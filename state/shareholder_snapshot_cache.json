@@ -460,5 +460,508 @@
         "ratio": 1.41
       }
     ]
+  },
+  "E00397": {
+    "issuer_name": "オエノンホールディングス株式会社",
+    "sec_code": "25330",
+    "last_doc_id": "S100XRFQ",
+    "last_submit_datetime": "2026-03-19 15:00",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "THEHONGKONGANDSHANGHAIBANKINGCORPORATIONLTD-SINGAPOREBRANCHPRIVATEBANKINGDIVISIONCLIENTSA/C8221-623793(常任代理人香港上海銀行東京支店)",
+        "shares": 13267,
+        "ratio": 23.54
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 6796,
+        "ratio": 12.06
+      },
+      {
+        "rank": null,
+        "name_norm": "第一生命保険株式会社(常任代理人株式会社日本カストディ銀行)",
+        "shares": 3061,
+        "ratio": 5.43
+      },
+      {
+        "rank": null,
+        "name_norm": "オエノンホールディングス従業員持株会",
+        "shares": 1930,
+        "ratio": 3.42
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社南悠商社",
+        "shares": 1884,
+        "ratio": 3.34
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社北洋銀行",
+        "shares": 1750,
+        "ratio": 3.1
+      },
+      {
+        "rank": null,
+        "name_norm": "NORTHERNTRUSTCO.(AVFC)REIEDPAIFCLIENTSNONTREATYACCOUNT(常任代理人香港上海銀行東京支店)",
+        "shares": 1280,
+        "ratio": 2.27
+      },
+      {
+        "rank": null,
+        "name_norm": "J.P.MORGANSE-LUXEMBOURGBRANCH381639(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 1280,
+        "ratio": 2.27
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社みずほ銀行(常任代理人株式会社日本カストディ銀行)",
+        "shares": 1221,
+        "ratio": 2.16
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社三菱UFJ銀行",
+        "shares": 1046,
+        "ratio": 1.85
+      }
+    ]
+  },
+  "E35340": {
+    "issuer_name": "株式会社ＡＤワークスグループ",
+    "sec_code": "29820",
+    "last_doc_id": "S100XS5K",
+    "last_submit_datetime": "2026-03-19 15:01",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "田中秀夫",
+        "shares": 5359200,
+        "ratio": 10.76
+      },
+      {
+        "rank": null,
+        "name_norm": "有限会社リバティーハウス",
+        "shares": 1971600,
+        "ratio": 3.96
+      },
+      {
+        "rank": null,
+        "name_norm": "NOMURAPBNOMINEESLIMITEDOMNIBUS-MARGIN(CASHPB)(常任代理人野村證券株式会社)",
+        "shares": 900000,
+        "ratio": 1.81
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505223(常任代理人株式会社みずほ銀行)",
+        "shares": 892800,
+        "ratio": 1.79
+      },
+      {
+        "rank": null,
+        "name_norm": "BOFASINCSEGREGATIONACCOUNT(常任代理人BOFA証券株式会社)",
+        "shares": 882810,
+        "ratio": 1.77
+      },
+      {
+        "rank": null,
+        "name_norm": "立花証券株式会社",
+        "shares": 769100,
+        "ratio": 1.54
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(役員株式報酬信託口・76735口)",
+        "shares": 701751,
+        "ratio": 1.41
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505044(常任代理人株式会社みずほ銀行)",
+        "shares": 690200,
+        "ratio": 1.39
+      },
+      {
+        "rank": null,
+        "name_norm": "BNYGCMCLIENTACCOUNTJPRDACISG(FE-AC)(常任代理人株式会社三菱UFJ銀行)",
+        "shares": 671944,
+        "ratio": 1.35
+      },
+      {
+        "rank": null,
+        "name_norm": "JPMORGANCHASEBANK380802(常任代理人株式会社みずほ銀行)",
+        "shares": 510300,
+        "ratio": 1.02
+      }
+    ]
+  },
+  "E00373": {
+    "issuer_name": "江崎グリコ株式会社",
+    "sec_code": "22060",
+    "last_doc_id": "S100XRXN",
+    "last_submit_datetime": "2026-03-19 15:30",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 7059,
+        "ratio": 11.09
+      },
+      {
+        "rank": null,
+        "name_norm": "掬泉商事株式会社",
+        "shares": 4131,
+        "ratio": 6.49
+      },
+      {
+        "rank": null,
+        "name_norm": "大同生命保険株式会社",
+        "shares": 3500,
+        "ratio": 5.5
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505223",
+        "shares": 2476,
+        "ratio": 3.89
+      },
+      {
+        "rank": null,
+        "name_norm": "佐賀県農業協同組合",
+        "shares": 1943,
+        "ratio": 3.05
+      },
+      {
+        "rank": null,
+        "name_norm": "江崎グリコ共栄会",
+        "shares": 1789,
+        "ratio": 2.81
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 1642,
+        "ratio": 2.58
+      },
+      {
+        "rank": null,
+        "name_norm": "大日本印刷株式会社",
+        "shares": 1621,
+        "ratio": 2.55
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505103",
+        "shares": 1540,
+        "ratio": 2.42
+      },
+      {
+        "rank": null,
+        "name_norm": "THECHASEMANHATTANBANK,N.A.LONDONSPECIALACCOUNTNO.1",
+        "shares": 1431,
+        "ratio": 2.25
+      }
+    ]
+  },
+  "E35967": {
+    "issuer_name": "勤次郎株式会社",
+    "sec_code": "40130",
+    "last_doc_id": "S100XR7V",
+    "last_submit_datetime": "2026-03-19 15:31",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "エヌイーシステムサービス株式会社",
+        "shares": 7170000,
+        "ratio": 36.1
+      },
+      {
+        "rank": null,
+        "name_norm": "加村稔",
+        "shares": 1922637,
+        "ratio": 9.68
+      },
+      {
+        "rank": null,
+        "name_norm": "勤次郎持株会",
+        "shares": 1577206,
+        "ratio": 7.94
+      },
+      {
+        "rank": null,
+        "name_norm": "MK株式会社",
+        "shares": 1100000,
+        "ratio": 5.54
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 761400,
+        "ratio": 3.83
+      },
+      {
+        "rank": null,
+        "name_norm": "三菱UFJキャピタル株式会社",
+        "shares": 450000,
+        "ratio": 2.27
+      },
+      {
+        "rank": null,
+        "name_norm": "良原一行",
+        "shares": 410000,
+        "ratio": 2.06
+      },
+      {
+        "rank": null,
+        "name_norm": "BNYGCMCLIENTACCOUNTJPRDACISG(FE-AC)(常任代理人株式会社三菱UFJ銀行)",
+        "shares": 384768,
+        "ratio": 1.94
+      },
+      {
+        "rank": null,
+        "name_norm": "加村光子",
+        "shares": 320000,
+        "ratio": 1.61
+      },
+      {
+        "rank": null,
+        "name_norm": "松浦幹治",
+        "shares": 203246,
+        "ratio": 1.02
+      }
+    ]
+  },
+  "E32725": {
+    "issuer_name": "いちごグリーンインフラ投資法人",
+    "sec_code": "",
+    "last_doc_id": "S100XS18",
+    "last_submit_datetime": "2026-03-19 15:31",
+    "report_type": "semiannual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "いちご株式会社",
+        "shares": 8000,
+        "ratio": null
+      },
+      {
+        "rank": null,
+        "name_norm": "岩井裕志",
+        "shares": null,
+        "ratio": null
+      },
+      {
+        "rank": null,
+        "name_norm": "山内章",
+        "shares": null,
+        "ratio": null
+      },
+      {
+        "rank": null,
+        "name_norm": "石原実",
+        "shares": null,
+        "ratio": null
+      }
+    ]
+  },
+  "E27208": {
+    "issuer_name": "株式会社メドレックス",
+    "sec_code": "45860",
+    "last_doc_id": "S100XS7V",
+    "last_submit_datetime": "2026-03-19 15:32",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "江平文茂",
+        "shares": 2250000,
+        "ratio": 3.79
+      },
+      {
+        "rank": null,
+        "name_norm": "楽天証券株式会社",
+        "shares": 2072100,
+        "ratio": 3.49
+      },
+      {
+        "rank": null,
+        "name_norm": "永井崇久",
+        "shares": 2000000,
+        "ratio": 3.37
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社SBI証券",
+        "shares": 1091906,
+        "ratio": 1.84
+      },
+      {
+        "rank": null,
+        "name_norm": "野村證券株式会社",
+        "shares": 803184,
+        "ratio": 1.35
+      },
+      {
+        "rank": null,
+        "name_norm": "NOMURAPBNOMINEESLIMITEDOMNIBUS-MARGIN(CASHPB)",
+        "shares": 733800,
+        "ratio": 1.24
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社MM",
+        "shares": 540300,
+        "ratio": 0.91
+      },
+      {
+        "rank": null,
+        "name_norm": "山下博",
+        "shares": 386600,
+        "ratio": 0.65
+      },
+      {
+        "rank": null,
+        "name_norm": "江崎雄二",
+        "shares": 373000,
+        "ratio": 0.63
+      },
+      {
+        "rank": null,
+        "name_norm": "八木朗",
+        "shares": 342600,
+        "ratio": 0.58
+      }
+    ]
+  },
+  "E25156": {
+    "issuer_name": "インテグラル株式会社",
+    "sec_code": "58420",
+    "last_doc_id": "S100XOZ3",
+    "last_submit_datetime": "2026-03-19 15:45",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "山本礼二郎",
+        "shares": 9737000,
+        "ratio": 28.61
+      },
+      {
+        "rank": null,
+        "name_norm": "佐山展生",
+        "shares": 8121500,
+        "ratio": 23.86
+      },
+      {
+        "rank": null,
+        "name_norm": "水谷謙作",
+        "shares": 2700000,
+        "ratio": 7.93
+      },
+      {
+        "rank": null,
+        "name_norm": "辺見芳弘",
+        "shares": 2126000,
+        "ratio": 6.25
+      },
+      {
+        "rank": null,
+        "name_norm": "StateStreetBankAndTrustCompany505103(常任代理人株式会社みずほ銀行)",
+        "shares": 551938,
+        "ratio": 1.62
+      },
+      {
+        "rank": null,
+        "name_norm": "仲田真紀子",
+        "shares": 400398,
+        "ratio": 1.18
+      },
+      {
+        "rank": null,
+        "name_norm": "長谷川聡子",
+        "shares": 400000,
+        "ratio": 1.18
+      },
+      {
+        "rank": null,
+        "name_norm": "後藤英恒",
+        "shares": 400000,
+        "ratio": 1.18
+      },
+      {
+        "rank": null,
+        "name_norm": "山崎壯",
+        "shares": 400000,
+        "ratio": 1.18
+      },
+      {
+        "rank": null,
+        "name_norm": "西岡成浩",
+        "shares": 400000,
+        "ratio": 1.18
+      }
+    ]
   }
 }

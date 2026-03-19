@@ -1,0 +1,18 @@
+2026-03-19 15:15:22,952 INFO [sync_orders] === sync_orders START ===
+2026-03-19 15:15:22,952 INFO [sync_orders]   mode:   APPLY
+2026-03-19 15:15:22,952 INFO [sync_orders]   sqlite: C:\Users\takuy\OneDrive\tdnet-excel-input\data\decision_db.db
+2026-03-19 15:15:22,952 INFO [sync_orders]   log:    C:\Users\takuy\OneDrive\tdnet-excel-input\logs\sync_orders_apply_20260319_151522.log
+2026-03-19 15:15:22,956 INFO [sync_orders] [SQLite] order_metrics: 12 rows
+2026-03-19 15:15:22,956 INFO [sync_orders] [SYNC] per-metric: {'backlog_total': 4, 'orders_total': 6, 'carryover_construction_total': 2}
+2026-03-19 15:15:22,966 INFO [sync_orders] [SYNC] 開始: 12 rows → order_kpis
+2026-03-19 15:15:23,249 ERROR [sync_orders] [API] HTTP 0: 
+2026-03-19 15:15:23,476 INFO [sync_orders] [VERIFY] order_kpis: 248 total rows in Supabase
+2026-03-19 15:15:23,476 INFO [sync_orders] 
+============================================================
+  SYNC 完了
+  upserted: 0 / 12
+  errors:   12
+  elapsed:  0.3秒
+  total_in_supabase: 248
+============================================================
+2026-03-19 15:15:23,476 ERROR [sync_orders] エラー 12 件。ログ: C:\Users\takuy\OneDrive\tdnet-excel-input\logs\sync_orders_apply_20260319_151522.log
