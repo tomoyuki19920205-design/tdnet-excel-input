@@ -981,16 +981,27 @@ def push_sqlite_to_supabase(
         supabase_url = (
             supabase_url or os.environ.get("SUPABASE_URL", "")
         )
+        # SERVICE_ROLE_KEY を優先（RLS バイパスに必要）
+        # 後方互換: SUPABASE_ANON_KEY もフォールバック
         supabase_key = (
-            supabase_key or os.environ.get("SUPABASE_ANON_KEY", "")
+            supabase_key
+            or os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+            or os.environ.get("SUPABASE_ANON_KEY", "")
         )
 
     if not supabase_url or not supabase_key:
         raise ValueError(
             ".env ファイルが見つからないか、接続情報が未設定です。\n"
-            "  SUPABASE_URL と SUPABASE_ANON_KEY を .env に"
-            "設定してください。"
+            "  SUPABASE_URL と SUPABASE_SERVICE_ROLE_KEY を "
+            ".env に設定してください。"
         )
+
+    # fail-fast: キーの先頭でどの種類か判別
+    key_prefix = supabase_key[:20] if supabase_key else "(empty)"
+    logger.info(
+        f"[PUSH] supabase_url={supabase_url[:40]}... "
+        f"key_prefix={key_prefix}..."
+    )
 
     if not checkpoint_path:
         checkpoint_path = os.path.join(
