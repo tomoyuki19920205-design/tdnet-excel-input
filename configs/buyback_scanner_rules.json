@@ -1,0 +1,59 @@
+{
+  "_comment": "buyback scanner scoring rules — 2026-03-11 tuning v2",
+  "_changes": {
+    "2026-03-11": [
+      "high=7, medium=4 に閾値引き上げ (medium をreview対象帯として使う設計)",
+      "「自己株式」weak→penalty (-2): FP率100%, 単独で buyback 判定に不十分",
+      "「上限」weak→penalty (-1): 単独ではweak signal, FP多",
+      "「自己株式の消却」strong 3→2: cancel誤検出対策として弱化",
+      "pair_bonus / strong keywords は維持"
+    ]
+  },
+  "strong_keywords": {
+    "自己株式取得": 3,
+    "自己株式の取得": 3,
+    "自社株買い": 3,
+    "取得状況": 3,
+    "自己株式取得状況": 3,
+    "自己株式の取得状況": 3,
+    "取得結果": 3,
+    "自己株式取得結果": 3,
+    "自己株式の取得結果": 3,
+    "取得終了": 3,
+    "自己株式の消却": 2,
+    "消却予定日": 3,
+    "取得する株式の総数": 3,
+    "取得価額の総額": 3,
+    "取得期間": 3,
+    "取得方法": 3,
+    "ToSTNeT": 3,
+    "自己株式立会外買付取引": 3
+  },
+  "weak_keywords": {
+    "発行済株式総数": 1,
+    "市場買付": 1,
+    "立会外買付": 1,
+    "株式の取得": 1
+  },
+  "penalty_keywords": {
+    "新株予約権": -3,
+    "転換社債": -4,
+    "新株予約権付社債": -4,
+    "買入消却": -4,
+    "消却見合わせ": -3,
+    "自己株式処分": -4,
+    "ストックオプション": -4,
+    "自己株式": -2,
+    "上限": -1
+  },
+  "pair_bonus": {
+    "shares_and_amount": 4,
+    "tostnet_bonus": 2,
+    "derived_ticker_bonus": 1,
+    "derived_title_bonus": 1
+  },
+  "priority_thresholds": {
+    "high": 7,
+    "medium": 4
+  }
+}

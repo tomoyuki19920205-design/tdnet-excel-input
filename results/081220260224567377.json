@@ -1,0 +1,23 @@
+{
+  "ticker_code": "7093",
+  "company_name": null,
+  "title": "決算短信 (081220260224567377.zip)",
+  "disclosed_at": "2026-02-24T16:57:10+09:00",
+  "url": null,
+  "sha256": "d3c732767988af2298b2499cff054b09fb566b91fa5c9d3db664c6b0b47e779a",
+  "doc_type": "TANSHIN",
+  "source": "TDNET",
+  "fiscal_year_end": "2025-12-31",
+  "quarter": 2,
+  "source_unit": "円",
+  "values": {
+    "sales": 3696000000,
+    "op_income": 2000000
+  },
+  "scope": "CONSOLIDATED",
+  "metric_type": "actual",
+  "quality": "IXBRL",
+  "_source_file": "081220260224567377.zip",
+  "_extractor_unit": "百万円",
+  "_ticker_source": "XBRL_FILENAME"
+}

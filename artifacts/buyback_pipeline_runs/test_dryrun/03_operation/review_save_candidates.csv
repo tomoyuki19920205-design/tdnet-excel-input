@@ -1,0 +1,2 @@
+file_path,file_name,ticker,disclosure_date,title,manifest_candidate_score,manifest_review_priority,matched_keywords,event_type,confidence_final,review_bucket,extracted_fields_count,missing_key_fields,shares_limit,shares_acquired,shares_cancelled,amount_limit_million_yen,amount_acquired_million_yen,start_date,end_date,cancel_date,acquisition_method,save_reason
+,140120260220566631.pdf,2288,2026-02-24,2026年３月期第３四半期決算短信〔日本基準〕（連結）,,,自己株式の取得,buyback_decision,1.0,high_confidence_extracted,6,,650000,,,1300.0,,2026-03-04,2026-03-09,,tostnet,high_confidence_extracted_with_core_fields

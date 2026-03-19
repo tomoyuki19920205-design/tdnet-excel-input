@@ -1,0 +1,110 @@
+======================================================================
+Fixed-Population A/B Comparison
+======================================================================
+Before: ab_v1_20260315_111057.jsonl  (worker=v1, total=25)
+After:  ab_v2_20260315_111057.jsonl  (worker=v2, total=25)
+Common filing IDs: 25
+Only in before:    0
+Only in after:     0
+
+--- Transition Matrix (fixed population: 25) ---
+  ok → ok: 2
+  ok → quarantined: 4
+  quarantined → ok: 2
+  quarantined → quarantined: 17
+
+--- Improvement / Regression Summary ---
+  Improved (strict: bad→ok):        2
+  Improved (broad:  bad→ok/partial): 2
+  Regressed (strict: ok→bad):        4
+  Regressed (broad:  ok/partial→bad): 4
+  Same status:                        19
+
+--- fallback_reason breakdown ---
+  primary_unavailable            before=  0  after= 10
+
+--- quarantine/fail reason breakdown ---
+  account_like_dominant               before=  0  after=  1
+  candidate_guard:narrative_guard|hint=pdf_narrative_block_selected before=  9  after=  0
+  candidate_guard:no_valid_segment_rows|hint=pdf_no_segment_table_after_guard before=  2  after=  0
+  high_invalid_ratio                  before=  0  after=  1
+  no_records                          before=  0  after= 17
+  no_segment_table                    before=  8  after=  0
+  too_few_valid_segments              before=  0  after=  2
+
+--- Quality Comparison (both ok/partial: 2 filings) ---
+  rows                     12 →      6  (diff=-6)
+  valid_seg_count           0 →      6  (diff=+6)
+  sales_nn                 12 →      6  (diff=-6)
+  profit_nn                 7 →      6  (diff=-1)
+
+--- Representative Examples: Improved (2) ---
+  73f4ca42f3f2e12fdc6deb01 ticker=6966
+    status:  quarantined  → ok
+    path:    xbrl         → xbrl
+    reason:  candidate_guard:narrative_guard|hint=pdf_narrative_block_selected → 
+    rows         0 → 3  (+3)
+    valid_seg    0 → 3  (+3)
+    sales_nn     0 → 3  (+3)
+    profit_nn    0 → 3  (+3)
+  847254c5ed87d272f2a7c83f ticker=7614
+    status:  quarantined  → ok
+    path:    xbrl         → xbrl
+    reason:  no_segment_table → 
+    rows         0 → 2  (+2)
+    valid_seg    0 → 2  (+2)
+    sales_nn     0 → 2  (+2)
+    profit_nn    0 → 2  (+2)
+
+--- Representative Examples: Regressed (4) ---
+  2704e0a759bb8920c90393b9 ticker=7999
+    status:  ok           → quarantined
+    path:    pdf          → pdf
+    reason:               → too_few_valid_segments
+    fallback:             → primary_unavailable
+    valid_seg    0 → 1  (+1)
+  2e24f6e307e7543756a3330e ticker=3150
+    status:  ok           → quarantined
+    path:    pdf          → pdf
+    reason:               → account_like_dominant
+    fallback:             → primary_unavailable
+    valid_seg    0 → 1  (+1)
+  38d904cf9a083ca59aaae9a1 ticker=3161
+    status:  ok           → quarantined
+    path:    xbrl         → xbrl
+    reason:               → too_few_valid_segments
+    rows         6 → 1  (-5)
+    valid_seg    0 → 1  (+1)
+    sales_nn     6 → 1  (-5)
+    profit_nn    3 → 1  (-2)
+
+--- Representative Examples: Same Status (19) ---
+  04329b041f42b57be022cd1b ticker=1758
+    status:  quarantined  → quarantined
+    path:    xbrl         → xbrl
+    reason:  candidate_guard:no_valid_segment_rows|hint=pdf_no_segment_table_after_guard → no_records
+  0aa173751eaa1ab09c391cda ticker=7983
+    status:  ok           → ok
+    path:    xbrl         → xbrl
+    rows         6 → 3  (-3)
+    valid_seg    0 → 3  (+3)
+    sales_nn     6 → 3  (-3)
+  0df2a1fc5b4132617ba1cfb4 ticker=3494
+    status:  quarantined  → quarantined
+    path:    pdf          → pdf
+    reason:  candidate_guard:narrative_guard|hint=pdf_narrative_block_selected → no_records
+    fallback:             → primary_unavailable
+
+======================================================================
+SUMMARY (fixed population: 25)
+======================================================================
+  Worker versions: v1 → v2
+  ok:             6 →    4  (diff=-2)
+  partial:        0 →    0  (diff=+0)
+  quarantined:   19 →   21  (diff=+2)
+  failed:         0 →    0  (diff=+0)
+
+  Improved (strict): 2
+  Improved (broad):  2
+  Regressed (strict): 4
+  Regressed (broad):  4

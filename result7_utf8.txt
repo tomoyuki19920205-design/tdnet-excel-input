@@ -1,0 +1,27 @@
+﻿
+============================================================
+  Quarantine Retry - DRY-RUN
+============================================================
+  total_targets           : 79
+  rescued                 : 12
+  still_quarantined       : 67
+  rescue_rate             : 15.2%
+  elapsed_sec             : 47.7
+  avg_sec_per_filing      : 0.60
+
+  hint_breakdown_before:
+    pdf_no_sales_profit_columns             : 79
+
+  hint_breakdown_after:
+    pdf_no_sales_profit_columns             : 56
+    pdf_text_cid_corrupted                  : 11
+
+  hint_transition:
+    pdf_no_sales_profit_columns         -> pdf_no_sales_profit_columns        : 56
+    pdf_no_sales_profit_columns         -> rescued                            : 12
+    pdf_no_sales_profit_columns         -> pdf_text_cid_corrupted             : 11
+
+  parse_quality_breakdown:
+    partial_sales_only                      : 110
+    full                                    : 22
+============================================================

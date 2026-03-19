@@ -1,0 +1,191 @@
+
+======================================================================
+TICKER: 2810
+PDF: C:\Users\takuy\OneDrive\tdnet-excel-input\data\tdnet_cache\1784ce64c0230269ac77d7a4\source.pdf
+  Success: True
+  Segments: 6
+    [0] name=香辛・調味加工食品 sales=100884.0 profit=100.0 raw_profit=operating_profit_like
+    [1] name=健康食品 sales=13303.0 profit=98.5 raw_profit=operating_profit_like
+    [2] name=海外食品 sales=46792.0 profit=100.4 raw_profit=operating_profit_like
+    [3] name=外食 sales=48515.0 profit=107.9 raw_profit=operating_profit_like
+    [4] name=その他食品 sales=40821.0 profit=98.3 raw_profit=operating_profit_like
+    [5] name=（注） sales=1.0 profit=None raw_profit=operating_profit_like
+  Quarantine: 
+  Failed stage: 
+  Candidates: 5
+
+  Phase B: rows=17 num_cols=4
+  Phase B preview: ['セグメント別の経営成績の概況（セグメント間取引消去前）は、次のとおりであります。', '営業利益', '売上高']
+  Phase C: rows=16 header_band=2
+  Phase C preview: ['営業利益', '売上高', '事業の種類別 （セグメント利益又は損失(△)）']
+  Has sales: True Has profit: True
+
+  Column diagnosis:
+    Strategy: new
+    Sales col: 0
+    Profit col: 1
+    Profit role: operating_profit_like
+    New headers: ['売上高', '営業利益']
+    Legacy headers: ['営業利益売上高']
+    Column roles: ['segment_label', 'operating_profit_like']
+    Raw headers: ['営業利益', '売上高']
+
+  Key trace:
+    Phase C: ヘッダーグリッド再構築
+    Phase C: preamble_trim skipped=1 stop_reason=table_header_term first=['セグメント別の経営成績の概況（セグメント間取引消去前）は、次のとおりであります。']
+    Phase C: band_h=2, raw=['営業利益', '売上高'], reconstructed=['営業利益売上高'], units=None
+    Phase C: merge vertical ['営業利益', '売上高'] -> 営業利益売上高 score=60.0
+    Phase C: transition B(17rows,4cols)→C(16rows,4cols) header_band=2 new_headers=['営業利益売上高']
+    Phase D: 列ロール分類
+    Phase D-0: split result primary=2 secondary=0
+    Phase D: dual_metric_split: ['営業利益売上高'] → ['売上高', '営業利益']
+    Phase D: resolution_strategy=new
+    Phase D: sales_col=0, profit_col=1, role=operating_profit_like
+    Phase E: 行ロール分類
+    Phase E: 抽出可能行=6, skip行=6, non_reportable=11
+    Phase F: レコード組立
+    Phase F: 6件のセグメント抽出成功
+
+======================================================================
+TICKER: 6644
+PDF: C:\Users\takuy\OneDrive\tdnet-excel-input\data\tdnet_cache\0b83ecf97e9d93e022abb3d7\source.pdf
+  Success: True
+  Segments: 9
+    [0] name=売上高 sales=70238.0 profit=72086.0 raw_profit=segment_profit_like
+    [1] name=国内計測制御 sales=39593.0 profit=41838.0 raw_profit=segment_profit_like
+    [2] name=海外計測制御 sales=31198.0 profit=30619.0 raw_profit=segment_profit_like
+    [3] name=不動産 sales=420.0 profit=334.0 raw_profit=segment_profit_like
+    [4] name=営業利益 sales=4051.0 profit=4358.0 raw_profit=segment_profit_like
+    [5] name=国内計測制御 sales=2700.0 profit=2926.0 raw_profit=segment_profit_like
+    [6] name=海外計測制御 sales=1153.0 profit=1275.0 raw_profit=segment_profit_like
+    [7] name=不動産 sales=208.0 profit=161.0 raw_profit=segment_profit_like
+    [8] name=経常利益 sales=4031.0 profit=4407.0 raw_profit=segment_profit_like
+  Quarantine: 
+  Failed stage: 
+  Candidates: 5
+
+  Phase B: rows=17 num_cols=4
+  Phase B preview: ['増減額 増減率', '第3四半期 第第第第第33333四四四四四半半半半半期期期期期', '売上高 70,238 72,086 1,848 +2.6％']
+  Phase C: rows=17 header_band=2
+  Phase C preview: ['増減額 増減率', '第3四半期 第第第第第33333四四四四四半半半半半期期期期期', '売上高 70,238 72,086 1,848 +2.6％']
+  Has sales: True Has profit: True
+
+  Column diagnosis:
+    Strategy: phase_b_fallback
+    Sales col: 2
+    Profit col: None
+    Profit role: 
+    New headers: []
+    Legacy headers: []
+    Column roles: ['ratio', 'unknown', 'unknown']
+    Raw headers: ['増減額 増減率', '第3四半期 第第第第第33333四四四四四半半半半半期期期期期']
+
+  Key trace:
+    Phase C: ヘッダーグリッド再構築
+    Phase C: band_h=2, raw=['増減額 増減率', '第3四半期 第第第第第33333四四四四四半半半半半期期期期期'], reconstructed=['増減額増減率第3四半期第第第第第33333四四四四四半半半半半期期期期期'], units=None
+    Phase C: transition B(17rows,4cols)→C(17rows,4cols) header_band=2 new_headers=['増減額増減率第3四半期第第第第第33333四四四四四半半半半半期期期期期']
+    Phase D: 列ロール分類
+    Phase D-0: split result primary=2 secondary=0
+    Phase D: resolution_strategy=new
+    Phase D: fallback rerun column diagnosis on Phase B source table sales_col=2 profit_col=None
+    Phase D-3: profit near-sales recheck start sales_col=2
+    Phase D-3: profit near-sales no candidate
+    Phase D-6: profit inference start sales_col=2 num data_rows=17
+    Phase D-6: col=0 skipped (ratio-like: median=3.0 pct=10 decimal=10)
+    Phase D-6: no numeric columns to evaluate
+    Phase D: accepted sales-only fallback (parse_quality=partial_sales_only)
+    Phase D: sales_col=2, profit_col=None, role=
+    Phase E: 行ロール分類
+    Phase E: 抽出可能行=9, skip行=4, non_reportable=8
+    Phase F: レコード組立
+    Phase F: profit inference: pos=1 median=4358.0 pct=0/9 dec=9/9 -> PROFIT
+    Phase F: 9件のセグメント抽出成功
+
+======================================================================
+TICKER: 9057
+PDF: C:\Users\takuy\OneDrive\tdnet-excel-input\data\tdnet_cache\4f2dd4d3ee2c5e196ebe8f27\source.pdf
+  Success: False
+  Segments: 0
+  Quarantine: candidate_guard:narrative_guard
+  Failed stage: candidate_guard
+  Candidates: 9
+
+  Phase B: rows=None num_cols=None
+  Phase B preview: []
+  Phase C: rows=None header_band=None
+  Phase C preview: []
+  Has sales: None Has profit: None
+
+  Column diagnosis:
+    Strategy: None
+    Sales col: None
+    Profit col: None
+    Profit role: 
+    New headers: []
+    Legacy headers: []
+    Column roles: []
+    Raw headers: []
+
+  Key trace:
+
+======================================================================
+TICKER: 3232
+PDF: C:\Users\takuy\OneDrive\tdnet-excel-input\data\tdnet_cache\3dd4b58ef71f14adfee9038f\source.pdf
+  Success: True
+  Segments: 13
+    [0] name=石油製品販売 sales=7726.0 profit=None raw_profit=
+    [1] name=生活用品販売 sales=6620.0 profit=None raw_profit=
+    [2] name=自動車販売 sales=11912.0 profit=None raw_profit=
+    [3] name=この結果、レジャー・サービスセグメントの営業収益は sales=127.0 profit=None raw_profit=
+    [4] name=なり、営業利益は sales=14.0 profit=None raw_profit=
+    [5] name=ビジネスホテル sales=5780.0 profit=None raw_profit=
+    [6] name=旅館 sales=2010.0 profit=None raw_profit=
+    [7] name=ドライブイン sales=766.0 profit=None raw_profit=
+    [8] name=索道事業(ロープウエイ) sales=733.0 profit=None raw_profit=
+    [9] name=ゴルフ場 sales=358.0 profit=None raw_profit=
+    [10] name=旅行 sales=2211.0 profit=None raw_profit=
+    [11] name=自動車教習所 sales=703.0 profit=None raw_profit=
+    [12] name=その他 sales=225.0 profit=None raw_profit=
+  Quarantine: 
+  Failed stage: 
+  Candidates: 5
+
+  Phase B: rows=32 num_cols=2
+  Phase B preview: ['は７億円（同２億42百万円、52.9％増）となりました。', '業種別営業成績', '区分 営業収益（百万円） 前年同期比（％）']
+  Phase C: rows=31 header_band=2
+  Phase C preview: ['業種別営業成績', '区分 営業収益（百万円） 前年同期比（％）', '石油製品販売事業 7,726 △3.3']
+  Has sales: True Has profit: True
+
+  Column diagnosis:
+    Strategy: new
+    Sales col: 0
+    Profit col: None
+    Profit role: 
+    New headers: ['業種別営業成績区分営業収益(百万円)前年同期比(%)']
+    Legacy headers: ['業種別営業成績区分営業収益前年同期比(%)']
+    Column roles: ['ratio']
+    Raw headers: ['業種別営業成績', '区分 営業収益（百万円） 前年同期比（％）']
+
+  Key trace:
+    Phase C: ヘッダーグリッド再構築
+    Phase C: preamble_trim skipped=1 stop_reason=table_header_term first=['は７億円（同２億42百万円、52.9％増）となりました。']
+    Phase C: band_h=2, raw=['業種別営業成績', '区分 営業収益（百万円） 前年同期比（％）'], reconstructed=['業種別営業成績区分営業収益(百万円)前年同期比(%)'], units=百万円
+    Unit: raw=百万円, mult=1000000, src=header
+    Phase C: transition B(32rows,2cols)→C(31rows,2cols) header_band=2 new_headers=['業種別営業成績区分営業収益(百万円)前年同期比(%)']
+    Phase D: 列ロール分類
+    Phase D-0: split result primary=2 secondary=0
+    Phase D: resolution_strategy=new
+    Phase D-3: profit near-sales recheck start sales_col=0
+    Phase D-3: profit near-sales no candidate
+    Phase D-6: profit inference start sales_col=0 num data_rows=29
+    Phase D-6: no numeric columns to evaluate
+    Phase D: accepted sales-only fallback (parse_quality=partial_sales_only)
+    Phase D: sales_col=0, profit_col=None, role=
+    Phase E: 行ロール分類
+    Phase E: 抽出可能行=13, skip行=15, non_reportable=19
+    Phase F: レコード組立
+    Phase F: profit inference: pos=1 median=7.0 pct=0/13 dec=13/13 -> RATIO (skip)
+    Phase F: profit inference: pos=2 median=10.0 pct=0/2 dec=2/2 -> RATIO (skip)
+    Phase F: profit inference: pos=3 median=54.0 pct=0/2 dec=2/2 -> RATIO (skip)
+    Phase F: profit inference: pos=4 median=26.8 pct=2/2 dec=2/2 -> RATIO (skip)
+    Phase F: 13件のセグメント抽出成功

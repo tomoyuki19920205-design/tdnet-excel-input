@@ -1,0 +1,38 @@
+# TDnet決算自動入力システム 設定ファイル
+# このファイルを config.yaml にコピーして使用してください
+
+# Excelファイルのパス（スラッシュ推奨）
+excel_path: "C:/Users/takuy/OneDrive/共有ファイル.xlsx"
+
+# 対象シート名
+sheet_name: "PL"
+
+# ポーリング間隔（秒）
+poll_interval_sec: 180
+
+# 行探索パラメータ
+max_scan_rows: 150    # M列探索の最大行数（startRowから下方向）
+q_search_up: 20       # N列探索の上方向範囲（termRowから上）
+q_search_down: 40     # N列探索の下方向範囲（termRowから下）
+
+# Excel側の数値単位
+excel_unit: "million_yen"   # million_yen | thousand_yen | yen
+
+# ログ・DB保存先
+log_path: "data/app.log"
+state_db_path: "data/state.db"
+
+# 保存リトライ回数
+retry_count: 5
+
+# 列マッピング（Excel列記号）
+columns:
+  code: "A"
+  fiscal_term: "M"
+  quarter: "N"
+  sales: "O"
+  gross_profit: "P"
+  operating_profit: "S"
+
+# ウォッチリスト（空なら決算短信全銘柄対象）
+watch_tickers: []

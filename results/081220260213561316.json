@@ -1,0 +1,23 @@
+{
+  "ticker_code": "5461",
+  "company_name": null,
+  "title": "決算短信 (081220260213561316.zip)",
+  "disclosed_at": "2026-02-25T23:45:51+09:00",
+  "url": null,
+  "sha256": "c76c9121ab77aa0a8f7cdb24cfbd52b10f9373995a3e1d446ff978b4576f6c0e",
+  "doc_type": "TANSHIN",
+  "source": "TDNET",
+  "fiscal_year_end": "2025-12-31",
+  "quarter": 2,
+  "source_unit": "円",
+  "values": {
+    "sales": 36809000000,
+    "op_income": 735000000
+  },
+  "scope": "CONSOLIDATED",
+  "metric_type": "actual",
+  "quality": "IXBRL",
+  "_source_file": "081220260213561316.zip",
+  "_extractor_unit": "百万円",
+  "_ticker_source": "SecuritiesCode"
+}

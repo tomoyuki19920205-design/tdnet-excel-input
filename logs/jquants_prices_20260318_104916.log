@@ -1,0 +1,16 @@
+2026-03-18 10:49:16,789 INFO [jquants_prices] === J-Quants Prices Fetch ===
+2026-03-18 10:49:16,789 INFO [jquants_prices] since=2026-03-11, to=2026-03-18, db=C:\Users\takuy\OneDrive\tdnet-excel-input\data\jquants.db
+2026-03-18 10:49:16,790 INFO [jquants_auth] API KEY loaded (OHZ7IFH1...)
+2026-03-18 10:49:20,474 INFO [jquants_prices]   [1/8] 2026-03-11: 4445 items, 4445 upserted
+2026-03-18 10:49:24,605 INFO [jquants_prices]   [2/8] 2026-03-12: 4444 items, 4444 upserted
+2026-03-18 10:49:28,591 INFO [jquants_prices]   [3/8] 2026-03-13: 4443 items, 4443 upserted
+2026-03-18 10:49:32,738 INFO [jquants_prices]   [6/8] 2026-03-16: 4443 items, 4443 upserted
+2026-03-18 10:49:36,733 INFO [jquants_prices]   [7/8] 2026-03-17: 4442 items, 4442 upserted
+2026-03-18 10:49:37,175 INFO [jquants_prices]   [8/8] 2026-03-18: no data (祝日?)
+2026-03-18 10:49:37,645 INFO [jquants_prices] [MARKET_CAP] 18,687 行の時価総額を算出しました
+2026-03-18 10:49:37,646 INFO [jquants_prices] ============================================================
+2026-03-18 10:49:37,646 INFO [jquants_prices] DONE in 0.3 min
+2026-03-18 10:49:37,646 INFO [jquants_prices]   Total upserted: 22217
+2026-03-18 10:49:37,646 INFO [jquants_prices]   Total errors  : 0
+2026-03-18 10:49:37,646 INFO [jquants_prices]   DB: C:\Users\takuy\OneDrive\tdnet-excel-input\data\jquants.db
+2026-03-18 10:49:37,646 INFO [jquants_prices]   Log: C:\Users\takuy\OneDrive\tdnet-excel-input\logs\jquants_prices_20260318_104916.log

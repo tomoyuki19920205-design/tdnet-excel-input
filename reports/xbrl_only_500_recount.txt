@@ -1,0 +1,31 @@
+============================================================
+  XBRL Only V2 — 500件再集計
+============================================================
+  total: 500 (skipped 0)
+  xbrl_resolved: 57
+  xbrl_unresolved: 443
+
+  --- Status ---
+    quarantined: 446
+    ok: 51
+    partial: 3
+
+  --- Selected Path ---
+    none: 443
+    xbrl: 57
+
+  --- Route Mode ---
+    xbrl_only_no_source: 443
+    xbrl_v2: 57
+
+  --- Quarantine Reason ---
+    no_xbrl_segment_source: 397
+    no_records: 46
+    too_few_valid_segments: 3
+
+  XBRL Resolved Subset:
+    ok+partial: 54/57 = 94.7%
+
+  --- PDF path 確認 ---
+    pdf ok/partial: 0
+    pdf_v1_compat route_mode: 0

@@ -1,0 +1,122 @@
+======================================================================
+Fixed-Population A/B Comparison
+======================================================================
+Before: ab_v1_20260315_122836.jsonl  (worker=v1, total=102)
+After:  ab_v2_20260315_122836.jsonl  (worker=v2, total=102)
+Common filing IDs: 102
+Only in before:    0
+Only in after:     0
+
+--- Transition Matrix (fixed population: 102) ---
+  ok → ok: 8
+  ok → partial: 1
+  ok → quarantined: 8
+  quarantined → ok: 13
+  quarantined → partial: 1
+  quarantined → quarantined: 71
+
+--- Improvement / Regression Summary ---
+  Improved (strict: bad→ok):        13
+  Improved (broad:  bad→ok/partial): 14
+  Regressed (strict: ok→bad):        8
+  Regressed (broad:  ok/partial→bad): 8
+  Same status:                        79
+
+--- selected_path changes ---
+  xbrl → pdf: 7
+  xbrl_fallback → xbrl: 1
+
+--- fallback_reason breakdown ---
+  primary_unavailable            before=  0  after= 39
+
+--- quarantine/fail reason breakdown ---
+  account_like_dominant               before=  0  after=  3
+  candidate_guard:narrative_guard|hint=pdf_narrative_block_selected before= 51  after=  0
+  candidate_guard:no_valid_segment_rows|hint=pdf_no_segment_table_after_guard before=  3  after=  0
+  high_invalid_ratio                  before=  0  after=  1
+  no_records                          before=  0  after= 69
+  no_segment_table                    before= 30  after=  0
+  picked_pl_table                     before=  1  after=  0
+  too_few_valid_segments              before=  0  after=  6
+
+--- Quality Comparison (both ok/partial: 9 filings) ---
+  rows                     53 →     38  (diff=-15)
+  valid_seg_count           0 →     30  (diff=+30)
+  sales_nn                 53 →     38  (diff=-15)
+  profit_nn                47 →     37  (diff=-10)
+
+--- Representative Examples: Improved (14) ---
+  0e6d0360aa3029d0396400e4 ticker=4382
+    status:  quarantined  → ok
+    path:    xbrl         → xbrl
+    reason:  picked_pl_table → 
+    rows         0 → 2  (+2)
+    valid_seg    0 → 2  (+2)
+    sales_nn     0 → 2  (+2)
+    profit_nn    0 → 2  (+2)
+  1515a8cd38d91acd687b86e3 ticker=3931
+    status:  quarantined  → ok
+    path:    xbrl         → xbrl
+    reason:  candidate_guard:narrative_guard|hint=pdf_narrative_block_selected → 
+    rows         0 → 2  (+2)
+    valid_seg    0 → 2  (+2)
+    sales_nn     0 → 2  (+2)
+    profit_nn    0 → 2  (+2)
+  32ef04d3bc57baf9a666b15d ticker=8013
+    status:  quarantined  → ok
+    path:    xbrl         → xbrl
+    reason:  candidate_guard:narrative_guard|hint=pdf_narrative_block_selected → 
+    rows         0 → 2  (+2)
+    valid_seg    0 → 2  (+2)
+    sales_nn     0 → 2  (+2)
+    profit_nn    0 → 2  (+2)
+
+--- Representative Examples: Regressed (8) ---
+  0e3a0b8a560b2deace1b1c17 ticker=5079
+    status:  ok           → quarantined
+    path:    xbrl         → pdf
+    reason:               → account_like_dominant
+    fallback:             → primary_unavailable
+  38d904cf9a083ca59aaae9a1 ticker=3161
+    status:  ok           → quarantined
+    path:    xbrl         → xbrl
+    reason:               → too_few_valid_segments
+    rows         6 → 1  (-5)
+    valid_seg    0 → 1  (+1)
+    sales_nn     6 → 1  (-5)
+    profit_nn    3 → 1  (-2)
+  57a08f5e2e50a7a5257c862e ticker=3248
+    status:  ok           → quarantined
+    path:    pdf          → pdf
+    reason:               → high_invalid_ratio
+    fallback:             → primary_unavailable
+    valid_seg    0 → 2  (+2)
+
+--- Representative Examples: Same Status (79) ---
+  03f15b20f7b511dedc930c54 ticker=9425
+    status:  quarantined  → quarantined
+    path:    xbrl         → xbrl
+    reason:  candidate_guard:narrative_guard|hint=pdf_narrative_block_selected → no_records
+  04329b041f42b57be022cd1b ticker=1758
+    status:  quarantined  → quarantined
+    path:    xbrl         → xbrl
+    reason:  candidate_guard:no_valid_segment_rows|hint=pdf_no_segment_table_after_guard → no_records
+  04a5f2fdaed5f82252349377 ticker=1975
+    status:  ok           → ok
+    path:    pdf          → pdf
+    fallback:             → primary_unavailable
+    valid_seg    0 → 3  (+3)
+
+======================================================================
+SUMMARY (fixed population: 102)
+======================================================================
+  Worker versions: v1 → v2
+  ok:            17 →   21  (diff=+4)
+  partial:        0 →    2  (diff=+2)
+  quarantined:   85 →   79  (diff=-6)
+  failed:         0 →    0  (diff=+0)
+
+  Improved (strict): 13
+  Improved (broad):  14
+  Regressed (strict): 8
+  Regressed (broad):  8

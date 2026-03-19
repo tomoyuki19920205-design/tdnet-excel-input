@@ -1,0 +1,2 @@
+row_number,file_path,ticker,event_type,skip_reason
+1,,2288,buyback_decision,file_path_empty

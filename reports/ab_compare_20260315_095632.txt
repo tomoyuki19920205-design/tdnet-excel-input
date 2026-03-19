@@ -1,0 +1,78 @@
+======================================================================
+Fixed-Population A/B Comparison
+======================================================================
+Before: ab_v1_20260315_095632.jsonl  (worker=v1, total=20)
+After:  ab_v2_20260315_095632.jsonl  (worker=v2, total=20)
+Common filing IDs: 20
+Only in before:    0
+Only in after:     0
+
+--- Transition Matrix (fixed population: 20) ---
+  ok → quarantined: 2
+  quarantined → quarantined: 18
+
+--- Improvement / Regression Summary ---
+  Improved (strict: bad→ok):        0
+  Improved (broad:  bad→ok/partial): 0
+  Regressed (strict: ok→bad):        2
+  Regressed (broad:  ok/partial→bad): 2
+  Same status:                        18
+
+--- fallback_reason breakdown ---
+  primary_unavailable            before=  0  after= 20
+
+--- quarantine/fail reason breakdown ---
+  account_like_dominant               before=  0  after=  1
+  candidate_guard:narrative_guard|hint=pdf_narrative_block_selected before=  6  after=  0
+  no_records                          before=  0  after= 18
+  no_segment_table                    before= 11  after=  0
+  period_quarter_unresolved:period='R7/12',quarter='' before=  1  after=  0
+  too_few_valid_segments              before=  0  after=  1
+
+--- Representative Examples: Improved (0) ---
+  (none)
+
+--- Representative Examples: Regressed (2) ---
+  2704e0a759bb8920c90393b9 ticker=7999
+    status:  ok           → quarantined
+    path:    pdf          → pdf
+    reason:               → too_few_valid_segments
+    fallback:             → primary_unavailable
+    valid_seg    0 → 1  (+1)
+  2e24f6e307e7543756a3330e ticker=3150
+    status:  ok           → quarantined
+    path:    pdf          → pdf
+    reason:               → account_like_dominant
+    fallback:             → primary_unavailable
+    valid_seg    0 → 1  (+1)
+
+--- Representative Examples: Same Status (18) ---
+  07faab9b40bf820d0fadfcc6 ticker=2136
+    status:  quarantined  → quarantined
+    path:    pdf          → pdf
+    reason:  candidate_guard:narrative_guard|hint=pdf_narrative_block_selected → no_records
+    fallback:             → primary_unavailable
+  212add6c6a42ac436eb942ca ticker=2413
+    status:  quarantined  → quarantined
+    path:    pdf          → pdf
+    reason:  candidate_guard:narrative_guard|hint=pdf_narrative_block_selected → no_records
+    fallback:             → primary_unavailable
+  26d84eab5b796880b742f06a ticker=1726
+    status:  quarantined  → quarantined
+    path:    pdf          → pdf
+    reason:  no_segment_table → no_records
+    fallback:             → primary_unavailable
+
+======================================================================
+SUMMARY (fixed population: 20)
+======================================================================
+  Worker versions: v1 → v2
+  ok:             2 →    0  (diff=-2)
+  partial:        0 →    0  (diff=+0)
+  quarantined:   18 →   20  (diff=+2)
+  failed:         0 →    0  (diff=+0)
+
+  Improved (strict): 0
+  Improved (broad):  0
+  Regressed (strict): 2
+  Regressed (broad):  2

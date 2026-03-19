@@ -1,0 +1,23 @@
+{
+  "ticker_code": "4062",
+  "company_name": null,
+  "title": "決算短信 (081220260220565976.zip)",
+  "disclosed_at": "2026-02-24T16:57:07+09:00",
+  "url": null,
+  "sha256": "a66b9b92f91d963708c1689a2d69bcebbf9df40730d05fb0624de68f63d1d16f",
+  "doc_type": "TANSHIN",
+  "source": "TDNET",
+  "fiscal_year_end": "2025-12-31",
+  "quarter": 2,
+  "source_unit": "円",
+  "values": {
+    "sales": 298621000000,
+    "op_income": 44527000000
+  },
+  "scope": "CONSOLIDATED",
+  "metric_type": "actual",
+  "quality": "IXBRL",
+  "_source_file": "081220260220565976.zip",
+  "_extractor_unit": "百万円",
+  "_ticker_source": "SecuritiesCode"
+}

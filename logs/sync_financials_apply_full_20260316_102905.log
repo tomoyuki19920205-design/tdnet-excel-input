@@ -1,0 +1,20 @@
+2026-03-16 10:29:05,226 INFO [sync_financials] === sync_financials START ===
+2026-03-16 10:29:05,226 INFO [sync_financials]   mode:       APPLY (本番反映)
+2026-03-16 10:29:05,226 INFO [sync_financials]   scope:      FULL (全量)
+2026-03-16 10:29:05,226 INFO [sync_financials]   sqlite:     C:\Users\takuy\OneDrive\tdnet-excel-input\data\jquants.db
+2026-03-16 10:29:05,226 INFO [sync_financials]   table:      financials
+2026-03-16 10:29:05,228 INFO [sync_financials]   limit:      無制限
+2026-03-16 10:29:05,228 INFO [sync_financials]   batch-size: 500
+2026-03-16 10:29:05,229 INFO [sync_financials]   log:        C:\Users\takuy\OneDrive\tdnet-excel-input\logs\sync_financials_apply_full_20260316_102905.log
+2026-03-16 10:29:05,236 INFO [sync_financials] [SQLite] 生データ: 87,157 rows / 3,820 codes
+2026-03-16 10:29:05,830 ERROR [sync_financials] FATAL: No module named 'src'
+Traceback (most recent call last):
+  File "C:\Users\takuy\OneDrive\tdnet-excel-input\tools\sync_financials.py", line 582, in main
+    stats = sync(
+            ^^^^^
+  File "C:\Users\takuy\OneDrive\tdnet-excel-input\tools\sync_financials.py", line 337, in sync
+    data, raw_stats = read_sqlite(db_path, limit=limit, recent_days=recent_days)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\takuy\OneDrive\tdnet-excel-input\tools\sync_financials.py", line 282, in read_sqlite
+    from src.common_ticker import normalize_ticker
+ModuleNotFoundError: No module named 'src'

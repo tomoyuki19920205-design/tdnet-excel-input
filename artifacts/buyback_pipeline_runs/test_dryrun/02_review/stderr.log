@@ -1,0 +1,8 @@
+16:36:38 INFO [buyback_review] manifest: 3 エントリ
+16:36:38 INFO [buyback_review] 対象ファイル: 3 件
+16:36:40 INFO [buyback_review] [3/3] 処理中...
+16:36:41 INFO [buyback_review] CSV 出力: c:\Users\takuy\OneDrive\tdnet-excel-input\artifacts\buyback_pipeline_runs\test_dryrun\02_review\review_buyback_results.csv (3 rows)
+16:36:41 INFO [buyback_review] JSONL 出力: c:\Users\takuy\OneDrive\tdnet-excel-input\artifacts\buyback_pipeline_runs\test_dryrun\02_review\review_buyback_results.jsonl (3 rows)
+16:36:41 INFO [buyback_review] CSV 出力: c:\Users\takuy\OneDrive\tdnet-excel-input\artifacts\buyback_pipeline_runs\test_dryrun\02_review\review_low_confidence.csv (2 rows)
+16:36:41 INFO [buyback_review] CSV 出力: c:\Users\takuy\OneDrive\tdnet-excel-input\artifacts\buyback_pipeline_runs\test_dryrun\02_review\review_extraction_failures.csv (0 rows)
+16:36:41 INFO [buyback_review] サマリ出力: c:\Users\takuy\OneDrive\tdnet-excel-input\artifacts\buyback_pipeline_runs\test_dryrun\02_review\review_summary.md

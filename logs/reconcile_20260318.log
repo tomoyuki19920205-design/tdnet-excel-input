@@ -1,0 +1,7 @@
+[2026/03/18  6:54:04.15] Starting reconcile 
+[06:54:04] [db] config: write_key_type=service_role read_key_type=service_role
+[06:54:05] [pipeline_run] started: reconcile (id=224, trigger=scheduler)
+[06:54:05] [reconcile] starting daily reconcile checks
+[06:54:06] [reconcile] done: issues_total=0 checks={'stuck_jobs': 0, 'rebuild_backlog': 0, 'financials_duplicates': 0, 'quarantine_today': 0}
+[06:54:06] [pipeline_run] finished: reconcile status=done elapsed=0.7s id=224 processed=0 success=0 failed=0
+[2026/03/18  6:54:06.34] Finished (exit=0) 

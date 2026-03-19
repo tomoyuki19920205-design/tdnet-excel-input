@@ -1,0 +1,6 @@
+16:36:08 [INFO] 対象 PDF: 134件 (input_dir=c:\Users\takuy\OneDrive\tdnet-excel-input\data\docs)
+16:36:29 [INFO] 進捗: 100/134
+16:36:38 [INFO] 候補 CSV: c:\Users\takuy\OneDrive\tdnet-excel-input\artifacts\buyback_pipeline_runs\test_dryrun\01_candidates\buyback_candidates.csv (3件)
+16:36:38 [INFO] サマリ: c:\Users\takuy\OneDrive\tdnet-excel-input\artifacts\buyback_pipeline_runs\test_dryrun\01_candidates\candidate_summary.md
+16:36:38 [INFO] マニフェスト: c:\Users\takuy\OneDrive\tdnet-excel-input\artifacts\buyback_pipeline_runs\test_dryrun\01_candidates\candidate_manifest.csv (3件)
+16:36:38 [INFO] 完了: 134件走査, 3件候補, 1件失敗, 29.7秒

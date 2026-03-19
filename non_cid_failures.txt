@@ -1,0 +1,195 @@
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:2:[DEBUG] column_diagnosis  filing=52eec749be2f6e24cf1b... ticker=9206
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:16:[DEBUG] column_diagnosis  filing=124ae29053aad575ea75... ticker=6471
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:19:[DEBUG] column_diagnosis  filing=6ac03bbfaf4a2ef94a90... ticker=8304
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:38:[DEBUG] column_diagnosis  filing=58d84779fdc6513d8bf7... ticker=4582
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:51:     Phase C: preamble_trim skipped=5 stop_reason=numeric first=['シンバイオ製薬株式会社(4582) 2025年12月期 決算短信', '（６）当社グループのパイプラインについて', '当社グループは現在開発中のパイプラインとして、SyB V-1901、SyB L-1701、SyB L-1702を有してい']
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:57:[DEBUG] column_diagnosis  filing=4f29a6719c0bd49dd42f... ticker=5411
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:60:[DEBUG] column_diagnosis  filing=454dd1760273ff1f03b1... ticker=6370
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:79:[DEBUG] column_diagnosis  filing=15f908217c8f96c4dd37... ticker=1813
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:92:     Phase C: preamble_trim skipped=2 stop_reason=table_header_term first=['報告セグメントの業績は次の通りです。 （セグメント情報の詳細については、11ページをご覧ください。）', '（単位：百万円）']
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:98:[DEBUG] column_diagnosis  filing=28bb7169c34e0904a092... ticker=4088
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:113:     Phase C: preamble_trim skipped=20 stop_reason=max_skip first=['2026年２月６日', '各 位', '会 社 名 エア・ウォーター株式会社']
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:119:[DEBUG] column_diagnosis  filing=6612ebff2041262e4933... ticker=5201
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:138:[DEBUG] column_diagnosis  filing=3c6c44cbb057b2aecd55... ticker=7609
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:151:     Phase C: preamble_trim skipped=20 stop_reason=max_skip first=['2026年2月6日', '各 位', '会 社 名 ダ イ ト ロ ン 株 式 会 社']
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:157:[DEBUG] column_diagnosis  filing=9b54620b0a89f67caf0e... ticker=8035
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:160:[DEBUG] column_diagnosis  filing=76b547b74a8c212cc64c... ticker=8801
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:163:[DEBUG] column_diagnosis  filing=6c47f06fff7bb8cb2659... ticker=9433
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:176:     Phase C: preamble_trim skipped=14 stop_reason=numeric first=['2026年2月6日', '各位', '会社名 ＫＤＤＩ株式会社']
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:182:[DEBUG] column_diagnosis  filing=2db2003f237b7f84e971... ticker=1736
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:185:[DEBUG] column_diagnosis  filing=3969cab038b68ac8b4a4... ticker=1768
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:199:[DEBUG] column_diagnosis  filing=88e90a469ec3b8b2eaa0... ticker=2602
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:218:[DEBUG] column_diagnosis  filing=b5f67fdca01c3ab7fc3b... ticker=6089
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:237:[DEBUG] column_diagnosis  filing=1240c2f993c0c17ac046... ticker=9434
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:256:[DEBUG] column_diagnosis  filing=6b1bbe142a303a4363f4... ticker=4680
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:275:[DEBUG] column_diagnosis  filing=42e4c7fa9f81f6ba6e03... ticker=5542
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:322:  filing: 124ae29053aad575ea75... ticker=6471
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:323:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:329:          reason: 数値列46列; 数値行21行(5+); 数値密度21/22; 行数22
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:332:          reason: 数値列50列; 数値行45行(5+); 数値密度45/46; 行数46
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:335:          reason: 数値列39列; 数値行30行(5+); 数値密度30/31; 行数31
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:342:      Phase C: preamble_trim skipped=1 stop_reason=numeric first=['日本精工株式会社(6471)2026年3月期第3四半期決算短信〔IFRS〕(連結)']
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:345:  filing: 6ac03bbfaf4a2ef94a90... ticker=8304
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:346:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:352:          reason: 報告セグメント; セグメント情報; 事業セグメント; 売上系:売上高; 利益系:利益又は損失; 数値列2列; 数値行8行(5+); 行数31; セグメント名行5
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:355:          reason: 報告セグメント; セグメント別; 売上系:収益; 利益系:利益又は損失; 数値列2列; 数値行7行(5+); 数値密度7/15; 行数15; セグメント名行3行
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:358:          reason: 売上系:収益; 利益系:経常利益; 数値列3列; 数値行27行(5+); 数値密度27/43; 行数43; セグメント名行22行; 補助語2個; 三拍子ボーナス
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:369:  filing: 58d84779fdc6513d8bf7... ticker=4582
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:370:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:376:          reason: 数値列2列; 数値行11行(5+); 行数41; セグメント名行3行
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:379:          reason: 売上系:売上高; 利益系:営業利益; 数値列4列; 数値行21行(5+); 数値密度21/53; 行数53; セグメント名行7行; 補助語1個; キャッシュ・フ
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:382:          reason: 売上系:売上高; 数値列2列; 数値行13行(5+); 数値密度13/33; 行数33; 補助語1個; 業績予想(減点)
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:387:      Phase C: preamble_trim skipped=5 stop_reason=numeric first=['シンバイオ製薬株式会社(4582) 2025年12月期 決算短信', '（６）当社グループのパイプラインについて', '当社グループは現在開発中のパイプラインとして、SyB V-1901、SyB L-1701、SyB L-1702を有してい']
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:393:  filing: 4f29a6719c0bd49dd42f... ticker=5411
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:394:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:400:          reason: 数値列45列; 数値行13行(5+); 数値密度13/14; 行数14
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:403:          reason: 数値列18列; 数値行34行(5+); 数値密度34/35; 行数35
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:406:          reason: 数値列18列; 数値行37行(5+); 数値密度37/38; 行数38
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:413:      Phase C: preamble_trim skipped=1 stop_reason=numeric first=['ＪＦＥホールディングス㈱（5411）2026年３月期 第３四半期決算短信']
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:416:  filing: 454dd1760273ff1f03b1... ticker=6370
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:417:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:423:          reason: 報告セグメント; セグメント情報; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行4行(3+); 行数18; 比率中心
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:426:          reason: 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行21行(5+); 数値密度21/29; 行数29; セグメント名行17行; 補助語1個; 連結損益計算
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:429:          reason: 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行6行(5+); 数値密度6/13; 行数13; 比率中心
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:440:  filing: 15f908217c8f96c4dd37... ticker=1813
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:441:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:447:          reason: 報告セグメント; セグメント情報; 売上系:売上高; 利益系:営業利益; 数値列3列; 数値行19行(5+); 数値密度19/26; 行数26; セグメント名行
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:450:          reason: 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行31行(5+); 数値密度31/62; 行数62; セグメント名行17行; 補助語3個; 連結損益計算
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:453:          reason: 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行22行(5+); 数値密度22/49; 行数49; セグメント名行13行; 補助語2個; 連結損益計算
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:458:      Phase C: preamble_trim skipped=2 stop_reason=table_header_term first=['報告セグメントの業績は次の通りです。 （セグメント情報の詳細については、11ページをご覧ください。）', '（単位：百万円）']
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:464:  filing: 28bb7169c34e0904a092... ticker=4088
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:465:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:471:          reason: 数値列3列; 数値行13行(5+); 数値密度13/28; 行数28
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:476:      Phase C: preamble_trim skipped=20 stop_reason=max_skip first=['2026年２月６日', '各 位', '会 社 名 エア・ウォーター株式会社']
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:482:  filing: 6612ebff2041262e4933... ticker=5201
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:483:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:489:          reason: セグメント別; 売上系:売上高; 利益系:営業利益; 数値列6列; 数値行9行(5+); 数値密度9/27; 行数27; セグメント名行7行; 補助語3個; 三
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:492:          reason: 売上系:売上高; 利益系:営業利益; 数値列3列; 数値行9行(5+); 行数42; セグメント名行5行; 補助語1個
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:495:          reason: 数値列3列; 数値行15行(5+); 数値密度15/35; 行数35; セグメント名行9行; 補助語2個; 財政状態(減点); 有利子負債(減点)
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:506:  filing: 3c6c44cbb057b2aecd55... ticker=7609
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:507:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:513:          reason: 売上系:売上高; 利益系:営業利益; 数値列3列; 数値行11行(5+); 数値密度11/35; 行数35; セグメント名行3行; 業績予想(減点)
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:518:      Phase C: preamble_trim skipped=20 stop_reason=max_skip first=['2026年2月6日', '各 位', '会 社 名 ダ イ ト ロ ン 株 式 会 社']
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:524:  filing: 9b54620b0a89f67caf0e... ticker=8035
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:525:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:531:          reason: 数値列26列; 数値行25行(5+); 数値密度25/28; 行数28
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:534:          reason: 数値列15列; 数値行43行(5+); 数値密度43/48; 行数48
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:537:          reason: 数値列18列; 数値行30行(5+); 数値密度30/32; 行数32
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:546:  filing: 76b547b74a8c212cc64c... ticker=8801
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:547:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:553:          reason: 数値列36列; 数値行57行(5+); 数値密度57/81; 行数81
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:556:          reason: 数値列28列; 数値行28行(5+); 数値密度28/40; 行数40
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:559:          reason: 数値列32列; 数値行63行(5+); 数値密度63/74; 行数74
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:568:  filing: 6c47f06fff7bb8cb2659... ticker=9433
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:569:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:575:          reason: 数値列3列; 数値行11行(5+); 数値密度11/28; 行数28
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:580:      Phase C: preamble_trim skipped=14 stop_reason=numeric first=['2026年2月6日', '各位', '会社名 ＫＤＤＩ株式会社']
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:586:  filing: 2db2003f237b7f84e971... ticker=1736
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:587:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:593:          reason: 数値列18列; 数値行45行(5+); 数値密度45/59; 行数59
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:596:          reason: 数値列8列; 数値行17行(5+); 数値密度17/36; 行数36
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:599:          reason: 数値列11列; 数値行11行(5+); 行数47
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:608:  filing: 88e90a469ec3b8b2eaa0... ticker=2602
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:609:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:615:          reason: 報告セグメント; セグメント情報; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 行数15; セグメント名行2行; 比率中心
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:618:          reason: 事業セグメント; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行10行(5+); 行数40; セグメント名行4行
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:621:          reason: 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行31行(5+); 数値密度31/41; 行数41; セグメント名行24行; 補助語2個; 連結損益計算
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:632:  filing: b5f67fdca01c3ab7fc3b... ticker=6089
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:633:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:639:          reason: 報告セグメント; セグメント情報; 事業セグメント; 売上系:売上収益; 利益系:セグメント利益; 数値列1列(減点); 数値行6行(5+); 行数34; セグ
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:642:          reason: 売上系:売上収益; 利益系:営業利益; 数値列2列; 数値行25行(5+); 数値密度25/49; 行数49; セグメント名行18行; 補助語2個; 連結損益計
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:645:          reason: 利益系:損益; 数値列2列; 数値行11行(5+); 数値密度11/22; 行数22; セグメント名行6行; 補助語2個; 三拍子ボーナス(売上/利益+補助語+
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:656:  filing: 1240c2f993c0c17ac046... ticker=9434
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:657:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:663:          reason: セグメント情報; 売上系:売上高; 利益系:セグメント利益; 数値列4列; 数値行20行(5+); 数値密度20/46; 行数46; セグメント名行10行; 補
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:666:          reason: 報告セグメント; 売上系:売上高; 利益系:セグメント利益; 数値列2列; 数値行12行(5+); 行数58; 補助語1個
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:669:          reason: 報告セグメント; 売上系:売上高; 利益系:セグメント利益; 数値列1列(減点); 数値行7行(5+); 行数29; 補助語1個
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:680:  filing: 6b1bbe142a303a4363f4... ticker=4680
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:681:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:687:          reason: 報告セグメント; セグメント情報; 事業セグメント; 売上系:売上収益; 利益系:セグメント利益; 数値列1列(減点); 数値行8行(5+); 行数34; セグ
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:690:          reason: 報告セグメント; 事業セグメント; 売上系:売上収益; 利益系:セグメント利益; 数値列1列(減点); 数値行7行(5+); 数値密度7/19; 行数19; セ
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:693:          reason: 売上系:売上収益; 利益系:営業利益; 数値列2列; 数値行30行(5+); 数値密度30/52; 行数52; セグメント名行22行; 補助語2個; 連結損益計
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:704:  filing: 42e4c7fa9f81f6ba6e03... ticker=5542
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:705:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:711:          reason: 報告セグメント; セグメント情報; 事業セグメント; 売上系:売上高; 利益系:セグメント利益; 数値列2列; 数値行8行(5+); 行数40; セグメント名行
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:714:          reason: 報告セグメント; 売上系:売上高; 利益系:セグメント利益; 数値列3列; 数値行7行(5+); 数値密度7/23; 行数23; セグメント名行5行; 補助語4
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:717:          reason: 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行27行(5+); 数値密度27/36; 行数36; セグメント名行19行; 補助語2個; 三拍子ボーナ
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:733:  filing: 6ac03bbfaf4a2ef94a90... ticker=8304
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:734:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:735:    raw_header       : （セグメント情報等の注記）
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:736:    raw_header       : 【セグメント情報】
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:737:    reconstructed    : 【セグメント情報】
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:739:    sales_col=None profit_col=None profit_role=
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:743:  filing: 58d84779fdc6513d8bf7... ticker=4582
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:744:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:745:    raw_header       : ① [SyB V-1901（一般名：Brincidofovir＜ブリンシドホビル＞「BCV」）]
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:746:    raw_header       : 2019年９月にキメリックス社との間でBCVに関しての独占的グローバルライセンス契約を締結し、オルソポックス
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:747:    reconstructed    : 1[SyBV-1901(一般名:Brincidofovir<ブリンシドホビル>「BCV」)]2019年9月にキメリックス
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:749:    sales_col=None profit_col=None profit_role=
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:753:  filing: 454dd1760273ff1f03b1... ticker=6370
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:754:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:755:    raw_header       : ２）セグメント別の概況
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:756:    raw_header       : 当社グループは、社会やお客様への価値提供の観点で市場毎の特性を深く考察したうえで戦略を策定し、多様な
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:757:    reconstructed    : 2)セグメント別の概況当社グループは、社会やお客様への価値提供の観点で市場毎の特性を深く考察したうえで戦略を策定し、多様
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:759:    sales_col=None profit_col=None profit_role=
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:763:  filing: 15f908217c8f96c4dd37... ticker=1813
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:764:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:765:    raw_header       : 前第３四半期 当第３四半期 増減
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:766:    raw_header       : 土木事業 56,477 56,748 271
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:767:    reconstructed    : 前第3四半期当第3四半期増減土木事業56,47756,748271
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:769:    sales_col=None profit_col=None profit_role=
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:773:  filing: 28bb7169c34e0904a092... ticker=4088
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:774:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:775:    raw_header       : こうした中、2026年３月期第３四半期決算関連手続きにも相応の日数を要する見込みであることから、2026
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:776:    raw_header       : 年３月期第３四半期決算短信の開示を延期することといたしました。
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:777:    raw_header       : ２．今後の予定
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:778:    reconstructed    : こうした中、2026年3月期第3四半期決算関連手続きにも相応の日数を要する見込みであることから、2026年3月期第3四半
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:780:    sales_col=None profit_col=None profit_role=
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:786:  filing: 6612ebff2041262e4933... ticker=5201
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:787:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:788:    raw_header       : セグメント別業績 前期比較
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:789:    raw_header       : ←白地・薄い地色の場合の
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:790:    reconstructed    : セグメント別業績前期比較←白地・薄い地色の場合の
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:792:    sales_col=None profit_col=None profit_role=
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:796:  filing: 3c6c44cbb057b2aecd55... ticker=7609
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:797:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:798:    raw_header       : 【訂正前】
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:799:    raw_header       : 親会社株主に帰属 １株当たり
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:800:    reconstructed    : 【訂正前】親会社株主に帰属1株当たり
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:802:    sales_col=None profit_col=None profit_role=
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:806:  filing: 6c47f06fff7bb8cb2659... ticker=9433
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:807:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:808:    raw_header       : 当社は2026年1月14日付け「当社連結子会社における不適切な取引の疑いの判明及び特別調査委員会
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:809:    raw_header       : の設置に関するお知らせ」で公表のとおり、当社連結子会社であるビッグローブ株式会社及び同社の子会
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:810:    reconstructed    : 当社は2026年1月14日付け「当社連結子会社における不適切な取引の疑いの判明及び特別調査委員会の設置に関するお知らせ」
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:812:    sales_col=None profit_col=None profit_role=
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:816:  filing: 88e90a469ec3b8b2eaa0... ticker=2602
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:817:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:818:    raw_header       : セグメント別の概況
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:819:    raw_header       : 従来、報告セグメントの事業区分は「油脂事業」、「加工食品・素材事業」、「ファインケミカル事業」の３事業
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:820:    reconstructed    : セグメント別の概況従来、報告セグメントの事業区分は「油脂事業」、「加工食品・素材事業」、「ファインケミカル事業」の3事業
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:822:    sales_col=None profit_col=None profit_role=
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:826:  filing: b5f67fdca01c3ab7fc3b... ticker=6089
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:827:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:828:    raw_header       : （セグメント情報等）
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:829:    raw_header       : （1）報告セグメントの概要
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:830:    reconstructed    : (セグメント情報等)(1)報告セグメントの概要
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:832:    sales_col=None profit_col=None profit_role=
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:836:  filing: 1240c2f993c0c17ac046... ticker=9434
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:837:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:838:    raw_header       : c.セグメント情報に記載された区分ごとの状況
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:839:    raw_header       : (a) コンシューマ事業
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:840:    reconstructed    : c.セグメント情報に記載された区分ごとの状況(a)コンシューマ事業
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:842:    sales_col=None profit_col=None profit_role=
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:846:  filing: 6b1bbe142a303a4363f4... ticker=4680
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:847:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:848:    raw_header       : （セグメント情報）
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:849:    raw_header       : (1）報告セグメントの概要
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:850:    reconstructed    : (セグメント情報)(1)報告セグメントの概要
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:852:    sales_col=None profit_col=None profit_role=
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:856:  filing: 42e4c7fa9f81f6ba6e03... ticker=5542
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:857:    status           : still_quarantined
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:858:    raw_header       : (セグメント情報等)
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:859:    raw_header       : (セグメント情報)
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:860:    reconstructed    : (セグメント情報等)(セグメント情報)
+C:\Users\takuy\OneDrive\tdnet-excel-input\debug.txt:862:    sales_col=None profit_col=None profit_role=

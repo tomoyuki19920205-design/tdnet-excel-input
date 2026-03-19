@@ -1,0 +1,23 @@
+{
+  "ticker_code": "8985",
+  "company_name": null,
+  "title": "決算短信 (081220260222566956.zip)",
+  "disclosed_at": "2026-02-25T23:45:47+09:00",
+  "url": null,
+  "sha256": "0871d7c66bd55aee4f05829335ccb8176c27a972b2e501ea0bc4a3e7be10f3c8",
+  "doc_type": "TANSHIN",
+  "source": "TDNET",
+  "fiscal_year_end": "2025-12-31",
+  "quarter": 1,
+  "source_unit": "円",
+  "values": {
+    "sales": 45564000000,
+    "op_income": 31052000000
+  },
+  "scope": "CONSOLIDATED",
+  "metric_type": "actual",
+  "quality": "IXBRL",
+  "_source_file": "081220260222566956.zip",
+  "_extractor_unit": "百万円",
+  "_ticker_source": "XBRL_FILENAME"
+}

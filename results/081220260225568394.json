@@ -1,0 +1,23 @@
+{
+  "ticker_code": "2391",
+  "company_name": null,
+  "title": "決算短信 (081220260225568394.zip)",
+  "disclosed_at": "2026-02-25T23:45:48+09:00",
+  "url": null,
+  "sha256": "427b2697041e525de6614e13a75030206900cb4bc2d390c2bf67e8e866f9654d",
+  "doc_type": "TANSHIN",
+  "source": "TDNET",
+  "fiscal_year_end": "2026-01-31",
+  "quarter": 1,
+  "source_unit": "円",
+  "values": {
+    "sales": 1573000000,
+    "op_income": 316000000
+  },
+  "scope": "CONSOLIDATED",
+  "metric_type": "actual",
+  "quality": "IXBRL",
+  "_source_file": "081220260225568394.zip",
+  "_extractor_unit": "百万円",
+  "_ticker_source": "SecuritiesCode"
+}

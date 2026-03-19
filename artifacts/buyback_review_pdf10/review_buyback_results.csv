@@ -1,0 +1,11 @@
+﻿file_path,file_type,file_name,ticker,disclosure_date,title,source_doc_id,source_url,text_extract_ok,text_length,title_detected,is_buyback_related,event_type_candidate,classification_confidence,extraction_confidence,confidence_final,matched_keywords,exclusion_reason,event_type,shares_limit,shares_acquired,shares_cancelled,amount_limit_million_yen,amount_acquired_million_yen,ratio_to_outstanding,start_date,end_date,cancel_date,acquisition_method,board_resolution_date,status_period_label,extracted_fields_count,missing_key_fields,raw_method_text,raw_amount_text,raw_shares_text,raw_period_text,review_bucket,review_notes
+data\docs\140120260204547040.pdf,pdf,140120260204547040.pdf,1401,2026-02-04,,,,True,22877,,False,,0.0,0.0,0.0,,,,,,,,,,,,,,,,0,,,,,,non_buyback,
+data\docs\140120260206549927.pdf,pdf,140120260206549927.pdf,1401,2026-02-06,,,,True,1773,,False,,0.0,0.0,0.0,,,,,,,,,,,,,,,,0,,,,,,non_buyback,
+data\docs\140120260213561316.pdf,pdf,140120260213561316.pdf,1401,2026-02-13,,,,True,12800,,False,,0.0,0.0,0.0,,,,,,,,,,,,,,,,0,,,,,,non_buyback,
+data\docs\140120260216563435.pdf,pdf,140120260216563435.pdf,1401,2026-02-16,,,,True,2028,,False,,0.0,0.0,0.0,,,,,,,,,,,,,,,,0,,,,,,non_buyback,
+data\docs\140120260217563586.pdf,pdf,140120260217563586.pdf,1401,2026-02-17,,,,True,1540,,False,,0.0,0.0,0.0,,,,,,,,,,,,,,,,0,,,,,,non_buyback,
+data\docs\140120260217563949.pdf,pdf,140120260217563949.pdf,1401,2026-02-17,,,,True,1180,,False,,0.0,0.0,0.0,,,,,,,,,,,,,,,,0,,,,,,non_buyback,
+data\docs\140120260217563972.pdf,pdf,140120260217563972.pdf,1401,2026-02-17,,,,True,9467,,False,,0.0,0.0,0.0,,,,,,,,,,,,,,,,0,,,,,,non_buyback,
+data\docs\140120260218564170.pdf,pdf,140120260218564170.pdf,1401,2026-02-18,,,,True,1032,,False,,0.0,0.0,0.0,,,,,,,,,,,,,,,,0,,,,,,non_buyback,
+data\docs\140120260218564639.pdf,pdf,140120260218564639.pdf,1401,2026-02-18,,,,True,1334,,False,,0.0,0.0,0.0,,,,,,,,,,,,,,,,0,,,,,,non_buyback,
+data\docs\140120260219565026.pdf,pdf,140120260219565026.pdf,1401,2026-02-19,,,,True,12044,,False,,0.0,0.0,0.0,,,,,,,,,,,,,,,,0,,,,,,non_buyback,

@@ -1,0 +1,108 @@
+============================================================ 
+ TDnet ワンクリック全更新  2026/03/01 16:31:38.95 
+============================================================ 
+ 
+[Step 1/4] TDnet新規開示を取得中... 
+============================================================
+  TDNET Ingest - ワンショット実行
+============================================================
+
+[DB]   C:\Users\takuy\OneDrive\tdnet-excel-input\decision_db.db
+
+[2026-03-01 16:31:39] [INFO] [API] yanoshin.jp APIから取得中: https://webapi.yanoshin.jp/webapi/tdnet/list/today.json
+[2026-03-01 16:31:39] [INFO] [API] detected_schema=items, raw_items_count=0
+[2026-03-01 16:31:39] [INFO] [API] fetched_count=0
+[2026-03-01 16:31:39] [INFO] [API] fetched_count=0, filtered_count=0, forecast_revision_count=0, financial_statement_count=0
+[2026-03-01 16:31:39] [INFO] [API] new_count=0
+[2026-03-01 16:31:39] [INFO] [INGEST] run=ingest-4d49b4c8 processed=0 success=0 skipped=0 error=0 (tanshin=0)
+============================================================
+  結果サマリ
+============================================================
+  run_id          : ingest-4d49b4c8
+  取得開示数      : 0
+  対象(決算短信)  : 0
+  処理件数        : 0
+  INSERT          : 0
+  UPDATE          : 0
+  変更なし        : 0
+  成功            : 0
+  スキップ        : 0
+  エラー          : 0
+
+ 
+[Step 2/4] SQLite → Supabase push中... 
+[16:31:40] [PUSH] SQLite総行数: 91622, 今回対象: 91622 件
+[16:31:40] [Phase 1/4] companies 一括 upsert...
+[16:31:41]   → 2752 社 完了 (1.7秒)
+[16:31:41] [Phase 2/4] periods 一括 upsert...
+Traceback (most recent call last):
+  File "C:\Users\takuy\OneDrive\tdnet-excel-input\tools\sqlite_to_supabase.py", line 1090, in main
+    stats = push_sqlite_to_supabase(
+            ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\takuy\OneDrive\tdnet-excel-input\tools\sqlite_to_supabase.py", line 668, in push_sqlite_to_supabase
+    result = api.upsert_batch(
+             ^^^^^^^^^^^^^^^^^
+  File "C:\Users\takuy\OneDrive\tdnet-excel-input\tools\sqlite_to_supabase.py", line 445, in upsert_batch
+    r = self._request(
+        ^^^^^^^^^^^^^^
+  File "C:\Users\takuy\OneDrive\tdnet-excel-input\tools\sqlite_to_supabase.py", line 385, in _request
+    r.raise_for_status()
+  File "C:\Users\takuy\OneDrive\tdnet-excel-input\.venv\Lib\site-packages\requests\models.py", line 1026, in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+requests.exceptions.HTTPError: 500 Server Error: Internal Server Error for url: https://fvkvfekzoebcolssnteo.supabase.co/rest/v1/periods?on_conflict=company_id%2Cfiscal_year_end%2Cquarter
+
+=======================================================
+  SQLite → Supabase push (バッチ版)
+=======================================================
+  DB         : C:\Users\takuy\OneDrive\tdnet-excel-input\decision_db.db
+  batch_size : 500
+
+
+=======================================================
+  ❌ push 失敗
+=======================================================
+=======================================================
+
+  [ERROR] Step2 code=1 
+ 
+[Step 3/4] data.xlsx を生成中... 
+[16:31:55] companies を取得中...
+[16:31:55]   → 2754 社
+[16:31:55] periods を取得中...
+[16:32:07]   → 91630 期間
+[16:32:07] facts を取得中...
+[16:32:36]   → 183403 件
+[16:32:36] 集約後: 66075 行
+[16:32:40] [GEN] data.xlsx 生成完了: 66075 行 -> C:\Users\takuy\OneDrive\data.xlsx
+[16:32:40] [GEN] === 検証サマリ ===
+[16:32:40] [GEN]   companies      : 2754 社
+[16:32:40] [GEN]   periods        : 91630 期間
+[16:32:40] [GEN]   v_latest_facts : 183403 件 (raw)
+[16:32:40] [GEN]   集約後行数     : 66075 行
+[16:32:40] [GEN]   出力行数       : 66075 行
+[16:32:40] [GEN]   出力先         : C:\Users\takuy\OneDrive\data.xlsx
+
+==================================================
+  data.xlsx 生成ツール
+==================================================
+
+==================================================
+  ✅ 成功
+==================================================
+  出力ファイル : C:\Users\takuy\OneDrive\data.xlsx
+  データ行数   : 66075 行
+  更新日時     : 2026-03-01 16:31:55
+  エラー       : 0
+==================================================
+
+ 
+[Step 4/4] data.xlsx 統計チェック... 
+  [XLSX] rows(DATA)=66075 
+  [XLSX] delta=+0 (prev=66075, now=66075) 
+  [XLSX] tickers=2746 
+ 
+============================================================ 
+ 完了  2026/03/01 16:32:43.78 
+ Step1=0 Step2=1 Step3=0 Step3Status=OK 
+============================================================ 
+  [AUTO] nopause mode 

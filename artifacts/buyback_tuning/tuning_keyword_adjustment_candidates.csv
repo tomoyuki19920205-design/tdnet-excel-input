@@ -1,0 +1,5 @@
+﻿keyword,total,high_confidence_extracted_count,non_buyback_count,classifier_only_count,low_confidence_count,current_weight,suggested_direction,suggested_reason
+自己株式,24,0,24,0,0,1,move_to_penalty,false positive rate 100%
+上限,3,0,2,1,0,1,move_to_penalty,false positive rate 67%
+自己株式の取得,2,1,0,1,0,3,keep,balanced
+自己株式の消却,1,0,0,1,0,3,decrease,mostly classifier_only (100%)

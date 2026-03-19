@@ -1,0 +1,260 @@
+[2026/03/19 12:16:00.99] ==== START edinet_shareholder_watch ==== 
+2026-03-19 12:16:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 12:16:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 12:16:01 [INFO] モード: once
+2026-03-19 12:16:01 [INFO]   2026-03-19: 288 件取得
+2026-03-19 12:16:01 [INFO]   2026-03-18: 280 件取得
+2026-03-19 12:16:01 [INFO] SUMMARY fetched=568 candidate=145 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 skipped_seen=145 skipped_status=0 errors=0
+[2026/03/19 12:16:01.94] ==== END exit_code=0 ==== 
+[2026/03/19 12:16:53.69] ==== START edinet_shareholder_watch ==== 
+2026-03-19 12:16:54 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 12:16:54 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 12:16:54 [INFO] モード: once
+2026-03-19 12:16:54 [INFO]   2026-03-19: 288 件取得
+2026-03-19 12:16:54 [INFO]   2026-03-18: 280 件取得
+2026-03-19 12:16:54 [INFO] SUMMARY fetched=568 candidate=145 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 skipped_seen=145 skipped_status=0 errors=0
+[2026/03/19 12:16:54.76] ==== END exit_code=0 ==== 
+[2026/03/19 12:21:00.91] ==== START edinet_shareholder_watch ==== 
+2026-03-19 12:21:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 12:21:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 12:21:01 [INFO] モード: once
+2026-03-19 12:21:01 [INFO]   2026-03-19: 288 件取得
+2026-03-19 12:21:01 [INFO]   2026-03-18: 280 件取得
+2026-03-19 12:21:01 [INFO] SUMMARY fetched=568 candidate=145 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 skipped_seen=145 skipped_status=0 errors=0
+[2026/03/19 12:21:01.84] ==== END exit_code=0 ==== 
+[2026/03/19 12:26:00.96] ==== START edinet_shareholder_watch ==== 
+2026-03-19 12:26:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 12:26:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 12:26:01 [INFO] モード: once
+2026-03-19 12:26:01 [INFO]   2026-03-19: 289 件取得
+2026-03-19 12:26:01 [INFO]   2026-03-18: 280 件取得
+2026-03-19 12:26:01 [INFO] SUMMARY fetched=569 candidate=145 processed=0 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=0 skipped_seen=145 skipped_status=0 errors=0
+[2026/03/19 12:26:01.90] ==== END exit_code=0 ==== 
+[2026/03/19 12:31:00.99] ==== START edinet_shareholder_watch ==== 
+2026-03-19 12:31:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 12:31:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 12:31:01 [INFO] モード: once
+2026-03-19 12:31:01 [INFO]   2026-03-19: 289 件取得
+2026-03-19 12:31:01 [INFO]   2026-03-18: 280 件取得
+2026-03-19 12:31:01 [INFO] SUMMARY fetched=569 candidate=145 processed=0 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=0 skipped_seen=145 skipped_status=0 errors=0
+[2026/03/19 12:31:01.94] ==== END exit_code=0 ==== 
+[2026/03/19 12:36:00.96] ==== START edinet_shareholder_watch ==== 
+2026-03-19 12:36:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 12:36:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 12:36:01 [INFO] モード: once
+2026-03-19 12:36:01 [INFO]   2026-03-19: 289 件取得
+2026-03-19 12:36:01 [INFO]   2026-03-18: 280 件取得
+2026-03-19 12:36:01 [INFO] SUMMARY fetched=569 candidate=145 processed=0 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=0 skipped_seen=145 skipped_status=0 errors=0
+[2026/03/19 12:36:01.97] ==== END exit_code=0 ==== 
+[2026/03/19 12:41:00.92] ==== START edinet_shareholder_watch ==== 
+2026-03-19 12:41:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 12:41:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 12:41:01 [INFO] モード: once
+2026-03-19 12:41:01 [INFO]   2026-03-19: 289 件取得
+2026-03-19 12:41:01 [INFO]   2026-03-18: 280 件取得
+2026-03-19 12:41:01 [INFO] SUMMARY fetched=569 candidate=145 processed=0 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=0 skipped_seen=145 skipped_status=0 errors=0
+[2026/03/19 12:41:01.92] ==== END exit_code=0 ==== 
+[2026/03/19 12:46:00.91] ==== START edinet_shareholder_watch ==== 
+2026-03-19 12:46:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 12:46:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 12:46:01 [INFO] モード: once
+2026-03-19 12:46:01 [INFO]   2026-03-19: 290 件取得
+2026-03-19 12:46:01 [INFO]   2026-03-18: 280 件取得
+2026-03-19 12:46:01 [INFO] SUMMARY fetched=570 candidate=145 processed=0 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=0 skipped_seen=145 skipped_status=0 errors=0
+[2026/03/19 12:46:01.83] ==== END exit_code=0 ==== 
+[2026/03/19 12:51:00.90] ==== START edinet_shareholder_watch ==== 
+2026-03-19 12:51:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 12:51:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 12:51:01 [INFO] モード: once
+2026-03-19 12:51:01 [INFO]   2026-03-19: 291 件取得
+2026-03-19 12:51:16 [INFO]   DOC docID=S100XS5R issuer=ＧＭＯペパボ株式会社 extraction=html shareholders=10 matched=none prev_snapshot=no
+2026-03-19 12:51:16 [INFO]   NO-PREV-SNAPSHOT: issuer=ＧＭＯペパボ株式会社 key=E22101 → 初回snapshot作成のみ
+2026-03-19 12:51:16 [INFO]   2026-03-18: 280 件取得
+2026-03-19 12:51:16 [INFO] SUMMARY fetched=571 candidate=146 processed=1 html_ok=1 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=1 skipped_seen=145 skipped_status=0 errors=0
+[2026/03/19 12:51:16.74] ==== END exit_code=0 ==== 
+[2026/03/19 12:56:00.92] ==== START edinet_shareholder_watch ==== 
+2026-03-19 12:56:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 12:56:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 12:56:01 [INFO] モード: once
+2026-03-19 12:56:01 [INFO]   2026-03-19: 293 件取得
+2026-03-19 12:56:01 [INFO]   2026-03-18: 280 件取得
+2026-03-19 12:56:01 [INFO] SUMMARY fetched=573 candidate=146 processed=0 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=0 skipped_seen=146 skipped_status=0 errors=0
+[2026/03/19 12:56:01.96] ==== END exit_code=0 ==== 
+[2026/03/19 13:01:01.00] ==== START edinet_shareholder_watch ==== 
+2026-03-19 13:01:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 13:01:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 13:01:01 [INFO] モード: once
+2026-03-19 13:01:01 [INFO]   2026-03-19: 295 件取得
+2026-03-19 13:01:01 [INFO]   2026-03-18: 280 件取得
+2026-03-19 13:01:01 [INFO] SUMMARY fetched=575 candidate=146 processed=0 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=0 skipped_seen=146 skipped_status=0 errors=0
+[2026/03/19 13:01:02.06] ==== END exit_code=0 ==== 
+[2026/03/19 13:06:00.93] ==== START edinet_shareholder_watch ==== 
+2026-03-19 13:06:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 13:06:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 13:06:01 [INFO] モード: once
+2026-03-19 13:06:01 [INFO]   2026-03-19: 297 件取得
+2026-03-19 13:06:03 [INFO]   DOC docID=S100XS3C issuer=ノーリツ鋼機株式会社 extraction=html shareholders=10 matched=none prev_snapshot=no
+2026-03-19 13:06:03 [INFO]   NO-PREV-SNAPSHOT: issuer=ノーリツ鋼機株式会社 key=E02322 → 初回snapshot作成のみ
+2026-03-19 13:06:03 [INFO]   2026-03-18: 280 件取得
+2026-03-19 13:06:03 [INFO] SUMMARY fetched=577 candidate=147 processed=1 html_ok=1 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=1 skipped_seen=146 skipped_status=0 errors=0
+[2026/03/19 13:06:03.59] ==== END exit_code=0 ==== 
+[2026/03/19 13:11:00.95] ==== START edinet_shareholder_watch ==== 
+2026-03-19 13:11:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 13:11:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 13:11:01 [INFO] モード: once
+2026-03-19 13:11:01 [INFO]   2026-03-19: 298 件取得
+2026-03-19 13:11:01 [INFO]   2026-03-18: 280 件取得
+2026-03-19 13:11:01 [INFO] SUMMARY fetched=578 candidate=147 processed=0 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=0 skipped_seen=147 skipped_status=0 errors=0
+[2026/03/19 13:11:01.97] ==== END exit_code=0 ==== 
+[2026/03/19 13:16:00.91] ==== START edinet_shareholder_watch ==== 
+2026-03-19 13:16:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 13:16:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 13:16:01 [INFO] モード: once
+2026-03-19 13:16:01 [INFO]   2026-03-19: 298 件取得
+2026-03-19 13:16:01 [INFO]   2026-03-18: 280 件取得
+2026-03-19 13:16:01 [INFO] SUMMARY fetched=578 candidate=147 processed=0 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=0 skipped_seen=147 skipped_status=0 errors=0
+[2026/03/19 13:16:01.81] ==== END exit_code=0 ==== 
+[2026/03/19 13:21:01.00] ==== START edinet_shareholder_watch ==== 
+2026-03-19 13:21:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 13:21:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 13:21:01 [INFO] モード: once
+2026-03-19 13:21:01 [INFO]   2026-03-19: 298 件取得
+2026-03-19 13:21:01 [INFO]   2026-03-18: 280 件取得
+2026-03-19 13:21:01 [INFO] SUMMARY fetched=578 candidate=147 processed=0 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=0 skipped_seen=147 skipped_status=0 errors=0
+[2026/03/19 13:21:01.95] ==== END exit_code=0 ==== 
+[2026/03/19 13:26:00.95] ==== START edinet_shareholder_watch ==== 
+2026-03-19 13:26:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 13:26:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 13:26:01 [INFO] モード: once
+2026-03-19 13:26:03 [INFO]   2026-03-19: 301 件取得
+2026-03-19 13:26:03 [INFO]   2026-03-18: 280 件取得
+2026-03-19 13:26:03 [INFO] SUMMARY fetched=581 candidate=147 processed=0 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=0 skipped_seen=147 skipped_status=0 errors=0
+[2026/03/19 13:26:03.70] ==== END exit_code=0 ==== 
+[2026/03/19 13:31:00.96] ==== START edinet_shareholder_watch ==== 
+2026-03-19 13:31:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 13:31:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 13:31:01 [INFO] モード: once
+2026-03-19 13:31:01 [INFO]   2026-03-19: 303 件取得
+2026-03-19 13:31:04 [INFO]   DOC docID=S100XS6L issuer=株式会社スポーツフィールド extraction=html shareholders=10 matched=none prev_snapshot=no
+2026-03-19 13:31:04 [INFO]   NO-PREV-SNAPSHOT: issuer=株式会社スポーツフィールド key=E35323 → 初回snapshot作成のみ
+2026-03-19 13:31:04 [INFO]   2026-03-18: 280 件取得
+2026-03-19 13:31:04 [INFO] SUMMARY fetched=583 candidate=148 processed=1 html_ok=1 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=1 skipped_seen=147 skipped_status=0 errors=0
+[2026/03/19 13:31:04.27] ==== END exit_code=0 ==== 
+[2026/03/19 13:36:00.95] ==== START edinet_shareholder_watch ==== 
+2026-03-19 13:36:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 13:36:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 13:36:01 [INFO] モード: once
+2026-03-19 13:36:01 [INFO]   2026-03-19: 303 件取得
+2026-03-19 13:36:01 [INFO]   2026-03-18: 280 件取得
+2026-03-19 13:36:01 [INFO] SUMMARY fetched=583 candidate=148 processed=0 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=0 skipped_seen=148 skipped_status=0 errors=0
+[2026/03/19 13:36:01.89] ==== END exit_code=0 ==== 
+[2026/03/19 13:41:00.95] ==== START edinet_shareholder_watch ==== 
+2026-03-19 13:41:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 13:41:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 13:41:01 [INFO] モード: once
+2026-03-19 13:41:01 [INFO]   2026-03-19: 306 件取得
+2026-03-19 13:41:03 [INFO]   DOC docID=S100WZGB issuer=株式会社ブロードバンドタワー extraction=html shareholders=10 matched=none prev_snapshot=no
+2026-03-19 13:41:03 [INFO]   NO-PREV-SNAPSHOT: issuer=株式会社ブロードバンドタワー key=E05494 → 初回snapshot作成のみ
+2026-03-19 13:41:03 [INFO]   2026-03-18: 280 件取得
+2026-03-19 13:41:03 [INFO] SUMMARY fetched=586 candidate=149 processed=1 html_ok=1 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=1 skipped_seen=148 skipped_status=0 errors=0
+[2026/03/19 13:41:03.42] ==== END exit_code=0 ==== 
+[2026/03/19 13:46:00.94] ==== START edinet_shareholder_watch ==== 
+2026-03-19 13:46:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 13:46:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 13:46:01 [INFO] モード: once
+2026-03-19 13:46:01 [INFO]   2026-03-19: 308 件取得
+2026-03-19 13:46:01 [INFO]   2026-03-18: 280 件取得
+2026-03-19 13:46:01 [INFO] SUMMARY fetched=588 candidate=149 processed=0 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=0 skipped_seen=149 skipped_status=0 errors=0
+[2026/03/19 13:46:02.01] ==== END exit_code=0 ==== 
+[2026/03/19 13:51:00.90] ==== START edinet_shareholder_watch ==== 
+2026-03-19 13:51:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 13:51:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 13:51:01 [INFO] モード: once
+2026-03-19 13:51:01 [INFO]   2026-03-19: 308 件取得
+2026-03-19 13:51:01 [INFO]   2026-03-18: 280 件取得
+2026-03-19 13:51:01 [INFO] SUMMARY fetched=588 candidate=149 processed=0 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=0 skipped_seen=149 skipped_status=0 errors=0
+[2026/03/19 13:51:01.79] ==== END exit_code=0 ==== 
+[2026/03/19 13:56:00.96] ==== START edinet_shareholder_watch ==== 
+2026-03-19 13:56:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 13:56:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 13:56:01 [INFO] モード: once
+2026-03-19 13:56:01 [INFO]   2026-03-19: 308 件取得
+2026-03-19 13:56:01 [INFO]   2026-03-18: 280 件取得
+2026-03-19 13:56:01 [INFO] SUMMARY fetched=588 candidate=149 processed=0 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=0 skipped_seen=149 skipped_status=0 errors=0
+[2026/03/19 13:56:01.91] ==== END exit_code=0 ==== 
+[2026/03/19 14:01:00.93] ==== START edinet_shareholder_watch ==== 
+2026-03-19 14:01:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 14:01:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 14:01:01 [INFO] モード: once
+2026-03-19 14:01:01 [INFO]   2026-03-19: 312 件取得
+2026-03-19 14:01:02 [INFO]   DOC docID=S100XRYQ issuer=株式会社テノ．ホールディングス extraction=html shareholders=10 matched=none prev_snapshot=no
+2026-03-19 14:01:02 [INFO]   NO-PREV-SNAPSHOT: issuer=株式会社テノ．ホールディングス key=E34276 → 初回snapshot作成のみ
+2026-03-19 14:01:03 [INFO]   2026-03-18: 280 件取得
+2026-03-19 14:01:03 [INFO] SUMMARY fetched=592 candidate=150 processed=1 html_ok=1 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=1 skipped_seen=149 skipped_status=0 errors=0
+[2026/03/19 14:01:03.17] ==== END exit_code=0 ==== 
+[2026/03/19 14:06:01.00] ==== START edinet_shareholder_watch ==== 
+2026-03-19 14:06:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 14:06:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 14:06:01 [INFO] モード: once
+2026-03-19 14:06:02 [INFO]   2026-03-19: 312 件取得
+2026-03-19 14:06:02 [INFO]   2026-03-18: 280 件取得
+2026-03-19 14:06:02 [INFO] SUMMARY fetched=592 candidate=150 processed=0 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=0 skipped_seen=150 skipped_status=0 errors=0
+[2026/03/19 14:06:02.33] ==== END exit_code=0 ==== 
+[2026/03/19 14:11:01.01] ==== START edinet_shareholder_watch ==== 
+2026-03-19 14:11:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 14:11:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 14:11:01 [INFO] モード: once
+2026-03-19 14:11:01 [INFO]   2026-03-19: 314 件取得
+2026-03-19 14:11:02 [INFO]   2026-03-18: 280 件取得
+2026-03-19 14:11:02 [INFO] SUMMARY fetched=594 candidate=150 processed=0 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=0 skipped_seen=150 skipped_status=0 errors=0
+[2026/03/19 14:11:02.12] ==== END exit_code=0 ==== 
+[2026/03/19 14:16:01.01] ==== START edinet_shareholder_watch ==== 
+2026-03-19 14:16:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 14:16:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 14:16:01 [INFO] モード: once
+2026-03-19 14:16:01 [INFO]   2026-03-19: 315 件取得
+2026-03-19 14:16:02 [INFO]   2026-03-18: 280 件取得
+2026-03-19 14:16:02 [INFO] SUMMARY fetched=595 candidate=150 processed=0 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=0 skipped_seen=150 skipped_status=0 errors=0
+[2026/03/19 14:16:02.09] ==== END exit_code=0 ==== 
+[2026/03/19 14:21:00.97] ==== START edinet_shareholder_watch ==== 
+2026-03-19 14:21:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 14:21:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 14:21:01 [INFO] モード: once
+2026-03-19 14:21:01 [INFO]   2026-03-19: 315 件取得
+2026-03-19 14:21:01 [INFO]   2026-03-18: 280 件取得
+2026-03-19 14:21:01 [INFO] SUMMARY fetched=595 candidate=150 processed=0 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=0 skipped_seen=150 skipped_status=0 errors=0
+[2026/03/19 14:21:01.97] ==== END exit_code=0 ==== 
+[2026/03/19 14:26:01.01] ==== START edinet_shareholder_watch ==== 
+2026-03-19 14:26:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 14:26:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 14:26:01 [INFO] モード: once
+2026-03-19 14:26:01 [INFO]   2026-03-19: 318 件取得
+2026-03-19 14:26:03 [INFO]   DOC docID=S100XR06 issuer=ルネサスエレクトロニクス株式会社 extraction=html shareholders=10 matched=none prev_snapshot=no
+2026-03-19 14:26:03 [INFO]   NO-PREV-SNAPSHOT: issuer=ルネサスエレクトロニクス株式会社 key=E02081 → 初回snapshot作成のみ
+2026-03-19 14:26:03 [INFO]   2026-03-18: 280 件取得
+2026-03-19 14:26:03 [INFO] SUMMARY fetched=598 candidate=151 processed=1 html_ok=1 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=1 skipped_seen=150 skipped_status=0 errors=0
+[2026/03/19 14:26:03.91] ==== END exit_code=0 ==== 
+[2026/03/19 14:31:00.95] ==== START edinet_shareholder_watch ==== 
+2026-03-19 14:31:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 14:31:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 14:31:01 [INFO] モード: once
+2026-03-19 14:31:01 [INFO]   2026-03-19: 320 件取得
+2026-03-19 14:31:01 [INFO]   2026-03-18: 280 件取得
+2026-03-19 14:31:01 [INFO] SUMMARY fetched=600 candidate=151 processed=0 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=0 skipped_seen=151 skipped_status=0 errors=0
+[2026/03/19 14:31:01.97] ==== END exit_code=0 ==== 
+[2026/03/19 14:36:01.11] ==== START edinet_shareholder_watch ==== 
+2026-03-19 14:36:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 14:36:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 14:36:01 [INFO] モード: once
+2026-03-19 14:36:01 [INFO]   2026-03-19: 321 件取得
+2026-03-19 14:36:02 [INFO]   2026-03-18: 280 件取得
+2026-03-19 14:36:02 [INFO] SUMMARY fetched=601 candidate=151 processed=0 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=0 skipped_seen=151 skipped_status=0 errors=0
+[2026/03/19 14:36:02.21] ==== END exit_code=0 ==== 
+[2026/03/19 14:41:01.02] ==== START edinet_shareholder_watch ==== 
+2026-03-19 14:41:01 [INFO] === EDINET 株主欄監視 開始 ===
+2026-03-19 14:41:01 [INFO] 対象株主: 井村俊哉, 片山晃
+2026-03-19 14:41:01 [INFO] モード: once
+2026-03-19 14:41:01 [INFO]   2026-03-19: 322 件取得
+2026-03-19 14:41:02 [INFO]   2026-03-18: 280 件取得
+2026-03-19 14:41:02 [INFO] SUMMARY fetched=602 candidate=151 processed=0 html_ok=0 pdf_ok=0 failed=0 target_hits=0 new_hits=0 notified=0 no_prev_snapshot=0 skipped_seen=151 skipped_status=0 errors=0
+[2026/03/19 14:41:02.15] ==== END exit_code=0 ==== 

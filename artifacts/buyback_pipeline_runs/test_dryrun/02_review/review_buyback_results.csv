@@ -1,0 +1,37 @@
+﻿file_path,file_type,file_name,ticker,disclosure_date,title,source_doc_id,source_url,text_extract_ok,text_length,title_detected,is_buyback_related,event_type_candidate,classification_confidence,extraction_confidence,confidence_final,matched_keywords,exclusion_reason,event_type,shares_limit,shares_acquired,shares_cancelled,amount_limit_million_yen,amount_acquired_million_yen,ratio_to_outstanding,start_date,end_date,cancel_date,acquisition_method,board_resolution_date,status_period_label,extracted_fields_count,missing_key_fields,raw_method_text,raw_amount_text,raw_shares_text,raw_period_text,review_bucket,review_notes,manifest_candidate_score,manifest_review_priority,manifest_matched_keywords,manifest_matched_keyword_count,manifest_ticker,manifest_title,manifest_disclosure_date
+c:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\140120260220566631.pdf,pdf,140120260220566631.pdf,2288,2026-02-24,2026年３月期第３四半期決算短信〔日本基準〕（連結）,,,True,17827,,True,buyback_decision,0.6,1.0,1.0,自己株式の取得,,buyback_decision,650000,,,1300.0,,2.66,2026-03-04,2026-03-09,,tostnet,,,6,,"取得方法
+株式会社東京証券取引所における市場買付け
+① 取引一任契約に基づく立会取引市場における買付け
+② 自己株式立会外買付取引（ToSTNeT-３）による買付け
+－ 12 －
+丸大食品㈱（2288）2026年３月期 第３四半期決算短信
+(注)売出価格等決定日が2026年３月４日（水）の場合、
+「2026","取得価額の総額
+13億円（上限）
+(4) 取得期間
+本売出しに係る売出価格等決定日（2026年３月４日（水）から2026年３月９日（月）までの間のいず
+れかの日（以下、「売出価格等決定日」という。））に応じて定まる本売出しの受渡期日の翌営業日
+（売出価格等決定日の６営業日後の日）から2026年９月30日（水）まで（注）
+(5) 取得方法
+株式会社東京証券取引所における市場買付け
+① 取引一任契約に基づく立会取引","取得する株式の総数
+650,000株（上限）（発行済株式総数（自己株式を除く）に対する割合2.66%）
+(3) 株式の取得価額の総額
+13億円（上限）
+(4) 取得期間
+本売出しに係る売出価格等決定日（2026年３月４日（水）から2026年３月９日（月）までの間のいず
+れかの日（以下、「売出価格等決定日」という。））に応じて定まる本売出しの受渡期日の翌営業日
+（売出価格等決定日の６営業日後の日）から2026年９月3","取得期間
+本売出しに係る売出価格等決定日（2026年３月４日（水）から2026年３月９日（月）までの間のいず
+れかの日（以下、「売出価格等決定日」という。））に応じて定まる本売出しの受渡期日の翌営業日
+（売出価格等決定日の６営業日後の日）から2026年９月30日（水）まで（注）
+(5) 取得方法
+株式会社東京証券取引所における市場買付け
+① 取引一任契約に基づく立会取引市場における買付け
+② 自己株式立会外買付取引（ToSTNeT-３）による買付け
+－ 12 －
+丸大食品㈱（2288）2026年３月期 第３四半期決算短信
+(注)売出価格等決定日が2026年３月４日（水）の場合、
+「2026年３月12日",high_confidence_extracted,,,,,,2288,2026年３月期第３四半期決算短信〔日本基準〕（連結）,2026-02-24
+c:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\140120260223566990.pdf,pdf,140120260223566990.pdf,8233,2026-02-24,（開示事項の経過）特別損失の計上及び業績予想の修正に関するお知らせ,,,True,2544,,True,,0.2,0.0,0.2,自己株式の消却|CANCEL_SUPPRESSED:社債,,,,,,,,,,,,,,,0,,,,,,classifier_only,,,,,,8233,（開示事項の経過）特別損失の計上及び業績予想の修正に関するお知らせ,2026-02-24
+c:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\140120260306577313.pdf,pdf,140120260306577313.pdf,9824,2026-03-06,2026年10月期 第１四半期決算短信〔日本基準〕（連結）,,,True,8701,,True,buyback_decision,0.6,0.6,0.6,自己株式の取得,,buyback_decision,,,,,,,,,,,2025-11-01,,1,shares_limit|amount_limit_million_yen|start_date|end_date,,,,,classifier_only,,,,,,9824,2026年10月期 第１四半期決算短信〔日本基準〕（連結）,2026-03-06

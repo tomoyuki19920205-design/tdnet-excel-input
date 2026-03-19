@@ -1,0 +1,461 @@
+START 2026/03/07 10:26:20.18 
+[Step 1/8] TDnet ingest... 
+============================================================
+  TDNET Ingest - ワンショット実行
+============================================================
+
+[DB]   C:\Users\takuy\OneDrive\tdnet-excel-input\decision_db.db
+
+[2026-03-07 10:26:20] [INFO] [API] yanoshin.jp APIから取得中: https://webapi.yanoshin.jp/webapi/tdnet/list/today.json
+[2026-03-07 10:26:21] [INFO] [API] detected_schema=items, raw_items_count=264
+[2026-03-07 10:26:21] [INFO] [API] first_item_preview: id=cb6e7b584ed2..., pubdate=2026-03-06 18:40:00, title=役員体制に関するお知らせ, code=7136
+[2026-03-07 10:26:21] [INFO] [API] fetched_count=264
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=426A, name=ＳＰ５００ＥＷＨ無, title=ニッセイＥＴＦ　Ｓ＆Ｐ５００イコール・ウェイト（為替ヘッジなし）（2026年1月期）決算短信
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=13494, name=Ｅ－ＳＳＧＡ－ＳＩＮ, title=アジア国債・公債ＥＴＦ（正式名称：ＡＢＦ汎アジア債券インデックス・ファンド）に関する日々の開示事項
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=15574, name=Ｅ－ＳＳＧＡＴＣ, title=State Street SPDR S&amp;P500 ETFに関する日々の開示事項
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=20704, name=Ｎ－三菱ＵＦＪ証ＨＤ, title=上場ETN（発行者：三菱UFJ証券ホールディングス株式会社）に関する日々の開示事項
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=1557, name=ＳＰＤＲ５００, title=State Street SPDR S&amp;P500 ETF分配金の支払いに係る基準日のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=13294, name=Ｅ－ブラックロック, title=上場ETF（管理会社：ブラックロック・ジャパン）に関する日々の開示事項
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=16714, name=Ｅ－シンプレクス, title=上場ＥＴＦ(管理会社：シンプレクス・アセット・マネジメント)に関する日々の開示事項
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=2633, name=Ｓ＆Ｐ５００ヘッジ無, title=ETFの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=2634, name=Ｓ＆Ｐ５００ヘッジ有, title=ETFの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=16724, name=Ｅ－ＷｉｓｄｏｍＴｒ, title=上場ETF（管理会社：WisdomTree、外国投資法人：MSL）に関する日々の開示事項　
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=16724, name=Ｅ－ＷｉｓｄｏｍＴｒ, title=上場ETF（管理会社：WisdomTree、外国投資法人：CSL）に関する日々の開示事項　
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=1555, name=上場Ａリート, title=ＥＴＦの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=1566, name=上場ＥＭ債, title=ＥＴＦの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=1677, name=上場外債, title=ＥＴＦの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=2237, name=ｉＦＳＰ５００ダブル, title=iFreeETFの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=2238, name=ｉＦＳＰ５００ベア, title=iFreeETFの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=2247, name=ｉＦＳＰ５００Ｈ無, title=iFreeETFの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=2248, name=ｉＦＳＰ５００Ｈ有, title=iFreeETFの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=2249, name=ｉＦＳＰ５００Ｗベア, title=iFreeETFの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=2528, name=ｉＦＪリートコア, title=iFreeETFの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=284, name=ｉＦナス１００Ｈ無, title=iFreeETFの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=2841, name=ｉＦナス１００Ｈ有, title=iFreeETFの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=2842, name=ｉＦナス１００ベア, title=iFreeETFの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=2865, name=ＧＸＮＤＸカバコ, title=ETFの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=2866, name=ＧＸ優先証券, title=ETFの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=2868, name=ＧＸＳＰＸカバコ, title=ETFの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=2869, name=ｉＦナス１００ダブル, title=iFreeETFの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=287, name=ｉＦナス１００Ｗベア, title=iFreeETFの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=424A, name=ＧＸゴールドＨ, title=ETFの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=425A, name=ＧＸゴールド, title=ETFの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=467A, name=ＧＸＵＳ社債Ｈ, title=ETFの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] skip_reason=instrument_excluded, code=468A, name=ＧＸＵＳ社債, title=ETFの収益分配金見込額のお知らせ
+[2026-03-07 10:26:21] [INFO] [API] instrument_skipped_count=32
+[2026-03-07 10:26:21] [INFO] [API] fetched_count=264, filtered_count=26, forecast_revision_count=8, financial_statement_count=18
+[2026-03-07 10:26:21] [INFO] [API] new_count=23
+[2026-03-07 10:26:21] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/140120260306577795.pdf
+[2026-03-07 10:26:21] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\140120260306577795.pdf (777.9KB)
+[2026-03-07 10:26:21] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/081220260306577795.zip
+[2026-03-07 10:26:21] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\081220260306577795.zip (102.5KB)
+[2026-03-07 10:26:21] [INFO] [抽出] XBRL抽出を試行: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\081220260306577795.zip
+[2026-03-07 10:26:21] [INFO] [XBRL] 未知の財務タグ検出: ['tse-ed-t:CashFlowsFromOperatingActivities', 'tse-ed-t:ChangeInComprehensiveIncome', 'tse-ed-t:ChangeInNetIncome', 'tse-ed-t:ChangeInNetSales', 'tse-ed-t:ChangeInOperatingIncome', 'tse-ed-t:ChangeInOrdinaryIncome', 'tse-ed-t:ChangeInProfitAttributableToOwnersOfParent', 'tse-ed-t:ComprehensiveIncome', 'tse-ed-t:DilutedNetIncomePerShare', 'tse-ed-t:InvestmentProfitLossOnEquityMethod', 'tse-ed-t:NetIncome', 'tse-ed-t:NetIncomePerShare', 'tse-ed-t:NetIncomeToShareholdersEquityRatio', 'tse-ed-t:OperatingIncomeToNetSalesRatio', 'tse-ed-t:OrdinaryIncomeToTotalAssetsRatio', 'tse-ed-t:ProfitAttributableToOwnersOfParent']
+[2026-03-07 10:26:21] [INFO] [XBRL] ZIP内ファイルから抽出成功: XBRLData/Summary/tse-acedjpsm-43310-20260306343310-ixbrl.htm
+[2026-03-07 10:26:21] [INFO] [抽出] XBRL抽出成功: sales=35709000000, op=1622000000
+[2026-03-07 10:26:21] [INFO] [INGEST] doc_id=d3137e4f111f0f53 zip_hash=ce658535c99571d92b7a5519918368423b3130150613fe91bc8101aca3c352fa status=success 4331 2025-12-31 4Q sales=35709000000 gp=None op=1622000000
+[2026-03-07 10:26:22] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/140120260306577706.pdf
+[2026-03-07 10:26:23] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\140120260306577706.pdf (91.1KB)
+[2026-03-07 10:26:23] [INFO] [抽出] SKIP_PDF_NOT_TANSHIN: title=2026 年1月期 第４四半期決算発表日の変更に関するお知らせ
+[2026-03-07 10:26:23] [INFO] [INGEST] doc_id=e8a239dae9baa689 status=skipped_not_tanshin title=2026 年1月期 第４四半期決算発表日の変更に関するお知らせ
+[2026-03-07 10:26:23] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/140120260305576615.pdf
+[2026-03-07 10:26:23] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\140120260305576615.pdf (359.3KB)
+[2026-03-07 10:26:23] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/081220260305576615.zip
+[2026-03-07 10:26:23] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\081220260305576615.zip (89.7KB)
+[2026-03-07 10:26:23] [INFO] [抽出] XBRL抽出を試行: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\081220260305576615.zip
+[2026-03-07 10:26:23] [INFO] [XBRL] 未知の財務タグ検出: ['tse-ed-t:CashFlowsFromOperatingActivities', 'tse-ed-t:ChangeInComprehensiveIncome', 'tse-ed-t:ChangeInNetSales', 'tse-ed-t:ChangeInOperatingIncome', 'tse-ed-t:ChangeInOrdinaryIncome', 'tse-ed-t:ChangeInProfitAttributableToOwnersOfParent', 'tse-ed-t:ComprehensiveIncome', 'tse-ed-t:DilutedNetIncomePerShare', 'tse-ed-t:InvestmentProfitLossOnEquityMethod', 'tse-ed-t:NetIncomePerShare', 'tse-ed-t:NetIncomeToShareholdersEquityRatio', 'tse-ed-t:OperatingIncomeToNetSalesRatio', 'tse-ed-t:OrdinaryIncomeToTotalAssetsRatio', 'tse-ed-t:ProfitAttributableToOwnersOfParent']
+[2026-03-07 10:26:23] [INFO] [XBRL] ZIP内ファイルから抽出成功: XBRLData/Summary/tse-acedjpsm-319A0-202603063319A0-ixbrl.htm
+[2026-03-07 10:26:23] [INFO] [抽出] XBRL抽出成功: sales=14961000000, op=1432000000
+[2026-03-07 10:26:23] [INFO] [INGEST] doc_id=9014af0bc4a71d52 zip_hash=3c18af97f5bbcfd4f0ae46d2317c3bcffcd81d063565b52b511a6a52e8c00eaf status=success 319A 2025-12-31 4Q sales=14961000000 gp=None op=1432000000
+[2026-03-07 10:26:24] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/140120260305577046.pdf
+[2026-03-07 10:26:24] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\140120260305577046.pdf (211.8KB)
+[2026-03-07 10:26:24] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/081220260305577046.zip
+[2026-03-07 10:26:25] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\081220260305577046.zip (45.0KB)
+[2026-03-07 10:26:25] [INFO] [抽出] XBRL抽出を試行: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\081220260305577046.zip
+[2026-03-07 10:26:25] [INFO] [XBRL] 未知の財務タグ検出: ['tse-ed-t:ChangeInComprehensiveIncome', 'tse-ed-t:ChangeInNetSales', 'tse-ed-t:ChangeInOperatingIncome', 'tse-ed-t:ChangeInOrdinaryIncome', 'tse-ed-t:ChangeInProfitAttributableToOwnersOfParent', 'tse-ed-t:ComprehensiveIncome', 'tse-ed-t:DilutedNetIncomePerShare', 'tse-ed-t:NetIncomePerShare', 'tse-ed-t:ProfitAttributableToOwnersOfParent']
+[2026-03-07 10:26:25] [INFO] [XBRL] ZIP内ファイルから抽出成功: XBRLData/Summary/tse-scedjpsy-38160-20260306338160-ixbrl.htm
+[2026-03-07 10:26:25] [INFO] [抽出] XBRL抽出成功: sales=1551000000, op=66000000
+[2026-03-07 10:26:25] [INFO] [INGEST] doc_id=5509da848f44685b zip_hash=04cb74376306a3d879bd42d7cf8e2ec47eb3083bd84404b6a17eea93ca63299b status=success 3816 2026-07-31 4Q sales=1551000000 gp=None op=66000000
+[2026-03-07 10:26:25] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/140120260306577334.pdf
+[2026-03-07 10:26:26] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\140120260306577334.pdf (332.5KB)
+[2026-03-07 10:26:26] [INFO] [抽出] PDF抽出を試行: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\140120260306577334.pdf
+[2026-03-07 10:26:26] [INFO] [抽出] PDF抽出成功: sales=688822, op=2024
+[2026-03-07 10:26:26] [WARNING] [INGEST] doc_id=53e0411bef2178d9 zip_hash=99dab9a27cc611ca2c848e4d598d94ebd39f05ecc465ccf6901db7dced2943dc status=parse_failed reason=年度/Q不明: year=R7/12, q=
+[2026-03-07 10:26:26] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/140120260306577667.pdf
+[2026-03-07 10:26:26] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\140120260306577667.pdf (280.1KB)
+[2026-03-07 10:26:26] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/081220260306577667.zip
+[2026-03-07 10:26:26] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\081220260306577667.zip (59.9KB)
+[2026-03-07 10:26:27] [INFO] [抽出] XBRL抽出を試行: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\081220260306577667.zip
+[2026-03-07 10:26:27] [INFO] [XBRL] 未知の財務タグ検出: ['tse-ed-t:ChangeInComprehensiveIncome', 'tse-ed-t:ChangeInNetSales', 'tse-ed-t:ChangeInOperatingIncome', 'tse-ed-t:ChangeInOrdinaryIncome', 'tse-ed-t:ChangeInProfitAttributableToOwnersOfParent', 'tse-ed-t:ComprehensiveIncome', 'tse-ed-t:DilutedNetIncomePerShare', 'tse-ed-t:NetIncomePerShare', 'tse-ed-t:ProfitAttributableToOwnersOfParent']
+[2026-03-07 10:26:27] [INFO] [XBRL] ZIP内ファイルから抽出成功: XBRLData/Summary/tse-qcedjpsm-89170-20260306389170-ixbrl.htm
+[2026-03-07 10:26:27] [INFO] [抽出] XBRL抽出成功: sales=7610000000, op=490000000
+[2026-03-07 10:26:27] [INFO] [INGEST] doc_id=8c9dd672fdc17651 zip_hash=6f2b16a4f1ffa292e3cd7f91cf950ae202bea5e3cd87e502f6e5a31e96fcc370 status=success 8917 2026-10-31 4Q sales=7610000000 gp=None op=490000000
+[2026-03-07 10:26:28] [INFO] [SEGMENT] 8917 quarantine: segment_table_found_but_no_sales_profit_columns
+[2026-03-07 10:26:28] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/140120260305576840.pdf
+[2026-03-07 10:26:28] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\140120260305576840.pdf (498.2KB)
+[2026-03-07 10:26:28] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/081220260305576840.zip
+[2026-03-07 10:26:28] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\081220260305576840.zip (51.5KB)
+[2026-03-07 10:26:29] [INFO] [抽出] XBRL抽出を試行: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\081220260305576840.zip
+[2026-03-07 10:26:29] [INFO] [XBRL] 未知の財務タグ検出: ['tse-ed-t:ChangeInComprehensiveIncome', 'tse-ed-t:ChangeInNetSales', 'tse-ed-t:ChangeInOperatingIncome', 'tse-ed-t:ChangeInOrdinaryIncome', 'tse-ed-t:ChangeInProfitAttributableToOwnersOfParent', 'tse-ed-t:ComprehensiveIncome', 'tse-ed-t:DilutedNetIncomePerShare', 'tse-ed-t:NetIncomePerShare', 'tse-ed-t:ProfitAttributableToOwnersOfParent']
+[2026-03-07 10:26:29] [INFO] [XBRL] ZIP内ファイルから抽出成功: XBRLData/Summary/tse-qcedjpsm-37330-20260306337330-ixbrl.htm
+[2026-03-07 10:26:29] [INFO] [抽出] XBRL抽出成功: sales=9404000000, op=1519000000
+[2026-03-07 10:26:29] [INFO] [INGEST] doc_id=32fdea10e56e3506 zip_hash=271e537e6dab4fee2f982bc130fe61a03dfe8d01e97165596e6e6f3d1f853879 status=success 3733 2026-10-31 4Q sales=9404000000 gp=None op=1519000000
+[2026-03-07 10:26:30] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/140120260305576562.pdf
+[2026-03-07 10:26:30] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\140120260305576562.pdf (300.6KB)
+[2026-03-07 10:26:30] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/081220260305576562.zip
+[2026-03-07 10:26:30] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\081220260305576562.zip (55.2KB)
+[2026-03-07 10:26:30] [INFO] [抽出] XBRL抽出を試行: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\081220260305576562.zip
+[2026-03-07 10:26:30] [INFO] [XBRL] 未知の財務タグ検出: ['tse-ed-t:ChangeInComprehensiveIncome', 'tse-ed-t:ChangeInNetSales', 'tse-ed-t:ChangeInOperatingIncome', 'tse-ed-t:ChangeInOrdinaryIncome', 'tse-ed-t:ChangeInProfitAttributableToOwnersOfParent', 'tse-ed-t:ComprehensiveIncome', 'tse-ed-t:DilutedNetIncomePerShare', 'tse-ed-t:NetIncomePerShare', 'tse-ed-t:ProfitAttributableToOwnersOfParent']
+[2026-03-07 10:26:30] [INFO] [XBRL] ZIP内ファイルから抽出成功: XBRLData/Summary/tse-scedjpsy-38540-20260306338540-ixbrl.htm
+[2026-03-07 10:26:30] [INFO] [抽出] XBRL抽出成功: sales=10360000000, op=2831000000
+[2026-03-07 10:26:30] [INFO] [INGEST] doc_id=256b5590dd07ec50 zip_hash=ba643df24ee86ac9520841fa818f7c5e77f442e9315397090408e0cb225252cd status=success 3854 2026-07-31 4Q sales=10360000000 gp=None op=2831000000
+[2026-03-07 10:26:31] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/140120260305576938.pdf
+[2026-03-07 10:26:31] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\140120260305576938.pdf (470.4KB)
+[2026-03-07 10:26:31] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/081220260305576938.zip
+[2026-03-07 10:26:32] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\081220260305576938.zip (64.2KB)
+[2026-03-07 10:26:32] [INFO] [抽出] XBRL抽出を試行: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\081220260305576938.zip
+[2026-03-07 10:26:32] [INFO] [XBRL] 未知の財務タグ検出: ['tse-ed-t:ChangeInComprehensiveIncome', 'tse-ed-t:ChangeInNetSales', 'tse-ed-t:ChangeInOperatingIncome', 'tse-ed-t:ChangeInOrdinaryIncome', 'tse-ed-t:ChangeInProfitAttributableToOwnersOfParent', 'tse-ed-t:ComprehensiveIncome', 'tse-ed-t:DilutedNetIncomePerShare', 'tse-ed-t:NetIncomePerShare', 'tse-ed-t:ProfitAttributableToOwnersOfParent']
+[2026-03-07 10:26:32] [INFO] [XBRL] ZIP内ファイルから抽出成功: XBRLData/Summary/tse-qcedjpsm-18730-20260305576938-ixbrl.htm
+[2026-03-07 10:26:32] [INFO] [抽出] XBRL抽出成功: sales=21258000000, op=622000000
+[2026-03-07 10:26:32] [INFO] [INGEST] doc_id=7c45903fd67bf278 zip_hash=acc10c8d2ebd7c1ec853a8997f840c4ec8443ff83bd223fc7894287983437e21 status=success 1873 2026-04-30 4Q sales=21258000000 gp=None op=622000000
+[2026-03-07 10:26:32] [INFO] [ORDER] 1873 quarantine: orders_total: キーワード'受注高'はあるが合計行が見つからない; backlog_total: キーワード'受注残高'はあるが合計行が見つからない
+[2026-03-07 10:26:33] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/140120260204547040.pdf
+[2026-03-07 10:26:33] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\140120260204547040.pdf (681.5KB)
+[2026-03-07 10:26:33] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/081220260204547040.zip
+[2026-03-07 10:26:34] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\081220260204547040.zip (96.8KB)
+[2026-03-07 10:26:34] [INFO] [抽出] XBRL抽出を試行: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\081220260204547040.zip
+[2026-03-07 10:26:34] [INFO] [XBRL] 未知の財務タグ検出: ['tse-ed-t:ChangeInComprehensiveIncome', 'tse-ed-t:ChangeInNetSales', 'tse-ed-t:ChangeInOperatingIncome', 'tse-ed-t:ChangeInOrdinaryIncome', 'tse-ed-t:ChangeInProfitAttributableToOwnersOfParent', 'tse-ed-t:ComprehensiveIncome', 'tse-ed-t:DilutedNetIncomePerShare', 'tse-ed-t:NetIncomePerShare', 'tse-ed-t:ProfitAttributableToOwnersOfParent']
+[2026-03-07 10:26:34] [INFO] [XBRL] ZIP内ファイルから抽出成功: XBRLData/Summary/tse-scedjpsy-23530-20260306323530-ixbrl.htm
+[2026-03-07 10:26:34] [INFO] [抽出] XBRL抽出成功: sales=19909000000, op=4431000000
+[2026-03-07 10:26:34] [INFO] [INGEST] doc_id=3fb293c6144b058c zip_hash=47836b3e033a6c6e0624355250c57b461bba07379712cf4323c7b9a4cdda978c status=success 2353 2026-07-31 4Q sales=19909000000 gp=None op=4431000000
+[2026-03-07 10:26:35] [INFO] [SEGMENT] 2353 4Q 直営: sales=487 profit=None (inserted)
+[2026-03-07 10:26:35] [INFO] [SEGMENT] 2353 4Q 直営: sales=536 profit=None (updated)
+[2026-03-07 10:26:35] [INFO] [SEGMENT] 2353 4Q 直営: sales=458 profit=None (updated)
+[2026-03-07 10:26:35] [INFO] [SEGMENT] 2353 4Q 直営: sales=498 profit=None (updated)
+[2026-03-07 10:26:35] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/140120260305576780.pdf
+[2026-03-07 10:26:36] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\140120260305576780.pdf (623.2KB)
+[2026-03-07 10:26:36] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/081220260305576780.zip
+[2026-03-07 10:26:36] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\081220260305576780.zip (61.3KB)
+[2026-03-07 10:26:36] [INFO] [抽出] XBRL抽出を試行: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\081220260305576780.zip
+[2026-03-07 10:26:36] [INFO] [XBRL] 未知の財務タグ検出: ['tse-ed-t:ChangeInComprehensiveIncome', 'tse-ed-t:ChangeInNetSales', 'tse-ed-t:ChangeInOperatingIncome', 'tse-ed-t:ChangeInOrdinaryIncome', 'tse-ed-t:ChangeInProfitAttributableToOwnersOfParent', 'tse-ed-t:ComprehensiveIncome', 'tse-ed-t:DilutedNetIncomePerShare', 'tse-ed-t:NetIncomePerShare', 'tse-ed-t:ProfitAttributableToOwnersOfParent']
+[2026-03-07 10:26:36] [INFO] [XBRL] ZIP内ファイルから抽出成功: XBRLData/Summary/tse-qcedjpsm-24380-20260306324380-ixbrl.htm
+[2026-03-07 10:26:36] [INFO] [抽出] XBRL抽出成功: sales=5272000000, op=284000000
+[2026-03-07 10:26:36] [INFO] [INGEST] doc_id=86f755cce3b0be59 zip_hash=85bd70c592700da08ec1f8719c475c9eb136bfffedec94d34b1fc6a82ec73c26 status=success 2438 2026-04-30 4Q sales=5272000000 gp=None op=284000000
+[2026-03-07 10:26:38] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/140120260306577591.pdf
+[2026-03-07 10:26:38] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\140120260306577591.pdf (688.4KB)
+[2026-03-07 10:26:38] [INFO] [抽出] SKIP_PDF_NOT_TANSHIN: title=2026年６月期　第２四半期決算説明 質疑応答集
+[2026-03-07 10:26:38] [INFO] [INGEST] doc_id=151f86de1ee5b42f status=skipped_not_tanshin title=2026年６月期　第２四半期決算説明 質疑応答集
+[2026-03-07 10:26:38] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/140120260305576166.pdf
+[2026-03-07 10:26:39] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\140120260305576166.pdf (323.7KB)
+[2026-03-07 10:26:39] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/081220260305576166.zip
+[2026-03-07 10:26:39] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\081220260305576166.zip (76.6KB)
+[2026-03-07 10:26:39] [INFO] [抽出] XBRL抽出を試行: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\081220260305576166.zip
+[2026-03-07 10:26:39] [INFO] [XBRL] 未知の財務タグ検出: ['tse-ed-t:ChangeInComprehensiveIncome', 'tse-ed-t:ChangeInNetSales', 'tse-ed-t:ChangeInOperatingIncome', 'tse-ed-t:ChangeInOrdinaryIncome', 'tse-ed-t:ChangeInProfitAttributableToOwnersOfParent', 'tse-ed-t:ComprehensiveIncome', 'tse-ed-t:DilutedNetIncomePerShare', 'tse-ed-t:NetIncomePerShare', 'tse-ed-t:ProfitAttributableToOwnersOfParent']
+[2026-03-07 10:26:39] [INFO] [XBRL] ZIP内ファイルから抽出成功: XBRLData/Summary/tse-scedjpsy-60400-20260306360400-ixbrl.htm
+[2026-03-07 10:26:39] [INFO] [抽出] XBRL抽出成功: sales=5450000000, op=1025000000
+[2026-03-07 10:26:39] [INFO] [INGEST] doc_id=f493d1ef5eacdf6f zip_hash=403d6a9e366b701dc65dd7dd6c766fe4ebe829fb3d5f5bc378caedcaef5a68eb status=success 604 2026-07-31 4Q sales=5450000000 gp=None op=1025000000
+[2026-03-07 10:26:40] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/140120260304575984.pdf
+[2026-03-07 10:26:41] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\140120260304575984.pdf (407.7KB)
+[2026-03-07 10:26:41] [INFO] [DL] ダウンロード中: https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/081220260304575984.zip
+[2026-03-07 10:26:41] [INFO] [DL] 保存完了: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\081220260304575984.zip (58.4KB)
+[2026-03-07 10:26:41] [INFO] [抽出] XBRL抽出を試行: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\081220260304575984.zip
+[2026-03-07 10:26:41] [INFO] [XBRL] 未知の財務タグ検出: ['tse-ed-t:ChangeInComprehensiveIncome', 'tse-ed-t:ChangeInNetSales', 'tse-ed-t:ChangeInOperatingIncome', 'tse-ed-t:ChangeInOrdinaryIncome', 'tse-ed-t:ChangeInProfitAttributableToOwnersOfParent', 'tse-ed-t:ComprehensiveIncome', 'tse-ed-t:DilutedNetIncomePerShare', 'tse-ed-t:NetIncomePerShare', 'tse-ed-t:ProfitAttributableToOwnersOfParent']
+[2026-03-07 10:26:41] [INFO] [XBRL] ZIP内ファイルから抽出成功: XBRLData/Summary/tse-scedjpsy-62670-20260306362670-ixbrl.htm
+[2026-03-07 10:26:41] [INFO] [抽出] XBRL抽出成功: sales=4593000000, op=361000000
+[2026-03-07 10:26:41] [INFO] [INGEST] doc_id=a9ce87ca16bf50de zip_hash=f3000a0e0c5f8a0c32dabffff131a9770ebbba43049868af6b51408025475327 status=success 6267 2026-07-31 4Q sales=4593000000 gp=None op=361000000
+[2026-03-07 10:26:42] [INFO] [DL] 既にダウンロード済み: C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\140120260305576919.pdf
+[2026-03-07 10:26:42] [INFO] [抽出] SKIP_PDF_NOT_TANSHIN: title=2026年4月期 第3四半期決算補足説明資料
+[2026-03-07 10:26:42] [INFO] [INGEST] doc_id=a802ff0966d04501 status=skipped_not_tanshin title=2026年4月期 第3四半期決算補足説明資料
+[2026-03-07 10:26:42] [INFO] [INGEST] run=ingest-46cabacf processed=15 success=11 skipped=3 error=1 (tanshin=15) SKIP_NOT_TANSHIN_TITLE=3
+============================================================
+  結果サマリ
+============================================================
+  run_id          : ingest-46cabacf
+  取得開示数      : 23
+  対象(決算短信)  : 15
+  処理件数        : 15
+  INSERT          : 11
+  UPDATE          : 0
+  変更なし        : 0
+  成功            : 11
+  スキップ        : 3
+  エラー          : 1
+  [skip内訳]
+    SKIP_NOT_TANSHIN_TITLE: 3
+  失敗コード      : 481A
+
+[個別結果]
+  [+] inserted   | 4331 2025-12-31 4Q sales=35709000000 gp=None op=1622000000
+  [-] skipped    | SKIP_PDF_NOT_TANSHIN: title=2026 年1月期 第４四半期決算発表日の変更に関するお知らせ
+  [+] inserted   | 319A 2025-12-31 4Q sales=14961000000 gp=None op=1432000000
+  [+] inserted   | 3816 2026-07-31 4Q sales=1551000000 gp=None op=66000000
+  [!] error      | 年度/Q不明: year=R7/12, q=
+  [+] inserted   | 8917 2026-10-31 4Q sales=7610000000 gp=None op=490000000
+  [+] inserted   | 3733 2026-10-31 4Q sales=9404000000 gp=None op=1519000000
+  [+] inserted   | 3854 2026-07-31 4Q sales=10360000000 gp=None op=2831000000
+  [+] inserted   | 1873 2026-04-30 4Q sales=21258000000 gp=None op=622000000
+  [+] inserted   | 2353 2026-07-31 4Q sales=19909000000 gp=None op=4431000000
+  [+] inserted   | 2438 2026-04-30 4Q sales=5272000000 gp=None op=284000000
+  [-] skipped    | SKIP_PDF_NOT_TANSHIN: title=2026年６月期　第２四半期決算説明 質疑応答集
+  [+] inserted   | 604 2026-07-31 4Q sales=5450000000 gp=None op=1025000000
+  [+] inserted   | 6267 2026-07-31 4Q sales=4593000000 gp=None op=361000000
+  [-] skipped    | SKIP_PDF_NOT_TANSHIN: title=2026年4月期 第3四半期決算補足説明資料
+
+[TICKERS] 11 items -> C:\Users\takuy\OneDrive\tdnet-excel-input\logs\last_ingested_items.json
+[Step 2/8] SQLite to Supabase push... 
+[10:26:43] [PUSH] SQLite総行数: 91647, 今回対象: 91647 件
+[10:26:43] [Phase 1/4] companies 一括 upsert...
+[10:26:45]   → 2773 社 完了 (2.0秒)
+[10:26:45] [Phase 2/4] periods 一括 upsert...
+[10:27:05]   → 91647 期間 完了 (22.0秒)
+[10:27:05] [Phase 3/4] disclosures 一括 upsert...
+[10:27:05]   対象 disclosure: 91647 件
+Traceback (most recent call last):
+  File "C:\Users\takuy\OneDrive\tdnet-excel-input\tools\sqlite_to_supabase.py", line 1090, in main
+    stats = push_sqlite_to_supabase(
+            ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\takuy\OneDrive\tdnet-excel-input\tools\sqlite_to_supabase.py", line 747, in push_sqlite_to_supabase
+    existing_disc = api.select_all(
+                    ^^^^^^^^^^^^^^^
+  File "C:\Users\takuy\OneDrive\tdnet-excel-input\tools\sqlite_to_supabase.py", line 421, in select_all
+    r = self._request(
+        ^^^^^^^^^^^^^^
+  File "C:\Users\takuy\OneDrive\tdnet-excel-input\tools\sqlite_to_supabase.py", line 385, in _request
+    r.raise_for_status()
+  File "C:\Users\takuy\OneDrive\tdnet-excel-input\.venv\Lib\site-packages\requests\models.py", line 1026, in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+requests.exceptions.HTTPError: 502 Server Error: Bad Gateway for url: https://fvkvfekzoebcolssnteo.supabase.co/rest/v1/disclosures?select=disclosure_id%2Csha256
+
+=======================================================
+  SQLite → Supabase push (バッチ版)
+=======================================================
+  DB         : C:\Users\takuy\OneDrive\tdnet-excel-input\decision_db.db
+  batch_size : 500
+
+
+=======================================================
+  ❌ push 失敗
+=======================================================
+=======================================================
+
+[Step 3/8] jquants sync... 
+2026-03-07 10:27:13,047 INFO [sync_financials] === sync_financials START ===
+2026-03-07 10:27:13,047 INFO [sync_financials]   mode:       APPLY (�{�Ԕ��f)
+2026-03-07 10:27:13,047 INFO [sync_financials]   scope:      RECENT 30��
+2026-03-07 10:27:13,047 INFO [sync_financials]   sqlite:     C:\Users\takuy\OneDrive\tdnet-excel-input\data\jquants.db
+2026-03-07 10:27:13,047 INFO [sync_financials]   table:      financials
+2026-03-07 10:27:13,047 INFO [sync_financials]   limit:      ������
+2026-03-07 10:27:13,047 INFO [sync_financials]   batch-size: 500
+2026-03-07 10:27:13,048 INFO [sync_financials]   log:        C:\Users\takuy\OneDrive\tdnet-excel-input\logs\sync_financials_apply_recent30d_20260307_102713.log
+2026-03-07 10:27:13,131 INFO [sync_financials] [SQLite] ���f�[�^: 87,157 rows / 3,820 codes
+2026-03-07 10:27:13,131 INFO [sync_financials] [SQLite] �������[�h: fetched_at >= 2026-02-05 10:27:13 (����30��)
+2026-03-07 10:27:13,597 INFO [sync_financials] [SQLite] �d���r����: 72,490 rows
+2026-03-07 10:27:13,603 INFO [sync_financials] [SYNC] quarter ���z: {"1Q": 17819, "2Q": 17771, "3Q": 17832, "4Q": 13, "FY": 19055}
+2026-03-07 10:27:13,604 INFO [sync_financials] [SYNC] �J�n: 72,490 rows �� financials (145 batches �~ 500)
+2026-03-07 10:27:13,875 INFO [sync_financials]   batch 1/145: 500 rows upserted (�݌v 500 / 72,490, 0.3�b)
+2026-03-07 10:27:14,036 INFO [sync_financials]   batch 2/145: 500 rows upserted (�݌v 1,000 / 72,490, 0.4�b)
+2026-03-07 10:27:14,204 INFO [sync_financials]   batch 3/145: 500 rows upserted (�݌v 1,500 / 72,490, 0.6�b)
+2026-03-07 10:27:14,363 INFO [sync_financials]   batch 4/145: 500 rows upserted (�݌v 2,000 / 72,490, 0.8�b)
+2026-03-07 10:27:14,526 INFO [sync_financials]   batch 5/145: 500 rows upserted (�݌v 2,500 / 72,490, 0.9�b)
+2026-03-07 10:27:14,668 INFO [sync_financials]   batch 6/145: 500 rows upserted (�݌v 3,000 / 72,490, 1.1�b)
+2026-03-07 10:27:14,844 INFO [sync_financials]   batch 7/145: 500 rows upserted (�݌v 3,500 / 72,490, 1.2�b)
+2026-03-07 10:27:14,998 INFO [sync_financials]   batch 8/145: 500 rows upserted (�݌v 4,000 / 72,490, 1.4�b)
+2026-03-07 10:27:15,147 INFO [sync_financials]   batch 9/145: 500 rows upserted (�݌v 4,500 / 72,490, 1.5�b)
+2026-03-07 10:27:15,284 INFO [sync_financials]   batch 10/145: 500 rows upserted (�݌v 5,000 / 72,490, 1.7�b)
+2026-03-07 10:27:15,424 INFO [sync_financials]   batch 11/145: 500 rows upserted (�݌v 5,500 / 72,490, 1.8�b)
+2026-03-07 10:27:15,563 INFO [sync_financials]   batch 12/145: 500 rows upserted (�݌v 6,000 / 72,490, 2.0�b)
+2026-03-07 10:27:15,710 INFO [sync_financials]   batch 13/145: 500 rows upserted (�݌v 6,500 / 72,490, 2.1�b)
+2026-03-07 10:27:15,871 INFO [sync_financials]   batch 14/145: 500 rows upserted (�݌v 7,000 / 72,490, 2.3�b)
+2026-03-07 10:27:16,019 INFO [sync_financials]   batch 15/145: 500 rows upserted (�݌v 7,500 / 72,490, 2.4�b)
+2026-03-07 10:27:16,176 INFO [sync_financials]   batch 16/145: 500 rows upserted (�݌v 8,000 / 72,490, 2.6�b)
+2026-03-07 10:27:16,335 INFO [sync_financials]   batch 17/145: 500 rows upserted (�݌v 8,500 / 72,490, 2.7�b)
+2026-03-07 10:27:16,470 INFO [sync_financials]   batch 18/145: 500 rows upserted (�݌v 9,000 / 72,490, 2.9�b)
+2026-03-07 10:27:16,614 INFO [sync_financials]   batch 19/145: 500 rows upserted (�݌v 9,500 / 72,490, 3.0�b)
+2026-03-07 10:27:16,740 INFO [sync_financials]   batch 20/145: 500 rows upserted (�݌v 10,000 / 72,490, 3.1�b)
+2026-03-07 10:27:16,870 INFO [sync_financials]   batch 21/145: 500 rows upserted (�݌v 10,500 / 72,490, 3.3�b)
+2026-03-07 10:27:16,998 INFO [sync_financials]   batch 22/145: 500 rows upserted (�݌v 11,000 / 72,490, 3.4�b)
+2026-03-07 10:27:17,152 INFO [sync_financials]   batch 23/145: 500 rows upserted (�݌v 11,500 / 72,490, 3.5�b)
+2026-03-07 10:27:17,288 INFO [sync_financials]   batch 24/145: 500 rows upserted (�݌v 12,000 / 72,490, 3.7�b)
+2026-03-07 10:27:17,421 INFO [sync_financials]   batch 25/145: 500 rows upserted (�݌v 12,500 / 72,490, 3.8�b)
+2026-03-07 10:27:17,544 INFO [sync_financials]   batch 26/145: 500 rows upserted (�݌v 13,000 / 72,490, 3.9�b)
+2026-03-07 10:27:17,672 INFO [sync_financials]   batch 27/145: 500 rows upserted (�݌v 13,500 / 72,490, 4.1�b)
+2026-03-07 10:27:17,809 INFO [sync_financials]   batch 28/145: 500 rows upserted (�݌v 14,000 / 72,490, 4.2�b)
+2026-03-07 10:27:17,946 INFO [sync_financials]   batch 29/145: 500 rows upserted (�݌v 14,500 / 72,490, 4.3�b)
+2026-03-07 10:27:18,114 INFO [sync_financials]   batch 30/145: 500 rows upserted (�݌v 15,000 / 72,490, 4.5�b)
+2026-03-07 10:27:18,265 INFO [sync_financials]   batch 31/145: 500 rows upserted (�݌v 15,500 / 72,490, 4.7�b)
+2026-03-07 10:27:18,392 INFO [sync_financials]   batch 32/145: 500 rows upserted (�݌v 16,000 / 72,490, 4.8�b)
+2026-03-07 10:27:18,533 INFO [sync_financials]   batch 33/145: 500 rows upserted (�݌v 16,500 / 72,490, 4.9�b)
+2026-03-07 10:27:18,662 INFO [sync_financials]   batch 34/145: 500 rows upserted (�݌v 17,000 / 72,490, 5.1�b)
+2026-03-07 10:27:18,799 INFO [sync_financials]   batch 35/145: 500 rows upserted (�݌v 17,500 / 72,490, 5.2�b)
+2026-03-07 10:27:18,932 INFO [sync_financials]   batch 36/145: 500 rows upserted (�݌v 18,000 / 72,490, 5.3�b)
+2026-03-07 10:27:19,065 INFO [sync_financials]   batch 37/145: 500 rows upserted (�݌v 18,500 / 72,490, 5.5�b)
+2026-03-07 10:27:19,210 INFO [sync_financials]   batch 38/145: 500 rows upserted (�݌v 19,000 / 72,490, 5.6�b)
+2026-03-07 10:27:19,340 INFO [sync_financials]   batch 39/145: 500 rows upserted (�݌v 19,500 / 72,490, 5.7�b)
+2026-03-07 10:27:19,476 INFO [sync_financials]   batch 40/145: 500 rows upserted (�݌v 20,000 / 72,490, 5.9�b)
+2026-03-07 10:27:19,611 INFO [sync_financials]   batch 41/145: 500 rows upserted (�݌v 20,500 / 72,490, 6.0�b)
+2026-03-07 10:27:19,754 INFO [sync_financials]   batch 42/145: 500 rows upserted (�݌v 21,000 / 72,490, 6.2�b)
+2026-03-07 10:27:19,888 INFO [sync_financials]   batch 43/145: 500 rows upserted (�݌v 21,500 / 72,490, 6.3�b)
+2026-03-07 10:27:20,028 INFO [sync_financials]   batch 44/145: 500 rows upserted (�݌v 22,000 / 72,490, 6.4�b)
+2026-03-07 10:27:20,162 INFO [sync_financials]   batch 45/145: 500 rows upserted (�݌v 22,500 / 72,490, 6.6�b)
+2026-03-07 10:27:20,299 INFO [sync_financials]   batch 46/145: 500 rows upserted (�݌v 23,000 / 72,490, 6.7�b)
+2026-03-07 10:27:20,438 INFO [sync_financials]   batch 47/145: 500 rows upserted (�݌v 23,500 / 72,490, 6.8�b)
+2026-03-07 10:27:20,565 INFO [sync_financials]   batch 48/145: 500 rows upserted (�݌v 24,000 / 72,490, 7.0�b)
+2026-03-07 10:27:20,694 INFO [sync_financials]   batch 49/145: 500 rows upserted (�݌v 24,500 / 72,490, 7.1�b)
+2026-03-07 10:27:20,886 INFO [sync_financials]   batch 50/145: 500 rows upserted (�݌v 25,000 / 72,490, 7.3�b)
+2026-03-07 10:27:21,012 INFO [sync_financials]   batch 51/145: 500 rows upserted (�݌v 25,500 / 72,490, 7.4�b)
+2026-03-07 10:27:21,181 INFO [sync_financials]   batch 52/145: 500 rows upserted (�݌v 26,000 / 72,490, 7.6�b)
+2026-03-07 10:27:21,327 INFO [sync_financials]   batch 53/145: 500 rows upserted (�݌v 26,500 / 72,490, 7.7�b)
+2026-03-07 10:27:21,454 INFO [sync_financials]   batch 54/145: 500 rows upserted (�݌v 27,000 / 72,490, 7.9�b)
+2026-03-07 10:27:21,577 INFO [sync_financials]   batch 55/145: 500 rows upserted (�݌v 27,500 / 72,490, 8.0�b)
+2026-03-07 10:27:21,705 INFO [sync_financials]   batch 56/145: 500 rows upserted (�݌v 28,000 / 72,490, 8.1�b)
+2026-03-07 10:27:21,832 INFO [sync_financials]   batch 57/145: 500 rows upserted (�݌v 28,500 / 72,490, 8.2�b)
+2026-03-07 10:27:21,973 INFO [sync_financials]   batch 58/145: 500 rows upserted (�݌v 29,000 / 72,490, 8.4�b)
+2026-03-07 10:27:22,103 INFO [sync_financials]   batch 59/145: 500 rows upserted (�݌v 29,500 / 72,490, 8.5�b)
+2026-03-07 10:27:22,241 INFO [sync_financials]   batch 60/145: 500 rows upserted (�݌v 30,000 / 72,490, 8.6�b)
+2026-03-07 10:27:22,383 INFO [sync_financials]   batch 61/145: 500 rows upserted (�݌v 30,500 / 72,490, 8.8�b)
+2026-03-07 10:27:22,526 INFO [sync_financials]   batch 62/145: 500 rows upserted (�݌v 31,000 / 72,490, 8.9�b)
+2026-03-07 10:27:22,654 INFO [sync_financials]   batch 63/145: 500 rows upserted (�݌v 31,500 / 72,490, 9.1�b)
+2026-03-07 10:27:22,812 INFO [sync_financials]   batch 64/145: 500 rows upserted (�݌v 32,000 / 72,490, 9.2�b)
+2026-03-07 10:27:22,936 INFO [sync_financials]   batch 65/145: 500 rows upserted (�݌v 32,500 / 72,490, 9.3�b)
+2026-03-07 10:27:23,069 INFO [sync_financials]   batch 66/145: 500 rows upserted (�݌v 33,000 / 72,490, 9.5�b)
+2026-03-07 10:27:23,192 INFO [sync_financials]   batch 67/145: 500 rows upserted (�݌v 33,500 / 72,490, 9.6�b)
+2026-03-07 10:27:23,324 INFO [sync_financials]   batch 68/145: 500 rows upserted (�݌v 34,000 / 72,490, 9.7�b)
+2026-03-07 10:27:23,454 INFO [sync_financials]   batch 69/145: 500 rows upserted (�݌v 34,500 / 72,490, 9.9�b)
+2026-03-07 10:27:23,582 INFO [sync_financials]   batch 70/145: 500 rows upserted (�݌v 35,000 / 72,490, 10.0�b)
+2026-03-07 10:27:23,715 INFO [sync_financials]   batch 71/145: 500 rows upserted (�݌v 35,500 / 72,490, 10.1�b)
+2026-03-07 10:27:23,845 INFO [sync_financials]   batch 72/145: 500 rows upserted (�݌v 36,000 / 72,490, 10.2�b)
+2026-03-07 10:27:23,976 INFO [sync_financials]   batch 73/145: 500 rows upserted (�݌v 36,500 / 72,490, 10.4�b)
+2026-03-07 10:27:24,112 INFO [sync_financials]   batch 74/145: 500 rows upserted (�݌v 37,000 / 72,490, 10.5�b)
+2026-03-07 10:27:24,257 INFO [sync_financials]   batch 75/145: 500 rows upserted (�݌v 37,500 / 72,490, 10.7�b)
+2026-03-07 10:27:24,381 INFO [sync_financials]   batch 76/145: 500 rows upserted (�݌v 38,000 / 72,490, 10.8�b)
+2026-03-07 10:27:24,531 INFO [sync_financials]   batch 77/145: 500 rows upserted (�݌v 38,500 / 72,490, 10.9�b)
+2026-03-07 10:27:24,681 INFO [sync_financials]   batch 78/145: 500 rows upserted (�݌v 39,000 / 72,490, 11.1�b)
+2026-03-07 10:27:24,837 INFO [sync_financials]   batch 79/145: 500 rows upserted (�݌v 39,500 / 72,490, 11.2�b)
+2026-03-07 10:27:24,976 INFO [sync_financials]   batch 80/145: 500 rows upserted (�݌v 40,000 / 72,490, 11.4�b)
+2026-03-07 10:27:25,117 INFO [sync_financials]   batch 81/145: 500 rows upserted (�݌v 40,500 / 72,490, 11.5�b)
+2026-03-07 10:27:25,245 INFO [sync_financials]   batch 82/145: 500 rows upserted (�݌v 41,000 / 72,490, 11.6�b)
+2026-03-07 10:27:25,392 INFO [sync_financials]   batch 83/145: 500 rows upserted (�݌v 41,500 / 72,490, 11.8�b)
+2026-03-07 10:27:25,540 INFO [sync_financials]   batch 84/145: 500 rows upserted (�݌v 42,000 / 72,490, 11.9�b)
+2026-03-07 10:27:25,727 INFO [sync_financials]   batch 85/145: 500 rows upserted (�݌v 42,500 / 72,490, 12.1�b)
+2026-03-07 10:27:25,869 INFO [sync_financials]   batch 86/145: 500 rows upserted (�݌v 43,000 / 72,490, 12.3�b)
+2026-03-07 10:27:25,998 INFO [sync_financials]   batch 87/145: 500 rows upserted (�݌v 43,500 / 72,490, 12.4�b)
+2026-03-07 10:27:26,151 INFO [sync_financials]   batch 88/145: 500 rows upserted (�݌v 44,000 / 72,490, 12.5�b)
+2026-03-07 10:27:26,284 INFO [sync_financials]   batch 89/145: 500 rows upserted (�݌v 44,500 / 72,490, 12.7�b)
+2026-03-07 10:27:26,419 INFO [sync_financials]   batch 90/145: 500 rows upserted (�݌v 45,000 / 72,490, 12.8�b)
+2026-03-07 10:27:26,547 INFO [sync_financials]   batch 91/145: 500 rows upserted (�݌v 45,500 / 72,490, 12.9�b)
+2026-03-07 10:27:26,679 INFO [sync_financials]   batch 92/145: 500 rows upserted (�݌v 46,000 / 72,490, 13.1�b)
+2026-03-07 10:27:26,809 INFO [sync_financials]   batch 93/145: 500 rows upserted (�݌v 46,500 / 72,490, 13.2�b)
+2026-03-07 10:27:26,938 INFO [sync_financials]   batch 94/145: 500 rows upserted (�݌v 47,000 / 72,490, 13.3�b)
+2026-03-07 10:27:27,071 INFO [sync_financials]   batch 95/145: 500 rows upserted (�݌v 47,500 / 72,490, 13.5�b)
+2026-03-07 10:27:27,205 INFO [sync_financials]   batch 96/145: 500 rows upserted (�݌v 48,000 / 72,490, 13.6�b)
+2026-03-07 10:27:27,345 INFO [sync_financials]   batch 97/145: 500 rows upserted (�݌v 48,500 / 72,490, 13.7�b)
+2026-03-07 10:27:27,478 INFO [sync_financials]   batch 98/145: 500 rows upserted (�݌v 49,000 / 72,490, 13.9�b)
+2026-03-07 10:27:27,605 INFO [sync_financials]   batch 99/145: 500 rows upserted (�݌v 49,500 / 72,490, 14.0�b)
+2026-03-07 10:27:27,745 INFO [sync_financials]   batch 100/145: 500 rows upserted (�݌v 50,000 / 72,490, 14.1�b)
+2026-03-07 10:27:27,891 INFO [sync_financials]   batch 101/145: 500 rows upserted (�݌v 50,500 / 72,490, 14.3�b)
+2026-03-07 10:27:28,026 INFO [sync_financials]   batch 102/145: 500 rows upserted (�݌v 51,000 / 72,490, 14.4�b)
+2026-03-07 10:27:28,149 INFO [sync_financials]   batch 103/145: 500 rows upserted (�݌v 51,500 / 72,490, 14.5�b)
+2026-03-07 10:27:28,286 INFO [sync_financials]   batch 104/145: 500 rows upserted (�݌v 52,000 / 72,490, 14.7�b)
+2026-03-07 10:27:28,408 INFO [sync_financials]   batch 105/145: 500 rows upserted (�݌v 52,500 / 72,490, 14.8�b)
+2026-03-07 10:27:28,550 INFO [sync_financials]   batch 106/145: 500 rows upserted (�݌v 53,000 / 72,490, 14.9�b)
+2026-03-07 10:27:28,677 INFO [sync_financials]   batch 107/145: 500 rows upserted (�݌v 53,500 / 72,490, 15.1�b)
+2026-03-07 10:27:28,812 INFO [sync_financials]   batch 108/145: 500 rows upserted (�݌v 54,000 / 72,490, 15.2�b)
+2026-03-07 10:27:28,946 INFO [sync_financials]   batch 109/145: 500 rows upserted (�݌v 54,500 / 72,490, 15.3�b)
+2026-03-07 10:27:29,103 INFO [sync_financials]   batch 110/145: 500 rows upserted (�݌v 55,000 / 72,490, 15.5�b)
+2026-03-07 10:27:29,230 INFO [sync_financials]   batch 111/145: 500 rows upserted (�݌v 55,500 / 72,490, 15.6�b)
+2026-03-07 10:27:29,356 INFO [sync_financials]   batch 112/145: 500 rows upserted (�݌v 56,000 / 72,490, 15.8�b)
+2026-03-07 10:27:29,490 INFO [sync_financials]   batch 113/145: 500 rows upserted (�݌v 56,500 / 72,490, 15.9�b)
+2026-03-07 10:27:29,617 INFO [sync_financials]   batch 114/145: 500 rows upserted (�݌v 57,000 / 72,490, 16.0�b)
+2026-03-07 10:27:29,745 INFO [sync_financials]   batch 115/145: 500 rows upserted (�݌v 57,500 / 72,490, 16.1�b)
+2026-03-07 10:27:29,875 INFO [sync_financials]   batch 116/145: 500 rows upserted (�݌v 58,000 / 72,490, 16.3�b)
+2026-03-07 10:27:30,004 INFO [sync_financials]   batch 117/145: 500 rows upserted (�݌v 58,500 / 72,490, 16.4�b)
+2026-03-07 10:27:30,152 INFO [sync_financials]   batch 118/145: 500 rows upserted (�݌v 59,000 / 72,490, 16.5�b)
+2026-03-07 10:27:30,285 INFO [sync_financials]   batch 119/145: 500 rows upserted (�݌v 59,500 / 72,490, 16.7�b)
+2026-03-07 10:27:30,414 INFO [sync_financials]   batch 120/145: 500 rows upserted (�݌v 60,000 / 72,490, 16.8�b)
+2026-03-07 10:27:30,579 INFO [sync_financials]   batch 121/145: 500 rows upserted (�݌v 60,500 / 72,490, 17.0�b)
+2026-03-07 10:27:30,706 INFO [sync_financials]   batch 122/145: 500 rows upserted (�݌v 61,000 / 72,490, 17.1�b)
+2026-03-07 10:27:30,845 INFO [sync_financials]   batch 123/145: 500 rows upserted (�݌v 61,500 / 72,490, 17.2�b)
+2026-03-07 10:27:30,973 INFO [sync_financials]   batch 124/145: 500 rows upserted (�݌v 62,000 / 72,490, 17.4�b)
+2026-03-07 10:27:31,115 INFO [sync_financials]   batch 125/145: 500 rows upserted (�݌v 62,500 / 72,490, 17.5�b)
+2026-03-07 10:27:31,270 INFO [sync_financials]   batch 126/145: 500 rows upserted (�݌v 63,000 / 72,490, 17.7�b)
+2026-03-07 10:27:31,397 INFO [sync_financials]   batch 127/145: 500 rows upserted (�݌v 63,500 / 72,490, 17.8�b)
+2026-03-07 10:27:31,537 INFO [sync_financials]   batch 128/145: 500 rows upserted (�݌v 64,000 / 72,490, 17.9�b)
+2026-03-07 10:27:31,658 INFO [sync_financials]   batch 129/145: 500 rows upserted (�݌v 64,500 / 72,490, 18.1�b)
+2026-03-07 10:27:31,795 INFO [sync_financials]   batch 130/145: 500 rows upserted (�݌v 65,000 / 72,490, 18.2�b)
+2026-03-07 10:27:31,919 INFO [sync_financials]   batch 131/145: 500 rows upserted (�݌v 65,500 / 72,490, 18.3�b)
+2026-03-07 10:27:32,054 INFO [sync_financials]   batch 132/145: 500 rows upserted (�݌v 66,000 / 72,490, 18.4�b)
+2026-03-07 10:27:32,190 INFO [sync_financials]   batch 133/145: 500 rows upserted (�݌v 66,500 / 72,490, 18.6�b)
+2026-03-07 10:27:32,322 INFO [sync_financials]   batch 134/145: 500 rows upserted (�݌v 67,000 / 72,490, 18.7�b)
+2026-03-07 10:27:32,457 INFO [sync_financials]   batch 135/145: 500 rows upserted (�݌v 67,500 / 72,490, 18.9�b)
+2026-03-07 10:27:32,595 INFO [sync_financials]   batch 136/145: 500 rows upserted (�݌v 68,000 / 72,490, 19.0�b)
+2026-03-07 10:27:32,719 INFO [sync_financials]   batch 137/145: 500 rows upserted (�݌v 68,500 / 72,490, 19.1�b)
+2026-03-07 10:27:32,847 INFO [sync_financials]   batch 138/145: 500 rows upserted (�݌v 69,000 / 72,490, 19.2�b)
+2026-03-07 10:27:33,000 INFO [sync_financials]   batch 139/145: 500 rows upserted (�݌v 69,500 / 72,490, 19.4�b)
+2026-03-07 10:27:33,127 INFO [sync_financials]   batch 140/145: 500 rows upserted (�݌v 70,000 / 72,490, 19.5�b)
+2026-03-07 10:27:33,263 INFO [sync_financials]   batch 141/145: 500 rows upserted (�݌v 70,500 / 72,490, 19.7�b)
+2026-03-07 10:27:33,389 INFO [sync_financials]   batch 142/145: 500 rows upserted (�݌v 71,000 / 72,490, 19.8�b)
+2026-03-07 10:27:33,514 INFO [sync_financials]   batch 143/145: 500 rows upserted (�݌v 71,500 / 72,490, 19.9�b)
+2026-03-07 10:27:33,643 INFO [sync_financials]   batch 144/145: 500 rows upserted (�݌v 72,000 / 72,490, 20.0�b)
+2026-03-07 10:27:33,792 INFO [sync_financials]   batch 145/145: 490 rows upserted (�݌v 72,490 / 72,490, 20.2�b)
+2026-03-07 10:27:33,792 INFO [sync_financials] [VERIFY] Supabase ���̌��ؒ�...
+2026-03-07 10:27:33,929 INFO [sync_financials] [VERIFY] public.financials: 72,490 rows
+2026-03-07 10:27:33,929 INFO [sync_financials] 
+============================================================
+  SYNC ����
+  upserted: 72,490 / 72,490
+  errors:   0
+  elapsed:  20.2�b
+============================================================
+2026-03-07 10:27:33,936 INFO [sync_financials] === sync_financials END (log: C:\Users\takuy\OneDrive\tdnet-excel-input\logs\sync_financials_apply_recent30d_20260307_102713.log) ===
+[Step 4/8] KPI sync... (SKIPPED) 
+[Step 5/8] Generating data.xlsx... 
+[10:27:34] public.financials を取得中...
+[10:27:43]   → 72,490 行取得
+[10:27:43]   → 3,820 tickers
+[10:27:47] [GEN] data.xlsx 生成完了: 72,490 行 -> C:\Users\takuy\OneDrive\data.xlsx
+[10:27:47] [GEN] === 検証サマリ ===
+[10:27:47] [GEN]   financials     : 72,490 行
+[10:27:47] [GEN]   tickers        : 3,820
+[10:27:47] [GEN]   出力行数       : 72,490 行
+[10:27:47] [GEN]   生成日時       : 2026-03-07 10:27:34
+[10:27:47] [GEN]   出力先         : C:\Users\takuy\OneDrive\data.xlsx
+
+==================================================
+  data.xlsx 生成ツール
+  ソース: Supabase public.financials
+==================================================
+
+==================================================
+  ✅ 成功
+==================================================
+  出力ファイル : C:\Users\takuy\OneDrive\data.xlsx
+  データ行数   : 72,490 行
+  ticker数     : 3,820
+  生成日時     : 2026-03-07 10:27:34
+  エラー       : 0
+==================================================
+
+[Step 6/8] data.xlsx stats... 
+  [XLSX] rows(DATA)=72491 
+  [XLSX] delta=+0 (prev=72491, now=72491) 
+  [XLSX] tickers=3821 
+[Step 7/8] Viewer refresh... (SKIPPED) 
+[Step 8/8] Discord alerts... 
+[ALERT] 11 item(s)
+[ALERT] thresholds: YOY>=30.0% QoQ>=30.0%
+[ALERT] enabled categories: ['tanshin']
+  4331: ALERT -> sending...
+  319A: ALERT -> sending...
+  3816: ALERT -> sending...
+  8917: ALERT -> sending...
+  3733: below threshold (YOY<30.0% QoQ<30.0%)
+  3854: below threshold (YOY<30.0% QoQ<30.0%)
+  1873: ALERT -> sending...
+  2353: below threshold (YOY<30.0% QoQ<30.0%)
+  2438: ALERT -> sending...
+  604: SKIP (no data)
+  6267: below threshold (YOY<30.0% QoQ<30.0%)
+ALERT_DONE sent=6 checked=10 skipped=1 deduped=0
+============================================================ 
+ DONE 2026/03/07 10:27:54.00 
+============================================================ 

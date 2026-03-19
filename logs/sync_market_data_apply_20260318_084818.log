@@ -1,0 +1,2 @@
+2026-03-18 08:48:18,434 INFO [sync_market_data] [SYNC] 0 rows from SQLite
+2026-03-18 08:48:18,435 WARNING [sync_market_data] [SYNC] 0件。同期対象なし。

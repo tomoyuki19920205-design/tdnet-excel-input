@@ -1,0 +1,23 @@
+{
+  "ticker_code": "6855",
+  "company_name": null,
+  "title": "決算短信 (081220260219565026.zip)",
+  "disclosed_at": "2026-02-25T23:45:42+09:00",
+  "url": null,
+  "sha256": "b3f4da142c989b6c003c9e7f3ad7643ca930cc902e7a71bceecebb41af63d857",
+  "doc_type": "TANSHIN",
+  "source": "TDNET",
+  "fiscal_year_end": "2025-12-31",
+  "quarter": 2,
+  "source_unit": "円",
+  "values": {
+    "sales": 20675000000,
+    "op_income": 5028000000
+  },
+  "scope": "CONSOLIDATED",
+  "metric_type": "actual",
+  "quality": "IXBRL",
+  "_source_file": "081220260219565026.zip",
+  "_extractor_unit": "百万円",
+  "_ticker_source": "SecuritiesCode"
+}

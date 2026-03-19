@@ -1,0 +1,6 @@
+﻿priority,review_bucket,count,row_pct
+high,classifier_only,1,100.0
+low,classifier_only,1,10.0
+low,non_buyback,9,90.0
+medium,high_confidence_extracted,1,5.6
+medium,non_buyback,17,94.4

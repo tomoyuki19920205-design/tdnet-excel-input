@@ -1,0 +1,23 @@
+{
+  "ticker_code": "8963",
+  "company_name": null,
+  "title": "決算短信 (081220260226569513.zip)",
+  "disclosed_at": "2026-02-26T17:23:00+09:00",
+  "url": null,
+  "sha256": "db00fcd55b988943731d9611af446eb4030fbb7cd2bd8dcd98d7670d2364b781",
+  "doc_type": "TANSHIN",
+  "source": "TDNET",
+  "fiscal_year_end": "2025-12-31",
+  "quarter": 1,
+  "source_unit": "円",
+  "values": {
+    "sales": 28591000000,
+    "op_income": 19309000000
+  },
+  "scope": "CONSOLIDATED",
+  "metric_type": "actual",
+  "quality": "IXBRL",
+  "_source_file": "081220260226569513.zip",
+  "_extractor_unit": "百万円",
+  "_ticker_source": "SecuritiesCode"
+}

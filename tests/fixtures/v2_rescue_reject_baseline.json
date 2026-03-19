@@ -1,0 +1,205 @@
+{
+  "test_date": "2026-03-15",
+  "population": 102,
+  "rescued_count": 19,
+  "rejected_count": 3,
+  "rescued": [
+    {
+      "ticker": "2294",
+      "fid": "c947e4518bc31c2b24e2692f",
+      "v1_reason": "no_segment_table",
+      "v2_status": "ok",
+      "v2_path": "xbrl",
+      "v2_valid_seg": 5,
+      "v2_sales_nn": 5
+    },
+    {
+      "ticker": "2373",
+      "fid": "ade72dc9758c2104735b2a57",
+      "v1_reason": "candidate_guard:narrative_guard|hint=pdf_narrative_block_selected",
+      "v2_status": "partial",
+      "v2_path": "xbrl",
+      "v2_valid_seg": 2,
+      "v2_sales_nn": 2
+    },
+    {
+      "ticker": "2751",
+      "fid": "650a7c4bcaf9d6261977d681",
+      "v1_reason": "candidate_guard:narrative_guard|hint=pdf_narrative_block_selected",
+      "v2_status": "ok",
+      "v2_path": "xbrl",
+      "v2_valid_seg": 3,
+      "v2_sales_nn": 3
+    },
+    {
+      "ticker": "3071",
+      "fid": "83b03f2fcfae0b93cce9387a",
+      "v1_reason": "candidate_guard:narrative_guard|hint=pdf_narrative_block_selected",
+      "v2_status": "ok",
+      "v2_path": "xbrl",
+      "v2_valid_seg": 2,
+      "v2_sales_nn": 2
+    },
+    {
+      "ticker": "3134",
+      "fid": "2e96bae54227a04b04542b66",
+      "v1_reason": "candidate_guard:narrative_guard|hint=pdf_narrative_block_selected",
+      "v2_status": "ok",
+      "v2_path": "xbrl",
+      "v2_valid_seg": 2,
+      "v2_sales_nn": 2
+    },
+    {
+      "ticker": "3524",
+      "fid": "bd2227f40d9ae223c059e6fe",
+      "v1_reason": "candidate_guard:narrative_guard|hint=pdf_narrative_block_selected",
+      "v2_status": "ok",
+      "v2_path": "xbrl",
+      "v2_valid_seg": 2,
+      "v2_sales_nn": 2
+    },
+    {
+      "ticker": "3931",
+      "fid": "1515a8cd38d91acd687b86e3",
+      "v1_reason": "candidate_guard:narrative_guard|hint=pdf_narrative_block_selected",
+      "v2_status": "ok",
+      "v2_path": "xbrl",
+      "v2_valid_seg": 2,
+      "v2_sales_nn": 2
+    },
+    {
+      "ticker": "3955",
+      "fid": "64fa8ade85c8fc1e831d514a",
+      "v1_reason": "candidate_guard:narrative_guard|hint=pdf_narrative_block_selected",
+      "v2_status": "ok",
+      "v2_path": "xbrl",
+      "v2_valid_seg": 2,
+      "v2_sales_nn": 2
+    },
+    {
+      "ticker": "4026",
+      "fid": "d7354601a16fd7dbe9c36da8",
+      "v1_reason": "candidate_guard:narrative_guard|hint=pdf_narrative_block_selected",
+      "v2_status": "ok",
+      "v2_path": "xbrl",
+      "v2_valid_seg": 2,
+      "v2_sales_nn": 2
+    },
+    {
+      "ticker": "4287",
+      "fid": "9f90db2dc8ad44cbc9f342a1",
+      "v1_reason": "candidate_guard:narrative_guard|hint=pdf_narrative_block_selected",
+      "v2_status": "ok",
+      "v2_path": "xbrl",
+      "v2_valid_seg": 4,
+      "v2_sales_nn": 4
+    },
+    {
+      "ticker": "4382",
+      "fid": "0e6d0360aa3029d0396400e4",
+      "v1_reason": "picked_pl_table",
+      "v2_status": "ok",
+      "v2_path": "xbrl",
+      "v2_valid_seg": 2,
+      "v2_sales_nn": 2
+    },
+    {
+      "ticker": "4996",
+      "fid": "ef1d7a9e7472f39e4e08b3f4",
+      "v1_reason": "candidate_guard:narrative_guard|hint=pdf_narrative_block_selected",
+      "v2_status": "ok",
+      "v2_path": "xbrl",
+      "v2_valid_seg": 2,
+      "v2_sales_nn": 2
+    },
+    {
+      "ticker": "6336",
+      "fid": "57302c1f1ba36999317164a5",
+      "v1_reason": "no_segment_table",
+      "v2_status": "ok",
+      "v2_path": "xbrl",
+      "v2_valid_seg": 2,
+      "v2_sales_nn": 2
+    },
+    {
+      "ticker": "6757",
+      "fid": "9db09be5c6f41d03d4064f06",
+      "v1_reason": "no_segment_table",
+      "v2_status": "ok",
+      "v2_path": "xbrl",
+      "v2_valid_seg": 4,
+      "v2_sales_nn": 4
+    },
+    {
+      "ticker": "6966",
+      "fid": "73f4ca42f3f2e12fdc6deb01",
+      "v1_reason": "candidate_guard:narrative_guard|hint=pdf_narrative_block_selected",
+      "v2_status": "ok",
+      "v2_path": "xbrl",
+      "v2_valid_seg": 3,
+      "v2_sales_nn": 3
+    },
+    {
+      "ticker": "7435",
+      "fid": "a129869c501c9a4cd5d3791a",
+      "v1_reason": "no_segment_table",
+      "v2_status": "ok",
+      "v2_path": "xbrl",
+      "v2_valid_seg": 4,
+      "v2_sales_nn": 4
+    },
+    {
+      "ticker": "7614",
+      "fid": "847254c5ed87d272f2a7c83f",
+      "v1_reason": "no_segment_table",
+      "v2_status": "ok",
+      "v2_path": "xbrl",
+      "v2_valid_seg": 2,
+      "v2_sales_nn": 2
+    },
+    {
+      "ticker": "8013",
+      "fid": "32ef04d3bc57baf9a666b15d",
+      "v1_reason": "candidate_guard:narrative_guard|hint=pdf_narrative_block_selected",
+      "v2_status": "ok",
+      "v2_path": "xbrl",
+      "v2_valid_seg": 2,
+      "v2_sales_nn": 2
+    },
+    {
+      "ticker": "9163",
+      "fid": "7cd6ac58cb8d91c824021246",
+      "v1_reason": "candidate_guard:narrative_guard|hint=pdf_narrative_block_selected",
+      "v2_status": "ok",
+      "v2_path": "xbrl",
+      "v2_valid_seg": 2,
+      "v2_sales_nn": 2
+    }
+  ],
+  "rejected": [
+    {
+      "ticker": "3248",
+      "fid": "57a08f5e2e50a7a5257c862e",
+      "v2_reason": "high_invalid_ratio",
+      "v2_path": "pdf",
+      "v2_valid_seg": 2,
+      "v2_sales_nn": 3
+    },
+    {
+      "ticker": "3407",
+      "fid": "5daf47858ad2853bc11049bd",
+      "v2_reason": "account_like_dominant",
+      "v2_path": "pdf",
+      "v2_valid_seg": 0,
+      "v2_sales_nn": 1
+    },
+    {
+      "ticker": "3843",
+      "fid": "9291d87e6d1b0dcd47440d94",
+      "v2_reason": "too_few_valid_segments",
+      "v2_path": "pdf",
+      "v2_valid_seg": 1,
+      "v2_sales_nn": 3
+    }
+  ]
+}

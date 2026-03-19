@@ -1,0 +1,11 @@
+2026-03-18 09:22:59,909 INFO [jquants_prices] === J-Quants Prices Fetch ===
+2026-03-18 09:22:59,909 INFO [jquants_prices] since=2026-03-11, to=2026-03-18, db=C:\Users\takuy\OneDrive\tdnet-excel-input\data\jquants.db
+2026-03-18 09:22:59,909 INFO [jquants_auth] API KEY loaded (OHZ7IFH1...)
+2026-03-18 09:22:59,910 INFO [jquants_prices] [SINGLE] code=72030, 2026-03-11 ~ 2026-03-18
+2026-03-18 09:23:00,004 INFO [jquants_prices] [SINGLE] 0 rows upserted for 72030
+2026-03-18 09:23:00,004 INFO [jquants_prices] ============================================================
+2026-03-18 09:23:00,005 INFO [jquants_prices] DONE in 0.0 min
+2026-03-18 09:23:00,005 INFO [jquants_prices]   Total upserted: 0
+2026-03-18 09:23:00,005 INFO [jquants_prices]   Total errors  : 0
+2026-03-18 09:23:00,005 INFO [jquants_prices]   DB: C:\Users\takuy\OneDrive\tdnet-excel-input\data\jquants.db
+2026-03-18 09:23:00,005 INFO [jquants_prices]   Log: C:\Users\takuy\OneDrive\tdnet-excel-input\logs\jquants_prices_20260318_092259.log

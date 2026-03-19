@@ -1,0 +1,30 @@
+============================================================
+  XBRL Only V2 — 500件再集計 (定義分離版)
+============================================================
+  total: 500
+
+  --- XBRL Source 分類 ---
+    xbrl_source_available_count:    103
+    xbrl_source_unavailable_count:  397
+    xbrl_segment_facts_present:     57
+    xbrl_segment_no_facts:          46
+    xbrl_extraction_error:          0
+    xbrl_segment_success_count:     54
+
+  --- Precision ---
+    facts present → success: 54/57 = 94.7%
+    source available → success: 54/103 = 52.4%
+    全体 coverage: 103/500 = 20.6%
+
+  --- Status ---
+    quarantined: 446
+    ok: 51
+    partial: 3
+
+  --- Quarantine Reason ---
+    no_xbrl_segment_source: 397
+    no_records: 46
+    too_few_valid_segments: 3
+
+  --- PDF path 確認 ---
+    pdf selected: 0

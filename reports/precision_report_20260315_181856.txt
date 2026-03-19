@@ -1,0 +1,49 @@
+======================================================================
+  セグメント抽出精度測定レポート
+======================================================================
+母集団: 決算短信系 (annual + quarterly), 504 件
+
+--- 母集団テスト概要 ---
+  v1:   ok=115 partial=0 quarantined=389 failed=0 success_rate=22.8%
+  v2:   ok=141 partial=3 quarantined=360 failed=0 success_rate=28.6%
+
+--- A. 粗い成功率 (success / 母集団全体) ---
+  v1: 115/504 = 22.8%
+  v2: 144/504 = 28.6%
+
+--- B. セグメント業績あり企業 成功率 (denominator=150) ---
+  v1: 115/150 = 76.7%
+  v2: 144/150 = 96.0%
+  (セグメント業績なし推定: 354件)
+
+--- XBRL resolved subset (0件) ---
+
+--- PDF-only subset (0件) ---
+
+--- selected_path breakdown (v2) ---
+  pdf: 404
+  xbrl: 100
+
+--- route_mode breakdown (v2) ---
+  ?: 504
+
+--- quarantine_reason breakdown (v2) 上位 ---
+  no_records: 354
+  too_few_valid_segments: 3
+  too_few_sales: 2
+  high_invalid_ratio: 1
+
+--- Representative success (v2, max 5) ---
+  6786 path=pdf valid_seg=4 sales_nn=6
+  7466 path=pdf valid_seg=11 sales_nn=19
+  5579 path=pdf valid_seg=1 sales_nn=2
+  9366 path=pdf valid_seg=1 sales_nn=2
+  3421 path=xbrl valid_seg=2 sales_nn=2
+
+--- Representative fail (v2, max 10) ---
+  3662 path=xbrl reason=high_invalid_ratio
+  1433 path=xbrl reason=too_few_valid_segments
+  3070 path=xbrl reason=too_few_valid_segments
+  7095 path=xbrl reason=too_few_valid_segments
+  8715 path=pdf reason=too_few_sales
+  8560 path=pdf reason=too_few_sales

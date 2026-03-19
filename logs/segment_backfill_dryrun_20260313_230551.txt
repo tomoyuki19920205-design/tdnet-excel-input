@@ -1,0 +1,9 @@
+SEGMENT BACKFILL DRY RUN - 20260313_230551
+Range: 2026-03-06 ~ 2026-03-13
+Total (pre-selector): 193
+Accepted: 172
+Excluded: 21
+
+  excluded_correction: 13
+  excluded_non_earnings_summary: 4
+  excluded_presentation: 4

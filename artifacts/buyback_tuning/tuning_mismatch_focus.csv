@@ -1,0 +1,2 @@
+﻿file_path,old_priority,new_priority,old_candidate_score,new_candidate_score,review_bucket,matched_keywords,tuning_reason
+data/docs\140120260306577313.pdf,high,high,6,6,classifier_only,自己株式の取得|上限,old_high_classifier_only

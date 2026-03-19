@@ -1,0 +1,3 @@
+﻿file_path,ticker,title,event_type_candidate,confidence_final,missing_key_fields,matched_keywords,review_notes,manifest_candidate_score,manifest_review_priority
+C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\140120260223566990.pdf,8233,（開示事項の経過）特別損失の計上及び業績予想の修正に関するお知らせ,,0.2,,自己株式の消却|CANCEL_SUPPRESSED:社債,,,
+C:\Users\takuy\OneDrive\tdnet-excel-input\data\docs\140120260306577313.pdf,9824,2026年10月期 第１四半期決算短信〔日本基準〕（連結）,buyback_decision,0.6,shares_limit|amount_limit_million_yen|start_date|end_date,自己株式の取得,,,

@@ -1,0 +1,3 @@
+﻿file_path,ticker,title,event_type_candidate,confidence_final,missing_key_fields,matched_keywords,review_notes
+data\docs\140120260220566631.pdf,1401,,,0.2,,自己株式の取得,
+data\docs\140120260223566990.pdf,1401,,treasury_cancel,0.6,shares_cancelled|cancel_date,自己株式の消却,

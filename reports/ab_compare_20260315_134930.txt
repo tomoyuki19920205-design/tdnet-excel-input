@@ -1,0 +1,128 @@
+======================================================================
+Fixed-Population A/B Comparison
+======================================================================
+Before: ab_v1_20260315_134930.jsonl  (worker=v1, total=504)
+After:  ab_v2_20260315_134930.jsonl  (worker=v2, total=504)
+Common filing IDs: 504
+Only in before:    0
+Only in after:     0
+
+--- Transition Matrix (fixed population: 504) ---
+  ok → ok: 18
+  ok → partial: 17
+  ok → quarantined: 84
+  quarantined → ok: 4
+  quarantined → quarantined: 381
+
+--- Improvement / Regression Summary ---
+  Improved (strict: bad→ok):        4
+  Improved (broad:  bad→ok/partial): 4
+  Regressed (strict: ok→bad):        84
+  Regressed (broad:  ok/partial→bad): 84
+  Same status:                        399
+
+--- selected_path changes ---
+  xbrl → pdf: 1
+
+--- fallback_reason breakdown ---
+  primary_unavailable            before=  0  after=486
+
+--- quarantine/fail reason breakdown ---
+  account_like_dominant               before=  0  after= 46
+  candidate_guard:detail_breakdown_guard|hint=pdf_segment_like_but_invalid_structure before=  7  after=  0
+  candidate_guard:narrative_guard|hint=pdf_narrative_block_selected before=204  after=  0
+  candidate_guard:no_valid_segment_rows|hint=pdf_no_segment_table_after_guard before= 13  after=  0
+  high_invalid_ratio                  before=  0  after= 30
+  no_records                          before=  0  after=381
+  no_segment_table                    before=147  after=  0
+  period_quarter_unresolved:period='R7/12',quarter='' before=  3  after=  0
+  period_quarter_unresolved:period='R8/1',quarter='' before=  2  after=  0
+  period_quarter_unresolved:period='R8/3',quarter='' before=  1  after=  0
+  picked_pl_table                     before=  4  after=  0
+  too_few_sales                       before=  0  after=  1
+  too_few_valid_segments              before=  0  after=  7
+  テキスト抽出不可                            before=  4  after=  0
+
+--- Quality Comparison (both ok/partial: 35 filings) ---
+  rows                    238 →    228  (diff=-10)
+  valid_seg_count           0 →    175  (diff=+175)
+  sales_nn                238 →    228  (diff=-10)
+  profit_nn               216 →    210  (diff=-6)
+
+--- Representative Examples: Improved (4) ---
+  3f1ef8626a7d4d2d90b71779 ticker=6577
+    status:  quarantined  → ok
+    path:    xbrl         → xbrl
+    reason:  no_segment_table → 
+    rows         0 → 2  (+2)
+    valid_seg    0 → 2  (+2)
+    sales_nn     0 → 2  (+2)
+    profit_nn    0 → 2  (+2)
+  7cd6ac58cb8d91c824021246 ticker=9163
+    status:  quarantined  → ok
+    path:    xbrl         → xbrl
+    reason:  candidate_guard:narrative_guard|hint=pdf_narrative_block_selected → 
+    rows         0 → 2  (+2)
+    valid_seg    0 → 2  (+2)
+    sales_nn     0 → 2  (+2)
+    profit_nn    0 → 2  (+2)
+  a129869c501c9a4cd5d3791a ticker=7435
+    status:  quarantined  → ok
+    path:    xbrl         → xbrl
+    reason:  no_segment_table → 
+    rows         0 → 4  (+4)
+    valid_seg    0 → 4  (+4)
+    sales_nn     0 → 4  (+4)
+    profit_nn    0 → 4  (+4)
+
+--- Representative Examples: Regressed (84) ---
+  015390c5d1b9372f4ae67a53 ticker=7292
+    status:  ok           → quarantined
+    path:    pdf          → pdf
+    reason:               → account_like_dominant
+    fallback:             → primary_unavailable
+    valid_seg    0 → 1  (+1)
+  01b401f81f9cf4513c66d828 ticker=7466
+    status:  ok           → quarantined
+    path:    pdf          → pdf
+    reason:               → high_invalid_ratio
+    fallback:             → primary_unavailable
+    valid_seg    0 → 11  (+11)
+    profit_nn    11 → 9  (-2)
+  07113785774297b78cce10f4 ticker=1867
+    status:  ok           → quarantined
+    path:    pdf          → pdf
+    reason:               → account_like_dominant
+    fallback:             → primary_unavailable
+    valid_seg    0 → 1  (+1)
+
+--- Representative Examples: Same Status (399) ---
+  002c6eea6e15705f1135c159 ticker=6804
+    status:  quarantined  → quarantined
+    path:    pdf          → pdf
+    reason:  candidate_guard:narrative_guard|hint=pdf_narrative_block_selected → no_records
+    fallback:             → primary_unavailable
+  0253d5e6240f4b0693f92ad7 ticker=7368
+    status:  quarantined  → quarantined
+    path:    pdf          → pdf
+    reason:  テキスト抽出不可     → no_records
+    fallback:             → primary_unavailable
+  02d6f678c83fb5ca451a9fc7 ticker=7057
+    status:  quarantined  → quarantined
+    path:    pdf          → pdf
+    reason:  no_segment_table → no_records
+    fallback:             → primary_unavailable
+
+======================================================================
+SUMMARY (fixed population: 504)
+======================================================================
+  Worker versions: v1 → v2
+  ok:           119 →   22  (diff=-97)
+  partial:        0 →   17  (diff=+17)
+  quarantined:  385 →  465  (diff=+80)
+  failed:         0 →    0  (diff=+0)
+
+  Improved (strict): 4
+  Improved (broad):  4
+  Regressed (strict): 84
+  Regressed (broad):  84

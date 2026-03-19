@@ -1,0 +1,2 @@
+﻿file_path,file_type,ticker,title,stage,error_type,error_message,text_extract_ok,text_length
+data\docs\140120260224567389.pdf,pdf,1401,,load_text,text_extract_failed,PDF text extraction yielded empty text,False,0

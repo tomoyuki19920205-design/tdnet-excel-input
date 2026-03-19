@@ -1,0 +1,23 @@
+{
+  "ticker_code": "9215",
+  "company_name": null,
+  "title": "決算短信 (081220260226569824.zip)",
+  "disclosed_at": "2026-02-26T17:22:58+09:00",
+  "url": null,
+  "sha256": "f4c22bf1a5eb55a2f61e5a40612b1b9275ecc7fd9026d872067c1767759520c7",
+  "doc_type": "TANSHIN",
+  "source": "TDNET",
+  "fiscal_year_end": "2025-11-30",
+  "quarter": 1,
+  "source_unit": "円",
+  "values": {
+    "sales": 1922000000,
+    "op_income": 50000000
+  },
+  "scope": "CONSOLIDATED",
+  "metric_type": "actual",
+  "quality": "IXBRL",
+  "_source_file": "081220260226569824.zip",
+  "_extractor_unit": "百万円",
+  "_ticker_source": "XBRL_FILENAME"
+}

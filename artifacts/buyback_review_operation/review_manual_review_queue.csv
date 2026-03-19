@@ -1,0 +1,3 @@
+file_path,file_name,ticker,title,manifest_candidate_score,manifest_review_priority,matched_keywords,review_bucket,confidence_final,extracted_fields_count,missing_key_fields,event_type,review_reason
+,140120260223566990.pdf,8233,（開示事項の経過）特別損失の計上及び業績予想の修正に関するお知らせ,,,自己株式の消却|CANCEL_SUPPRESSED:社債,classifier_only,0.2,0,,,classifier_only
+,140120260306577313.pdf,9824,2026年10月期 第１四半期決算短信〔日本基準〕（連結）,,,自己株式の取得,classifier_only,0.6,1,shares_limit|amount_limit_million_yen|start_date|end_date,buyback_decision,classifier_only

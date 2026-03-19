@@ -1,0 +1,73 @@
+=== PDF Audit Results (n=50) ===
+  false_positive: 25
+  partial_fp: 20
+  true_success: 5
+
+  PDF precision (strict): 5/50 = 10.0%
+  False positive ratio: 45/50 = 90.0%
+
+=== Representative TRUE SUCCESS ===
+  [8150] records=8
+    機構部品メーカー: sales=46828.0, profit=50366.0
+    海外メーカー: sales=41841.0, profit=44281.0
+    その他メーカー: sales=15710.0, profit=19358.0
+  [7777] records=4
+    米国: sales=2301.0, profit=4065.0
+    欧州: sales=1445.0, profit=1852.0
+    日本: sales=914.0, profit=956.0
+  [7269] records=7
+    売上収益は: sales=100200.0, profit=400.0
+    期に比べ: sales=1150.0, profit=48700.0
+    売上収益は: sales=100200.0, profit=400.0
+  [5984] records=2
+    から生じる収: sales=11729.475, profit=2843.799
+    から生じる収: sales=11729.475, profit=2843.799
+  [341A0] records=2
+    売上高は: sales=1348.0, profit=521.0
+    売上高は: sales=1348.0, profit=521.0
+
+=== Representative FALSE POSITIVE ===
+  [7917] cls=false_positive records=3
+    [fp_tiny_value] 環境ソリュ 産業 (sales=1.0)
+    [fp_label] 外部顧客への売上高 (pattern:外部顧客)
+    [fp_label] セグメント利益 (pattern:セグメント(利益|間|損|資産))
+  [6118] cls=false_positive records=1
+    [fp_label] I 前第 (pattern:^I\s*(前|当))
+  [6549] cls=false_positive records=1
+    [fp_label] I 前第 (pattern:^I\s*(前|当))
+  [7247] cls=partial_fp records=19
+    [ok] モビリティ ()
+    [ok] ガステクノ ()
+    [ok] 商社 ()
+    [ok] その他 ()
+    [fp_tiny_value] ご参考外貨換算レート (sales=1.0)
+  [9404] cls=false_positive records=4
+    [fp_tiny_value] コンテンツ・ ウェルネス 不動産 (注 (sales=1.0)
+    [fp_tiny_value] メディア事業 事業 関連事業 (注 (sales=2.0)
+    [fp_label] 外部顧客への売上高 (pattern:外部顧客)
+    [fp_label] メントに配分していない全社費用 (pattern:配分して)
+  [7461] cls=partial_fp records=3
+    [fp_label] I 前第 (pattern:^I\s*(前|当))
+    [ok] その他の収益 ()
+    [fp_label] 外部顧客への売上高 (pattern:外部顧客)
+  [9849] cls=partial_fp records=4
+    [fp_tiny_value] 不動産賃貸 (注 (sales=0.001)
+    [ok] その他の収益 ()
+    [fp_label] 外部顧客への売上高 (pattern:外部顧客)
+    [fp_label] セグメント利益 (pattern:セグメント(利益|間|損|資産))
+  [7490] cls=false_positive records=2
+    [fp_tiny_value] 事業 エネルギー 不動産 (sales=0.002)
+    [fp_label] セグメント利益 (pattern:セグメント(利益|間|損|資産))
+  [6408] cls=false_positive records=3
+    [fp_label] I 前第 (pattern:^I\s*(前|当))
+    [fp_label] 外部顧客への売上高 (pattern:外部顧客)
+    [fp_label] セグメント利益 (pattern:セグメント(利益|間|損|資産))
+  [9017] cls=false_positive records=4
+    [fp_label] 外部顧客への売上高 (pattern:外部顧客)
+    [fp_label] セグメント利益 (pattern:セグメント(利益|間|損|資産))
+    [fp_label] 外部顧客への売上高 (pattern:外部顧客)
+    [fp_label] セグメント利益 (pattern:セグメント(利益|間|損|資産))
+  [9888] cls=partial_fp records=3
+    [fp_label] I 前第 (pattern:^I\s*(前|当))
+    [ok] 顧客との契約から生じる収益 ()
+    [fp_label] セグメント利益 (pattern:セグメント(利益|間|損|資産))

@@ -1,0 +1,3 @@
+﻿keyword,total,high_confidence_extracted_count,non_buyback_count,classifier_only_count,low_confidence_count,current_weight,suggested_direction,suggested_reason
+自己株式の取得,2,1,0,1,0,3,keep,balanced
+自己株式の消却,1,0,0,1,0,2,decrease,mostly classifier_only (100%)

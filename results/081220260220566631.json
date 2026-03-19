@@ -1,0 +1,23 @@
+{
+  "ticker_code": "2288",
+  "company_name": null,
+  "title": "決算短信 (081220260220566631.zip)",
+  "disclosed_at": "2026-02-24T16:57:07+09:00",
+  "url": null,
+  "sha256": "7e8b218ffb59ef625841ca8d1dfd267193fe0a140b6052e662980fb1e634a8c4",
+  "doc_type": "TANSHIN",
+  "source": "TDNET",
+  "fiscal_year_end": "2025-12-31",
+  "quarter": 2,
+  "source_unit": "円",
+  "values": {
+    "sales": 183643000000,
+    "op_income": 6807000000
+  },
+  "scope": "CONSOLIDATED",
+  "metric_type": "actual",
+  "quality": "IXBRL",
+  "_source_file": "081220260220566631.zip",
+  "_extractor_unit": "百万円",
+  "_ticker_source": "SecuritiesCode"
+}

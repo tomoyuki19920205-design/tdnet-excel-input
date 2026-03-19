@@ -1,0 +1,3 @@
+﻿priority,review_bucket,count,row_pct
+low,classifier_only,2,66.7
+low,high_confidence_extracted,1,33.3

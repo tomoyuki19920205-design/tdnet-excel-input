@@ -1,0 +1,676 @@
+START 2026/03/04 10:27:15.10 
+[Step 1/8] TDnet ingest... 
+============================================================
+  TDNET Ingest - ワンショット実行
+============================================================
+
+[DB]   C:\Users\takuy\OneDrive\tdnet-excel-input\decision_db.db
+
+[2026-03-04 10:27:15] [INFO] [API] yanoshin.jp APIから取得中: https://webapi.yanoshin.jp/webapi/tdnet/list/today.json
+[2026-03-04 10:27:15] [INFO] [API] detected_schema=items, raw_items_count=26
+[2026-03-04 10:27:15] [INFO] [API] first_item_preview: id=aeb3e9c5f503..., pubdate=2026-03-04 10:15:00, title=株式の立会外分売終了に関するお知らせ, code=6286
+[2026-03-04 10:27:15] [INFO] [API] fetched_count=26
+[2026-03-04 10:27:15] [INFO] [API] skip_reason=instrument_excluded, code=16714, name=Ｅ－シンプレクス, title=上場ＥＴＦ(管理会社：シンプレクス・アセット・マネジメント)に関する日々の開示事項
+[2026-03-04 10:27:15] [INFO] [API] skip_reason=instrument_excluded, code=1398, name=ＳＭＤＡＭ　Ｊリート, title=ＥＴＦの収益分配金見込額のお知らせ
+[2026-03-04 10:27:15] [INFO] [API] skip_reason=instrument_excluded, code=2245, name=独債７－１０ヘッジ有, title=ETFの収益分配金見込額のお知らせ
+[2026-03-04 10:27:15] [INFO] [API] skip_reason=instrument_excluded, code=2246, name=仏債７－１０ヘッジ有, title=ETFの収益分配金見込額のお知らせ
+[2026-03-04 10:27:15] [INFO] [API] skip_reason=instrument_excluded, code=251, name=ＮＦ国内債券, title=ETFの収益分配金見込額のお知らせ
+[2026-03-04 10:27:15] [INFO] [API] skip_reason=instrument_excluded, code=2511, name=ＮＦ外債ヘッジ無, title=ETFの収益分配金見込額のお知らせ
+[2026-03-04 10:27:15] [INFO] [API] skip_reason=instrument_excluded, code=2512, name=ＮＦ外債ヘッジ有, title=ETFの収益分配金見込額のお知らせ
+[2026-03-04 10:27:15] [INFO] [API] skip_reason=instrument_excluded, code=2513, name=ＮＦ外株ヘッジ無, title=ETFの収益分配金見込額のお知らせ
+[2026-03-04 10:27:15] [INFO] [API] skip_reason=instrument_excluded, code=2514, name=ＮＦ外株ヘッジ有, title=ETFの収益分配金見込額のお知らせ
+[2026-03-04 10:27:15] [INFO] [API] skip_reason=instrument_excluded, code=2515, name=ＮＦ外ＲＥＩＴヘ無, title=ETFの収益分配金見込額のお知らせ
+[2026-03-04 10:27:15] [INFO] [API] skip_reason=instrument_excluded, code=2519, name=ＮＦ新興国債券ヘ無, title=ETFの収益分配金見込額のお知らせ
+[2026-03-04 10:27:15] [INFO] [API] skip_reason=instrument_excluded, code=252, name=ＮＦ新興国株式ヘ無, title=ETFの収益分配金見込額のお知らせ
+[2026-03-04 10:27:15] [INFO] [API] skip_reason=instrument_excluded, code=2554, name=ＮＦ米社債ヘ有, title=ETFの収益分配金見込額のお知らせ
+[2026-03-04 10:27:15] [INFO] [API] skip_reason=instrument_excluded, code=2647, name=米債７－１０ヘッジ無, title=ETFの収益分配金見込額のお知らせ
+[2026-03-04 10:27:15] [INFO] [API] skip_reason=instrument_excluded, code=2648, name=米債７－１０ヘッジ有, title=ETFの収益分配金見込額のお知らせ
+[2026-03-04 10:27:15] [INFO] [API] skip_reason=instrument_excluded, code=364A, name=Ｓ＆Ｐ５００配当貴族, title=ETFの収益分配金見込額のお知らせ
+[2026-03-04 10:27:15] [INFO] [API] skip_reason=instrument_excluded, code=1597, name=ＭＸＳ　Ｊリート, title=ＭＡＸＩＳ ＥＴＦの収益分配金見込額のお知らせ
+[2026-03-04 10:27:15] [INFO] [API] skip_reason=instrument_excluded, code=16724, name=Ｅ－ＷｉｓｄｏｍＴｒ, title=上場ETF（管理会社：WisdomTree、外国投資法人：CSL）に関する日々の開示事項　
+[2026-03-04 10:27:15] [INFO] [API] skip_reason=instrument_excluded, code=16724, name=Ｅ－ＷｉｓｄｏｍＴｒ, title=上場ETF（管理会社：WisdomTree、外国投資法人：MSL）に関する日々の開示事項　
+[2026-03-04 10:27:15] [INFO] [API] skip_reason=instrument_excluded, code=1345, name=上場Ｊリート, title=ＥＴＦの収益分配金見込額のお知らせ
+[2026-03-04 10:27:15] [INFO] [API] instrument_skipped_count=20
+[2026-03-04 10:27:15] [INFO] [API] fetched_count=26, filtered_count=0, forecast_revision_count=0, financial_statement_count=0
+[2026-03-04 10:27:15] [INFO] [API] new_count=0
+[2026-03-04 10:27:15] [INFO] [INGEST] run=ingest-d6a5a325 processed=0 success=0 skipped=0 error=0 (tanshin=0)
+============================================================
+  結果サマリ
+============================================================
+  run_id          : ingest-d6a5a325
+  取得開示数      : 0
+  対象(決算短信)  : 0
+  処理件数        : 0
+  INSERT          : 0
+  UPDATE          : 0
+  変更なし        : 0
+  成功            : 0
+  スキップ        : 0
+  エラー          : 0
+
+[TICKERS] 0 items -> C:\Users\takuy\OneDrive\tdnet-excel-input\logs\last_ingested_items.json
+[Step 2/8] SQLite to Supabase push... 
+[10:27:16] [PUSH] SQLite総行数: 91624, 今回対象: 91624 件
+[10:27:16] [Phase 1/4] companies 一括 upsert...
+[10:27:16]   → 2754 社 完了 (0.5秒)
+[10:27:16] [Phase 2/4] periods 一括 upsert...
+[10:27:31]   → 91624 期間 完了 (15.3秒)
+[10:27:31] [Phase 3/4] disclosures 一括 upsert...
+[10:27:31]   対象 disclosure: 91624 件
+[10:27:39]   既存 disclosure: 91634 件
+[10:27:39]   新規なし（全件既存）
+[10:27:39]   → 91634 disclosure 完了 (23.9秒)
+[10:27:39] [Phase 4/4] facts 一括 upsert (batch=500, offset=0)...
+[10:27:40]   batch 1: 226/91624 (0.2%) facts=500 sanitized=0 経過=24秒 残り≈9711秒
+[10:27:40]   batch 2: 477/91624 (0.5%) facts=1002 sanitized=0 経過=24秒 残り≈4615秒
+[10:27:40]   batch 3: 709/91624 (0.8%) facts=1503 sanitized=0 経過=24秒 残り≈3114秒
+[10:27:40]   batch 4: 959/91624 (1.0%) facts=2005 sanitized=0 経過=24秒 残り≈2310秒
+[10:27:40]   batch 5: 1188/91624 (1.3%) facts=2505 sanitized=0 経過=25秒 残り≈1870秒
+[10:27:40]   batch 6: 1439/91624 (1.6%) facts=3006 sanitized=0 経過=25秒 残り≈1549秒
+[10:27:40]   batch 7: 1668/91624 (1.8%) facts=3507 sanitized=0 経過=25秒 残り≈1340秒
+[10:27:41]   batch 8: 1909/91624 (2.1%) facts=4007 sanitized=0 経過=25秒 残り≈1174秒
+[10:27:41]   batch 9: 2144/91624 (2.3%) facts=4507 sanitized=0 経過=25秒 残り≈1048秒
+[10:27:41]   batch 10: 2370/91624 (2.6%) facts=5007 sanitized=0 経過=25秒 残り≈951秒
+[10:27:41]   batch 11: 2626/91624 (2.9%) facts=5509 sanitized=0 経過=25秒 残り≈860秒
+[10:27:41]   batch 12: 2863/91624 (3.1%) facts=6011 sanitized=0 経過=26秒 残り≈791秒
+[10:27:41]   batch 13: 3129/91624 (3.4%) facts=6512 sanitized=0 経過=26秒 残り≈726秒
+[10:27:41]   batch 14: 3375/91624 (3.7%) facts=7014 sanitized=0 経過=26秒 残り≈675秒
+[10:27:42]   batch 15: 3638/91624 (4.0%) facts=7514 sanitized=0 経過=26秒 残り≈628秒
+[10:27:42]   batch 16: 3884/91624 (4.2%) facts=8015 sanitized=0 経過=26秒 残り≈590秒
+[10:27:42]   batch 17: 4134/91624 (4.5%) facts=8517 sanitized=0 経過=26秒 残り≈555秒
+[10:27:42]   batch 18: 4384/91624 (4.8%) facts=9017 sanitized=0 経過=26秒 残り≈525秒
+[10:27:42]   batch 19: 4621/91624 (5.0%) facts=9518 sanitized=0 経過=26秒 残り≈499秒
+[10:27:42]   batch 20: 4871/91624 (5.3%) facts=10020 sanitized=0 経過=27秒 残り≈474秒
+[10:27:42]   batch 21: 5095/91624 (5.6%) facts=10521 sanitized=0 経過=27秒 残り≈455秒
+[10:27:42]   batch 22: 5353/91624 (5.8%) facts=11021 sanitized=0 経過=27秒 残り≈433秒
+[10:27:43]   batch 23: 5611/91624 (6.1%) facts=11523 sanitized=0 経過=27秒 残り≈414秒
+[10:27:43]   batch 24: 5843/91624 (6.4%) facts=12024 sanitized=0 経過=27秒 残り≈398秒
+[10:27:43]   batch 25: 6114/91624 (6.7%) facts=12526 sanitized=0 経過=27秒 残り≈381秒
+[10:27:43]   batch 26: 6350/91624 (6.9%) facts=13028 sanitized=0 経過=27秒 残り≈368秒
+[10:27:43]   batch 27: 6589/91624 (7.2%) facts=13530 sanitized=0 経過=28秒 残り≈356秒
+[10:27:43]   batch 28: 6851/91624 (7.5%) facts=14030 sanitized=0 経過=28秒 残り≈343秒
+[10:27:43]   batch 29: 7104/91624 (7.8%) facts=14531 sanitized=0 経過=28秒 残り≈331秒
+[10:27:44]   batch 30: 7345/91624 (8.0%) facts=15033 sanitized=0 経過=28秒 残り≈321秒
+[10:27:44]   batch 31: 7595/91624 (8.3%) facts=15535 sanitized=0 経過=28秒 残り≈311秒
+[10:27:44]   batch 32: 7841/91624 (8.6%) facts=16037 sanitized=0 経過=28秒 残り≈301秒
+[10:27:44]   batch 33: 8093/91624 (8.8%) facts=16537 sanitized=0 経過=28秒 残り≈292秒
+[10:27:44]   batch 34: 8328/91624 (9.1%) facts=17038 sanitized=0 経過=28秒 残り≈285秒
+[10:27:44]   batch 35: 8579/91624 (9.4%) facts=17538 sanitized=0 経過=29秒 残り≈277秒
+[10:27:44]   batch 36: 8802/91624 (9.6%) facts=18038 sanitized=0 経過=29秒 残り≈270秒
+[10:27:44]   batch 37: 9024/91624 (9.8%) facts=18538 sanitized=0 経過=29秒 残り≈264秒
+[10:27:45]   batch 38: 9252/91624 (10.1%) facts=19038 sanitized=0 経過=29秒 残り≈258秒
+[10:27:45]   batch 39: 9500/91624 (10.4%) facts=19540 sanitized=0 経過=29秒 残り≈251秒
+[10:27:45]   batch 40: 9736/91624 (10.6%) facts=20040 sanitized=0 経過=29秒 残り≈246秒
+[10:27:45]   batch 41: 9976/91624 (10.9%) facts=20542 sanitized=0 経過=29秒 残り≈240秒
+[10:27:45]   batch 42: 10242/91624 (11.2%) facts=21042 sanitized=0 経過=29秒 残り≈234秒
+[10:27:45]   batch 43: 10529/91624 (11.5%) facts=21543 sanitized=0 経過=30秒 残り≈228秒
+[10:27:45]   batch 44: 10826/91624 (11.8%) facts=22043 sanitized=0 経過=30秒 残り≈222秒
+[10:27:46]   batch 45: 11183/91624 (12.2%) facts=22543 sanitized=0 経過=30秒 残り≈215秒
+[10:27:46]   batch 46: 11461/91624 (12.5%) facts=23043 sanitized=0 経過=30秒 残り≈210秒
+[10:27:46]   batch 47: 11691/91624 (12.8%) facts=23545 sanitized=0 経過=30秒 残り≈206秒
+[10:27:46]   batch 48: 11963/91624 (13.1%) facts=24045 sanitized=0 経過=30秒 残り≈202秒
+[10:27:46]   batch 49: 12232/91624 (13.4%) facts=24546 sanitized=0 経過=30秒 残り≈197秒
+[10:27:46]   batch 50: 12468/91624 (13.6%) facts=25047 sanitized=0 経過=31秒 残り≈194秒
+[10:27:46]   batch 51: 12691/91624 (13.9%) facts=25548 sanitized=0 経過=31秒 残り≈191秒
+[10:27:46]   batch 52: 12933/91624 (14.1%) facts=26050 sanitized=0 経過=31秒 残り≈188秒
+[10:27:47]   batch 53: 13186/91624 (14.4%) facts=26550 sanitized=0 経過=31秒 残り≈184秒
+[10:27:47]   batch 54: 13413/91624 (14.6%) facts=27050 sanitized=0 経過=31秒 残り≈181秒
+[10:27:47]   batch 55: 13645/91624 (14.9%) facts=27550 sanitized=0 経過=31秒 残り≈179秒
+[10:27:47]   batch 56: 13902/91624 (15.2%) facts=28052 sanitized=0 経過=31秒 残り≈176秒
+[10:27:47]   batch 57: 14163/91624 (15.5%) facts=28554 sanitized=0 経過=32秒 残り≈173秒
+[10:27:47]   batch 58: 14394/91624 (15.7%) facts=29055 sanitized=0 経過=32秒 残り≈170秒
+[10:27:47]   batch 59: 14632/91624 (16.0%) facts=29556 sanitized=0 経過=32秒 残り≈167秒
+[10:27:48]   batch 60: 14860/91624 (16.2%) facts=30057 sanitized=0 経過=32秒 残り≈165秒
+[10:27:48] [SANITIZE] 元値が10^16超 (5.40e+303): col=operating_profit val=5.4e+303 ticker=4685 fye=2028-03-31 Q=2Q
+[10:27:48]   batch 61: 15079/91624 (16.5%) facts=30557 sanitized=1 経過=32秒 残り≈163秒
+[10:27:48]   batch 62: 15308/91624 (16.7%) facts=31057 sanitized=1 経過=32秒 残り≈161秒
+[10:27:48]   batch 63: 15538/91624 (17.0%) facts=31557 sanitized=1 経過=32秒 残り≈158秒
+[10:27:48]   batch 64: 15781/91624 (17.2%) facts=32059 sanitized=1 経過=32秒 残り≈156秒
+[10:27:48]   batch 65: 16031/91624 (17.5%) facts=32559 sanitized=1 経過=33秒 残り≈154秒
+[10:27:48]   batch 66: 16246/91624 (17.7%) facts=33059 sanitized=1 経過=33秒 残り≈152秒
+[10:27:48]   batch 67: 16482/91624 (18.0%) facts=33560 sanitized=1 経過=33秒 残り≈150秒
+[10:27:49]   batch 68: 16726/91624 (18.3%) facts=34060 sanitized=1 経過=33秒 残り≈148秒
+[10:27:49]   batch 69: 16952/91624 (18.5%) facts=34560 sanitized=1 経過=33秒 残り≈146秒
+[10:27:49]   batch 70: 17198/91624 (18.8%) facts=35060 sanitized=1 経過=33秒 残り≈144秒
+[10:27:49]   batch 71: 17433/91624 (19.0%) facts=35561 sanitized=1 経過=33秒 残り≈142秒
+[10:27:49]   batch 72: 17643/91624 (19.3%) facts=36063 sanitized=1 経過=33秒 残り≈140秒
+[10:27:49]   batch 73: 17871/91624 (19.5%) facts=36565 sanitized=1 経過=34秒 残り≈139秒
+[10:27:49]   batch 74: 18091/91624 (19.7%) facts=37066 sanitized=1 経過=34秒 残り≈137秒
+[10:27:49]   batch 75: 18339/91624 (20.0%) facts=37567 sanitized=1 経過=34秒 残り≈135秒
+[10:27:50]   batch 76: 18586/91624 (20.3%) facts=38069 sanitized=1 経過=34秒 残り≈133秒
+[10:27:50]   batch 77: 18841/91624 (20.6%) facts=38571 sanitized=1 経過=34秒 残り≈132秒
+[10:27:50]   batch 78: 19106/91624 (20.9%) facts=39073 sanitized=1 経過=34秒 残り≈130秒
+[10:27:50]   batch 79: 19341/91624 (21.1%) facts=39573 sanitized=1 経過=34秒 残り≈129秒
+[10:27:50]   batch 80: 19572/91624 (21.4%) facts=40075 sanitized=1 経過=35秒 残り≈127秒
+[10:27:50]   batch 81: 19836/91624 (21.6%) facts=40575 sanitized=1 経過=35秒 残り≈125秒
+[10:27:50]   batch 82: 20078/91624 (21.9%) facts=41076 sanitized=1 経過=35秒 残り≈124秒
+[10:27:50]   batch 83: 20331/91624 (22.2%) facts=41578 sanitized=1 経過=35秒 残り≈122秒
+[10:27:51]   batch 84: 20569/91624 (22.4%) facts=42079 sanitized=1 経過=35秒 残り≈121秒
+[10:27:51]   batch 85: 20845/91624 (22.8%) facts=42579 sanitized=1 経過=35秒 残り≈119秒
+[10:27:51]   batch 86: 21071/91624 (23.0%) facts=43081 sanitized=1 経過=35秒 残り≈118秒
+[10:27:51]   batch 87: 21320/91624 (23.3%) facts=43581 sanitized=1 経過=35秒 残り≈117秒
+[10:27:51]   batch 88: 21610/91624 (23.6%) facts=44083 sanitized=1 経過=35秒 残り≈115秒
+[10:27:51]   batch 89: 21846/91624 (23.8%) facts=44583 sanitized=1 経過=36秒 残り≈114秒
+[10:27:51]   batch 90: 22075/91624 (24.1%) facts=45083 sanitized=1 経過=36秒 残り≈113秒
+[10:27:51]   batch 91: 22295/91624 (24.3%) facts=45585 sanitized=1 経過=36秒 残り≈112秒
+[10:27:52]   batch 92: 22540/91624 (24.6%) facts=46086 sanitized=1 経過=36秒 残り≈110秒
+[10:27:52]   batch 93: 22782/91624 (24.9%) facts=46587 sanitized=1 経過=36秒 残り≈109秒
+[10:27:52]   batch 94: 23022/91624 (25.1%) facts=47089 sanitized=1 経過=36秒 残り≈108秒
+[10:27:52]   batch 95: 23276/91624 (25.4%) facts=47589 sanitized=1 経過=36秒 残り≈107秒
+[10:27:52]   batch 96: 23514/91624 (25.7%) facts=48090 sanitized=1 経過=36秒 残り≈106秒
+[10:27:52]   batch 97: 23763/91624 (25.9%) facts=48592 sanitized=1 経過=37秒 残り≈105秒
+[10:27:52]   batch 98: 24012/91624 (26.2%) facts=49093 sanitized=1 経過=37秒 残り≈103秒
+[10:27:52]   batch 99: 24252/91624 (26.5%) facts=49594 sanitized=1 経過=37秒 残り≈102秒
+[10:27:53]   batch 100: 24523/91624 (26.8%) facts=50096 sanitized=1 経過=37秒 残り≈101秒
+[10:27:53]   batch 101: 24745/91624 (27.0%) facts=50598 sanitized=1 経過=37秒 残り≈100秒
+[10:27:53]   batch 102: 24959/91624 (27.2%) facts=51099 sanitized=1 経過=37秒 残り≈100秒
+[10:27:53]   batch 103: 25195/91624 (27.5%) facts=51601 sanitized=1 経過=37秒 残り≈99秒
+[10:27:53]   batch 104: 25440/91624 (27.8%) facts=52102 sanitized=1 経過=38秒 残り≈98秒
+[10:27:53]   batch 105: 25667/91624 (28.0%) facts=52604 sanitized=1 経過=38秒 残り≈97秒
+[10:27:53]   batch 106: 25927/91624 (28.3%) facts=53105 sanitized=1 経過=38秒 残り≈96秒
+[10:27:54]   batch 107: 26181/91624 (28.6%) facts=53605 sanitized=1 経過=38秒 残り≈95秒
+[10:27:54]   batch 108: 26431/91624 (28.8%) facts=54105 sanitized=1 経過=38秒 残り≈94秒
+[10:27:54]   batch 109: 26671/91624 (29.1%) facts=54607 sanitized=1 経過=38秒 残り≈93秒
+[10:27:54]   batch 110: 26917/91624 (29.4%) facts=55107 sanitized=1 経過=38秒 残り≈92秒
+[10:27:54]   batch 111: 27158/91624 (29.6%) facts=55607 sanitized=1 経過=39秒 残り≈92秒
+[10:27:54]   batch 112: 27391/91624 (29.9%) facts=56107 sanitized=1 経過=39秒 残り≈91秒
+[10:27:54]   batch 113: 27667/91624 (30.2%) facts=56609 sanitized=1 経過=39秒 残り≈90秒
+[10:27:55]   batch 114: 27911/91624 (30.5%) facts=57111 sanitized=1 経過=39秒 残り≈89秒
+[10:27:55]   batch 115: 28150/91624 (30.7%) facts=57612 sanitized=1 経過=39秒 残り≈88秒
+[10:27:55]   batch 116: 28401/91624 (31.0%) facts=58112 sanitized=1 経過=39秒 残り≈87秒
+[10:27:55]   batch 117: 28632/91624 (31.2%) facts=58612 sanitized=1 経過=39秒 残り≈87秒
+[10:27:55]   batch 118: 28869/91624 (31.5%) facts=59113 sanitized=1 経過=40秒 残り≈86秒
+[10:27:55]   batch 119: 29100/91624 (31.8%) facts=59613 sanitized=1 経過=40秒 残り≈85秒
+[10:27:55]   batch 120: 29323/91624 (32.0%) facts=60115 sanitized=1 経過=40秒 残り≈85秒
+[10:27:56]   batch 121: 29609/91624 (32.3%) facts=60616 sanitized=1 経過=40秒 残り≈84秒
+[10:27:56]   batch 122: 29837/91624 (32.6%) facts=61116 sanitized=1 経過=40秒 残り≈83秒
+[10:27:56]   batch 123: 30067/91624 (32.8%) facts=61616 sanitized=1 経過=40秒 残り≈82秒
+[10:27:56]   batch 124: 30323/91624 (33.1%) facts=62117 sanitized=1 経過=40秒 残り≈82秒
+[10:27:56]   batch 125: 30554/91624 (33.3%) facts=62618 sanitized=1 経過=41秒 残り≈81秒
+[10:27:56]   batch 126: 30784/91624 (33.6%) facts=63118 sanitized=1 経過=41秒 残り≈80秒
+[10:27:56]   batch 127: 31018/91624 (33.9%) facts=63620 sanitized=1 経過=41秒 残り≈80秒
+[10:27:57]   batch 128: 31250/91624 (34.1%) facts=64122 sanitized=1 経過=41秒 残り≈79秒
+[10:27:57]   batch 129: 31491/91624 (34.4%) facts=64624 sanitized=1 経過=41秒 残り≈78秒
+[10:27:57]   batch 130: 31722/91624 (34.6%) facts=65126 sanitized=1 経過=41秒 残り≈78秒
+[10:27:57]   batch 131: 31943/91624 (34.9%) facts=65626 sanitized=1 経過=41秒 残り≈77秒
+[10:27:57]   batch 132: 32184/91624 (35.1%) facts=66126 sanitized=1 経過=42秒 残り≈77秒
+[10:27:57]   batch 133: 32427/91624 (35.4%) facts=66627 sanitized=1 経過=42秒 残り≈76秒
+[10:27:57]   batch 134: 32659/91624 (35.6%) facts=67129 sanitized=1 経過=42秒 残り≈75秒
+[10:27:58]   batch 135: 32901/91624 (35.9%) facts=67631 sanitized=1 経過=42秒 残り≈75秒
+[10:27:58]   batch 136: 33130/91624 (36.2%) facts=68131 sanitized=1 経過=42秒 残り≈74秒
+[10:27:58]   batch 137: 33374/91624 (36.4%) facts=68632 sanitized=1 経過=42秒 残り≈74秒
+[10:27:58]   batch 138: 33624/91624 (36.7%) facts=69133 sanitized=1 経過=42秒 残り≈73秒
+[10:27:58]   batch 139: 33863/91624 (37.0%) facts=69634 sanitized=1 経過=42秒 残り≈72秒
+[10:27:58]   batch 140: 34121/91624 (37.2%) facts=70134 sanitized=1 経過=43秒 残り≈72秒
+[10:27:58]   batch 141: 34405/91624 (37.6%) facts=70634 sanitized=1 経過=43秒 残り≈71秒
+[10:27:58]   batch 142: 34645/91624 (37.8%) facts=71136 sanitized=1 経過=43秒 残り≈70秒
+[10:27:59]   batch 143: 34876/91624 (38.1%) facts=71636 sanitized=1 経過=43秒 残り≈70秒
+[10:27:59]   batch 144: 35152/91624 (38.4%) facts=72137 sanitized=1 経過=43秒 残り≈69秒
+[10:27:59]   batch 145: 35405/91624 (38.6%) facts=72639 sanitized=1 経過=43秒 残り≈69秒
+[10:27:59]   batch 146: 35636/91624 (38.9%) facts=73139 sanitized=1 経過=43秒 残り≈68秒
+[10:27:59]   batch 147: 35913/91624 (39.2%) facts=73640 sanitized=1 経過=43秒 残り≈67秒
+[10:27:59]   batch 148: 36185/91624 (39.5%) facts=74140 sanitized=1 経過=44秒 残り≈67秒
+[10:27:59]   batch 149: 36466/91624 (39.8%) facts=74642 sanitized=1 経過=44秒 残り≈66秒
+[10:28:00]   batch 150: 36701/91624 (40.1%) facts=75143 sanitized=1 経過=44秒 残り≈66秒
+[10:28:00]   batch 151: 36957/91624 (40.3%) facts=75645 sanitized=1 経過=44秒 残り≈65秒
+[10:28:00]   batch 152: 37192/91624 (40.6%) facts=76147 sanitized=1 経過=44秒 残り≈65秒
+[10:28:00]   batch 153: 37460/91624 (40.9%) facts=76647 sanitized=1 経過=45秒 残り≈64秒
+[10:28:01]   batch 154: 37715/91624 (41.2%) facts=77148 sanitized=1 経過=45秒 残り≈64秒
+[10:28:01]   batch 155: 37947/91624 (41.4%) facts=77650 sanitized=1 経過=45秒 残り≈64秒
+[10:28:01]   batch 156: 38216/91624 (41.7%) facts=78151 sanitized=1 経過=46秒 残り≈64秒
+[10:28:01]   batch 157: 38438/91624 (42.0%) facts=78652 sanitized=1 経過=46秒 残り≈63秒
+[10:28:01]   batch 158: 38661/91624 (42.2%) facts=79153 sanitized=1 経過=46秒 残り≈63秒
+[10:28:02]   batch 159: 38907/91624 (42.5%) facts=79654 sanitized=1 経過=46秒 残り≈62秒
+[10:28:02]   batch 160: 39125/91624 (42.7%) facts=80155 sanitized=1 経過=46秒 残り≈62秒
+[10:28:02]   batch 161: 39365/91624 (43.0%) facts=80655 sanitized=1 経過=46秒 残り≈62秒
+[10:28:02]   batch 162: 39670/91624 (43.3%) facts=81157 sanitized=1 経過=46秒 残り≈61秒
+[10:28:02]   batch 163: 39923/91624 (43.6%) facts=81658 sanitized=1 経過=47秒 残り≈60秒
+[10:28:02]   batch 164: 40199/91624 (43.9%) facts=82159 sanitized=1 経過=47秒 残り≈60秒
+[10:28:03]   batch 165: 40468/91624 (44.2%) facts=82659 sanitized=1 経過=47秒 残り≈59秒
+[10:28:03]   batch 166: 40718/91624 (44.4%) facts=83160 sanitized=1 経過=47秒 残り≈59秒
+[10:28:03]   batch 167: 40949/91624 (44.7%) facts=83661 sanitized=1 経過=47秒 残り≈59秒
+[10:28:03]   batch 168: 41201/91624 (45.0%) facts=84163 sanitized=1 経過=47秒 残り≈58秒
+[10:28:03]   batch 169: 41453/91624 (45.2%) facts=84663 sanitized=1 経過=48秒 残り≈58秒
+[10:28:03]   batch 170: 41704/91624 (45.5%) facts=85165 sanitized=1 経過=48秒 残り≈57秒
+[10:28:04]   batch 171: 41947/91624 (45.8%) facts=85665 sanitized=1 経過=48秒 残り≈57秒
+[10:28:04]   batch 172: 42180/91624 (46.0%) facts=86167 sanitized=1 経過=48秒 残り≈56秒
+[10:28:04]   batch 173: 42436/91624 (46.3%) facts=86668 sanitized=1 経過=48秒 残り≈56秒
+[10:28:04]   batch 174: 42677/91624 (46.6%) facts=87168 sanitized=1 経過=48秒 残り≈55秒
+[10:28:04]   batch 175: 42961/91624 (46.9%) facts=87669 sanitized=1 経過=48秒 残り≈55秒
+[10:28:04]   batch 176: 43199/91624 (47.1%) facts=88169 sanitized=1 経過=49秒 残り≈55秒
+[10:28:04]   batch 177: 43437/91624 (47.4%) facts=88669 sanitized=1 経過=49秒 残り≈54秒
+[10:28:05]   batch 178: 43665/91624 (47.7%) facts=89170 sanitized=1 経過=49秒 残り≈54秒
+[10:28:05]   batch 179: 43869/91624 (47.9%) facts=89670 sanitized=1 経過=49秒 残り≈53秒
+[10:28:05]   batch 180: 44109/91624 (48.1%) facts=90170 sanitized=1 経過=49秒 残り≈53秒
+[10:28:05]   batch 181: 44340/91624 (48.4%) facts=90670 sanitized=1 経過=49秒 残り≈53秒
+[10:28:05]   batch 182: 44583/91624 (48.7%) facts=91170 sanitized=1 経過=49秒 残り≈52秒
+[10:28:05]   batch 183: 44820/91624 (48.9%) facts=91670 sanitized=1 経過=50秒 残り≈52秒
+[10:28:05]   batch 184: 45046/91624 (49.2%) facts=92172 sanitized=1 経過=50秒 残り≈51秒
+[10:28:06]   batch 185: 45257/91624 (49.4%) facts=92673 sanitized=1 経過=50秒 残り≈51秒
+[10:28:06]   batch 186: 45540/91624 (49.7%) facts=93173 sanitized=1 経過=50秒 残り≈51秒
+[10:28:06]   batch 187: 45845/91624 (50.0%) facts=93673 sanitized=1 経過=50秒 残り≈50秒
+[10:28:06]   batch 188: 46187/91624 (50.4%) facts=94173 sanitized=1 経過=50秒 残り≈49秒
+[10:28:06]   batch 189: 46428/91624 (50.7%) facts=94675 sanitized=1 経過=50秒 残り≈49秒
+[10:28:06]   batch 190: 46677/91624 (50.9%) facts=95177 sanitized=1 経過=51秒 残り≈49秒
+[10:28:06]   batch 191: 46899/91624 (51.2%) facts=95677 sanitized=1 経過=51秒 残り≈48秒
+[10:28:06]   batch 192: 47142/91624 (51.5%) facts=96178 sanitized=1 経過=51秒 残り≈48秒
+[10:28:07]   batch 193: 47385/91624 (51.7%) facts=96679 sanitized=1 経過=51秒 残り≈48秒
+[10:28:07]   batch 194: 47606/91624 (52.0%) facts=97181 sanitized=1 経過=51秒 残り≈47秒
+[10:28:07]   batch 195: 47834/91624 (52.2%) facts=97682 sanitized=1 経過=51秒 残り≈47秒
+[10:28:07]   batch 196: 48070/91624 (52.5%) facts=98183 sanitized=1 経過=51秒 残り≈47秒
+[10:28:07]   batch 197: 48289/91624 (52.7%) facts=98683 sanitized=1 経過=52秒 残り≈46秒
+[10:28:07]   batch 198: 48569/91624 (53.0%) facts=99183 sanitized=1 経過=52秒 残り≈46秒
+[10:28:07]   batch 199: 48851/91624 (53.3%) facts=99684 sanitized=1 経過=52秒 残り≈45秒
+[10:28:08]   batch 200: 49104/91624 (53.6%) facts=100185 sanitized=1 経過=52秒 残り≈45秒
+[10:28:08]   batch 201: 49353/91624 (53.9%) facts=100686 sanitized=1 経過=52秒 残り≈45秒
+[10:28:08]   batch 202: 49571/91624 (54.1%) facts=101186 sanitized=1 経過=52秒 残り≈44秒
+[10:28:08]   batch 203: 49803/91624 (54.4%) facts=101688 sanitized=1 経過=52秒 残り≈44秒
+[10:28:08]   batch 204: 50041/91624 (54.6%) facts=102188 sanitized=1 経過=52秒 残り≈44秒
+[10:28:08]   batch 205: 50284/91624 (54.9%) facts=102690 sanitized=1 経過=53秒 残り≈43秒
+[10:28:08]   batch 206: 50504/91624 (55.1%) facts=103190 sanitized=1 経過=53秒 残り≈43秒
+[10:28:09]   batch 207: 50747/91624 (55.4%) facts=103691 sanitized=1 経過=53秒 残り≈43秒
+[10:28:09]   batch 208: 51003/91624 (55.7%) facts=104191 sanitized=1 経過=53秒 残り≈42秒
+[10:28:09]   batch 209: 51232/91624 (55.9%) facts=104691 sanitized=1 経過=53秒 残り≈42秒
+[10:28:09]   batch 210: 51497/91624 (56.2%) facts=105193 sanitized=1 経過=53秒 残り≈42秒
+[10:28:09]   batch 211: 51726/91624 (56.5%) facts=105695 sanitized=1 経過=53秒 残り≈41秒
+[10:28:09]   batch 212: 51956/91624 (56.7%) facts=106196 sanitized=1 経過=54秒 残り≈41秒
+[10:28:09]   batch 213: 52198/91624 (57.0%) facts=106697 sanitized=1 経過=54秒 残り≈41秒
+[10:28:09]   batch 214: 52455/91624 (57.3%) facts=107197 sanitized=1 経過=54秒 残り≈40秒
+[10:28:10]   batch 215: 52686/91624 (57.5%) facts=107697 sanitized=1 経過=54秒 残り≈40秒
+[10:28:10]   batch 216: 52931/91624 (57.8%) facts=108198 sanitized=1 経過=54秒 残り≈40秒
+[10:28:10]   batch 217: 53164/91624 (58.0%) facts=108700 sanitized=1 経過=54秒 残り≈39秒
+[10:28:10]   batch 218: 53388/91624 (58.3%) facts=109201 sanitized=1 経過=54秒 残り≈39秒
+[10:28:10]   batch 219: 53628/91624 (58.5%) facts=109703 sanitized=1 経過=54秒 残り≈39秒
+[10:28:10]   batch 220: 53881/91624 (58.8%) facts=110205 sanitized=1 経過=55秒 残り≈38秒
+[10:28:10]   batch 221: 54131/91624 (59.1%) facts=110707 sanitized=1 経過=55秒 残り≈38秒
+[10:28:10]   batch 222: 54361/91624 (59.3%) facts=111208 sanitized=1 経過=55秒 残り≈38秒
+[10:28:11]   batch 223: 54615/91624 (59.6%) facts=111709 sanitized=1 経過=55秒 残り≈37秒
+[10:28:11]   batch 224: 54847/91624 (59.9%) facts=112211 sanitized=1 経過=55秒 残り≈37秒
+[10:28:11]   batch 225: 55093/91624 (60.1%) facts=112711 sanitized=1 経過=55秒 残り≈37秒
+[10:28:11]   batch 226: 55320/91624 (60.4%) facts=113213 sanitized=1 経過=55秒 残り≈36秒
+[10:28:11]   batch 227: 55551/91624 (60.6%) facts=113714 sanitized=1 経過=55秒 残り≈36秒
+[10:28:11]   batch 228: 55782/91624 (60.9%) facts=114215 sanitized=1 経過=56秒 残り≈36秒
+[10:28:11]   batch 229: 55982/91624 (61.1%) facts=114715 sanitized=1 経過=56秒 残り≈35秒
+[10:28:11]   batch 230: 56198/91624 (61.3%) facts=115216 sanitized=1 経過=56秒 残り≈35秒
+[10:28:12]   batch 231: 56410/91624 (61.6%) facts=115717 sanitized=1 経過=56秒 残り≈35秒
+[10:28:12]   batch 232: 56638/91624 (61.8%) facts=116217 sanitized=1 経過=56秒 残り≈35秒
+[10:28:12]   batch 233: 56865/91624 (62.1%) facts=116717 sanitized=1 経過=56秒 残り≈34秒
+[10:28:12]   batch 234: 57108/91624 (62.3%) facts=117219 sanitized=1 経過=56秒 残り≈34秒
+[10:28:12]   batch 235: 57346/91624 (62.6%) facts=117720 sanitized=1 経過=56秒 残り≈34秒
+[10:28:12]   batch 236: 57563/91624 (62.8%) facts=118220 sanitized=1 経過=57秒 残り≈33秒
+[10:28:12]   batch 237: 57781/91624 (63.1%) facts=118721 sanitized=1 経過=57秒 残り≈33秒
+[10:28:12]   batch 238: 58025/91624 (63.3%) facts=119223 sanitized=1 経過=57秒 残り≈33秒
+[10:28:13]   batch 239: 58259/91624 (63.6%) facts=119723 sanitized=1 経過=57秒 残り≈33秒
+[10:28:13]   batch 240: 58501/91624 (63.8%) facts=120225 sanitized=1 経過=57秒 残り≈32秒
+[10:28:13]   batch 241: 58752/91624 (64.1%) facts=120726 sanitized=1 経過=57秒 残り≈32秒
+[10:28:13]   batch 242: 58978/91624 (64.4%) facts=121226 sanitized=1 経過=57秒 残り≈32秒
+[10:28:13]   batch 243: 59210/91624 (64.6%) facts=121727 sanitized=1 経過=57秒 残り≈31秒
+[10:28:13]   batch 244: 59454/91624 (64.9%) facts=122227 sanitized=1 経過=58秒 残り≈31秒
+[10:28:13]   batch 245: 59673/91624 (65.1%) facts=122727 sanitized=1 経過=58秒 残り≈31秒
+[10:28:13]   batch 246: 59930/91624 (65.4%) facts=123227 sanitized=1 経過=58秒 残り≈31秒
+[10:28:14]   batch 247: 60199/91624 (65.7%) facts=123729 sanitized=1 経過=58秒 残り≈30秒
+[10:28:14]   batch 248: 60451/91624 (66.0%) facts=124230 sanitized=1 経過=58秒 残り≈30秒
+[10:28:14]   batch 249: 60695/91624 (66.2%) facts=124732 sanitized=1 経過=58秒 残り≈30秒
+[10:28:14]   batch 250: 60925/91624 (66.5%) facts=125233 sanitized=1 経過=58秒 残り≈29秒
+[10:28:14]   batch 251: 61144/91624 (66.7%) facts=125733 sanitized=1 経過=58秒 残り≈29秒
+[10:28:14]   batch 252: 61380/91624 (67.0%) facts=126234 sanitized=1 経過=59秒 残り≈29秒
+[10:28:14]   batch 253: 61626/91624 (67.3%) facts=126736 sanitized=1 経過=59秒 残り≈29秒
+[10:28:14]   batch 254: 61874/91624 (67.5%) facts=127238 sanitized=1 経過=59秒 残り≈28秒
+[10:28:15]   batch 255: 62108/91624 (67.8%) facts=127738 sanitized=1 経過=59秒 残り≈28秒
+[10:28:15]   batch 256: 62344/91624 (68.0%) facts=128238 sanitized=1 経過=59秒 残り≈28秒
+[10:28:15]   batch 257: 62579/91624 (68.3%) facts=128738 sanitized=1 経過=59秒 残り≈27秒
+[10:28:15]   batch 258: 62820/91624 (68.6%) facts=129239 sanitized=1 経過=59秒 残り≈27秒
+[10:28:15]   batch 259: 63060/91624 (68.8%) facts=129741 sanitized=1 経過=59秒 残り≈27秒
+[10:28:15]   batch 260: 63293/91624 (69.1%) facts=130243 sanitized=1 経過=60秒 残り≈27秒
+[10:28:15]   batch 261: 63533/91624 (69.3%) facts=130744 sanitized=1 経過=60秒 残り≈26秒
+[10:28:15]   batch 262: 63778/91624 (69.6%) facts=131244 sanitized=1 経過=60秒 残り≈26秒
+[10:28:16]   batch 263: 64045/91624 (69.9%) facts=131744 sanitized=1 経過=60秒 残り≈26秒
+[10:28:16]   batch 264: 64290/91624 (70.2%) facts=132246 sanitized=1 経過=60秒 残り≈26秒
+[10:28:16]   batch 265: 64520/91624 (70.4%) facts=132747 sanitized=1 経過=60秒 残り≈25秒
+[10:28:16]   batch 266: 64737/91624 (70.7%) facts=133248 sanitized=1 経過=60秒 残り≈25秒
+[10:28:16]   batch 267: 64959/91624 (70.9%) facts=133750 sanitized=1 経過=61秒 残り≈25秒
+[10:28:16]   batch 268: 65197/91624 (71.2%) facts=134251 sanitized=1 経過=61秒 残り≈25秒
+[10:28:16]   batch 269: 65452/91624 (71.4%) facts=134751 sanitized=1 経過=61秒 残り≈24秒
+[10:28:17]   batch 270: 65696/91624 (71.7%) facts=135253 sanitized=1 経過=61秒 残り≈24秒
+[10:28:17]   batch 271: 65930/91624 (72.0%) facts=135753 sanitized=1 経過=61秒 残り≈24秒
+[10:28:17]   batch 272: 66169/91624 (72.2%) facts=136253 sanitized=1 経過=61秒 残り≈24秒
+[10:28:17]   batch 273: 66397/91624 (72.5%) facts=136753 sanitized=1 経過=61秒 残り≈23秒
+[10:28:17]   batch 274: 66637/91624 (72.7%) facts=137253 sanitized=1 経過=61秒 残り≈23秒
+[10:28:17]   batch 275: 66854/91624 (73.0%) facts=137754 sanitized=1 経過=62秒 残り≈23秒
+[10:28:17]   batch 276: 67086/91624 (73.2%) facts=138256 sanitized=1 経過=62秒 残り≈23秒
+[10:28:17]   batch 277: 67325/91624 (73.5%) facts=138757 sanitized=1 経過=62秒 残り≈22秒
+[10:28:18]   batch 278: 67582/91624 (73.8%) facts=139259 sanitized=1 経過=62秒 残り≈22秒
+[10:28:18]   batch 279: 67797/91624 (74.0%) facts=139760 sanitized=1 経過=62秒 残り≈22秒
+[10:28:18]   batch 280: 68046/91624 (74.3%) facts=140262 sanitized=1 経過=62秒 残り≈22秒
+[10:28:18]   batch 281: 68279/91624 (74.5%) facts=140762 sanitized=1 経過=62秒 残り≈21秒
+[10:28:18]   batch 282: 68519/91624 (74.8%) facts=141262 sanitized=1 経過=62秒 残り≈21秒
+[10:28:18]   batch 283: 68752/91624 (75.0%) facts=141764 sanitized=1 経過=63秒 残り≈21秒
+[10:28:18]   batch 284: 69003/91624 (75.3%) facts=142265 sanitized=1 経過=63秒 残り≈21秒
+[10:28:18]   batch 285: 69248/91624 (75.6%) facts=142765 sanitized=1 経過=63秒 残り≈20秒
+[10:28:19]   batch 286: 69487/91624 (75.8%) facts=143266 sanitized=1 経過=63秒 残り≈20秒
+[10:28:19]   batch 287: 69714/91624 (76.1%) facts=143766 sanitized=1 経過=63秒 残り≈20秒
+[10:28:19]   batch 288: 69972/91624 (76.4%) facts=144267 sanitized=1 経過=63秒 残り≈20秒
+[10:28:19]   batch 289: 70221/91624 (76.6%) facts=144769 sanitized=1 経過=63秒 残り≈19秒
+[10:28:19]   batch 290: 70473/91624 (76.9%) facts=145269 sanitized=1 経過=63秒 残り≈19秒
+[10:28:19]   batch 291: 70707/91624 (77.2%) facts=145770 sanitized=1 経過=64秒 残り≈19秒
+[10:28:19]   batch 292: 70935/91624 (77.4%) facts=146272 sanitized=1 経過=64秒 残り≈19秒
+[10:28:19]   batch 293: 71163/91624 (77.7%) facts=146773 sanitized=1 経過=64秒 残り≈18秒
+[10:28:20]   batch 294: 71385/91624 (77.9%) facts=147274 sanitized=1 経過=64秒 残り≈18秒
+[10:28:20]   batch 295: 71603/91624 (78.1%) facts=147775 sanitized=1 経過=64秒 残り≈18秒
+[10:28:20]   batch 296: 71855/91624 (78.4%) facts=148277 sanitized=1 経過=64秒 残り≈18秒
+[10:28:20]   batch 297: 72089/91624 (78.7%) facts=148778 sanitized=1 経過=64秒 残り≈17秒
+[10:28:20]   batch 298: 72330/91624 (78.9%) facts=149278 sanitized=1 経過=64秒 残り≈17秒
+[10:28:20]   batch 299: 72591/91624 (79.2%) facts=149780 sanitized=1 経過=65秒 残り≈17秒
+[10:28:20]   batch 300: 72861/91624 (79.5%) facts=150280 sanitized=1 経過=65秒 残り≈17秒
+[10:28:20]   batch 301: 73103/91624 (79.8%) facts=150780 sanitized=1 経過=65秒 残り≈16秒
+[10:28:21]   batch 302: 73370/91624 (80.1%) facts=151280 sanitized=1 経過=65秒 残り≈16秒
+[10:28:21]   batch 303: 73619/91624 (80.3%) facts=151782 sanitized=1 経過=65秒 残り≈16秒
+[10:28:21]   batch 304: 73859/91624 (80.6%) facts=152284 sanitized=1 経過=65秒 残り≈16秒
+[10:28:21]   batch 305: 74118/91624 (80.9%) facts=152785 sanitized=1 経過=65秒 残り≈15秒
+[10:28:21]   batch 306: 74347/91624 (81.1%) facts=153287 sanitized=1 経過=66秒 残り≈15秒
+[10:28:21]   batch 307: 74584/91624 (81.4%) facts=153787 sanitized=1 経過=66秒 残り≈15秒
+[10:28:21]   batch 308: 74813/91624 (81.7%) facts=154287 sanitized=1 経過=66秒 残り≈15秒
+[10:28:22]   batch 309: 75057/91624 (81.9%) facts=154789 sanitized=1 経過=66秒 残り≈15秒
+[10:28:22]   batch 310: 75285/91624 (82.2%) facts=155289 sanitized=1 経過=66秒 残り≈14秒
+[10:28:22]   batch 311: 75507/91624 (82.4%) facts=155790 sanitized=1 経過=66秒 残り≈14秒
+[10:28:22]   batch 312: 75762/91624 (82.7%) facts=156292 sanitized=1 経過=66秒 残り≈14秒
+[10:28:22]   batch 313: 75999/91624 (82.9%) facts=156792 sanitized=1 経過=66秒 残り≈14秒
+[10:28:22]   batch 314: 76261/91624 (83.2%) facts=157294 sanitized=1 経過=67秒 残り≈13秒
+[10:28:22]   batch 315: 76521/91624 (83.5%) facts=157795 sanitized=1 経過=67秒 残り≈13秒
+[10:28:22]   batch 316: 76793/91624 (83.8%) facts=158295 sanitized=1 経過=67秒 残り≈13秒
+[10:28:23]   batch 317: 77073/91624 (84.1%) facts=158797 sanitized=1 経過=67秒 残り≈13秒
+[10:28:23]   batch 318: 77355/91624 (84.4%) facts=159299 sanitized=1 経過=67秒 残り≈12秒
+[10:28:23]   batch 319: 77604/91624 (84.7%) facts=159799 sanitized=1 経過=67秒 残り≈12秒
+[10:28:23]   batch 320: 77893/91624 (85.0%) facts=160299 sanitized=1 経過=67秒 残り≈12秒
+[10:28:23]   batch 321: 78270/91624 (85.4%) facts=160800 sanitized=1 経過=67秒 残り≈12秒
+[10:28:23]   batch 322: 78530/91624 (85.7%) facts=161301 sanitized=1 経過=68秒 残り≈11秒
+[10:28:23]   batch 323: 78788/91624 (86.0%) facts=161803 sanitized=1 経過=68秒 残り≈11秒
+[10:28:23]   batch 324: 79059/91624 (86.3%) facts=162305 sanitized=1 経過=68秒 残り≈11秒
+[10:28:24]   batch 325: 79311/91624 (86.6%) facts=162806 sanitized=1 経過=68秒 残り≈11秒
+[10:28:24]   batch 326: 79571/91624 (86.8%) facts=163307 sanitized=1 経過=68秒 残り≈10秒
+[10:28:24]   batch 327: 79821/91624 (87.1%) facts=163809 sanitized=1 経過=68秒 残り≈10秒
+[10:28:24]   batch 328: 80074/91624 (87.4%) facts=164309 sanitized=1 経過=68秒 残り≈10秒
+[10:28:24]   batch 329: 80336/91624 (87.7%) facts=164809 sanitized=1 経過=68秒 残り≈10秒
+[10:28:24]   batch 330: 80566/91624 (87.9%) facts=165310 sanitized=1 経過=69秒 残り≈9秒
+[10:28:24]   batch 331: 80838/91624 (88.2%) facts=165811 sanitized=1 経過=69秒 残り≈9秒
+[10:28:24]   batch 332: 81098/91624 (88.5%) facts=166311 sanitized=1 経過=69秒 残り≈9秒
+[10:28:25]   batch 333: 81340/91624 (88.8%) facts=166811 sanitized=1 経過=69秒 残り≈9秒
+[10:28:25]   batch 334: 81583/91624 (89.0%) facts=167313 sanitized=1 経過=69秒 残り≈9秒
+[10:28:25]   batch 335: 81853/91624 (89.3%) facts=167814 sanitized=1 経過=69秒 残り≈8秒
+[10:28:25]   batch 336: 82094/91624 (89.6%) facts=168316 sanitized=1 経過=69秒 残り≈8秒
+[10:28:25]   batch 337: 82344/91624 (89.9%) facts=168816 sanitized=1 経過=70秒 残り≈8秒
+[10:28:25]   batch 338: 82601/91624 (90.2%) facts=169316 sanitized=1 経過=70秒 残り≈8秒
+[10:28:25]   batch 339: 82872/91624 (90.4%) facts=169816 sanitized=1 経過=70秒 残り≈7秒
+[10:28:25]   batch 340: 83113/91624 (90.7%) facts=170318 sanitized=1 経過=70秒 残り≈7秒
+[10:28:26]   batch 341: 83387/91624 (91.0%) facts=170820 sanitized=1 経過=70秒 残り≈7秒
+[10:28:26]   batch 342: 83707/91624 (91.4%) facts=171321 sanitized=1 経過=70秒 残り≈7秒
+[10:28:26]   batch 343: 84021/91624 (91.7%) facts=171823 sanitized=1 経過=70秒 残り≈6秒
+[10:28:26]   batch 344: 84363/91624 (92.1%) facts=172325 sanitized=1 経過=70秒 残り≈6秒
+[10:28:26]   batch 345: 84647/91624 (92.4%) facts=172827 sanitized=1 経過=71秒 残り≈6秒
+[10:28:26]   batch 346: 84956/91624 (92.7%) facts=173327 sanitized=1 経過=71秒 残り≈6秒
+[10:28:26]   batch 347: 85250/91624 (93.0%) facts=173829 sanitized=1 経過=71秒 残り≈5秒
+[10:28:27]   batch 348: 85593/91624 (93.4%) facts=174330 sanitized=1 経過=71秒 残り≈5秒
+[10:28:27]   batch 349: 85890/91624 (93.7%) facts=174830 sanitized=1 経過=71秒 残り≈5秒
+[10:28:27]   batch 350: 86173/91624 (94.1%) facts=175332 sanitized=1 経過=71秒 残り≈5秒
+[10:28:27]   batch 351: 86534/91624 (94.4%) facts=175833 sanitized=1 経過=71秒 残り≈4秒
+[10:28:27]   batch 352: 86801/91624 (94.7%) facts=176335 sanitized=1 経過=71秒 残り≈4秒
+[10:28:27]   batch 353: 87082/91624 (95.0%) facts=176835 sanitized=1 経過=72秒 残り≈4秒
+[10:28:27]   batch 354: 87386/91624 (95.4%) facts=177337 sanitized=1 経過=72秒 残り≈3秒
+[10:28:27]   batch 355: 87784/91624 (95.8%) facts=177837 sanitized=1 経過=72秒 残り≈3秒
+[10:28:28]   batch 356: 88141/91624 (96.2%) facts=178338 sanitized=1 経過=72秒 残り≈3秒
+[10:28:28]   batch 357: 88478/91624 (96.6%) facts=178838 sanitized=1 経過=72秒 残り≈3秒
+[10:28:28]   batch 358: 88786/91624 (96.9%) facts=179339 sanitized=1 経過=72秒 残り≈2秒
+[10:28:28]   batch 359: 89175/91624 (97.3%) facts=179839 sanitized=1 経過=72秒 残り≈2秒
+[10:28:28]   batch 360: 89513/91624 (97.7%) facts=180341 sanitized=1 経過=73秒 残り≈2秒
+[10:28:28]   batch 361: 89791/91624 (98.0%) facts=180841 sanitized=1 経過=73秒 残り≈1秒
+[10:28:28]   batch 362: 90157/91624 (98.4%) facts=181343 sanitized=1 経過=73秒 残り≈1秒
+[10:28:28]   batch 363: 90451/91624 (98.7%) facts=181843 sanitized=1 経過=73秒 残り≈1秒
+[10:28:29]   batch 364: 90765/91624 (99.1%) facts=182344 sanitized=1 経過=73秒 残り≈1秒
+[10:28:29]   batch 365: 91128/91624 (99.5%) facts=182845 sanitized=1 経過=73秒 残り≈0秒
+[10:28:29]   batch 366: 91565/91624 (99.9%) facts=183346 sanitized=1 経過=73秒 残り≈0秒
+[10:28:29]   → facts 完了: 183397 件 (sanitized=1) (73.3秒)
+[10:28:29] [SANITIZE] === 異常値サマリ: 1 件 ===
+[10:28:29] [SANITIZE] 列別件数:
+[10:28:29]   operating_profit: 1 件
+[10:28:29] [SANITIZE] ticker別 上位5:
+[10:28:29]   4685: 1 件
+[10:28:29] [SANITIZE] 該当行 詳細:
+[10:28:29]   [1] ticker=4685 fye=2028-03-31 Q=2Q col=operating_profit val=5.4e+303 reason=元値が10^16超 (5.40e+303) cause=巨大値 (指数=304, 単位誤りの疑い)
+[10:28:29] [SANITIZE] === サマリ終了 (1 件) ===
+[10:28:29] [PUSH] 全完了 (73.3秒): companies=2754 periods=91624 disclosures=0 facts=183397 sanitized=1 errors=0
+
+=======================================================
+  SQLite → Supabase push (バッチ版)
+=======================================================
+  DB         : C:\Users\takuy\OneDrive\tdnet-excel-input\decision_db.db
+  batch_size : 500
+
+=======================================================
+  ✅ push 完了
+=======================================================
+  SQLite総行数       : 91624
+  今回対象           : 91624
+  companies upsert   : 2754
+  periods upsert     : 91624
+  disclosures upsert : 0
+  facts push         : 183397
+  値サニタイズ       : 1
+  エラー             : 0
+  quarantine DB      : C:\Users\takuy\OneDrive\tdnet-excel-input\data/quarantine.db
+=======================================================
+
+[Step 3/8] jquants sync... 
+2026-03-04 10:28:29,645 INFO [sync_financials] === sync_financials START ===
+2026-03-04 10:28:29,646 INFO [sync_financials]   mode:       APPLY (�{�Ԕ��f)
+2026-03-04 10:28:29,646 INFO [sync_financials]   scope:      RECENT 30��
+2026-03-04 10:28:29,646 INFO [sync_financials]   sqlite:     C:\Users\takuy\OneDrive\tdnet-excel-input\data\jquants.db
+2026-03-04 10:28:29,646 INFO [sync_financials]   table:      financials
+2026-03-04 10:28:29,646 INFO [sync_financials]   limit:      ������
+2026-03-04 10:28:29,646 INFO [sync_financials]   batch-size: 500
+2026-03-04 10:28:29,648 INFO [sync_financials]   log:        C:\Users\takuy\OneDrive\tdnet-excel-input\logs\sync_financials_apply_recent30d_20260304_102829.log
+2026-03-04 10:28:29,655 INFO [sync_financials] [SQLite] ���f�[�^: 87,157 rows / 3,820 codes
+2026-03-04 10:28:29,655 INFO [sync_financials] [SQLite] �������[�h: fetched_at >= 2026-02-02 10:28:29 (����30��)
+2026-03-04 10:28:30,019 INFO [sync_financials] [SQLite] �d���r����: 72,490 rows
+2026-03-04 10:28:30,026 INFO [sync_financials] [SYNC] quarter ���z: {"1Q": 17819, "2Q": 17771, "3Q": 17832, "4Q": 13, "FY": 19055}
+2026-03-04 10:28:30,026 INFO [sync_financials] [SYNC] �J�n: 72,490 rows �� financials (145 batches �~ 500)
+2026-03-04 10:28:30,232 INFO [sync_financials]   batch 1/145: 500 rows upserted (�݌v 500 / 72,490, 0.2�b)
+2026-03-04 10:28:30,401 INFO [sync_financials]   batch 2/145: 500 rows upserted (�݌v 1,000 / 72,490, 0.4�b)
+2026-03-04 10:28:30,549 INFO [sync_financials]   batch 3/145: 500 rows upserted (�݌v 1,500 / 72,490, 0.5�b)
+2026-03-04 10:28:30,695 INFO [sync_financials]   batch 4/145: 500 rows upserted (�݌v 2,000 / 72,490, 0.7�b)
+2026-03-04 10:28:30,862 INFO [sync_financials]   batch 5/145: 500 rows upserted (�݌v 2,500 / 72,490, 0.8�b)
+2026-03-04 10:28:31,006 INFO [sync_financials]   batch 6/145: 500 rows upserted (�݌v 3,000 / 72,490, 1.0�b)
+2026-03-04 10:28:31,168 INFO [sync_financials]   batch 7/145: 500 rows upserted (�݌v 3,500 / 72,490, 1.1�b)
+2026-03-04 10:28:31,308 INFO [sync_financials]   batch 8/145: 500 rows upserted (�݌v 4,000 / 72,490, 1.3�b)
+2026-03-04 10:28:31,445 INFO [sync_financials]   batch 9/145: 500 rows upserted (�݌v 4,500 / 72,490, 1.4�b)
+2026-03-04 10:28:31,592 INFO [sync_financials]   batch 10/145: 500 rows upserted (�݌v 5,000 / 72,490, 1.6�b)
+2026-03-04 10:28:31,750 INFO [sync_financials]   batch 11/145: 500 rows upserted (�݌v 5,500 / 72,490, 1.7�b)
+2026-03-04 10:28:31,880 INFO [sync_financials]   batch 12/145: 500 rows upserted (�݌v 6,000 / 72,490, 1.9�b)
+2026-03-04 10:28:32,035 INFO [sync_financials]   batch 13/145: 500 rows upserted (�݌v 6,500 / 72,490, 2.0�b)
+2026-03-04 10:28:32,178 INFO [sync_financials]   batch 14/145: 500 rows upserted (�݌v 7,000 / 72,490, 2.2�b)
+2026-03-04 10:28:32,409 INFO [sync_financials]   batch 15/145: 500 rows upserted (�݌v 7,500 / 72,490, 2.4�b)
+2026-03-04 10:28:33,014 INFO [sync_financials]   batch 16/145: 500 rows upserted (�݌v 8,000 / 72,490, 3.0�b)
+2026-03-04 10:28:33,190 INFO [sync_financials]   batch 17/145: 500 rows upserted (�݌v 8,500 / 72,490, 3.2�b)
+2026-03-04 10:28:33,365 INFO [sync_financials]   batch 18/145: 500 rows upserted (�݌v 9,000 / 72,490, 3.3�b)
+2026-03-04 10:28:33,542 INFO [sync_financials]   batch 19/145: 500 rows upserted (�݌v 9,500 / 72,490, 3.5�b)
+2026-03-04 10:28:33,700 INFO [sync_financials]   batch 20/145: 500 rows upserted (�݌v 10,000 / 72,490, 3.7�b)
+2026-03-04 10:28:33,834 INFO [sync_financials]   batch 21/145: 500 rows upserted (�݌v 10,500 / 72,490, 3.8�b)
+2026-03-04 10:28:33,988 INFO [sync_financials]   batch 22/145: 500 rows upserted (�݌v 11,000 / 72,490, 4.0�b)
+2026-03-04 10:28:34,122 INFO [sync_financials]   batch 23/145: 500 rows upserted (�݌v 11,500 / 72,490, 4.1�b)
+2026-03-04 10:28:34,254 INFO [sync_financials]   batch 24/145: 500 rows upserted (�݌v 12,000 / 72,490, 4.2�b)
+2026-03-04 10:28:34,384 INFO [sync_financials]   batch 25/145: 500 rows upserted (�݌v 12,500 / 72,490, 4.4�b)
+2026-03-04 10:28:34,536 INFO [sync_financials]   batch 26/145: 500 rows upserted (�݌v 13,000 / 72,490, 4.5�b)
+2026-03-04 10:28:34,690 INFO [sync_financials]   batch 27/145: 500 rows upserted (�݌v 13,500 / 72,490, 4.7�b)
+2026-03-04 10:28:34,828 INFO [sync_financials]   batch 28/145: 500 rows upserted (�݌v 14,000 / 72,490, 4.8�b)
+2026-03-04 10:28:35,028 INFO [sync_financials]   batch 29/145: 500 rows upserted (�݌v 14,500 / 72,490, 5.0�b)
+2026-03-04 10:28:35,172 INFO [sync_financials]   batch 30/145: 500 rows upserted (�݌v 15,000 / 72,490, 5.1�b)
+2026-03-04 10:28:35,304 INFO [sync_financials]   batch 31/145: 500 rows upserted (�݌v 15,500 / 72,490, 5.3�b)
+2026-03-04 10:28:35,432 INFO [sync_financials]   batch 32/145: 500 rows upserted (�݌v 16,000 / 72,490, 5.4�b)
+2026-03-04 10:28:35,558 INFO [sync_financials]   batch 33/145: 500 rows upserted (�݌v 16,500 / 72,490, 5.5�b)
+2026-03-04 10:28:35,739 INFO [sync_financials]   batch 34/145: 500 rows upserted (�݌v 17,000 / 72,490, 5.7�b)
+2026-03-04 10:28:35,876 INFO [sync_financials]   batch 35/145: 500 rows upserted (�݌v 17,500 / 72,490, 5.9�b)
+2026-03-04 10:28:36,026 INFO [sync_financials]   batch 36/145: 500 rows upserted (�݌v 18,000 / 72,490, 6.0�b)
+2026-03-04 10:28:36,171 INFO [sync_financials]   batch 37/145: 500 rows upserted (�݌v 18,500 / 72,490, 6.1�b)
+2026-03-04 10:28:36,306 INFO [sync_financials]   batch 38/145: 500 rows upserted (�݌v 19,000 / 72,490, 6.3�b)
+2026-03-04 10:28:36,441 INFO [sync_financials]   batch 39/145: 500 rows upserted (�݌v 19,500 / 72,490, 6.4�b)
+2026-03-04 10:28:36,575 INFO [sync_financials]   batch 40/145: 500 rows upserted (�݌v 20,000 / 72,490, 6.5�b)
+2026-03-04 10:28:36,732 INFO [sync_financials]   batch 41/145: 500 rows upserted (�݌v 20,500 / 72,490, 6.7�b)
+2026-03-04 10:28:36,881 INFO [sync_financials]   batch 42/145: 500 rows upserted (�݌v 21,000 / 72,490, 6.9�b)
+2026-03-04 10:28:37,019 INFO [sync_financials]   batch 43/145: 500 rows upserted (�݌v 21,500 / 72,490, 7.0�b)
+2026-03-04 10:28:37,154 INFO [sync_financials]   batch 44/145: 500 rows upserted (�݌v 22,000 / 72,490, 7.1�b)
+2026-03-04 10:28:37,283 INFO [sync_financials]   batch 45/145: 500 rows upserted (�݌v 22,500 / 72,490, 7.3�b)
+2026-03-04 10:28:37,416 INFO [sync_financials]   batch 46/145: 500 rows upserted (�݌v 23,000 / 72,490, 7.4�b)
+2026-03-04 10:28:37,567 INFO [sync_financials]   batch 47/145: 500 rows upserted (�݌v 23,500 / 72,490, 7.5�b)
+2026-03-04 10:28:37,725 INFO [sync_financials]   batch 48/145: 500 rows upserted (�݌v 24,000 / 72,490, 7.7�b)
+2026-03-04 10:28:37,858 INFO [sync_financials]   batch 49/145: 500 rows upserted (�݌v 24,500 / 72,490, 7.8�b)
+2026-03-04 10:28:38,036 INFO [sync_financials]   batch 50/145: 500 rows upserted (�݌v 25,000 / 72,490, 8.0�b)
+2026-03-04 10:28:38,164 INFO [sync_financials]   batch 51/145: 500 rows upserted (�݌v 25,500 / 72,490, 8.1�b)
+2026-03-04 10:28:38,292 INFO [sync_financials]   batch 52/145: 500 rows upserted (�݌v 26,000 / 72,490, 8.3�b)
+2026-03-04 10:28:38,478 INFO [sync_financials]   batch 53/145: 500 rows upserted (�݌v 26,500 / 72,490, 8.5�b)
+2026-03-04 10:28:38,636 INFO [sync_financials]   batch 54/145: 500 rows upserted (�݌v 27,000 / 72,490, 8.6�b)
+2026-03-04 10:28:38,777 INFO [sync_financials]   batch 55/145: 500 rows upserted (�݌v 27,500 / 72,490, 8.8�b)
+2026-03-04 10:28:38,919 INFO [sync_financials]   batch 56/145: 500 rows upserted (�݌v 28,000 / 72,490, 8.9�b)
+2026-03-04 10:28:39,052 INFO [sync_financials]   batch 57/145: 500 rows upserted (�݌v 28,500 / 72,490, 9.0�b)
+2026-03-04 10:28:39,180 INFO [sync_financials]   batch 58/145: 500 rows upserted (�݌v 29,000 / 72,490, 9.2�b)
+2026-03-04 10:28:39,308 INFO [sync_financials]   batch 59/145: 500 rows upserted (�݌v 29,500 / 72,490, 9.3�b)
+2026-03-04 10:28:39,443 INFO [sync_financials]   batch 60/145: 500 rows upserted (�݌v 30,000 / 72,490, 9.4�b)
+2026-03-04 10:28:39,598 INFO [sync_financials]   batch 61/145: 500 rows upserted (�݌v 30,500 / 72,490, 9.6�b)
+2026-03-04 10:28:39,740 INFO [sync_financials]   batch 62/145: 500 rows upserted (�݌v 31,000 / 72,490, 9.7�b)
+2026-03-04 10:28:39,871 INFO [sync_financials]   batch 63/145: 500 rows upserted (�݌v 31,500 / 72,490, 9.8�b)
+2026-03-04 10:28:40,003 INFO [sync_financials]   batch 64/145: 500 rows upserted (�݌v 32,000 / 72,490, 10.0�b)
+2026-03-04 10:28:40,131 INFO [sync_financials]   batch 65/145: 500 rows upserted (�݌v 32,500 / 72,490, 10.1�b)
+2026-03-04 10:28:40,264 INFO [sync_financials]   batch 66/145: 500 rows upserted (�݌v 33,000 / 72,490, 10.2�b)
+2026-03-04 10:28:40,399 INFO [sync_financials]   batch 67/145: 500 rows upserted (�݌v 33,500 / 72,490, 10.4�b)
+2026-03-04 10:28:40,530 INFO [sync_financials]   batch 68/145: 500 rows upserted (�݌v 34,000 / 72,490, 10.5�b)
+2026-03-04 10:28:40,661 INFO [sync_financials]   batch 69/145: 500 rows upserted (�݌v 34,500 / 72,490, 10.6�b)
+2026-03-04 10:28:40,818 INFO [sync_financials]   batch 70/145: 500 rows upserted (�݌v 35,000 / 72,490, 10.8�b)
+2026-03-04 10:28:40,969 INFO [sync_financials]   batch 71/145: 500 rows upserted (�݌v 35,500 / 72,490, 10.9�b)
+2026-03-04 10:28:41,100 INFO [sync_financials]   batch 72/145: 500 rows upserted (�݌v 36,000 / 72,490, 11.1�b)
+2026-03-04 10:28:41,246 INFO [sync_financials]   batch 73/145: 500 rows upserted (�݌v 36,500 / 72,490, 11.2�b)
+2026-03-04 10:28:41,393 INFO [sync_financials]   batch 74/145: 500 rows upserted (�݌v 37,000 / 72,490, 11.4�b)
+2026-03-04 10:28:41,529 INFO [sync_financials]   batch 75/145: 500 rows upserted (�݌v 37,500 / 72,490, 11.5�b)
+2026-03-04 10:28:41,661 INFO [sync_financials]   batch 76/145: 500 rows upserted (�݌v 38,000 / 72,490, 11.6�b)
+2026-03-04 10:28:41,796 INFO [sync_financials]   batch 77/145: 500 rows upserted (�݌v 38,500 / 72,490, 11.8�b)
+2026-03-04 10:28:41,926 INFO [sync_financials]   batch 78/145: 500 rows upserted (�݌v 39,000 / 72,490, 11.9�b)
+2026-03-04 10:28:42,055 INFO [sync_financials]   batch 79/145: 500 rows upserted (�݌v 39,500 / 72,490, 12.0�b)
+2026-03-04 10:28:42,197 INFO [sync_financials]   batch 80/145: 500 rows upserted (�݌v 40,000 / 72,490, 12.2�b)
+2026-03-04 10:28:42,335 INFO [sync_financials]   batch 81/145: 500 rows upserted (�݌v 40,500 / 72,490, 12.3�b)
+2026-03-04 10:28:42,465 INFO [sync_financials]   batch 82/145: 500 rows upserted (�݌v 41,000 / 72,490, 12.4�b)
+2026-03-04 10:28:42,593 INFO [sync_financials]   batch 83/145: 500 rows upserted (�݌v 41,500 / 72,490, 12.6�b)
+2026-03-04 10:28:42,732 INFO [sync_financials]   batch 84/145: 500 rows upserted (�݌v 42,000 / 72,490, 12.7�b)
+2026-03-04 10:28:42,862 INFO [sync_financials]   batch 85/145: 500 rows upserted (�݌v 42,500 / 72,490, 12.8�b)
+2026-03-04 10:28:42,989 INFO [sync_financials]   batch 86/145: 500 rows upserted (�݌v 43,000 / 72,490, 13.0�b)
+2026-03-04 10:28:43,112 INFO [sync_financials]   batch 87/145: 500 rows upserted (�݌v 43,500 / 72,490, 13.1�b)
+2026-03-04 10:28:43,262 INFO [sync_financials]   batch 88/145: 500 rows upserted (�݌v 44,000 / 72,490, 13.2�b)
+2026-03-04 10:28:43,388 INFO [sync_financials]   batch 89/145: 500 rows upserted (�݌v 44,500 / 72,490, 13.4�b)
+2026-03-04 10:28:43,515 INFO [sync_financials]   batch 90/145: 500 rows upserted (�݌v 45,000 / 72,490, 13.5�b)
+2026-03-04 10:28:43,647 INFO [sync_financials]   batch 91/145: 500 rows upserted (�݌v 45,500 / 72,490, 13.6�b)
+2026-03-04 10:28:43,783 INFO [sync_financials]   batch 92/145: 500 rows upserted (�݌v 46,000 / 72,490, 13.8�b)
+2026-03-04 10:28:43,934 INFO [sync_financials]   batch 93/145: 500 rows upserted (�݌v 46,500 / 72,490, 13.9�b)
+2026-03-04 10:28:44,074 INFO [sync_financials]   batch 94/145: 500 rows upserted (�݌v 47,000 / 72,490, 14.0�b)
+2026-03-04 10:28:44,217 INFO [sync_financials]   batch 95/145: 500 rows upserted (�݌v 47,500 / 72,490, 14.2�b)
+2026-03-04 10:28:44,359 INFO [sync_financials]   batch 96/145: 500 rows upserted (�݌v 48,000 / 72,490, 14.3�b)
+2026-03-04 10:28:44,485 INFO [sync_financials]   batch 97/145: 500 rows upserted (�݌v 48,500 / 72,490, 14.5�b)
+2026-03-04 10:28:44,652 INFO [sync_financials]   batch 98/145: 500 rows upserted (�݌v 49,000 / 72,490, 14.6�b)
+2026-03-04 10:28:44,780 INFO [sync_financials]   batch 99/145: 500 rows upserted (�݌v 49,500 / 72,490, 14.8�b)
+2026-03-04 10:28:44,918 INFO [sync_financials]   batch 100/145: 500 rows upserted (�݌v 50,000 / 72,490, 14.9�b)
+2026-03-04 10:28:45,051 INFO [sync_financials]   batch 101/145: 500 rows upserted (�݌v 50,500 / 72,490, 15.0�b)
+2026-03-04 10:28:45,180 INFO [sync_financials]   batch 102/145: 500 rows upserted (�݌v 51,000 / 72,490, 15.2�b)
+2026-03-04 10:28:45,346 INFO [sync_financials]   batch 103/145: 500 rows upserted (�݌v 51,500 / 72,490, 15.3�b)
+2026-03-04 10:28:45,492 INFO [sync_financials]   batch 104/145: 500 rows upserted (�݌v 52,000 / 72,490, 15.5�b)
+2026-03-04 10:28:45,630 INFO [sync_financials]   batch 105/145: 500 rows upserted (�݌v 52,500 / 72,490, 15.6�b)
+2026-03-04 10:28:45,764 INFO [sync_financials]   batch 106/145: 500 rows upserted (�݌v 53,000 / 72,490, 15.7�b)
+2026-03-04 10:28:45,914 INFO [sync_financials]   batch 107/145: 500 rows upserted (�݌v 53,500 / 72,490, 15.9�b)
+2026-03-04 10:28:46,062 INFO [sync_financials]   batch 108/145: 500 rows upserted (�݌v 54,000 / 72,490, 16.0�b)
+2026-03-04 10:28:46,233 INFO [sync_financials]   batch 109/145: 500 rows upserted (�݌v 54,500 / 72,490, 16.2�b)
+2026-03-04 10:28:46,364 INFO [sync_financials]   batch 110/145: 500 rows upserted (�݌v 55,000 / 72,490, 16.3�b)
+2026-03-04 10:28:46,503 INFO [sync_financials]   batch 111/145: 500 rows upserted (�݌v 55,500 / 72,490, 16.5�b)
+2026-03-04 10:28:46,656 INFO [sync_financials]   batch 112/145: 500 rows upserted (�݌v 56,000 / 72,490, 16.6�b)
+2026-03-04 10:28:46,782 INFO [sync_financials]   batch 113/145: 500 rows upserted (�݌v 56,500 / 72,490, 16.8�b)
+2026-03-04 10:28:46,922 INFO [sync_financials]   batch 114/145: 500 rows upserted (�݌v 57,000 / 72,490, 16.9�b)
+2026-03-04 10:28:47,068 INFO [sync_financials]   batch 115/145: 500 rows upserted (�݌v 57,500 / 72,490, 17.0�b)
+2026-03-04 10:28:47,212 INFO [sync_financials]   batch 116/145: 500 rows upserted (�݌v 58,000 / 72,490, 17.2�b)
+2026-03-04 10:28:47,367 INFO [sync_financials]   batch 117/145: 500 rows upserted (�݌v 58,500 / 72,490, 17.3�b)
+2026-03-04 10:28:47,507 INFO [sync_financials]   batch 118/145: 500 rows upserted (�݌v 59,000 / 72,490, 17.5�b)
+2026-03-04 10:28:47,641 INFO [sync_financials]   batch 119/145: 500 rows upserted (�݌v 59,500 / 72,490, 17.6�b)
+2026-03-04 10:28:47,777 INFO [sync_financials]   batch 120/145: 500 rows upserted (�݌v 60,000 / 72,490, 17.8�b)
+2026-03-04 10:28:47,914 INFO [sync_financials]   batch 121/145: 500 rows upserted (�݌v 60,500 / 72,490, 17.9�b)
+2026-03-04 10:28:48,050 INFO [sync_financials]   batch 122/145: 500 rows upserted (�݌v 61,000 / 72,490, 18.0�b)
+2026-03-04 10:28:48,177 INFO [sync_financials]   batch 123/145: 500 rows upserted (�݌v 61,500 / 72,490, 18.2�b)
+2026-03-04 10:28:48,306 INFO [sync_financials]   batch 124/145: 500 rows upserted (�݌v 62,000 / 72,490, 18.3�b)
+2026-03-04 10:28:48,449 INFO [sync_financials]   batch 125/145: 500 rows upserted (�݌v 62,500 / 72,490, 18.4�b)
+2026-03-04 10:28:48,581 INFO [sync_financials]   batch 126/145: 500 rows upserted (�݌v 63,000 / 72,490, 18.6�b)
+2026-03-04 10:28:48,744 INFO [sync_financials]   batch 127/145: 500 rows upserted (�݌v 63,500 / 72,490, 18.7�b)
+2026-03-04 10:28:48,874 INFO [sync_financials]   batch 128/145: 500 rows upserted (�݌v 64,000 / 72,490, 18.8�b)
+2026-03-04 10:28:49,021 INFO [sync_financials]   batch 129/145: 500 rows upserted (�݌v 64,500 / 72,490, 19.0�b)
+2026-03-04 10:28:49,178 INFO [sync_financials]   batch 130/145: 500 rows upserted (�݌v 65,000 / 72,490, 19.2�b)
+2026-03-04 10:28:49,314 INFO [sync_financials]   batch 131/145: 500 rows upserted (�݌v 65,500 / 72,490, 19.3�b)
+2026-03-04 10:28:49,489 INFO [sync_financials]   batch 132/145: 500 rows upserted (�݌v 66,000 / 72,490, 19.5�b)
+2026-03-04 10:28:49,634 INFO [sync_financials]   batch 133/145: 500 rows upserted (�݌v 66,500 / 72,490, 19.6�b)
+2026-03-04 10:28:49,772 INFO [sync_financials]   batch 134/145: 500 rows upserted (�݌v 67,000 / 72,490, 19.7�b)
+2026-03-04 10:28:49,916 INFO [sync_financials]   batch 135/145: 500 rows upserted (�݌v 67,500 / 72,490, 19.9�b)
+2026-03-04 10:28:50,077 INFO [sync_financials]   batch 136/145: 500 rows upserted (�݌v 68,000 / 72,490, 20.1�b)
+2026-03-04 10:28:50,226 INFO [sync_financials]   batch 137/145: 500 rows upserted (�݌v 68,500 / 72,490, 20.2�b)
+2026-03-04 10:28:50,390 INFO [sync_financials]   batch 138/145: 500 rows upserted (�݌v 69,000 / 72,490, 20.4�b)
+2026-03-04 10:28:50,514 INFO [sync_financials]   batch 139/145: 500 rows upserted (�݌v 69,500 / 72,490, 20.5�b)
+2026-03-04 10:28:50,655 INFO [sync_financials]   batch 140/145: 500 rows upserted (�݌v 70,000 / 72,490, 20.6�b)
+2026-03-04 10:28:50,794 INFO [sync_financials]   batch 141/145: 500 rows upserted (�݌v 70,500 / 72,490, 20.8�b)
+2026-03-04 10:28:50,928 INFO [sync_financials]   batch 142/145: 500 rows upserted (�݌v 71,000 / 72,490, 20.9�b)
+2026-03-04 10:28:51,076 INFO [sync_financials]   batch 143/145: 500 rows upserted (�݌v 71,500 / 72,490, 21.0�b)
+2026-03-04 10:28:51,233 INFO [sync_financials]   batch 144/145: 500 rows upserted (�݌v 72,000 / 72,490, 21.2�b)
+2026-03-04 10:28:51,404 INFO [sync_financials]   batch 145/145: 490 rows upserted (�݌v 72,490 / 72,490, 21.4�b)
+2026-03-04 10:28:51,405 INFO [sync_financials] [VERIFY] Supabase ���̌��ؒ�...
+2026-03-04 10:28:51,814 INFO [sync_financials] [VERIFY] public.financials: 72,490 rows
+2026-03-04 10:28:51,814 INFO [sync_financials] 
+============================================================
+  SYNC ����
+  upserted: 72,490 / 72,490
+  errors:   0
+  elapsed:  21.4�b
+============================================================
+2026-03-04 10:28:51,822 INFO [sync_financials] === sync_financials END (log: C:\Users\takuy\OneDrive\tdnet-excel-input\logs\sync_financials_apply_recent30d_20260304_102829.log) ===
+[Step 4/8] KPI sync... 
+C:\Users\takuy\OneDrive\tdnet-excel-input\.venv\Scripts\python.exe: No module named tools.kpi_sync
+[Step 5/8] Generating data.xlsx... 
+[10:28:52] public.financials を取得中...
+[10:29:02]   → 72,490 行取得
+[10:29:02]   → 3,820 tickers
+[10:29:06] [GEN] data.xlsx 生成完了: 72,490 行 -> C:\Users\takuy\OneDrive\data.xlsx
+[10:29:06] [GEN] === 検証サマリ ===
+[10:29:06] [GEN]   financials     : 72,490 行
+[10:29:06] [GEN]   tickers        : 3,820
+[10:29:06] [GEN]   出力行数       : 72,490 行
+[10:29:06] [GEN]   生成日時       : 2026-03-04 10:28:52
+[10:29:06] [GEN]   出力先         : C:\Users\takuy\OneDrive\data.xlsx
+
+==================================================
+  data.xlsx 生成ツール
+  ソース: Supabase public.financials
+==================================================
+
+==================================================
+  ✅ 成功
+==================================================
+  出力ファイル : C:\Users\takuy\OneDrive\data.xlsx
+  データ行数   : 72,490 行
+  ticker数     : 3,820
+  生成日時     : 2026-03-04 10:28:52
+  エラー       : 0
+==================================================
+
+[Step 6/8] data.xlsx stats... 
+  [XLSX] rows(DATA)=72491 
+  [XLSX] delta=+0 (prev=72491, now=72491) 
+  [XLSX] tickers=3821 
+[Step 7/8] Refresh viewer _DATA... 
+[1/3] data.xlsx ��ǂݍ��ݒ�...
+  -> 72,492 rows x 8 cols
+[2/3] �r���[�A Excel ���J���Ă��܂�...
+[ERROR] �r���[�A Excel ���J���܂���: 
+  �t�@�C���� Excel �ŊJ����Ă�������Ă��������B
+  [WARN] refresh_pl_view code=1 
+[Step 8/8] Discord alerts... 
+[INFO] 0 items. No alerts.
+ALERT_DONE sent=0 checked=0 skipped=0 deduped=0
+============================================================ 
+ DONE 2026/03/04 10:29:22.28 
+============================================================ 
