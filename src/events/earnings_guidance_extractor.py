@@ -64,6 +64,16 @@ _EPS_DILUTED_TAGS = {
 }
 _EPS_ALL_TAGS = _EPS_BASIC_TAGS | _EPS_DILUTED_TAGS
 
+# 配当金タグ（EPS と誤認しないよう除外）
+_DIVIDEND_XBRL_TAGS = {
+    "DividendPerShare",
+    "DividendsPerShare",
+    "InterimDividendPerShare",
+    "FinalDividendPerShare",
+    "AnnualDividendPerShare",
+    "TotalDividendPaidPerShare",
+}
+
 # iXBRL / XBRL 拡張子
 _IXBRL_EXTS = ("-ixbrl.htm", ".ixbrl.htm", "-ixbrl.html", ".ixbrl.html", ".ixbrl")
 _XBRL_EXTS = (".xbrl",)
@@ -189,21 +199,19 @@ def _pick_best(candidates: list[dict], is_eps: bool = False) -> dict | None:
             return None
         filtered = fy
 
-    def _score(c: dict) -> int:
-        s = 0
-        if c["period_type"] == "full_year":
-            s += 100
-        elif c["period_type"] == "unknown":
-            s += 10
-        if c["horizon"] == "next_year":
-            s += 50
-        elif c["horizon"] == "current_year":
-            s += 30
-        if c.get("is_consol"):
-            s += 5
-        if c.get("is_basic", True):
-            s += 2
-        return s
+    def _score(c: dict) -> tuple:
+        """スコアをタプルで返す（大きい方が優先）。
+
+        EPS の場合: Basic 優先 + 絶対値が大きい方を優先
+        （配当金 2.0 vs 実EPS 59.41 のような誤採用を防止）
+        """
+        period_s = 100 if c["period_type"] == "full_year" else (10 if c["period_type"] == "unknown" else 0)
+        horizon_s = 50 if c["horizon"] == "next_year" else (30 if c["horizon"] == "current_year" else 0)
+        consol_s = 5 if c.get("is_consol") else 0
+        basic_s = 2 if c.get("is_basic", True) else 0
+        # EPS の場合、絶対値が大きい方が真のEPSである可能性が高い
+        abs_val = abs(c["value"]) if is_eps else 0
+        return (period_s, basic_s, abs_val, horizon_s, consol_s)
 
     filtered.sort(key=_score, reverse=True)
     return filtered[0]
@@ -278,28 +286,71 @@ _EPS_HEADER_KEYWORDS = [
     "1株当たり純利益",
 ]
 _DIVIDEND_KEYWORDS = ["配当", "1株当たり配当金"]
+_EPS_SUSPICIOUS_THRESHOLD = 1000  # text fallback で > 1000 は suspicious
+_MAX_TABLE_DATA_ROWS = 20  # テーブルデータ行の上限
+
+# 配当文脈を示すキーワード
+_DIVIDEND_CONTEXT_RE = re.compile(
+    r"配当|期末配当|中間配当|年間配当|円/株|株主還元"
+)
+
+# テーブルヘッダーらしい単語（売上/利益等）
+_TABLE_HEADER_INDICATORS = re.compile(
+    r"売上|営業利益|経常利益|当期純利益|百万円|千円"
+)
 
 
 def _extract_eps_from_forecast_table(plain_text: str) -> list[dict]:
-    """業績予想テーブルのプレーンテキストから EPS 候補を抽出する。"""
+    """業績予想テーブルのプレーンテキストから EPS 候補を抽出する。
+
+    品質ガード:
+    - 配当文脈の見出しは拒否
+    - テーブル境界検出（空行連続で停止）
+    - データ行は最大 _MAX_TABLE_DATA_ROWS 行
+    - suspicious 値（> 1000）にはフラグ付与
+    """
     lines = plain_text.strip().split("\n")
     header_idx = None
     has_extra_right = False
 
-    # ヘッダー行検索
+    # ヘッダー行検索 —— 配当文脈は拒否
     for i, line in enumerate(lines):
         norm = unicodedata.normalize("NFKC", line)
         for kw in _EPS_HEADER_KEYWORDS:
             nkw = unicodedata.normalize("NFKC", kw)
-            if nkw in norm:
-                header_idx = i
-                eps_pos = norm.find(nkw)
-                after = norm[eps_pos + len(nkw):]
-                for dk in _DIVIDEND_KEYWORDS:
-                    ndk = unicodedata.normalize("NFKC", dk)
-                    if ndk in after:
-                        has_extra_right = True
-                break
+            if nkw not in norm:
+                continue
+
+            # ---- 配当文脈チェック ----
+            # 見出しの前方に「配当」があれば配当段落の可能性が高い
+            eps_pos = norm.find(nkw)
+            before = norm[:eps_pos]
+            if _DIVIDEND_CONTEXT_RE.search(before):
+                continue  # 配当文脈 → スキップ
+
+            # 「1株当たり配当金」と誤認しない: 前後30文字以内に配当キーワード
+            context_window = norm[max(0, eps_pos - 30):eps_pos + len(nkw) + 30]
+            if re.search(r"配当", context_window) and "純利益" not in context_window:
+                continue
+
+            # ---- 見出し行の妥当性: テーブルヘッダーらしいか ----
+            # テーブルヘッダーには「売上」「営業利益」「百万円」等がある
+            is_table_header = bool(_TABLE_HEADER_INDICATORS.search(norm))
+
+            # テーブルヘッダーでない場合は本文中の配当言及の可能性
+            if not is_table_header:
+                # 「利益」も含まれていない → 非テーブル行（本文段落等）
+                if "利益" not in norm and "EPS" not in norm.upper():
+                    continue
+
+            header_idx = i
+            # 右側に配当列があるか確認
+            after = norm[eps_pos + len(nkw):]
+            for dk in _DIVIDEND_KEYWORDS:
+                ndk = unicodedata.normalize("NFKC", dk)
+                if ndk in after:
+                    has_extra_right = True
+            break
         if header_idx is not None:
             break
 
@@ -307,11 +358,29 @@ def _extract_eps_from_forecast_table(plain_text: str) -> list[dict]:
         return []
 
     candidates: list[dict] = []
+    consecutive_empty = 0
+    data_row_count = 0
+
     for i in range(header_idx + 1, len(lines)):
         line = lines[i].strip()
         if not line:
+            consecutive_empty += 1
+            if consecutive_empty >= 2:
+                break  # テーブル終了
             continue
+        consecutive_empty = 0
+
+        # データ行上限
+        data_row_count += 1
+        if data_row_count > _MAX_TABLE_DATA_ROWS:
+            break
+
         norm = unicodedata.normalize("NFKC", line)
+
+        # 配当文脈の行はスキップ
+        if _DIVIDEND_CONTEXT_RE.search(norm) and "純利益" not in norm:
+            continue
+
         period_type = _classify_eps_text_period(norm)
 
         # 数値トークン抽出
@@ -334,6 +403,9 @@ def _extract_eps_from_forecast_table(plain_text: str) -> list[dict]:
         if abs(eps_val) > _EPS_ABSURD_THRESHOLD:
             continue
 
+        # suspicious フラグ
+        is_suspicious = abs(eps_val) > _EPS_SUSPICIOUS_THRESHOLD
+
         candidates.append({
             "metric": "eps",
             "value": eps_val,
@@ -344,6 +416,7 @@ def _extract_eps_from_forecast_table(plain_text: str) -> list[dict]:
             "ctx": "text",
             "tag": "text_eps",
             "source": "text",
+            "suspicious": is_suspicious,
         })
 
     return candidates
@@ -783,9 +856,26 @@ def extract_guidance_from_zip(
     zf.close()
 
     # ---- EPS テキスト fallback ----
-    if plain_text:
+    # XBRL に EPS 候補がある場合はテキストfallback不要
+    has_xbrl_eps = any(
+        c["metric"] == "eps" and c.get("source") in ("xbrl", "ixbrl")
+        for c in all_candidates
+    )
+    if plain_text and not has_xbrl_eps:
         text_eps = _extract_eps_from_forecast_table(plain_text)
-        all_candidates.extend(text_eps)
+        # suspicious 値（> 1000）は除外
+        clean_text_eps = [c for c in text_eps if not c.get("suspicious")]
+        if clean_text_eps:
+            all_candidates.extend(clean_text_eps)
+            logger.info(
+                f"[GUIDANCE] text fallback EPS: {len(clean_text_eps)} candidates "
+                f"(filtered {len(text_eps) - len(clean_text_eps)} suspicious)"
+            )
+        elif text_eps:
+            logger.warning(
+                f"[GUIDANCE] text fallback EPS: all {len(text_eps)} candidates "
+                f"were suspicious (> {_EPS_SUSPICIOUS_THRESHOLD}), dropped"
+            )
 
     # ---- ベスト候補選択 ----
     if all_candidates:

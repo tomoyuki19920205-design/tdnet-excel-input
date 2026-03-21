@@ -974,3 +974,46 @@ class TestEpsTextExtraction:
         # EPS=150.00 であるべき。配当金=40 を採用してはいけない
         assert fy[0]["value"] == 150.0
 
+    def test_eps_dividend_paragraph_not_matched(self):
+        """本文中の配当段落で「1株当たり」がヒットしないこと"""
+        from src.events.earnings_guidance_extractor import _extract_eps_from_forecast_table
+        text = (
+            "これにより、当期の期末配当につきましては、１株当たり42円と"
+            "させていただきたいと存じます。この結果、1株当たりの年間配当金は"
+            "84円となる予定です。なお、次期の配当金につきましては、中間配当を"
+            "１株当たり43円、期末配当を１株当たり43円とし\n"
+            "\n"
+            "２．会計基準の選択に関する基本的な考え方\n"
+        )
+        cands = _extract_eps_from_forecast_table(text)
+        assert len(cands) == 0, f"配当段落から候補が出てはいけない: {cands}"
+
+    def test_eps_suspicious_value_flagged(self):
+        """EPS > 1000 は suspicious フラグ付き"""
+        from src.events.earnings_guidance_extractor import _extract_eps_from_forecast_table
+        text = (
+            "売上高 営業利益 当期純利益 １株当たり当期純利益\n"
+            "百万円 百万円 百万円 円\n"
+            "通期 65,000 3,000 2,000 6500.00\n"
+        )
+        cands = _extract_eps_from_forecast_table(text)
+        fy = [c for c in cands if c["period_type"] == "full_year"]
+        assert len(fy) >= 1
+        assert fy[0]["suspicious"] is True
+
+    def test_eps_table_boundary_stops_at_double_blank(self):
+        """空行2連続でテーブル終了 → 後続の無関係数値を拾わない"""
+        from src.events.earnings_guidance_extractor import _extract_eps_from_forecast_table
+        text = (
+            "売上高 営業利益 当期純利益 １株当たり当期純利益\n"
+            "百万円 百万円 百万円 円\n"
+            "通期 10,000 500 300 85.50\n"
+            "\n"
+            "\n"
+            "（注）上記は参考値であり確定値ではありません 9999.99\n"
+        )
+        cands = _extract_eps_from_forecast_table(text)
+        # 9999.99 を拾っていないこと
+        assert all(c["value"] != 9999.99 for c in cands), "テーブル後の数値を拾ってはいけない"
+        assert len(cands) >= 1
+        assert cands[0]["value"] == 85.5
