@@ -439,6 +439,11 @@ _OUTLOOK_STOP_RE = re.compile(
     r"コーポレートガバナンス|その他の経営|会計基準の選択)",
 )
 
+# 述語パターン（短文品質判定用）
+_PREDICATE_RE = re.compile(
+    r"(おります|います|ます|です|ございます|なります|であり|見込|想定|予想|計画|方針)"
+)
+
 # 段落 fallback 用: 見通し語（任意語）
 _OUTLOOK_KEYWORD_RE = re.compile(
     r"(見込[むみ]|想定|予想|継続|回復|拡大|需要|価格|原材料|為替|"
@@ -489,7 +494,7 @@ def _extract_outlook_text(html_text: str) -> str:
     extracted: list[str] = []
     for i in range(start_idx + 1, min(start_idx + 60, len(lines))):
         line = lines[i].strip()
-        if _OUTLOOK_STOP_RE.search(line):
+        if _is_stop_heading(line):
             break
         extracted.append(line)
 
@@ -520,10 +525,31 @@ def _filter_future_paragraphs(text: str) -> str:
     return "\n".join(future_paras).strip()
 
 
+def _is_stop_heading(line: str) -> bool:
+    """打ち切り語の文脈化: 見出し行・節タイトルならTrue、本文中なら継続。
+
+    見出し行の特徴:
+    - 短い行（60文字以下）
+    - 数字接頭辞付き（「３．」「(5)」等）
+    - 句点なし
+    """
+    if not _OUTLOOK_STOP_RE.search(line):
+        return False
+    # 短い行 = 見出し行として扱う
+    if len(line) <= 60 and "。" not in line:
+        return True
+    # 数字接頭辞付き = 節タイトル
+    if re.match(r'^[\d０-９（(]+[．.）)\s]', line):
+        return True
+    # 長い行で句点あり = 本文の一部 → 継続
+    return False
+
+
 def _is_outlook_quality_ok(text: str) -> bool:
     """見通しテキストの品質ガード。
 
-    見通し語が複数あれば句点なし単行でも採用可。
+    見通し語が複数 or future強語+述語あれば句点なし単行でも採用可。
+    名詞断片だけの短文は不採用。
     """
     if len(text) < 15:
         return False
@@ -534,11 +560,19 @@ def _is_outlook_quality_ok(text: str) -> bool:
     has_period = "。" in text
     meaningful_lines = [l.strip() for l in text.split("\n") if l.strip()]
     has_multi_lines = len(meaningful_lines) >= 2
-    # 見通し語が複数あれば句点なし単行でも採用
     outlook_kw_count = len(_OUTLOOK_KEYWORD_RE.findall(text))
-    if not has_period and not has_multi_lines and outlook_kw_count < 2:
-        return False
-    return True
+    # 見通し語2つ以上 → OK
+    if outlook_kw_count >= 2:
+        return True
+    # 句点あり or 複数行 → OK
+    if has_period or has_multi_lines:
+        return True
+    # future強語+述語ありの短文 → OK
+    has_strong = bool(_OUTLOOK_STRONG_KEYWORD_RE.search(text))
+    has_predicate = bool(_PREDICATE_RE.search(text))
+    if has_strong and has_predicate:
+        return True
+    return False
 
 
 # CSS/HTMLゴミ段落・財務諸表フラグメントの除外パターン
@@ -564,7 +598,12 @@ def _extract_outlook_paragraphs_fallback(text: str) -> str:
         para = para.strip()
         if not para or len(para) < 30:
             continue
-        if _OUTLOOK_STOP_RE.search(para):
+        # 段落全体が打ち切り見出し → 除外（本文中なら継続）
+        first_line = para.split('\n')[0].strip()
+        if _is_stop_heading(first_line):
+            continue
+        # 段落に打ち切り語があり未来表現がない → 除外（配当/株主還元段落等）
+        if _OUTLOOK_STOP_RE.search(para) and not _FUTURE_EXPRESSION_RE.search(para):
             continue
         # CSS/HTMLゴミ段落を除外
         if _CSS_NOISE_RE.search(para):
@@ -593,10 +632,28 @@ _RULED_LINE_RE = re.compile(r"^[━─═＝\-=]{3,}")
 _HEADING_LINE_RE = re.compile(
     r"^[\d０-９]*[．.\s]*(?:今後の見通し|見通し|業績予想)"
 )
+# summary 除外: 過去実績文・財務諸表名・HTMLエンティティ
+_SUMMARY_SKIP_RE = re.compile(
+    r"(&#\d+;|&amp;|&nbsp;|&lt;|&gt;"
+    r"|貸借対照表|損益計算書|包括利益計算書|株主資本等変動計算書"
+    r"|キャッシュ・フロー計算書|四半期連結財務諸表"
+    r"|添付資料の目次|連結注記表|個別注記表"
+    r"|font-family|font-size|text-align|div#|page-break"
+    r"|\.root\s*\{|width:\s*\d)"
+)
+_PAST_TENSE_RE = re.compile(
+    r"(となりました|でありました|いたしました|推移しました"
+    r"|結果となりました|計上しました|増加しました|減少しました"
+    r"|に至りました|記録しました|実施しました)"
+)
 
 
 def make_fallback_summary(outlook_text: str, max_len: int = 200) -> str:
-    """見通しテキストをノイズ除去して短縮する。"""
+    """見通しテキストをノイズ除去して短縮する。
+
+    過去実績文・財務諸表名・HTMLエンティティを除外し、
+    未来表現を含む文を優先して要約する。
+    """
     lines = outlook_text.strip().split("\n")
     clean: list[str] = []
     for line in lines:
@@ -609,10 +666,44 @@ def make_fallback_summary(outlook_text: str, max_len: int = 200) -> str:
             continue
         if _RULED_LINE_RE.match(line):
             continue
+        # HTMLエンティティ・財務諸表名・CSSを含む行は除外
+        if _SUMMARY_SKIP_RE.search(line):
+            continue
         clean.append(line)
 
-    result = "\n".join(clean).strip()
-    result = re.sub(r"[ \u3000]{2,}", " ", result)
+    if not clean:
+        return ""
+
+    # 文単位で分割して未来表現を含む文を優先
+    text = "\n".join(clean).strip()
+    text = re.sub(r"[ \u3000]{2,}", " ", text)
+
+    # 句点で分割して文ごとに判定
+    sentences = re.split(r"(?<=。)", text)
+    future_sents: list[str] = []
+    other_sents: list[str] = []
+    for s in sentences:
+        s = s.strip()
+        if not s:
+            continue
+        if _PAST_TENSE_RE.search(s) and not _FUTURE_EXPRESSION_RE.search(s):
+            continue  # 過去実績のみの文はスキップ
+        if _FUTURE_EXPRESSION_RE.search(s):
+            future_sents.append(s)
+        else:
+            other_sents.append(s)
+
+    # 未来文を優先、足りなければ他の文を追加
+    result_sents = future_sents[:3]
+    remaining = max_len - sum(len(s) for s in result_sents)
+    for s in other_sents:
+        if remaining <= 0:
+            break
+        if len(s) <= remaining:
+            result_sents.append(s)
+            remaining -= len(s)
+
+    result = "".join(result_sents).strip()
     if len(result) > max_len:
         result = result[:max_len - 1] + "…"
     return result

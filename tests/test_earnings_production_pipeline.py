@@ -1163,8 +1163,8 @@ class TestOutlookEnhancement:
         from src.events.earnings_guidance_extractor import _extract_outlook_paragraphs_fallback
         text = (
             "配当予想に関する説明\n\n"
-            "当社は株主還元を経営の重要課題と位置づけ、"
-            "安定配当の継続を方針としております。\n\n"
+            "当社は安定配当を経営の重要課題と位置づけ、"
+            "１株当たり50円の配当を維持する方針としております。\n\n"
         )
         result = _extract_outlook_paragraphs_fallback(text)
         assert result == ""
@@ -1217,3 +1217,125 @@ class TestOutlookEnhancement:
         text = _extract_outlook_text(html)
         assert "回復" in text
         assert "当期末配当" not in text
+
+
+# ============================================================
+# 見通し抽出精度改善テスト（Round 2）
+# ============================================================
+class TestOutlookRefinement:
+    """打ち切り語文脈化・短文救済・verbose圧縮のテスト"""
+
+    # --- A. 打ち切り語文脈化 ---
+
+    def test_stop_heading_short_line(self):
+        """短い打ち切り語行（節タイトル）は打ち切る"""
+        from src.events.earnings_guidance_extractor import _is_stop_heading
+        assert _is_stop_heading("配当の状況") is True
+        assert _is_stop_heading("３．配当予想に関する説明") is True
+        assert _is_stop_heading("（5）継続企業の前提に関する重要事象等") is True
+
+    def test_stop_heading_body_text_continues(self):
+        """本文中に配当語を含む長い文は打ち切らない"""
+        from src.events.earnings_guidance_extractor import _is_stop_heading
+        line = (
+            "当社は安定配当の方針に基づき、業績の改善と需要の拡大を"
+            "見込んで来期は増配を計画しております。"
+        )
+        assert _is_stop_heading(line) is False
+
+    def test_outlook_continues_through_body_dividend(self):
+        """見通し本文中に「配当」を含む文があっても打ち切らない"""
+        from src.events.earnings_guidance_extractor import _extract_outlook_text
+        html = (
+            "今後の見通し\n"
+            "当社グループは来期の売上高について拡大を見込んでおります。"
+            "なお、配当につきましては安定配当を継続する方針であり、"
+            "業績の改善を踏まえて増配を予想しております。\n"
+            "２．配当の状況\n"
+            "１株当たり配当金は80円\n"
+        )
+        text = _extract_outlook_text(html)
+        assert "拡大" in text
+        assert "増配" in text  # 本文中の配当言及は残る
+        assert "１株当たり" not in text  # 節タイトル後は含まない
+
+    # --- B. 短文品質ガード ---
+
+    def test_quality_short_future_with_predicate(self):
+        """短文でもfuture強語+述語ありなら品質OK"""
+        from src.events.earnings_guidance_extractor import _is_outlook_quality_ok
+        assert _is_outlook_quality_ok("来期は為替の影響を見込んでおります") is True
+
+    def test_quality_noun_fragment_rejected(self):
+        """名詞断片だけは品質NG"""
+        from src.events.earnings_guidance_extractor import _is_outlook_quality_ok
+        # 15文字以上で強語+見通し語2つ → OK
+        assert _is_outlook_quality_ok("来期の需要拡大と為替影響による想定") is True
+        # 述語なし・見通し語不足・短すぎ → NG
+        assert _is_outlook_quality_ok("来期売上高目標") is False
+
+    # --- C. verbose 圧縮 (make_fallback_summary) ---
+
+    def test_summary_skips_past_tense(self):
+        """過去実績文は summary から除外される"""
+        from src.events.earnings_guidance_extractor import make_fallback_summary
+        text = (
+            "当期の売上高は100億円で前期比10%の増収となりました。"
+            "営業利益は15億円で前期比5%の増益となりました。"
+            "来期は需要拡大を見込み、売上高120億円を計画しております。"
+        )
+        summary = make_fallback_summary(text)
+        assert "増収となりました" not in summary
+        assert "増益となりました" not in summary
+        assert "来期" in summary
+
+    def test_summary_skips_html_entities(self):
+        """HTMLエンティティを含む行は summary から除外"""
+        from src.events.earnings_guidance_extractor import make_fallback_summary
+        text = (
+            "&#160;\n"
+            "（２）連結貸借対照表\n"
+            "&#160;　(単位：千円)\n"
+            "来期は需要拡大を見込み改善を想定しております。\n"
+        )
+        summary = make_fallback_summary(text)
+        assert "&#160" not in summary
+        assert "貸借対照表" not in summary
+        assert "需要拡大" in summary
+
+    def test_summary_prioritizes_future(self):
+        """未来表現を含む文が summary で優先される"""
+        from src.events.earnings_guidance_extractor import make_fallback_summary
+        text = (
+            "当期は原材料コスト上昇の影響を受けました。"
+            "来期の計画については、需要拡大とコスト改善を見込んでおります。"
+            "併せて新製品の投入を予定しております。"
+        )
+        summary = make_fallback_summary(text, max_len=100)
+        assert "来期" in summary
+        assert "見込" in summary
+
+    def test_summary_not_too_long(self):
+        """summary は max_len を超えない"""
+        from src.events.earnings_guidance_extractor import make_fallback_summary
+        text = (
+            "来期は" + "売上高の拡大を見込み、" * 20 + "改善を想定しております。"
+        )
+        summary = make_fallback_summary(text, max_len=200)
+        assert len(summary) <= 200
+
+    # --- D. EPS 不変確認 ---
+
+    def test_eps_extraction_unchanged(self):
+        """EPS 抽出ロジックに影響がないこと"""
+        from src.events.earnings_guidance_extractor import _extract_eps_from_forecast_table
+        text = (
+            "売上高 営業利益 経常利益 当期純利益 １株当たり当期純利益\n"
+            "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭\n"
+            "通期 14,700 1.3 588 6.7 664 7.8 475 2.6 237.98\n"
+        )
+        cands = _extract_eps_from_forecast_table(text)
+        fy = [c for c in cands if c["period_type"] == "full_year"]
+        assert len(fy) >= 1
+        assert fy[0]["value"] == 237.98
+
