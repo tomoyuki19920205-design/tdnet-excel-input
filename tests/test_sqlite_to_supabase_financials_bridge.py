@@ -167,7 +167,7 @@ def _make_sqlite_row(**kwargs):
         "created_at": "2026-03-01",
         "updated_at": "2026-03-01",
         "source_doc_id": "test",
-        "source_url": None,
+        "source_url": "https://webapi.yanoshin.jp/rd.php?test",
         "zip_hash": None,
         "parser_version": "v2",
     }
@@ -186,10 +186,10 @@ class TestBuildFinancialsFromTdnet:
         assert result[0]["ticker"] == "1832"
         assert result[0]["period"] == "2026-03-31"
         assert result[0]["quarter"] == "3Q"
-        # 円建てそのまま (再スケーリングなし)
-        assert result[0]["sales"] == 49_169_000_000
-        assert result[0]["gross_profit"] == 4_880_000_000
-        assert result[0]["operating_profit"] == 2_799_000_000
+        # 正規化レイヤー経由で百万円化 (source_urlあり=tdnet由来, 円→百万円)
+        assert result[0]["sales"] == 49169
+        assert result[0]["gross_profit"] == 4880
+        assert result[0]["operating_profit"] == 2799
         assert result[0]["source"] == "tdnet"
 
     def test_6623_row_built(self):
@@ -203,7 +203,8 @@ class TestBuildFinancialsFromTdnet:
         result = _build_financials_rows_from_tdnet(rows)
         assert len(result) == 1
         assert result[0]["ticker"] == "6623"
-        assert result[0]["sales"] == 92_756_000_000
+        # 正規化レイヤー経由で百万円化
+        assert result[0]["sales"] == 92756
 
     def test_4Q_becomes_FY(self):
         """4Q は FY に変換される"""
@@ -224,7 +225,7 @@ class TestBuildFinancialsFromTdnet:
         rows = [_make_sqlite_row(sales=100_000_000.0, gross_profit=None)]
         result = _build_financials_rows_from_tdnet(rows)
         assert len(result) == 1
-        assert result[0]["sales"] == 100_000_000
+        assert result[0]["sales"] == 100  # 100_000_000円 → 100百万円
         assert result[0]["gross_profit"] is None
 
 

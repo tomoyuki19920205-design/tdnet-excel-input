@@ -132,7 +132,7 @@ class TestPipelineRunFailures:
             serving_error=RuntimeError("View error"),
             skip_notify=True,
         )
-        assert result["steps"]["serving"] == "warning"
+        assert result["steps"]["rebuild"] == "warning"
         assert result["overall"] == "partial_success"
 
 

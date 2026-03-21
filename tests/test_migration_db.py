@@ -13,13 +13,21 @@ from src.migration.migration_db import MigrationDB
 
 @pytest.fixture
 def db():
-    """テスト用一時DBを作成"""
+    """テスト用一時DBを作成
+
+    persist_policy 依存:
+      insert_log() / quarantine_record() は should_persist_intermediates() ガード付き。
+      テスト環境ではデフォルト OFF のため、明示的に ON にする必要がある。
+    """
+    from src.persist_policy import init_persist_policy, reset_persist_policy
+    init_persist_policy(cli_flag=True)
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     _db = MigrationDB(path)
     yield _db
     _db.close()
     os.unlink(path)
+    reset_persist_policy()
 
 
 class TestTableCreation:

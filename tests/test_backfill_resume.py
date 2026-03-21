@@ -33,7 +33,8 @@ def _make_filings(n: int, **overrides) -> list[FilingInfo]:
 
 
 class TestResumeCandidates:
-    def test_done_excluded_from_resume(self, tmp_path):
+    def test_done_included_in_resume(self, tmp_path):
+        """done = segment抽出完了/upsert待ち → resume候補に含まれる"""
         store = BackfillStateStore(str(tmp_path / "s.db"))
         filings = _make_filings(3)
         store.register_filings(filings)
@@ -41,7 +42,8 @@ class TestResumeCandidates:
 
         candidates = store.get_resume_candidates(limit=100)
         fids = [c["filing_id"] for c in candidates]
-        assert "fid_000" not in fids
+        # done はまだ upsert されていないため resume 対象
+        assert "fid_000" in fids
         assert "fid_001" in fids
         assert "fid_002" in fids
         store.close()

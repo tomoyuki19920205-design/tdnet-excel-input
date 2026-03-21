@@ -40,7 +40,6 @@ def _find_db() -> str:
     for p in [
         Path(_PROJECT_ROOT) / "decision_db.db",
         Path(r"C:\Users\takuy\OneDrive\tdnet-excel-input\decision_db.db"),
-        Path(r"C:\Users\takuy\.gemini\antigravity\playground\tdnet-excel-input\decision_db.db"),
     ]:
         if p.exists():
             return str(p)

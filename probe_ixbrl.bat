@@ -4,7 +4,7 @@ echo ========================================
 echo   iXBRL Probe ツール
 echo ========================================
 echo.
-cd /d C:\Users\takuy\.gemini\antigravity\playground\tdnet-excel-input
+cd /d C:\Users\takuy\OneDrive\tdnet-excel-input
 .\.venv\Scripts\python.exe tools\ixbrl_probe.py %1
 echo.
 echo ========================================

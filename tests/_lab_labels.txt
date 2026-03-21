@@ -1,0 +1,13 @@
+File: XBRLData/Attachment/tse-acedjpfr-25900-2026-01-20-01-2026-03-04-lab.xml
+Total segment labels: 10
+
+label_DomesticBeverageBusinessReportableSegmentsMember: 国内飲料事業
+label_DomesticBeverageBusinessReportableSegmentsMember_2: 国内飲料事業、報告セグメント [メンバー]
+label_InternationalBeverageBusinessReportableSegmentsMember: 海外飲料事業
+label_InternationalBeverageBusinessReportableSegmentsMember_2: 海外飲料事業、報告セグメント [メンバー]
+label_PharmaceuticalRelatedBusinessReportableSegmentsMember: 医薬品関連事業
+label_PharmaceuticalRelatedBusinessReportableSegmentsMember_2: 医薬品関連事業、報告セグメント [メンバー]
+label_FoodBusinessReportableSegmentsMember: 食品事業
+label_FoodBusinessReportableSegmentsMember_2: 食品事業、報告セグメント [メンバー]
+label_DyDoPharmaReportableSegmentsMember: 希少疾病用医薬品事業
+label_DyDoPharmaReportableSegmentsMember_2: 希少疾病用医薬品事業、報告セグメント [メンバー]

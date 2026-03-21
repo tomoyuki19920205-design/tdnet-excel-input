@@ -1,0 +1,13 @@
+2026-03-19 20:07:46,138 INFO [sync_financials] === sync_financials START ===
+2026-03-19 20:07:46,138 INFO [sync_financials]   mode:       APPLY (本番反映)
+2026-03-19 20:07:46,138 INFO [sync_financials]   scope:      RECENT 7日
+2026-03-19 20:07:46,139 INFO [sync_financials]   sqlite:     C:\Users\takuy\OneDrive\tdnet-excel-input\data\jquants.db
+2026-03-19 20:07:46,139 INFO [sync_financials]   table:      financials
+2026-03-19 20:07:46,139 INFO [sync_financials]   limit:      無制限
+2026-03-19 20:07:46,139 INFO [sync_financials]   batch-size: 500
+2026-03-19 20:07:46,139 INFO [sync_financials]   log:        C:\Users\takuy\OneDrive\tdnet-excel-input\logs\sync_financials_apply_recent7d_20260319_200746.log
+2026-03-19 20:07:46,215 INFO [sync_financials] [SQLite] 生データ: 87,157 rows / 3,820 codes
+2026-03-19 20:07:46,215 INFO [sync_financials] [SQLite] 差分モード: fetched_at >= 2026-03-12 20:07:46 (直近7日)
+2026-03-19 20:07:46,478 INFO [sync_financials] [SQLite] 重複排除後: 0 rows
+2026-03-19 20:07:46,478 WARNING [sync_financials] [SYNC] 0 件。同期対象がありません。
+2026-03-19 20:07:46,478 INFO [sync_financials] === sync_financials END (log: C:\Users\takuy\OneDrive\tdnet-excel-input\logs\sync_financials_apply_recent7d_20260319_200746.log) ===

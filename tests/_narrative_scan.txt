@@ -1,0 +1,45 @@
+﻿ZIP: 081220260304575305.zip
+   214,915 XBRLData/Attachment/0101010-acbs01-tse-acedjpfr-25900-2026-01-20-01-2026-03-04-ixbrl.htm
+    59,380 XBRLData/Attachment/0102010-acpl01-tse-acedjpfr-25900-2026-01-20-01-2026-03-04-ixbrl.htm
+    26,325 XBRLData/Attachment/0102020-acci01-tse-acedjpfr-25900-2026-01-20-01-2026-03-04-ixbrl.htm
+   160,523 XBRLData/Attachment/0103010-acss01-tse-acedjpfr-25900-2026-01-20-01-2026-03-04-ixbrl.htm
+    99,092 XBRLData/Attachment/0104010-accf01-tse-acedjpfr-25900-2026-01-20-01-2026-03-04-ixbrl.htm
+   192,349 XBRLData/Attachment/0105010-acsg01-tse-acedjpfr-25900-2026-01-20-01-2026-03-04-ixbrl.htm
+   116,187 XBRLData/Attachment/0201010-anbs01-tse-acedjpfr-25900-2026-01-20-01-2026-03-04-ixbrl.htm
+    60,458 XBRLData/Attachment/0202010-anpl01-tse-acedjpfr-25900-2026-01-20-01-2026-03-04-ixbrl.htm
+   224,595 XBRLData/Attachment/0203010-anss01-tse-acedjpfr-25900-2026-01-20-01-2026-03-04-ixbrl.htm
+       991 XBRLData/Attachment/index.txt
+     1,272 XBRLData/Attachment/manifest.xml
+  1,126,464 XBRLData/Attachment/qualitative.htm
+   118,481 XBRLData/Attachment/tse-acedjpfr-25900-2026-01-20-01-2026-03-04-cal.xml
+   228,934 XBRLData/Attachment/tse-acedjpfr-25900-2026-01-20-01-2026-03-04-def.xml
+    17,861 XBRLData/Attachment/tse-acedjpfr-25900-2026-01-20-01-2026-03-04-lab-en.xml
+    18,033 XBRLData/Attachment/tse-acedjpfr-25900-2026-01-20-01-2026-03-04-lab.xml
+   237,533 XBRLData/Attachment/tse-acedjpfr-25900-2026-01-20-01-2026-03-04-pre.xml
+    10,575 XBRLData/Attachment/tse-acedjpfr-25900-2026-01-20-01-2026-03-04.xsd
+   154,869 XBRLData/Summary/tse-acedjpsm-25900-20260304325900-def.xml
+   225,043 XBRLData/Summary/tse-acedjpsm-25900-20260304325900-ixbrl.htm
+     1,810 XBRLData/Summary/tse-acedjpsm-25900-20260304325900.xsd
+
+MATCH: XBRLData/Summary/tse-acedjpsm-25900-20260304325900-ixbrl.htm (216,441 bytes) keywords: ['邨悟霧謌千ｸｾ']
+  snippet: 邨悟霧謌千ｸｾ・茨ｼ・｡ｨ遉ｺ縺ｯ蟇ｾ蜑肴悄蠅玲ｸ帷紫・可ﾂ螢ｲ荳企ｫ伜霧讌ｭ蛻ｩ逶顔ｵ悟ｸｸ蛻ｩ逶願ｦｪ莨夂､ｾ譬ｪ荳ｻ縺ｫ蟶ｰ螻槭☆繧句ｽ捺悄邏泌茜逶環逋ｾ荳・・・・卆荳・・・・卆荳・・・・卆荳・・・・026蟷ｴ1譛域悄241,2361.74,163笆ｳ13.11,467笆ｳ51.5笆ｳ30,322・・025蟷ｴ1譛域悄237,18911.24,78928.33,023笆ｳ2.93,804笆ｳ...
+
+MATCH: XBRLData/Attachment/qualitative.htm (1,068,368 bytes) keywords: ['邨悟霧謌千ｸｾ', '縺薙・繧医≧縺ｪ迺ｰ蠅・ｸ・, '縺薙・邨先棡']
+  snippet: 邨悟霧謌千ｸｾ遲峨・讎よｳ・窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ
+
+
+2
+
+
+
+
+・・・牙ｽ捺悄縺ｮ邨悟霧謌千ｸｾ縺ｮ讎よｳ・窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ
+
+
+2
+
+
+
+
+・・・牙ｽ捺悄縺ｮ雋｡謾ｿ迥ｶ諷九・讎よｳ・窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ窶ｦ...
+

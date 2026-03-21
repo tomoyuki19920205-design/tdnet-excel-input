@@ -87,7 +87,7 @@ ALL_PROFIT_TAGS = _PROFIT_TAGS | _IFRS_PROFIT_TAGS
 # ============================================================
 # パターン1: 標準 suffix (ReportableSegmentsMember 等)
 _SEGMENT_MEMBER_RE = re.compile(
-    r"(?:tse-\w+-\d+\w?)"       # prefix (tse-acedjpfr-25900, tse-qcediffr-72030 等)
+    r"(?:tse-\w+-\d+0?)"       # prefix (tse-acedjpfr-25900, tse-qcediffr-72030 等)
     r"(\w+?)"                   # segment member name
     r"(?:ReportableSegments?Member|OperatingSegments?Member"
     r"|BusinessSegments?Member|OtherSegments?Member)",

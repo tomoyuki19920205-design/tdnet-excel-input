@@ -1,0 +1,7 @@
+[2026/03/17  8:02:01.72] Starting process 
+[08:02:01] [db] config: write_key_type=service_role read_key_type=service_role
+[08:02:03] [pipeline_run] started: process (id=223, trigger=scheduler)
+[08:02:03] [filings_process] Step 1: SQLite ¨ Supabase push
+[08:02:04] [PUSH] SQLite‘s”: 91727, ¡‰ñ‘ÎÛ: 91727 Œ
+[08:02:04] [Phase 1/4] companies ˆêŠ‡ upsert...
+^C

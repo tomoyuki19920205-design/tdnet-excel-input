@@ -4,7 +4,7 @@ echo ========================================
 echo   TDnet決算自動入力システム 起動中...
 echo ========================================
 echo.
-cd /d C:\Users\takuy\.gemini\antigravity\playground\tdnet-excel-input
+cd /d C:\Users\takuy\OneDrive\tdnet-excel-input
 .\.venv\Scripts\python.exe src\main.py
 echo.
 echo ========================================

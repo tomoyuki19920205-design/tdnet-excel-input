@@ -1,0 +1,8 @@
+sales_cur=241236000000
+sales_pri=237189000000
+op_cur=4163000000
+op_pri=4789000000
+source=xbrl
+seg: 国内飲料事業 sales_cur=142532 profit_cur=-2284
+seg: 海外飲料事業 sales_cur=65341 profit_cur=7547
+seg: 食品事業 sales_cur=19562 profit_cur=487

@@ -1,0 +1,73 @@
+[2026-03-03 23:43:46] [INFO] [SCAN] PDF files found: 78
+[2026-03-03 23:48:15] [INFO] [RESUME] 既に処理済み: 0件
+[2026-03-03 23:48:15] [INFO] [SCAN] PDF files found: 78
+[2026-03-03 23:48:17] [INFO] [QUARANTINE] 5461 2026-03-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:48:19] [INFO] [QUARANTINE] 6855 2026-03-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:48:20] [INFO] [QUARANTINE] 4062 2026-03-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:48:20] [INFO] [PROGRESS] 10 processed
+[2026-03-03 23:48:20] [INFO] [LIMIT] max-items=10 reached
+[2026-03-03 23:48:46] [INFO] [SCAN] PDF files found: 78
+[2026-03-03 23:48:47] [INFO] [QUARANTINE] 5461 2026-03-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:48:49] [INFO] [QUARANTINE] 6855 2026-03-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:48:49] [INFO] [QUARANTINE] 4062 2026-03-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:48:50] [INFO] [PROGRESS] 10 processed
+[2026-03-03 23:48:51] [INFO] [QUARANTINE] 5401 2026-03-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:48:52] [INFO] [QUARANTINE] 2288 2026-03-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:49:00] [INFO] [QUARANTINE] 7093 2025-12-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:49:01] [INFO] [OK] 9253 2026-02-28 ?Q: 6 segs
+[2026-03-03 23:49:01] [INFO] [PROGRESS] 20 processed
+[2026-03-03 23:49:02] [INFO] [QUARANTINE] 2995 2026-06-30: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:49:04] [INFO] [QUARANTINE] ７７４３ 2026-03-31: segment_table_found_but_no_rows_extracted
+[2026-03-03 23:49:06] [INFO] [PROGRESS] 30 processed
+[2026-03-03 23:49:08] [INFO] [OK] 5698 unknown ?Q: 3 segs
+[2026-03-03 23:49:10] [INFO] [QUARANTINE] 4011 2025-12-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:49:11] [INFO] [QUARANTINE] 4750 2026-04-30: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:49:11] [INFO] [PROGRESS] 40 processed
+[2026-03-03 23:51:25] [INFO] [RESUME] 既に処理済み: 78件
+[2026-03-03 23:51:25] [INFO] [SCAN] PDF files found: 78
+[2026-03-03 23:51:26] [INFO] [SCAN] PDF files found: 78
+[2026-03-03 23:51:27] [INFO] [QUARANTINE] 5461 2026-03-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:51:29] [INFO] [QUARANTINE] 6855 2026-03-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:51:30] [INFO] [QUARANTINE] 4062 2026-03-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:51:30] [INFO] [PROGRESS] 10 processed
+[2026-03-03 23:51:31] [INFO] [QUARANTINE] 5401 2026-03-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:51:32] [INFO] [QUARANTINE] 2288 2026-03-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:51:38] [INFO] [QUARANTINE] 7093 2025-12-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:51:39] [INFO] [OK] 9253 2026-02-28 ?Q: 6 segs
+[2026-03-03 23:51:39] [INFO] [PROGRESS] 20 processed
+[2026-03-03 23:51:40] [INFO] [QUARANTINE] 2995 2026-06-30: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:51:41] [INFO] [QUARANTINE] ７７４３ 2026-03-31: segment_table_found_but_no_rows_extracted
+[2026-03-03 23:51:43] [INFO] [PROGRESS] 30 processed
+[2026-03-03 23:51:44] [INFO] [OK] 5698 unknown ?Q: 3 segs
+[2026-03-03 23:51:46] [INFO] [QUARANTINE] 4011 2025-12-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:51:47] [INFO] [QUARANTINE] 4750 2026-04-30: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:51:47] [INFO] [PROGRESS] 40 processed
+[2026-03-03 23:57:21] [INFO] [SCAN] PDF files found: 78
+[2026-03-03 23:57:22] [INFO] [QUARANTINE] 5461 2026-03-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:57:25] [INFO] [QUARANTINE] 6855 2026-03-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:57:26] [INFO] [QUARANTINE] 4062 2026-03-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:57:26] [INFO] [PROGRESS] 10 processed
+[2026-03-03 23:57:27] [INFO] [QUARANTINE] 5401 2026-03-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:57:28] [INFO] [QUARANTINE] 2288 2026-03-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:57:35] [INFO] [QUARANTINE] 7093 2025-12-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:57:37] [INFO] [OK] 9253 2026-02-28 ?Q: 6 segs
+[2026-03-03 23:57:37] [INFO] [PROGRESS] 20 processed
+[2026-03-03 23:57:37] [INFO] [QUARANTINE] 2995 2026-06-30: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:57:38] [INFO] [QUARANTINE] ７７４３ 2026-03-31: segment_table_found_but_no_rows_extracted
+[2026-03-03 23:57:41] [INFO] [PROGRESS] 30 processed
+[2026-03-03 23:57:42] [INFO] [OK] 5698 unknown ?Q: 3 segs
+[2026-03-03 23:57:44] [INFO] [QUARANTINE] 4011 2025-12-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:57:45] [INFO] [QUARANTINE] 4750 2026-04-30: segment_table_found_but_no_sales_profit_columns
+[2026-03-03 23:57:45] [INFO] [PROGRESS] 40 processed
+[2026-03-04 00:03:17] [INFO] [SCAN] PDF files found: 78
+[2026-03-04 00:03:20] [INFO] [QUARANTINE] 6855 2026-03-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-04 00:03:21] [INFO] [PROGRESS] 10 processed
+[2026-03-04 00:03:23] [INFO] [QUARANTINE] 2288 2026-03-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-04 00:03:29] [INFO] [QUARANTINE] 7093 2025-12-31: segment_table_found_but_no_sales_profit_columns
+[2026-03-04 00:03:30] [INFO] [OK] 9253 2026-02-28 ?Q: 6 segs
+[2026-03-04 00:03:30] [INFO] [PROGRESS] 20 processed
+[2026-03-04 00:03:31] [INFO] [OK] 2995 2026-06-30 ?Q: 27 segs
+[2026-03-04 00:03:32] [INFO] [QUARANTINE] ７７４３ 2026-03-31: segment_table_found_but_no_rows_extracted
+[2026-03-04 00:03:34] [INFO] [PROGRESS] 30 processed
+[2026-03-04 00:03:36] [INFO] [OK] 5698 unknown ?Q: 3 segs
+[2026-03-04 00:03:38] [INFO] [PROGRESS] 40 processed

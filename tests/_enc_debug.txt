@@ -1,0 +1,9 @@
+File: XBRLData/Attachment/qualitative.htm
+Size: 1126464
+First 20 bytes hex: efbbbf3c3f786d6c2076657273696f6e3d22312e
+BOM check: True
+meta charset: b'UTF-8'
+cp932[200:400]: UTF-8" />
+<meta http-equiv="X-UA-Compatible" content="IE=8" 
+utf8[200:400]: UTF-8" />
+<meta http-equiv="X-UA-Compatible" content="IE=8" 

@@ -424,6 +424,12 @@ def main():
     """エントリーポイント"""
     global logger
 
+    # ── playground ガード ──
+    if "playground" in os.getcwd().lower():
+        raise RuntimeError(
+            "playground から実行されました。OneDrive 側から実行してください。"
+        )
+
     # 設定読み込み
     config_path = None
     if len(sys.argv) > 1:

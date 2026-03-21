@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 
 import openpyxl
@@ -142,6 +143,10 @@ class TestEndToEnd:
             os.unlink(excel_path)
             os.unlink(db_path)
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Windows: SQLite temp file locking causes PermissionError on cleanup",
+    )
     def test_log_entries_stored(self):
         """ログエントリがDBに保存される"""
         # 150行超過をトリガー

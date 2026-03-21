@@ -1,0 +1,30 @@
+2026-03-19 19:12:56,223 INFO [sync_orders] === sync_orders START ===
+2026-03-19 19:12:56,223 INFO [sync_orders]   mode:   APPLY
+2026-03-19 19:12:56,223 INFO [sync_orders]   sqlite: C:\Users\takuy\OneDrive\tdnet-excel-input\data\decision_db.db
+2026-03-19 19:12:56,223 INFO [sync_orders]   log:    C:\Users\takuy\OneDrive\tdnet-excel-input\logs\sync_orders_apply_20260319_191256.log
+2026-03-19 19:12:56,228 INFO [sync_orders] [SQLite] order_metrics: 71 rows
+2026-03-19 19:12:56,228 INFO [sync_orders] [SYNC] per-metric: {'order_backlog': 29, 'orders_received': 32, 'carried_forward_construction': 10}
+2026-03-19 19:12:56,229 INFO [sync_orders] [SYNC] 開始: 71 rows → order_kpis
+2026-03-19 19:13:00,539 INFO [sync_orders]   [15/71] 4.3s | ins=3 skip=12 err=0
+2026-03-19 19:13:01,450 INFO [sync_orders]   [20/71] 5.2s | ins=8 skip=12 err=0
+2026-03-19 19:13:02,327 INFO [sync_orders]   [25/71] 6.1s | ins=13 skip=12 err=0
+2026-03-19 19:13:03,225 INFO [sync_orders]   [30/71] 7.0s | ins=18 skip=12 err=0
+2026-03-19 19:13:04,094 INFO [sync_orders]   [35/71] 7.9s | ins=23 skip=12 err=0
+2026-03-19 19:13:05,033 INFO [sync_orders]   [40/71] 8.8s | ins=28 skip=12 err=0
+2026-03-19 19:13:06,056 INFO [sync_orders]   [45/71] 9.8s | ins=33 skip=12 err=0
+2026-03-19 19:13:06,993 INFO [sync_orders]   [50/71] 10.8s | ins=38 skip=12 err=0
+2026-03-19 19:13:07,931 INFO [sync_orders]   [55/71] 11.7s | ins=43 skip=12 err=0
+2026-03-19 19:13:08,817 INFO [sync_orders]   [60/71] 12.6s | ins=48 skip=12 err=0
+2026-03-19 19:13:09,712 INFO [sync_orders]   [65/71] 13.5s | ins=53 skip=12 err=0
+2026-03-19 19:13:10,636 INFO [sync_orders]   [70/71] 14.4s | ins=58 skip=12 err=0
+2026-03-19 19:13:10,796 INFO [sync_orders]   [71/71] 14.6s | ins=59 skip=12 err=0
+2026-03-19 19:13:10,956 INFO [sync_orders] [VERIFY] order_kpis: 319 total rows in Supabase
+2026-03-19 19:13:10,956 INFO [sync_orders] 
+============================================================
+  SYNC 完了
+  inserted:        59
+  skipped_existing: 12
+  errors:          0
+  elapsed:         14.6秒
+============================================================
+2026-03-19 19:13:10,958 INFO [sync_orders] === sync_orders END (log: C:\Users\takuy\OneDrive\tdnet-excel-input\logs\sync_orders_apply_20260319_191256.log) ===

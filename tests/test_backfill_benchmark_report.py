@@ -192,9 +192,18 @@ class TestComparisonTable:
 class TestMetricsSummaryStep5:
     def test_quarantine_rate_in_summary(self):
         from lib.backfill.metrics import BackfillMetrics
-        m = BackfillMetrics()
-        m.completed_filings = 10
-        m.quarantined_count = 2
+        from lib.backfill.worker import FilingResult
+        m = BackfillMetrics(total_filings=10)
+        # record_result で ok_count / quarantined_count を積む
+        for i in range(8):
+            m.record_result(FilingResult(
+                filing_id=f"ok_{i}", status="ok", via="xbrl",
+                segment_records=[{"s": 1}], metrics={},
+            ))
+        for i in range(2):
+            m.record_result(FilingResult(
+                filing_id=f"q_{i}", status="quarantined", metrics={},
+            ))
         d = m.summary_dict()
         assert "quarantine_rate" in d
         assert d["quarantine_rate"] == "20.0%"

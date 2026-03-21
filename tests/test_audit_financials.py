@@ -113,8 +113,8 @@ class TestNormalizeTicker:
         assert normalize_ticker("6750") == "6750"
 
     def test_non_standard_preserved(self):
-        """130A0 は5桁だが数字のみではないのでそのまま"""
-        assert normalize_ticker("130A0") == "130A0"
+        """130A0 は5桁アルファ付きコード → 末尾0除去で130Aに正規化"""
+        assert normalize_ticker("130A0") == "130A"
 
     def test_5digit_not_ending_zero(self):
         """5桁だが末尾が0でない場合はそのまま"""
@@ -142,7 +142,8 @@ class TestTickerToLocalCode:
         assert _ticker_to_local_code("67500") == "67500"
 
     def test_non_standard(self):
-        assert _ticker_to_local_code("130A") == "130A"
+        # alpha ticker も末尾0付加で5桁化
+        assert _ticker_to_local_code("130A") == "130A0"
 
 
 # ============================================================

@@ -1,0 +1,27 @@
+2026-03-18 08:47:18,018 INFO [extract_per_share] === extract_per_share DRY-RUN ===
+2026-03-18 08:47:18,018 INFO [extract_per_share]   db: C:\Users\takuy\OneDrive\tdnet-excel-input\data\jquants.db
+2026-03-18 08:47:18,018 INFO [extract_per_share]   limit: 20
+2026-03-18 08:47:18,065 INFO [extract_per_share] [SCHEMA] per_share_data テーブルを作成しました
+2026-03-18 08:47:18,345 INFO [extract_per_share] [RAW] raw_json 付き: 20 行
+2026-03-18 08:47:18,346 INFO [extract_per_share] [DEDUP] 重複排除後: 14 レコード
+2026-03-18 08:47:18,346 INFO [extract_per_share] 
+============================================================
+  DRY-RUN: UPSERT はスキップ
+  対象: 14 レコード → per_share_data
+============================================================
+  本番反映するには --apply を付けて再実行してください
+============================================================
+2026-03-18 08:47:18,346 INFO [extract_per_share]   サンプル 1: ('1301', '2021-03-31', 'FY') EPS=None BPS=None 配当=None 株式数=None
+2026-03-18 08:47:18,346 INFO [extract_per_share]   サンプル 2: ('1301', '2022-03-31', '1Q') EPS=None BPS=None 配当=None 株式数=None
+2026-03-18 08:47:18,346 INFO [extract_per_share]   サンプル 3: ('1301', '2022-03-31', '2Q') EPS=None BPS=None 配当=None 株式数=None
+2026-03-18 08:47:18,348 INFO [extract_per_share]   サンプル 4: ('1301', '2022-03-31', '3Q') EPS=None BPS=None 配当=None 株式数=None
+2026-03-18 08:47:18,348 INFO [extract_per_share]   サンプル 5: ('1301', '2022-03-31', 'FY') EPS=None BPS=None 配当=None 株式数=None
+2026-03-18 08:47:18,348 INFO [extract_per_share] 
+============================================================
+2026-03-18 08:47:18,348 INFO [extract_per_share]   完了
+2026-03-18 08:47:18,348 INFO [extract_per_share]   raw行数     : 20
+2026-03-18 08:47:18,349 INFO [extract_per_share]   抽出成功    : 20
+2026-03-18 08:47:18,349 INFO [extract_per_share]   UPSERT      : 0
+2026-03-18 08:47:18,349 INFO [extract_per_share]   スキップ    : 0
+2026-03-18 08:47:18,349 INFO [extract_per_share]   エラー      : 0
+2026-03-18 08:47:18,349 INFO [extract_per_share] ============================================================

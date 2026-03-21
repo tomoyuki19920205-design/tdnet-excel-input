@@ -722,6 +722,48 @@ def run_ingest(
             f"(tanshin={len(target_items)}) {skip_str}".rstrip()
         )
 
+        # ── イベント検知パイプライン統合 ──
+        # items(全取得文書)をevent_pipelineに渡す。
+        # 失敗してもingest全体は成功扱い。
+        try:
+            from src.events.common_models import DocumentMeta
+            from src.events.event_pipeline import process_documents
+
+            event_docs = [
+                DocumentMeta(
+                    doc_id=item.disclosure_id,
+                    ticker=item.ticker,
+                    company_name=item.company_name,
+                    title=item.title,
+                    disclosure_datetime=item.published_at,
+                    doc_url=item.doc_url,
+                )
+                for item in items  # 全文書（決算短信+予想修正+その他）
+            ]
+
+            webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "") if not dry_run else ""
+            event_result = process_documents(
+                docs=event_docs,
+                db_path=decision_db_path,
+                dry_run=dry_run,
+                webhook_url=webhook_url,
+            )
+            summary["event_pipeline"] = {
+                "processed": event_result.processed,
+                "detected": event_result.detected,
+                "saved": event_result.saved,
+                "notified": event_result.notified,
+                "errors": event_result.errors,
+            }
+            logger.info(
+                f"[INGEST] event_pipeline: detected={event_result.detected} "
+                f"saved={event_result.saved} notified={event_result.notified} "
+                f"errors={event_result.errors}"
+            )
+        except Exception as e:
+            logger.error(f"[INGEST] event_pipeline failed (non-fatal): {e}", exc_info=True)
+            summary["event_pipeline"] = {"error": str(e)}
+
         return {"total": len(results), "results": results, "summary": summary}
     finally:
         decision_db.close()

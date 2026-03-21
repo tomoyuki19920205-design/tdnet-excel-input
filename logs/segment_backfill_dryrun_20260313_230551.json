@@ -1,0 +1,192 @@
+{
+  "timestamp": "20260313_230551",
+  "date_range": "2026-03-06~2026-03-13",
+  "only_earnings_summary": true,
+  "exclude_corrections": true,
+  "total_pre_selector": 193,
+  "accepted_count": 172,
+  "excluded_count": 21,
+  "excluded_reasons": {
+    "excluded_correction": 13,
+    "excluded_non_earnings_summary": 4,
+    "excluded_presentation": 4
+  },
+  "accepted_samples": [
+    {
+      "ticker": "3816",
+      "disclosure_date": "2026-03-06",
+      "title": "2026年7月期 第2四半期（中間期）決算短信〔日本基準〕（連結）",
+      "reason": "included_earnings_summary"
+    },
+    {
+      "ticker": "8917",
+      "disclosure_date": "2026-03-06",
+      "title": "令和８年10月期　第１四半期決算短信〔日本基準〕（連結）",
+      "reason": "included_earnings_summary"
+    },
+    {
+      "ticker": "3733",
+      "disclosure_date": "2026-03-06",
+      "title": "2026年10月期第1四半期決算短信〔日本基準〕（連結）",
+      "reason": "included_earnings_summary"
+    },
+    {
+      "ticker": "3854",
+      "disclosure_date": "2026-03-06",
+      "title": "2026年７月期　第２四半期（中間期）決算短信〔日本基準〕（連結）",
+      "reason": "included_earnings_summary"
+    },
+    {
+      "ticker": "1873",
+      "disclosure_date": "2026-03-06",
+      "title": "2026年４月期第３四半期決算短信〔日本基準〕(連結)",
+      "reason": "included_earnings_summary"
+    },
+    {
+      "ticker": "2353",
+      "disclosure_date": "2026-03-06",
+      "title": "2026年７月期第２四半期（中間期）決算短信〔日本基準〕(連結)",
+      "reason": "included_earnings_summary"
+    },
+    {
+      "ticker": "2438",
+      "disclosure_date": "2026-03-06",
+      "title": "2026年４月期第３四半期決算短信〔日本基準〕(連結)",
+      "reason": "included_earnings_summary"
+    },
+    {
+      "ticker": "6040",
+      "disclosure_date": "2026-03-06",
+      "title": "2026年7月期第2四半期 決算短信[日本基準](連結）",
+      "reason": "included_earnings_summary"
+    },
+    {
+      "ticker": "6267",
+      "disclosure_date": "2026-03-06",
+      "title": "2026年７月期  第２四半期（中間期）決算短信〔日本基準〕(連結)",
+      "reason": "included_earnings_summary"
+    },
+    {
+      "ticker": "2910",
+      "disclosure_date": "2026-03-06",
+      "title": "2026年４月期 第３四半期決算短信〔日本基準〕（連結）",
+      "reason": "included_earnings_summary"
+    }
+  ],
+  "excluded_samples": {
+    "excluded_correction": [
+      {
+        "ticker": "4331",
+        "disclosure_date": "2026-03-06",
+        "title": "(訂正・数値データ訂正） 「2025年12月期 決算短信〔日本基準〕（連結）」の訂正に関するお知らせ",
+        "reason": "excluded_correction"
+      },
+      {
+        "ticker": "319A0",
+        "disclosure_date": "2026-03-06",
+        "title": "(訂正・数値データ訂正) 「2025年12月期 決算短信〔日本基準〕(連結)」の一部訂正に関するお知らせ",
+        "reason": "excluded_correction"
+      },
+      {
+        "ticker": "481A0",
+        "disclosure_date": "2026-03-06",
+        "title": "（訂正）2025年12月期 決算短信〔日本基準〕（非連結）の一部訂正について",
+        "reason": "excluded_correction"
+      },
+      {
+        "ticker": "4151",
+        "disclosure_date": "2026-03-09",
+        "title": "(訂正・数値データ訂正)「2025年12月期 決算短信〔IFRS〕（連結）」の一部訂正について",
+        "reason": "excluded_correction"
+      },
+      {
+        "ticker": "4151",
+        "disclosure_date": "2026-03-09",
+        "title": "（再訂正）「決算短信補足資料 -2025年12月期 -」の一部訂正について",
+        "reason": "excluded_correction"
+      },
+      {
+        "ticker": "7865",
+        "disclosure_date": "2026-03-10",
+        "title": "(訂正・数値データ訂正)「2026年１月期決算短信〔日本基準〕（非連結）」 の一部訂正について",
+        "reason": "excluded_correction"
+      },
+      {
+        "ticker": "8955",
+        "disclosure_date": "2026-03-10",
+        "title": "（訂正・数値データ訂正）「2025年12月期 決算短信（ＲＥＩＴ）」の一部訂正に関するお知らせ",
+        "reason": "excluded_correction"
+      },
+      {
+        "ticker": "6265",
+        "disclosure_date": "2026-03-10",
+        "title": "（訂正）「2024年12月期　決算短信〔日本基準〕（連結）」の一部訂正について",
+        "reason": "excluded_correction"
+      },
+      {
+        "ticker": "6265",
+        "disclosure_date": "2026-03-10",
+        "title": "（訂正）「2025年12月期　決算短信〔日本基準〕（連結）」の一部訂正について",
+        "reason": "excluded_correction"
+      },
+      {
+        "ticker": "6870",
+        "disclosure_date": "2026-03-11",
+        "title": "（訂正・数値データ訂正）「2025 年 12 月期 決算短信〔日本基準〕（連結）」の一部訂正について",
+        "reason": "excluded_correction"
+      }
+    ],
+    "excluded_non_earnings_summary": [
+      {
+        "ticker": "4811",
+        "disclosure_date": "2026-03-09",
+        "title": "「2025年12月期 通期決算説明会」質疑応答集および書き起こし公開",
+        "reason": "excluded_non_earnings_summary"
+      },
+      {
+        "ticker": "4892",
+        "disclosure_date": "2026-03-11",
+        "title": "2025年12月期 通期決算に関する質疑応答集",
+        "reason": "excluded_non_earnings_summary"
+      },
+      {
+        "ticker": "446A0",
+        "disclosure_date": "2026-03-13",
+        "title": "2026年１月期通期決算説明会資料",
+        "reason": "excluded_non_earnings_summary"
+      },
+      {
+        "ticker": "5031",
+        "disclosure_date": "2026-03-13",
+        "title": "よくある質問と回答（2026年1月期通期決算）",
+        "reason": "excluded_non_earnings_summary"
+      }
+    ],
+    "excluded_presentation": [
+      {
+        "ticker": "6696",
+        "disclosure_date": "2026-03-12",
+        "title": "2026年１月期 通期決算説明資料",
+        "reason": "excluded_presentation"
+      },
+      {
+        "ticker": "7674",
+        "disclosure_date": "2026-03-13",
+        "title": "2026年１月期通期　決算説明資料",
+        "reason": "excluded_presentation"
+      },
+      {
+        "ticker": "4175",
+        "disclosure_date": "2026-03-13",
+        "title": "2026年1月期 通期 決算説明資料(事業計画及び成長可能性に関する事項)",
+        "reason": "excluded_presentation"
+      },
+      {
+        "ticker": "2163",
+        "disclosure_date": "2026-03-13",
+        "title": "2026年1月期　決算短信補足説明資料",
+        "reason": "excluded_presentation"
+      }
+    ]
+  }
+}

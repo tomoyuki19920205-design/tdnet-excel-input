@@ -1,0 +1,15 @@
+2026-03-18 09:03:38,830 INFO [extract_per_share] === extract_per_share APPLY ===
+2026-03-18 09:03:38,830 INFO [extract_per_share]   db: C:\Users\takuy\OneDrive\tdnet-excel-input\data\jquants.db
+2026-03-18 09:03:38,830 INFO [extract_per_share]   limit: 無制限
+2026-03-18 09:03:39,157 INFO [extract_per_share] [RAW] raw_json 付き: 87,157 行
+2026-03-18 09:03:40,257 INFO [extract_per_share] [DEDUP] 重複排除後: 72,445 レコード
+2026-03-18 09:03:41,109 INFO [extract_per_share] [UPSERT] 72,445 レコードを per_share_data に書き込み
+2026-03-18 09:03:41,165 INFO [extract_per_share] 
+============================================================
+2026-03-18 09:03:41,165 INFO [extract_per_share]   完了
+2026-03-18 09:03:41,166 INFO [extract_per_share]   raw行数     : 87,157
+2026-03-18 09:03:41,166 INFO [extract_per_share]   抽出成功    : 87,157
+2026-03-18 09:03:41,166 INFO [extract_per_share]   UPSERT      : 72,445
+2026-03-18 09:03:41,166 INFO [extract_per_share]   スキップ    : 0
+2026-03-18 09:03:41,166 INFO [extract_per_share]   エラー      : 0
+2026-03-18 09:03:41,166 INFO [extract_per_share] ============================================================

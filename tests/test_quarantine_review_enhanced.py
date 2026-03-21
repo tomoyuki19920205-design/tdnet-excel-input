@@ -101,6 +101,9 @@ class TestBuildColumnDiagnosis:
         class FakeColResult:
             column_roles = ["sales", "unknown"]
             role_score_breakdown = [{"sales": 0.9}, {"unknown": 0.5}]
+            best_sales_col = 0
+            best_profit_col = None
+            profit_role = ""
         cr = FakeColResult()
         diag = _build_column_diagnosis(cr, ["売上高", "不明列"], [["A", "500"]], {"sales": 0.3})
         assert diag["reconstructed_headers"] == ["売上高", "不明列"]
@@ -110,7 +113,10 @@ class TestBuildColumnDiagnosis:
     def test_empty(self):
         class EmptyResult:
             column_roles = None
-            role_score_breakdown = None
+            role_score_breakdown = []
+            best_sales_col = None
+            best_profit_col = None
+            profit_role = ""
         diag = _build_column_diagnosis(EmptyResult(), [], [], None)
         assert diag["column_roles"] == []
         assert diag["taxonomy_scores"] == []

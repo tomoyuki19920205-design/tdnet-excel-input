@@ -30,11 +30,20 @@ from src.extraction.extracted_facts_sheets import (
 
 @pytest.fixture
 def db():
-    """テスト用インメモリDB"""
+    """テスト用インメモリDB
+
+    persist_policy 依存:
+      insert_facts() は should_persist_intermediates() ガード付き。
+      テスト環境ではデフォルト OFF のため、明示的に ON にする必要がある。
+    """
+    from src.persist_policy import init_persist_policy, reset_persist_policy
+    init_persist_policy(cli_flag=True)
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     ensure_tables(conn)
-    return conn
+    yield conn
+    conn.close()
+    reset_persist_policy()
 
 
 def _add_doc(conn, ticker, pubdate, title, doc_type, file_type="html"):

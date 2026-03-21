@@ -88,6 +88,8 @@ class FakeFiling:
     doc_url: str = ""
     xbrl_url: str = ""
     listing_source: str = "tdnet_html"
+    company_name: str = "テスト企業"
+    published_at: str = "2026-03-11 15:00"
 
 
 class FakeProvider:

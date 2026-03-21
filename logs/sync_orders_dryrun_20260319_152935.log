@@ -1,0 +1,12 @@
+2026-03-19 15:29:35,213 INFO [sync_orders] === sync_orders START ===
+2026-03-19 15:29:35,213 INFO [sync_orders]   mode:   DRY-RUN
+2026-03-19 15:29:35,213 INFO [sync_orders]   sqlite: C:\Users\takuy\OneDrive\tdnet-excel-input\data\decision_db.db
+2026-03-19 15:29:35,213 INFO [sync_orders]   log:    C:\Users\takuy\OneDrive\tdnet-excel-input\logs\sync_orders_dryrun_20260319_152935.log
+2026-03-19 15:29:35,217 INFO [sync_orders] [SQLite] order_metrics: 12 rows
+2026-03-19 15:29:35,217 INFO [sync_orders] [SYNC] per-metric: {'order_backlog': 4, 'orders_received': 6, 'carried_forward_construction': 2}
+2026-03-19 15:29:35,218 INFO [sync_orders] 
+============================================================
+  DRY-RUN: 12 rows → order_kpis
+  本番反映するには --apply を付けて再実行
+============================================================
+2026-03-19 15:29:35,218 INFO [sync_orders] === sync_orders END (log: C:\Users\takuy\OneDrive\tdnet-excel-input\logs\sync_orders_dryrun_20260319_152935.log) ===

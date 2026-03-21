@@ -1,0 +1,24 @@
+﻿SPECIAL(ordinary_segment): member='arking' readable='arking' normalized='arking' val=8779
+SPECIAL(ordinary_segment): member='kiing' readable='kiing' normalized='kiing' val=4915
+SPECIAL(ordinary_segment): member='hemePark' readable='heme Park' normalized='heme Park' val=4256
+SPECIAL(ordinary_segment): member='arking' readable='arking' normalized='arking' val=8800
+SPECIAL(ordinary_segment): member='kiing' readable='kiing' normalized='kiing' val=4955
+SPECIAL(ordinary_segment): member='hemePark' readable='heme Park' normalized='heme Park' val=4272
+SPECIAL(ordinary_segment): member='arking' readable='arking' normalized='arking' val=2152
+SPECIAL(ordinary_segment): member='kiing' readable='kiing' normalized='kiing' val=1083
+SPECIAL(ordinary_segment): member='hemePark' readable='heme Park' normalized='heme Park' val=1101
+SPECIAL(ordinary_segment): member='Other' readable='Other' normalized='Other' val=460
+SPECIAL(ordinary_segment): member='Other' readable='Other' normalized='Other' val=482
+SPECIAL(ordinary_segment): member='Other' readable='Other' normalized='Other' val=125
+SPECIAL(ordinary_segment): member='arking' readable='arking' normalized='arking' val=9355
+SPECIAL(ordinary_segment): member='kiing' readable='kiing' normalized='kiing' val=5448
+SPECIAL(ordinary_segment): member='hemePark' readable='heme Park' normalized='heme Park' val=4596
+SPECIAL(ordinary_segment): member='arking' readable='arking' normalized='arking' val=9370
+SPECIAL(ordinary_segment): member='kiing' readable='kiing' normalized='kiing' val=5450
+SPECIAL(ordinary_segment): member='hemePark' readable='heme Park' normalized='heme Park' val=4612
+SPECIAL(ordinary_segment): member='arking' readable='arking' normalized='arking' val=2404
+SPECIAL(ordinary_segment): member='kiing' readable='kiing' normalized='kiing' val=1025
+SPECIAL(ordinary_segment): member='hemePark' readable='heme Park' normalized='heme Park' val=1232
+SPECIAL(ordinary_segment): member='Other' readable='Other' normalized='Other' val=509
+SPECIAL(ordinary_segment): member='Other' readable='Other' normalized='Other' val=533
+SPECIAL(ordinary_segment): member='Other' readable='Other' normalized='Other' val=102

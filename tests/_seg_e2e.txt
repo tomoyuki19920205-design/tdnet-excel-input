@@ -1,0 +1,10 @@
+﻿--- 081220260223566997.zip ---
+螢ｲ荳・YOY +31.3%縲縲蝟ｶ讌ｭ蛻ｩ逶・YOY +139.3%
+繧ｻ繧ｰ繝｡繝ｳ繝茨ｼ・
+繝ｻondominiums Business For Residence・壼｣ｲ荳・YOY +72.2% / 蝟ｶ讌ｭ蛻ｩ逶・YOY +456.2%
+繝ｻondominiums Business For Asset Management・壼｣ｲ荳・YOY +31.7% / 蝟ｶ讌ｭ蛻ｩ逶・YOY +1393.8%
+繝ｻuilding Maintenance Business・壼｣ｲ荳・YOY +2.9% / 蝟ｶ讌ｭ蛻ｩ逶・YOY +16.4%
+繝ｻeal Estate Rental And Management Business・壼｣ｲ荳・YOY -2.5% / 蝟ｶ讌ｭ蛻ｩ逶・YOY +0.0%
+繝ｻOther・壼｣ｲ荳・YOY -93.3% / 蝟ｶ讌ｭ蛻ｩ逶・YOY -89.4%
+
+Tested with segments: 1

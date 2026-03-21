@@ -56,12 +56,12 @@ class TestRowRolesPhase2:
         assert sub[0].is_reportable_segment is False
 
     def test_sonota(self):
-        """その他 → other / False"""
+        """その他 → segment (is_reportable=True) として分類"""
         lines = ["ヘッダー", "その他    5,000"]
         result = classify_rows(lines, header_band_height=1)
-        other = [r for r in result.rows if r.role == RowRole.OTHER]
-        assert len(other) == 1
-        assert other[0].is_reportable_segment is False
+        seg = [r for r in result.rows if r.role == RowRole.SEGMENT]
+        assert len(seg) == 1
+        assert seg[0].is_reportable_segment is True
 
     def test_note(self):
         lines = ["ヘッダー", "（注）セグメント利益は営業利益ベースの数値であります。"]

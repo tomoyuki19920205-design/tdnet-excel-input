@@ -1,0 +1,15 @@
+[2026/03/21  8:07:51.75] Starting reconcile 
+[08:07:51] [db] config: write_key_type=service_role read_key_type=service_role
+[08:07:51] =======================================================
+[08:07:51]   RUNTIME PATH CHECK
+[08:07:51] =======================================================
+[08:07:51]   cwd         : C:\Users\takuy\OneDrive\tdnet-excel-input
+[08:07:51]   python      : C:\Users\takuy\OneDrive\tdnet-excel-input\.venv\Scripts\python.exe
+[08:07:51]   .env        : C:\Users\takuy\OneDrive\tdnet-excel-input\.env
+[08:07:51]   DB          : C:\Users\takuy\OneDrive\tdnet-excel-input\decision_db.db
+[08:07:51] =======================================================
+[08:07:52] [pipeline_run] started: reconcile (id=310, trigger=scheduler)
+[08:07:52] [reconcile] starting daily reconcile checks
+[08:07:52] [reconcile] done: issues_total=0 checks={'stuck_jobs': 0, 'rebuild_backlog': 0, 'financials_duplicates': 0, 'quarantine_today': 0}
+[08:07:52] [pipeline_run] finished: reconcile status=done elapsed=0.6s id=310 processed=0 success=0 failed=0
+[2026/03/21  8:07:52.78] Finished (exit=0) 

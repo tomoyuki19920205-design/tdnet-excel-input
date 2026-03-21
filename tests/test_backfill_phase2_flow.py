@@ -71,10 +71,15 @@ class TestXbrlFirstSuccess:
     @patch("src.downloader.download_document")
     def test_ok_via_xbrl(self, mock_dl, mock_fin, mock_seg, tmp_path):
         cache = str(tmp_path / "cache")
-        pdf_path = os.path.join(cache, "test_fid_001", "source.pdf")
-        os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
+        fid_dir = os.path.join(cache, "test_fid_001")
+        os.makedirs(fid_dir, exist_ok=True)
+        pdf_path = os.path.join(fid_dir, "source.pdf")
         with open(pdf_path, "wb") as f:
             f.write(b"%PDF test")
+        # XBRL ZIP cache を作成 (download_document_ex の実呼び出しを回避)
+        xbrl_path = os.path.join(fid_dir, "xbrl.zip")
+        with open(xbrl_path, "wb") as f:
+            f.write(b"PK fake xbrl")
 
         mock_dl.return_value = pdf_path
         mock_fin.return_value = (MockExtracted(), "")
@@ -96,10 +101,15 @@ class TestXbrlFirstNeedsPdf:
     @patch("src.downloader.download_document")
     def test_needs_pdf_no_segments(self, mock_dl, mock_fin, mock_seg, tmp_path):
         cache = str(tmp_path / "cache")
-        pdf_path = os.path.join(cache, "test_fid_001", "source.pdf")
-        os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
+        fid_dir = os.path.join(cache, "test_fid_001")
+        os.makedirs(fid_dir, exist_ok=True)
+        pdf_path = os.path.join(fid_dir, "source.pdf")
         with open(pdf_path, "wb") as f:
             f.write(b"%PDF test")
+        # XBRL ZIP cache を作成
+        xbrl_path = os.path.join(fid_dir, "xbrl.zip")
+        with open(xbrl_path, "wb") as f:
+            f.write(b"PK fake xbrl")
 
         mock_dl.return_value = pdf_path
         mock_fin.return_value = (MockExtracted(), "")
@@ -193,10 +203,15 @@ class TestPdfOnlyCacheReuse:
     def test_no_redownload(self, mock_seg, tmp_path):
         cache = str(tmp_path / "cache")
         fid = "test_fid_cache"
-        pdf_path = os.path.join(cache, fid, "source.pdf")
-        os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
+        fid_dir = os.path.join(cache, fid)
+        os.makedirs(fid_dir, exist_ok=True)
+        pdf_path = os.path.join(fid_dir, "source.pdf")
         with open(pdf_path, "wb") as f:
             f.write(b"%PDF test")
+        # extract_financials_result.json cache (period/quarter 取得に必要)
+        fin_path = os.path.join(fid_dir, "extract_financials_result.json")
+        with open(fin_path, "w", encoding="utf-8") as f:
+            json.dump({"period": "2025-03-31", "quarter": "4Q"}, f)
 
         mock_seg.return_value = ([MockSegment()], "")
 

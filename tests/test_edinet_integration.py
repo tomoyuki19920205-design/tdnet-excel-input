@@ -100,8 +100,8 @@ class TestNormalizeTicker:
         assert _normalize_ticker("72030") == "7203"
 
     def test_5digit_no_trailing_zero(self):
-        # 末尾が0でない5桁: 先頭4桁を返す
-        assert _normalize_ticker("72031") == "7203"
+        # 末尾が0でない5桁: strip_tdnet_trailing_zero は適用されない
+        assert _normalize_ticker("72031") == "72031"
 
     def test_empty(self):
         assert _normalize_ticker("") == ""

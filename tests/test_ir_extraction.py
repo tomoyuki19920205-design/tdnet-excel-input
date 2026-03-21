@@ -78,20 +78,25 @@ class TestIrDocSchema:
         conn.close()
 
     def test_insert_facts(self):
-        """facts が挿入される"""
-        conn = sqlite3.connect(":memory:")
-        ensure_tables(conn)
-        facts = [
-            {
-                "document_id": 1, "ticker": "4062", "period": "2027-03-31",
-                "quarter": "3Q", "metric_name": "sales", "metric_value": 100000,
-                "unit": "円", "segment_name": "", "source_type": "html",
-                "confidence": "high",
-            },
-        ]
-        inserted = insert_facts(conn, facts)
-        assert inserted == 1
-        conn.close()
+        """facts が挿入される (persist_policy ON が必要)"""
+        from src.persist_policy import init_persist_policy, reset_persist_policy
+        init_persist_policy(cli_flag=True)
+        try:
+            conn = sqlite3.connect(":memory:")
+            ensure_tables(conn)
+            facts = [
+                {
+                    "document_id": 1, "ticker": "4062", "period": "2027-03-31",
+                    "quarter": "3Q", "metric_name": "sales", "metric_value": 100000,
+                    "unit": "円", "segment_name": "", "source_type": "html",
+                    "confidence": "high",
+                },
+            ]
+            inserted = insert_facts(conn, facts)
+            assert inserted == 1
+            conn.close()
+        finally:
+            reset_persist_policy()
 
     def test_insert_facts_duplicate_skipped(self):
         """重複 facts はスキップ"""

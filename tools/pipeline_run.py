@@ -161,6 +161,42 @@ def _run_retry(dry_run: bool, target_id: str | None = None) -> StepResult:
     return step
 
 
+def _run_event_notify(dry_run: bool) -> StepResult:
+    step = StepResult("events")
+    st = time.monotonic()
+    try:
+        from src.events.common_storage import ensure_events_table, get_unnotified_events, mark_notified
+        from src.events.common_notify import send_event_discord
+        import sqlite3
+
+        db_path = os.path.join(_PROJECT_ROOT, "decision_db.db")
+        webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "")
+
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            ensure_events_table(conn)
+            events = get_unnotified_events(conn)
+            sent = 0
+            for ev in events:
+                ok = send_event_discord(webhook_url, ev, dry_run=dry_run)
+                if ok and not dry_run:
+                    mark_notified(conn, ev.event_id)
+                    sent += 1
+                elif ok:
+                    sent += 1
+            step.detail = {"total_unnotified": len(events), "sent": sent}
+            step.status = "success"
+        finally:
+            conn.close()
+    except Exception as e:
+        step.status = "warning"
+        step.detail = {"error": str(e)}
+        logger.warning(f"[PIPELINE] events WARNING: {e}")
+    step.elapsed = time.monotonic() - st
+    return step
+
+
 # ============================================================
 # フルパイプライン実行
 # ============================================================
@@ -314,7 +350,39 @@ def main():
         format="[%(asctime)s] %(message)s",
         datefmt="%H:%M:%S",
     )
+
+    # ── playground ガード ──
+    import os
+    _cwd = os.getcwd()
+    if "playground" in _cwd.lower():
+        print(
+            "[FATAL] playground から実行されました。"
+            "OneDrive 側から実行してください。",
+            file=sys.stderr,
+        )
+        sys.exit(99)
+
     load_env(_PROJECT_ROOT)
+
+    # ── 実行時パスログ ──
+    _onedrive_marker = r"C:\Users\takuy\OneDrive\tdnet-excel-input"
+    _env_path = os.path.join(_PROJECT_ROOT, ".env")
+    _db_path = os.environ.get(
+        "DECISION_DB_PATH",
+        os.path.join(_PROJECT_ROOT, "decision_db.db"),
+    )
+
+    def _tag(path: str) -> str:
+        return "" if _onedrive_marker.lower() in path.lower() else " [WARNING: NOT OneDrive]"
+
+    logger.info("=" * 55)
+    logger.info("  RUNTIME PATH CHECK")
+    logger.info("=" * 55)
+    logger.info(f"  cwd         : {_cwd}{_tag(_cwd)}")
+    logger.info(f"  python      : {sys.executable}{_tag(sys.executable)}")
+    logger.info(f"  .env        : {_env_path}{_tag(_env_path)}")
+    logger.info(f"  DB          : {_db_path}{_tag(_db_path)}")
+    logger.info("=" * 55)
 
     # サブコマンド
     cmd = args.command
@@ -437,6 +505,12 @@ def main():
             if args.dry_run:
                 sys.argv += ["--dry-run"]
             backfill_main()
+
+    elif cmd == "events":
+        step = _run_subcommand_with_logging(
+            "events", lambda: _run_event_notify(args.dry_run), trigger_type=trigger,
+        )
+        sys.exit(EXIT_OK)  # events failure は非致命的
 
     else:
         parser.print_help()

@@ -63,7 +63,7 @@ def _safe_print(msg: str):
 # Each rule: { "doc_category": str, "enabled": bool, "label": str }
 # Future: add "revision", "briefing", etc.
 ALERT_RULES = [
-    {"doc_category": "tanshin", "enabled": True, "label": "決算短信"},
+    {"doc_category": "tanshin", "enabled": False, "label": "決算短信"},  # 一時無効化: あとで正式版を設定する
     {"doc_category": "revision", "enabled": False, "label": "業績修正"},
     {"doc_category": "briefing", "enabled": False, "label": "説明資料"},
 ]
