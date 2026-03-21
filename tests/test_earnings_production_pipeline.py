@@ -570,17 +570,17 @@ class TestGuidanceExtractionImprovement:
         assert _EPS_BASIC_TAGS & _EPS_DILUTED_TAGS == set()
 
     def test_op_priority_over_ordinary(self):
-        """OrdinaryIncome が _FORECAST_TAG_MAP に含まれないこと"""
+        """OperatingIncome と OrdinaryIncome が両方 _FORECAST_TAG_MAP に含まれること"""
         from src.events.earnings_guidance_extractor import _FORECAST_TAG_MAP
-        assert "OrdinaryIncome" not in _FORECAST_TAG_MAP
-        # OperatingIncome は含まれる
+        assert "OrdinaryIncome" in _FORECAST_TAG_MAP
+        assert _FORECAST_TAG_MAP["OrdinaryIncome"] == "ordinary_profit"
         assert "OperatingIncome" in _FORECAST_TAG_MAP
         assert _FORECAST_TAG_MAP["OperatingIncome"] == "operating_profit"
 
     def test_absurd_eps_excluded(self):
-        """異常EPS値 (>100,000) のフィルタ閾値が設定されていること"""
+        """異常EPS値 (>10,000) のフィルタ閾値が設定されていること"""
         from src.events.earnings_guidance_extractor import _EPS_ABSURD_THRESHOLD
-        assert _EPS_ABSURD_THRESHOLD == 100_000
+        assert _EPS_ABSURD_THRESHOLD == 10_000
 
     def test_fallback_summary_no_noise(self):
         """fallback_summary にページ番号・罫線が含まれないこと"""
@@ -959,4 +959,18 @@ class TestEpsTextExtraction:
         """「237円98銭」形式 → 237.98"""
         from src.events.earnings_guidance_extractor import _normalize_eps_text
         assert _normalize_eps_text("237円98銭") == 237.98
+
+    def test_eps_not_dividend_column(self):
+        """配当金列がEPSとして誤採用されないこと"""
+        from src.events.earnings_guidance_extractor import _extract_eps_from_forecast_table
+        text = (
+            "売上高 営業利益 経常利益 当期純利益 １株当たり当期純利益 １株当たり配当金\n"
+            "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭 円\n"
+            "通期 10,000 5.0 500 10.0 480 8.0 300 4.0 150.00 40\n"
+        )
+        cands = _extract_eps_from_forecast_table(text)
+        fy = [c for c in cands if c["period_type"] == "full_year"]
+        assert len(fy) >= 1
+        # EPS=150.00 であるべき。配当金=40 を採用してはいけない
+        assert fy[0]["value"] == 150.0
 
