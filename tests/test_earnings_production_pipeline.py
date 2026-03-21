@@ -1017,3 +1017,203 @@ class TestEpsTextExtraction:
         assert all(c["value"] != 9999.99 for c in cands), "テーブル後の数値を拾ってはいけない"
         assert len(cands) >= 1
         assert cands[0]["value"] == 85.5
+
+
+# ============================================================
+# 見通し抽出強化テスト
+# ============================================================
+class TestOutlookEnhancement:
+    """outlook 抽出強化のユニットテスト"""
+
+    # --- A. 新見出しパターン ---
+
+    def test_heading_gyouseki_yosou(self):
+        """「業績予想に関する説明」見出しで outlook 抽出可"""
+        from src.events.earnings_guidance_extractor import _extract_outlook_text
+        html = (
+            "決算概要 略\n"
+            "３．業績予想に関する説明\n"
+            "来期の連結業績予想については、売上高は為替影響を見込み"
+            "前期比5%増の500億円を想定しております。"
+            "原材料価格の上昇が影響するものの、増収効果により営業利益は拡大を予想しております。\n"
+            "４．配当予想に関する説明\n"
+            "１株当たり配当金は50円を予定しています。\n"
+        )
+        text = _extract_outlook_text(html)
+        assert "売上高" in text
+        assert "配当" not in text
+
+    def test_heading_keiei_seiseki_with_future(self):
+        """「経営成績に関する分析」+未来表現あり → 採用"""
+        from src.events.earnings_guidance_extractor import _extract_outlook_text
+        html = (
+            "経営成績に関する分析・検討\n"
+            "当期の売上高は100億円で前期比10%の増収となりました。\n\n"
+            "今後の需要拡大を見込み、来期の売上高は120億円を想定しております。\n"
+            "配当の状況\n"
+        )
+        text = _extract_outlook_text(html)
+        assert "来期" in text or "見込" in text
+        # 過去実績のみの行は除外される
+        assert "増収となりました" not in text
+
+    def test_heading_keiei_seiseki_past_only_rejected(self):
+        """「経営成績に関する分析」だが過去実績説明のみなら outlook 不採用"""
+        from src.events.earnings_guidance_extractor import _extract_outlook_text
+        html = (
+            "経営成績に関する分析\n"
+            "当期の売上高は100億円で前期比10%の増収となりました。\n"
+            "営業利益は15億円で前期比5%の増益となりました。\n"
+            "配当の状況\n"
+        )
+        text = _extract_outlook_text(html)
+        assert text == ""
+
+    # --- B. 段落 fallback ---
+
+    def test_fallback_no_heading(self):
+        """見出しなし本文段落から見通し語で outlook 抽出可"""
+        from src.events.earnings_guidance_extractor import _extract_outlook_paragraphs_fallback
+        text = (
+            "第1四半期の業績は堅調に推移しました。\n\n"
+            "当社グループは今後の需要拡大を見込み、"
+            "原材料価格の改善と為替の影響を想定した上で、"
+            "来期も増収増益の計画としております。\n\n"
+            "以上\n"
+        )
+        result = _extract_outlook_paragraphs_fallback(text)
+        assert "需要拡大" in result
+        assert "見込" in result
+
+    def test_fallback_strong_keyword_single(self):
+        """見通し語1つでも強語を含む短文は採用"""
+        from src.events.earnings_guidance_extractor import _extract_outlook_paragraphs_fallback
+        text = (
+            "第1四半期の業績は堅調に推移しました。\n\n"
+            "来期の連結業績については為替の影響を考慮した業績計画としております。\n\n"
+        )
+        result = _extract_outlook_paragraphs_fallback(text)
+        assert "為替" in result or "影響" in result
+
+    def test_fallback_quality_guard(self):
+        """fallback でもノイズ段落は品質ガードで除外"""
+        from src.events.earnings_guidance_extractor import _extract_outlook_paragraphs_fallback
+        text = "a\n\nb\n\nc\n\n"
+        result = _extract_outlook_paragraphs_fallback(text)
+        assert result == ""
+
+    # --- C. 打ち切り語 ---
+
+    def test_stop_at_chuuki_jikou(self):
+        """「注記事項」で打ち切り"""
+        from src.events.earnings_guidance_extractor import _extract_outlook_text
+        html = (
+            "今後の見通し\n"
+            "来期の売上高は拡大を見込んでおります。\n"
+            "注記事項\n"
+            "この文は含めてはいけません。\n"
+        )
+        text = _extract_outlook_text(html)
+        assert "拡大" in text
+        assert "含めて" not in text
+
+    def test_stop_at_yakuin_idou(self):
+        """「役員異動」で打ち切り"""
+        from src.events.earnings_guidance_extractor import _extract_outlook_text
+        html = (
+            "今後の見通し\n"
+            "当社は来期も増収を計画しております。営業利益についても改善を見込んでおります。\n"
+            "役員異動について\n"
+            "代表取締役の異動\n"
+        )
+        text = _extract_outlook_text(html)
+        assert "増収" in text
+        assert "代表取締役" not in text
+
+    def test_stop_at_corporate_governance(self):
+        """「コーポレートガバナンス」で打ち切り"""
+        from src.events.earnings_guidance_extractor import _extract_outlook_text
+        html = (
+            "今後の見通し\n"
+            "来期は需要回復を想定し改善を見込んでおります。\n"
+            "コーポレートガバナンスに関する報告\n"
+            "この文は含めてはいけません。\n"
+        )
+        text = _extract_outlook_text(html)
+        assert "回復" in text
+        assert "報告" not in text
+
+    def test_stop_at_rieki_haibun(self):
+        """「利益配分」で打ち切り"""
+        from src.events.earnings_guidance_extractor import _extract_outlook_text
+        html = (
+            "今後の見通し\n"
+            "為替の影響を考慮し、来期の売上高は拡大を見込んでおります。\n"
+            "利益配分に関する基本方針\n"
+            "利益は株主に還元\n"
+        )
+        text = _extract_outlook_text(html)
+        assert "拡大" in text
+        assert "還元" not in text
+
+    # --- D. 配当を拾わない ---
+
+    def test_dividend_not_outlook(self):
+        """配当段落を見通しとして拾わない"""
+        from src.events.earnings_guidance_extractor import _extract_outlook_paragraphs_fallback
+        text = (
+            "配当予想に関する説明\n\n"
+            "当社は株主還元を経営の重要課題と位置づけ、"
+            "安定配当の継続を方針としております。\n\n"
+        )
+        result = _extract_outlook_paragraphs_fallback(text)
+        assert result == ""
+
+    # --- E. 品質ガード緩和 ---
+
+    def test_quality_short_but_meaningful(self):
+        """短いが見通し語2つ以上 → 品質OK"""
+        from src.events.earnings_guidance_extractor import _is_outlook_quality_ok
+        text = "来期は需要拡大と為替の影響を想定"
+        assert _is_outlook_quality_ok(text) is True
+
+    def test_quality_too_short(self):
+        """あまりにも短い → 品質NG"""
+        from src.events.earnings_guidance_extractor import _is_outlook_quality_ok
+        assert _is_outlook_quality_ok("短い文") is False
+
+    # --- F. XBRL text block 優先 ---
+
+    def test_xbrl_text_block_priority(self):
+        """XBRL text block と HTML段落の両方がある場合は XBRL 側が優先"""
+        from src.events.earnings_guidance_extractor import _extract_outlook_text
+        xbrl_html = (
+            "今後の見通し\n"
+            "XBRL側: 来期は原材料価格の改善により増収を見込んでおります。\n"
+        )
+        plain_html = (
+            "今後の見通し\n"
+            "HTML側: 来期の業績は拡大を想定しております。\n"
+        )
+        # XBRL 側を先に処理
+        xbrl_text = _extract_outlook_text(xbrl_html)
+        assert "XBRL側" in xbrl_text
+        # XBRL が取れていれば plain は使わない (extract_guidance_from_zip のロジック確認)
+        # ここでは個別関数の結果を確認
+        plain_text = _extract_outlook_text(plain_html)
+        assert "HTML側" in plain_text
+
+    # --- G. 「配当予想に関する説明」見出し打ち切り ---
+
+    def test_haito_yosou_not_outlook(self):
+        """「配当予想に関する説明」は outlook として拾わない（打ち切り語ヒット）"""
+        from src.events.earnings_guidance_extractor import _extract_outlook_text
+        html = (
+            "今後の見通し\n"
+            "来期は需要回復を見込み、売上高の拡大を想定しております。\n"
+            "配当予想に関する説明\n"
+            "当期末配当は１株当たり50円\n"
+        )
+        text = _extract_outlook_text(html)
+        assert "回復" in text
+        assert "当期末配当" not in text

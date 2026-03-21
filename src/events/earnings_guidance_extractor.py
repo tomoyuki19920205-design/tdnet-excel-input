@@ -427,29 +427,60 @@ def _extract_eps_from_forecast_table(plain_text: str) -> list[dict]:
 # ============================================================
 
 _OUTLOOK_HEADING_RE = re.compile(
-    r"(今後の見通し|次期.*見通し|来期.*見通し|業績予想について|今後の.*見通し)",
+    r"(今後の見通し|業績見通し|次期.*見通し|来期.*見通し|"
+    r"業績予想に関する説明|経営成績に関する.*分析|"
+    r"当面の見通し|今後の事業環境|通期見通し|次期業績予想|"
+    r"今後の.*見通し|業績予想について)",
 )
 _OUTLOOK_STOP_RE = re.compile(
-    r"(継続企業|配当の状況|株主還元|配当予想|その他の経営|会計基準の選択)",
+    r"(継続企業|注記事項|配当の状況|配当予想|配当予想に関する|"
+    r"役員異動|役員人事|重要事象|セグメント情報.*の注記|"
+    r"株主還元|株主還元方針|利益配分|"
+    r"コーポレートガバナンス|その他の経営|会計基準の選択)",
+)
+
+# 段落 fallback 用: 見通し語（任意語）
+_OUTLOOK_KEYWORD_RE = re.compile(
+    r"(見込[むみ]|想定|予想|継続|回復|拡大|需要|価格|原材料|為替|"
+    r"影響|進捗|伸長|改善|増収|増益|減収|減益|見通し|計画|方針)"
+)
+# 段落 fallback 用: 強語（1つでも採用候補）
+_OUTLOOK_STRONG_KEYWORD_RE = re.compile(
+    r"(影響|見込[むみ]|想定|予想|回復|拡大|改善|為替|原材料)"
+)
+# 「経営成績に関する分析」見出し用: 未来表現フィルタ
+_FUTURE_EXPRESSION_RE = re.compile(
+    r"(来期|次期|今後|見込[むみ]|想定|予想|継続|進める|期待|影響|見通し|計画)"
+)
+# 「経営成績に関する分析」見出し判定
+_KEIEI_SEISEKI_HEADING_RE = re.compile(
+    r"経営成績に関する.*分析"
 )
 
 
 def _strip_html_tags(text: str) -> str:
-    """簡易 HTML タグ除去。"""
+    """簡易 HTML タグ除去。style/script ブロックも除去。"""
+    # style/script ブロック除去
+    text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL | re.IGNORECASE)
     return re.sub(r"<[^>]+>", "", text)
 
 
 def _extract_outlook_text(html_text: str) -> str:
     """見通しセクションのテキストを抽出する。
 
-    継続企業・配当区画で打ち切り、품質ガード適用。
+    継続企業・配当区画で打ち切り、品質ガード適用。
+    「経営成績に関する分析」見出しの場合は未来表現フィルタを適用。
     """
     text = _strip_html_tags(html_text)
     lines = text.split("\n")
 
     start_idx = None
+    is_keiei_seiseki = False
     for i, line in enumerate(lines):
         if _OUTLOOK_HEADING_RE.search(line):
+            if _KEIEI_SEISEKI_HEADING_RE.search(line):
+                is_keiei_seiseki = True
             start_idx = i
             break
     if start_idx is None:
@@ -463,25 +494,94 @@ def _extract_outlook_text(html_text: str) -> str:
         extracted.append(line)
 
     result = "\n".join(extracted).strip()
+
+    # 「経営成績に関する分析」: 未来表現を含む段落のみ残す
+    if is_keiei_seiseki:
+        result = _filter_future_paragraphs(result)
+
     if not _is_outlook_quality_ok(result):
         return ""
     return result
 
 
+def _filter_future_paragraphs(text: str) -> str:
+    """未来表現を含む段落のみ残す。経営成績分析の過去実績除外用。"""
+    paragraphs = re.split(r"\n\s*\n", text)
+    future_paras = []
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            continue
+        # 段落内の各行にも未来表現チェック
+        lines = para.split("\n")
+        has_future = any(_FUTURE_EXPRESSION_RE.search(line) for line in lines)
+        if has_future:
+            future_paras.append(para)
+    return "\n".join(future_paras).strip()
+
+
 def _is_outlook_quality_ok(text: str) -> bool:
-    """見通しテキストの品質ガード。"""
-    if len(text) < 20:
+    """見通しテキストの品質ガード。
+
+    見通し語が複数あれば句点なし単行でも採用可。
+    """
+    if len(text) < 15:
         return False
     # 意味のある日本語文字数
     jp_count = sum(1 for c in text if '\u3040' <= c <= '\u9fff' or '\u30a0' <= c <= '\u30ff')
-    if jp_count < 10:
+    if jp_count < 8:
         return False
     has_period = "。" in text
     meaningful_lines = [l.strip() for l in text.split("\n") if l.strip()]
     has_multi_lines = len(meaningful_lines) >= 2
-    if not has_period and not has_multi_lines:
+    # 見通し語が複数あれば句点なし単行でも採用
+    outlook_kw_count = len(_OUTLOOK_KEYWORD_RE.findall(text))
+    if not has_period and not has_multi_lines and outlook_kw_count < 2:
         return False
     return True
+
+
+# CSS/HTMLゴミ段落・財務諸表フラグメントの除外パターン
+_CSS_NOISE_RE = re.compile(
+    r"(font-family|font-size|text-align|margin|padding|float|width|div#|"
+    r"\.style_|page-break|div\{|&amp;#160|&#160|"
+    r"貸借対照表|損益計算書|包括利益計算書|株主資本等変動計算書|"
+    r"キャッシュ・フロー計算書|四半期連結財務諸表)"
+)
+
+
+def _extract_outlook_paragraphs_fallback(text: str) -> str:
+    """見出し不在時に見通し語を含む段落を収集する。
+
+    2段階採用:
+    - 見通し語2つ以上 → 強採用
+    - 見通し語1つでも強語なら候補採用
+    """
+    plain = _strip_html_tags(text)
+    paragraphs = re.split(r"\n\s*\n", plain)
+    candidates: list[str] = []
+    for para in paragraphs:
+        para = para.strip()
+        if not para or len(para) < 30:
+            continue
+        if _OUTLOOK_STOP_RE.search(para):
+            continue
+        # CSS/HTMLゴミ段落を除外
+        if _CSS_NOISE_RE.search(para):
+            continue
+        keywords = _OUTLOOK_KEYWORD_RE.findall(para)
+        strong_keywords = _OUTLOOK_STRONG_KEYWORD_RE.findall(para)
+        # 2段階採用
+        if len(keywords) >= 2:
+            candidates.append(para)
+        elif len(keywords) >= 1 and len(strong_keywords) >= 1:
+            candidates.append(para)
+    if not candidates:
+        return ""
+    result = "\n".join(candidates[:3])  # 最大3段落
+    if not _is_outlook_quality_ok(result):
+        return ""
+    return result
 
 
 # ============================================================
@@ -886,11 +986,16 @@ def extract_guidance_from_zip(
         guidance.net_income_forecast = best.get("net_income")
         guidance.eps_forecast = best.get("eps")
 
-    # ---- Outlook 抽出 ----
+    # ---- Outlook 抽出 (3段階: XBRL text block → 見出し → 段落fallback) ----
+    # Step 1: XBRL text block (HTML) 優先
     if outlook_html:
         guidance.outlook_text = _extract_outlook_text(outlook_html)
-    elif plain_text:
+    # Step 2: プレーンテキストベース見出し検索
+    if not guidance.outlook_text and plain_text:
         guidance.outlook_text = _extract_outlook_text(plain_text)
+    # Step 3: 段落 fallback (見出しなしでも見通し語ベースで抽出)
+    if not guidance.outlook_text and plain_text:
+        guidance.outlook_text = _extract_outlook_paragraphs_fallback(plain_text)
 
     logger.info(
         f"[GUIDANCE] extracted: sales={guidance.sales_forecast} "
