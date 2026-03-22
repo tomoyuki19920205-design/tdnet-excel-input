@@ -1339,3 +1339,136 @@ class TestOutlookRefinement:
         assert len(fy) >= 1
         assert fy[0]["value"] == 237.98
 
+
+# ============================================================
+# 目次・概況断片 reject テスト（Round 3 → 複合スコアリング）
+# ============================================================
+class TestOutlookTocReject:
+    """目次・概況見出し断片の reject テスト（複合スコアリング対応版）"""
+
+    def test_toc_dot_leader_rejected(self):
+        """ドットリーダー + ページ番号の目次行は outlook 不採用"""
+        from src.events.earnings_guidance_extractor import _extract_outlook_text
+        html = (
+            "今後の見通し\n"
+            "qualitative\n"
+            "○添付資料の目次\n"
+            "１．経営成績等の概況 …………………………………… 2\n"
+            "（１）当期の経営成績の概況 ………………………… 2\n"
+            "（２）当期の財政状態の概況 ………………………… 3\n"
+            "配当の状況\n"
+        )
+        text = _extract_outlook_text(html)
+        assert text == ""
+
+    def test_gaikyo_heading_only_not_rejected(self):
+        """概況見出しのみ（シグナル1つ）では reject しない"""
+        from src.events.earnings_guidance_extractor import _is_toc_junk
+        # 概況見出し + 未来表現あり → シグナル1つ（概況のみ）→ 採用
+        text = (
+            "経営成績等の概況\n"
+            "来期は需要拡大を見込み改善を想定しております。\n"
+        )
+        assert _is_toc_junk(text) is False
+
+    def test_gaikyo_with_no_future_rejected(self):
+        """概況見出し + 列挙見出し（構造2つ）→ reject"""
+        from src.events.earnings_guidance_extractor import _is_toc_junk
+        text = (
+            "（１）経営成績等の概況\n"
+            "（２）当期の経営成績の概況\n"
+            "（３）財政状態の概況\n"
+        )
+        # 構造シグナル: 概況見出し(3/3=100%) + 列挙見出し(3/3=100%) = 2 → reject
+        assert _is_toc_junk(text) is True
+
+    def test_gaikyo_plus_toc_plus_page_rejected(self):
+        """概況見出し + TOC + ページ番号（シグナル複数）→ reject"""
+        from src.events.earnings_guidance_extractor import _is_toc_junk
+        text = (
+            "経営成績等の概況 …………………………………… 2\n"
+            "当期の経営成績の概況 ………………………… 2\n"
+            "財政状態の概況 ………………………………… 3\n"
+        )
+        assert _is_toc_junk(text) is True
+
+    def test_qualitative_standalone_rejected(self):
+        """qualitative 単独は content_lines 空で reject"""
+        from src.events.earnings_guidance_extractor import _is_toc_junk
+        assert _is_toc_junk("qualitative") is True
+        assert _is_toc_junk("定性的情報") is True
+
+    def test_toc_fragment_rejected(self):
+        """TOC断片（ドットリーダー行のみ）は outlook 不採用"""
+        from src.events.earnings_guidance_extractor import _extract_outlook_text
+        html = (
+            "今後の見通し\n"
+            "１．経営成績等の概況 ……………………… 2\n"
+            "（１）当期の経営成績の概況 ………………… 2\n"
+            "（２）当期の財政状態の概況 ………………… 3\n"
+            "配当の状況\n"
+        )
+        text = _extract_outlook_text(html)
+        assert text == ""
+
+    def test_real_outlook_still_works(self):
+        """本物の見通し本文は引き続き採用"""
+        from src.events.earnings_guidance_extractor import _extract_outlook_text
+        html = (
+            "今後の見通し\n"
+            "来期の連結業績については、需要拡大を見込み、"
+            "売上高500億円、営業利益30億円を計画しております。"
+            "為替の影響については不確実性があるものの、"
+            "原材料価格の改善を想定しております。\n"
+            "配当の状況\n"
+        )
+        text = _extract_outlook_text(html)
+        assert "需要拡大" in text
+        assert "見込" in text
+
+    def test_fallback_no_toc(self):
+        """段落 fallback でも目次断片は採用しない"""
+        from src.events.earnings_guidance_extractor import _extract_outlook_paragraphs_fallback
+        text = (
+            "qualitative\n"
+            "１．経営成績等の概況 ………………… 2\n\n"
+            "当社グループは来期の需要拡大を見込み、原材料価格の改善と為替の影響を想定した上で増収増益の計画としております。\n\n"
+        )
+        result = _extract_outlook_paragraphs_fallback(text)
+        assert "経営成績等の概況" not in result
+        assert "需要拡大" in result
+
+    def test_enum_heading_only_rejected(self):
+        """列挙見出しだけの目次断片は reject"""
+        from src.events.earnings_guidance_extractor import _is_toc_junk
+        text = (
+            "（１）当期の経営成績の概況\n"
+            "（２）当期の財政状態の概況\n"
+            "（３）当期のキャッシュ・フローの概況\n"
+            "（４）今後の見通し\n"
+        )
+        # シグナル: 列挙見出し + 概況見出し + 未来表現なし（「見通し」はTOC行扱いでないが非TOC行で判定）
+        # 「見通し」は _FUTURE_EXPRESSION_RE にマッチするが非TOC行にあるので has_future=True
+        # → シグナル: 列挙 + 概況 = 2 → reject
+        assert _is_toc_junk(text) is True
+
+    def test_6966_regression(self):
+        """6966 の TOC 断片は確実に reject"""
+        from src.events.earnings_guidance_extractor import _is_toc_junk
+        text = (
+            "qualitative\n\n\n\n\n\n"
+            "○添付資料の目次\n"
+            "&#160;\n\n\n\n\n\n\n\n\n"
+            "１．経営成績等の概況 ………………………………………………………………………………………………………\n\n\n"
+            "2\n\n\n\n"
+            "（１）当期の経営成績の概況 ……………………………………………………………………………………………\n\n\n"
+            "2\n\n\n\n"
+            "（２）当期の財政状態の概況 ……………………………………………………………………………………………\n\n\n"
+            "3\n\n\n\n"
+            "（３）当期のキャッシュ・フローの概況 ………………………………………………………………………………\n\n\n"
+            "3\n\n\n\n"
+            "（４）今後の見通し ………………………………………………………………………………………………………\n"
+        )
+        assert _is_toc_junk(text) is True
+
+

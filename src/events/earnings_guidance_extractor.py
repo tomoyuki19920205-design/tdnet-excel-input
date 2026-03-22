@@ -462,6 +462,32 @@ _KEIEI_SEISEKI_HEADING_RE = re.compile(
     r"経営成績に関する.*分析"
 )
 
+# 目次・概況見出し断片の reject フィルタ
+_TOC_LINE_RE = re.compile(
+    r"(…{2,}|・・・|·{3,}|\.\.\.)"  # ドットリーダー
+)
+_PAGE_NUM_LINE_RE = re.compile(
+    r"[\s　]+\d{1,3}\s*$"  # 行末の単独ページ番号
+)
+_TOC_JUNK_RE = re.compile(
+    r"^\s*("
+    r"qualitative|定性的情報|添付資料の目次|添付資料|目次"
+    r"|&(#160|#xa0|nbsp);?"   # HTML entities
+    r"|\d{1,3}"               # ページ番号 (1-3桁の数字のみ)
+    r"|○.*目次"              # ○添付資料の目次 etc.
+    r")\s*$",
+    re.IGNORECASE,
+)
+# 概況見出し（outlook 見出しとして認めない）
+_GAIKYO_HEADING_RE = re.compile(
+    r"(経営成績等の概況|当期の経営成績の概況|財政状態の概況|キャッシュ・フローの概況"
+    r"|経営成績に関する説明|当四半期.*概況|当中間期.*概況)"
+)
+# 列挙見出し（目次の項目見出し）
+_ENUM_HEADING_RE = re.compile(
+    r"^\s*([（(]\s*[0-9０-９]\s*[）)]|[0-9０-９]+[.．])"  # （1）, (1), 1., １．
+)
+
 
 def _strip_html_tags(text: str) -> str:
     """簡易 HTML タグ除去。style/script ブロックも除去。"""
@@ -471,11 +497,70 @@ def _strip_html_tags(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text)
 
 
+def _is_toc_junk(text: str) -> bool:
+    """結果全体が目次/概況断片かどうかを複合スコアリングで判定。
+
+    4 種の構造シグナルと未来表現の有無で判定:
+      構造シグナル:
+        1. ドットリーダー行が content の 30%以上
+        2. ページ番号行が content の 30%以上
+        3. 短い列挙見出し行（60文字以下）が content の 40%以上
+        4. 概況見出し行が content に 1 つ以上
+
+    reject 条件:
+      - 構造シグナル 2 つ以上 → 即 reject（TOC 確定）
+      - 構造シグナル 1 つ + 非 TOC 行に未来表現なし → reject
+      - 構造シグナル 0 → 通過
+
+    概況見出し単独 + 未来表現あり → 通過（シグナル 1 + 未来あり）。
+    注意: 未来表現は TOC 行以外（本文行）でのみ判定する。
+    """
+    if not text:
+        return True
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    if not lines:
+        return True
+
+    # qualitative/目次/定性的情報/ページ番号/HTMLエンティティ を除外
+    content_lines = [l for l in lines if not _TOC_JUNK_RE.match(l)]
+    if not content_lines:
+        return True
+
+    n = len(content_lines)
+    structural_signals = 0
+
+    # Signal 1: ドットリーダー行が 30%以上
+    dot_count = sum(1 for l in content_lines if _TOC_LINE_RE.search(l))
+    if dot_count >= n * 0.3:
+        structural_signals += 1
+
+    # Signal 2: ページ番号行が 30%以上
+    page_count = sum(1 for l in content_lines if _PAGE_NUM_LINE_RE.search(l))
+    if page_count >= n * 0.3:
+        structural_signals += 1
+
+    # Signal 3: 短い列挙見出し行（60文字以下）が 40%以上
+    enum_count = sum(
+        1 for l in content_lines
+        if len(l) <= 60 and _ENUM_HEADING_RE.match(l)
+    )
+    if enum_count >= n * 0.4:
+        structural_signals += 1
+
+    # Signal 4: 概況見出し行が content の 50%以上
+    gaikyo_count = sum(1 for l in content_lines if _GAIKYO_HEADING_RE.search(l))
+    if gaikyo_count >= n * 0.5:
+        structural_signals += 1
+
+    # 構造シグナル 2 つ以上 → reject（TOC 確定）
+    return structural_signals >= 2
+
+
 def _extract_outlook_text(html_text: str) -> str:
     """見通しセクションのテキストを抽出する。
 
     継続企業・配当区画で打ち切り、品質ガード適用。
-    「経営成績に関する分析」見出しの場合は未来表現フィルタを適用。
+    目次・概況見出し断片・未来表現なしの文は reject。
     """
     text = _strip_html_tags(html_text)
     lines = text.split("\n")
@@ -499,6 +584,10 @@ def _extract_outlook_text(html_text: str) -> str:
         extracted.append(line)
 
     result = "\n".join(extracted).strip()
+
+    # 結果全体が目次/概況断片なら reject
+    if _is_toc_junk(result):
+        return ""
 
     # 「経営成績に関する分析」: 未来表現を含む段落のみ残す
     if is_keiei_seiseki:
