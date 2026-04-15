@@ -1,4 +1,0 @@
-{"event": "v2_start", "ticker": "211A", "run_id": "793bcbb5fb3e", "timestamp": "2026-04-10T08:35:29.265424+09:00"}
-{"event": "ok", "via": "xbrl", "status": "ok", "segments": 2, "fingerprint": "a61d00dd7072bb08ac3c2f59", "hard_fail_reason": "", "fallback_used": false, "candidate_summary": "xbrl:success → html:skip(not_implemented) → pdf:not_attempted", "timestamp": "2026-04-10T08:35:32.334692+09:00"}
-{"event": "v2_start", "ticker": "211A", "run_id": "f4d9399a2cea", "timestamp": "2026-04-12T18:20:25.937467+09:00"}
-{"event": "ok", "via": "xbrl", "status": "ok", "segments": 2, "fingerprint": "a61d00dd7072bb08ac3c2f59", "hard_fail_reason": "", "fallback_used": false, "candidate_summary": "xbrl:success → html:skip(not_implemented) → pdf:not_attempted", "timestamp": "2026-04-12T18:20:27.863811+09:00"}

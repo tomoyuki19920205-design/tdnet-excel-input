@@ -24,3 +24,10 @@ state/locks/
 
 data/*.db
 *.db
+
+data/
+logs/
+tmp/
+*.db
+*.zip
+*.pdf

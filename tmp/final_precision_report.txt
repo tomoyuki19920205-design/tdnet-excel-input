@@ -1,9 +1,0 @@
-Metric               | Phase 3    | Phase 4    | Change
-------------------------------------------------------------
-exact_match          | 16         | 16         | +0
-partial_match        | 12         | 11         | -1
-wrong_value          | 13         | 13         | +0
-both_missing         | 9          | 10         | +1
-------------------------------------------------------------
-True Improvements    | 13         | 12         | -1
-EPS 1.0 Found (in Res) | 23         | 38         | +15

@@ -1,6 +1,0 @@
-{"event": "v2_start", "ticker": "5132", "run_id": "8f45c7645593", "timestamp": "2026-04-10T08:34:33.799756+09:00"}
-{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T08:34:35.693591+09:00"}
-{"event": "quarantined", "reason": "candidate_guard:narrative_guard|hint=pdf_narrative_block_selected", "review_hint": "pdf_narrative_block_selected", "candidate_reject_reason": "candidate_guard:bs_cf_guard", "xbrl_fallback_attempted": false, "timestamp": "2026-04-10T08:34:40.011531+09:00"}
-{"event": "v2_start", "ticker": "5132", "run_id": "f4d9399a2cea", "timestamp": "2026-04-12T18:19:23.505875+09:00"}
-{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-12T18:19:24.164416+09:00"}
-{"event": "ok", "via": "pdf", "segments": 14, "fingerprint": "c7a34401a6b15f3e252be162", "timestamp": "2026-04-12T18:19:26.493789+09:00"}

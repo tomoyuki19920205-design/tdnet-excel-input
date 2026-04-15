@@ -1,9 +1,0 @@
-{"event": "v2_start", "ticker": "218A", "run_id": "793bcbb5fb3e", "timestamp": "2026-04-10T08:35:33.198530+09:00"}
-{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T08:35:35.346626+09:00"}
-{"event": "ok", "via": "pdf", "segments": 33, "fingerprint": "64674f7c23ee3af5d11187c4", "timestamp": "2026-04-10T08:35:37.960599+09:00"}
-{"event": "v2_start", "ticker": "218A", "run_id": "b2fef1854a1d", "timestamp": "2026-04-10T10:46:08.365368+09:00"}
-{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T10:46:13.948525+09:00"}
-{"event": "ok", "via": "pdf", "segments": 33, "fingerprint": "22555aa8b40d0bc062c522be", "timestamp": "2026-04-10T10:46:18.123719+09:00"}
-{"event": "v2_start", "ticker": "218A", "run_id": "f4d9399a2cea", "timestamp": "2026-04-12T18:20:27.904526+09:00"}
-{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-12T18:20:29.647405+09:00"}
-{"event": "ok", "via": "pdf", "segments": 7, "fingerprint": "1b7c9b0e9ef47c5e69d5592a", "timestamp": "2026-04-12T18:20:31.679077+09:00"}

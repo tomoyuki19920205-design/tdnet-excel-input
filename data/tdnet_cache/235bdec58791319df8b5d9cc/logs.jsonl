@@ -1,3 +1,0 @@
-{"event": "v2_start", "ticker": "8077", "run_id": "d1c15ea40018", "timestamp": "2026-04-10T08:56:48.860803+09:00"}
-{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T08:56:51.724647+09:00"}
-{"event": "ok", "via": "pdf", "segments": 18, "fingerprint": "91a9acb8e8ae9a02958d2a4e", "timestamp": "2026-04-10T08:56:53.896407+09:00"}

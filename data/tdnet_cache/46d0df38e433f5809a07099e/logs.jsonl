@@ -1,3 +1,0 @@
-{"event": "v2_start", "ticker": "4592", "run_id": "96fe496be3d3", "timestamp": "2026-04-10T10:02:51.439600+09:00"}
-{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T10:02:58.123409+09:00"}
-{"event": "quarantined", "reason": "candidate_guard:narrative_guard|hint=pdf_narrative_block_selected", "review_hint": "pdf_narrative_block_selected", "candidate_reject_reason": "bs_table_detected", "xbrl_fallback_attempted": false, "timestamp": "2026-04-10T10:03:02.467060+09:00"}

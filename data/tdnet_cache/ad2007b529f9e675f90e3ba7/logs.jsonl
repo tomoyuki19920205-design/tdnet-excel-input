@@ -1,2 +1,0 @@
-{"event": "v2_start", "ticker": "391A", "run_id": "2418005fb88b", "timestamp": "2026-04-10T08:44:39.824658+09:00"}
-{"event": "ok", "via": "xbrl", "status": "ok", "segments": 3, "fingerprint": "124d89b99b47eb96e18375e4", "hard_fail_reason": "", "fallback_used": false, "candidate_summary": "xbrl:success → html:skip(not_implemented) → pdf:not_attempted", "timestamp": "2026-04-10T08:44:42.084050+09:00"}
