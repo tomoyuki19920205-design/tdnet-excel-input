@@ -1,0 +1,21 @@
+{
+  "search.exclude": {
+    "**/.venv": true,
+    "**/data": true,
+    "**/logs": true,
+    "**/results": true,
+    "**/artifacts": true,
+    "**/tmp": true,
+    "**/*.xlsx": true,
+    "**/*.xlsx.bak": true,
+    "**/*.db": true
+  },
+  "files.watcherExclude": {
+    "**/.venv/**": true,
+    "**/data/**": true,
+    "**/logs/**": true,
+    "**/results/**": true,
+    "**/artifacts/**": true,
+    "**/tmp/**": true
+  }
+}

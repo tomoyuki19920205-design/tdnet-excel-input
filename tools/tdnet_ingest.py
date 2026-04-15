@@ -201,12 +201,20 @@ def _process_single(
     if financials is None:
         error_msg = extract_error or "抽出失敗"
 
-        # non-tanshin PDFスキップは「仕様通りスキップ」扱い
+        # non-tanshin PDFスキップは retryable skip として記録
+        # （コード修正後の再 ingest で自動再処理される）
         if "SKIP_PDF_NOT_TANSHIN" in error_msg:
             logger.info(
                 f"[INGEST] doc_id={disclosure_id[:16]} "
                 f"status=skipped_not_tanshin title={item.title[:40]}"
             )
+            if not dry_run:
+                state_db.record(
+                    disclosure_id=disclosure_id, code=code,
+                    year="", quarter="",
+                    status=Status.SKIPPED_NOT_TANSHIN,
+                    error_detail=error_msg,
+                )
             return {"status": "skipped", "detail": error_msg, "code": code}
 
         logger.warning(
@@ -446,6 +454,7 @@ def _process_single(
         "status": db_result, "detail": result_detail, "code": code,
         "seg_metrics": seg_metrics,
         "source_type": "pdf" if doc_path and doc_path.lower().endswith(".pdf") else "zip",
+        "disclosure_id": disclosure_id,
     }
 
 # ============================================================

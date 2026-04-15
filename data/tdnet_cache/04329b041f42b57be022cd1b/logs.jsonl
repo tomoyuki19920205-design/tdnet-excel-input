@@ -1,0 +1,6 @@
+{"event": "v2_start", "ticker": "1758", "run_id": "793bcbb5fb3e", "timestamp": "2026-04-10T08:35:25.137221+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T08:35:27.915666+09:00"}
+{"event": "quarantined", "reason": "candidate_guard:no_valid_segment_rows|hint=pdf_no_segment_table_after_guard", "review_hint": "pdf_no_segment_table_after_guard", "candidate_reject_reason": "bs_table_detected", "xbrl_fallback_attempted": true, "timestamp": "2026-04-10T08:35:33.026176+09:00"}
+{"event": "v2_start", "ticker": "1758", "run_id": "f4d9399a2cea", "timestamp": "2026-04-12T18:20:23.256893+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-12T18:20:24.710426+09:00"}
+{"event": "quarantined", "reason": "period_quarter_unresolved:period='R8/1',quarter=''", "review_hint": "pdf_extraction_failed", "candidate_reject_reason": "period_quarter_unresolved:period='R8/1',quarter=''", "xbrl_fallback_attempted": false, "timestamp": "2026-04-12T18:20:27.864811+09:00"}

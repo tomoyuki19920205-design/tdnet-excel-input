@@ -1,0 +1,3 @@
+pdf,current_gt,manual_decision,actual_segment_table_exists,evidence_page,evidence_summary,extracted_seg_names,pattern_expand_safe,recommended_action
+140120260313581228.pdf,yes,keep_yes,True,9,"page10にセグメント情報あり。包装関連事業/物流梱包事業の2セグメントが実在。「報告セグメント」「四半期連結損益計算書計上額」は列ヘッダー行であり、COL_AS_SEGの誤検出。GTのyesは正しい。",報告セグメント | 四半期連結 損益計算書 計上額,no,"GT維持(yes)。G-PFパターン拡張不可（FN増加）。COL_AS_SEG列検出ロジックの改善が必要。"
+140120260313581329.pdf,no,change_to_yes,True,12,"page13にセグメント情報あり。レストラン事業/エステートビルドアップ事業の2セグメントが実在（売上・利益の数値あり）。「報告セグメント」「中間連結損益計算書計上額」は列ヘッダー行。GTのnoは誤り。pending7でもsegment_yes(biz=3)。",報告セグメント | 中間連結損益 計算書計上額,no,"GT修正(no→yes)必須。G-PFパターン拡張不可（修正後はTPのためFN化する）。"

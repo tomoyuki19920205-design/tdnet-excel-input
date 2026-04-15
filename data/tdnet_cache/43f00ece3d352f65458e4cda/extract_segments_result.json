@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "8200",
+    "period": "R8/2",
+    "quarter": "FY",
+    "segment_name": "Nagasaki Champon",
+    "segment_order": 1,
+    "segment_sales": 36881,
+    "segment_profit": 1145,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Nagasaki Champon",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "43f00ece3d352f65458e4cda",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "8200",
+    "period": "R8/2",
+    "quarter": "FY",
+    "segment_name": "Tonkatsu",
+    "segment_order": 2,
+    "segment_sales": 8007,
+    "segment_profit": 140,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Tonkatsu",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "43f00ece3d352f65458e4cda",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "8200",
+    "period": "R8/2",
+    "quarter": "FY",
+    "segment_name": "Maintenance",
+    "segment_order": 3,
+    "segment_sales": 195,
+    "segment_profit": 217,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Maintenance",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "43f00ece3d352f65458e4cda",
+    "row_type": "segment"
+  }
+]

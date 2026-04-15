@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "3921",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Software",
+    "segment_order": 1,
+    "segment_sales": 6217,
+    "segment_profit": 2516,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Software",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "cfb4e79f8a2fdd983b65bd68",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "3921",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "System Development Service",
+    "segment_order": 2,
+    "segment_sales": 1935,
+    "segment_profit": 73,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "System Development Service",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "cfb4e79f8a2fdd983b65bd68",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "3921",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Overseas Operations",
+    "segment_order": 3,
+    "segment_sales": 76,
+    "segment_profit": -92,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Overseas Operations",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "cfb4e79f8a2fdd983b65bd68",
+    "row_type": "segment"
+  }
+]

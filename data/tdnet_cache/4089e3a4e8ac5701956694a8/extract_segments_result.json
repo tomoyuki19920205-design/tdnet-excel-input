@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "7879",
+    "period": "R8/11",
+    "quarter": "1Q",
+    "segment_name": "Housing Construction Materials",
+    "segment_order": 1,
+    "segment_sales": 9551,
+    "segment_profit": 94,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Housing Construction Materials",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "4089e3a4e8ac5701956694a8",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "7879",
+    "period": "R8/11",
+    "quarter": "1Q",
+    "segment_name": "Plywood",
+    "segment_order": 2,
+    "segment_sales": 5623,
+    "segment_profit": 74,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Plywood",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "4089e3a4e8ac5701956694a8",
+    "row_type": "segment"
+  }
+]

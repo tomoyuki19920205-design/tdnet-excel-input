@@ -31,6 +31,11 @@ from lib.backfill.worker import (
 
 logger = logging.getLogger("backfill.worker_v2")
 
+# ============================================================
+# [TEST ONLY] PDF強制ルート — テスト後は必ず False に戻すこと
+# ============================================================
+TEST_FORCE_PDF_ONLY: bool = False
+
 
 # ============================================================
 # validator status → worker status 変換
@@ -70,6 +75,9 @@ class SourceCandidate:
     segment_records: list = field(default_factory=list)
     validation: object = None                     # ExtractionValidationResult | None
     error: str = ""                               # 抽出エラー (あれば)
+    # Phase 2: Trace & Scores
+    rule_trace: list[str] = field(default_factory=list)
+    score_summary: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -101,6 +109,9 @@ class FilingResultV2:
     cache_paths: dict = field(default_factory=dict)
     quarantine: dict | None = None
     result_fingerprint: str | None = None
+    # Phase 2 trace
+    rule_trace: list[str] = field(default_factory=list)
+    score_summary: dict = field(default_factory=dict)
     # debug
     candidates: list = field(default_factory=list, repr=False)
     candidate_summary: str = ""
@@ -170,6 +181,25 @@ def process_one_filing_v2(
         save_extract_financials_result(paths, financials_data)
 
     # ========================================
+    # [TEST] XBRL 無効化 → PDF 強制ルート
+    # ========================================
+    if TEST_FORCE_PDF_ONLY and doc_path:
+        logger.info(f"[v2][TEST] TEST_FORCE_PDF_ONLY=True: fid={fid} → PDF only")
+        from lib.backfill.worker import process_one_filing_pdf_only
+        _pdf_result = process_one_filing_pdf_only(
+            filing,
+            cache_root=cache_root,
+            state_store=state_store,
+            retry_pdf=retry_pdf,
+            timeout_pdf=timeout_pdf,
+            sleep_fn=_sleep,
+            financials_data=financials_data,
+        )
+        if not isinstance(_pdf_result, dict):
+            setattr(_pdf_result, "route_mode", "test_pdf_forced")
+        return _pdf_result
+
+    # ========================================
     # Step 2: 各 source で抽出 → validator
     # ========================================
     from src.segment.extraction_result_validator import validate_extraction_result
@@ -225,10 +255,40 @@ def process_one_filing_v2(
         narrative_contamination = validation.narrative_contamination
     elif not best.available:
         # XBRL source 自体なし → no_xbrl_segment_source
-        worker_status = "quarantined"
-        confidence = 0.0
-        reason = "[tdnet_xbrl] XBRL segment source unavailable"
-        hard_fail_reason = "no_xbrl_segment_source"
+        fallback_used = True
+        fallback_reason = "no_xbrl_segment_source"
+        from lib.backfill.worker import process_one_filing_pdf_only
+        result = process_one_filing_pdf_only(filing)
+        # 属性引き継ぎ (FilingResult -> FilingResultV2 / dict 互換)
+        if isinstance(result, dict):
+            result["fallback_used"] = True
+            result["fallback_reason"] = "no_xbrl_segment_source"
+            if not result.get("rule_trace"):
+                from src.extractor import get_last_v2_segment_result as _get_v2
+                _v2 = _get_v2()
+                result["rule_trace"] = _v2.rule_trace if _v2 else []
+                result["score_summary"] = _v2.score_summary if _v2 else {}
+            # PDF成功: valid_segment_count >= 1 なら status="ok"
+            if result.get("valid_segment_count", 0) >= 1:
+                result["status"] = "ok"
+                result["selected_path"] = "pdf"
+                result["via"] = "pdf"
+        else:
+            setattr(result, "fallback_used", True)
+            setattr(result, "fallback_reason", "no_xbrl_segment_source")
+            if not getattr(result, "rule_trace", None):
+                from src.extractor import get_last_v2_segment_result as _get_v2
+                _v2 = _get_v2()
+                setattr(result, "rule_trace", _v2.rule_trace if _v2 else [])
+                setattr(result, "score_summary", _v2.score_summary if _v2 else {})
+            # PDF成功: valid_segment_count >= 1 なら status="ok"
+            if getattr(result, "valid_segment_count", 0) >= 1:
+                result.status = "ok"
+                result.selected_path = "pdf"
+                result.via = "pdf"
+                if getattr(result, "valid_segment_count", 0) >= 2:
+                    result.confidence = max(getattr(result, "confidence", 0.0), 0.7)
+        return result
         raw_seg_count = 0
         valid_seg_count = 0
         invalid_seg_count = 0
@@ -244,7 +304,39 @@ def process_one_filing_v2(
         reason = f"[tdnet_xbrl] {best.error}"
         # xbrl_no_segment_facts → no_records, それ以外→ xbrl_extraction_error
         if best.error == "xbrl_no_segment_facts":
-            hard_fail_reason = "no_records"
+            fallback_used = True
+            fallback_reason = "no_records"
+            from lib.backfill.worker import process_one_filing_pdf_only
+            result = process_one_filing_pdf_only(filing)
+            if isinstance(result, dict):
+                result["fallback_used"] = True
+                result["fallback_reason"] = "no_records"
+                if not result.get("rule_trace"):
+                    from src.extractor import get_last_v2_segment_result as _get_v2
+                    _v2 = _get_v2()
+                    result["rule_trace"] = _v2.rule_trace if _v2 else []
+                    result["score_summary"] = _v2.score_summary if _v2 else {}
+                # PDF成功: valid_segment_count >= 1 なら status="ok"
+                if result.get("valid_segment_count", 0) >= 1:
+                    result["status"] = "ok"
+                    result["selected_path"] = "pdf"
+                    result["via"] = "pdf"
+            else:
+                setattr(result, "fallback_used", True)
+                setattr(result, "fallback_reason", "no_records")
+                if not getattr(result, "rule_trace", None):
+                    from src.extractor import get_last_v2_segment_result as _get_v2
+                    _v2 = _get_v2()
+                    setattr(result, "rule_trace", _v2.rule_trace if _v2 else [])
+                    setattr(result, "score_summary", _v2.score_summary if _v2 else {})
+                # PDF成功: valid_segment_count >= 1 なら status="ok"
+                if getattr(result, "valid_segment_count", 0) >= 1:
+                    result.status = "ok"
+                    result.selected_path = "pdf"
+                    result.via = "pdf"
+                    if getattr(result, "valid_segment_count", 0) >= 2:
+                        result.confidence = max(getattr(result, "confidence", 0.0), 0.7)
+            return result
         elif best.error.startswith("period_quarter_unresolved"):
             hard_fail_reason = "xbrl_extraction_error"
         else:
@@ -370,6 +462,8 @@ def process_one_filing_v2(
         cache_paths={"cache_dir": str(paths.cache_dir)},
         quarantine=quarantine_dict,
         result_fingerprint=fp,
+        rule_trace=getattr(best, "rule_trace", []),
+        score_summary=getattr(best, "score_summary", {}),
         candidates=candidates,
         candidate_summary=candidate_summary,
         route_mode=route_mode,
@@ -501,21 +595,29 @@ def _try_pdf_source(
 
     from src.segment.extraction_result_validator import validate_extraction_result
 
-    segment_records, seg_err = _extract_segments(
+    _seg_result = _extract_segments(
         doc_path, filing, financials_data, "pdf", fid, metrics,
         retry_pdf=retry_pdf, timeout_pdf=timeout_pdf, sleep_fn=sleep_fn,
     )
+    segment_records = _seg_result[0] if len(_seg_result) > 0 else []
+    seg_err        = _seg_result[1] if len(_seg_result) > 1 else ""
+    rule_trace     = _seg_result[2] if len(_seg_result) > 2 else []
+    score_summary  = _seg_result[3] if len(_seg_result) > 3 else {}
 
     if not segment_records:
         return SourceCandidate(
             source="pdf", attempted=True, available=True,
             error=seg_err or "pdf_no_segments",
+            rule_trace=rule_trace,
+            score_summary=score_summary,
         )
 
     validation = validate_extraction_result(segment_records, source="pdf_compat")
     return SourceCandidate(
         source="pdf", attempted=True, available=True,
         segment_records=segment_records, validation=validation,
+        rule_trace=rule_trace,
+        score_summary=score_summary,
     )
 
 

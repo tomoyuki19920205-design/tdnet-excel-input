@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "5271",
+    "period": "R8/2",
+    "quarter": "FY",
+    "segment_name": "Foundation",
+    "segment_order": 1,
+    "segment_sales": 11492,
+    "segment_profit": 632,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Foundation",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "7275074f8e258c57b62e1e2c",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "5271",
+    "period": "R8/2",
+    "quarter": "FY",
+    "segment_name": "Leasing",
+    "segment_order": 2,
+    "segment_sales": 198,
+    "segment_profit": 120,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Leasing",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "7275074f8e258c57b62e1e2c",
+    "row_type": "segment"
+  }
+]

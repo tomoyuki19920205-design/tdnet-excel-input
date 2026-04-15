@@ -394,28 +394,33 @@ class BackfillMetricsV2:
 
     def record_v2_result(self, result) -> None:
         """FilingResultV2 を1件集計。"""
+        segment_records = getattr(result, "segment_records", None)
+        segment_record_count = len(segment_records) if segment_records is not None else 0
+        metrics = getattr(result, "metrics", None)
+        duration_ms = metrics.get("total_ms", 0) if metrics is not None else 0
+
         self._filing_results.append({
-            "filing_id": result.filing_id,
-            "status": result.status,
-            "source": result.source,
-            "selected_path": result.selected_path,
-            "confidence": result.confidence,
-            "fallback_used": result.fallback_used,
-            "fallback_reason": result.fallback_reason,
-            "hard_fail_reason": result.hard_fail_reason,
-            "quarantine_reason": result.quarantine_reason,
-            "raw_segment_count": result.raw_segment_count,
-            "valid_segment_count": result.valid_segment_count,
-            "invalid_segment_count": result.invalid_segment_count,
-            "sales_non_null_count": result.sales_non_null_count,
-            "profit_non_null_count": result.profit_non_null_count,
-            "account_like_ratio": result.account_like_ratio,
-            "narrative_contamination": result.narrative_contamination,
-            "segment_record_count": len(result.segment_records),
-            "duration_ms": result.metrics.get("total_ms", 0),
+            "filing_id": getattr(result, "filing_id", None),
+            "status": getattr(result, "status", None),
+            "source": getattr(result, "source", None),
+            "selected_path": getattr(result, "selected_path", None),
+            "confidence": getattr(result, "confidence", None),
+            "fallback_used": getattr(result, "fallback_used", None),
+            "fallback_reason": getattr(result, "fallback_reason", None),
+            "hard_fail_reason": getattr(result, "hard_fail_reason", None),
+            "quarantine_reason": getattr(result, "quarantine_reason", None),
+            "raw_segment_count": getattr(result, "raw_segment_count", None),
+            "valid_segment_count": getattr(result, "valid_segment_count", None),
+            "invalid_segment_count": getattr(result, "invalid_segment_count", None),
+            "sales_non_null_count": getattr(result, "sales_non_null_count", None),
+            "profit_non_null_count": getattr(result, "profit_non_null_count", None),
+            "account_like_ratio": getattr(result, "account_like_ratio", None),
+            "narrative_contamination": getattr(result, "narrative_contamination", None),
+            "segment_record_count": segment_record_count,
+            "duration_ms": duration_ms,
         })
-        if result.status in ("ok", "partial"):
-            self.total_segment_rows += len(result.segment_records)
+        if getattr(result, "status", None) in ("ok", "partial"):
+            self.total_segment_rows += segment_record_count
 
     def record_upsert(self, stats) -> None:
         self.upsert_inserted += stats.inserted

@@ -1,0 +1,14 @@
+{
+  "filing_id": "65333af0e0435bb1c0c65283",
+  "ticker": "235A",
+  "disclosure_date": "2026-04-10",
+  "title": "2026年2月期（2025年8月25日～2026年2月24日）決算短信",
+  "doc_type": "financial_statement",
+  "source_url": "https://www.release.tdnet.info/inbs/140120260410501381.pdf",
+  "xbrl_url": "https://www.release.tdnet.info/inbs/081220260410501381.zip",
+  "listing_source": "tdnet_html",
+  "has_xbrl": false,
+  "xbrl_url_inferred": true,
+  "has_pdf": true,
+  "created_at": "2026-04-10T14:12:31.752305+09:00"
+}

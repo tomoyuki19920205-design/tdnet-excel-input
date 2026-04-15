@@ -1,0 +1,5 @@
+﻿candidate_index,page,raw_score,num_density,segment_like_rows,segment_name_like_rows,valid_segment_like,bs_cf_like,bs_cf_ratio,header_keyword_hits,has_sales_header,has_profit_header,cg_accept,cg_reject_reason,is_best_table
+0,10,0.7,1.15,0,0,1,0,0.0,0,False,False,False,narrative_guard,True
+1,10,0.57,0.7273,0,0,1,0,0.0,0,False,False,False,narrative_guard,False
+2,0,0.54,0.6111,1,1,0,0,0.0,2,True,True,False,no_valid_segment_rows,False
+3,3,0.47,1.3333,0,0,0,0,0.0,2,True,True,False,no_valid_segment_rows,False

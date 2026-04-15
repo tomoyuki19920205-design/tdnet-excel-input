@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "4441",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "Security Business",
+    "segment_order": 1,
+    "segment_sales": 492,
+    "segment_profit": 331,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Security Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-10",
+    "tdnet_doc_id": "f6cf2d15e467b896b0bbb474",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "4441",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "Solution Business",
+    "segment_order": 2,
+    "segment_sales": 293,
+    "segment_profit": 80,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Solution Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-10",
+    "tdnet_doc_id": "f6cf2d15e467b896b0bbb474",
+    "row_type": "segment"
+  }
+]

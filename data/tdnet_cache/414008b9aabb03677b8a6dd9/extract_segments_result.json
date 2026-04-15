@@ -1,0 +1,19 @@
+[
+  {
+    "ticker": "7034",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "Investment Business",
+    "segment_order": 1,
+    "segment_sales": 700,
+    "segment_profit": 628,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Investment Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-17",
+    "tdnet_doc_id": "414008b9aabb03677b8a6dd9",
+    "row_type": "segment"
+  }
+]

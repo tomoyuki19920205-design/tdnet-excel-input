@@ -1,0 +1,3762 @@
+[
+  {
+    "ticker": "6040",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "UNKNOWN",
+    "segment_order": 1,
+    "segment_sales": 2025.0,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_pdf",
+    "segment_name_norm": "UNKNOWN",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-06",
+    "tdnet_doc_id": "d51f78ff8be5191e1260bcb7",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.71 (売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=1 narr=28",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['日本スキー場開発㈱ (6040)', '2026年７月期 第２四半期決算短信'], reconstructed=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信'], units=None",
+      "Unit: raw=None, mult=None, src=None",
+      "Phase C: transition B(54rows,2cols)→C(54rows,2cols) header_band=2 new_headers=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: header/numeric fallback failed, deferring quarantine to post-fallbacks",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D: virtual columns reconstruction (sales only) num_rows=22",
+      "Phase D-6: profit inference start sales_col=0 num data_rows=52",
+      "Phase D-6: no numeric columns to evaluate",
+      "Phase D: accepted sales-only fallback (parse_quality=partial_sales_only)",
+      "Phase D: sales_col=0, profit_col=None, role=",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=16, skip行=25, non_reportable=38",
+      "Phase F: レコード組立",
+      "Phase F: profit inference: pos=1 median=10.0 pct=0/13 dec=13/13 -> RATIO (skip)",
+      "Phase F: profit inference: pos=2 median=80.3 pct=7/7 dec=7/7 -> RATIO (skip)",
+      "Phase F: 16件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.23,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.55,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.3,
+            "segment_row": 0.25,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列3列; 数値行8行(5+); 数値密度8/13; 行数13; セグメント名行4行; 事業名パターン2行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.46,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.22,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 数値密度7/20; 行数20; 補助語2個; 減価償却(減点); 事業名パターン2行;",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 1,
+        "narrative_like": 28,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 2,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 12,
+        "pl_account_like": 0,
+        "top_samples": [
+          "日本スキー場開発㈱ (:valid_segment_like",
+          ":garbage_fragment_like",
+          "その他の施設における来場者数 （単位：千人）:garbage_fragment_like",
+          ":garbage_fragment_like",
+          "会社名 前年同期比:unknown"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 54,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "phase_c_rows": 54,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信"
+        ],
+        "reconstructed_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "column_labels": [
+          [
+            "その他の施設における来場者数 （単位：千人）"
+          ],
+          [
+            "2025年 2026年"
+          ]
+        ],
+        "column_roles": [
+          "segment_label"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [],
+        "sales_candidates": [],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "new_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 0.8919999999999999,
+      "table_score": 0.71,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 16,
+      "non_reportable_count": 38,
+      "unit_raw": null,
+      "unit_multiplier": null,
+      "sales_col_role": "sales",
+      "profit_col_role": "",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 16
+    }
+  },
+  {
+    "ticker": "6040",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "UNKNOWN",
+    "segment_order": 2,
+    "segment_sales": 1.0,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_pdf",
+    "segment_name_norm": "UNKNOWN",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-06",
+    "tdnet_doc_id": "d51f78ff8be5191e1260bcb7",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.71 (売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=1 narr=28",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['日本スキー場開発㈱ (6040)', '2026年７月期 第２四半期決算短信'], reconstructed=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信'], units=None",
+      "Unit: raw=None, mult=None, src=None",
+      "Phase C: transition B(54rows,2cols)→C(54rows,2cols) header_band=2 new_headers=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: header/numeric fallback failed, deferring quarantine to post-fallbacks",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D: virtual columns reconstruction (sales only) num_rows=22",
+      "Phase D-6: profit inference start sales_col=0 num data_rows=52",
+      "Phase D-6: no numeric columns to evaluate",
+      "Phase D: accepted sales-only fallback (parse_quality=partial_sales_only)",
+      "Phase D: sales_col=0, profit_col=None, role=",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=16, skip行=25, non_reportable=38",
+      "Phase F: レコード組立",
+      "Phase F: profit inference: pos=1 median=10.0 pct=0/13 dec=13/13 -> RATIO (skip)",
+      "Phase F: profit inference: pos=2 median=80.3 pct=7/7 dec=7/7 -> RATIO (skip)",
+      "Phase F: 16件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.23,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.55,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.3,
+            "segment_row": 0.25,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列3列; 数値行8行(5+); 数値密度8/13; 行数13; セグメント名行4行; 事業名パターン2行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.46,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.22,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 数値密度7/20; 行数20; 補助語2個; 減価償却(減点); 事業名パターン2行;",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 1,
+        "narrative_like": 28,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 2,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 12,
+        "pl_account_like": 0,
+        "top_samples": [
+          "日本スキー場開発㈱ (:valid_segment_like",
+          ":garbage_fragment_like",
+          "その他の施設における来場者数 （単位：千人）:garbage_fragment_like",
+          ":garbage_fragment_like",
+          "会社名 前年同期比:unknown"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 54,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "phase_c_rows": 54,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信"
+        ],
+        "reconstructed_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "column_labels": [
+          [
+            "その他の施設における来場者数 （単位：千人）"
+          ],
+          [
+            "2025年 2026年"
+          ]
+        ],
+        "column_roles": [
+          "segment_label"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [],
+        "sales_candidates": [],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "new_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 0.8919999999999999,
+      "table_score": 0.71,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 16,
+      "non_reportable_count": 38,
+      "unit_raw": null,
+      "unit_multiplier": null,
+      "sales_col_role": "sales",
+      "profit_col_role": "",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 16
+    }
+  },
+  {
+    "ticker": "6040",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "川場リゾート(株)",
+    "segment_order": 3,
+    "segment_sales": 67.0,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_pdf",
+    "segment_name_norm": "川場リゾート(株)",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-06",
+    "tdnet_doc_id": "d51f78ff8be5191e1260bcb7",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.71 (売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=1 narr=28",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['日本スキー場開発㈱ (6040)', '2026年７月期 第２四半期決算短信'], reconstructed=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信'], units=None",
+      "Unit: raw=None, mult=None, src=None",
+      "Phase C: transition B(54rows,2cols)→C(54rows,2cols) header_band=2 new_headers=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: header/numeric fallback failed, deferring quarantine to post-fallbacks",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D: virtual columns reconstruction (sales only) num_rows=22",
+      "Phase D-6: profit inference start sales_col=0 num data_rows=52",
+      "Phase D-6: no numeric columns to evaluate",
+      "Phase D: accepted sales-only fallback (parse_quality=partial_sales_only)",
+      "Phase D: sales_col=0, profit_col=None, role=",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=16, skip行=25, non_reportable=38",
+      "Phase F: レコード組立",
+      "Phase F: profit inference: pos=1 median=10.0 pct=0/13 dec=13/13 -> RATIO (skip)",
+      "Phase F: profit inference: pos=2 median=80.3 pct=7/7 dec=7/7 -> RATIO (skip)",
+      "Phase F: 16件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.23,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.55,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.3,
+            "segment_row": 0.25,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列3列; 数値行8行(5+); 数値密度8/13; 行数13; セグメント名行4行; 事業名パターン2行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.46,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.22,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 数値密度7/20; 行数20; 補助語2個; 減価償却(減点); 事業名パターン2行;",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 1,
+        "narrative_like": 28,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 2,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 12,
+        "pl_account_like": 0,
+        "top_samples": [
+          "日本スキー場開発㈱ (:valid_segment_like",
+          ":garbage_fragment_like",
+          "その他の施設における来場者数 （単位：千人）:garbage_fragment_like",
+          ":garbage_fragment_like",
+          "会社名 前年同期比:unknown"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 54,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "phase_c_rows": 54,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信"
+        ],
+        "reconstructed_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "column_labels": [
+          [
+            "その他の施設における来場者数 （単位：千人）"
+          ],
+          [
+            "2025年 2026年"
+          ]
+        ],
+        "column_roles": [
+          "segment_label"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [],
+        "sales_candidates": [],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "new_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 0.8919999999999999,
+      "table_score": 0.71,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 16,
+      "non_reportable_count": 38,
+      "unit_raw": null,
+      "unit_multiplier": null,
+      "sales_col_role": "sales",
+      "profit_col_role": "",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 16
+    }
+  },
+  {
+    "ticker": "6040",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "めいほう高原開発(株)",
+    "segment_order": 4,
+    "segment_sales": 14.0,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_pdf",
+    "segment_name_norm": "めいほう高原開発(株)",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-06",
+    "tdnet_doc_id": "d51f78ff8be5191e1260bcb7",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.71 (売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=1 narr=28",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['日本スキー場開発㈱ (6040)', '2026年７月期 第２四半期決算短信'], reconstructed=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信'], units=None",
+      "Unit: raw=None, mult=None, src=None",
+      "Phase C: transition B(54rows,2cols)→C(54rows,2cols) header_band=2 new_headers=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: header/numeric fallback failed, deferring quarantine to post-fallbacks",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D: virtual columns reconstruction (sales only) num_rows=22",
+      "Phase D-6: profit inference start sales_col=0 num data_rows=52",
+      "Phase D-6: no numeric columns to evaluate",
+      "Phase D: accepted sales-only fallback (parse_quality=partial_sales_only)",
+      "Phase D: sales_col=0, profit_col=None, role=",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=16, skip行=25, non_reportable=38",
+      "Phase F: レコード組立",
+      "Phase F: profit inference: pos=1 median=10.0 pct=0/13 dec=13/13 -> RATIO (skip)",
+      "Phase F: profit inference: pos=2 median=80.3 pct=7/7 dec=7/7 -> RATIO (skip)",
+      "Phase F: 16件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.23,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.55,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.3,
+            "segment_row": 0.25,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列3列; 数値行8行(5+); 数値密度8/13; 行数13; セグメント名行4行; 事業名パターン2行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.46,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.22,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 数値密度7/20; 行数20; 補助語2個; 減価償却(減点); 事業名パターン2行;",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 1,
+        "narrative_like": 28,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 2,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 12,
+        "pl_account_like": 0,
+        "top_samples": [
+          "日本スキー場開発㈱ (:valid_segment_like",
+          ":garbage_fragment_like",
+          "その他の施設における来場者数 （単位：千人）:garbage_fragment_like",
+          ":garbage_fragment_like",
+          "会社名 前年同期比:unknown"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 54,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "phase_c_rows": 54,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信"
+        ],
+        "reconstructed_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "column_labels": [
+          [
+            "その他の施設における来場者数 （単位：千人）"
+          ],
+          [
+            "2025年 2026年"
+          ]
+        ],
+        "column_roles": [
+          "segment_label"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [],
+        "sales_candidates": [],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "new_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 0.8919999999999999,
+      "table_score": 0.71,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 16,
+      "non_reportable_count": 38,
+      "unit_raw": null,
+      "unit_multiplier": null,
+      "sales_col_role": "sales",
+      "profit_col_role": "",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 16
+    }
+  },
+  {
+    "ticker": "6040",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "(株)鹿島槍",
+    "segment_order": 5,
+    "segment_sales": 1.0,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_pdf",
+    "segment_name_norm": "(株)鹿島槍",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-06",
+    "tdnet_doc_id": "d51f78ff8be5191e1260bcb7",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.71 (売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=1 narr=28",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['日本スキー場開発㈱ (6040)', '2026年７月期 第２四半期決算短信'], reconstructed=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信'], units=None",
+      "Unit: raw=None, mult=None, src=None",
+      "Phase C: transition B(54rows,2cols)→C(54rows,2cols) header_band=2 new_headers=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: header/numeric fallback failed, deferring quarantine to post-fallbacks",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D: virtual columns reconstruction (sales only) num_rows=22",
+      "Phase D-6: profit inference start sales_col=0 num data_rows=52",
+      "Phase D-6: no numeric columns to evaluate",
+      "Phase D: accepted sales-only fallback (parse_quality=partial_sales_only)",
+      "Phase D: sales_col=0, profit_col=None, role=",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=16, skip行=25, non_reportable=38",
+      "Phase F: レコード組立",
+      "Phase F: profit inference: pos=1 median=10.0 pct=0/13 dec=13/13 -> RATIO (skip)",
+      "Phase F: profit inference: pos=2 median=80.3 pct=7/7 dec=7/7 -> RATIO (skip)",
+      "Phase F: 16件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.23,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.55,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.3,
+            "segment_row": 0.25,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列3列; 数値行8行(5+); 数値密度8/13; 行数13; セグメント名行4行; 事業名パターン2行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.46,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.22,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 数値密度7/20; 行数20; 補助語2個; 減価償却(減点); 事業名パターン2行;",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 1,
+        "narrative_like": 28,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 2,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 12,
+        "pl_account_like": 0,
+        "top_samples": [
+          "日本スキー場開発㈱ (:valid_segment_like",
+          ":garbage_fragment_like",
+          "その他の施設における来場者数 （単位：千人）:garbage_fragment_like",
+          ":garbage_fragment_like",
+          "会社名 前年同期比:unknown"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 54,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "phase_c_rows": 54,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信"
+        ],
+        "reconstructed_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "column_labels": [
+          [
+            "その他の施設における来場者数 （単位：千人）"
+          ],
+          [
+            "2025年 2026年"
+          ]
+        ],
+        "column_roles": [
+          "segment_label"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [],
+        "sales_candidates": [],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "new_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 0.8919999999999999,
+      "table_score": 0.71,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 16,
+      "non_reportable_count": 38,
+      "unit_raw": null,
+      "unit_multiplier": null,
+      "sales_col_role": "sales",
+      "profit_col_role": "",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 16
+    }
+  },
+  {
+    "ticker": "6040",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "UNKNOWN",
+    "segment_order": 6,
+    "segment_sales": 2025.0,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_pdf",
+    "segment_name_norm": "UNKNOWN",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-06",
+    "tdnet_doc_id": "d51f78ff8be5191e1260bcb7",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.71 (売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=1 narr=28",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['日本スキー場開発㈱ (6040)', '2026年７月期 第２四半期決算短信'], reconstructed=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信'], units=None",
+      "Unit: raw=None, mult=None, src=None",
+      "Phase C: transition B(54rows,2cols)→C(54rows,2cols) header_band=2 new_headers=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: header/numeric fallback failed, deferring quarantine to post-fallbacks",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D: virtual columns reconstruction (sales only) num_rows=22",
+      "Phase D-6: profit inference start sales_col=0 num data_rows=52",
+      "Phase D-6: no numeric columns to evaluate",
+      "Phase D: accepted sales-only fallback (parse_quality=partial_sales_only)",
+      "Phase D: sales_col=0, profit_col=None, role=",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=16, skip行=25, non_reportable=38",
+      "Phase F: レコード組立",
+      "Phase F: profit inference: pos=1 median=10.0 pct=0/13 dec=13/13 -> RATIO (skip)",
+      "Phase F: profit inference: pos=2 median=80.3 pct=7/7 dec=7/7 -> RATIO (skip)",
+      "Phase F: 16件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.23,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.55,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.3,
+            "segment_row": 0.25,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列3列; 数値行8行(5+); 数値密度8/13; 行数13; セグメント名行4行; 事業名パターン2行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.46,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.22,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 数値密度7/20; 行数20; 補助語2個; 減価償却(減点); 事業名パターン2行;",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 1,
+        "narrative_like": 28,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 2,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 12,
+        "pl_account_like": 0,
+        "top_samples": [
+          "日本スキー場開発㈱ (:valid_segment_like",
+          ":garbage_fragment_like",
+          "その他の施設における来場者数 （単位：千人）:garbage_fragment_like",
+          ":garbage_fragment_like",
+          "会社名 前年同期比:unknown"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 54,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "phase_c_rows": 54,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信"
+        ],
+        "reconstructed_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "column_labels": [
+          [
+            "その他の施設における来場者数 （単位：千人）"
+          ],
+          [
+            "2025年 2026年"
+          ]
+        ],
+        "column_roles": [
+          "segment_label"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [],
+        "sales_candidates": [],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "new_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 0.8919999999999999,
+      "table_score": 0.71,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 16,
+      "non_reportable_count": 38,
+      "unit_raw": null,
+      "unit_multiplier": null,
+      "sales_col_role": "sales",
+      "profit_col_role": "",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 16
+    }
+  },
+  {
+    "ticker": "6040",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "UNKNOWN",
+    "segment_order": 7,
+    "segment_sales": 1.0,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_pdf",
+    "segment_name_norm": "UNKNOWN",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-06",
+    "tdnet_doc_id": "d51f78ff8be5191e1260bcb7",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.71 (売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=1 narr=28",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['日本スキー場開発㈱ (6040)', '2026年７月期 第２四半期決算短信'], reconstructed=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信'], units=None",
+      "Unit: raw=None, mult=None, src=None",
+      "Phase C: transition B(54rows,2cols)→C(54rows,2cols) header_band=2 new_headers=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: header/numeric fallback failed, deferring quarantine to post-fallbacks",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D: virtual columns reconstruction (sales only) num_rows=22",
+      "Phase D-6: profit inference start sales_col=0 num data_rows=52",
+      "Phase D-6: no numeric columns to evaluate",
+      "Phase D: accepted sales-only fallback (parse_quality=partial_sales_only)",
+      "Phase D: sales_col=0, profit_col=None, role=",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=16, skip行=25, non_reportable=38",
+      "Phase F: レコード組立",
+      "Phase F: profit inference: pos=1 median=10.0 pct=0/13 dec=13/13 -> RATIO (skip)",
+      "Phase F: profit inference: pos=2 median=80.3 pct=7/7 dec=7/7 -> RATIO (skip)",
+      "Phase F: 16件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.23,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.55,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.3,
+            "segment_row": 0.25,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列3列; 数値行8行(5+); 数値密度8/13; 行数13; セグメント名行4行; 事業名パターン2行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.46,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.22,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 数値密度7/20; 行数20; 補助語2個; 減価償却(減点); 事業名パターン2行;",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 1,
+        "narrative_like": 28,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 2,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 12,
+        "pl_account_like": 0,
+        "top_samples": [
+          "日本スキー場開発㈱ (:valid_segment_like",
+          ":garbage_fragment_like",
+          "その他の施設における来場者数 （単位：千人）:garbage_fragment_like",
+          ":garbage_fragment_like",
+          "会社名 前年同期比:unknown"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 54,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "phase_c_rows": 54,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信"
+        ],
+        "reconstructed_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "column_labels": [
+          [
+            "その他の施設における来場者数 （単位：千人）"
+          ],
+          [
+            "2025年 2026年"
+          ]
+        ],
+        "column_roles": [
+          "segment_label"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [],
+        "sales_candidates": [],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "new_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 0.8919999999999999,
+      "table_score": 0.71,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 16,
+      "non_reportable_count": 38,
+      "unit_raw": null,
+      "unit_multiplier": null,
+      "sales_col_role": "sales",
+      "profit_col_role": "",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 16
+    }
+  },
+  {
+    "ticker": "6040",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "HAKUBA VALLEY国際山岳リゾート白馬八方尾根",
+    "segment_order": 8,
+    "segment_sales": 5.0,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_pdf",
+    "segment_name_norm": "HAKUBA VALLEY国際山岳リゾート白馬八方尾根",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-06",
+    "tdnet_doc_id": "d51f78ff8be5191e1260bcb7",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.71 (売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=1 narr=28",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['日本スキー場開発㈱ (6040)', '2026年７月期 第２四半期決算短信'], reconstructed=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信'], units=None",
+      "Unit: raw=None, mult=None, src=None",
+      "Phase C: transition B(54rows,2cols)→C(54rows,2cols) header_band=2 new_headers=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: header/numeric fallback failed, deferring quarantine to post-fallbacks",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D: virtual columns reconstruction (sales only) num_rows=22",
+      "Phase D-6: profit inference start sales_col=0 num data_rows=52",
+      "Phase D-6: no numeric columns to evaluate",
+      "Phase D: accepted sales-only fallback (parse_quality=partial_sales_only)",
+      "Phase D: sales_col=0, profit_col=None, role=",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=16, skip行=25, non_reportable=38",
+      "Phase F: レコード組立",
+      "Phase F: profit inference: pos=1 median=10.0 pct=0/13 dec=13/13 -> RATIO (skip)",
+      "Phase F: profit inference: pos=2 median=80.3 pct=7/7 dec=7/7 -> RATIO (skip)",
+      "Phase F: 16件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.23,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.55,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.3,
+            "segment_row": 0.25,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列3列; 数値行8行(5+); 数値密度8/13; 行数13; セグメント名行4行; 事業名パターン2行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.46,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.22,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 数値密度7/20; 行数20; 補助語2個; 減価償却(減点); 事業名パターン2行;",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 1,
+        "narrative_like": 28,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 2,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 12,
+        "pl_account_like": 0,
+        "top_samples": [
+          "日本スキー場開発㈱ (:valid_segment_like",
+          ":garbage_fragment_like",
+          "その他の施設における来場者数 （単位：千人）:garbage_fragment_like",
+          ":garbage_fragment_like",
+          "会社名 前年同期比:unknown"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 54,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "phase_c_rows": 54,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信"
+        ],
+        "reconstructed_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "column_labels": [
+          [
+            "その他の施設における来場者数 （単位：千人）"
+          ],
+          [
+            "2025年 2026年"
+          ]
+        ],
+        "column_roles": [
+          "segment_label"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [],
+        "sales_candidates": [],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "new_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 0.8919999999999999,
+      "table_score": 0.71,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 16,
+      "non_reportable_count": 38,
+      "unit_raw": null,
+      "unit_multiplier": null,
+      "sales_col_role": "sales",
+      "profit_col_role": "",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 16
+    }
+  },
+  {
+    "ticker": "6040",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "HAKUBA VALLEY白馬岩岳マウンテンリゾート",
+    "segment_order": 9,
+    "segment_sales": 26.0,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_pdf",
+    "segment_name_norm": "HAKUBA VALLEY白馬岩岳マウンテンリゾート",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-06",
+    "tdnet_doc_id": "d51f78ff8be5191e1260bcb7",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.71 (売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=1 narr=28",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['日本スキー場開発㈱ (6040)', '2026年７月期 第２四半期決算短信'], reconstructed=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信'], units=None",
+      "Unit: raw=None, mult=None, src=None",
+      "Phase C: transition B(54rows,2cols)→C(54rows,2cols) header_band=2 new_headers=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: header/numeric fallback failed, deferring quarantine to post-fallbacks",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D: virtual columns reconstruction (sales only) num_rows=22",
+      "Phase D-6: profit inference start sales_col=0 num data_rows=52",
+      "Phase D-6: no numeric columns to evaluate",
+      "Phase D: accepted sales-only fallback (parse_quality=partial_sales_only)",
+      "Phase D: sales_col=0, profit_col=None, role=",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=16, skip行=25, non_reportable=38",
+      "Phase F: レコード組立",
+      "Phase F: profit inference: pos=1 median=10.0 pct=0/13 dec=13/13 -> RATIO (skip)",
+      "Phase F: profit inference: pos=2 median=80.3 pct=7/7 dec=7/7 -> RATIO (skip)",
+      "Phase F: 16件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.23,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.55,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.3,
+            "segment_row": 0.25,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列3列; 数値行8行(5+); 数値密度8/13; 行数13; セグメント名行4行; 事業名パターン2行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.46,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.22,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 数値密度7/20; 行数20; 補助語2個; 減価償却(減点); 事業名パターン2行;",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 1,
+        "narrative_like": 28,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 2,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 12,
+        "pl_account_like": 0,
+        "top_samples": [
+          "日本スキー場開発㈱ (:valid_segment_like",
+          ":garbage_fragment_like",
+          "その他の施設における来場者数 （単位：千人）:garbage_fragment_like",
+          ":garbage_fragment_like",
+          "会社名 前年同期比:unknown"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 54,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "phase_c_rows": 54,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信"
+        ],
+        "reconstructed_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "column_labels": [
+          [
+            "その他の施設における来場者数 （単位：千人）"
+          ],
+          [
+            "2025年 2026年"
+          ]
+        ],
+        "column_roles": [
+          "segment_label"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [],
+        "sales_candidates": [],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "new_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 0.8919999999999999,
+      "table_score": 0.71,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 16,
+      "non_reportable_count": 38,
+      "unit_raw": null,
+      "unit_multiplier": null,
+      "sales_col_role": "sales",
+      "profit_col_role": "",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 16
+    }
+  },
+  {
+    "ticker": "6040",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "HAKUBA VALLEYつがいけマウンテンリゾート",
+    "segment_order": 10,
+    "segment_sales": 2.0,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_pdf",
+    "segment_name_norm": "HAKUBA VALLEYつがいけマウンテンリゾート",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-06",
+    "tdnet_doc_id": "d51f78ff8be5191e1260bcb7",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.71 (売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=1 narr=28",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['日本スキー場開発㈱ (6040)', '2026年７月期 第２四半期決算短信'], reconstructed=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信'], units=None",
+      "Unit: raw=None, mult=None, src=None",
+      "Phase C: transition B(54rows,2cols)→C(54rows,2cols) header_band=2 new_headers=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: header/numeric fallback failed, deferring quarantine to post-fallbacks",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D: virtual columns reconstruction (sales only) num_rows=22",
+      "Phase D-6: profit inference start sales_col=0 num data_rows=52",
+      "Phase D-6: no numeric columns to evaluate",
+      "Phase D: accepted sales-only fallback (parse_quality=partial_sales_only)",
+      "Phase D: sales_col=0, profit_col=None, role=",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=16, skip行=25, non_reportable=38",
+      "Phase F: レコード組立",
+      "Phase F: profit inference: pos=1 median=10.0 pct=0/13 dec=13/13 -> RATIO (skip)",
+      "Phase F: profit inference: pos=2 median=80.3 pct=7/7 dec=7/7 -> RATIO (skip)",
+      "Phase F: 16件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.23,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.55,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.3,
+            "segment_row": 0.25,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列3列; 数値行8行(5+); 数値密度8/13; 行数13; セグメント名行4行; 事業名パターン2行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.46,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.22,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 数値密度7/20; 行数20; 補助語2個; 減価償却(減点); 事業名パターン2行;",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 1,
+        "narrative_like": 28,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 2,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 12,
+        "pl_account_like": 0,
+        "top_samples": [
+          "日本スキー場開発㈱ (:valid_segment_like",
+          ":garbage_fragment_like",
+          "その他の施設における来場者数 （単位：千人）:garbage_fragment_like",
+          ":garbage_fragment_like",
+          "会社名 前年同期比:unknown"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 54,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "phase_c_rows": 54,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信"
+        ],
+        "reconstructed_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "column_labels": [
+          [
+            "その他の施設における来場者数 （単位：千人）"
+          ],
+          [
+            "2025年 2026年"
+          ]
+        ],
+        "column_roles": [
+          "segment_label"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [],
+        "sales_candidates": [],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "new_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 0.8919999999999999,
+      "table_score": 0.71,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 16,
+      "non_reportable_count": 38,
+      "unit_raw": null,
+      "unit_multiplier": null,
+      "sales_col_role": "sales",
+      "profit_col_role": "",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 16
+    }
+  },
+  {
+    "ticker": "6040",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "竜王マウンテンリゾート",
+    "segment_order": 11,
+    "segment_sales": 1.0,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_pdf",
+    "segment_name_norm": "竜王マウンテンリゾート",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-06",
+    "tdnet_doc_id": "d51f78ff8be5191e1260bcb7",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.71 (売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=1 narr=28",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['日本スキー場開発㈱ (6040)', '2026年７月期 第２四半期決算短信'], reconstructed=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信'], units=None",
+      "Unit: raw=None, mult=None, src=None",
+      "Phase C: transition B(54rows,2cols)→C(54rows,2cols) header_band=2 new_headers=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: header/numeric fallback failed, deferring quarantine to post-fallbacks",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D: virtual columns reconstruction (sales only) num_rows=22",
+      "Phase D-6: profit inference start sales_col=0 num data_rows=52",
+      "Phase D-6: no numeric columns to evaluate",
+      "Phase D: accepted sales-only fallback (parse_quality=partial_sales_only)",
+      "Phase D: sales_col=0, profit_col=None, role=",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=16, skip行=25, non_reportable=38",
+      "Phase F: レコード組立",
+      "Phase F: profit inference: pos=1 median=10.0 pct=0/13 dec=13/13 -> RATIO (skip)",
+      "Phase F: profit inference: pos=2 median=80.3 pct=7/7 dec=7/7 -> RATIO (skip)",
+      "Phase F: 16件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.23,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.55,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.3,
+            "segment_row": 0.25,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列3列; 数値行8行(5+); 数値密度8/13; 行数13; セグメント名行4行; 事業名パターン2行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.46,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.22,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 数値密度7/20; 行数20; 補助語2個; 減価償却(減点); 事業名パターン2行;",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 1,
+        "narrative_like": 28,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 2,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 12,
+        "pl_account_like": 0,
+        "top_samples": [
+          "日本スキー場開発㈱ (:valid_segment_like",
+          ":garbage_fragment_like",
+          "その他の施設における来場者数 （単位：千人）:garbage_fragment_like",
+          ":garbage_fragment_like",
+          "会社名 前年同期比:unknown"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 54,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "phase_c_rows": 54,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信"
+        ],
+        "reconstructed_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "column_labels": [
+          [
+            "その他の施設における来場者数 （単位：千人）"
+          ],
+          [
+            "2025年 2026年"
+          ]
+        ],
+        "column_roles": [
+          "segment_label"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [],
+        "sales_candidates": [],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "new_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 0.8919999999999999,
+      "table_score": 0.71,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 16,
+      "non_reportable_count": 38,
+      "unit_raw": null,
+      "unit_multiplier": null,
+      "sales_col_role": "sales",
+      "profit_col_role": "",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 16
+    }
+  },
+  {
+    "ticker": "6040",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "(注)",
+    "segment_order": 12,
+    "segment_sales": 1.0,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_pdf",
+    "segment_name_norm": "(注)",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-06",
+    "tdnet_doc_id": "d51f78ff8be5191e1260bcb7",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.71 (売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=1 narr=28",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['日本スキー場開発㈱ (6040)', '2026年７月期 第２四半期決算短信'], reconstructed=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信'], units=None",
+      "Unit: raw=None, mult=None, src=None",
+      "Phase C: transition B(54rows,2cols)→C(54rows,2cols) header_band=2 new_headers=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: header/numeric fallback failed, deferring quarantine to post-fallbacks",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D: virtual columns reconstruction (sales only) num_rows=22",
+      "Phase D-6: profit inference start sales_col=0 num data_rows=52",
+      "Phase D-6: no numeric columns to evaluate",
+      "Phase D: accepted sales-only fallback (parse_quality=partial_sales_only)",
+      "Phase D: sales_col=0, profit_col=None, role=",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=16, skip行=25, non_reportable=38",
+      "Phase F: レコード組立",
+      "Phase F: profit inference: pos=1 median=10.0 pct=0/13 dec=13/13 -> RATIO (skip)",
+      "Phase F: profit inference: pos=2 median=80.3 pct=7/7 dec=7/7 -> RATIO (skip)",
+      "Phase F: 16件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.23,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.55,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.3,
+            "segment_row": 0.25,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列3列; 数値行8行(5+); 数値密度8/13; 行数13; セグメント名行4行; 事業名パターン2行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.46,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.22,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 数値密度7/20; 行数20; 補助語2個; 減価償却(減点); 事業名パターン2行;",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 1,
+        "narrative_like": 28,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 2,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 12,
+        "pl_account_like": 0,
+        "top_samples": [
+          "日本スキー場開発㈱ (:valid_segment_like",
+          ":garbage_fragment_like",
+          "その他の施設における来場者数 （単位：千人）:garbage_fragment_like",
+          ":garbage_fragment_like",
+          "会社名 前年同期比:unknown"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 54,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "phase_c_rows": 54,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信"
+        ],
+        "reconstructed_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "column_labels": [
+          [
+            "その他の施設における来場者数 （単位：千人）"
+          ],
+          [
+            "2025年 2026年"
+          ]
+        ],
+        "column_roles": [
+          "segment_label"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [],
+        "sales_candidates": [],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "new_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 0.8919999999999999,
+      "table_score": 0.71,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 16,
+      "non_reportable_count": 38,
+      "unit_raw": null,
+      "unit_multiplier": null,
+      "sales_col_role": "sales",
+      "profit_col_role": "",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 16
+    }
+  },
+  {
+    "ticker": "6040",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "当グリーンシーズンにおいてはインバウンドのお客様にご利用いただきました。天候面では、",
+    "segment_order": 13,
+    "segment_sales": 8.0,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_pdf",
+    "segment_name_norm": "当グリーンシーズンにおいてはインバウンドのお客様にご利用いただきました。天候面では、",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-06",
+    "tdnet_doc_id": "d51f78ff8be5191e1260bcb7",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.71 (売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=1 narr=28",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['日本スキー場開発㈱ (6040)', '2026年７月期 第２四半期決算短信'], reconstructed=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信'], units=None",
+      "Unit: raw=None, mult=None, src=None",
+      "Phase C: transition B(54rows,2cols)→C(54rows,2cols) header_band=2 new_headers=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: header/numeric fallback failed, deferring quarantine to post-fallbacks",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D: virtual columns reconstruction (sales only) num_rows=22",
+      "Phase D-6: profit inference start sales_col=0 num data_rows=52",
+      "Phase D-6: no numeric columns to evaluate",
+      "Phase D: accepted sales-only fallback (parse_quality=partial_sales_only)",
+      "Phase D: sales_col=0, profit_col=None, role=",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=16, skip行=25, non_reportable=38",
+      "Phase F: レコード組立",
+      "Phase F: profit inference: pos=1 median=10.0 pct=0/13 dec=13/13 -> RATIO (skip)",
+      "Phase F: profit inference: pos=2 median=80.3 pct=7/7 dec=7/7 -> RATIO (skip)",
+      "Phase F: 16件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.23,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.55,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.3,
+            "segment_row": 0.25,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列3列; 数値行8行(5+); 数値密度8/13; 行数13; セグメント名行4行; 事業名パターン2行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.46,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.22,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 数値密度7/20; 行数20; 補助語2個; 減価償却(減点); 事業名パターン2行;",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 1,
+        "narrative_like": 28,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 2,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 12,
+        "pl_account_like": 0,
+        "top_samples": [
+          "日本スキー場開発㈱ (:valid_segment_like",
+          ":garbage_fragment_like",
+          "その他の施設における来場者数 （単位：千人）:garbage_fragment_like",
+          ":garbage_fragment_like",
+          "会社名 前年同期比:unknown"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 54,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "phase_c_rows": 54,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信"
+        ],
+        "reconstructed_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "column_labels": [
+          [
+            "その他の施設における来場者数 （単位：千人）"
+          ],
+          [
+            "2025年 2026年"
+          ]
+        ],
+        "column_roles": [
+          "segment_label"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [],
+        "sales_candidates": [],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "new_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 0.8919999999999999,
+      "table_score": 0.71,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 16,
+      "non_reportable_count": 38,
+      "unit_raw": null,
+      "unit_multiplier": null,
+      "sales_col_role": "sales",
+      "profit_col_role": "",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 16
+    }
+  },
+  {
+    "ticker": "6040",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "り、多くのお客様にお越しいただきました。一方で、",
+    "segment_order": 14,
+    "segment_sales": 9.0,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_pdf",
+    "segment_name_norm": "り、多くのお客様にお越しいただきました。一方で、",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-06",
+    "tdnet_doc_id": "d51f78ff8be5191e1260bcb7",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.71 (売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=1 narr=28",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['日本スキー場開発㈱ (6040)', '2026年７月期 第２四半期決算短信'], reconstructed=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信'], units=None",
+      "Unit: raw=None, mult=None, src=None",
+      "Phase C: transition B(54rows,2cols)→C(54rows,2cols) header_band=2 new_headers=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: header/numeric fallback failed, deferring quarantine to post-fallbacks",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D: virtual columns reconstruction (sales only) num_rows=22",
+      "Phase D-6: profit inference start sales_col=0 num data_rows=52",
+      "Phase D-6: no numeric columns to evaluate",
+      "Phase D: accepted sales-only fallback (parse_quality=partial_sales_only)",
+      "Phase D: sales_col=0, profit_col=None, role=",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=16, skip行=25, non_reportable=38",
+      "Phase F: レコード組立",
+      "Phase F: profit inference: pos=1 median=10.0 pct=0/13 dec=13/13 -> RATIO (skip)",
+      "Phase F: profit inference: pos=2 median=80.3 pct=7/7 dec=7/7 -> RATIO (skip)",
+      "Phase F: 16件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.23,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.55,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.3,
+            "segment_row": 0.25,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列3列; 数値行8行(5+); 数値密度8/13; 行数13; セグメント名行4行; 事業名パターン2行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.46,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.22,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 数値密度7/20; 行数20; 補助語2個; 減価償却(減点); 事業名パターン2行;",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 1,
+        "narrative_like": 28,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 2,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 12,
+        "pl_account_like": 0,
+        "top_samples": [
+          "日本スキー場開発㈱ (:valid_segment_like",
+          ":garbage_fragment_like",
+          "その他の施設における来場者数 （単位：千人）:garbage_fragment_like",
+          ":garbage_fragment_like",
+          "会社名 前年同期比:unknown"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 54,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "phase_c_rows": 54,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信"
+        ],
+        "reconstructed_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "column_labels": [
+          [
+            "その他の施設における来場者数 （単位：千人）"
+          ],
+          [
+            "2025年 2026年"
+          ]
+        ],
+        "column_roles": [
+          "segment_label"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [],
+        "sales_candidates": [],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "new_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 0.8919999999999999,
+      "table_score": 0.71,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 16,
+      "non_reportable_count": 38,
+      "unit_raw": null,
+      "unit_multiplier": null,
+      "sales_col_role": "sales",
+      "profit_col_role": "",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 16
+    }
+  },
+  {
+    "ticker": "6040",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "「HANETTA(ハネッタ)」の運営が",
+    "segment_order": 15,
+    "segment_sales": 4.0,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_pdf",
+    "segment_name_norm": "「HANETTA(ハネッタ)」の運営が",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-06",
+    "tdnet_doc_id": "d51f78ff8be5191e1260bcb7",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.71 (売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=1 narr=28",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['日本スキー場開発㈱ (6040)', '2026年７月期 第２四半期決算短信'], reconstructed=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信'], units=None",
+      "Unit: raw=None, mult=None, src=None",
+      "Phase C: transition B(54rows,2cols)→C(54rows,2cols) header_band=2 new_headers=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: header/numeric fallback failed, deferring quarantine to post-fallbacks",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D: virtual columns reconstruction (sales only) num_rows=22",
+      "Phase D-6: profit inference start sales_col=0 num data_rows=52",
+      "Phase D-6: no numeric columns to evaluate",
+      "Phase D: accepted sales-only fallback (parse_quality=partial_sales_only)",
+      "Phase D: sales_col=0, profit_col=None, role=",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=16, skip行=25, non_reportable=38",
+      "Phase F: レコード組立",
+      "Phase F: profit inference: pos=1 median=10.0 pct=0/13 dec=13/13 -> RATIO (skip)",
+      "Phase F: profit inference: pos=2 median=80.3 pct=7/7 dec=7/7 -> RATIO (skip)",
+      "Phase F: 16件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.23,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.55,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.3,
+            "segment_row": 0.25,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列3列; 数値行8行(5+); 数値密度8/13; 行数13; セグメント名行4行; 事業名パターン2行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.46,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.22,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 数値密度7/20; 行数20; 補助語2個; 減価償却(減点); 事業名パターン2行;",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 1,
+        "narrative_like": 28,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 2,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 12,
+        "pl_account_like": 0,
+        "top_samples": [
+          "日本スキー場開発㈱ (:valid_segment_like",
+          ":garbage_fragment_like",
+          "その他の施設における来場者数 （単位：千人）:garbage_fragment_like",
+          ":garbage_fragment_like",
+          "会社名 前年同期比:unknown"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 54,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "phase_c_rows": 54,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信"
+        ],
+        "reconstructed_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "column_labels": [
+          [
+            "その他の施設における来場者数 （単位：千人）"
+          ],
+          [
+            "2025年 2026年"
+          ]
+        ],
+        "column_roles": [
+          "segment_label"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [],
+        "sales_candidates": [],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "new_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 0.8919999999999999,
+      "table_score": 0.71,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 16,
+      "non_reportable_count": 38,
+      "unit_raw": null,
+      "unit_multiplier": null,
+      "sales_col_role": "sales",
+      "profit_col_role": "",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 16
+    }
+  },
+  {
+    "ticker": "6040",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "(第",
+    "segment_order": 16,
+    "segment_sales": 3.0,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_pdf",
+    "segment_name_norm": "(第",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-06",
+    "tdnet_doc_id": "d51f78ff8be5191e1260bcb7",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.71 (売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=1 narr=28",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['日本スキー場開発㈱ (6040)', '2026年７月期 第２四半期決算短信'], reconstructed=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信'], units=None",
+      "Unit: raw=None, mult=None, src=None",
+      "Phase C: transition B(54rows,2cols)→C(54rows,2cols) header_band=2 new_headers=['日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: header/numeric fallback failed, deferring quarantine to post-fallbacks",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D: virtual columns reconstruction (sales only) num_rows=22",
+      "Phase D-6: profit inference start sales_col=0 num data_rows=52",
+      "Phase D-6: no numeric columns to evaluate",
+      "Phase D: accepted sales-only fallback (parse_quality=partial_sales_only)",
+      "Phase D: sales_col=0, profit_col=None, role=",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=16, skip行=25, non_reportable=38",
+      "Phase F: レコード組立",
+      "Phase F: profit inference: pos=1 median=10.0 pct=0/13 dec=13/13 -> RATIO (skip)",
+      "Phase F: profit inference: pos=2 median=80.3 pct=7/7 dec=7/7 -> RATIO (skip)",
+      "Phase F: 16件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.23,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 数値列2列; 数値行6行(5+); 行数54; セグメント名行3行; 補助語2個; 事業名パターン4行; 比率中心; 三拍子ボーナス(売上/利",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.55,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.3,
+            "segment_row": 0.25,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列3列; 数値行8行(5+); 数値密度8/13; 行数13; セグメント名行4行; 事業名パターン2行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.46,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.22,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 数値密度7/20; 行数20; 補助語2個; 減価償却(減点); 事業名パターン2行;",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 1,
+        "narrative_like": 28,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 2,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 12,
+        "pl_account_like": 0,
+        "top_samples": [
+          "日本スキー場開発㈱ (:valid_segment_like",
+          ":garbage_fragment_like",
+          "その他の施設における来場者数 （単位：千人）:garbage_fragment_like",
+          ":garbage_fragment_like",
+          "会社名 前年同期比:unknown"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 54,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "phase_c_rows": 54,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信",
+          "その他の施設における来場者数 （単位：千人）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "日本スキー場開発㈱ (6040)",
+          "2026年７月期 第２四半期決算短信"
+        ],
+        "reconstructed_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "column_labels": [
+          [
+            "その他の施設における来場者数 （単位：千人）"
+          ],
+          [
+            "2025年 2026年"
+          ]
+        ],
+        "column_roles": [
+          "segment_label"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [],
+        "sales_candidates": [],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "new_headers": [
+          "日本スキー場開発(株)(6040)2026年7月期第2四半期決算短信"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 0.8919999999999999,
+      "table_score": 0.71,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 16,
+      "non_reportable_count": 38,
+      "unit_raw": null,
+      "unit_multiplier": null,
+      "sales_col_role": "sales",
+      "profit_col_role": "",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 16
+    }
+  }
+]

@@ -44,13 +44,26 @@ class StateDB:
         self._conn.execute(_CREATE_TABLE)
         self._conn.commit()
 
+    # retryable skip ステータス一覧
+    # これらのステータスで記録された開示は「処理済み」とは見なさず、
+    # 次回 ingest で再試行される。
+    _RETRYABLE_STATUSES = frozenset([
+        "skipped_not_tanshin",  # Status.SKIPPED_NOT_TANSHIN
+    ])
+
     def is_processed(self, disclosure_id: str) -> bool:
-        """同一disclosure_idが既に処理済みかどうか"""
+        """同一disclosure_idが既に処理済みかどうか。
+        retryable skip ステータスの場合は False を返す（再処理対象）。
+        """
         cur = self._conn.execute(
-            "SELECT 1 FROM processing_log WHERE disclosure_id = ?",
+            "SELECT status FROM processing_log WHERE disclosure_id = ?",
             (disclosure_id,),
         )
-        return cur.fetchone() is not None
+        row = cur.fetchone()
+        if row is None:
+            return False
+        # retryable skip は未処理扱い
+        return row[0] not in self._RETRYABLE_STATUSES
 
     def record(
         self,

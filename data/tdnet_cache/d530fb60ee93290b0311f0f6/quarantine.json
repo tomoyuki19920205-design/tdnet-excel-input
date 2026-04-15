@@ -1,0 +1,14 @@
+{
+  "filing_id": "d530fb60ee93290b0311f0f6",
+  "ticker": "291A",
+  "stage": "extracting_pdf",
+  "error_message": "segment_table_found_but_no_sales_profit_columns",
+  "review_hint": "pdf_table_parse_failed",
+  "via": "pdf",
+  "candidate_reject_reason": "segment_table_found_but_no_sales_profit_columns",
+  "detector_v2_reason": "",
+  "detector_v1_reason": "segment_table_found_but_no_sales_profit_columns",
+  "xbrl_fallback_attempted": false,
+  "xbrl_fallback_succeeded": false,
+  "xbrl_failure_reason": ""
+}

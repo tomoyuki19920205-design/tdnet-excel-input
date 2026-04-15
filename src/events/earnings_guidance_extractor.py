@@ -108,7 +108,8 @@ class GuidanceData:
 
     @property
     def has_outlook(self) -> bool:
-        return bool(self.outlook_summary)
+        # Outlook 抽出は無効化済み — 常に False
+        return False
 
     @property
     def sales_yoy(self) -> Optional[float]:
@@ -822,34 +823,27 @@ def format_guidance_section(guidance: GuidanceData, clip: float | None = None) -
 
     ガイダンスも見通しもなければ空文字を返す。
     """
-    if not guidance.has_guidance and not guidance.has_outlook:
+    if not guidance.has_guidance:
         return ""
 
-    parts: list[str] = []
+    lines = ["■ 来期ガイダンス"]
+    if guidance.sales_forecast is not None:
+        line = f"売上: {_fmt_oku_yen(guidance.sales_forecast)}"
+        if guidance.sales_yoy is not None:
+            line += f"（YOY {_fmt_yoy(guidance.sales_yoy)}）"
+        lines.append(line)
+    if guidance.op_forecast is not None:
+        line = f"OP: {_fmt_oku_yen(guidance.op_forecast)}"
+        if guidance.op_yoy is not None:
+            line += f"（YOY {_fmt_yoy(guidance.op_yoy)}）"
+        lines.append(line)
+    if guidance.eps_forecast is not None:
+        line = f"EPS: {guidance.eps_forecast}円"
+        if guidance.eps_yoy is not None:
+            line += f"（YOY {_fmt_yoy(guidance.eps_yoy)}）"
+        lines.append(line)
 
-    if guidance.has_guidance:
-        lines = ["■ 来期ガイダンス"]
-        if guidance.sales_forecast is not None:
-            line = f"売上: {_fmt_oku_yen(guidance.sales_forecast)}"
-            if guidance.sales_yoy is not None:
-                line += f"（YOY {_fmt_yoy(guidance.sales_yoy)}）"
-            lines.append(line)
-        if guidance.op_forecast is not None:
-            line = f"OP: {_fmt_oku_yen(guidance.op_forecast)}"
-            if guidance.op_yoy is not None:
-                line += f"（YOY {_fmt_yoy(guidance.op_yoy)}）"
-            lines.append(line)
-        if guidance.eps_forecast is not None:
-            line = f"EPS: {guidance.eps_forecast}円"
-            if guidance.eps_yoy is not None:
-                line += f"（YOY {_fmt_yoy(guidance.eps_yoy)}）"
-            lines.append(line)
-        parts.append("\n".join(lines))
-
-    if guidance.has_outlook:
-        parts.append(f"■ 見通し\n{guidance.outlook_summary}")
-
-    return "\n\n".join(parts)
+    return "\n".join(lines)
 
 
 # ============================================================
@@ -1166,16 +1160,9 @@ def extract_guidance_from_zip(
         guidance.net_income_forecast = best.get("net_income")
         guidance.eps_forecast = best.get("eps")
 
-    # ---- Outlook 抽出 (3段階: XBRL text block → 見出し → 段落fallback) ----
-    # Step 1: XBRL text block (HTML) 優先
-    if outlook_html:
-        guidance.outlook_text = _extract_outlook_text(outlook_html)
-    # Step 2: プレーンテキストベース見出し検索
-    if not guidance.outlook_text and plain_text:
-        guidance.outlook_text = _extract_outlook_text(plain_text)
-    # Step 3: 段落 fallback (見出しなしでも見通し語ベースで抽出)
-    if not guidance.outlook_text and plain_text:
-        guidance.outlook_text = _extract_outlook_paragraphs_fallback(plain_text)
+    # ---- Outlook 抽出は無効化済み ----
+    # outlook_text / outlook_summary / outlook_factors は互換用に空値を維持
+    # (抽出ロジック自体は関数として残存しているが呼び出さない)
 
     logger.info(
         f"[GUIDANCE] extracted: sales={guidance.sales_forecast} "

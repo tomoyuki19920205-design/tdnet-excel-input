@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "6289",
+    "period": "R8/8",
+    "quarter": "2Q",
+    "segment_name": "Construction Machinery",
+    "segment_order": 1,
+    "segment_sales": 9818,
+    "segment_profit": 2147,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Construction Machinery",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "7309d05c99c88c9c3eb6366f",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "6289",
+    "period": "R8/8",
+    "quarter": "2Q",
+    "segment_name": "Press In Construction",
+    "segment_order": 2,
+    "segment_sales": 4276,
+    "segment_profit": 502,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Press In Construction",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "7309d05c99c88c9c3eb6366f",
+    "row_type": "segment"
+  }
+]

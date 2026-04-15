@@ -1,0 +1,2368 @@
+[
+  {
+    "ticker": "4422",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "UNKNOWN",
+    "segment_order": 1,
+    "segment_sales": 2026.0,
+    "segment_profit": 7.0,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "UNKNOWN",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "95498a0497f1c8dbfd93292a",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.74 (セグメント情報; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行5行(5+); 行数17; セグメント情報見出し(加点); 事業名パターン3行; 比率中心)",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=11 bscf=0 garbage=3",
+      "Phase B-2: ACCEPT alt candidate #2 valid=0 score=0.54",
+      "Phase B-2: ACCEPT valid=0 narr=1",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['売上高 営業利益 経常利益', '中間純利益'], reconstructed=['売上高中間純利益', '営業利益', '経常利益'], units=None",
+      "Phase C: merge vertical ['売上高', '中間純利益'] -> 売上高中間純利益 score=60.0",
+      "Unit: raw=百万円, mult=1000000, src=nearby",
+      "Phase C: transition B(17rows,4cols)→C(17rows,4cols) header_band=2 new_headers=['売上高中間純利益', '営業利益', '経常利益']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=7, skip行=3, non_reportable=10",
+      "Phase F: レコード組立",
+      "Phase F: 7件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.74,
+          "categories": {
+            "header": 0.46,
+            "numeric_layout": 0.23,
+            "segment_row": 0.15,
+            "exclusion": -0.1,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行5行(5+); 行数17; セグメント情報見出し(加点); 事業名パターン3行; 比",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.53,
+          "categories": {
+            "header": 0.34,
+            "numeric_layout": 0.28,
+            "segment_row": 0.03,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 売上系:売上高; 数値列2列; 数値行11行(5+); 数値密度11/20; 行数20; 補助語1個; 財政状態(減点); セグメント情報見出",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 8,
+          "score": 0.2,
+          "categories": {
+            "header": 0.22,
+            "numeric_layout": 0.15,
+            "segment_row": 0.13,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": -0.3,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 数値列6列; 行数10; 補助語1個; セグメント情報見出し(加点); 事業名パターン2行; 見出しブロック(数値行少+短ブロック)",
+          "weak_evidence": false,
+          "heading_like": true
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 11,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "当中間連結会計期間における我が国経済は、内需及びインバウンド需要の回復など、社会活動の正常化の動きが:narrative_like",
+          "みられました。一方で、国際情勢不安、円安の進行、物価上昇など、景気動向についてもいまだ予断を許さない状:narrative_like",
+          "況が続いております。:narrative_like",
+          "このような環境の下、当社グループは、引き続き国内及び海外におけるコンサルティングサービス及びASPサー:narrative_like",
+          "ビスのさらなる販売拡大に取り組んだ結果、国内のコンサルティングサービスを中心に堅調に推移いたしました。:narrative_like"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 17,
+        "phase_b_num_cols": 4,
+        "phase_b_preview": [
+          "売上高 営業利益 経常利益",
+          "中間純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％"
+        ],
+        "phase_c_rows": 17,
+        "phase_c_num_cols": 4,
+        "phase_c_preview": [
+          "売上高 営業利益 経常利益",
+          "中間純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "売上高 営業利益 経常利益",
+          "中間純利益"
+        ],
+        "reconstructed_headers": [
+          "売上高中間純利益",
+          "営業利益",
+          "経常利益"
+        ],
+        "column_labels": [
+          [
+            "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％"
+          ],
+          [
+            "2026年７月期中間期 423 64.6 61 - 64 - 64 -"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "operating_profit_like",
+          "unknown"
+        ],
+        "best_sales_col": 0,
+        "best_profit_col": 1,
+        "profit_role": "operating_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.162,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.6,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.6,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "売上高中間純利益",
+            "scores": {
+              "segment_profit_like": 0.063,
+              "net_income_like": 0.162
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.162,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "営業利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "operating_profit_like": 0.6
+            },
+            "best_role": "operating_profit_like",
+            "best_score": 0.6,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "経常利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "ordinary_profit_like": 0.6
+            },
+            "best_role": "ordinary_profit_like",
+            "best_score": 0.6,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高中間純利益",
+            "scores": {
+              "sales": 0.18
+            },
+            "best_role": "sales",
+            "best_score": 0.18,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "売上高営業利益経常利益中間純利益"
+        ],
+        "new_headers": [
+          "売上高中間純利益",
+          "営業利益",
+          "経常利益"
+        ],
+        "reconstruction_steps": [
+          {
+            "type": "vertical",
+            "parts": [
+              "売上高",
+              "中間純利益"
+            ],
+            "result": "売上高中間純利益",
+            "score": 60.0,
+            "dict_term": "売上高"
+          }
+        ]
+      },
+      "page_score": 1.0,
+      "table_score": 0.54,
+      "header_confidence": 0.7,
+      "col_confidence": 0.6799999999999999,
+      "segment_count": 7,
+      "non_reportable_count": 10,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 7,
+      "parse_quality_partial": 0
+    }
+  },
+  {
+    "ticker": "4422",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "UNKNOWN",
+    "segment_order": 2,
+    "segment_sales": 2025.0,
+    "segment_profit": 7.0,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "UNKNOWN",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "95498a0497f1c8dbfd93292a",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.74 (セグメント情報; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行5行(5+); 行数17; セグメント情報見出し(加点); 事業名パターン3行; 比率中心)",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=11 bscf=0 garbage=3",
+      "Phase B-2: ACCEPT alt candidate #2 valid=0 score=0.54",
+      "Phase B-2: ACCEPT valid=0 narr=1",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['売上高 営業利益 経常利益', '中間純利益'], reconstructed=['売上高中間純利益', '営業利益', '経常利益'], units=None",
+      "Phase C: merge vertical ['売上高', '中間純利益'] -> 売上高中間純利益 score=60.0",
+      "Unit: raw=百万円, mult=1000000, src=nearby",
+      "Phase C: transition B(17rows,4cols)→C(17rows,4cols) header_band=2 new_headers=['売上高中間純利益', '営業利益', '経常利益']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=7, skip行=3, non_reportable=10",
+      "Phase F: レコード組立",
+      "Phase F: 7件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.74,
+          "categories": {
+            "header": 0.46,
+            "numeric_layout": 0.23,
+            "segment_row": 0.15,
+            "exclusion": -0.1,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行5行(5+); 行数17; セグメント情報見出し(加点); 事業名パターン3行; 比",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.53,
+          "categories": {
+            "header": 0.34,
+            "numeric_layout": 0.28,
+            "segment_row": 0.03,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 売上系:売上高; 数値列2列; 数値行11行(5+); 数値密度11/20; 行数20; 補助語1個; 財政状態(減点); セグメント情報見出",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 8,
+          "score": 0.2,
+          "categories": {
+            "header": 0.22,
+            "numeric_layout": 0.15,
+            "segment_row": 0.13,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": -0.3,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 数値列6列; 行数10; 補助語1個; セグメント情報見出し(加点); 事業名パターン2行; 見出しブロック(数値行少+短ブロック)",
+          "weak_evidence": false,
+          "heading_like": true
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 11,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "当中間連結会計期間における我が国経済は、内需及びインバウンド需要の回復など、社会活動の正常化の動きが:narrative_like",
+          "みられました。一方で、国際情勢不安、円安の進行、物価上昇など、景気動向についてもいまだ予断を許さない状:narrative_like",
+          "況が続いております。:narrative_like",
+          "このような環境の下、当社グループは、引き続き国内及び海外におけるコンサルティングサービス及びASPサー:narrative_like",
+          "ビスのさらなる販売拡大に取り組んだ結果、国内のコンサルティングサービスを中心に堅調に推移いたしました。:narrative_like"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 17,
+        "phase_b_num_cols": 4,
+        "phase_b_preview": [
+          "売上高 営業利益 経常利益",
+          "中間純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％"
+        ],
+        "phase_c_rows": 17,
+        "phase_c_num_cols": 4,
+        "phase_c_preview": [
+          "売上高 営業利益 経常利益",
+          "中間純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "売上高 営業利益 経常利益",
+          "中間純利益"
+        ],
+        "reconstructed_headers": [
+          "売上高中間純利益",
+          "営業利益",
+          "経常利益"
+        ],
+        "column_labels": [
+          [
+            "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％"
+          ],
+          [
+            "2026年７月期中間期 423 64.6 61 - 64 - 64 -"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "operating_profit_like",
+          "unknown"
+        ],
+        "best_sales_col": 0,
+        "best_profit_col": 1,
+        "profit_role": "operating_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.162,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.6,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.6,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "売上高中間純利益",
+            "scores": {
+              "segment_profit_like": 0.063,
+              "net_income_like": 0.162
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.162,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "営業利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "operating_profit_like": 0.6
+            },
+            "best_role": "operating_profit_like",
+            "best_score": 0.6,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "経常利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "ordinary_profit_like": 0.6
+            },
+            "best_role": "ordinary_profit_like",
+            "best_score": 0.6,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高中間純利益",
+            "scores": {
+              "sales": 0.18
+            },
+            "best_role": "sales",
+            "best_score": 0.18,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "売上高営業利益経常利益中間純利益"
+        ],
+        "new_headers": [
+          "売上高中間純利益",
+          "営業利益",
+          "経常利益"
+        ],
+        "reconstruction_steps": [
+          {
+            "type": "vertical",
+            "parts": [
+              "売上高",
+              "中間純利益"
+            ],
+            "result": "売上高中間純利益",
+            "score": 60.0,
+            "dict_term": "売上高"
+          }
+        ]
+      },
+      "page_score": 1.0,
+      "table_score": 0.54,
+      "header_confidence": 0.7,
+      "col_confidence": 0.6799999999999999,
+      "segment_count": 7,
+      "non_reportable_count": 10,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 7,
+      "parse_quality_partial": 0
+    }
+  },
+  {
+    "ticker": "4422",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "(注)包括利益",
+    "segment_order": 3,
+    "segment_sales": 2026.0,
+    "segment_profit": 7.0,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "(注)包括利益",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "95498a0497f1c8dbfd93292a",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.74 (セグメント情報; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行5行(5+); 行数17; セグメント情報見出し(加点); 事業名パターン3行; 比率中心)",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=11 bscf=0 garbage=3",
+      "Phase B-2: ACCEPT alt candidate #2 valid=0 score=0.54",
+      "Phase B-2: ACCEPT valid=0 narr=1",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['売上高 営業利益 経常利益', '中間純利益'], reconstructed=['売上高中間純利益', '営業利益', '経常利益'], units=None",
+      "Phase C: merge vertical ['売上高', '中間純利益'] -> 売上高中間純利益 score=60.0",
+      "Unit: raw=百万円, mult=1000000, src=nearby",
+      "Phase C: transition B(17rows,4cols)→C(17rows,4cols) header_band=2 new_headers=['売上高中間純利益', '営業利益', '経常利益']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=7, skip行=3, non_reportable=10",
+      "Phase F: レコード組立",
+      "Phase F: 7件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.74,
+          "categories": {
+            "header": 0.46,
+            "numeric_layout": 0.23,
+            "segment_row": 0.15,
+            "exclusion": -0.1,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行5行(5+); 行数17; セグメント情報見出し(加点); 事業名パターン3行; 比",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.53,
+          "categories": {
+            "header": 0.34,
+            "numeric_layout": 0.28,
+            "segment_row": 0.03,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 売上系:売上高; 数値列2列; 数値行11行(5+); 数値密度11/20; 行数20; 補助語1個; 財政状態(減点); セグメント情報見出",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 8,
+          "score": 0.2,
+          "categories": {
+            "header": 0.22,
+            "numeric_layout": 0.15,
+            "segment_row": 0.13,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": -0.3,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 数値列6列; 行数10; 補助語1個; セグメント情報見出し(加点); 事業名パターン2行; 見出しブロック(数値行少+短ブロック)",
+          "weak_evidence": false,
+          "heading_like": true
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 11,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "当中間連結会計期間における我が国経済は、内需及びインバウンド需要の回復など、社会活動の正常化の動きが:narrative_like",
+          "みられました。一方で、国際情勢不安、円安の進行、物価上昇など、景気動向についてもいまだ予断を許さない状:narrative_like",
+          "況が続いております。:narrative_like",
+          "このような環境の下、当社グループは、引き続き国内及び海外におけるコンサルティングサービス及びASPサー:narrative_like",
+          "ビスのさらなる販売拡大に取り組んだ結果、国内のコンサルティングサービスを中心に堅調に推移いたしました。:narrative_like"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 17,
+        "phase_b_num_cols": 4,
+        "phase_b_preview": [
+          "売上高 営業利益 経常利益",
+          "中間純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％"
+        ],
+        "phase_c_rows": 17,
+        "phase_c_num_cols": 4,
+        "phase_c_preview": [
+          "売上高 営業利益 経常利益",
+          "中間純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "売上高 営業利益 経常利益",
+          "中間純利益"
+        ],
+        "reconstructed_headers": [
+          "売上高中間純利益",
+          "営業利益",
+          "経常利益"
+        ],
+        "column_labels": [
+          [
+            "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％"
+          ],
+          [
+            "2026年７月期中間期 423 64.6 61 - 64 - 64 -"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "operating_profit_like",
+          "unknown"
+        ],
+        "best_sales_col": 0,
+        "best_profit_col": 1,
+        "profit_role": "operating_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.162,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.6,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.6,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "売上高中間純利益",
+            "scores": {
+              "segment_profit_like": 0.063,
+              "net_income_like": 0.162
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.162,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "営業利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "operating_profit_like": 0.6
+            },
+            "best_role": "operating_profit_like",
+            "best_score": 0.6,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "経常利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "ordinary_profit_like": 0.6
+            },
+            "best_role": "ordinary_profit_like",
+            "best_score": 0.6,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高中間純利益",
+            "scores": {
+              "sales": 0.18
+            },
+            "best_role": "sales",
+            "best_score": 0.18,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "売上高営業利益経常利益中間純利益"
+        ],
+        "new_headers": [
+          "売上高中間純利益",
+          "営業利益",
+          "経常利益"
+        ],
+        "reconstruction_steps": [
+          {
+            "type": "vertical",
+            "parts": [
+              "売上高",
+              "中間純利益"
+            ],
+            "result": "売上高中間純利益",
+            "score": 60.0,
+            "dict_term": "売上高"
+          }
+        ]
+      },
+      "page_score": 1.0,
+      "table_score": 0.54,
+      "header_confidence": 0.7,
+      "col_confidence": 0.6799999999999999,
+      "segment_count": 7,
+      "non_reportable_count": 10,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 7,
+      "parse_quality_partial": 0
+    }
+  },
+  {
+    "ticker": "4422",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "UNKNOWN",
+    "segment_order": 4,
+    "segment_sales": 2026.0,
+    "segment_profit": 7.0,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "UNKNOWN",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "95498a0497f1c8dbfd93292a",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.74 (セグメント情報; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行5行(5+); 行数17; セグメント情報見出し(加点); 事業名パターン3行; 比率中心)",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=11 bscf=0 garbage=3",
+      "Phase B-2: ACCEPT alt candidate #2 valid=0 score=0.54",
+      "Phase B-2: ACCEPT valid=0 narr=1",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['売上高 営業利益 経常利益', '中間純利益'], reconstructed=['売上高中間純利益', '営業利益', '経常利益'], units=None",
+      "Phase C: merge vertical ['売上高', '中間純利益'] -> 売上高中間純利益 score=60.0",
+      "Unit: raw=百万円, mult=1000000, src=nearby",
+      "Phase C: transition B(17rows,4cols)→C(17rows,4cols) header_band=2 new_headers=['売上高中間純利益', '営業利益', '経常利益']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=7, skip行=3, non_reportable=10",
+      "Phase F: レコード組立",
+      "Phase F: 7件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.74,
+          "categories": {
+            "header": 0.46,
+            "numeric_layout": 0.23,
+            "segment_row": 0.15,
+            "exclusion": -0.1,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行5行(5+); 行数17; セグメント情報見出し(加点); 事業名パターン3行; 比",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.53,
+          "categories": {
+            "header": 0.34,
+            "numeric_layout": 0.28,
+            "segment_row": 0.03,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 売上系:売上高; 数値列2列; 数値行11行(5+); 数値密度11/20; 行数20; 補助語1個; 財政状態(減点); セグメント情報見出",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 8,
+          "score": 0.2,
+          "categories": {
+            "header": 0.22,
+            "numeric_layout": 0.15,
+            "segment_row": 0.13,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": -0.3,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 数値列6列; 行数10; 補助語1個; セグメント情報見出し(加点); 事業名パターン2行; 見出しブロック(数値行少+短ブロック)",
+          "weak_evidence": false,
+          "heading_like": true
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 11,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "当中間連結会計期間における我が国経済は、内需及びインバウンド需要の回復など、社会活動の正常化の動きが:narrative_like",
+          "みられました。一方で、国際情勢不安、円安の進行、物価上昇など、景気動向についてもいまだ予断を許さない状:narrative_like",
+          "況が続いております。:narrative_like",
+          "このような環境の下、当社グループは、引き続き国内及び海外におけるコンサルティングサービス及びASPサー:narrative_like",
+          "ビスのさらなる販売拡大に取り組んだ結果、国内のコンサルティングサービスを中心に堅調に推移いたしました。:narrative_like"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 17,
+        "phase_b_num_cols": 4,
+        "phase_b_preview": [
+          "売上高 営業利益 経常利益",
+          "中間純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％"
+        ],
+        "phase_c_rows": 17,
+        "phase_c_num_cols": 4,
+        "phase_c_preview": [
+          "売上高 営業利益 経常利益",
+          "中間純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "売上高 営業利益 経常利益",
+          "中間純利益"
+        ],
+        "reconstructed_headers": [
+          "売上高中間純利益",
+          "営業利益",
+          "経常利益"
+        ],
+        "column_labels": [
+          [
+            "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％"
+          ],
+          [
+            "2026年７月期中間期 423 64.6 61 - 64 - 64 -"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "operating_profit_like",
+          "unknown"
+        ],
+        "best_sales_col": 0,
+        "best_profit_col": 1,
+        "profit_role": "operating_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.162,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.6,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.6,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "売上高中間純利益",
+            "scores": {
+              "segment_profit_like": 0.063,
+              "net_income_like": 0.162
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.162,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "営業利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "operating_profit_like": 0.6
+            },
+            "best_role": "operating_profit_like",
+            "best_score": 0.6,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "経常利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "ordinary_profit_like": 0.6
+            },
+            "best_role": "ordinary_profit_like",
+            "best_score": 0.6,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高中間純利益",
+            "scores": {
+              "sales": 0.18
+            },
+            "best_role": "sales",
+            "best_score": 0.18,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "売上高営業利益経常利益中間純利益"
+        ],
+        "new_headers": [
+          "売上高中間純利益",
+          "営業利益",
+          "経常利益"
+        ],
+        "reconstruction_steps": [
+          {
+            "type": "vertical",
+            "parts": [
+              "売上高",
+              "中間純利益"
+            ],
+            "result": "売上高中間純利益",
+            "score": 60.0,
+            "dict_term": "売上高"
+          }
+        ]
+      },
+      "page_score": 1.0,
+      "table_score": 0.54,
+      "header_confidence": 0.7,
+      "col_confidence": 0.6799999999999999,
+      "segment_count": 7,
+      "non_reportable_count": 10,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 7,
+      "parse_quality_partial": 0
+    }
+  },
+  {
+    "ticker": "4422",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "UNKNOWN",
+    "segment_order": 5,
+    "segment_sales": 2025.0,
+    "segment_profit": 7.0,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "UNKNOWN",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "95498a0497f1c8dbfd93292a",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.74 (セグメント情報; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行5行(5+); 行数17; セグメント情報見出し(加点); 事業名パターン3行; 比率中心)",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=11 bscf=0 garbage=3",
+      "Phase B-2: ACCEPT alt candidate #2 valid=0 score=0.54",
+      "Phase B-2: ACCEPT valid=0 narr=1",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['売上高 営業利益 経常利益', '中間純利益'], reconstructed=['売上高中間純利益', '営業利益', '経常利益'], units=None",
+      "Phase C: merge vertical ['売上高', '中間純利益'] -> 売上高中間純利益 score=60.0",
+      "Unit: raw=百万円, mult=1000000, src=nearby",
+      "Phase C: transition B(17rows,4cols)→C(17rows,4cols) header_band=2 new_headers=['売上高中間純利益', '営業利益', '経常利益']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=7, skip行=3, non_reportable=10",
+      "Phase F: レコード組立",
+      "Phase F: 7件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.74,
+          "categories": {
+            "header": 0.46,
+            "numeric_layout": 0.23,
+            "segment_row": 0.15,
+            "exclusion": -0.1,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行5行(5+); 行数17; セグメント情報見出し(加点); 事業名パターン3行; 比",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.53,
+          "categories": {
+            "header": 0.34,
+            "numeric_layout": 0.28,
+            "segment_row": 0.03,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 売上系:売上高; 数値列2列; 数値行11行(5+); 数値密度11/20; 行数20; 補助語1個; 財政状態(減点); セグメント情報見出",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 8,
+          "score": 0.2,
+          "categories": {
+            "header": 0.22,
+            "numeric_layout": 0.15,
+            "segment_row": 0.13,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": -0.3,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 数値列6列; 行数10; 補助語1個; セグメント情報見出し(加点); 事業名パターン2行; 見出しブロック(数値行少+短ブロック)",
+          "weak_evidence": false,
+          "heading_like": true
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 11,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "当中間連結会計期間における我が国経済は、内需及びインバウンド需要の回復など、社会活動の正常化の動きが:narrative_like",
+          "みられました。一方で、国際情勢不安、円安の進行、物価上昇など、景気動向についてもいまだ予断を許さない状:narrative_like",
+          "況が続いております。:narrative_like",
+          "このような環境の下、当社グループは、引き続き国内及び海外におけるコンサルティングサービス及びASPサー:narrative_like",
+          "ビスのさらなる販売拡大に取り組んだ結果、国内のコンサルティングサービスを中心に堅調に推移いたしました。:narrative_like"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 17,
+        "phase_b_num_cols": 4,
+        "phase_b_preview": [
+          "売上高 営業利益 経常利益",
+          "中間純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％"
+        ],
+        "phase_c_rows": 17,
+        "phase_c_num_cols": 4,
+        "phase_c_preview": [
+          "売上高 営業利益 経常利益",
+          "中間純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "売上高 営業利益 経常利益",
+          "中間純利益"
+        ],
+        "reconstructed_headers": [
+          "売上高中間純利益",
+          "営業利益",
+          "経常利益"
+        ],
+        "column_labels": [
+          [
+            "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％"
+          ],
+          [
+            "2026年７月期中間期 423 64.6 61 - 64 - 64 -"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "operating_profit_like",
+          "unknown"
+        ],
+        "best_sales_col": 0,
+        "best_profit_col": 1,
+        "profit_role": "operating_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.162,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.6,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.6,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "売上高中間純利益",
+            "scores": {
+              "segment_profit_like": 0.063,
+              "net_income_like": 0.162
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.162,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "営業利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "operating_profit_like": 0.6
+            },
+            "best_role": "operating_profit_like",
+            "best_score": 0.6,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "経常利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "ordinary_profit_like": 0.6
+            },
+            "best_role": "ordinary_profit_like",
+            "best_score": 0.6,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高中間純利益",
+            "scores": {
+              "sales": 0.18
+            },
+            "best_role": "sales",
+            "best_score": 0.18,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "売上高営業利益経常利益中間純利益"
+        ],
+        "new_headers": [
+          "売上高中間純利益",
+          "営業利益",
+          "経常利益"
+        ],
+        "reconstruction_steps": [
+          {
+            "type": "vertical",
+            "parts": [
+              "売上高",
+              "中間純利益"
+            ],
+            "result": "売上高中間純利益",
+            "score": 60.0,
+            "dict_term": "売上高"
+          }
+        ]
+      },
+      "page_score": 1.0,
+      "table_score": 0.54,
+      "header_confidence": 0.7,
+      "col_confidence": 0.6799999999999999,
+      "segment_count": 7,
+      "non_reportable_count": 10,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 7,
+      "parse_quality_partial": 0
+    }
+  },
+  {
+    "ticker": "4422",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "(注)当社は、",
+    "segment_order": 6,
+    "segment_sales": 2026.0,
+    "segment_profit": 2.0,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "(注)当社は、",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "95498a0497f1c8dbfd93292a",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.74 (セグメント情報; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行5行(5+); 行数17; セグメント情報見出し(加点); 事業名パターン3行; 比率中心)",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=11 bscf=0 garbage=3",
+      "Phase B-2: ACCEPT alt candidate #2 valid=0 score=0.54",
+      "Phase B-2: ACCEPT valid=0 narr=1",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['売上高 営業利益 経常利益', '中間純利益'], reconstructed=['売上高中間純利益', '営業利益', '経常利益'], units=None",
+      "Phase C: merge vertical ['売上高', '中間純利益'] -> 売上高中間純利益 score=60.0",
+      "Unit: raw=百万円, mult=1000000, src=nearby",
+      "Phase C: transition B(17rows,4cols)→C(17rows,4cols) header_band=2 new_headers=['売上高中間純利益', '営業利益', '経常利益']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=7, skip行=3, non_reportable=10",
+      "Phase F: レコード組立",
+      "Phase F: 7件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.74,
+          "categories": {
+            "header": 0.46,
+            "numeric_layout": 0.23,
+            "segment_row": 0.15,
+            "exclusion": -0.1,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行5行(5+); 行数17; セグメント情報見出し(加点); 事業名パターン3行; 比",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.53,
+          "categories": {
+            "header": 0.34,
+            "numeric_layout": 0.28,
+            "segment_row": 0.03,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 売上系:売上高; 数値列2列; 数値行11行(5+); 数値密度11/20; 行数20; 補助語1個; 財政状態(減点); セグメント情報見出",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 8,
+          "score": 0.2,
+          "categories": {
+            "header": 0.22,
+            "numeric_layout": 0.15,
+            "segment_row": 0.13,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": -0.3,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 数値列6列; 行数10; 補助語1個; セグメント情報見出し(加点); 事業名パターン2行; 見出しブロック(数値行少+短ブロック)",
+          "weak_evidence": false,
+          "heading_like": true
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 11,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "当中間連結会計期間における我が国経済は、内需及びインバウンド需要の回復など、社会活動の正常化の動きが:narrative_like",
+          "みられました。一方で、国際情勢不安、円安の進行、物価上昇など、景気動向についてもいまだ予断を許さない状:narrative_like",
+          "況が続いております。:narrative_like",
+          "このような環境の下、当社グループは、引き続き国内及び海外におけるコンサルティングサービス及びASPサー:narrative_like",
+          "ビスのさらなる販売拡大に取り組んだ結果、国内のコンサルティングサービスを中心に堅調に推移いたしました。:narrative_like"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 17,
+        "phase_b_num_cols": 4,
+        "phase_b_preview": [
+          "売上高 営業利益 経常利益",
+          "中間純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％"
+        ],
+        "phase_c_rows": 17,
+        "phase_c_num_cols": 4,
+        "phase_c_preview": [
+          "売上高 営業利益 経常利益",
+          "中間純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "売上高 営業利益 経常利益",
+          "中間純利益"
+        ],
+        "reconstructed_headers": [
+          "売上高中間純利益",
+          "営業利益",
+          "経常利益"
+        ],
+        "column_labels": [
+          [
+            "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％"
+          ],
+          [
+            "2026年７月期中間期 423 64.6 61 - 64 - 64 -"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "operating_profit_like",
+          "unknown"
+        ],
+        "best_sales_col": 0,
+        "best_profit_col": 1,
+        "profit_role": "operating_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.162,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.6,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.6,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "売上高中間純利益",
+            "scores": {
+              "segment_profit_like": 0.063,
+              "net_income_like": 0.162
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.162,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "営業利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "operating_profit_like": 0.6
+            },
+            "best_role": "operating_profit_like",
+            "best_score": 0.6,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "経常利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "ordinary_profit_like": 0.6
+            },
+            "best_role": "ordinary_profit_like",
+            "best_score": 0.6,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高中間純利益",
+            "scores": {
+              "sales": 0.18
+            },
+            "best_role": "sales",
+            "best_score": 0.18,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "売上高営業利益経常利益中間純利益"
+        ],
+        "new_headers": [
+          "売上高中間純利益",
+          "営業利益",
+          "経常利益"
+        ],
+        "reconstruction_steps": [
+          {
+            "type": "vertical",
+            "parts": [
+              "売上高",
+              "中間純利益"
+            ],
+            "result": "売上高中間純利益",
+            "score": 60.0,
+            "dict_term": "売上高"
+          }
+        ]
+      },
+      "page_score": 1.0,
+      "table_score": 0.54,
+      "header_confidence": 0.7,
+      "col_confidence": 0.6799999999999999,
+      "segment_count": 7,
+      "non_reportable_count": 10,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 7,
+      "parse_quality_partial": 0
+    }
+  },
+  {
+    "ticker": "4422",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "に当該株式分割が行われたと仮定し、「",
+    "segment_order": 7,
+    "segment_sales": 1.0,
+    "segment_profit": 1.0,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "に当該株式分割が行われたと仮定し、「",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "95498a0497f1c8dbfd93292a",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.74 (セグメント情報; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行5行(5+); 行数17; セグメント情報見出し(加点); 事業名パターン3行; 比率中心)",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=11 bscf=0 garbage=3",
+      "Phase B-2: ACCEPT alt candidate #2 valid=0 score=0.54",
+      "Phase B-2: ACCEPT valid=0 narr=1",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['売上高 営業利益 経常利益', '中間純利益'], reconstructed=['売上高中間純利益', '営業利益', '経常利益'], units=None",
+      "Phase C: merge vertical ['売上高', '中間純利益'] -> 売上高中間純利益 score=60.0",
+      "Unit: raw=百万円, mult=1000000, src=nearby",
+      "Phase C: transition B(17rows,4cols)→C(17rows,4cols) header_band=2 new_headers=['売上高中間純利益', '営業利益', '経常利益']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=7, skip行=3, non_reportable=10",
+      "Phase F: レコード組立",
+      "Phase F: 7件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.74,
+          "categories": {
+            "header": 0.46,
+            "numeric_layout": 0.23,
+            "segment_row": 0.15,
+            "exclusion": -0.1,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行5行(5+); 行数17; セグメント情報見出し(加点); 事業名パターン3行; 比",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.54,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列4列; 数値行6行(5+); 数値密度6/17; 行数17",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.53,
+          "categories": {
+            "header": 0.34,
+            "numeric_layout": 0.28,
+            "segment_row": 0.03,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 売上系:売上高; 数値列2列; 数値行11行(5+); 数値密度11/20; 行数20; 補助語1個; 財政状態(減点); セグメント情報見出",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 8,
+          "score": 0.2,
+          "categories": {
+            "header": 0.22,
+            "numeric_layout": 0.15,
+            "segment_row": 0.13,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": -0.3,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 数値列6列; 行数10; 補助語1個; セグメント情報見出し(加点); 事業名パターン2行; 見出しブロック(数値行少+短ブロック)",
+          "weak_evidence": false,
+          "heading_like": true
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 0,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 11,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 2,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "当中間連結会計期間における我が国経済は、内需及びインバウンド需要の回復など、社会活動の正常化の動きが:narrative_like",
+          "みられました。一方で、国際情勢不安、円安の進行、物価上昇など、景気動向についてもいまだ予断を許さない状:narrative_like",
+          "況が続いております。:narrative_like",
+          "このような環境の下、当社グループは、引き続き国内及び海外におけるコンサルティングサービス及びASPサー:narrative_like",
+          "ビスのさらなる販売拡大に取り組んだ結果、国内のコンサルティングサービスを中心に堅調に推移いたしました。:narrative_like"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 17,
+        "phase_b_num_cols": 4,
+        "phase_b_preview": [
+          "売上高 営業利益 経常利益",
+          "中間純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％"
+        ],
+        "phase_c_rows": 17,
+        "phase_c_num_cols": 4,
+        "phase_c_preview": [
+          "売上高 営業利益 経常利益",
+          "中間純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "売上高 営業利益 経常利益",
+          "中間純利益"
+        ],
+        "reconstructed_headers": [
+          "売上高中間純利益",
+          "営業利益",
+          "経常利益"
+        ],
+        "column_labels": [
+          [
+            "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％"
+          ],
+          [
+            "2026年７月期中間期 423 64.6 61 - 64 - 64 -"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "operating_profit_like",
+          "unknown"
+        ],
+        "best_sales_col": 0,
+        "best_profit_col": 1,
+        "profit_role": "operating_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.162,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.6,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.6,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "売上高中間純利益",
+            "scores": {
+              "segment_profit_like": 0.063,
+              "net_income_like": 0.162
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.162,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "営業利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "operating_profit_like": 0.6
+            },
+            "best_role": "operating_profit_like",
+            "best_score": 0.6,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "経常利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "ordinary_profit_like": 0.6
+            },
+            "best_role": "ordinary_profit_like",
+            "best_score": 0.6,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高中間純利益",
+            "scores": {
+              "sales": 0.18
+            },
+            "best_role": "sales",
+            "best_score": 0.18,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "売上高営業利益経常利益中間純利益"
+        ],
+        "new_headers": [
+          "売上高中間純利益",
+          "営業利益",
+          "経常利益"
+        ],
+        "reconstruction_steps": [
+          {
+            "type": "vertical",
+            "parts": [
+              "売上高",
+              "中間純利益"
+            ],
+            "result": "売上高中間純利益",
+            "score": 60.0,
+            "dict_term": "売上高"
+          }
+        ]
+      },
+      "page_score": 1.0,
+      "table_score": 0.54,
+      "header_confidence": 0.7,
+      "col_confidence": 0.6799999999999999,
+      "segment_count": 7,
+      "non_reportable_count": 10,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 7,
+      "parse_quality_partial": 0
+    }
+  }
+]

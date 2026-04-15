@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "3491",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "RENOSY Marketplace",
+    "segment_order": 1,
+    "segment_sales": 56729,
+    "segment_profit": 1172,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "RENOSY Marketplace",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-17",
+    "tdnet_doc_id": "02defd2ee00f6f4954d80bc2",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "3491",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "ITANDI",
+    "segment_order": 2,
+    "segment_sales": 1637,
+    "segment_profit": 350,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "ITANDI",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-17",
+    "tdnet_doc_id": "02defd2ee00f6f4954d80bc2",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "3491",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "Other",
+    "segment_order": 3,
+    "segment_sales": 198,
+    "segment_profit": 80,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Other",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-17",
+    "tdnet_doc_id": "02defd2ee00f6f4954d80bc2",
+    "row_type": "segment"
+  }
+]

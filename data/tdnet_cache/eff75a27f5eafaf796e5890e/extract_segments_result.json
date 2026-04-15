@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "6489",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "Environment",
+    "segment_order": 1,
+    "segment_sales": 10438,
+    "segment_profit": 587,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Environment",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "eff75a27f5eafaf796e5890e",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "6489",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "Valve",
+    "segment_order": 2,
+    "segment_sales": 9236,
+    "segment_profit": 1535,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Valve",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "eff75a27f5eafaf796e5890e",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "6489",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "Maintenance",
+    "segment_order": 3,
+    "segment_sales": 8189,
+    "segment_profit": 1925,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Maintenance",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "eff75a27f5eafaf796e5890e",
+    "row_type": "segment"
+  }
+]

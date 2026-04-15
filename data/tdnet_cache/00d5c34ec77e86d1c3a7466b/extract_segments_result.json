@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "4343",
+    "period": "R8/2",
+    "quarter": "FY",
+    "segment_name": "Domestic Business",
+    "segment_order": 1,
+    "segment_sales": 75217,
+    "segment_profit": 7019,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Domestic Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-09",
+    "tdnet_doc_id": "00d5c34ec77e86d1c3a7466b",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "4343",
+    "period": "R8/2",
+    "quarter": "FY",
+    "segment_name": "Asean",
+    "segment_order": 2,
+    "segment_sales": 15222,
+    "segment_profit": 465,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Asean",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-09",
+    "tdnet_doc_id": "00d5c34ec77e86d1c3a7466b",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "4343",
+    "period": "R8/2",
+    "quarter": "FY",
+    "segment_name": "China",
+    "segment_order": 3,
+    "segment_sales": 2850,
+    "segment_profit": -1369,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "China",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-09",
+    "tdnet_doc_id": "00d5c34ec77e86d1c3a7466b",
+    "row_type": "segment"
+  }
+]

@@ -424,8 +424,8 @@ class TestGuidanceData:
         assert "売上:" in text
         assert "OP:" in text
         assert "EPS:" in text
-        assert "■ 見通し" in text
-        assert "セグメントA拡大" in text
+        # Outlook 無効化済み: 見通しセクションは出力されない
+        assert "■ 見通し" not in text
 
     def test_format_no_guidance_no_outlook(self):
         from src.events.earnings_guidance_extractor import GuidanceData, format_guidance_section
@@ -729,8 +729,8 @@ class TestFullYearPriority:
         result = _select_best_candidates(candidates)
         assert result["sales"] == 15000000000
 
-    def test_guidance_section_includes_outlook(self):
-        """outlook_summary ありのとき ■ 見通し が含まれる"""
+    def test_guidance_section_outlook_disabled(self):
+        """Outlook 無効化済み: outlook_summary をセットしても見通しセクションは出ない"""
         from src.events.earnings_guidance_extractor import (
             GuidanceData, format_guidance_section,
         )
@@ -740,8 +740,8 @@ class TestFullYearPriority:
         )
         section = format_guidance_section(g)
         assert "■ 来期ガイダンス" in section
-        assert "■ 見通し" in section
-        assert "増収増益" in section
+        assert "■ 見通し" not in section
+        assert "増収増益" not in section
 
     def test_guidance_section_no_outlook_when_empty(self):
         """outlook_summary 空のとき ■ 見通し が含まれない"""

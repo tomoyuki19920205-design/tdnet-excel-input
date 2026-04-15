@@ -1,0 +1,3 @@
+{"event": "v2_start", "ticker": "7355", "run_id": "2418005fb88b", "timestamp": "2026-04-10T08:45:13.259134+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T08:45:15.542639+09:00"}
+{"event": "ok", "via": "pdf", "segments": 2, "fingerprint": "dcd0b1623230538df6f1d50b", "timestamp": "2026-04-10T08:45:18.247186+09:00"}

@@ -113,6 +113,12 @@ _SEGMENT_PROFIT_LIKE_KW: list[tuple[str, float]] = [
     # Phase C partial 補完追加
     ("セグメント損失", 0.9),
     ("利益損失", 0.7),
+    # Phase 2-2 追加
+    ("事業損益", 0.85),
+    ("EBITDA", 0.9),
+    # Phase 3: weak_header 追加
+    ("部門損益", 0.7),
+    ("調整後利益", 0.7),
 ]
 
 _ORDINARY_PROFIT_LIKE_KW: list[tuple[str, float]] = [
@@ -185,6 +191,16 @@ _EXTERNAL_SALES_KW: list[tuple[str, float]] = [
     ("Salestoexternalcustomers", 1.0),
     ("Externalrevenue", 0.9),
     ("Externalsales", 0.9),
+    # Phase 2-2 追加
+    ("セグメント売上高", 0.95),
+    ("営業収益", 0.85),
+    ("経常収益", 0.4),  # 低スコア補助
+    # Phase 3: weak_header 追加
+    ("収入", 0.3),
+    ("営業収入", 0.5),
+    ("外部収入", 0.6),
+    ("セグメント収益", 0.7),
+    ("外部顧客への売上収益", 0.95),
 ]
 
 _INTERNAL_SALES_KW: list[tuple[str, float]] = [
@@ -322,6 +338,162 @@ class ColumnAnalysisResult:
         if self.best_profit_col is not None and self.best_profit_col < len(self.column_roles):
             return self.column_roles[self.best_profit_col]
         return ""
+
+
+# ============================================================
+# Phase 3: 列スコアリング関数
+# ============================================================
+
+# 除外ヘッダーキーワード (ratio/count/quantity 列を sales/profit から除外)
+_COL_EXCLUDE_KW = ["構成比", "割合", "件数", "数量", "比率", "増減率",
+                   "前年比", "前年同期比", "前期比", "率", "%", "％",
+                   "margin", "ratio"]
+
+_COL_SALES_PREFER_KW = ["売上", "収益", "営業収益", "売上高", "売上収益",
+                         "セグメント売上", "収入", "営業収入", "外部", "Revenue",
+                         "Sales", "Income"]
+
+_COL_PROFIT_PREFER_KW = ["利益", "損益", "損失", "セグメント利益", "営業利益",
+                          "事業利益", "EBITDA", "部門損益", "調整後利益",
+                          "Profit", "OperatingProfit"]
+
+import logging as _col_logging
+_col_logger = _col_logging.getLogger("tdnet.column_scoring")
+
+
+def _compute_column_score(
+    col_idx: int,
+    data_rows: list[list[str]],
+    all_scores: list[dict[str, float]],
+    all_roles: list[str],
+    header: str | list[str],
+) -> dict:
+    """
+    Phase 3: 各数値列に sales/profit としてのスコアを算出する。
+
+    Returns:
+        {"col": col_idx, "sales_score": float, "profit_score": float,
+         "fill_rate": float, "magnitude": float, ...}
+    """
+    hdr = header[col_idx] if isinstance(header, list) and col_idx < len(header) else (
+        header if isinstance(header, str) else ""
+    )
+    hdr_lower = hdr.replace(" ", "").lower() if hdr else ""
+
+    # --- 値収集 ---
+    vals: list[float] = []
+    total_cells = 0
+    pct_count = 0
+    decimal_count = 0
+    for row in data_rows:
+        if col_idx < len(row):
+            cell = row[col_idx].strip()
+            if not cell:
+                continue
+            total_cells += 1
+            if "%" in cell or "％" in cell:
+                pct_count += 1
+            if "." in cell:
+                decimal_count += 1
+            clean = cell.replace(",", "").replace("△", "-").replace("▲", "-").replace("－", "-")
+            try:
+                vals.append(float(clean))
+            except ValueError:
+                pass
+
+    fill_rate = len(vals) / max(total_cells, 1) if total_cells > 0 else 0
+    abs_vals = sorted(abs(v) for v in vals) if vals else []
+    median = abs_vals[len(abs_vals) // 2] if abs_vals else 0
+
+    # --- ratio penalty ---
+    ratio_penalty = 0.0
+    if total_cells > 0:
+        if pct_count / total_cells >= 0.3:
+            ratio_penalty = 1.0
+        elif decimal_count / total_cells >= 0.5 and median < 200:
+            ratio_penalty = 0.8
+        elif median < 10 and abs_vals and max(abs_vals) < 200:
+            ratio_penalty = 0.6
+    if any(ex in hdr_lower for ex in _COL_EXCLUDE_KW):
+        ratio_penalty = max(ratio_penalty, 1.0)
+
+    # --- count penalty (件数/数量系) ---
+    count_penalty = 0.0
+    _count_kw = ["件数", "数量", "人数", "台数", "店舗数", "count", "units"]
+    if any(ck in hdr_lower for ck in _count_kw):
+        count_penalty = 1.0
+
+    # --- magnitude_score (正規化: 値が大きいほど sales 候補) ---
+    magnitude_score = 0.0
+    if median > 0:
+        import math
+        magnitude_score = min(math.log10(median + 1) / 6.0, 1.0)  # 1M → 1.0
+
+    # --- header_sales_score ---
+    header_sales_score = 0.0
+    if any(kw.lower() in hdr_lower for kw in _COL_SALES_PREFER_KW if kw):
+        header_sales_score = 1.0
+
+    # --- header_profit_score ---
+    header_profit_score = 0.0
+    if any(kw.lower() in hdr_lower for kw in _COL_PROFIT_PREFER_KW if kw):
+        header_profit_score = 1.0
+
+    # --- taxonomy score からの補助 ---
+    if col_idx < len(all_scores):
+        sc = all_scores[col_idx]
+        for role in ColumnRole.ALL_SALES_ROLES:
+            if sc.get(role, 0) > 0.3:
+                header_sales_score = max(header_sales_score, 0.8)
+        for role in ColumnRole.ALL_PROFIT_ROLES:
+            if sc.get(role, 0) > 0.3:
+                header_profit_score = max(header_profit_score, 0.8)
+
+    # --- variance_score (適度なばらつきがあれば加点) ---
+    variance_score = 0.0
+    if len(abs_vals) >= 3:
+        mean_v = sum(abs_vals) / len(abs_vals)
+        if mean_v > 0:
+            cv = (sum((v - mean_v)**2 for v in abs_vals) / len(abs_vals))**0.5 / mean_v
+            variance_score = min(cv, 1.0)  # coefficient of variation
+
+    # --- sales_score 合算 ---
+    sales_score = (
+        header_sales_score * 5
+        + fill_rate * 2
+        + magnitude_score * 2
+        + variance_score * 1
+        - ratio_penalty * 3
+        - count_penalty * 2
+    )
+
+    # --- profit_score 合算 ---
+    profit_score = (
+        header_profit_score * 5
+        + fill_rate * 2
+        + variance_score * 1
+        - ratio_penalty * 3
+        - count_penalty * 2
+    )
+
+    _col_logger.debug(
+        f"[COLSCORE] col={col_idx} sales={sales_score:.1f} profit={profit_score:.1f} "
+        f"fill={fill_rate:.2f} mag={magnitude_score:.2f} var={variance_score:.2f} "
+        f"ratio_pen={ratio_penalty:.1f} count_pen={count_penalty:.1f} "
+        f"hdr={hdr!r}"
+    )
+
+    return {
+        "col": col_idx,
+        "sales_score": sales_score,
+        "profit_score": profit_score,
+        "fill_rate": fill_rate,
+        "magnitude": magnitude_score,
+        "variance": variance_score,
+        "ratio_penalty": ratio_penalty,
+        "count_penalty": count_penalty,
+        "header": hdr,
+    }
 
 
 # ============================================================
@@ -570,7 +742,11 @@ def classify_columns(
                             best_profit_role = ColumnRole.SEGMENT_PROFIT_LIKE
                             break
 
-    # --- Phase 3: 数値列の大小分布からsales/profitを推定補助 (structure gate 付き) ---
+    # --- Phase 3: 列スコアリングベースの sales/profit 推定 (structure gate 付き) ---
+    # MIN_SCORE / MIN_MARGIN で誤確定を防止
+    _COL_MIN_SCORE = 1.5   # sales/profit 確定に必要な最低スコア
+    _COL_MIN_MARGIN = 0.5  # 1位と2位の差がこれ以上必要
+
     if best_sales_col is None and best_profit_col is None and n_cols >= 2:
         # Phase 5: structure gate — segment_like_rows >= 2 が必要
         seg_rows_gate2 = 0
@@ -590,33 +766,41 @@ def classify_columns(
                                                       ColumnRole.MARGIN_LIKE, ColumnRole.ASSETS_LIKE,
                                                       ColumnRole.DEPRECIATION_LIKE, ColumnRole.CAPEX_LIKE)]
             if len(num_col_indices) >= 2:
-                col_medians: list[tuple[int, float]] = []
+                # 各列に sales/profit スコアを付与
+                col_scores: list[dict] = []
                 for ci in num_col_indices:
-                    vals = []
-                    for row in data_rows:
-                        if ci < len(row):
-                            cell = row[ci].strip().replace(",", "").replace("△", "-").replace("▲", "-")
-                            try:
-                                vals.append(abs(float(cell)))
-                            except ValueError:
-                                pass
-                    if vals:
-                        vals.sort()
-                        median = vals[len(vals) // 2]
-                        col_medians.append((ci, median))
+                    info = _compute_column_score(ci, data_rows, all_scores, all_roles,
+                                                headers if ci < len(headers) else "")
+                    col_scores.append(info)
 
-                if len(col_medians) >= 2:
-                    col_medians.sort(key=lambda x: x[1], reverse=True)
-                    largest_col, largest_med = col_medians[0]
-                    second_col, second_med = col_medians[1]
-                    if largest_med > 0 and largest_med >= second_med * 1.5:
-                        if best_sales_col is None:
-                            best_sales_col = largest_col
-                            best_sales_score = 0.25
-                        if best_profit_col is None and second_col != best_sales_col:
-                            best_profit_col = second_col
-                            best_profit_score = 0.2
-                            best_profit_role = ColumnRole.SEGMENT_PROFIT_LIKE
+                # sales 確定: score 最大 + margin 条件
+                col_scores.sort(key=lambda x: x["sales_score"], reverse=True)
+                if len(col_scores) >= 2:
+                    best_s = col_scores[0]
+                    second_s = col_scores[1]
+                    if (best_s["sales_score"] >= _COL_MIN_SCORE
+                            and (best_s["sales_score"] - second_s["sales_score"]) >= _COL_MIN_MARGIN):
+                        best_sales_col = best_s["col"]
+                        best_sales_score = 0.25
+                elif len(col_scores) == 1 and col_scores[0]["sales_score"] >= _COL_MIN_SCORE:
+                    best_sales_col = col_scores[0]["col"]
+                    best_sales_score = 0.25
+
+                # profit 確定: sales と同一列禁止 + margin 条件
+                profit_candidates = [c for c in col_scores if c["col"] != best_sales_col]
+                profit_candidates.sort(key=lambda x: x["profit_score"], reverse=True)
+                if len(profit_candidates) >= 2:
+                    best_p = profit_candidates[0]
+                    second_p = profit_candidates[1]
+                    if (best_p["profit_score"] >= _COL_MIN_SCORE
+                            and (best_p["profit_score"] - second_p["profit_score"]) >= _COL_MIN_MARGIN):
+                        best_profit_col = best_p["col"]
+                        best_profit_score = 0.2
+                        best_profit_role = ColumnRole.SEGMENT_PROFIT_LIKE
+                elif len(profit_candidates) == 1 and profit_candidates[0]["profit_score"] >= _COL_MIN_SCORE:
+                    best_profit_col = profit_candidates[0]["col"]
+                    best_profit_score = 0.2
+                    best_profit_role = ColumnRole.SEGMENT_PROFIT_LIKE
 
     if best_profit_col is not None and best_profit_role:
         all_roles[best_profit_col] = best_profit_role

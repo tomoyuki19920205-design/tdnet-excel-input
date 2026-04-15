@@ -107,6 +107,7 @@ _DEDUCTION_KEYWORDS: list[tuple[str, float]] = [
     ("連結損益及び包括利益計算書", -0.20),
 ]
 
+
 # Phase 4: 行名に出現するとセグメント表の可能性が高い語
 _REGION_NAMES = {
     "日本", "国内", "海外", "北米", "欧州", "アジア", "中国",
@@ -275,7 +276,13 @@ def score_segment_page(
             multi_num_col_rows += 1
 
     # セグメント名行加点
-    if segment_like_rows >= 3:
+    if segment_like_rows >= 5:
+        # Phase 3.5: 強構造ボーナス
+        bonus = min(0.15, segment_like_rows * 0.025)
+        score += bonus
+        breakdown["segment_name_rows"] = bonus
+        reasons.append(f"セグメント名{segment_like_rows}行(強)")
+    elif segment_like_rows >= 3:
         bonus = min(0.08, segment_like_rows * 0.02)
         score += bonus
         breakdown["segment_name_rows"] = bonus
@@ -283,24 +290,44 @@ def score_segment_page(
 
     # 地域名加点
     if region_hits >= 2:
-        bonus = min(0.10, region_hits * 0.03)
+        bonus = min(0.12, region_hits * 0.03)
         score += bonus
         breakdown["region_names"] = bonus
         reasons.append(f"地域名{region_hits}件")
 
     # 業種名加点
     if industry_hits >= 2:
-        bonus = min(0.08, industry_hits * 0.02)
+        bonus = min(0.10, industry_hits * 0.025)
         score += bonus
         breakdown["industry_names"] = bonus
         reasons.append(f"業種名{industry_hits}件")
 
     # 複数列数値テーブル構造加点
-    if multi_num_col_rows >= 3:
+    if multi_num_col_rows >= 5:
+        # Phase 3.5: 強構造ボーナス
+        bonus = min(0.18, multi_num_col_rows * 0.025)
+        score += bonus
+        breakdown["multi_num_table"] = bonus
+        reasons.append(f"数値テーブル{multi_num_col_rows}行(強)")
+    elif multi_num_col_rows >= 3:
         bonus = min(0.12, multi_num_col_rows * 0.02)
         score += bonus
         breakdown["multi_num_table"] = bonus
         reasons.append(f"数値テーブル{multi_num_col_rows}行")
+
+    # Phase 3.5: 地域名 + 数値テーブル共存ボーナス
+    if region_hits >= 2 and multi_num_col_rows >= 3:
+        bonus = 0.10
+        score += bonus
+        breakdown["region_num_coexist"] = bonus
+        reasons.append("地域名+数値テーブル共存")
+
+    # Phase 3.5: 業種名 + 数値テーブル共存ボーナス
+    if industry_hits >= 2 and multi_num_col_rows >= 3:
+        bonus = 0.08
+        score += bonus
+        breakdown["industry_num_coexist"] = bonus
+        reasons.append("業種名+数値テーブル共存")
 
     score = max(0.0, min(score, 1.0))
 

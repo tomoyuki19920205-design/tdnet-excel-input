@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "5889",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "KANEKO",
+    "segment_order": 1,
+    "segment_sales": 12469,
+    "segment_profit": 4686,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "KANEKO",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-13",
+    "tdnet_doc_id": "f609eb920937bffff9d79541",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "5889",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Four Nines",
+    "segment_order": 2,
+    "segment_sales": 6171,
+    "segment_profit": 1855,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Four Nines",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-13",
+    "tdnet_doc_id": "f609eb920937bffff9d79541",
+    "row_type": "segment"
+  }
+]

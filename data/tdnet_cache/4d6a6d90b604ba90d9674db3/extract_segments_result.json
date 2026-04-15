@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "4238",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Plastic Molding",
+    "segment_order": 1,
+    "segment_sales": 11098,
+    "segment_profit": 1112,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Plastic Molding",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-09",
+    "tdnet_doc_id": "4d6a6d90b604ba90d9674db3",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "4238",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Molders",
+    "segment_order": 2,
+    "segment_sales": 1500,
+    "segment_profit": 173,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Molders",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-09",
+    "tdnet_doc_id": "4d6a6d90b604ba90d9674db3",
+    "row_type": "segment"
+  }
+]

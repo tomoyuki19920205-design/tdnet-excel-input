@@ -1,0 +1,14 @@
+{
+  "filing_id": "a70ce3db7f9ea3296d562045",
+  "ticker": "4384",
+  "disclosure_date": "2026-03-17",
+  "title": "2026年7月期 第2四半期（中間期）決算短信〔日本基準〕（連結）",
+  "doc_type": "financial_statement",
+  "source_url": "https://www.release.tdnet.info/inbs/140120260313581850.pdf",
+  "xbrl_url": "https://www.release.tdnet.info/inbs/081220260313581850.zip",
+  "listing_source": "tdnet_html",
+  "has_xbrl": false,
+  "xbrl_url_inferred": true,
+  "has_pdf": true,
+  "created_at": "2026-04-10T10:02:51.031617+09:00"
+}

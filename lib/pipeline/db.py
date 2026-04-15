@@ -193,21 +193,33 @@ def supabase_upsert(
     timeout: int | tuple[int, int] = (10, 60),
     batch_size: int = 100,
     max_retries: int = 3,
+    session: "requests.Session | None" = None,
 ) -> dict[str, Any]:
     """Supabase REST API で upsert。service role key 必須。
 
     バッチ分割 + 502/503/504 リトライ対応。
 
+    Args:
+        session: requests.Session を渡すと HTTP 接続を再利用する。
+                 渡された session の close は **呼び出し元の責務**。
+                 None の場合は従来どおり requests.post() を直接使用。
+
     Returns:
-        {"status": int, "ok": bool, "count": int, "error": str | None}
+        {
+            "status": int, "ok": bool, "count": int, "error": str | None,
+            "batches_attempted": int, "batches_succeeded": int, "batches_failed": int,
+        }
     """
-    import requests
+    import requests as _requests_mod
     import time as _time
 
     cfg = _get_write_config(config)
     if not cfg:
         logger.warning(f"[db] UPSERT {table} skipped: no write config (service role key missing)")
-        return {"status": 0, "ok": False, "count": 0, "error": "no_write_config"}
+        return {
+            "status": 0, "ok": False, "count": 0, "error": "no_write_config",
+            "batches_attempted": 0, "batches_succeeded": 0, "batches_failed": 0,
+        }
 
     # headers 構築 (cfg に "headers" がなくてもフォールバック)
     if "headers" in cfg:
@@ -230,10 +242,15 @@ def supabase_upsert(
     if on_conflict:
         params["on_conflict"] = on_conflict
 
+    # HTTP POST 関数: session があればそれを使い、なければ requests.post 直接
+    _post = session.post if session is not None else _requests_mod.post
+
     # バッチ分割
     batches = [data[i:i + batch_size] for i in range(0, len(data), batch_size)]
     total_batches = len(batches)
     total_written = 0
+    batches_succeeded = 0
+    batches_failed = 0
     last_error: str | None = None
     last_status = 200
 
@@ -251,14 +268,14 @@ def supabase_upsert(
         success = False
         for attempt in range(1, max_retries + 1):
             try:
-                r = requests.post(
+                r = _post(
                     f"{cfg['rest_url']}/{table}",
                     json=batch if len(batch) > 1 else batch[0],
                     headers=headers,
                     params=params,
                     timeout=timeout,
                 )
-            except requests.exceptions.Timeout as e:
+            except _requests_mod.exceptions.Timeout as e:
                 logger.warning(
                     f"[db] UPSERT {table} batch {batch_idx}/{total_batches} "
                     f"timeout (attempt {attempt}/{max_retries}): {e}"
@@ -307,14 +324,17 @@ def supabase_upsert(
                 )
                 break
 
-        if not success and last_error:
-            # バッチ失敗 — 残りを中断せず続行するか、ここで止めるか
-            # conservative: 中断して残りは未処理として返す
-            logger.warning(
-                f"[db] UPSERT {table} aborting at batch {batch_idx}/{total_batches} "
-                f"after error: {last_error}"
-            )
-            break
+        if success:
+            batches_succeeded += 1
+        else:
+            batches_failed += 1
+            if last_error:
+                # バッチ失敗 — conservative: 中断して残りは未処理として返す
+                logger.warning(
+                    f"[db] UPSERT {table} aborting at batch {batch_idx}/{total_batches} "
+                    f"after error: {last_error}"
+                )
+                break
 
     ok = total_written == len(data)
     if not ok and total_written > 0:
@@ -327,6 +347,9 @@ def supabase_upsert(
         "ok": ok,
         "count": total_written,
         "error": last_error,
+        "batches_attempted": batches_succeeded + batches_failed,
+        "batches_succeeded": batches_succeeded,
+        "batches_failed": batches_failed,
     }
 
 

@@ -1,0 +1,2 @@
+{"event": "v2_start", "ticker": "3843", "run_id": "2418005fb88b", "timestamp": "2026-04-10T08:44:39.086599+09:00"}
+{"event": "quarantined", "via": "xbrl", "status": "quarantined", "segments": 1, "fingerprint": "2ec652244883f556556d2a48", "hard_fail_reason": "too_few_valid_segments", "fallback_used": false, "candidate_summary": "xbrl:quarantine(too_few_valid_segments) → html:skip(not_implemented) → pdf:not_attempted", "timestamp": "2026-04-10T08:44:40.002748+09:00"}

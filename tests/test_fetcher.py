@@ -75,10 +75,10 @@ class TestClassifyDisclosure:
         title = "通期業績予想の下方修正に関するお知らせ"
         assert classify_disclosure(title) == DisclosureType.FORECAST_REVISION
 
-    def test_dividend_only_excluded(self):
-        """配当のみは対象外"""
+    def test_dividend_only_classified(self):
+        """配当のみは DIVIDEND_REVISION として分類"""
         title = "配当予想の修正に関するお知らせ"
-        assert classify_disclosure(title) is None
+        assert classify_disclosure(title) == DisclosureType.DIVIDEND_REVISION
 
     def test_unrelated_excluded(self):
         """無関係な開示"""

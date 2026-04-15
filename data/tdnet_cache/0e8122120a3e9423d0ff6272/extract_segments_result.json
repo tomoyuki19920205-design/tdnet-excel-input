@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "3490",
+    "period": "R8/2",
+    "quarter": "FY",
+    "segment_name": "Real Estate Sales",
+    "segment_order": 1,
+    "segment_sales": 12585,
+    "segment_profit": 926,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Real Estate Sales",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-09",
+    "tdnet_doc_id": "0e8122120a3e9423d0ff6272",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "3490",
+    "period": "R8/2",
+    "quarter": "FY",
+    "segment_name": "Real Estate Leasing",
+    "segment_order": 2,
+    "segment_sales": 703,
+    "segment_profit": 74,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Real Estate Leasing",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-09",
+    "tdnet_doc_id": "0e8122120a3e9423d0ff6272",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "3490",
+    "period": "R8/2",
+    "quarter": "FY",
+    "segment_name": "Real Estate Management",
+    "segment_order": 3,
+    "segment_sales": 254,
+    "segment_profit": 88,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Real Estate Management",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-09",
+    "tdnet_doc_id": "0e8122120a3e9423d0ff6272",
+    "row_type": "segment"
+  }
+]

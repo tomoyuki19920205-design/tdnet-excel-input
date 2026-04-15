@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "4443",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "Sansan Bill One Business",
+    "segment_order": 1,
+    "segment_sales": 34302,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Sansan Bill One Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "2088970463dcc857dcd38593",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "4443",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "Eight Business",
+    "segment_order": 2,
+    "segment_sales": 4771,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Eight Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "2088970463dcc857dcd38593",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "4443",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "Other",
+    "segment_order": 3,
+    "segment_sales": 191,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Other",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "2088970463dcc857dcd38593",
+    "row_type": "segment"
+  }
+]

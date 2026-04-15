@@ -1,0 +1,14 @@
+{
+  "filing_id": "bb35d73d24dde12b70fc74fc",
+  "ticker": "2502",
+  "stage": "extracting_pdf",
+  "error_message": "no_segment_table",
+  "review_hint": "pdf_no_segment_table_candidate",
+  "via": "pdf",
+  "candidate_reject_reason": "no_segment_table_candidate",
+  "detector_v2_reason": "no_segment_table_candidate",
+  "detector_v1_reason": "no_segment_table",
+  "xbrl_fallback_attempted": false,
+  "xbrl_fallback_succeeded": false,
+  "xbrl_failure_reason": ""
+}

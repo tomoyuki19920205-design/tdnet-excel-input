@@ -1,0 +1,11 @@
+﻿pdf,ticker,detected_mode,segment_name_raw,segment_name_norm,sales,profit,parse_quality,quarantine_reason,page_number,unit_text
+140120260310578871.pdf,7827,COL_AS_SEG,木材事業,木材,1872.894,110.468,full,,9,"Unit: raw=千円, mult=1000, src=header"
+140120260310578871.pdf,7827,COL_AS_SEG,ハウス・エコ 事業,ハウス・エコ,712.768,38.932,full,,9,"Unit: raw=千円, mult=1000, src=header"
+140120260310578871.pdf,7827,COL_AS_SEG,太陽光発電 売電事業,太陽光発電 売電,77.936,41.442,full,,9,"Unit: raw=千円, mult=1000, src=header"
+140120260310578871.pdf,7827,COL_AS_SEG,ライフ クリエイト 事業,ライフ クリエイト,89.05,5.182,full,,9,"Unit: raw=千円, mult=1000, src=header"
+140120260311579609.pdf,?,COL_AS_SEG,防護服・ 環境資機材,防護服・ 環境資機材,3488.516,382.891,full,,9,"Unit: raw=千円, mult=1000, src=page_top"
+140120260311579609.pdf,?,COL_AS_SEG,ヘルスケア 製品,ヘルスケア 製品,184.803,-18.433,full,,9,"Unit: raw=千円, mult=1000, src=page_top"
+140120260311579609.pdf,?,COL_AS_SEG,ライフ マテリアル,ライフ マテリアル,2114.838,136.968,full,,9,"Unit: raw=千円, mult=1000, src=page_top"
+140120260312580246.pdf,?,COL_AS_SEG,業務 スーパー 事業,業務 スーパー,127609.0,10345.0,full,,9,"Unit: raw=百万円, mult=1000000, src=page_top"
+140120260312580246.pdf,?,COL_AS_SEG,外食・中食 事業,外食・中食,3859.0,240.0,full,,9,"Unit: raw=百万円, mult=1000000, src=page_top"
+140120260312580246.pdf,?,COL_AS_SEG,エコ再生 エネルギー 事業,エコ再生 エネルギー,946.0,-178.0,full,,9,"Unit: raw=百万円, mult=1000000, src=page_top"

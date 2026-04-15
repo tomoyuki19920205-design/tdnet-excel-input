@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "8276",
+    "period": "R8/2",
+    "quarter": "FY",
+    "segment_name": "Retail",
+    "segment_order": 1,
+    "segment_sales": 432348,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Retail",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-02",
+    "tdnet_doc_id": "426ca08cf59629488309577f",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "8276",
+    "period": "R8/2",
+    "quarter": "FY",
+    "segment_name": "Retail Related",
+    "segment_order": 2,
+    "segment_sales": 6867,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Retail Related",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-02",
+    "tdnet_doc_id": "426ca08cf59629488309577f",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "8276",
+    "period": "R8/2",
+    "quarter": "FY",
+    "segment_name": "Other",
+    "segment_order": 3,
+    "segment_sales": 16793,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Other",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-02",
+    "tdnet_doc_id": "426ca08cf59629488309577f",
+    "row_type": "segment"
+  }
+]

@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "3524",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "Fishery Related",
+    "segment_order": 1,
+    "segment_sales": 12265,
+    "segment_profit": 15,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Fishery Related",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-13",
+    "tdnet_doc_id": "bd2227f40d9ae223c059e6fe",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "3524",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "On Land Related",
+    "segment_order": 2,
+    "segment_sales": 2853,
+    "segment_profit": 132,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "On Land Related",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-13",
+    "tdnet_doc_id": "bd2227f40d9ae223c059e6fe",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "3524",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "Other",
+    "segment_order": 3,
+    "segment_sales": 1,
+    "segment_profit": -1,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Other",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-13",
+    "tdnet_doc_id": "bd2227f40d9ae223c059e6fe",
+    "row_type": "segment"
+  }
+]

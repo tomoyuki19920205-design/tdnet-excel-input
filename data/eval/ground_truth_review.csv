@@ -1,0 +1,11 @@
+﻿pdf,ticker,expected_table_type,segment_name_raw,segment_name_canonical,sales_raw,sales_canonical,profit_raw,profit_canonical,unit_text,review_status,notes
+140120260310578871.pdf,7827,col_as_seg,木材,木材,1872.894,1872.894,110.468,110.468,"Unit: raw=千円, mult=1000, src=header",auto_seed,
+140120260310578871.pdf,7827,col_as_seg,ハウス・エコ,ハウス・エコ,712.768,712.768,38.932,38.932,"Unit: raw=千円, mult=1000, src=header",auto_seed,
+140120260310578871.pdf,7827,col_as_seg,太陽光発電 売電,太陽光発電 売電,77.936,77.936,41.442,41.442,"Unit: raw=千円, mult=1000, src=header",auto_seed,
+140120260310578871.pdf,7827,col_as_seg,ライフ クリエイト,ライフ クリエイト,89.05,89.05,5.182,5.182,"Unit: raw=千円, mult=1000, src=header",auto_seed,
+140120260311579609.pdf,?,col_as_seg,防護服・ 環境資機材,防護服・ 環境資機材,3488.516,3488.516,382.891,382.891,"Unit: raw=千円, mult=1000, src=page_top",auto_seed,
+140120260311579609.pdf,?,col_as_seg,ヘルスケア 製品,ヘルスケア 製品,184.803,184.803,-18.433,-18.433,"Unit: raw=千円, mult=1000, src=page_top",auto_seed,
+140120260311579609.pdf,?,col_as_seg,ライフ マテリアル,ライフ マテリアル,2114.838,2114.838,136.968,136.968,"Unit: raw=千円, mult=1000, src=page_top",auto_seed,
+140120260312580246.pdf,?,col_as_seg,業務 スーパー,業務 スーパー,127609,127609,10345,10345,"Unit: raw=百万円, mult=1000000, src=page_top",auto_seed,
+140120260312580246.pdf,?,col_as_seg,外食・中食,外食・中食,3859,3859,240,240,"Unit: raw=百万円, mult=1000000, src=page_top",auto_seed,
+140120260312580246.pdf,?,col_as_seg,エコ再生 エネルギー,エコ再生 エネルギー,946,946,-178,-178,"Unit: raw=百万円, mult=1000000, src=page_top",auto_seed,

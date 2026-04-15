@@ -1,0 +1,14 @@
+{
+  "filing_id": "06a35c172034221d4ac09d3e",
+  "ticker": "172A",
+  "stage": "extracting_pdf",
+  "error_message": "candidate_guard:narrative_guard|hint=pdf_narrative_block_selected",
+  "review_hint": "pdf_narrative_block_selected",
+  "via": "pdf",
+  "candidate_reject_reason": "no_segment_table_candidate",
+  "detector_v2_reason": "no_segment_table_candidate",
+  "detector_v1_reason": "candidate_guard:narrative_guard|hint=pdf_narrative_block_selected",
+  "xbrl_fallback_attempted": false,
+  "xbrl_fallback_succeeded": false,
+  "xbrl_failure_reason": ""
+}

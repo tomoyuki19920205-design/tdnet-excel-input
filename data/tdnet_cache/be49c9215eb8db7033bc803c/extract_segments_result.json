@@ -1,0 +1,4083 @@
+[
+  {
+    "ticker": "5032",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "UNKNOWN",
+    "segment_order": 1,
+    "segment_sales": 54730.0,
+    "segment_profit": 27.6,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "UNKNOWN",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "be49c9215eb8db7033bc803c",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=5, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.76 (セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行14行(5+); 数値密度14/20; 行数20; セグメント名行2行; 補助語2個; 財政状態(減点); 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=12 bscf=4 garbage=4",
+      "Phase B-2: ACCEPT alt candidate #2 valid=2 score=0.58",
+      "Phase B-2: ACCEPT valid=2 narr=8",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['売上高 営業利益 経常利益 当期純利益', '当期純利益'], reconstructed=['売上高当期純利益', '営業利益', '経常利益', '当期純利益'], units=None",
+      "Phase C: merge vertical ['売上高', '当期純利益'] -> 売上高当期純利益 score=60.0",
+      "Unit: raw=百万円, mult=1000000, src=nearby",
+      "Phase C: transition B(33rows,2cols)→C(33rows,2cols) header_band=2 new_headers=['売上高当期純利益', '営業利益', '経常利益']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=11, skip行=8, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 11件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.76,
+          "categories": {
+            "header": 0.34,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.12,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行14行(5+); 数値密度14/20; 行数20; セグメント名行2行; 補助語2個;",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 1,
+          "score": 0.58,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.23,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 行数33; セグメント名行2行; 補助語1個; 業績予想(減点); 事業名パターン2行",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.35,
+          "categories": {
+            "header": 0.22,
+            "numeric_layout": 0.3,
+            "segment_row": 0.1,
+            "exclusion": -0.27,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 数値列4列; 数値行14行(5+); 数値密度14/27; 行数27; 減価償却(減点); キャッシュ・フロー(減点); セグメント情報見出し",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.24,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.25,
+            "segment_row": 0.0,
+            "exclusion": -0.25,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.25
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列5列; 数値行4行(3+); 数値密度4/12; 行数12; PL勘定科目中程度(3語)",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 2,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 12,
+        "bs_cf_like": 4,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 4,
+        "pl_account_like": 0,
+        "top_samples": [
+          "VTuberグループ「にじさんじ」及び「NIJISANJI EN」に所属するVTuber数は:narrative_like",
+          "りました。また、「にじさんじオフィシャルストア」や「にじさんじFAN CLUB」等の利用の際に必要となるIDであ:narrative_like",
+          "るANYCOLOR IDは:garbage_fragment_like",
+          "以上の結果、当第:narrative_like",
+          ":garbage_fragment_like"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 33,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+        ],
+        "phase_c_rows": 33,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益"
+        ],
+        "reconstructed_headers": [
+          "売上高当期純利益",
+          "営業利益",
+          "経常利益",
+          "当期純利益"
+        ],
+        "column_labels": [
+          [
+            "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+          ],
+          [
+            "54,730 27.6 19,824 21.8 19,840 22.4 14,015 21.8 229.99"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "operating_profit_like",
+          "unknown",
+          "unknown"
+        ],
+        "best_sales_col": 0,
+        "best_profit_col": 1,
+        "profit_role": "operating_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.18,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.6,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.6,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.6,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "売上高当期純利益",
+            "scores": {
+              "segment_profit_like": 0.063,
+              "net_income_like": 0.18
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.18,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "営業利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "operating_profit_like": 0.6
+            },
+            "best_role": "operating_profit_like",
+            "best_score": 0.6,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "経常利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "ordinary_profit_like": 0.6
+            },
+            "best_role": "ordinary_profit_like",
+            "best_score": 0.6,
+            "selected": false
+          },
+          {
+            "col": 3,
+            "header": "当期純利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "net_income_like": 0.6
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.6,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高当期純利益",
+            "scores": {
+              "sales": 0.18
+            },
+            "best_role": "sales",
+            "best_score": 0.18,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "売上高営業利益経常利益当期純利益当期純利益"
+        ],
+        "new_headers": [
+          "売上高当期純利益",
+          "営業利益",
+          "経常利益",
+          "当期純利益"
+        ],
+        "reconstruction_steps": [
+          {
+            "type": "vertical",
+            "parts": [
+              "売上高",
+              "当期純利益"
+            ],
+            "result": "売上高当期純利益",
+            "score": 60.0,
+            "dict_term": "売上高"
+          }
+        ]
+      },
+      "page_score": 0.7699999999999999,
+      "table_score": 0.58,
+      "header_confidence": 0.7,
+      "col_confidence": 0.6799999999999999,
+      "segment_count": 11,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 7,
+      "parse_quality_partial": 4
+    }
+  },
+  {
+    "ticker": "5032",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "（注）",
+    "segment_order": 2,
+    "segment_sales": 1.0,
+    "segment_profit": null,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "(注)",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "be49c9215eb8db7033bc803c",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=5, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.76 (セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行14行(5+); 数値密度14/20; 行数20; セグメント名行2行; 補助語2個; 財政状態(減点); 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=12 bscf=4 garbage=4",
+      "Phase B-2: ACCEPT alt candidate #2 valid=2 score=0.58",
+      "Phase B-2: ACCEPT valid=2 narr=8",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['売上高 営業利益 経常利益 当期純利益', '当期純利益'], reconstructed=['売上高当期純利益', '営業利益', '経常利益', '当期純利益'], units=None",
+      "Phase C: merge vertical ['売上高', '当期純利益'] -> 売上高当期純利益 score=60.0",
+      "Unit: raw=百万円, mult=1000000, src=nearby",
+      "Phase C: transition B(33rows,2cols)→C(33rows,2cols) header_band=2 new_headers=['売上高当期純利益', '営業利益', '経常利益']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=11, skip行=8, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 11件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.76,
+          "categories": {
+            "header": 0.34,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.12,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行14行(5+); 数値密度14/20; 行数20; セグメント名行2行; 補助語2個;",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 1,
+          "score": 0.58,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.23,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 行数33; セグメント名行2行; 補助語1個; 業績予想(減点); 事業名パターン2行",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.35,
+          "categories": {
+            "header": 0.22,
+            "numeric_layout": 0.3,
+            "segment_row": 0.1,
+            "exclusion": -0.27,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 数値列4列; 数値行14行(5+); 数値密度14/27; 行数27; 減価償却(減点); キャッシュ・フロー(減点); セグメント情報見出し",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.24,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.25,
+            "segment_row": 0.0,
+            "exclusion": -0.25,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.25
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列5列; 数値行4行(3+); 数値密度4/12; 行数12; PL勘定科目中程度(3語)",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 2,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 12,
+        "bs_cf_like": 4,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 4,
+        "pl_account_like": 0,
+        "top_samples": [
+          "VTuberグループ「にじさんじ」及び「NIJISANJI EN」に所属するVTuber数は:narrative_like",
+          "りました。また、「にじさんじオフィシャルストア」や「にじさんじFAN CLUB」等の利用の際に必要となるIDであ:narrative_like",
+          "るANYCOLOR IDは:garbage_fragment_like",
+          "以上の結果、当第:narrative_like",
+          ":garbage_fragment_like"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 33,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+        ],
+        "phase_c_rows": 33,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益"
+        ],
+        "reconstructed_headers": [
+          "売上高当期純利益",
+          "営業利益",
+          "経常利益",
+          "当期純利益"
+        ],
+        "column_labels": [
+          [
+            "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+          ],
+          [
+            "54,730 27.6 19,824 21.8 19,840 22.4 14,015 21.8 229.99"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "operating_profit_like",
+          "unknown",
+          "unknown"
+        ],
+        "best_sales_col": 0,
+        "best_profit_col": 1,
+        "profit_role": "operating_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.18,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.6,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.6,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.6,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "売上高当期純利益",
+            "scores": {
+              "segment_profit_like": 0.063,
+              "net_income_like": 0.18
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.18,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "営業利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "operating_profit_like": 0.6
+            },
+            "best_role": "operating_profit_like",
+            "best_score": 0.6,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "経常利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "ordinary_profit_like": 0.6
+            },
+            "best_role": "ordinary_profit_like",
+            "best_score": 0.6,
+            "selected": false
+          },
+          {
+            "col": 3,
+            "header": "当期純利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "net_income_like": 0.6
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.6,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高当期純利益",
+            "scores": {
+              "sales": 0.18
+            },
+            "best_role": "sales",
+            "best_score": 0.18,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "売上高営業利益経常利益当期純利益当期純利益"
+        ],
+        "new_headers": [
+          "売上高当期純利益",
+          "営業利益",
+          "経常利益",
+          "当期純利益"
+        ],
+        "reconstruction_steps": [
+          {
+            "type": "vertical",
+            "parts": [
+              "売上高",
+              "当期純利益"
+            ],
+            "result": "売上高当期純利益",
+            "score": 60.0,
+            "dict_term": "売上高"
+          }
+        ]
+      },
+      "page_score": 0.7699999999999999,
+      "table_score": 0.58,
+      "header_confidence": 0.7,
+      "col_confidence": 0.6799999999999999,
+      "segment_count": 11,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 7,
+      "parse_quality_partial": 4
+    }
+  },
+  {
+    "ticker": "5032",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "UNKNOWN",
+    "segment_order": 3,
+    "segment_sales": 2.0,
+    "segment_profit": 2026.0,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "UNKNOWN",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "be49c9215eb8db7033bc803c",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=5, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.76 (セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行14行(5+); 数値密度14/20; 行数20; セグメント名行2行; 補助語2個; 財政状態(減点); 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=12 bscf=4 garbage=4",
+      "Phase B-2: ACCEPT alt candidate #2 valid=2 score=0.58",
+      "Phase B-2: ACCEPT valid=2 narr=8",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['売上高 営業利益 経常利益 当期純利益', '当期純利益'], reconstructed=['売上高当期純利益', '営業利益', '経常利益', '当期純利益'], units=None",
+      "Phase C: merge vertical ['売上高', '当期純利益'] -> 売上高当期純利益 score=60.0",
+      "Unit: raw=百万円, mult=1000000, src=nearby",
+      "Phase C: transition B(33rows,2cols)→C(33rows,2cols) header_band=2 new_headers=['売上高当期純利益', '営業利益', '経常利益']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=11, skip行=8, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 11件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.76,
+          "categories": {
+            "header": 0.34,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.12,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行14行(5+); 数値密度14/20; 行数20; セグメント名行2行; 補助語2個;",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 1,
+          "score": 0.58,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.23,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 行数33; セグメント名行2行; 補助語1個; 業績予想(減点); 事業名パターン2行",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.35,
+          "categories": {
+            "header": 0.22,
+            "numeric_layout": 0.3,
+            "segment_row": 0.1,
+            "exclusion": -0.27,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 数値列4列; 数値行14行(5+); 数値密度14/27; 行数27; 減価償却(減点); キャッシュ・フロー(減点); セグメント情報見出し",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.24,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.25,
+            "segment_row": 0.0,
+            "exclusion": -0.25,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.25
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列5列; 数値行4行(3+); 数値密度4/12; 行数12; PL勘定科目中程度(3語)",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 2,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 12,
+        "bs_cf_like": 4,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 4,
+        "pl_account_like": 0,
+        "top_samples": [
+          "VTuberグループ「にじさんじ」及び「NIJISANJI EN」に所属するVTuber数は:narrative_like",
+          "りました。また、「にじさんじオフィシャルストア」や「にじさんじFAN CLUB」等の利用の際に必要となるIDであ:narrative_like",
+          "るANYCOLOR IDは:garbage_fragment_like",
+          "以上の結果、当第:narrative_like",
+          ":garbage_fragment_like"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 33,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+        ],
+        "phase_c_rows": 33,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益"
+        ],
+        "reconstructed_headers": [
+          "売上高当期純利益",
+          "営業利益",
+          "経常利益",
+          "当期純利益"
+        ],
+        "column_labels": [
+          [
+            "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+          ],
+          [
+            "54,730 27.6 19,824 21.8 19,840 22.4 14,015 21.8 229.99"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "operating_profit_like",
+          "unknown",
+          "unknown"
+        ],
+        "best_sales_col": 0,
+        "best_profit_col": 1,
+        "profit_role": "operating_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.18,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.6,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.6,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.6,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "売上高当期純利益",
+            "scores": {
+              "segment_profit_like": 0.063,
+              "net_income_like": 0.18
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.18,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "営業利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "operating_profit_like": 0.6
+            },
+            "best_role": "operating_profit_like",
+            "best_score": 0.6,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "経常利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "ordinary_profit_like": 0.6
+            },
+            "best_role": "ordinary_profit_like",
+            "best_score": 0.6,
+            "selected": false
+          },
+          {
+            "col": 3,
+            "header": "当期純利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "net_income_like": 0.6
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.6,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高当期純利益",
+            "scores": {
+              "sales": 0.18
+            },
+            "best_role": "sales",
+            "best_score": 0.18,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "売上高営業利益経常利益当期純利益当期純利益"
+        ],
+        "new_headers": [
+          "売上高当期純利益",
+          "営業利益",
+          "経常利益",
+          "当期純利益"
+        ],
+        "reconstruction_steps": [
+          {
+            "type": "vertical",
+            "parts": [
+              "売上高",
+              "当期純利益"
+            ],
+            "result": "売上高当期純利益",
+            "score": 60.0,
+            "dict_term": "売上高"
+          }
+        ]
+      },
+      "page_score": 0.7699999999999999,
+      "table_score": 0.58,
+      "header_confidence": 0.7,
+      "col_confidence": 0.6799999999999999,
+      "segment_count": 11,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 7,
+      "parse_quality_partial": 4
+    }
+  },
+  {
+    "ticker": "5032",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "四半期決算に関する定性的情報(",
+    "segment_order": 4,
+    "segment_sales": 3.0,
+    "segment_profit": null,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "四半期決算に関する定性的情報(",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "be49c9215eb8db7033bc803c",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=5, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.76 (セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行14行(5+); 数値密度14/20; 行数20; セグメント名行2行; 補助語2個; 財政状態(減点); 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=12 bscf=4 garbage=4",
+      "Phase B-2: ACCEPT alt candidate #2 valid=2 score=0.58",
+      "Phase B-2: ACCEPT valid=2 narr=8",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['売上高 営業利益 経常利益 当期純利益', '当期純利益'], reconstructed=['売上高当期純利益', '営業利益', '経常利益', '当期純利益'], units=None",
+      "Phase C: merge vertical ['売上高', '当期純利益'] -> 売上高当期純利益 score=60.0",
+      "Unit: raw=百万円, mult=1000000, src=nearby",
+      "Phase C: transition B(33rows,2cols)→C(33rows,2cols) header_band=2 new_headers=['売上高当期純利益', '営業利益', '経常利益']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=11, skip行=8, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 11件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.76,
+          "categories": {
+            "header": 0.34,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.12,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行14行(5+); 数値密度14/20; 行数20; セグメント名行2行; 補助語2個;",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 1,
+          "score": 0.58,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.23,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 行数33; セグメント名行2行; 補助語1個; 業績予想(減点); 事業名パターン2行",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.35,
+          "categories": {
+            "header": 0.22,
+            "numeric_layout": 0.3,
+            "segment_row": 0.1,
+            "exclusion": -0.27,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 数値列4列; 数値行14行(5+); 数値密度14/27; 行数27; 減価償却(減点); キャッシュ・フロー(減点); セグメント情報見出し",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.24,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.25,
+            "segment_row": 0.0,
+            "exclusion": -0.25,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.25
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列5列; 数値行4行(3+); 数値密度4/12; 行数12; PL勘定科目中程度(3語)",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 2,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 12,
+        "bs_cf_like": 4,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 4,
+        "pl_account_like": 0,
+        "top_samples": [
+          "VTuberグループ「にじさんじ」及び「NIJISANJI EN」に所属するVTuber数は:narrative_like",
+          "りました。また、「にじさんじオフィシャルストア」や「にじさんじFAN CLUB」等の利用の際に必要となるIDであ:narrative_like",
+          "るANYCOLOR IDは:garbage_fragment_like",
+          "以上の結果、当第:narrative_like",
+          ":garbage_fragment_like"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 33,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+        ],
+        "phase_c_rows": 33,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益"
+        ],
+        "reconstructed_headers": [
+          "売上高当期純利益",
+          "営業利益",
+          "経常利益",
+          "当期純利益"
+        ],
+        "column_labels": [
+          [
+            "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+          ],
+          [
+            "54,730 27.6 19,824 21.8 19,840 22.4 14,015 21.8 229.99"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "operating_profit_like",
+          "unknown",
+          "unknown"
+        ],
+        "best_sales_col": 0,
+        "best_profit_col": 1,
+        "profit_role": "operating_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.18,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.6,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.6,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.6,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "売上高当期純利益",
+            "scores": {
+              "segment_profit_like": 0.063,
+              "net_income_like": 0.18
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.18,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "営業利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "operating_profit_like": 0.6
+            },
+            "best_role": "operating_profit_like",
+            "best_score": 0.6,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "経常利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "ordinary_profit_like": 0.6
+            },
+            "best_role": "ordinary_profit_like",
+            "best_score": 0.6,
+            "selected": false
+          },
+          {
+            "col": 3,
+            "header": "当期純利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "net_income_like": 0.6
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.6,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高当期純利益",
+            "scores": {
+              "sales": 0.18
+            },
+            "best_role": "sales",
+            "best_score": 0.18,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "売上高営業利益経常利益当期純利益当期純利益"
+        ],
+        "new_headers": [
+          "売上高当期純利益",
+          "営業利益",
+          "経常利益",
+          "当期純利益"
+        ],
+        "reconstruction_steps": [
+          {
+            "type": "vertical",
+            "parts": [
+              "売上高",
+              "当期純利益"
+            ],
+            "result": "売上高当期純利益",
+            "score": 60.0,
+            "dict_term": "売上高"
+          }
+        ]
+      },
+      "page_score": 0.7699999999999999,
+      "table_score": 0.58,
+      "header_confidence": 0.7,
+      "col_confidence": 0.6799999999999999,
+      "segment_count": 11,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 7,
+      "parse_quality_partial": 4
+    }
+  },
+  {
+    "ticker": "5032",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "UNKNOWN",
+    "segment_order": 5,
+    "segment_sales": 3.0,
+    "segment_profit": 2026.0,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "UNKNOWN",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "be49c9215eb8db7033bc803c",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=5, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.76 (セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行14行(5+); 数値密度14/20; 行数20; セグメント名行2行; 補助語2個; 財政状態(減点); 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=12 bscf=4 garbage=4",
+      "Phase B-2: ACCEPT alt candidate #2 valid=2 score=0.58",
+      "Phase B-2: ACCEPT valid=2 narr=8",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['売上高 営業利益 経常利益 当期純利益', '当期純利益'], reconstructed=['売上高当期純利益', '営業利益', '経常利益', '当期純利益'], units=None",
+      "Phase C: merge vertical ['売上高', '当期純利益'] -> 売上高当期純利益 score=60.0",
+      "Unit: raw=百万円, mult=1000000, src=nearby",
+      "Phase C: transition B(33rows,2cols)→C(33rows,2cols) header_band=2 new_headers=['売上高当期純利益', '営業利益', '経常利益']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=11, skip行=8, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 11件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.76,
+          "categories": {
+            "header": 0.34,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.12,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行14行(5+); 数値密度14/20; 行数20; セグメント名行2行; 補助語2個;",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 1,
+          "score": 0.58,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.23,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 行数33; セグメント名行2行; 補助語1個; 業績予想(減点); 事業名パターン2行",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.35,
+          "categories": {
+            "header": 0.22,
+            "numeric_layout": 0.3,
+            "segment_row": 0.1,
+            "exclusion": -0.27,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 数値列4列; 数値行14行(5+); 数値密度14/27; 行数27; 減価償却(減点); キャッシュ・フロー(減点); セグメント情報見出し",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.24,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.25,
+            "segment_row": 0.0,
+            "exclusion": -0.25,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.25
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列5列; 数値行4行(3+); 数値密度4/12; 行数12; PL勘定科目中程度(3語)",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 2,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 12,
+        "bs_cf_like": 4,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 4,
+        "pl_account_like": 0,
+        "top_samples": [
+          "VTuberグループ「にじさんじ」及び「NIJISANJI EN」に所属するVTuber数は:narrative_like",
+          "りました。また、「にじさんじオフィシャルストア」や「にじさんじFAN CLUB」等の利用の際に必要となるIDであ:narrative_like",
+          "るANYCOLOR IDは:garbage_fragment_like",
+          "以上の結果、当第:narrative_like",
+          ":garbage_fragment_like"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 33,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+        ],
+        "phase_c_rows": 33,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益"
+        ],
+        "reconstructed_headers": [
+          "売上高当期純利益",
+          "営業利益",
+          "経常利益",
+          "当期純利益"
+        ],
+        "column_labels": [
+          [
+            "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+          ],
+          [
+            "54,730 27.6 19,824 21.8 19,840 22.4 14,015 21.8 229.99"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "operating_profit_like",
+          "unknown",
+          "unknown"
+        ],
+        "best_sales_col": 0,
+        "best_profit_col": 1,
+        "profit_role": "operating_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.18,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.6,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.6,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.6,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "売上高当期純利益",
+            "scores": {
+              "segment_profit_like": 0.063,
+              "net_income_like": 0.18
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.18,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "営業利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "operating_profit_like": 0.6
+            },
+            "best_role": "operating_profit_like",
+            "best_score": 0.6,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "経常利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "ordinary_profit_like": 0.6
+            },
+            "best_role": "ordinary_profit_like",
+            "best_score": 0.6,
+            "selected": false
+          },
+          {
+            "col": 3,
+            "header": "当期純利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "net_income_like": 0.6
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.6,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高当期純利益",
+            "scores": {
+              "sales": 0.18
+            },
+            "best_role": "sales",
+            "best_score": 0.18,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "売上高営業利益経常利益当期純利益当期純利益"
+        ],
+        "new_headers": [
+          "売上高当期純利益",
+          "営業利益",
+          "経常利益",
+          "当期純利益"
+        ],
+        "reconstruction_steps": [
+          {
+            "type": "vertical",
+            "parts": [
+              "売上高",
+              "当期純利益"
+            ],
+            "result": "売上高当期純利益",
+            "score": 60.0,
+            "dict_term": "売上高"
+          }
+        ]
+      },
+      "page_score": 0.7699999999999999,
+      "table_score": 0.58,
+      "header_confidence": 0.7,
+      "col_confidence": 0.6799999999999999,
+      "segment_count": 11,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 7,
+      "parse_quality_partial": 4
+    }
+  },
+  {
+    "ticker": "5032",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "1 期末発行済株式数(自己株式を含む)",
+    "segment_order": 6,
+    "segment_sales": 2026.0,
+    "segment_profit": 4.0,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "1 期末発行済株式数(自己株式を含む)",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "be49c9215eb8db7033bc803c",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=5, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.76 (セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行14行(5+); 数値密度14/20; 行数20; セグメント名行2行; 補助語2個; 財政状態(減点); 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=12 bscf=4 garbage=4",
+      "Phase B-2: ACCEPT alt candidate #2 valid=2 score=0.58",
+      "Phase B-2: ACCEPT valid=2 narr=8",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['売上高 営業利益 経常利益 当期純利益', '当期純利益'], reconstructed=['売上高当期純利益', '営業利益', '経常利益', '当期純利益'], units=None",
+      "Phase C: merge vertical ['売上高', '当期純利益'] -> 売上高当期純利益 score=60.0",
+      "Unit: raw=百万円, mult=1000000, src=nearby",
+      "Phase C: transition B(33rows,2cols)→C(33rows,2cols) header_band=2 new_headers=['売上高当期純利益', '営業利益', '経常利益']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=11, skip行=8, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 11件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.76,
+          "categories": {
+            "header": 0.34,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.12,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行14行(5+); 数値密度14/20; 行数20; セグメント名行2行; 補助語2個;",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 1,
+          "score": 0.58,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.23,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 行数33; セグメント名行2行; 補助語1個; 業績予想(減点); 事業名パターン2行",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.35,
+          "categories": {
+            "header": 0.22,
+            "numeric_layout": 0.3,
+            "segment_row": 0.1,
+            "exclusion": -0.27,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 数値列4列; 数値行14行(5+); 数値密度14/27; 行数27; 減価償却(減点); キャッシュ・フロー(減点); セグメント情報見出し",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.24,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.25,
+            "segment_row": 0.0,
+            "exclusion": -0.25,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.25
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列5列; 数値行4行(3+); 数値密度4/12; 行数12; PL勘定科目中程度(3語)",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 2,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 12,
+        "bs_cf_like": 4,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 4,
+        "pl_account_like": 0,
+        "top_samples": [
+          "VTuberグループ「にじさんじ」及び「NIJISANJI EN」に所属するVTuber数は:narrative_like",
+          "りました。また、「にじさんじオフィシャルストア」や「にじさんじFAN CLUB」等の利用の際に必要となるIDであ:narrative_like",
+          "るANYCOLOR IDは:garbage_fragment_like",
+          "以上の結果、当第:narrative_like",
+          ":garbage_fragment_like"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 33,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+        ],
+        "phase_c_rows": 33,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益"
+        ],
+        "reconstructed_headers": [
+          "売上高当期純利益",
+          "営業利益",
+          "経常利益",
+          "当期純利益"
+        ],
+        "column_labels": [
+          [
+            "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+          ],
+          [
+            "54,730 27.6 19,824 21.8 19,840 22.4 14,015 21.8 229.99"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "operating_profit_like",
+          "unknown",
+          "unknown"
+        ],
+        "best_sales_col": 0,
+        "best_profit_col": 1,
+        "profit_role": "operating_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.18,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.6,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.6,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.6,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "売上高当期純利益",
+            "scores": {
+              "segment_profit_like": 0.063,
+              "net_income_like": 0.18
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.18,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "営業利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "operating_profit_like": 0.6
+            },
+            "best_role": "operating_profit_like",
+            "best_score": 0.6,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "経常利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "ordinary_profit_like": 0.6
+            },
+            "best_role": "ordinary_profit_like",
+            "best_score": 0.6,
+            "selected": false
+          },
+          {
+            "col": 3,
+            "header": "当期純利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "net_income_like": 0.6
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.6,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高当期純利益",
+            "scores": {
+              "sales": 0.18
+            },
+            "best_role": "sales",
+            "best_score": 0.18,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "売上高営業利益経常利益当期純利益当期純利益"
+        ],
+        "new_headers": [
+          "売上高当期純利益",
+          "営業利益",
+          "経常利益",
+          "当期純利益"
+        ],
+        "reconstruction_steps": [
+          {
+            "type": "vertical",
+            "parts": [
+              "売上高",
+              "当期純利益"
+            ],
+            "result": "売上高当期純利益",
+            "score": 60.0,
+            "dict_term": "売上高"
+          }
+        ]
+      },
+      "page_score": 0.7699999999999999,
+      "table_score": 0.58,
+      "header_confidence": 0.7,
+      "col_confidence": 0.6799999999999999,
+      "segment_count": 11,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 7,
+      "parse_quality_partial": 4
+    }
+  },
+  {
+    "ticker": "5032",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "2 期末自己株式数",
+    "segment_order": 7,
+    "segment_sales": 2026.0,
+    "segment_profit": 4.0,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "2 期末自己株式数",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "be49c9215eb8db7033bc803c",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=5, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.76 (セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行14行(5+); 数値密度14/20; 行数20; セグメント名行2行; 補助語2個; 財政状態(減点); 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=12 bscf=4 garbage=4",
+      "Phase B-2: ACCEPT alt candidate #2 valid=2 score=0.58",
+      "Phase B-2: ACCEPT valid=2 narr=8",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['売上高 営業利益 経常利益 当期純利益', '当期純利益'], reconstructed=['売上高当期純利益', '営業利益', '経常利益', '当期純利益'], units=None",
+      "Phase C: merge vertical ['売上高', '当期純利益'] -> 売上高当期純利益 score=60.0",
+      "Unit: raw=百万円, mult=1000000, src=nearby",
+      "Phase C: transition B(33rows,2cols)→C(33rows,2cols) header_band=2 new_headers=['売上高当期純利益', '営業利益', '経常利益']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=11, skip行=8, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 11件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.76,
+          "categories": {
+            "header": 0.34,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.12,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行14行(5+); 数値密度14/20; 行数20; セグメント名行2行; 補助語2個;",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 1,
+          "score": 0.58,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.23,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 行数33; セグメント名行2行; 補助語1個; 業績予想(減点); 事業名パターン2行",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.35,
+          "categories": {
+            "header": 0.22,
+            "numeric_layout": 0.3,
+            "segment_row": 0.1,
+            "exclusion": -0.27,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 数値列4列; 数値行14行(5+); 数値密度14/27; 行数27; 減価償却(減点); キャッシュ・フロー(減点); セグメント情報見出し",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.24,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.25,
+            "segment_row": 0.0,
+            "exclusion": -0.25,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.25
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列5列; 数値行4行(3+); 数値密度4/12; 行数12; PL勘定科目中程度(3語)",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 2,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 12,
+        "bs_cf_like": 4,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 4,
+        "pl_account_like": 0,
+        "top_samples": [
+          "VTuberグループ「にじさんじ」及び「NIJISANJI EN」に所属するVTuber数は:narrative_like",
+          "りました。また、「にじさんじオフィシャルストア」や「にじさんじFAN CLUB」等の利用の際に必要となるIDであ:narrative_like",
+          "るANYCOLOR IDは:garbage_fragment_like",
+          "以上の結果、当第:narrative_like",
+          ":garbage_fragment_like"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 33,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+        ],
+        "phase_c_rows": 33,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益"
+        ],
+        "reconstructed_headers": [
+          "売上高当期純利益",
+          "営業利益",
+          "経常利益",
+          "当期純利益"
+        ],
+        "column_labels": [
+          [
+            "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+          ],
+          [
+            "54,730 27.6 19,824 21.8 19,840 22.4 14,015 21.8 229.99"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "operating_profit_like",
+          "unknown",
+          "unknown"
+        ],
+        "best_sales_col": 0,
+        "best_profit_col": 1,
+        "profit_role": "operating_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.18,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.6,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.6,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.6,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "売上高当期純利益",
+            "scores": {
+              "segment_profit_like": 0.063,
+              "net_income_like": 0.18
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.18,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "営業利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "operating_profit_like": 0.6
+            },
+            "best_role": "operating_profit_like",
+            "best_score": 0.6,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "経常利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "ordinary_profit_like": 0.6
+            },
+            "best_role": "ordinary_profit_like",
+            "best_score": 0.6,
+            "selected": false
+          },
+          {
+            "col": 3,
+            "header": "当期純利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "net_income_like": 0.6
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.6,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高当期純利益",
+            "scores": {
+              "sales": 0.18
+            },
+            "best_role": "sales",
+            "best_score": 0.18,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "売上高営業利益経常利益当期純利益当期純利益"
+        ],
+        "new_headers": [
+          "売上高当期純利益",
+          "営業利益",
+          "経常利益",
+          "当期純利益"
+        ],
+        "reconstruction_steps": [
+          {
+            "type": "vertical",
+            "parts": [
+              "売上高",
+              "当期純利益"
+            ],
+            "result": "売上高当期純利益",
+            "score": 60.0,
+            "dict_term": "売上高"
+          }
+        ]
+      },
+      "page_score": 0.7699999999999999,
+      "table_score": 0.58,
+      "header_confidence": 0.7,
+      "col_confidence": 0.6799999999999999,
+      "segment_count": 11,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 7,
+      "parse_quality_partial": 4
+    }
+  },
+  {
+    "ticker": "5032",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "3 期中平均株式数(四半期累計)",
+    "segment_order": 8,
+    "segment_sales": 2026.0,
+    "segment_profit": 4.0,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "3 期中平均株式数(四半期累計)",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "be49c9215eb8db7033bc803c",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=5, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.76 (セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行14行(5+); 数値密度14/20; 行数20; セグメント名行2行; 補助語2個; 財政状態(減点); 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=12 bscf=4 garbage=4",
+      "Phase B-2: ACCEPT alt candidate #2 valid=2 score=0.58",
+      "Phase B-2: ACCEPT valid=2 narr=8",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['売上高 営業利益 経常利益 当期純利益', '当期純利益'], reconstructed=['売上高当期純利益', '営業利益', '経常利益', '当期純利益'], units=None",
+      "Phase C: merge vertical ['売上高', '当期純利益'] -> 売上高当期純利益 score=60.0",
+      "Unit: raw=百万円, mult=1000000, src=nearby",
+      "Phase C: transition B(33rows,2cols)→C(33rows,2cols) header_band=2 new_headers=['売上高当期純利益', '営業利益', '経常利益']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=11, skip行=8, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 11件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.76,
+          "categories": {
+            "header": 0.34,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.12,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行14行(5+); 数値密度14/20; 行数20; セグメント名行2行; 補助語2個;",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 1,
+          "score": 0.58,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.23,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 行数33; セグメント名行2行; 補助語1個; 業績予想(減点); 事業名パターン2行",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.35,
+          "categories": {
+            "header": 0.22,
+            "numeric_layout": 0.3,
+            "segment_row": 0.1,
+            "exclusion": -0.27,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 数値列4列; 数値行14行(5+); 数値密度14/27; 行数27; 減価償却(減点); キャッシュ・フロー(減点); セグメント情報見出し",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.24,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.25,
+            "segment_row": 0.0,
+            "exclusion": -0.25,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.25
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列5列; 数値行4行(3+); 数値密度4/12; 行数12; PL勘定科目中程度(3語)",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 2,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 12,
+        "bs_cf_like": 4,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 4,
+        "pl_account_like": 0,
+        "top_samples": [
+          "VTuberグループ「にじさんじ」及び「NIJISANJI EN」に所属するVTuber数は:narrative_like",
+          "りました。また、「にじさんじオフィシャルストア」や「にじさんじFAN CLUB」等の利用の際に必要となるIDであ:narrative_like",
+          "るANYCOLOR IDは:garbage_fragment_like",
+          "以上の結果、当第:narrative_like",
+          ":garbage_fragment_like"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 33,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+        ],
+        "phase_c_rows": 33,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益"
+        ],
+        "reconstructed_headers": [
+          "売上高当期純利益",
+          "営業利益",
+          "経常利益",
+          "当期純利益"
+        ],
+        "column_labels": [
+          [
+            "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+          ],
+          [
+            "54,730 27.6 19,824 21.8 19,840 22.4 14,015 21.8 229.99"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "operating_profit_like",
+          "unknown",
+          "unknown"
+        ],
+        "best_sales_col": 0,
+        "best_profit_col": 1,
+        "profit_role": "operating_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.18,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.6,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.6,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.6,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "売上高当期純利益",
+            "scores": {
+              "segment_profit_like": 0.063,
+              "net_income_like": 0.18
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.18,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "営業利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "operating_profit_like": 0.6
+            },
+            "best_role": "operating_profit_like",
+            "best_score": 0.6,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "経常利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "ordinary_profit_like": 0.6
+            },
+            "best_role": "ordinary_profit_like",
+            "best_score": 0.6,
+            "selected": false
+          },
+          {
+            "col": 3,
+            "header": "当期純利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "net_income_like": 0.6
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.6,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高当期純利益",
+            "scores": {
+              "sales": 0.18
+            },
+            "best_role": "sales",
+            "best_score": 0.18,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "売上高営業利益経常利益当期純利益当期純利益"
+        ],
+        "new_headers": [
+          "売上高当期純利益",
+          "営業利益",
+          "経常利益",
+          "当期純利益"
+        ],
+        "reconstruction_steps": [
+          {
+            "type": "vertical",
+            "parts": [
+              "売上高",
+              "当期純利益"
+            ],
+            "result": "売上高当期純利益",
+            "score": 60.0,
+            "dict_term": "売上高"
+          }
+        ]
+      },
+      "page_score": 0.7699999999999999,
+      "table_score": 0.58,
+      "header_confidence": 0.7,
+      "col_confidence": 0.6799999999999999,
+      "segment_count": 11,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 7,
+      "parse_quality_partial": 4
+    }
+  },
+  {
+    "ticker": "5032",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "は様々な要因により大きく異なる可能性があります。業績予想に関する事項については、添付資料P.",
+    "segment_order": 9,
+    "segment_sales": 2.0,
+    "segment_profit": 1.0,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "は様々な要因により大きく異なる可能性があります。業績予想に関する事項については、添付資料P.",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "be49c9215eb8db7033bc803c",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=5, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.76 (セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行14行(5+); 数値密度14/20; 行数20; セグメント名行2行; 補助語2個; 財政状態(減点); 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=12 bscf=4 garbage=4",
+      "Phase B-2: ACCEPT alt candidate #2 valid=2 score=0.58",
+      "Phase B-2: ACCEPT valid=2 narr=8",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['売上高 営業利益 経常利益 当期純利益', '当期純利益'], reconstructed=['売上高当期純利益', '営業利益', '経常利益', '当期純利益'], units=None",
+      "Phase C: merge vertical ['売上高', '当期純利益'] -> 売上高当期純利益 score=60.0",
+      "Unit: raw=百万円, mult=1000000, src=nearby",
+      "Phase C: transition B(33rows,2cols)→C(33rows,2cols) header_band=2 new_headers=['売上高当期純利益', '営業利益', '経常利益']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=11, skip行=8, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 11件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.76,
+          "categories": {
+            "header": 0.34,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.12,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行14行(5+); 数値密度14/20; 行数20; セグメント名行2行; 補助語2個;",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 1,
+          "score": 0.58,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.23,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 行数33; セグメント名行2行; 補助語1個; 業績予想(減点); 事業名パターン2行",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.35,
+          "categories": {
+            "header": 0.22,
+            "numeric_layout": 0.3,
+            "segment_row": 0.1,
+            "exclusion": -0.27,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 数値列4列; 数値行14行(5+); 数値密度14/27; 行数27; 減価償却(減点); キャッシュ・フロー(減点); セグメント情報見出し",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.24,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.25,
+            "segment_row": 0.0,
+            "exclusion": -0.25,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.25
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列5列; 数値行4行(3+); 数値密度4/12; 行数12; PL勘定科目中程度(3語)",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 2,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 12,
+        "bs_cf_like": 4,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 4,
+        "pl_account_like": 0,
+        "top_samples": [
+          "VTuberグループ「にじさんじ」及び「NIJISANJI EN」に所属するVTuber数は:narrative_like",
+          "りました。また、「にじさんじオフィシャルストア」や「にじさんじFAN CLUB」等の利用の際に必要となるIDであ:narrative_like",
+          "るANYCOLOR IDは:garbage_fragment_like",
+          "以上の結果、当第:narrative_like",
+          ":garbage_fragment_like"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 33,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+        ],
+        "phase_c_rows": 33,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益"
+        ],
+        "reconstructed_headers": [
+          "売上高当期純利益",
+          "営業利益",
+          "経常利益",
+          "当期純利益"
+        ],
+        "column_labels": [
+          [
+            "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+          ],
+          [
+            "54,730 27.6 19,824 21.8 19,840 22.4 14,015 21.8 229.99"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "operating_profit_like",
+          "unknown",
+          "unknown"
+        ],
+        "best_sales_col": 0,
+        "best_profit_col": 1,
+        "profit_role": "operating_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.18,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.6,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.6,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.6,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "売上高当期純利益",
+            "scores": {
+              "segment_profit_like": 0.063,
+              "net_income_like": 0.18
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.18,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "営業利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "operating_profit_like": 0.6
+            },
+            "best_role": "operating_profit_like",
+            "best_score": 0.6,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "経常利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "ordinary_profit_like": 0.6
+            },
+            "best_role": "ordinary_profit_like",
+            "best_score": 0.6,
+            "selected": false
+          },
+          {
+            "col": 3,
+            "header": "当期純利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "net_income_like": 0.6
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.6,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高当期純利益",
+            "scores": {
+              "sales": 0.18
+            },
+            "best_role": "sales",
+            "best_score": 0.18,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "売上高営業利益経常利益当期純利益当期純利益"
+        ],
+        "new_headers": [
+          "売上高当期純利益",
+          "営業利益",
+          "経常利益",
+          "当期純利益"
+        ],
+        "reconstruction_steps": [
+          {
+            "type": "vertical",
+            "parts": [
+              "売上高",
+              "当期純利益"
+            ],
+            "result": "売上高当期純利益",
+            "score": 60.0,
+            "dict_term": "売上高"
+          }
+        ]
+      },
+      "page_score": 0.7699999999999999,
+      "table_score": 0.58,
+      "header_confidence": 0.7,
+      "col_confidence": 0.6799999999999999,
+      "segment_count": 11,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 7,
+      "parse_quality_partial": 4
+    }
+  },
+  {
+    "ticker": "5032",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "半期決算に関する定性的情報(",
+    "segment_order": 10,
+    "segment_sales": 3.0,
+    "segment_profit": null,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "半期決算に関する定性的情報(",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "be49c9215eb8db7033bc803c",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=5, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.76 (セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行14行(5+); 数値密度14/20; 行数20; セグメント名行2行; 補助語2個; 財政状態(減点); 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=12 bscf=4 garbage=4",
+      "Phase B-2: ACCEPT alt candidate #2 valid=2 score=0.58",
+      "Phase B-2: ACCEPT valid=2 narr=8",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['売上高 営業利益 経常利益 当期純利益', '当期純利益'], reconstructed=['売上高当期純利益', '営業利益', '経常利益', '当期純利益'], units=None",
+      "Phase C: merge vertical ['売上高', '当期純利益'] -> 売上高当期純利益 score=60.0",
+      "Unit: raw=百万円, mult=1000000, src=nearby",
+      "Phase C: transition B(33rows,2cols)→C(33rows,2cols) header_band=2 new_headers=['売上高当期純利益', '営業利益', '経常利益']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=11, skip行=8, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 11件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.76,
+          "categories": {
+            "header": 0.34,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.12,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行14行(5+); 数値密度14/20; 行数20; セグメント名行2行; 補助語2個;",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 1,
+          "score": 0.58,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.23,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 行数33; セグメント名行2行; 補助語1個; 業績予想(減点); 事業名パターン2行",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.35,
+          "categories": {
+            "header": 0.22,
+            "numeric_layout": 0.3,
+            "segment_row": 0.1,
+            "exclusion": -0.27,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 数値列4列; 数値行14行(5+); 数値密度14/27; 行数27; 減価償却(減点); キャッシュ・フロー(減点); セグメント情報見出し",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.24,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.25,
+            "segment_row": 0.0,
+            "exclusion": -0.25,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.25
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列5列; 数値行4行(3+); 数値密度4/12; 行数12; PL勘定科目中程度(3語)",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 2,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 12,
+        "bs_cf_like": 4,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 4,
+        "pl_account_like": 0,
+        "top_samples": [
+          "VTuberグループ「にじさんじ」及び「NIJISANJI EN」に所属するVTuber数は:narrative_like",
+          "りました。また、「にじさんじオフィシャルストア」や「にじさんじFAN CLUB」等の利用の際に必要となるIDであ:narrative_like",
+          "るANYCOLOR IDは:garbage_fragment_like",
+          "以上の結果、当第:narrative_like",
+          ":garbage_fragment_like"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 33,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+        ],
+        "phase_c_rows": 33,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益"
+        ],
+        "reconstructed_headers": [
+          "売上高当期純利益",
+          "営業利益",
+          "経常利益",
+          "当期純利益"
+        ],
+        "column_labels": [
+          [
+            "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+          ],
+          [
+            "54,730 27.6 19,824 21.8 19,840 22.4 14,015 21.8 229.99"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "operating_profit_like",
+          "unknown",
+          "unknown"
+        ],
+        "best_sales_col": 0,
+        "best_profit_col": 1,
+        "profit_role": "operating_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.18,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.6,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.6,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.6,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "売上高当期純利益",
+            "scores": {
+              "segment_profit_like": 0.063,
+              "net_income_like": 0.18
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.18,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "営業利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "operating_profit_like": 0.6
+            },
+            "best_role": "operating_profit_like",
+            "best_score": 0.6,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "経常利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "ordinary_profit_like": 0.6
+            },
+            "best_role": "ordinary_profit_like",
+            "best_score": 0.6,
+            "selected": false
+          },
+          {
+            "col": 3,
+            "header": "当期純利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "net_income_like": 0.6
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.6,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高当期純利益",
+            "scores": {
+              "sales": 0.18
+            },
+            "best_role": "sales",
+            "best_score": 0.18,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "売上高営業利益経常利益当期純利益当期純利益"
+        ],
+        "new_headers": [
+          "売上高当期純利益",
+          "営業利益",
+          "経常利益",
+          "当期純利益"
+        ],
+        "reconstruction_steps": [
+          {
+            "type": "vertical",
+            "parts": [
+              "売上高",
+              "当期純利益"
+            ],
+            "result": "売上高当期純利益",
+            "score": 60.0,
+            "dict_term": "売上高"
+          }
+        ]
+      },
+      "page_score": 0.7699999999999999,
+      "table_score": 0.58,
+      "header_confidence": 0.7,
+      "col_confidence": 0.6799999999999999,
+      "segment_count": 11,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 7,
+      "parse_quality_partial": 4
+    }
+  },
+  {
+    "ticker": "5032",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "なお、比較を容易にするため、前第",
+    "segment_order": 11,
+    "segment_sales": 3.0,
+    "segment_profit": null,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "なお、比較を容易にするため、前第",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "be49c9215eb8db7033bc803c",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=5, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.76 (セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行14行(5+); 数値密度14/20; 行数20; セグメント名行2行; 補助語2個; 財政状態(減点); 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=12 bscf=4 garbage=4",
+      "Phase B-2: ACCEPT alt candidate #2 valid=2 score=0.58",
+      "Phase B-2: ACCEPT valid=2 narr=8",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['売上高 営業利益 経常利益 当期純利益', '当期純利益'], reconstructed=['売上高当期純利益', '営業利益', '経常利益', '当期純利益'], units=None",
+      "Phase C: merge vertical ['売上高', '当期純利益'] -> 売上高当期純利益 score=60.0",
+      "Unit: raw=百万円, mult=1000000, src=nearby",
+      "Phase C: transition B(33rows,2cols)→C(33rows,2cols) header_band=2 new_headers=['売上高当期純利益', '営業利益', '経常利益']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=11, skip行=8, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 11件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.76,
+          "categories": {
+            "header": 0.34,
+            "numeric_layout": 0.28,
+            "segment_row": 0.16,
+            "exclusion": -0.12,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント別; 売上系:売上高; 利益系:営業利益; 数値列2列; 数値行14行(5+); 数値密度14/20; 行数20; セグメント名行2行; 補助語2個;",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 1,
+          "score": 0.58,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.23,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行7行(5+); 行数33; セグメント名行2行; 補助語1個; 業績予想(減点); 事業名パターン2行",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.35,
+          "categories": {
+            "header": 0.22,
+            "numeric_layout": 0.3,
+            "segment_row": 0.1,
+            "exclusion": -0.27,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "セグメント情報; 数値列4列; 数値行14行(5+); 数値密度14/27; 行数27; 減価償却(減点); キャッシュ・フロー(減点); セグメント情報見出し",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 0,
+          "score": 0.24,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.25,
+            "segment_row": 0.0,
+            "exclusion": -0.25,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.25
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列5列; 数値行4行(3+); 数値密度4/12; 行数12; PL勘定科目中程度(3語)",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 2,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 12,
+        "bs_cf_like": 4,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 4,
+        "pl_account_like": 0,
+        "top_samples": [
+          "VTuberグループ「にじさんじ」及び「NIJISANJI EN」に所属するVTuber数は:narrative_like",
+          "りました。また、「にじさんじオフィシャルストア」や「にじさんじFAN CLUB」等の利用の際に必要となるIDであ:narrative_like",
+          "るANYCOLOR IDは:garbage_fragment_like",
+          "以上の結果、当第:narrative_like",
+          ":garbage_fragment_like"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 33,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+        ],
+        "phase_c_rows": 33,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益",
+          "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "売上高 営業利益 経常利益 当期純利益",
+          "当期純利益"
+        ],
+        "reconstructed_headers": [
+          "売上高当期純利益",
+          "営業利益",
+          "経常利益",
+          "当期純利益"
+        ],
+        "column_labels": [
+          [
+            "百万円 ％ 百万円 ％ 百万円 ％ 百万円 ％ 円 銭"
+          ],
+          [
+            "54,730 27.6 19,824 21.8 19,840 22.4 14,015 21.8 229.99"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "operating_profit_like",
+          "unknown",
+          "unknown"
+        ],
+        "best_sales_col": 0,
+        "best_profit_col": 1,
+        "profit_role": "operating_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.18,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.6,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.6,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.6,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "売上高当期純利益",
+            "scores": {
+              "segment_profit_like": 0.063,
+              "net_income_like": 0.18
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.18,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "営業利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "operating_profit_like": 0.6
+            },
+            "best_role": "operating_profit_like",
+            "best_score": 0.6,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "経常利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "ordinary_profit_like": 0.6
+            },
+            "best_role": "ordinary_profit_like",
+            "best_score": 0.6,
+            "selected": false
+          },
+          {
+            "col": 3,
+            "header": "当期純利益",
+            "scores": {
+              "segment_profit_like": 0.21,
+              "net_income_like": 0.6
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.6,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高当期純利益",
+            "scores": {
+              "sales": 0.18
+            },
+            "best_role": "sales",
+            "best_score": 0.18,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "売上高営業利益経常利益当期純利益当期純利益"
+        ],
+        "new_headers": [
+          "売上高当期純利益",
+          "営業利益",
+          "経常利益",
+          "当期純利益"
+        ],
+        "reconstruction_steps": [
+          {
+            "type": "vertical",
+            "parts": [
+              "売上高",
+              "当期純利益"
+            ],
+            "result": "売上高当期純利益",
+            "score": 60.0,
+            "dict_term": "売上高"
+          }
+        ]
+      },
+      "page_score": 0.7699999999999999,
+      "table_score": 0.58,
+      "header_confidence": 0.7,
+      "col_confidence": 0.6799999999999999,
+      "segment_count": 11,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 7,
+      "parse_quality_partial": 4
+    }
+  }
+]

@@ -39,6 +39,11 @@ except ImportError:
 # パス・定数
 # ============================================================
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from tools.state_io import atomic_json_save, safe_json_load  # noqa: E402
+
 _STATE_DIR = _PROJECT_ROOT / "state"
 _STATE_FILE = _STATE_DIR / "edinet_large_holder.json"
 _EDINET_CACHE_FILE = _STATE_DIR / "edinet_code_cache.json"
@@ -101,20 +106,14 @@ def _load_dotenv():
 # ============================================================
 def load_state() -> dict:
     """状態ファイルを読み込む。存在しなければ初期状態を返す。"""
-    if not _STATE_FILE.exists():
-        return {"seen_doc_ids": [], "last_checked_at": None}
-    try:
-        with open(_STATE_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        # 後方互換
-        if "seen_doc_ids" not in data:
-            data["seen_doc_ids"] = []
-        if "last_checked_at" not in data:
-            data["last_checked_at"] = None
-        return data
-    except (json.JSONDecodeError, OSError) as e:
-        log.warning("状態ファイル読込失敗 (初期状態で継続): %s", e)
-        return {"seen_doc_ids": [], "last_checked_at": None}
+    _default = {"seen_doc_ids": [], "last_checked_at": None}
+    data = safe_json_load(_STATE_FILE, default=_default)
+    # 後方互換
+    if "seen_doc_ids" not in data:
+        data["seen_doc_ids"] = []
+    if "last_checked_at" not in data:
+        data["last_checked_at"] = None
+    return data
 
 
 def save_state(state: dict):
@@ -123,9 +122,7 @@ def save_state(state: dict):
     ids = state.get("seen_doc_ids", [])
     if len(ids) > MAX_SEEN_IDS:
         state["seen_doc_ids"] = ids[-MAX_SEEN_IDS:]
-    _STATE_DIR.mkdir(parents=True, exist_ok=True)
-    with open(_STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
+    atomic_json_save(_STATE_FILE, state)
 
 
 # ============================================================
@@ -366,14 +363,7 @@ def send_discord(webhook_url: str, content: str, max_retries: int = 3) -> bool:
 # ============================================================
 def _load_edinet_cache() -> dict[str, dict]:
     """ローカルキャッシュを読み込む。存在しなければ空辞書を返す。"""
-    if not _EDINET_CACHE_FILE.exists():
-        return {}
-    try:
-        with open(_EDINET_CACHE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        log.warning("キャッシュ読込失敗: %s", e)
-        return {}
+    return safe_json_load(_EDINET_CACHE_FILE, default={})
 
 
 def _save_edinet_cache(cache: dict[str, dict]):
@@ -383,9 +373,7 @@ def _save_edinet_cache(cache: dict[str, dict]):
         keys = list(cache.keys())
         for k in keys[:len(cache) - MAX_CACHE_ENTRIES]:
             del cache[k]
-    _STATE_DIR.mkdir(parents=True, exist_ok=True)
-    with open(_EDINET_CACHE_FILE, "w", encoding="utf-8") as f:
-        json.dump(cache, f, ensure_ascii=False, indent=2)
+    atomic_json_save(_EDINET_CACHE_FILE, cache)
 
 
 def _merge_docs_into_cache(cache: dict[str, dict], docs: list[dict]) -> dict[str, dict]:
@@ -664,6 +652,13 @@ def main():
         sys.exit(1)
 
     log.info("=== EDINET 大量保有監視 開始 ===")
+    log.info("  pid=%d  cwd=%s", os.getpid(), os.getcwd())
+    log.info("  repo_root=%s", _PROJECT_ROOT)
+    log.info("  script=%s", Path(__file__).resolve())
+    log.info("  python=%s", sys.executable)
+    log.info("  argv=%s", sys.argv)
+    log.info("  state_file=%s", _STATE_FILE)
+    log.info("  cache_file=%s", _EDINET_CACHE_FILE)
     log.info("対象人物: %s", ", ".join(TARGET_ALIASES.keys()))
     log.info("モード: %s", "seed-state" if args.seed_state else "dry-run" if args.dry_run else "loop" if args.loop else "once")
 

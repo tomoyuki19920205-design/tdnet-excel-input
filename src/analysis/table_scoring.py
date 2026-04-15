@@ -643,17 +643,22 @@ def is_heading_like_table(ts: TableScore) -> bool:
 def find_table_regions(lines: list[str]) -> list[tuple[int, int, str]]:
     """
     テキスト行リストからテーブル候補領域を検出する。
-    セグメントKWを含む行を起点に、空行2連続または別セクション見出しで終了。
 
-    Phase 6: KW 拡充 + 売上/利益 header 起点検索追加
+    Phase 3.5: 5-pass 検索
+      Pass 1: セグメントKW行を起点
+      Pass 2: セグメント名・地域名・業種名クラスタ起点 (複数対応)
+      Pass 3: 売上/利益ヘッダー起点
+      Pass 4: 数値密度ベース (スライドウィンドウ)
 
     Returns:
         [(start, end, nearby_text), ...]
     """
+    import logging as _ftr_logging
+    _ftr_logger = _ftr_logging.getLogger("tdnet.find_table_regions")
+
     _SEGMENT_HEADER_KW = [
         "報告セグメント", "事業セグメント", "セグメント情報",
         "セグメント別", "事業別", "部門別",
-        # Phase 6 追加: 売上/利益型ヘッダー
         "売上高及び利益", "売上高と利益", "売上収益及び利益",
         "報告セグメントごとの売上高", "セグメントの業績",
         "外部顧客への売上高",
@@ -661,31 +666,38 @@ def find_table_regions(lines: list[str]) -> list[tuple[int, int, str]]:
     ]
     _SECTION_END_KW = [
         "連結損益", "連結貸借", "連結キャッシュ", "経営成績",
-        # Phase 6 追加
         "連結損益計算書", "四半期連結損益計算書",
         "連結貸借対照表", "キャッシュ・フローの状況",
         "財政状態",
     ]
     _TOC_INDICATORS = ["…", "・・", "───", "─────"]
 
+    _SEGMENT_NAME_RE = re.compile(r'.*(事業|部門|セグメント|ビジネス|カンパニー)$')
+    _REGION_NAMES_SET = {
+        "日本", "国内", "海外", "北米", "欧州", "アジア", "中国",
+        "東南アジア", "米国", "アメリカ", "ヨーロッパ",
+    }
+    _INDUSTRY_NAMES_SET = {
+        "不動産", "建設", "小売", "物流", "住宅", "金融", "製造",
+        "情報", "通信", "サービス", "エネルギー", "化学", "食品",
+    }
+    _SALES_PROFIT_HEADER_KW = [
+        "売上高", "営業利益", "売上収益", "営業収益", "セグメント利益",
+        "セグメント損益", "事業利益", "コア営業利益",
+        "経常利益", "経常収益",
+    ]
+    # 数値密度ベース除外キーワード
+    _NUMDENS_EXCLUDE_KW = ["%", "％", "構成比", "比率", "件数", "人数", "面積"]
+
     regions: list[tuple[int, int, str]] = []
+    region_passes: list[int] = []  # 各 region がどの pass 由来か
     used: set[int] = set()
 
-    for i, line in enumerate(lines):
-        if i in used:
-            continue
-        # 目次行はスキップ
-        if any(ind in line for ind in _TOC_INDICATORS):
-            continue
-
-        # セグメントKWを含む行を起点
-        if not any(kw in line for kw in _SEGMENT_HEADER_KW):
-            continue
-
-        start = i
-        end = min(start + 60, len(lines))
+    def _expand_region(start_line: int, max_extent: int = 60) -> int:
+        """start_line から下方に region を拡張し、終了行を返す"""
+        end = min(start_line + max_extent, len(lines))
         blank_count = 0
-        for j in range(start + 1, len(lines)):
+        for j in range(start_line + 1, len(lines)):
             stripped = lines[j].strip()
             if not stripped:
                 blank_count += 1
@@ -697,59 +709,241 @@ def find_table_regions(lines: list[str]) -> list[tuple[int, int, str]]:
             if any(kw in stripped for kw in _SECTION_END_KW):
                 end = j
                 break
+        return end
 
-        # 周辺テキスト (開始5行前)
+    def _add_region(start: int, end: int, pass_no: int) -> bool:
+        """重複チェック後に region を追加。追加したら True"""
+        # 既存 region と 50% 以上重複していたらスキップ
+        new_range = set(range(start, end))
+        for rs, re_, _ in regions:
+            existing = set(range(rs, re_))
+            overlap = len(new_range & existing)
+            if overlap > len(new_range) * 0.5:
+                return False
         nearby_start = max(0, start - 5)
         nearby = "\n".join(lines[nearby_start:start])
-
         regions.append((start, end, nearby))
+        region_passes.append(pass_no)
         used.update(range(start, end))
+        return True
 
-    # Phase 6: 第2パス — .*事業$ パターン + 数値行が複数ある領域を loose search
-    if not regions:
-        _SEGMENT_NAME_RE = re.compile(r'.*(事業|部門|セグメント|ビジネス|カンパニー)$')
-        for i, line in enumerate(lines):
-            if i in used:
-                continue
-            stripped = line.strip()
-            if not stripped:
-                continue
-            # ラベル部分だけ取り出す
-            label_m = re.match(r'^([^\d△▲\-－]{2,30})', stripped)
-            if not label_m:
-                continue
-            label = label_m.group(1).strip()
-            if not _SEGMENT_NAME_RE.match(label):
-                continue
-            # この行の近辺に数値行が 3 行以上あるか確認
-            context_start = max(0, i - 3)
-            context_end = min(len(lines), i + 20)
-            num_count = sum(
-                1 for j in range(context_start, context_end)
-                if re.search(r'[\d,]{3,}', lines[j])
+    # ================================================================
+    # Pass 1: セグメントKW行を起点
+    # ================================================================
+    for i, line in enumerate(lines):
+        if i in used:
+            continue
+        if any(ind in line for ind in _TOC_INDICATORS):
+            continue
+        if not any(kw in line for kw in _SEGMENT_HEADER_KW):
+            continue
+        start = i
+        end = _expand_region(start)
+        if _add_region(start, end, 1):
+            _ftr_logger.debug(f"[REGION_PASS:1] start={start} end={end} line={line.strip()[:50]}")
+
+    # ================================================================
+    # Pass 2: セグメント名・地域名・業種名クラスタ起点 (複数対応)
+    # ================================================================
+    for i, line in enumerate(lines):
+        if i in used:
+            continue
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if any(ind in stripped for ind in _TOC_INDICATORS):
+            continue
+        # ラベル部分を取り出す
+        label_m = re.match(r'^([^\d△▲\-－]{2,30})', stripped)
+        if not label_m:
+            continue
+        label = label_m.group(1).strip()
+
+        is_seg_name = _SEGMENT_NAME_RE.match(label)
+        is_region = any(rn in label for rn in _REGION_NAMES_SET)
+        is_industry = any(inn in label for inn in _INDUSTRY_NAMES_SET)
+
+        if not (is_seg_name or is_region or is_industry):
+            continue
+
+        # この行の近辺に数値行が 3 行以上あるか確認
+        context_start = max(0, i - 3)
+        context_end = min(len(lines), i + 20)
+        num_count = sum(
+            1 for j in range(context_start, context_end)
+            if re.search(r'[\d,]{3,}', lines[j])
+        )
+        if num_count < 3:
+            continue
+
+        # セグメント名が 3 行以上近辺にあるか確認
+        seg_cluster_count = 0
+        for j in range(context_start, context_end):
+            js = lines[j].strip()
+            jm = re.match(r'^([^\d△▲\-－]{2,30})', js)
+            if jm:
+                jl = jm.group(1).strip()
+                if (_SEGMENT_NAME_RE.match(jl)
+                        or any(rn in jl for rn in _REGION_NAMES_SET)
+                        or any(inn in jl for inn in _INDUSTRY_NAMES_SET)):
+                    seg_cluster_count += 1
+
+        if seg_cluster_count < 2:
+            continue
+
+        # region 検出
+        start = max(0, i - 3)
+        end = _expand_region(start, 40)
+        if _add_region(start, end, 2):
+            _ftr_logger.debug(
+                f"[REGION_PASS:2] start={start} end={end} "
+                f"label={label} cluster={seg_cluster_count}"
             )
-            if num_count < 3:
-                continue
-            # region 検出
-            start = max(0, i - 3)
-            end = min(start + 40, len(lines))
-            blank_count = 0
-            for j in range(i + 1, len(lines)):
-                s = lines[j].strip()
-                if not s:
-                    blank_count += 1
-                    if blank_count >= 2:
-                        end = j
-                        break
-                else:
-                    blank_count = 0
-                if any(kw in s for kw in _SECTION_END_KW):
-                    end = j
-                    break
-            nearby_start = max(0, start - 5)
-            nearby = "\n".join(lines[nearby_start:start])
-            regions.append((start, end, nearby))
-            used.update(range(start, end))
-            break  # 最初の1つだけ
 
-    return regions
+    # ================================================================
+    # Pass 3: 売上/利益ヘッダー起点
+    # ================================================================
+    for i, line in enumerate(lines):
+        if i in used:
+            continue
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # ヘッダー行判定: 売上/利益KWを含み、数値が主でない行
+        header_hits = sum(1 for kw in _SALES_PROFIT_HEADER_KW if kw in stripped)
+        if header_hits < 1:
+            continue
+        # 数値が主の行 (データ行) は除外
+        num_tokens = re.findall(r'[△▲\-]?[\d,]+(?:\.\d+)?', stripped)
+        non_num = re.sub(r'[△▲\-]?[\d,]+(?:\.\d+)?', '', stripped).strip()
+        if len(num_tokens) >= 3 and len(non_num) < 10:
+            continue  # データ行なのでスキップ
+
+        # ヘッダー行の下に数値行が 3 行以上あるか
+        below_num_count = 0
+        for j in range(i + 1, min(i + 25, len(lines))):
+            if re.search(r'[\d,]{3,}', lines[j]):
+                below_num_count += 1
+        if below_num_count < 3:
+            continue
+
+        start = i
+        end = _expand_region(start, 40)
+        if _add_region(start, end, 3):
+            _ftr_logger.debug(
+                f"[REGION_PASS:3] start={start} end={end} "
+                f"header_hits={header_hits} below_num={below_num_count}"
+            )
+
+    # ================================================================
+    # Pass 4: 数値密度ベース (スライドウィンドウ)
+    # ================================================================
+    # 条件: distinct_numeric_positions >= 2
+    #        + (segment_like_rows >= 2 OR region_hits >= 2 OR header_hits >= 1)
+    #        + %/構成比 優勢領域は除外
+    _WINDOW_SIZE = 20
+    _best_density_regions: list[tuple[int, int, float, int, int, int]] = []
+    # (start, end, density, seg_rows, region_hits, header_hits)
+
+    for win_start in range(0, max(1, len(lines) - _WINDOW_SIZE + 1), 5):
+        win_end = min(win_start + _WINDOW_SIZE, len(lines))
+        # 既存 region と重なっていたらスキップ
+        win_range = set(range(win_start, win_end))
+        if len(win_range & used) > len(win_range) * 0.3:
+            continue
+
+        window_lines = lines[win_start:win_end]
+        non_blank = [l for l in window_lines if l.strip()]
+        if len(non_blank) < 5:
+            continue
+
+        # 数値行カウント + distinct_numeric_positions
+        rep_num = 0
+        num_positions: dict[int, int] = {}
+        pct_count = 0
+        exclude_kw_count = 0
+        for wl in window_lines:
+            ws = wl.strip()
+            if not ws:
+                continue
+            # %/除外KW チェック
+            if any(ek in ws for ek in _NUMDENS_EXCLUDE_KW):
+                exclude_kw_count += 1
+            nums = re.findall(r'[△▲\-]?[\d,]+(?:\.\d+)?', ws)
+            if len(nums) >= 2:
+                rep_num += 1
+                for nm in nums:
+                    pos_bucket = ws.find(nm) // 10
+                    num_positions[pos_bucket] = num_positions.get(pos_bucket, 0) + 1
+
+        distinct_numpos = sum(1 for _cnt in num_positions.values() if _cnt >= 2)
+
+        if rep_num < 4 or distinct_numpos < 2:
+            continue
+
+        # %/除外KW が優勢な領域は除外
+        if exclude_kw_count > len(non_blank) * 0.3:
+            continue
+
+        # 構造チェック: seg_rows, region_hits, header_hits
+        win_seg_rows = 0
+        win_region_hits = 0
+        win_header_hits = 0
+        for wl in window_lines:
+            ws = wl.strip()
+            if not ws:
+                continue
+            wm = re.match(r'^([^\d△▲\-－]{2,30})', ws)
+            if wm:
+                wlabel = wm.group(1).strip()
+                skip_kws = ["合計", "調整", "消去", "全社", "計"]
+                if not any(sk in wlabel for sk in skip_kws):
+                    if (_SEGMENT_NAME_RE.match(wlabel)
+                            or any(rn in wlabel for rn in _REGION_NAMES_SET)
+                            or any(inn in wlabel for inn in _INDUSTRY_NAMES_SET)):
+                        win_seg_rows += 1
+                    if any(rn in wlabel for rn in _REGION_NAMES_SET):
+                        win_region_hits += 1
+            # header KW チェック
+            if any(kw in ws for kw in _SALES_PROFIT_HEADER_KW):
+                win_header_hits += 1
+
+        # gate: seg_rows >= 2 OR region_hits >= 2 OR header_hits >= 1
+        if not (win_seg_rows >= 2 or win_region_hits >= 2 or win_header_hits >= 1):
+            continue
+
+        density = rep_num / len(non_blank)
+        _best_density_regions.append(
+            (win_start, win_end, density, win_seg_rows, win_region_hits, win_header_hits)
+        )
+
+    # density 降順で上位 3 件を候補化
+    _best_density_regions.sort(key=lambda x: x[2], reverse=True)
+    for bdr in _best_density_regions[:3]:
+        bdr_start, bdr_end = bdr[0], bdr[1]
+        if _add_region(bdr_start, bdr_end, 4):
+            _ftr_logger.debug(
+                f"[REGION_PASS:4] start={bdr_start} end={bdr_end} "
+                f"density={bdr[2]:.2f} seg_rows={bdr[3]} "
+                f"region_hits={bdr[4]} header_hits={bdr[5]}"
+            )
+
+    # ================================================================
+    # 同一ページ内の候補数を上位 5 件に制限 (スコア推定不可のため行数で優先)
+    # ================================================================
+    if len(regions) > 5:
+        # region サイズ (行数) 降順で上位 5 件
+        indexed = list(enumerate(regions))
+        indexed.sort(key=lambda x: (x[1][1] - x[1][0]), reverse=True)
+        keep_indices = set(idx for idx, _ in indexed[:5])
+        regions = [r for i, r in enumerate(regions) if i in keep_indices]
+        region_passes = [p for i, p in enumerate(region_passes) if i in keep_indices]
+
+    # region_pass 情報を trace 用に nearby_text に埋め込む
+    enriched_regions: list[tuple[int, int, str]] = []
+    for (start, end, nearby), pass_no in zip(regions, region_passes):
+        enriched_nearby = f"[REGION_PASS:{pass_no}]\n{nearby}"
+        enriched_regions.append((start, end, enriched_nearby))
+
+    return enriched_regions
+

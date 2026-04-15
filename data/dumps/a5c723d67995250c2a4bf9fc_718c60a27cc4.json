@@ -1,0 +1,9 @@
+{
+  "source_doc_id": "a5c723d67995250c2a4bf9fc021e17c84551604a7c99938da458f7fbbdbc2cd4",
+  "source_url": "https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/140120260226570181.pdf",
+  "zip_hash": "718c60a27cc4686ff412feadd523ba0a265841ea621dec40816b656421e36fec",
+  "parser_version": "v2",
+  "timestamp": "2026-02-26T18:51:34+09:00",
+  "error_type": "extract_failed",
+  "error_message": "売上高・営業利益ともに抽出できず"
+}

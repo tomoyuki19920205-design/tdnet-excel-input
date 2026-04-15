@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "215A",
+    "period": "R8/4",
+    "quarter": "1Q",
+    "segment_name": "A0Timee Business",
+    "segment_order": 1,
+    "segment_sales": 10539,
+    "segment_profit": 2165,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "A0Timee Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "a8565b0296913019765033b4",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "215A",
+    "period": "R8/4",
+    "quarter": "1Q",
+    "segment_name": "Other",
+    "segment_order": 2,
+    "segment_sales": 316,
+    "segment_profit": -58,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Other",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "a8565b0296913019765033b4",
+    "row_type": "segment"
+  }
+]

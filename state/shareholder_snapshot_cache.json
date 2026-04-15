@@ -1579,5 +1579,3991 @@
         "ratio": 2.13
       }
     ]
+  },
+  "E00678": {
+    "issuer_name": "ユニ・チャーム株式会社",
+    "sec_code": "81130",
+    "last_doc_id": "S100XSEU",
+    "last_submit_datetime": "2026-03-23 09:00",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "ユニテック(株)",
+        "shares": 464870,
+        "ratio": 26.72
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行(株)(信託口)",
+        "shares": 174952,
+        "ratio": 10.06
+      },
+      {
+        "rank": null,
+        "name_norm": "高原基金(株)",
+        "shares": 84240,
+        "ratio": 4.84
+      },
+      {
+        "rank": null,
+        "name_norm": "(株)日本カストディ銀行(信託口)",
+        "shares": 61467,
+        "ratio": 3.53
+      },
+      {
+        "rank": null,
+        "name_norm": "(株)伊予銀行(常任代理人(株)日本カストディ銀行)",
+        "shares": 45900,
+        "ratio": 2.64
+      },
+      {
+        "rank": null,
+        "name_norm": "日本生命保険(相)(常任代理人日本マスタートラスト信託銀行(株))",
+        "shares": 36566,
+        "ratio": 2.1
+      },
+      {
+        "rank": null,
+        "name_norm": "JPMORGANCHASEBANK385864(常任代理人(株)みずほ銀行決済営業部)",
+        "shares": 30662,
+        "ratio": 1.76
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505223(常任代理人(株)みずほ銀行決済営業部)",
+        "shares": 28539,
+        "ratio": 1.64
+      },
+      {
+        "rank": null,
+        "name_norm": "THEBANKOFNEWYORKMELLONASDEPOSITARYBANKFORDEPOSITARYRECEIPTHOLDERS(常任代理人(株)みずほ銀行決済営業部)",
+        "shares": 23490,
+        "ratio": 1.35
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505001(常任代理人(株)みずほ銀行決済営業部)",
+        "shares": 19217,
+        "ratio": 1.1
+      }
+    ]
+  },
+  "E33588": {
+    "issuer_name": "株式会社エル・ティー・エス",
+    "sec_code": "65600",
+    "last_doc_id": "S100XRW4",
+    "last_submit_datetime": "2026-03-23 09:02",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "樺島弘明",
+        "shares": 585900,
+        "ratio": 13.31
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社クレスコ",
+        "shares": 300000,
+        "ratio": 6.81
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 286700,
+        "ratio": 6.51
+      },
+      {
+        "rank": null,
+        "name_norm": "金藤正樹",
+        "shares": 250000,
+        "ratio": 5.68
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社SBI証券",
+        "shares": 237390,
+        "ratio": 5.39
+      },
+      {
+        "rank": null,
+        "name_norm": "李成一",
+        "shares": 220000,
+        "ratio": 5.0
+      },
+      {
+        "rank": null,
+        "name_norm": "FPTジャパンホールディングス株式会社",
+        "shares": 220000,
+        "ratio": 5.0
+      },
+      {
+        "rank": null,
+        "name_norm": "GOLDMAN,SACHS&CO",
+        "shares": 220000,
+        "ratio": 5.0
+      },
+      {
+        "rank": null,
+        "name_norm": "塚原厚",
+        "shares": 201000,
+        "ratio": 4.57
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社KAH",
+        "shares": 200000,
+        "ratio": 4.54
+      }
+    ]
+  },
+  "E04626": {
+    "issuer_name": "株式会社武蔵カントリー倶楽部",
+    "sec_code": "",
+    "last_doc_id": "S100XS0N",
+    "last_submit_datetime": "2026-03-23 09:49",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "株式会社講談社",
+        "shares": 22,
+        "ratio": 1.22
+      },
+      {
+        "rank": null,
+        "name_norm": "日本通運株式会社",
+        "shares": 6,
+        "ratio": 0.33
+      },
+      {
+        "rank": null,
+        "name_norm": "東レ株式会社",
+        "shares": 5,
+        "ratio": 0.28
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社安川電機",
+        "shares": 5,
+        "ratio": 0.28
+      },
+      {
+        "rank": null,
+        "name_norm": "RKB毎日放送株式会社",
+        "shares": 4,
+        "ratio": 0.22
+      }
+    ]
+  },
+  "E00703": {
+    "issuer_name": "ＮＩＳＳＨＡ株式会社",
+    "sec_code": "79150",
+    "last_doc_id": "S100XS06",
+    "last_submit_datetime": "2026-03-23 10:00",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)管理有価証券信託設定分",
+        "shares": 2865,
+        "ratio": 5.96
+      },
+      {
+        "rank": null,
+        "name_norm": "鈴木興産株式会社",
+        "shares": 2563,
+        "ratio": 5.33
+      },
+      {
+        "rank": null,
+        "name_norm": "明治安田生命保険相互会社(常任代理人株式会社日本カストディ銀行)",
+        "shares": 2107,
+        "ratio": 4.38
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社みずほ銀行",
+        "shares": 2076,
+        "ratio": 4.32
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)投資信託設定分",
+        "shares": 2042,
+        "ratio": 4.25
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)管理有価証券信託設定分",
+        "shares": 1960,
+        "ratio": 4.08
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)投資信託設定分",
+        "shares": 1931,
+        "ratio": 4.02
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社京都銀行(常任代理人株式会社日本カストディ銀行)",
+        "shares": 1442,
+        "ratio": 3.0
+      },
+      {
+        "rank": null,
+        "name_norm": "JPモルガン証券株式会社",
+        "shares": 1140,
+        "ratio": 2.37
+      },
+      {
+        "rank": null,
+        "name_norm": "ニッシャ共栄会",
+        "shares": 1137,
+        "ratio": 2.36
+      }
+    ]
+  },
+  "E00374": {
+    "issuer_name": "株式会社不二家",
+    "sec_code": "22110",
+    "last_doc_id": "S100XS9W",
+    "last_submit_datetime": "2026-03-23 10:05",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "山崎製パン株式会社",
+        "shares": 14021,
+        "ratio": 54.39
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 1122,
+        "ratio": 4.35
+      },
+      {
+        "rank": null,
+        "name_norm": "不二家不二栄会持株会",
+        "shares": 922,
+        "ratio": 3.58
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社バンダイナムコホールディングス",
+        "shares": 500,
+        "ratio": 1.93
+      },
+      {
+        "rank": null,
+        "name_norm": "UBSAGLONDONA/CIPBSEGREGATEDCLIENTACCOUNT(常任代理人シティバンク、エヌ・エイ東京支店)",
+        "shares": 218,
+        "ratio": 0.84
+      },
+      {
+        "rank": null,
+        "name_norm": "GOLDMANSACHSBANKEUROPESE(常任代理人ゴールドマン・サックス証券株式会社)",
+        "shares": 150,
+        "ratio": 0.58
+      },
+      {
+        "rank": null,
+        "name_norm": "BOFASINCSEGREGATIONACCOUNT(常任代理人BOFA証券株式会社)",
+        "shares": 135,
+        "ratio": 0.52
+      },
+      {
+        "rank": null,
+        "name_norm": "藤井林太郎",
+        "shares": 117,
+        "ratio": 0.45
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 106,
+        "ratio": 0.41
+      },
+      {
+        "rank": null,
+        "name_norm": "損害保険ジャパン株式会社",
+        "shares": 98,
+        "ratio": 0.38
+      }
+    ]
+  },
+  "E04801": {
+    "issuer_name": "中道リース株式会社",
+    "sec_code": "85940",
+    "last_doc_id": "S100XSCO",
+    "last_submit_datetime": "2026-03-23 10:08",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "関寛",
+        "shares": 1377,
+        "ratio": 19.09
+      },
+      {
+        "rank": null,
+        "name_norm": "芙蓉総合リース株式会社",
+        "shares": 831,
+        "ratio": 11.52
+      },
+      {
+        "rank": null,
+        "name_norm": "ノースパシフィック株式会社",
+        "shares": 823,
+        "ratio": 11.41
+      },
+      {
+        "rank": null,
+        "name_norm": "関崇博",
+        "shares": 423,
+        "ratio": 5.86
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社北洋銀行",
+        "shares": 411,
+        "ratio": 5.69
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社北海道銀行",
+        "shares": 290,
+        "ratio": 4.02
+      },
+      {
+        "rank": null,
+        "name_norm": "野村證券株式会社",
+        "shares": 278,
+        "ratio": 3.86
+      },
+      {
+        "rank": null,
+        "name_norm": "北海道信用金庫",
+        "shares": 135,
+        "ratio": 1.87
+      },
+      {
+        "rank": null,
+        "name_norm": "今福洋介",
+        "shares": 133,
+        "ratio": 1.84
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社リアライズコーポレーション",
+        "shares": 101,
+        "ratio": 1.39
+      }
+    ]
+  },
+  "E04680": {
+    "issuer_name": "各務原開発株式会社",
+    "sec_code": "",
+    "last_doc_id": "S100XRFF",
+    "last_submit_datetime": "2026-03-23 10:09",
+    "report_type": "semiannual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "岐阜車体工業(株)",
+        "shares": 7,
+        "ratio": 0.2
+      },
+      {
+        "rank": null,
+        "name_norm": "明光ホームテック(株)",
+        "shares": 5,
+        "ratio": 0.2
+      },
+      {
+        "rank": null,
+        "name_norm": "アミコ(株)",
+        "shares": 5,
+        "ratio": 0.2
+      },
+      {
+        "rank": null,
+        "name_norm": "杉山幹夫",
+        "shares": 3,
+        "ratio": 0.1
+      },
+      {
+        "rank": null,
+        "name_norm": "宇野信雄",
+        "shares": 3,
+        "ratio": 0.1
+      },
+      {
+        "rank": null,
+        "name_norm": "吉田金属(株)",
+        "shares": 3,
+        "ratio": 0.1
+      },
+      {
+        "rank": null,
+        "name_norm": "(株)プラド",
+        "shares": 3,
+        "ratio": 0.1
+      },
+      {
+        "rank": null,
+        "name_norm": "亀屋商事(株)",
+        "shares": 3,
+        "ratio": 0.1
+      },
+      {
+        "rank": null,
+        "name_norm": "岐阜アサノコンクリート工業(株)",
+        "shares": 2,
+        "ratio": 0.0
+      },
+      {
+        "rank": null,
+        "name_norm": "丸八鋼材(株)",
+        "shares": 2,
+        "ratio": 0.0
+      }
+    ]
+  },
+  "E39268": {
+    "issuer_name": "株式会社Ｖｅｒｉｔａｓ　Ｉｎ　Ｓｉｌｉｃｏ",
+    "sec_code": "130A0",
+    "last_doc_id": "S100XSIT",
+    "last_submit_datetime": "2026-03-23 10:36",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "中村慎吾",
+        "shares": 1400000,
+        "ratio": 21.6
+      },
+      {
+        "rank": null,
+        "name_norm": "三菱瓦斯化学株式会社",
+        "shares": 731256,
+        "ratio": 11.3
+      },
+      {
+        "rank": null,
+        "name_norm": "NewLifeScience1号投資事業有限責任組合",
+        "shares": 556444,
+        "ratio": 8.6
+      },
+      {
+        "rank": null,
+        "name_norm": "三菱UFJライフサイエンス1号投資事業有限責任組合",
+        "shares": 512640,
+        "ratio": 7.9
+      },
+      {
+        "rank": null,
+        "name_norm": "IEファスト&エクセレント投資事業有限責任組合",
+        "shares": 331700,
+        "ratio": 5.1
+      },
+      {
+        "rank": null,
+        "name_norm": "梨本正之",
+        "shares": 298390,
+        "ratio": 4.6
+      },
+      {
+        "rank": null,
+        "name_norm": "楽天証券株式会社",
+        "shares": 131900,
+        "ratio": 2.0
+      },
+      {
+        "rank": null,
+        "name_norm": "NomuraPBNomineesLimitedOmnibus-Margin(CashPB)(常任代理人野村證券株式会社)",
+        "shares": 116900,
+        "ratio": 1.8
+      },
+      {
+        "rank": null,
+        "name_norm": "みずほライフサイエンス第1号投資事業有限責任組合",
+        "shares": 75200,
+        "ratio": 1.2
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社SBI証券",
+        "shares": 61423,
+        "ratio": 0.9
+      }
+    ]
+  },
+  "E04048": {
+    "issuer_name": "株式会社ハウスフリーダム",
+    "sec_code": "89960",
+    "last_doc_id": "S100XS94",
+    "last_submit_datetime": "2026-03-23 10:51",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "株式会社オーエフコーポレーション",
+        "shares": 878100,
+        "ratio": 22.91
+      },
+      {
+        "rank": null,
+        "name_norm": "VTホールディングス株式会社",
+        "shares": 556300,
+        "ratio": 14.51
+      },
+      {
+        "rank": null,
+        "name_norm": "山西みき子",
+        "shares": 303000,
+        "ratio": 7.9
+      },
+      {
+        "rank": null,
+        "name_norm": "森光哲也",
+        "shares": 200000,
+        "ratio": 5.22
+      },
+      {
+        "rank": null,
+        "name_norm": "ハウスフリーダム従業員持株会",
+        "shares": 167930,
+        "ratio": 4.38
+      },
+      {
+        "rank": null,
+        "name_norm": "増田直樹",
+        "shares": 120000,
+        "ratio": 3.13
+      },
+      {
+        "rank": null,
+        "name_norm": "小島賢二",
+        "shares": 114000,
+        "ratio": 2.97
+      },
+      {
+        "rank": null,
+        "name_norm": "若杉精三郎",
+        "shares": 72000,
+        "ratio": 1.88
+      },
+      {
+        "rank": null,
+        "name_norm": "ハウスフリーダム役員持株会",
+        "shares": 61970,
+        "ratio": 1.62
+      },
+      {
+        "rank": null,
+        "name_norm": "軽本勝",
+        "shares": 40000,
+        "ratio": 1.04
+      }
+    ]
+  },
+  "E38440": {
+    "issuer_name": "株式会社アイビス",
+    "sec_code": "93430",
+    "last_doc_id": "S100XS2D",
+    "last_submit_datetime": "2026-03-23 11:00",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "神谷栄治",
+        "shares": 7406215,
+        "ratio": 40.22
+      },
+      {
+        "rank": null,
+        "name_norm": "村上和彦",
+        "shares": 1418400,
+        "ratio": 7.7
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社リオライト",
+        "shares": 1000000,
+        "ratio": 5.43
+      },
+      {
+        "rank": null,
+        "name_norm": "畠山敬多",
+        "shares": 913500,
+        "ratio": 4.96
+      },
+      {
+        "rank": null,
+        "name_norm": "渡辺秀行",
+        "shares": 864300,
+        "ratio": 4.69
+      },
+      {
+        "rank": null,
+        "name_norm": "NOMURAINTERNATIONALPLCA/CJAPANFLOW(常任代理人野村證券株式会社)",
+        "shares": 742914,
+        "ratio": 4.03
+      },
+      {
+        "rank": null,
+        "name_norm": "木下圭一郎",
+        "shares": 509600,
+        "ratio": 2.77
+      },
+      {
+        "rank": null,
+        "name_norm": "GOLDMANSACHSINTERNATIONAL(常任代理人ゴールドマン・サックス証券株式会社)",
+        "shares": 448200,
+        "ratio": 2.43
+      },
+      {
+        "rank": null,
+        "name_norm": "中村剛",
+        "shares": 413000,
+        "ratio": 2.24
+      },
+      {
+        "rank": null,
+        "name_norm": "山下良久",
+        "shares": 195000,
+        "ratio": 1.06
+      }
+    ]
+  },
+  "E27361": {
+    "issuer_name": "株式会社ブロードリーフ",
+    "sec_code": "36730",
+    "last_doc_id": "S100XS43",
+    "last_submit_datetime": "2026-03-23 11:40",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)年金他",
+        "shares": 21375900,
+        "ratio": 23.28
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社エスアイエル",
+        "shares": 6895800,
+        "ratio": 7.51
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)年金他",
+        "shares": 5825300,
+        "ratio": 6.34
+      },
+      {
+        "rank": null,
+        "name_norm": "ノーザントラストカンパニーエイブイエフシーリフィデリティファンズ(常任代理人香港上海銀行東京支店)",
+        "shares": 4578671,
+        "ratio": 4.99
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)投資信託",
+        "shares": 3873300,
+        "ratio": 4.22
+      },
+      {
+        "rank": null,
+        "name_norm": "TVCMATSUFUND(常任代理人香港上海銀行東京支店)",
+        "shares": 3472700,
+        "ratio": 3.78
+      },
+      {
+        "rank": null,
+        "name_norm": "エヌオーアイ投資事業有限責任組合",
+        "shares": 2617300,
+        "ratio": 2.85
+      },
+      {
+        "rank": null,
+        "name_norm": "パーシングディヴィジョンオブドナルドソンラフキンアンドジェンレットエスイーシーコーポレイション(常任代理人シティバンク、エヌ・エイ東京支店)",
+        "shares": 2560000,
+        "ratio": 2.79
+      },
+      {
+        "rank": null,
+        "name_norm": "ザバンクオブニューヨーク133612(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 2056200,
+        "ratio": 2.24
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)投資信託",
+        "shares": 1881700,
+        "ratio": 2.05
+      }
+    ]
+  },
+  "E36883": {
+    "issuer_name": "株式会社リベロ",
+    "sec_code": "92450",
+    "last_doc_id": "S100XS3W",
+    "last_submit_datetime": "2026-03-23 11:54",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "鹿島秀俊",
+        "shares": 1913100,
+        "ratio": 36.06
+      },
+      {
+        "rank": null,
+        "name_norm": "横川尚佳",
+        "shares": 1371000,
+        "ratio": 25.84
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社ベネフィット・ワン",
+        "shares": 455000,
+        "ratio": 8.58
+      },
+      {
+        "rank": null,
+        "name_norm": "MSIPCLIENTSECURITIES(常任代理人モルガン・スタンレーMUFG証券株式会社)",
+        "shares": 234300,
+        "ratio": 4.41
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 93500,
+        "ratio": 1.76
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社ラストワンマイル",
+        "shares": 72000,
+        "ratio": 1.36
+      },
+      {
+        "rank": null,
+        "name_norm": "リベロ取引先持株会",
+        "shares": 70731,
+        "ratio": 1.33
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社HITEN",
+        "shares": 70000,
+        "ratio": 1.32
+      },
+      {
+        "rank": null,
+        "name_norm": "李秀礼",
+        "shares": 64000,
+        "ratio": 1.21
+      },
+      {
+        "rank": null,
+        "name_norm": "GOLDMANSACHSINTERNATIONAL(常任代理人ゴールドマン・サックス証券株式会社",
+        "shares": 34690,
+        "ratio": 0.65
+      }
+    ]
+  },
+  "E31037": {
+    "issuer_name": "竹本容器株式会社",
+    "sec_code": "42480",
+    "last_doc_id": "S100XSML",
+    "last_submit_datetime": "2026-03-23 12:32",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "一般社団法人笑友会",
+        "shares": 4083600,
+        "ratio": 33.84
+      },
+      {
+        "rank": null,
+        "name_norm": "竹本容器若竹持株会",
+        "shares": 600100,
+        "ratio": 4.97
+      },
+      {
+        "rank": null,
+        "name_norm": "竹本雅英",
+        "shares": 426000,
+        "ratio": 3.53
+      },
+      {
+        "rank": null,
+        "name_norm": "竹本笑子",
+        "shares": 396000,
+        "ratio": 3.28
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 222600,
+        "ratio": 1.84
+      },
+      {
+        "rank": null,
+        "name_norm": "BNYMREBNYMLBREGPPCLIENTMONEYANDASSETSAC(常任代理人株式会社三菱UFJ銀行)",
+        "shares": 210900,
+        "ratio": 1.75
+      },
+      {
+        "rank": null,
+        "name_norm": "山本勝人",
+        "shares": 158000,
+        "ratio": 1.31
+      },
+      {
+        "rank": null,
+        "name_norm": "山本健人",
+        "shares": 137000,
+        "ratio": 1.14
+      },
+      {
+        "rank": null,
+        "name_norm": "松井証券株式会社",
+        "shares": 130200,
+        "ratio": 1.08
+      },
+      {
+        "rank": null,
+        "name_norm": "高橋宏一",
+        "shares": 130000,
+        "ratio": 1.08
+      }
+    ]
+  },
+  "E31023": {
+    "issuer_name": "マークラインズ株式会社",
+    "sec_code": "39010",
+    "last_doc_id": "S100XSGJ",
+    "last_submit_datetime": "2026-03-23 13:09",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "酒井誠",
+        "shares": 1800000,
+        "ratio": 14.12
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 1410300,
+        "ratio": 11.06
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 789000,
+        "ratio": 6.18
+      },
+      {
+        "rank": null,
+        "name_norm": "BNYMASAGT/CLTSNONTREATYJASDEC(常任代理人株式会社三菱UFJ銀行)",
+        "shares": 473575,
+        "ratio": 3.71
+      },
+      {
+        "rank": null,
+        "name_norm": "モルガン・スタンレーMUFG証券株式会社",
+        "shares": 350317,
+        "ratio": 2.74
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505044(常任代理人株式会社みずほ銀行)",
+        "shares": 303400,
+        "ratio": 2.38
+      },
+      {
+        "rank": null,
+        "name_norm": "早稲田成長企業支援1号投資事業有限責任組合",
+        "shares": 300000,
+        "ratio": 2.35
+      },
+      {
+        "rank": null,
+        "name_norm": "GOLDMAN,SACHS&CO.REG(常任代理人ゴールドマン・サックス証券株式会社)",
+        "shares": 296990,
+        "ratio": 2.32
+      },
+      {
+        "rank": null,
+        "name_norm": "THEBANKOFNEWYORKMELLON140040(常任代理人株式会社みずほ銀行)",
+        "shares": 228600,
+        "ratio": 1.79
+      },
+      {
+        "rank": null,
+        "name_norm": "LICHFIELDLP(常任代理人株式会社三菱UFJ銀行)",
+        "shares": 222800,
+        "ratio": 1.74
+      }
+    ]
+  },
+  "E01901": {
+    "issuer_name": "株式会社堀場製作所",
+    "sec_code": "68560",
+    "last_doc_id": "S100XSIJ",
+    "last_submit_datetime": "2026-03-23 13:31",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 4928,
+        "ratio": 11.74
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 2567,
+        "ratio": 6.11
+      },
+      {
+        "rank": null,
+        "name_norm": "STICHTINGPENSIOENFONDSZORGENWELZIJN(常任代理人シティバンク、エヌ・エイ東京支店)",
+        "shares": 1245,
+        "ratio": 2.97
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505001(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 1186,
+        "ratio": 2.83
+      },
+      {
+        "rank": null,
+        "name_norm": "GOLDMANSACHSINTERNATIONAL(常任代理人ゴールドマン・サックス証券株式会社)",
+        "shares": 1149,
+        "ratio": 2.74
+      },
+      {
+        "rank": null,
+        "name_norm": "堀場厚",
+        "shares": 1097,
+        "ratio": 2.61
+      },
+      {
+        "rank": null,
+        "name_norm": "UBSAGLONDONA/CIPBSEGREGATEDCLIENTACCOUNT(常任代理人シティバンク、エヌ・エイ東京支店)",
+        "shares": 887,
+        "ratio": 2.11
+      },
+      {
+        "rank": null,
+        "name_norm": "堀場洛楽会投資部会",
+        "shares": 841,
+        "ratio": 2.0
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社京都銀行(常任代理人株式会社日本カストディ銀行)",
+        "shares": 828,
+        "ratio": 1.97
+      },
+      {
+        "rank": null,
+        "name_norm": "堀場グループ従業員持株会",
+        "shares": 714,
+        "ratio": 1.7
+      }
+    ]
+  },
+  "E27622": {
+    "issuer_name": "サントリー食品インターナショナル株式会社",
+    "sec_code": "25870",
+    "last_doc_id": "S100XSOA",
+    "last_submit_datetime": "2026-03-23 13:44",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "サントリーホールディングス株式会社",
+        "shares": 183800000,
+        "ratio": 59.48
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 19150600,
+        "ratio": 6.19
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY510312(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 6911461,
+        "ratio": 2.23
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY510311(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 5803139,
+        "ratio": 1.87
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505103(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 4451578,
+        "ratio": 1.44
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 4383900,
+        "ratio": 1.41
+      },
+      {
+        "rank": null,
+        "name_norm": "BBHFORBRIDGEBUILDERINTERNATIONALEQUITYFUND-PZENA(常任代理人株式会社三菱UFJ銀行)",
+        "shares": 2709000,
+        "ratio": 0.87
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505001(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 2111143,
+        "ratio": 0.68
+      },
+      {
+        "rank": null,
+        "name_norm": "SMBC日興証券株式会社",
+        "shares": 1982251,
+        "ratio": 0.64
+      },
+      {
+        "rank": null,
+        "name_norm": "JPMORGANCHASEBANK385781(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 1829931,
+        "ratio": 0.59
+      }
+    ]
+  },
+  "E05609": {
+    "issuer_name": "株式会社インフォマート",
+    "sec_code": "24920",
+    "last_doc_id": "S100XSO1",
+    "last_submit_datetime": "2026-03-23 13:47",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "THESFPVALUEREALIZATIONMASTERFUNDLTD.(常任代理人立花証券株式会社)",
+        "shares": 47884400,
+        "ratio": 21.15
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 29572900,
+        "ratio": 13.06
+      },
+      {
+        "rank": null,
+        "name_norm": "米多比昌治",
+        "shares": 12796000,
+        "ratio": 5.65
+      },
+      {
+        "rank": null,
+        "name_norm": "JPMORGANCHASEBANK385642(常任代理人株式会社みずほ銀行)",
+        "shares": 9717027,
+        "ratio": 4.29
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505001(常任代理人株式会社みずほ銀行)",
+        "shares": 8471489,
+        "ratio": 3.74
+      },
+      {
+        "rank": null,
+        "name_norm": "藤田尚武",
+        "shares": 6836218,
+        "ratio": 3.02
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社三菱UFJ銀行",
+        "shares": 6400000,
+        "ratio": 2.83
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社ジェフグルメカード",
+        "shares": 6400000,
+        "ratio": 2.83
+      },
+      {
+        "rank": null,
+        "name_norm": "THEBANKOFNEWYORKMELLON140051(常任代理人株式会社みずほ銀行)",
+        "shares": 5918225,
+        "ratio": 2.61
+      },
+      {
+        "rank": null,
+        "name_norm": "BNYMASAGT/CLTS10PERCENT(常任代理人株式会社三菱UFJ銀行)",
+        "shares": 5298900,
+        "ratio": 2.34
+      }
+    ]
+  },
+  "E00901": {
+    "issuer_name": "ＤＩＣ株式会社",
+    "sec_code": "46310",
+    "last_doc_id": "S100XS2N",
+    "last_submit_datetime": "2026-03-23 14:02",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "株式会社昌栄",
+        "shares": 12694386,
+        "ratio": 13.37
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 10777600,
+        "ratio": 11.35
+      },
+      {
+        "rank": null,
+        "name_norm": "OASISJAPANSTRATEGICFUNDLTD.(常任代理人シティバンク、エヌ・エイ東京支店)",
+        "shares": 5792408,
+        "ratio": 6.1
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 3325000,
+        "ratio": 3.5
+      },
+      {
+        "rank": null,
+        "name_norm": "第一生命保険株式会社(常任代理人株式会社日本カストディ銀行)",
+        "shares": 3033309,
+        "ratio": 3.19
+      },
+      {
+        "rank": null,
+        "name_norm": "OASISINVESTMENTSIIMASTERFUNDLTD.(常任代理人シティバンク、エヌ・エイ東京支店)",
+        "shares": 2783918,
+        "ratio": 2.93
+      },
+      {
+        "rank": null,
+        "name_norm": "OASISJAPANSTRATEGICFUNDYLTD.(常任代理人シティバンク、エヌ・エイ東京支店)",
+        "shares": 2442916,
+        "ratio": 2.57
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505223(常任代理人株式会社みずほ銀行)",
+        "shares": 2069706,
+        "ratio": 2.18
+      },
+      {
+        "rank": null,
+        "name_norm": "あいおいニッセイ同和損害保険株式会社(常任代理人日本マスタートラスト信託銀行株式会社)",
+        "shares": 2020859,
+        "ratio": 2.13
+      },
+      {
+        "rank": null,
+        "name_norm": "日本生命保険相互会社(常任代理人日本マスタートラスト信託銀行株式会社)",
+        "shares": 1900075,
+        "ratio": 2.0
+      }
+    ]
+  },
+  "E22559": {
+    "issuer_name": "サントリーホールディングス株式会社",
+    "sec_code": "",
+    "last_doc_id": "S100XSOR",
+    "last_submit_datetime": "2026-03-23 14:06",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "寿不動産株式会社",
+        "shares": 613818,
+        "ratio": 89.5
+      },
+      {
+        "rank": null,
+        "name_norm": "サントリー持株会",
+        "shares": 34833,
+        "ratio": 5.07
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社三菱UFJ銀行",
+        "shares": 6871,
+        "ratio": 1.0
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社三井住友銀行",
+        "shares": 6871,
+        "ratio": 1.0
+      },
+      {
+        "rank": null,
+        "name_norm": "三井住友信託銀行株式会社",
+        "shares": 6871,
+        "ratio": 1.0
+      },
+      {
+        "rank": null,
+        "name_norm": "日本生命保険相互会社",
+        "shares": 6871,
+        "ratio": 1.0
+      },
+      {
+        "rank": null,
+        "name_norm": "公益財団法人サントリー生命科学財団",
+        "shares": 3590,
+        "ratio": 0.52
+      },
+      {
+        "rank": null,
+        "name_norm": "佐治信忠",
+        "shares": 652,
+        "ratio": 0.09
+      },
+      {
+        "rank": null,
+        "name_norm": "鳥井信吾",
+        "shares": 539,
+        "ratio": 0.07
+      },
+      {
+        "rank": null,
+        "name_norm": "鳥井信宏",
+        "shares": 200,
+        "ratio": 0.02
+      }
+    ]
+  },
+  "E31723": {
+    "issuer_name": "株式会社土木管理総合試験所",
+    "sec_code": "61710",
+    "last_doc_id": "S100XSOI",
+    "last_submit_datetime": "2026-03-23 14:08",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "株式会社Feel",
+        "shares": 3094000,
+        "ratio": 21.76
+      },
+      {
+        "rank": null,
+        "name_norm": "下平雄二",
+        "shares": 1587400,
+        "ratio": 11.16
+      },
+      {
+        "rank": null,
+        "name_norm": "土木管理総合試験所従業員持株会",
+        "shares": 609165,
+        "ratio": 4.28
+      },
+      {
+        "rank": null,
+        "name_norm": "下平美奈子",
+        "shares": 444800,
+        "ratio": 3.13
+      },
+      {
+        "rank": null,
+        "name_norm": "下平絵里加",
+        "shares": 284000,
+        "ratio": 2.0
+      },
+      {
+        "rank": null,
+        "name_norm": "下平真里奈",
+        "shares": 284000,
+        "ratio": 2.0
+      },
+      {
+        "rank": null,
+        "name_norm": "松本土建株式会社",
+        "shares": 220500,
+        "ratio": 1.55
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社SBI証券",
+        "shares": 205600,
+        "ratio": 1.45
+      },
+      {
+        "rank": null,
+        "name_norm": "外池榮一郎",
+        "shares": 150000,
+        "ratio": 1.05
+      },
+      {
+        "rank": null,
+        "name_norm": "母袋道也",
+        "shares": 143000,
+        "ratio": 1.01
+      }
+    ]
+  },
+  "E38453": {
+    "issuer_name": "ノイルイミューン・バイオテック株式会社",
+    "sec_code": "48930",
+    "last_doc_id": "S100XSP4",
+    "last_submit_datetime": "2026-03-23 14:21",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "武田薬品工業株式会社",
+        "shares": 8119800,
+        "ratio": 18.75
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社鶴亀",
+        "shares": 7159550,
+        "ratio": 16.53
+      },
+      {
+        "rank": null,
+        "name_norm": "玉田耕治",
+        "shares": 3750000,
+        "ratio": 8.66
+      },
+      {
+        "rank": null,
+        "name_norm": "KOREASECURITIESDEPOSITORY-SAMSUNG(常任代理人シティバンク、エヌ・エイ東京支店)",
+        "shares": 3678720,
+        "ratio": 8.49
+      },
+      {
+        "rank": null,
+        "name_norm": "瀬戸恭子",
+        "shares": 1700000,
+        "ratio": 3.92
+      },
+      {
+        "rank": null,
+        "name_norm": "大和日台バイオベンチャー投資事業有限責任組合",
+        "shares": 1349200,
+        "ratio": 3.11
+      },
+      {
+        "rank": null,
+        "name_norm": "荻原弘子",
+        "shares": 1000000,
+        "ratio": 2.3
+      },
+      {
+        "rank": null,
+        "name_norm": "佐古田幸美",
+        "shares": 1000000,
+        "ratio": 2.3
+      },
+      {
+        "rank": null,
+        "name_norm": "和田聡",
+        "shares": 956900,
+        "ratio": 2.2
+      },
+      {
+        "rank": null,
+        "name_norm": "石崎秀信",
+        "shares": 760000,
+        "ratio": 1.75
+      }
+    ]
+  },
+  "E00905": {
+    "issuer_name": "サカタインクス株式会社",
+    "sec_code": "46330",
+    "last_doc_id": "S100XSP9",
+    "last_submit_datetime": "2026-03-23 14:36",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 6028,
+        "ratio": 12.24
+      },
+      {
+        "rank": null,
+        "name_norm": "住友生命保険相互会社",
+        "shares": 3510,
+        "ratio": 7.13
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 2024,
+        "ratio": 4.11
+      },
+      {
+        "rank": null,
+        "name_norm": "THECHASEMANHATTANBANK,N.A.LONDONSECSLENDINGOMNIBUSACCOUNT(常任代理人株式会社みずほ銀行)",
+        "shares": 1856,
+        "ratio": 3.77
+      },
+      {
+        "rank": null,
+        "name_norm": "サカタインクス社員持株会",
+        "shares": 1601,
+        "ratio": 3.25
+      },
+      {
+        "rank": null,
+        "name_norm": "BBHBOSTONFORNOMURAJAPANSMALLERCAPITALIZATIONFUND620065(常任代理人株式会社みずほ銀行)",
+        "shares": 1430,
+        "ratio": 2.9
+      },
+      {
+        "rank": null,
+        "name_norm": "有限会社神戸物産",
+        "shares": 1416,
+        "ratio": 2.88
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社朝日新聞社",
+        "shares": 1181,
+        "ratio": 2.4
+      },
+      {
+        "rank": null,
+        "name_norm": "THENOMURATRUSTANDBANKINGCO.,LTD.ASTHETRUSTEEOFREPURCHASEAGREEMENTMOTHERFUND(常任代理人シティバンク、エヌ・エイ東京支店)",
+        "shares": 1029,
+        "ratio": 2.09
+      },
+      {
+        "rank": null,
+        "name_norm": "神戸道雄",
+        "shares": 1004,
+        "ratio": 2.04
+      }
+    ]
+  },
+  "E00736": {
+    "issuer_name": "スターツ出版株式会社",
+    "sec_code": "78490",
+    "last_doc_id": "S100XSPB",
+    "last_submit_datetime": "2026-03-23 14:37",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "スターツコーポレーション株式会社",
+        "shares": 1865600,
+        "ratio": 48.59
+      },
+      {
+        "rank": null,
+        "name_norm": "スターツアメニティー株式会社",
+        "shares": 806000,
+        "ratio": 20.99
+      },
+      {
+        "rank": null,
+        "name_norm": "村石久二",
+        "shares": 104000,
+        "ratio": 2.71
+      },
+      {
+        "rank": null,
+        "name_norm": "MSIPCLIENTSECURITIES(常任代理人モルガン・スタンレーMUFG証券株式会社)",
+        "shares": 98800,
+        "ratio": 2.57
+      },
+      {
+        "rank": null,
+        "name_norm": "富樫隆行",
+        "shares": 80700,
+        "ratio": 2.1
+      },
+      {
+        "rank": null,
+        "name_norm": "スターツ出版従業員持株会",
+        "shares": 61090,
+        "ratio": 1.59
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 58600,
+        "ratio": 1.53
+      },
+      {
+        "rank": null,
+        "name_norm": "中台恒次",
+        "shares": 32000,
+        "ratio": 0.83
+      },
+      {
+        "rank": null,
+        "name_norm": "ヨシダトモヒロ",
+        "shares": 29200,
+        "ratio": 0.76
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 27300,
+        "ratio": 0.71
+      },
+      {
+        "rank": null,
+        "name_norm": "USBKNAJPI&WTS(常任代理人株式会社三菱UFJ銀行)",
+        "shares": 27300,
+        "ratio": 0.71
+      }
+    ]
+  },
+  "E01596": {
+    "issuer_name": "ＪＵＫＩ株式会社",
+    "sec_code": "64400",
+    "last_doc_id": "S100XSJU",
+    "last_submit_datetime": "2026-03-23 15:08",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 3839,
+        "ratio": 12.87
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社PEGASUS",
+        "shares": 1045,
+        "ratio": 3.51
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社みずほ銀行",
+        "shares": 938,
+        "ratio": 3.15
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 893,
+        "ratio": 3.0
+      },
+      {
+        "rank": null,
+        "name_norm": "日本生命保険相互会社",
+        "shares": 732,
+        "ratio": 2.45
+      },
+      {
+        "rank": null,
+        "name_norm": "朝日生命保険相互会社",
+        "shares": 569,
+        "ratio": 1.91
+      },
+      {
+        "rank": null,
+        "name_norm": "第一生命保険株式会社",
+        "shares": 511,
+        "ratio": 1.72
+      },
+      {
+        "rank": null,
+        "name_norm": "明治安田生命保険相互会社",
+        "shares": 460,
+        "ratio": 1.54
+      },
+      {
+        "rank": null,
+        "name_norm": "みずほ信託銀行株式会社",
+        "shares": 401,
+        "ratio": 1.34
+      },
+      {
+        "rank": null,
+        "name_norm": "JUKI取引先持株会",
+        "shares": 394,
+        "ratio": 1.32
+      }
+    ]
+  },
+  "E34130": {
+    "issuer_name": "株式会社イボキン",
+    "sec_code": "56990",
+    "last_doc_id": "S100XSK6",
+    "last_submit_datetime": "2026-03-23 15:22",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "HS興産株式会社",
+        "shares": 1280,
+        "ratio": 38.94
+      },
+      {
+        "rank": null,
+        "name_norm": "高橋克実",
+        "shares": 364,
+        "ratio": 11.07
+      },
+      {
+        "rank": null,
+        "name_norm": "内藤征吾",
+        "shares": 101,
+        "ratio": 3.09
+      },
+      {
+        "rank": null,
+        "name_norm": "イボキン従業員持株会",
+        "shares": 83,
+        "ratio": 2.53
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社SBI証券",
+        "shares": 82,
+        "ratio": 2.5
+      },
+      {
+        "rank": null,
+        "name_norm": "川島敏邦",
+        "shares": 47,
+        "ratio": 1.45
+      },
+      {
+        "rank": null,
+        "name_norm": "高橋完治",
+        "shares": 46,
+        "ratio": 1.4
+      },
+      {
+        "rank": null,
+        "name_norm": "吉田茂",
+        "shares": 40,
+        "ratio": 1.23
+      },
+      {
+        "rank": null,
+        "name_norm": "山崎喜博",
+        "shares": 40,
+        "ratio": 1.22
+      },
+      {
+        "rank": null,
+        "name_norm": "三河榮子",
+        "shares": 37,
+        "ratio": 1.14
+      }
+    ]
+  },
+  "E21122": {
+    "issuer_name": "株式会社オークネット",
+    "sec_code": "39640",
+    "last_doc_id": "S100XSDA",
+    "last_submit_datetime": "2026-03-23 15:30",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "フレックスコーポレーション(株)",
+        "shares": 18709860,
+        "ratio": 40.67
+      },
+      {
+        "rank": null,
+        "name_norm": "(株)BluePeak",
+        "shares": 4842940,
+        "ratio": 10.53
+      },
+      {
+        "rank": null,
+        "name_norm": "GOLDMAN,SACHS&CO.REG(常任代理人ゴールドマン・サックス証券(株))",
+        "shares": 2623100,
+        "ratio": 5.7
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行(株)(信託口)",
+        "shares": 1747800,
+        "ratio": 3.8
+      },
+      {
+        "rank": null,
+        "name_norm": "NORTHERNTRUSTCO.(AVFC)REFIDELITYFUNDS(常任代理人香港上海銀行東京支店)",
+        "shares": 1699574,
+        "ratio": 3.69
+      },
+      {
+        "rank": null,
+        "name_norm": "GOLDMANSACHSINTERNATIONAL(常任代理人ゴールドマン・サックス証券(株))",
+        "shares": 1559200,
+        "ratio": 3.39
+      },
+      {
+        "rank": null,
+        "name_norm": "(株)ナマイ・アセットマネジメント",
+        "shares": 1400000,
+        "ratio": 3.04
+      },
+      {
+        "rank": null,
+        "name_norm": "NORTHERNTRUSTCO.(AVFC)RENONTREATYCLIENTSACCOUNT(常任代理人香港上海銀行東京支店)",
+        "shares": 972186,
+        "ratio": 2.11
+      },
+      {
+        "rank": null,
+        "name_norm": "(株)オリエントコーポレーション",
+        "shares": 832800,
+        "ratio": 1.81
+      },
+      {
+        "rank": null,
+        "name_norm": "オークネットグループ従業員持株会",
+        "shares": 697810,
+        "ratio": 1.52
+      }
+    ]
+  },
+  "E25269": {
+    "issuer_name": "ラクオリア創薬株式会社",
+    "sec_code": "45790",
+    "last_doc_id": "S100XSQX",
+    "last_submit_datetime": "2026-03-23 15:30",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "KOREASECURITIESDEPOSITORY-SAMSUNG(常任代理人シティバンク、エヌ・エイ東京支店)",
+        "shares": 2594100,
+        "ratio": 10.61
+      },
+      {
+        "rank": null,
+        "name_norm": "柿沼佑一",
+        "shares": 2384700,
+        "ratio": 9.75
+      },
+      {
+        "rank": null,
+        "name_norm": "ファイザー株式会社",
+        "shares": 743000,
+        "ratio": 3.04
+      },
+      {
+        "rank": null,
+        "name_norm": "モルガン・スタンレーMUFG証券株式会社",
+        "shares": 294807,
+        "ratio": 1.21
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社エス・ビー・シー",
+        "shares": 251300,
+        "ratio": 1.03
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社アドバンスト・メディア",
+        "shares": 223800,
+        "ratio": 0.92
+      },
+      {
+        "rank": null,
+        "name_norm": "東京短資株式会社",
+        "shares": 221500,
+        "ratio": 0.91
+      },
+      {
+        "rank": null,
+        "name_norm": "田名後貴裕",
+        "shares": 169500,
+        "ratio": 0.69
+      },
+      {
+        "rank": null,
+        "name_norm": "香本育良",
+        "shares": 157000,
+        "ratio": 0.64
+      },
+      {
+        "rank": null,
+        "name_norm": "野村證券株式会社",
+        "shares": 156798,
+        "ratio": 0.64
+      }
+    ]
+  },
+  "E22024": {
+    "issuer_name": "株式会社デ・ウエスタン・セラピテクス研究所",
+    "sec_code": "45760",
+    "last_doc_id": "S100XS4G",
+    "last_submit_datetime": "2026-03-23 15:30",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "日高有一",
+        "shares": 5150600,
+        "ratio": 9.49
+      },
+      {
+        "rank": null,
+        "name_norm": "楽天証券株式会社共有口",
+        "shares": 2311900,
+        "ratio": 4.26
+      },
+      {
+        "rank": null,
+        "name_norm": "MSIPCLIENTSECURITIES(常任代理人モルガン・スタンレーMUFG証券株式会社)",
+        "shares": 1130200,
+        "ratio": 2.08
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社SBI証券",
+        "shares": 885918,
+        "ratio": 1.63
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社ミートプランニング",
+        "shares": 850000,
+        "ratio": 1.56
+      },
+      {
+        "rank": null,
+        "name_norm": "日高万由子",
+        "shares": 730000,
+        "ratio": 1.34
+      },
+      {
+        "rank": null,
+        "name_norm": "SMBC日興証券株式会社",
+        "shares": 592300,
+        "ratio": 1.09
+      },
+      {
+        "rank": null,
+        "name_norm": "日高弘義",
+        "shares": 428800,
+        "ratio": 0.79
+      },
+      {
+        "rank": null,
+        "name_norm": "日本証券金融株式会社",
+        "shares": 360500,
+        "ratio": 0.66
+      },
+      {
+        "rank": null,
+        "name_norm": "モルガン・スタンレーMUFG証券株式会社",
+        "shares": 306113,
+        "ratio": 0.56
+      }
+    ]
+  },
+  "E04560": {
+    "issuer_name": "藤田観光株式会社",
+    "sec_code": "97220",
+    "last_doc_id": "S100XS71",
+    "last_submit_datetime": "2026-03-23 15:31",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "DOWAホールディングス(株)",
+        "shares": 3814,
+        "ratio": 31.83
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行(株)(信託口)",
+        "shares": 722,
+        "ratio": 6.03
+      },
+      {
+        "rank": null,
+        "name_norm": "GOLDMANSACHSINTERNATIONAL(常任代理人ゴールドマン・サックス証券(株))",
+        "shares": 572,
+        "ratio": 4.78
+      },
+      {
+        "rank": null,
+        "name_norm": "野村證券(株)",
+        "shares": 379,
+        "ratio": 3.16
+      },
+      {
+        "rank": null,
+        "name_norm": "明治安田生命保険(相)(常任代理人(株)日本カストディ銀行)",
+        "shares": 300,
+        "ratio": 2.51
+      },
+      {
+        "rank": null,
+        "name_norm": "BNYMASAGT/CLTS10PERCENT(常任代理人(株)三菱UFJ銀行)",
+        "shares": 246,
+        "ratio": 2.06
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY510312(常任代理人(株)みずほ銀行)",
+        "shares": 220,
+        "ratio": 1.84
+      },
+      {
+        "rank": null,
+        "name_norm": "日本生命保険(相)(常任代理人日本マスタートラスト信託銀行(株))",
+        "shares": 218,
+        "ratio": 1.82
+      },
+      {
+        "rank": null,
+        "name_norm": "BNYGCMCLIENTACCOUNTJPRDACISG(FE-AC)(常任代理人(株)三菱UFJ銀行)",
+        "shares": 201,
+        "ratio": 1.68
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY510311(常任代理人(株)みずほ銀行)",
+        "shares": 190,
+        "ratio": 1.59
+      }
+    ]
+  },
+  "E37926": {
+    "issuer_name": "ポーターズ株式会社",
+    "sec_code": "51260",
+    "last_doc_id": "S100XSOH",
+    "last_submit_datetime": "2026-03-23 15:32",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "KAキャピタル株式会社",
+        "shares": 750,
+        "ratio": 45.96
+      },
+      {
+        "rank": null,
+        "name_norm": "西森康二",
+        "shares": 164,
+        "ratio": 10.06
+      },
+      {
+        "rank": null,
+        "name_norm": "御子柴智美",
+        "shares": 164,
+        "ratio": 10.06
+      },
+      {
+        "rank": null,
+        "name_norm": "光通信KK投資事業有限責任組合",
+        "shares": 103,
+        "ratio": 6.31
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 68,
+        "ratio": 4.16
+      },
+      {
+        "rank": null,
+        "name_norm": "MSIPCLIENTSECURITIES(常任代理人モルガン・スタンレーMUFG証券株式会社)",
+        "shares": 49,
+        "ratio": 3.05
+      },
+      {
+        "rank": null,
+        "name_norm": "INTERACTIVEBROKERSLLC(常任代理人インタラクティブ・ブローカーズ証券株式会社)",
+        "shares": 25,
+        "ratio": 1.56
+      },
+      {
+        "rank": null,
+        "name_norm": "ポーターズ社員持株会",
+        "shares": 25,
+        "ratio": 1.55
+      },
+      {
+        "rank": null,
+        "name_norm": "天野竜人",
+        "shares": 22,
+        "ratio": 1.35
+      },
+      {
+        "rank": null,
+        "name_norm": "JPモルガン証券株式会社",
+        "shares": 21,
+        "ratio": 1.28
+      }
+    ]
+  },
+  "E35124": {
+    "issuer_name": "株式会社ｋｕｂｅｌｌ",
+    "sec_code": "44480",
+    "last_doc_id": "S100XSJP",
+    "last_submit_datetime": "2026-03-23 15:33",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "株式会社Fun&Creative",
+        "shares": 20530400,
+        "ratio": 48.82
+      },
+      {
+        "rank": null,
+        "name_norm": "BNYGCMCLIENTACCOUNTJPRDACISG(FE−AC)(常任代理人株式会社三菱UFJ銀行)",
+        "shares": 1821983,
+        "ratio": 4.33
+      },
+      {
+        "rank": null,
+        "name_norm": "山本正喜",
+        "shares": 1781651,
+        "ratio": 4.24
+      },
+      {
+        "rank": null,
+        "name_norm": "山口勝幸",
+        "shares": 1186127,
+        "ratio": 2.82
+      },
+      {
+        "rank": null,
+        "name_norm": "GOLDMANSACHSINTERNATIONAL(常任代理人ゴールドマン・サックス証券株式会社)",
+        "shares": 1133691,
+        "ratio": 2.7
+      },
+      {
+        "rank": null,
+        "name_norm": "BANKJULIUSBAERANDCO.LTD.SINGAPORECLIENTS(常任代理人株式会社三菱UFJ銀行)",
+        "shares": 1129100,
+        "ratio": 2.68
+      },
+      {
+        "rank": null,
+        "name_norm": "THEHONGKONGANDSHANGHAIBANKINGCORPORATIONLTD−SINGAPOREBRANCHPRIVATEBANKINGDIVISIONA/CCLIENTS(常任代理人香港上海銀行東京支店)",
+        "shares": 997400,
+        "ratio": 2.37
+      },
+      {
+        "rank": null,
+        "name_norm": "井上直樹",
+        "shares": 576282,
+        "ratio": 1.37
+      },
+      {
+        "rank": null,
+        "name_norm": "BNYMSA/NVFORBNYMFORBNYMGCMCLIENTACCTEPSMPJ(常任代理人株式会社三菱UFJ銀行)",
+        "shares": 385000,
+        "ratio": 0.92
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 340500,
+        "ratio": 0.81
+      }
+    ]
+  },
+  "E02366": {
+    "issuer_name": "三菱鉛筆株式会社",
+    "sec_code": "79760",
+    "last_doc_id": "S100XRVX",
+    "last_submit_datetime": "2026-03-23 15:34",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 36324,
+        "ratio": 6.4
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社横浜銀行",
+        "shares": 28316,
+        "ratio": 4.99
+      },
+      {
+        "rank": null,
+        "name_norm": "三菱鉛筆取引先持株会",
+        "shares": 24507,
+        "ratio": 4.32
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社三井住友銀行",
+        "shares": 24077,
+        "ratio": 4.24
+      },
+      {
+        "rank": null,
+        "name_norm": "三井住友信託銀行株式会社",
+        "shares": 23750,
+        "ratio": 4.18
+      },
+      {
+        "rank": null,
+        "name_norm": "大同生命保険株式会社",
+        "shares": 23440,
+        "ratio": 4.13
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 20412,
+        "ratio": 3.6
+      },
+      {
+        "rank": null,
+        "name_norm": "明治安田生命保険相互会社",
+        "shares": 16195,
+        "ratio": 2.85
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社みずほ銀行",
+        "shares": 15400,
+        "ratio": 2.71
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505103(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 14974,
+        "ratio": 2.64
+      }
+    ]
+  },
+  "E05692": {
+    "issuer_name": "地主株式会社",
+    "sec_code": "32520",
+    "last_doc_id": "S100XS0T",
+    "last_submit_datetime": "2026-03-23 15:35",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "松岡哲也",
+        "shares": 2887300,
+        "ratio": 13.96
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(その他信託口)",
+        "shares": 1360900,
+        "ratio": 6.58
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(投資信託口)",
+        "shares": 1008600,
+        "ratio": 4.87
+      },
+      {
+        "rank": null,
+        "name_norm": "合同会社松岡",
+        "shares": 915000,
+        "ratio": 4.42
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(投資信託口)",
+        "shares": 869400,
+        "ratio": 4.2
+      },
+      {
+        "rank": null,
+        "name_norm": "野村證券株式会社",
+        "shares": 576350,
+        "ratio": 2.78
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社SBI証券",
+        "shares": 517854,
+        "ratio": 2.5
+      },
+      {
+        "rank": null,
+        "name_norm": "BNYGCMCLIENTACCOUNTJPRDACISG(FE-AC)(常任代理人株式会社三菱UFJ銀行)",
+        "shares": 469776,
+        "ratio": 2.27
+      },
+      {
+        "rank": null,
+        "name_norm": "西羅弘文",
+        "shares": 396824,
+        "ratio": 1.91
+      },
+      {
+        "rank": null,
+        "name_norm": "入江賢治",
+        "shares": 232100,
+        "ratio": 1.12
+      },
+      {
+        "rank": null,
+        "name_norm": "BBHBOSTONFORNOMURAJAPANSMALLERCAPITALIZATIONFUND620065(常任代理人株式会社みずほ銀行)",
+        "shares": 205000,
+        "ratio": 0.99
+      }
+    ]
+  },
+  "E35163": {
+    "issuer_name": "ＢＡＳＥ株式会社",
+    "sec_code": "44770",
+    "last_doc_id": "S100XSMS",
+    "last_submit_datetime": "2026-03-23 15:39",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "鶴岡裕太",
+        "shares": 18607178,
+        "ratio": 16.16
+      },
+      {
+        "rank": null,
+        "name_norm": "立花証券株式会社",
+        "shares": 16583000,
+        "ratio": 14.4
+      },
+      {
+        "rank": null,
+        "name_norm": "牧寛之",
+        "shares": 7633486,
+        "ratio": 6.63
+      },
+      {
+        "rank": null,
+        "name_norm": "MORGANSTANLEYSMITHBARNEYLLCCLIENTSFULLYPAIDSEGACCOUNT(常任代理人シティバンク、エヌ・エイ東京支店)株式会社",
+        "shares": 2709066,
+        "ratio": 2.35
+      },
+      {
+        "rank": null,
+        "name_norm": "柳澤安慶",
+        "shares": 2652000,
+        "ratio": 2.3
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 2564900,
+        "ratio": 2.22
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社サイバーエージェント",
+        "shares": 2255000,
+        "ratio": 1.95
+      },
+      {
+        "rank": null,
+        "name_norm": "上田八木短資株式会社",
+        "shares": 1798900,
+        "ratio": 1.56
+      },
+      {
+        "rank": null,
+        "name_norm": "THEBANKOFNEYYORK133612(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 1780100,
+        "ratio": 1.54
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社SBI証券",
+        "shares": 1495917,
+        "ratio": 1.29
+      }
+    ]
+  },
+  "E02350": {
+    "issuer_name": "タツモ株式会社",
+    "sec_code": "62660",
+    "last_doc_id": "S100XS15",
+    "last_submit_datetime": "2026-03-23 15:40",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "株式会社大江屋",
+        "shares": 2235000,
+        "ratio": 15.2
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 1270300,
+        "ratio": 8.6
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 498500,
+        "ratio": 3.4
+      },
+      {
+        "rank": null,
+        "name_norm": "FUBONSECURITIESCO.,LTD.CLIENT30(常任代理人シティバンク、エヌ・エイ東京支店)",
+        "shares": 474300,
+        "ratio": 3.2
+      },
+      {
+        "rank": null,
+        "name_norm": "INTERACTIVEBROKERSLLC(常任代理人インタラクティブ・ブローカーズ証券株式会社)",
+        "shares": 314400,
+        "ratio": 2.1
+      },
+      {
+        "rank": null,
+        "name_norm": "中銀リース株式会社",
+        "shares": 304500,
+        "ratio": 2.0
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505025(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 279400,
+        "ratio": 1.9
+      },
+      {
+        "rank": null,
+        "name_norm": "鳥越琢史",
+        "shares": 258197,
+        "ratio": 1.7
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505044(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 231100,
+        "ratio": 1.5
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505301(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 230500,
+        "ratio": 1.5
+      }
+    ]
+  },
+  "E00990": {
+    "issuer_name": "株式会社資生堂",
+    "sec_code": "49110",
+    "last_doc_id": "S100XSCU",
+    "last_submit_datetime": "2026-03-23 15:45",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)(注)1",
+        "shares": 68321,
+        "ratio": 17.1
+      },
+      {
+        "rank": null,
+        "name_norm": "GOVERNMENTOFNORWAY(常任代理人シティバンク、エヌ・エイ東京支店)",
+        "shares": 21741,
+        "ratio": 5.44
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)(注)1",
+        "shares": 20514,
+        "ratio": 5.13
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505001(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 9643,
+        "ratio": 2.41
+      },
+      {
+        "rank": null,
+        "name_norm": "NORTHERNTRUSTCO.(AVFC)RENONTREATYCLIENTSACCOUNT(常任代理人香港上海銀行東京支店)",
+        "shares": 9248,
+        "ratio": 2.31
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505301(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 8915,
+        "ratio": 2.23
+      },
+      {
+        "rank": null,
+        "name_norm": "みずほ信託銀行株式会社退職給付信託みずほ銀行口再信託受託者株式会社日本カストディ銀行",
+        "shares": 7000,
+        "ratio": 1.75
+      },
+      {
+        "rank": null,
+        "name_norm": "THEBANKOFNEWYORK134104(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 6381,
+        "ratio": 1.59
+      },
+      {
+        "rank": null,
+        "name_norm": "NORTHERNTRUSTCO.(AVFC)REIEDUUCITSCLIENTSNONLENDING15PCTTREATYACCOUNT(常任代理人香港上海銀行東京支店)",
+        "shares": 5988,
+        "ratio": 1.49
+      },
+      {
+        "rank": null,
+        "name_norm": "JPMORGANCHASEBANK385781(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 5923,
+        "ratio": 1.48
+      }
+    ]
+  },
+  "E41149": {
+    "issuer_name": "ＮＳグループ株式会社",
+    "sec_code": "471A0",
+    "last_doc_id": "S100XSQQ",
+    "last_submit_datetime": "2026-03-23 15:45",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "BVアセット株式会社",
+        "shares": 23470020,
+        "ratio": 45.0
+      },
+      {
+        "rank": null,
+        "name_norm": "BCPESAYCAYMAN,L.P.(常任代理人SMBC日興証券株式会社)",
+        "shares": 2721240,
+        "ratio": 5.22
+      },
+      {
+        "rank": null,
+        "name_norm": "大谷彰宏",
+        "shares": 2086224,
+        "ratio": 4.0
+      },
+      {
+        "rank": null,
+        "name_norm": "BCPESAYCAYMAN2,L.P.(常任代理人SMBC日興証券株式会社)",
+        "shares": 748216,
+        "ratio": 1.43
+      },
+      {
+        "rank": null,
+        "name_norm": "三菱UFJモルガン・スタンレー証券株式会社",
+        "shares": 690700,
+        "ratio": 1.32
+      },
+      {
+        "rank": null,
+        "name_norm": "BBHFORMATTHEWSJAPANFUND(常任代理人株式会社三菱UFJ銀行)",
+        "shares": 548800,
+        "ratio": 1.05
+      },
+      {
+        "rank": null,
+        "name_norm": "モルガン・スタンレーMUFG証券株式会社",
+        "shares": 465800,
+        "ratio": 0.89
+      },
+      {
+        "rank": null,
+        "name_norm": "BBHLUX/BROWNBROTHERSHARRIMAN(LUXEMBOURG)SCACUSTODIANFORSMD-AMFUNDS-DSBIJAPANEQUITYSMALLCAPABSOLUTEVALUE(常任代理人株式会社三井住友銀行)",
+        "shares": 403000,
+        "ratio": 0.77
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 380100,
+        "ratio": 0.73
+      },
+      {
+        "rank": null,
+        "name_norm": "THEBANKOFNEWYORK134088(常任代理人株式会社みずほ銀行)",
+        "shares": 300000,
+        "ratio": 0.58
+      }
+    ]
+  },
+  "E26815": {
+    "issuer_name": "ＧＭＯフィナンシャルホールディングス株式会社",
+    "sec_code": "71770",
+    "last_doc_id": "S100XSFM",
+    "last_submit_datetime": "2026-03-23 15:49",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "GMOインターネットグループ株式会社",
+        "shares": 77562200,
+        "ratio": 65.73
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社大和証券グループ本社",
+        "shares": 2520000,
+        "ratio": 2.13
+      },
+      {
+        "rank": null,
+        "name_norm": "BNPPARIBASLUXEMBOURG/2S/JASDEC/JANUSHENDERSONHORIZONFUND(常任代理人香港上海銀行東京支店)",
+        "shares": 1776119,
+        "ratio": 1.5
+      },
+      {
+        "rank": null,
+        "name_norm": "高島秀行",
+        "shares": 1483775,
+        "ratio": 1.25
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505001(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 1033301,
+        "ratio": 0.87
+      },
+      {
+        "rank": null,
+        "name_norm": "高橋慧",
+        "shares": 677200,
+        "ratio": 0.57
+      },
+      {
+        "rank": null,
+        "name_norm": "JPMORGANCHASEBANK385781(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 581300,
+        "ratio": 0.49
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社SBI証券",
+        "shares": 516776,
+        "ratio": 0.43
+      },
+      {
+        "rank": null,
+        "name_norm": "山本博史",
+        "shares": 383600,
+        "ratio": 0.32
+      },
+      {
+        "rank": null,
+        "name_norm": "JPモルガン証券株式会社",
+        "shares": 382265,
+        "ratio": 0.32
+      }
+    ]
+  },
+  "E03859": {
+    "issuer_name": "東京建物株式会社",
+    "sec_code": "88040",
+    "last_doc_id": "S100XSKF",
+    "last_submit_datetime": "2026-03-23 15:53",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行(株)(信託口)",
+        "shares": 38442,
+        "ratio": 18.49
+      },
+      {
+        "rank": null,
+        "name_norm": "(株)日本カストディ銀行(信託口)",
+        "shares": 24099,
+        "ratio": 11.59
+      },
+      {
+        "rank": null,
+        "name_norm": "日本証券金融(株)",
+        "shares": 4758,
+        "ratio": 2.29
+      },
+      {
+        "rank": null,
+        "name_norm": "損害保険ジャパン(株)(常任代理人(株)日本カストディ銀行)",
+        "shares": 4744,
+        "ratio": 2.28
+      },
+      {
+        "rank": null,
+        "name_norm": "明治安田生命保険(相)(常任代理人(株)日本カストディ銀行)",
+        "shares": 4729,
+        "ratio": 2.27
+      },
+      {
+        "rank": null,
+        "name_norm": "ステートストリートバンクアンドトラストカンパニー505001(常任代理人(株)みずほ銀行決済営業部)",
+        "shares": 4724,
+        "ratio": 2.27
+      },
+      {
+        "rank": null,
+        "name_norm": "ステートストリートバンクアンドトラストカンパニー505103(常任代理人(株)みずほ銀行決済営業部)",
+        "shares": 4422,
+        "ratio": 2.13
+      },
+      {
+        "rank": null,
+        "name_norm": "シービーロンドンスティッチングペンショエンフォンズゾーグエンウェルジジン(常任代理人シティバンク、エヌ・エイ東京支店)",
+        "shares": 3881,
+        "ratio": 1.87
+      },
+      {
+        "rank": null,
+        "name_norm": "ジェーピーモルガンチェースバンク380055(常任代理人(株)みずほ銀行決済営業部)",
+        "shares": 3413,
+        "ratio": 1.64
+      },
+      {
+        "rank": null,
+        "name_norm": "エムエスアイピ-クライアントセキユリテイ-ズ(常任代理人モルガン・スタンレーMUFG証券(株))",
+        "shares": 3161,
+        "ratio": 1.52
+      }
+    ]
+  },
+  "E00492": {
+    "issuer_name": "日本たばこ産業株式会社",
+    "sec_code": "29140",
+    "last_doc_id": "S100XSSA",
+    "last_submit_datetime": "2026-03-23 16:00",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "財務大臣",
+        "shares": 666885200,
+        "ratio": 37.55
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 185067100,
+        "ratio": 10.42
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 61682800,
+        "ratio": 3.47
+      },
+      {
+        "rank": null,
+        "name_norm": "SMBC日興証券株式会社",
+        "shares": 25349545,
+        "ratio": 1.43
+      },
+      {
+        "rank": null,
+        "name_norm": "THENOMURATRUSTANDBANKINGCO.,LTD.ASTHETRUSTEEOFREPURCHASEAGREEMENTMOTHERFUND(常任代理人シティバンク、エヌ・エイ東京支店)",
+        "shares": 23081600,
+        "ratio": 1.3
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505001(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 22464277,
+        "ratio": 1.27
+      },
+      {
+        "rank": null,
+        "name_norm": "JPMORGANCHASEBANK385781(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 16019033,
+        "ratio": 0.9
+      },
+      {
+        "rank": null,
+        "name_norm": "バークレイズ証券株式会社BNYM(常任代理人株式会社三菱UFJ銀行)",
+        "shares": 15000000,
+        "ratio": 0.84
+      },
+      {
+        "rank": null,
+        "name_norm": "JPモルガン証券株式会社",
+        "shares": 14991295,
+        "ratio": 0.84
+      },
+      {
+        "rank": null,
+        "name_norm": "日本証券金融株式会社",
+        "shares": 13105400,
+        "ratio": 0.74
+      }
+    ]
+  },
+  "E31071": {
+    "issuer_name": "ＭＲＴ株式会社",
+    "sec_code": "60340",
+    "last_doc_id": "S100XSR6",
+    "last_submit_datetime": "2026-03-23 16:00",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "株式会社冨田医療研究所",
+        "shares": 1200000,
+        "ratio": 21.69
+      },
+      {
+        "rank": null,
+        "name_norm": "冨田兵衛",
+        "shares": 905000,
+        "ratio": 16.36
+      },
+      {
+        "rank": null,
+        "name_norm": "冨田留美",
+        "shares": 450000,
+        "ratio": 8.13
+      },
+      {
+        "rank": null,
+        "name_norm": "伊藤忠商事株式会社",
+        "shares": 270000,
+        "ratio": 4.88
+      },
+      {
+        "rank": null,
+        "name_norm": "馬場稔正",
+        "shares": 264100,
+        "ratio": 4.77
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社メディカル・コンシェルジュ",
+        "shares": 226000,
+        "ratio": 4.08
+      },
+      {
+        "rank": null,
+        "name_norm": "小川智也",
+        "shares": 140000,
+        "ratio": 2.53
+      },
+      {
+        "rank": null,
+        "name_norm": "楽天証券株式会社",
+        "shares": 139900,
+        "ratio": 2.53
+      },
+      {
+        "rank": null,
+        "name_norm": "栗原真由美",
+        "shares": 114900,
+        "ratio": 2.08
+      },
+      {
+        "rank": null,
+        "name_norm": "水元公仁",
+        "shares": 56800,
+        "ratio": 1.03
+      }
+    ]
+  },
+  "E01054": {
+    "issuer_name": "メック株式会社",
+    "sec_code": "49710",
+    "last_doc_id": "S100XRJV",
+    "last_submit_datetime": "2026-03-23 16:00",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 1981,
+        "ratio": 10.77
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 1758,
+        "ratio": 9.56
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社マエダホールディングス",
+        "shares": 1199,
+        "ratio": 6.52
+      },
+      {
+        "rank": null,
+        "name_norm": "前田和夫",
+        "shares": 726,
+        "ratio": 3.95
+      },
+      {
+        "rank": null,
+        "name_norm": "GOLDMANSACHSINTERNATIONAL(常任代理人ゴールドマン・サックス証券株式会社)",
+        "shares": 694,
+        "ratio": 3.77
+      },
+      {
+        "rank": null,
+        "name_norm": "メック取引先持株会",
+        "shares": 562,
+        "ratio": 3.05
+      },
+      {
+        "rank": null,
+        "name_norm": "前田耕作",
+        "shares": 555,
+        "ratio": 3.01
+      },
+      {
+        "rank": null,
+        "name_norm": "野村信託銀行株式会社(投信口)",
+        "shares": 457,
+        "ratio": 2.48
+      },
+      {
+        "rank": null,
+        "name_norm": "BNPPARIBASLUXEMBOURG/2S/JASDEC/FIM/LUXEMBOURGFUNDS/UCITSASSETS(常任代理人香港上海銀行東京支店)",
+        "shares": 445,
+        "ratio": 2.41
+      },
+      {
+        "rank": null,
+        "name_norm": "ゴールドマン・サックス証券株式会社BNYM(常任代理人株式会社三菱UFJ銀行)",
+        "shares": 360,
+        "ratio": 1.95
+      }
+    ]
+  },
+  "E00834": {
+    "issuer_name": "大倉工業株式会社",
+    "sec_code": "42210",
+    "last_doc_id": "S100XSNI",
+    "last_submit_datetime": "2026-03-23 16:01",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 887,
+        "ratio": 7.86
+      },
+      {
+        "rank": null,
+        "name_norm": "住友化学株式会社",
+        "shares": 674,
+        "ratio": 5.97
+      },
+      {
+        "rank": null,
+        "name_norm": "大倉工業従業員持株会",
+        "shares": 422,
+        "ratio": 3.74
+      },
+      {
+        "rank": null,
+        "name_norm": "日本生命保険相互会社",
+        "shares": 375,
+        "ratio": 3.32
+      },
+      {
+        "rank": null,
+        "name_norm": "住友林業株式会社",
+        "shares": 315,
+        "ratio": 2.8
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社ヤクルト本社",
+        "shares": 251,
+        "ratio": 2.23
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社中国銀行",
+        "shares": 213,
+        "ratio": 1.89
+      },
+      {
+        "rank": null,
+        "name_norm": "松田滋明",
+        "shares": 181,
+        "ratio": 1.61
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 164,
+        "ratio": 1.46
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(退職給付信託CBC口)",
+        "shares": 154,
+        "ratio": 1.36
+      }
+    ]
+  },
+  "E37115": {
+    "issuer_name": "株式会社ブロードエンタープライズ",
+    "sec_code": "44150",
+    "last_doc_id": "S100XSGS",
+    "last_submit_datetime": "2026-03-23 16:03",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "中西良祐(注)2",
+        "shares": 4382,
+        "ratio": 71.31
+      },
+      {
+        "rank": null,
+        "name_norm": "吉岡裕之",
+        "shares": 86,
+        "ratio": 1.4
+      },
+      {
+        "rank": null,
+        "name_norm": "楽天証券株式会社(共有口)",
+        "shares": 51,
+        "ratio": 0.83
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社グローバル",
+        "shares": 44,
+        "ratio": 0.73
+      },
+      {
+        "rank": null,
+        "name_norm": "中西美津代",
+        "shares": 32,
+        "ratio": 0.52
+      },
+      {
+        "rank": null,
+        "name_norm": "柏木挙志",
+        "shares": 29,
+        "ratio": 0.47
+      },
+      {
+        "rank": null,
+        "name_norm": "神藤真沙志",
+        "shares": 26,
+        "ratio": 0.42
+      },
+      {
+        "rank": null,
+        "name_norm": "上田大介",
+        "shares": 25,
+        "ratio": 0.41
+      },
+      {
+        "rank": null,
+        "name_norm": "山本和生",
+        "shares": 25,
+        "ratio": 0.41
+      },
+      {
+        "rank": null,
+        "name_norm": "ブロードエンタープライズ従業員持株会",
+        "shares": 22,
+        "ratio": 0.37
+      }
+    ]
+  },
+  "E01542": {
+    "issuer_name": "株式会社荏原製作所",
+    "sec_code": "63610",
+    "last_doc_id": "S100XS6E",
+    "last_submit_datetime": "2026-03-23 16:13",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 77966,
+        "ratio": 17.08
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 34828,
+        "ratio": 7.63
+      },
+      {
+        "rank": null,
+        "name_norm": "いちごトラスト・ピーティーイー・リミテッド(常任代理人香港上海銀行東京支店セキュリティーズ・サービシズ・オペレーションズ)",
+        "shares": 23765,
+        "ratio": 5.2
+      },
+      {
+        "rank": null,
+        "name_norm": "BNYMASAGT/CLTSNONTREATYJASDEC(常任代理人株式会社三菱UFJ銀行)",
+        "shares": 11024,
+        "ratio": 2.41
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505001(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 10813,
+        "ratio": 2.37
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505301(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 7008,
+        "ratio": 1.54
+      },
+      {
+        "rank": null,
+        "name_norm": "JPMORGANCHASEBANK385781(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 6728,
+        "ratio": 1.47
+      },
+      {
+        "rank": null,
+        "name_norm": "BNYMASAGT/CLTS10PERCENT(常任代理人株式会社三菱UFJ銀行)",
+        "shares": 6208,
+        "ratio": 1.36
+      },
+      {
+        "rank": null,
+        "name_norm": "日本証券金融株式会社",
+        "shares": 5170,
+        "ratio": 1.13
+      },
+      {
+        "rank": null,
+        "name_norm": "日本生命保険相互会社",
+        "shares": 5093,
+        "ratio": 1.12
+      }
+    ]
+  },
+  "E37902": {
+    "issuer_name": "株式会社ｅＷｅＬＬ",
+    "sec_code": "50380",
+    "last_doc_id": "S100XSJZ",
+    "last_submit_datetime": "2026-03-23 16:30",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "中野剛人",
+        "shares": 5951012,
+        "ratio": 39.02
+      },
+      {
+        "rank": null,
+        "name_norm": "北村亜沙子",
+        "shares": 2476291,
+        "ratio": 16.24
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 880100,
+        "ratio": 5.77
+      },
+      {
+        "rank": null,
+        "name_norm": "GOLDMANSACHSINTERNATIONAL(常任代理人ゴールドマン・サックス証券株式会社)",
+        "shares": 710900,
+        "ratio": 4.66
+      },
+      {
+        "rank": null,
+        "name_norm": "住友商事株式会社",
+        "shares": 687000,
+        "ratio": 4.5
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 509100,
+        "ratio": 3.34
+      },
+      {
+        "rank": null,
+        "name_norm": "GOVERNMENTOFNORWAY(常任代理人シティバンクエヌ・エイ東京支店)",
+        "shares": 290900,
+        "ratio": 1.91
+      },
+      {
+        "rank": null,
+        "name_norm": "島田亨",
+        "shares": 288308,
+        "ratio": 1.89
+      },
+      {
+        "rank": null,
+        "name_norm": "JPMORGANCHASEBANK380802(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 237100,
+        "ratio": 1.55
+      },
+      {
+        "rank": null,
+        "name_norm": "LICHFIELDLP(常任代理人株式会社三菱UFJ銀行)",
+        "shares": 179300,
+        "ratio": 1.18
+      }
+    ]
+  },
+  "E05041": {
+    "issuer_name": "ＧＭＯインターネットグループ株式会社",
+    "sec_code": "94490",
+    "last_doc_id": "S100XSG3",
+    "last_submit_datetime": "2026-03-23 16:33",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "株式会社熊谷正寿事務所",
+        "shares": 35716,
+        "ratio": 35.66
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 13170,
+        "ratio": 13.15
+      },
+      {
+        "rank": null,
+        "name_norm": "熊谷正寿",
+        "shares": 8990,
+        "ratio": 8.98
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 4920,
+        "ratio": 4.91
+      },
+      {
+        "rank": null,
+        "name_norm": "CEPLUX-ORBISSICAV(常任代理人シティバンク、エヌ・エイ東京支店)",
+        "shares": 4637,
+        "ratio": 4.63
+      },
+      {
+        "rank": null,
+        "name_norm": "THEBANKOFNEWYORKMELLON140051(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 2575,
+        "ratio": 2.57
+      },
+      {
+        "rank": null,
+        "name_norm": "THEBANKOFNEWYORK133612(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 1774,
+        "ratio": 1.77
+      },
+      {
+        "rank": null,
+        "name_norm": "ORBISINSTITUTIONALFUNDSLIMITED-ORBISINSTITUTIONALGLOBALEQUITY(OFO)FUND(常任代理人シティバンク、エヌ・エイ東京支店)",
+        "shares": 1449,
+        "ratio": 1.45
+      },
+      {
+        "rank": null,
+        "name_norm": "STATESTREETBANKANDTRUSTCOMPANY505001(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 1256,
+        "ratio": 1.25
+      },
+      {
+        "rank": null,
+        "name_norm": "KUWAITINVESTMENTAUTHORITY(常任代理人シティバンク、エヌ・エイ東京支店)",
+        "shares": 1227,
+        "ratio": 1.23
+      }
+    ]
+  },
+  "E02168": {
+    "issuer_name": "ヤマハ発動機株式会社",
+    "sec_code": "72720",
+    "last_doc_id": "S100XRTH",
+    "last_submit_datetime": "2026-03-23 16:41",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 173066200,
+        "ratio": 17.83
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 49109800,
+        "ratio": 5.06
+      },
+      {
+        "rank": null,
+        "name_norm": "NORTHERNTRUSTCO.(AVFC)RESILCHESTERINTERNATIONALINVESTORSINTERNATIONALVALUEEQUITYTRUST(常任代理人香港上海銀行東京支店セキュリティーズ・サービシズ・オペレーションズ)",
+        "shares": 38774400,
+        "ratio": 3.99
+      },
+      {
+        "rank": null,
+        "name_norm": "ヤマハ株式会社",
+        "shares": 28928370,
+        "ratio": 2.98
+      },
+      {
+        "rank": null,
+        "name_norm": "NORTHERNTRUSTCO.(AVFC)REU.S.TAXEXEMPTEDPENSIONFUNDS(常任代理人香港上海銀行東京支店セキュリティーズ・サービシズ・オペレーションズ)",
+        "shares": 22422400,
+        "ratio": 2.31
+      },
+      {
+        "rank": null,
+        "name_norm": "トヨタ自動車株式会社",
+        "shares": 18750000,
+        "ratio": 1.93
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社静岡銀行",
+        "shares": 16948524,
+        "ratio": 1.74
+      },
+      {
+        "rank": null,
+        "name_norm": "NORTHERNTRUSTCO.(AVFC)RENONTREATYCLIENTSACCOUNT(常任代理人香港上海銀行東京支店セキュリティーズ・サービシズ・オペレーションズ)",
+        "shares": 16257577,
+        "ratio": 1.67
+      },
+      {
+        "rank": null,
+        "name_norm": "野村信託銀行株式会社(投信口)",
+        "shares": 15423100,
+        "ratio": 1.58
+      },
+      {
+        "rank": null,
+        "name_norm": "JPMORGANCHASEBANK385781(常任代理人株式会社みずほ銀行決済営業部)",
+        "shares": 13454706,
+        "ratio": 1.38
+      }
+    ]
+  },
+  "E27054": {
+    "issuer_name": "株式会社ユーグレナ",
+    "sec_code": "29310",
+    "last_doc_id": "S100XSL3",
+    "last_submit_datetime": "2026-03-23 16:48",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "出雲充",
+        "shares": 12407692,
+        "ratio": 9.08
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社綺麗創造ホールディングス",
+        "shares": 11434125,
+        "ratio": 8.37
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 10995400,
+        "ratio": 8.05
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 2454200,
+        "ratio": 1.79
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社丸井グループ",
+        "shares": 2139000,
+        "ratio": 1.56
+      },
+      {
+        "rank": null,
+        "name_norm": "山内正義",
+        "shares": 2001000,
+        "ratio": 1.46
+      },
+      {
+        "rank": null,
+        "name_norm": "楽天証券株式会社共有口",
+        "shares": 1571138,
+        "ratio": 1.15
+      },
+      {
+        "rank": null,
+        "name_norm": "HSBCHONGKONG-TREASURYSERVICESA/CASIANEQUITIESDERIVATIVES(常任代理人香港上海銀行東京支店)",
+        "shares": 1114000,
+        "ratio": 0.81
+      },
+      {
+        "rank": null,
+        "name_norm": "ロート製薬株式会社",
+        "shares": 1069500,
+        "ratio": 0.78
+      },
+      {
+        "rank": null,
+        "name_norm": "東京センチュリー株式会社",
+        "shares": 1000000,
+        "ratio": 0.73
+      }
+    ]
+  },
+  "E35220": {
+    "issuer_name": "恵和株式会社",
+    "sec_code": "42510",
+    "last_doc_id": "S100XS6Z",
+    "last_submit_datetime": "2026-03-23 16:50",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "長村惠弌",
+        "shares": 7021164,
+        "ratio": 38.0
+      },
+      {
+        "rank": null,
+        "name_norm": "日本マスタートラスト信託銀行株式会社(信託口)",
+        "shares": 1647100,
+        "ratio": 8.9
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社日本カストディ銀行(信託口)",
+        "shares": 448100,
+        "ratio": 2.4
+      },
+      {
+        "rank": null,
+        "name_norm": "中島由起",
+        "shares": 200000,
+        "ratio": 1.1
+      },
+      {
+        "rank": null,
+        "name_norm": "日本証券金融株式会社",
+        "shares": 185000,
+        "ratio": 1.0
+      },
+      {
+        "rank": null,
+        "name_norm": "恵和従業員持株会",
+        "shares": 174100,
+        "ratio": 0.9
+      },
+      {
+        "rank": null,
+        "name_norm": "小鶴友博",
+        "shares": 170600,
+        "ratio": 0.9
+      },
+      {
+        "rank": null,
+        "name_norm": "合同会社宮北キャピタル",
+        "shares": 169100,
+        "ratio": 0.9
+      },
+      {
+        "rank": null,
+        "name_norm": "東亞合成株式会社",
+        "shares": 140000,
+        "ratio": 0.8
+      },
+      {
+        "rank": null,
+        "name_norm": "野口順次郎",
+        "shares": 135662,
+        "ratio": 0.7
+      }
+    ]
+  },
+  "E05741": {
+    "issuer_name": "ビリングシステム株式会社",
+    "sec_code": "36230",
+    "last_doc_id": "S100XSRU",
+    "last_submit_datetime": "2026-03-23 16:55",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "株式会社T-SKY",
+        "shares": 598800,
+        "ratio": 9.52
+      },
+      {
+        "rank": null,
+        "name_norm": "OKASANINTERNATIONAL(ASIA)LIMITEDA/CCLIENT(常任代理人岡三証券株式会社)",
+        "shares": 441600,
+        "ratio": 7.02
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社NTTデータ",
+        "shares": 440000,
+        "ratio": 7.0
+      },
+      {
+        "rank": null,
+        "name_norm": "住原智彦",
+        "shares": 233600,
+        "ratio": 3.71
+      },
+      {
+        "rank": null,
+        "name_norm": "GOLDMANSACHSINTERNATIONAL(常任代理人ゴールドマン・サックス証券株式会社)",
+        "shares": 214700,
+        "ratio": 3.41
+      },
+      {
+        "rank": null,
+        "name_norm": "宗教法人宗三寺",
+        "shares": 168000,
+        "ratio": 2.67
+      },
+      {
+        "rank": null,
+        "name_norm": "江田敏彦",
+        "shares": 163100,
+        "ratio": 2.59
+      },
+      {
+        "rank": null,
+        "name_norm": "野村證券株式会社",
+        "shares": 141413,
+        "ratio": 2.25
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社SBI証券",
+        "shares": 132797,
+        "ratio": 2.11
+      },
+      {
+        "rank": null,
+        "name_norm": "BOOMSECURITIES(H.K.)LIMITED―CLIENTS’ACCOUNT(常任代理人マネックス証券株式会社)",
+        "shares": 107900,
+        "ratio": 1.72
+      }
+    ]
+  },
+  "E34508": {
+    "issuer_name": "ベルトラ株式会社",
+    "sec_code": "70480",
+    "last_doc_id": "S100XSV4",
+    "last_submit_datetime": "2026-03-23 17:00",
+    "report_type": "annual",
+    "targets_present": {
+      "井村俊哉": {
+        "matched": false
+      },
+      "片山晃": {
+        "matched": false
+      }
+    },
+    "all_shareholders": [
+      {
+        "rank": null,
+        "name_norm": "PaxalanS.àr.l.(常任代理人小谷野税理士法人)",
+        "shares": 8992,
+        "ratio": 24.56
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社オープンドア",
+        "shares": 5347,
+        "ratio": 14.61
+      },
+      {
+        "rank": null,
+        "name_norm": "永島徹三",
+        "shares": 1662,
+        "ratio": 4.54
+      },
+      {
+        "rank": null,
+        "name_norm": "二木渉",
+        "shares": 1530,
+        "ratio": 4.18
+      },
+      {
+        "rank": null,
+        "name_norm": "齊藤精良",
+        "shares": 1049,
+        "ratio": 2.86
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社JTB",
+        "shares": 899,
+        "ratio": 2.45
+      },
+      {
+        "rank": null,
+        "name_norm": "野村信託銀行株式会社(投信口)",
+        "shares": 765,
+        "ratio": 2.09
+      },
+      {
+        "rank": null,
+        "name_norm": "株式会社プレンティー",
+        "shares": 750,
+        "ratio": 2.04
+      },
+      {
+        "rank": null,
+        "name_norm": "楽天証券株式会社共有口",
+        "shares": 712,
+        "ratio": 1.94
+      },
+      {
+        "rank": null,
+        "name_norm": "萬年良子",
+        "shares": 510,
+        "ratio": 1.39
+      }
+    ]
   }
 }

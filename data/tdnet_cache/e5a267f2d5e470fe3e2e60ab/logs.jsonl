@@ -1,0 +1,6 @@
+{"event": "v2_start", "ticker": "5075", "run_id": "8f45c7645593", "timestamp": "2026-04-10T08:34:55.301269+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T08:34:59.753259+09:00"}
+{"event": "quarantined", "reason": "PDF読み込みエラー: Unexpected EOF", "review_hint": "pdf_extraction_failed", "candidate_reject_reason": "PDF読み込みエラー: Unexpected EOF", "xbrl_fallback_attempted": false, "timestamp": "2026-04-10T08:35:01.686733+09:00"}
+{"event": "v2_start", "ticker": "5075", "run_id": "f4d9399a2cea", "timestamp": "2026-04-12T18:19:36.942681+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-12T18:19:38.899563+09:00"}
+{"event": "quarantined", "reason": "PDF読み込みエラー: Unexpected EOF", "review_hint": "pdf_extraction_failed", "candidate_reject_reason": "PDF読み込みエラー: Unexpected EOF", "xbrl_fallback_attempted": false, "timestamp": "2026-04-12T18:19:40.923571+09:00"}

@@ -1,0 +1,34 @@
+{"event": "v2_start", "ticker": "2593", "run_id": "cb63b363504e", "timestamp": "2026-04-09T21:59:06.052394+09:00"}
+{"event": "ok", "via": "xbrl", "status": "ok", "segments": 3, "fingerprint": "0f0eb760c7726f887f21bac8", "hard_fail_reason": "", "fallback_used": false, "candidate_summary": "xbrl:success → html:skip(not_implemented) → pdf:not_attempted", "timestamp": "2026-04-09T21:59:07.113999+09:00"}
+{"event": "v2_start", "ticker": "2593", "run_id": "fe1aa927c527", "timestamp": "2026-04-09T22:20:15.656988+09:00"}
+{"event": "ok", "via": "xbrl", "status": "ok", "segments": 3, "fingerprint": "0f0eb760c7726f887f21bac8", "hard_fail_reason": "", "fallback_used": false, "candidate_summary": "xbrl:success → html:skip(not_implemented) → pdf:not_attempted", "timestamp": "2026-04-09T22:20:16.503913+09:00"}
+{"event": "v2_start", "ticker": "2593", "run_id": "2f0a7788fa90", "timestamp": "2026-04-09T22:38:58.762210+09:00"}
+{"event": "ok", "via": "xbrl", "status": "ok", "segments": 3, "fingerprint": "0f0eb760c7726f887f21bac8", "hard_fail_reason": "", "fallback_used": false, "candidate_summary": "xbrl:success → html:skip(not_implemented) → pdf:not_attempted", "timestamp": "2026-04-09T22:38:59.620168+09:00"}
+{"event": "v2_start", "ticker": "2593", "run_id": "2c92cf8bc933", "timestamp": "2026-04-09T22:45:29.933435+09:00"}
+{"event": "ok", "via": "xbrl", "status": "ok", "segments": 3, "fingerprint": "0f0eb760c7726f887f21bac8", "hard_fail_reason": "", "fallback_used": false, "candidate_summary": "xbrl:success → html:skip(not_implemented) → pdf:not_attempted", "timestamp": "2026-04-09T22:45:30.753387+09:00"}
+{"event": "v2_start", "ticker": "2593", "run_id": "9078816bd14e", "timestamp": "2026-04-10T07:43:19.385731+09:00"}
+{"event": "ok", "via": "xbrl", "status": "ok", "segments": 3, "fingerprint": "0f0eb760c7726f887f21bac8", "hard_fail_reason": "", "fallback_used": false, "candidate_summary": "xbrl:success → html:skip(not_implemented) → pdf:not_attempted", "timestamp": "2026-04-10T07:43:21.092069+09:00"}
+{"event": "v2_start", "ticker": "2593", "run_id": "d2346dff7d83", "timestamp": "2026-04-10T18:33:05.284588+09:00"}
+{"event": "ok", "via": "xbrl", "status": "ok", "segments": 3, "fingerprint": "0f0eb760c7726f887f21bac8", "hard_fail_reason": "", "fallback_used": false, "candidate_summary": "xbrl:success → html:skip(not_implemented) → pdf:not_attempted", "timestamp": "2026-04-10T18:33:06.092935+09:00"}
+{"event": "v2_start", "ticker": "2593", "run_id": "e3de2d82516a", "timestamp": "2026-04-10T20:42:38.148732+09:00"}
+{"event": "ok", "via": "xbrl", "status": "ok", "segments": 3, "fingerprint": "0f0eb760c7726f887f21bac8", "hard_fail_reason": "", "fallback_used": false, "candidate_summary": "xbrl:success → html:skip(not_implemented) → pdf:not_attempted", "timestamp": "2026-04-10T20:42:38.986717+09:00"}
+{"event": "v2_start", "ticker": "2593", "run_id": "e78a527c7016", "timestamp": "2026-04-10T21:14:22.269624+09:00"}
+{"event": "ok", "via": "xbrl", "status": "ok", "segments": 3, "fingerprint": "0f0eb760c7726f887f21bac8", "hard_fail_reason": "", "fallback_used": false, "candidate_summary": "xbrl:success → html:skip(not_implemented) → pdf:not_attempted", "timestamp": "2026-04-10T21:14:23.143848+09:00"}
+{"event": "v2_start", "ticker": "2593", "run_id": "88dfdda5dcdf", "timestamp": "2026-04-10T21:26:16.820600+09:00"}
+{"event": "ok", "via": "xbrl", "status": "ok", "segments": 3, "fingerprint": "0f0eb760c7726f887f21bac8", "hard_fail_reason": "", "fallback_used": false, "candidate_summary": "xbrl:success → html:skip(not_implemented) → pdf:not_attempted", "timestamp": "2026-04-10T21:26:17.631626+09:00"}
+{"event": "v2_start", "ticker": "2593", "run_id": "4d829c2912cc", "timestamp": "2026-04-10T21:35:54.244236+09:00"}
+{"event": "ok", "via": "xbrl", "status": "ok", "segments": 3, "fingerprint": "0f0eb760c7726f887f21bac8", "hard_fail_reason": "", "fallback_used": false, "candidate_summary": "xbrl:success → html:skip(not_implemented) → pdf:not_attempted", "timestamp": "2026-04-10T21:35:55.179725+09:00"}
+{"event": "v2_start", "ticker": "2593", "run_id": "8f5538f61f90", "timestamp": "2026-04-10T21:51:17.515349+09:00"}
+{"event": "ok", "via": "xbrl", "status": "ok", "segments": 3, "fingerprint": "0f0eb760c7726f887f21bac8", "hard_fail_reason": "", "fallback_used": false, "candidate_summary": "xbrl:success → html:skip(not_implemented) → pdf:not_attempted", "timestamp": "2026-04-10T21:51:18.416167+09:00"}
+{"event": "v2_start", "ticker": "2593", "run_id": "b23bf688ba15", "timestamp": "2026-04-10T21:57:13.940929+09:00"}
+{"event": "ok", "via": "xbrl", "status": "ok", "segments": 3, "fingerprint": "0f0eb760c7726f887f21bac8", "hard_fail_reason": "", "fallback_used": false, "candidate_summary": "xbrl:success → html:skip(not_implemented) → pdf:not_attempted", "timestamp": "2026-04-10T21:57:14.776108+09:00"}
+{"event": "v2_start", "ticker": "2593", "run_id": "2c5b46b68449", "timestamp": "2026-04-10T22:04:22.784302+09:00"}
+{"event": "ok", "via": "xbrl", "status": "ok", "segments": 3, "fingerprint": "0f0eb760c7726f887f21bac8", "hard_fail_reason": "", "fallback_used": false, "candidate_summary": "xbrl:success → html:skip(not_implemented) → pdf:not_attempted", "timestamp": "2026-04-10T22:04:23.627236+09:00"}
+{"event": "v2_start", "ticker": "2593", "run_id": "a61b9039c013", "timestamp": "2026-04-10T22:26:15.379429+09:00"}
+{"event": "ok", "via": "xbrl", "status": "ok", "segments": 3, "fingerprint": "0f0eb760c7726f887f21bac8", "hard_fail_reason": "", "fallback_used": false, "candidate_summary": "xbrl:success → html:skip(not_implemented) → pdf:not_attempted", "timestamp": "2026-04-10T22:26:16.238634+09:00"}
+{"event": "v2_start", "ticker": "2593", "run_id": "407471ed83e4", "timestamp": "2026-04-10T23:10:41.757729+09:00"}
+{"event": "ok", "via": "xbrl", "status": "ok", "segments": 3, "fingerprint": "0f0eb760c7726f887f21bac8", "hard_fail_reason": "", "fallback_used": false, "candidate_summary": "xbrl:success → html:skip(not_implemented) → pdf:not_attempted", "timestamp": "2026-04-10T23:10:42.628269+09:00"}
+{"event": "v2_start", "ticker": "2593", "run_id": "7e0865c7f8c7", "timestamp": "2026-04-10T23:30:36.306335+09:00"}
+{"event": "ok", "via": "xbrl", "status": "ok", "segments": 3, "fingerprint": "0f0eb760c7726f887f21bac8", "hard_fail_reason": "", "fallback_used": false, "candidate_summary": "xbrl:success → html:skip(not_implemented) → pdf:not_attempted", "timestamp": "2026-04-10T23:30:37.254399+09:00"}
+{"event": "v2_start", "ticker": "2593", "run_id": "e25ec45ea5db", "timestamp": "2026-04-10T23:37:04.618180+09:00"}
+{"event": "ok", "via": "xbrl", "status": "ok", "segments": 3, "fingerprint": "0f0eb760c7726f887f21bac8", "hard_fail_reason": "", "fallback_used": false, "candidate_summary": "xbrl:success → html:skip(not_implemented) → pdf:not_attempted", "timestamp": "2026-04-10T23:37:05.557171+09:00"}

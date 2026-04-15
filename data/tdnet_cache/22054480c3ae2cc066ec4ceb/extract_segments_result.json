@@ -1,0 +1,2834 @@
+[
+  {
+    "ticker": "2792",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "その他有価証券評価差額金",
+    "segment_order": 1,
+    "segment_sales": null,
+    "segment_profit": 34.958,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "その他有価証券評価差額金",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-26",
+    "tdnet_doc_id": "22054480c3ae2cc066ec4ceb",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 8件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B-orient: page=3 orientation=unknown row_seg=2 row_mhdr=0 col_seg=0 col_metric=3 num_cross=9 period=4 bscf=0",
+      "Phase B-boost: skip page=3 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=3 orientation=unknown row_seg=2 row_mhdr=0 col_seg=0 col_metric=3 num_cross=9 period=4 bscf=0",
+      "Phase B-boost: skip page=3 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=9 orientation=unknown row_seg=3 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=3 bscf=1",
+      "Phase B-boost: skip page=9 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=8 orientation=unknown row_seg=4 row_mhdr=0 col_seg=0 col_metric=1 num_cross=2 period=0 bscf=0",
+      "Phase B-orient-decision: page=8 orientation=unknown density_rescue=no header_suppressed=no",
+      "Phase B-orient: page=6 orientation=unknown row_seg=0 row_mhdr=0 col_seg=1 col_metric=0 num_cross=0 period=3 bscf=3",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=6 bscf=3",
+      "Phase B-orient-decision: page=6 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=7 orientation=unknown row_seg=10 row_mhdr=0 col_seg=0 col_metric=11 num_cross=16 period=1 bscf=0",
+      "Phase B-boost: skip page=7 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=0 orientation=unknown row_seg=0 row_mhdr=1 col_seg=2 col_metric=0 num_cross=0 period=5 bscf=0",
+      "Phase B-boost: skip page=0 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=5 orientation=unknown row_seg=0 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=0 bscf=13",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=5 bscf=13",
+      "Phase B-orient-decision: page=5 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=8 orientation=unknown row_seg=4 row_mhdr=0 col_seg=0 col_metric=1 num_cross=2 period=0 bscf=0",
+      "Phase B-boost: page=8 seg_kw_bonus=+0.03",
+      "Phase B-orient-decision: page=8 orientation=unknown density_rescue=no header_suppressed=no",
+      "Phase B: best_table score=1.00 (報告セグメント; セグメント情報; 利益系:損益; 数値列2列; 数値行9行(5+); 数値密度9/25; 行数25; セグメント名行5行; 補助語3個; キャッシュ・フロー(減点); セグメント情報見出し(加点); 事業名パターン2行; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2-pre: column_first status=none segment_count=0 numeric_col_count=0 tokens=[]",
+      "Phase B-2: ACCEPT valid=0 narr=11 numdens=0.5652 repnum=10 cand_score=11.5 rescued_by=table_signal:narrative+detail_breakdown_table_rescue+header_numeric:no_valid_segment+table_signal:total_metric_dominant",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=1, raw=['四半期純利益    1,992,915  1,399,284'], reconstructed=['四半期純利益', '1,992,915', '1,399,284'], units=None",
+      "Unit: raw=千円, mult=1000, src=page_top",
+      "Phase C: transition B(25rows,2cols)→C(25rows,2cols) header_band=1 new_headers=['四半期純利益', '1,992,915', '1,399,284']",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: fallback rerun column diagnosis on Phase B source table sales_col=None profit_col=1",
+      "Phase D: sales_col=None, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=8, skip行=4, non_reportable=17",
+      "Phase F: レコード組立",
+      "Phase F-col: col_as_seg: no header row found (max_seg=0)",
+      "Phase F: 8件のセグメント抽出成功",
+      "Phase G-PF: pl_summary_post_filter SKIP col_as_seg=False n=8"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 8,
+          "score": 1.0,
+          "categories": {
+            "header": 0.49,
+            "numeric_layout": 0.28,
+            "segment_row": 0.33,
+            "exclusion": -0.15,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "報告セグメント; セグメント情報; 利益系:損益; 数値列2列; 数値行9行(5+); 数値密度9/25; 行数25; セグメント名行5行; 補助語3個; キャ",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 8,
+          "score": 0.73,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.28,
+            "segment_row": 0.23,
+            "exclusion": 0.0,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "利益系:損益; 数値列2列; 数値行8行(5+); 数値密度8/11; 行数11; セグメント名行5行; 補助語3個; 三拍子ボーナス(売上/利益+補助語+セグ",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "利益系:損益; 数値列2列; 数値行12行(5+); 数値密度12/15; 行数15; セグメント名行6行; 補助語2個; 三拍子ボーナス(売上/利益+補助語+",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行29行(5+); 数値密度29/38; 行数38; セグメント名行20行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 2,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 0,
+        "narrative_like": 11,
+        "bs_cf_like": 1,
+        "detail_breakdown_like": 4,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 0,
+        "pl_account_like": 1,
+        "top_samples": [
+          "四半期純利益:pl_account_like",
+          "その他の包括利益:unknown",
+          "その他有価証券評価差額金:bs_cf_like",
+          "繰延ヘッジ損益:unknown",
+          "為替換算調整勘定:unknown"
+        ],
+        "numeric_density": 0.5652,
+        "repeated_numeric_rows": 10,
+        "header_keyword_hits": 1,
+        "anchor_hits": 3,
+        "segment_name_like_rows": 5,
+        "narrative_penalty": 11.0,
+        "bs_cf_penalty": 0.0,
+        "rescued_by": "table_signal:narrative+detail_breakdown_table_rescue+header_numeric:no_valid_segment+table_signal:total_metric_dominant",
+        "candidate_score": 11.5
+      },
+      "phase_transition": {
+        "phase_b_rows": 25,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "四半期純利益    1,992,915  1,399,284",
+          "その他の包括利益",
+          "その他有価証券評価差額金  34,958  164,819"
+        ],
+        "phase_c_rows": 25,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "四半期純利益    1,992,915  1,399,284",
+          "その他の包括利益",
+          "その他有価証券評価差額金  34,958  164,819"
+        ],
+        "header_band_h": 1,
+        "best_table_has_sales": false,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "四半期純利益    1,992,915  1,399,284"
+        ],
+        "reconstructed_headers": [
+          "四半期純利益",
+          "その他の包括利益",
+          "その他有価証券評価差額金"
+        ],
+        "column_labels": [
+          [
+            "四半期純利益",
+            "1,992,915",
+            "1,399,284"
+          ],
+          [
+            "その他の包括利益"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like",
+          "sales"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.162,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.36,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "四半期純利益",
+            "scores": {
+              "net_income_like": 0.162,
+              "segment_profit_like": 0.063
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.162,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "その他の包括利益",
+            "scores": {
+              "net_income_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15,
+              "segment_profit_like": 0.36,
+              "operating_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.36,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "その他有価証券評価差額金",
+            "scores": {
+              "net_income_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15,
+              "segment_profit_like": 0.15,
+              "operating_profit_like": 0.15
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 1,
+            "header": "その他の包括利益",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "その他有価証券評価差額金",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "phase_b_fallback"
+      },
+      "page_score": 0.9649999999999997,
+      "table_score": 1.0,
+      "header_confidence": 0.7,
+      "col_confidence": 0.36,
+      "segment_count": 8,
+      "non_reportable_count": 17,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 8
+    }
+  },
+  {
+    "ticker": "2792",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "繰延ヘッジ損益",
+    "segment_order": 2,
+    "segment_sales": null,
+    "segment_profit": 240.578,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "繰延ヘッジ損益",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-26",
+    "tdnet_doc_id": "22054480c3ae2cc066ec4ceb",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 8件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B-orient: page=3 orientation=unknown row_seg=2 row_mhdr=0 col_seg=0 col_metric=3 num_cross=9 period=4 bscf=0",
+      "Phase B-boost: skip page=3 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=3 orientation=unknown row_seg=2 row_mhdr=0 col_seg=0 col_metric=3 num_cross=9 period=4 bscf=0",
+      "Phase B-boost: skip page=3 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=9 orientation=unknown row_seg=3 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=3 bscf=1",
+      "Phase B-boost: skip page=9 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=8 orientation=unknown row_seg=4 row_mhdr=0 col_seg=0 col_metric=1 num_cross=2 period=0 bscf=0",
+      "Phase B-orient-decision: page=8 orientation=unknown density_rescue=no header_suppressed=no",
+      "Phase B-orient: page=6 orientation=unknown row_seg=0 row_mhdr=0 col_seg=1 col_metric=0 num_cross=0 period=3 bscf=3",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=6 bscf=3",
+      "Phase B-orient-decision: page=6 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=7 orientation=unknown row_seg=10 row_mhdr=0 col_seg=0 col_metric=11 num_cross=16 period=1 bscf=0",
+      "Phase B-boost: skip page=7 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=0 orientation=unknown row_seg=0 row_mhdr=1 col_seg=2 col_metric=0 num_cross=0 period=5 bscf=0",
+      "Phase B-boost: skip page=0 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=5 orientation=unknown row_seg=0 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=0 bscf=13",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=5 bscf=13",
+      "Phase B-orient-decision: page=5 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=8 orientation=unknown row_seg=4 row_mhdr=0 col_seg=0 col_metric=1 num_cross=2 period=0 bscf=0",
+      "Phase B-boost: page=8 seg_kw_bonus=+0.03",
+      "Phase B-orient-decision: page=8 orientation=unknown density_rescue=no header_suppressed=no",
+      "Phase B: best_table score=1.00 (報告セグメント; セグメント情報; 利益系:損益; 数値列2列; 数値行9行(5+); 数値密度9/25; 行数25; セグメント名行5行; 補助語3個; キャッシュ・フロー(減点); セグメント情報見出し(加点); 事業名パターン2行; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2-pre: column_first status=none segment_count=0 numeric_col_count=0 tokens=[]",
+      "Phase B-2: ACCEPT valid=0 narr=11 numdens=0.5652 repnum=10 cand_score=11.5 rescued_by=table_signal:narrative+detail_breakdown_table_rescue+header_numeric:no_valid_segment+table_signal:total_metric_dominant",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=1, raw=['四半期純利益    1,992,915  1,399,284'], reconstructed=['四半期純利益', '1,992,915', '1,399,284'], units=None",
+      "Unit: raw=千円, mult=1000, src=page_top",
+      "Phase C: transition B(25rows,2cols)→C(25rows,2cols) header_band=1 new_headers=['四半期純利益', '1,992,915', '1,399,284']",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: fallback rerun column diagnosis on Phase B source table sales_col=None profit_col=1",
+      "Phase D: sales_col=None, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=8, skip行=4, non_reportable=17",
+      "Phase F: レコード組立",
+      "Phase F-col: col_as_seg: no header row found (max_seg=0)",
+      "Phase F: 8件のセグメント抽出成功",
+      "Phase G-PF: pl_summary_post_filter SKIP col_as_seg=False n=8"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 8,
+          "score": 1.0,
+          "categories": {
+            "header": 0.49,
+            "numeric_layout": 0.28,
+            "segment_row": 0.33,
+            "exclusion": -0.15,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "報告セグメント; セグメント情報; 利益系:損益; 数値列2列; 数値行9行(5+); 数値密度9/25; 行数25; セグメント名行5行; 補助語3個; キャ",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 8,
+          "score": 0.73,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.28,
+            "segment_row": 0.23,
+            "exclusion": 0.0,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "利益系:損益; 数値列2列; 数値行8行(5+); 数値密度8/11; 行数11; セグメント名行5行; 補助語3個; 三拍子ボーナス(売上/利益+補助語+セグ",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "利益系:損益; 数値列2列; 数値行12行(5+); 数値密度12/15; 行数15; セグメント名行6行; 補助語2個; 三拍子ボーナス(売上/利益+補助語+",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行29行(5+); 数値密度29/38; 行数38; セグメント名行20行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 2,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 0,
+        "narrative_like": 11,
+        "bs_cf_like": 1,
+        "detail_breakdown_like": 4,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 0,
+        "pl_account_like": 1,
+        "top_samples": [
+          "四半期純利益:pl_account_like",
+          "その他の包括利益:unknown",
+          "その他有価証券評価差額金:bs_cf_like",
+          "繰延ヘッジ損益:unknown",
+          "為替換算調整勘定:unknown"
+        ],
+        "numeric_density": 0.5652,
+        "repeated_numeric_rows": 10,
+        "header_keyword_hits": 1,
+        "anchor_hits": 3,
+        "segment_name_like_rows": 5,
+        "narrative_penalty": 11.0,
+        "bs_cf_penalty": 0.0,
+        "rescued_by": "table_signal:narrative+detail_breakdown_table_rescue+header_numeric:no_valid_segment+table_signal:total_metric_dominant",
+        "candidate_score": 11.5
+      },
+      "phase_transition": {
+        "phase_b_rows": 25,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "四半期純利益    1,992,915  1,399,284",
+          "その他の包括利益",
+          "その他有価証券評価差額金  34,958  164,819"
+        ],
+        "phase_c_rows": 25,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "四半期純利益    1,992,915  1,399,284",
+          "その他の包括利益",
+          "その他有価証券評価差額金  34,958  164,819"
+        ],
+        "header_band_h": 1,
+        "best_table_has_sales": false,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "四半期純利益    1,992,915  1,399,284"
+        ],
+        "reconstructed_headers": [
+          "四半期純利益",
+          "その他の包括利益",
+          "その他有価証券評価差額金"
+        ],
+        "column_labels": [
+          [
+            "四半期純利益",
+            "1,992,915",
+            "1,399,284"
+          ],
+          [
+            "その他の包括利益"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like",
+          "sales"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.162,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.36,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "四半期純利益",
+            "scores": {
+              "net_income_like": 0.162,
+              "segment_profit_like": 0.063
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.162,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "その他の包括利益",
+            "scores": {
+              "net_income_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15,
+              "segment_profit_like": 0.36,
+              "operating_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.36,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "その他有価証券評価差額金",
+            "scores": {
+              "net_income_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15,
+              "segment_profit_like": 0.15,
+              "operating_profit_like": 0.15
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 1,
+            "header": "その他の包括利益",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "その他有価証券評価差額金",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "phase_b_fallback"
+      },
+      "page_score": 0.9649999999999997,
+      "table_score": 1.0,
+      "header_confidence": 0.7,
+      "col_confidence": 0.36,
+      "segment_count": 8,
+      "non_reportable_count": 17,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 8
+    }
+  },
+  {
+    "ticker": "2792",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "その他の包括利益合計",
+    "segment_order": 3,
+    "segment_sales": null,
+    "segment_profit": -1181.1100000000001,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "その他の包括利益合計",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-26",
+    "tdnet_doc_id": "22054480c3ae2cc066ec4ceb",
+    "row_type": "total",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 8件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B-orient: page=3 orientation=unknown row_seg=2 row_mhdr=0 col_seg=0 col_metric=3 num_cross=9 period=4 bscf=0",
+      "Phase B-boost: skip page=3 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=3 orientation=unknown row_seg=2 row_mhdr=0 col_seg=0 col_metric=3 num_cross=9 period=4 bscf=0",
+      "Phase B-boost: skip page=3 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=9 orientation=unknown row_seg=3 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=3 bscf=1",
+      "Phase B-boost: skip page=9 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=8 orientation=unknown row_seg=4 row_mhdr=0 col_seg=0 col_metric=1 num_cross=2 period=0 bscf=0",
+      "Phase B-orient-decision: page=8 orientation=unknown density_rescue=no header_suppressed=no",
+      "Phase B-orient: page=6 orientation=unknown row_seg=0 row_mhdr=0 col_seg=1 col_metric=0 num_cross=0 period=3 bscf=3",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=6 bscf=3",
+      "Phase B-orient-decision: page=6 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=7 orientation=unknown row_seg=10 row_mhdr=0 col_seg=0 col_metric=11 num_cross=16 period=1 bscf=0",
+      "Phase B-boost: skip page=7 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=0 orientation=unknown row_seg=0 row_mhdr=1 col_seg=2 col_metric=0 num_cross=0 period=5 bscf=0",
+      "Phase B-boost: skip page=0 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=5 orientation=unknown row_seg=0 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=0 bscf=13",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=5 bscf=13",
+      "Phase B-orient-decision: page=5 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=8 orientation=unknown row_seg=4 row_mhdr=0 col_seg=0 col_metric=1 num_cross=2 period=0 bscf=0",
+      "Phase B-boost: page=8 seg_kw_bonus=+0.03",
+      "Phase B-orient-decision: page=8 orientation=unknown density_rescue=no header_suppressed=no",
+      "Phase B: best_table score=1.00 (報告セグメント; セグメント情報; 利益系:損益; 数値列2列; 数値行9行(5+); 数値密度9/25; 行数25; セグメント名行5行; 補助語3個; キャッシュ・フロー(減点); セグメント情報見出し(加点); 事業名パターン2行; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2-pre: column_first status=none segment_count=0 numeric_col_count=0 tokens=[]",
+      "Phase B-2: ACCEPT valid=0 narr=11 numdens=0.5652 repnum=10 cand_score=11.5 rescued_by=table_signal:narrative+detail_breakdown_table_rescue+header_numeric:no_valid_segment+table_signal:total_metric_dominant",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=1, raw=['四半期純利益    1,992,915  1,399,284'], reconstructed=['四半期純利益', '1,992,915', '1,399,284'], units=None",
+      "Unit: raw=千円, mult=1000, src=page_top",
+      "Phase C: transition B(25rows,2cols)→C(25rows,2cols) header_band=1 new_headers=['四半期純利益', '1,992,915', '1,399,284']",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: fallback rerun column diagnosis on Phase B source table sales_col=None profit_col=1",
+      "Phase D: sales_col=None, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=8, skip行=4, non_reportable=17",
+      "Phase F: レコード組立",
+      "Phase F-col: col_as_seg: no header row found (max_seg=0)",
+      "Phase F: 8件のセグメント抽出成功",
+      "Phase G-PF: pl_summary_post_filter SKIP col_as_seg=False n=8"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 8,
+          "score": 1.0,
+          "categories": {
+            "header": 0.49,
+            "numeric_layout": 0.28,
+            "segment_row": 0.33,
+            "exclusion": -0.15,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "報告セグメント; セグメント情報; 利益系:損益; 数値列2列; 数値行9行(5+); 数値密度9/25; 行数25; セグメント名行5行; 補助語3個; キャ",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 8,
+          "score": 0.73,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.28,
+            "segment_row": 0.23,
+            "exclusion": 0.0,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "利益系:損益; 数値列2列; 数値行8行(5+); 数値密度8/11; 行数11; セグメント名行5行; 補助語3個; 三拍子ボーナス(売上/利益+補助語+セグ",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "利益系:損益; 数値列2列; 数値行12行(5+); 数値密度12/15; 行数15; セグメント名行6行; 補助語2個; 三拍子ボーナス(売上/利益+補助語+",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行29行(5+); 数値密度29/38; 行数38; セグメント名行20行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 2,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 0,
+        "narrative_like": 11,
+        "bs_cf_like": 1,
+        "detail_breakdown_like": 4,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 0,
+        "pl_account_like": 1,
+        "top_samples": [
+          "四半期純利益:pl_account_like",
+          "その他の包括利益:unknown",
+          "その他有価証券評価差額金:bs_cf_like",
+          "繰延ヘッジ損益:unknown",
+          "為替換算調整勘定:unknown"
+        ],
+        "numeric_density": 0.5652,
+        "repeated_numeric_rows": 10,
+        "header_keyword_hits": 1,
+        "anchor_hits": 3,
+        "segment_name_like_rows": 5,
+        "narrative_penalty": 11.0,
+        "bs_cf_penalty": 0.0,
+        "rescued_by": "table_signal:narrative+detail_breakdown_table_rescue+header_numeric:no_valid_segment+table_signal:total_metric_dominant",
+        "candidate_score": 11.5
+      },
+      "phase_transition": {
+        "phase_b_rows": 25,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "四半期純利益    1,992,915  1,399,284",
+          "その他の包括利益",
+          "その他有価証券評価差額金  34,958  164,819"
+        ],
+        "phase_c_rows": 25,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "四半期純利益    1,992,915  1,399,284",
+          "その他の包括利益",
+          "その他有価証券評価差額金  34,958  164,819"
+        ],
+        "header_band_h": 1,
+        "best_table_has_sales": false,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "四半期純利益    1,992,915  1,399,284"
+        ],
+        "reconstructed_headers": [
+          "四半期純利益",
+          "その他の包括利益",
+          "その他有価証券評価差額金"
+        ],
+        "column_labels": [
+          [
+            "四半期純利益",
+            "1,992,915",
+            "1,399,284"
+          ],
+          [
+            "その他の包括利益"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like",
+          "sales"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.162,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.36,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "四半期純利益",
+            "scores": {
+              "net_income_like": 0.162,
+              "segment_profit_like": 0.063
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.162,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "その他の包括利益",
+            "scores": {
+              "net_income_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15,
+              "segment_profit_like": 0.36,
+              "operating_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.36,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "その他有価証券評価差額金",
+            "scores": {
+              "net_income_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15,
+              "segment_profit_like": 0.15,
+              "operating_profit_like": 0.15
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 1,
+            "header": "その他の包括利益",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "その他有価証券評価差額金",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "phase_b_fallback"
+      },
+      "page_score": 0.9649999999999997,
+      "table_score": 1.0,
+      "header_confidence": 0.7,
+      "col_confidence": 0.36,
+      "segment_count": 8,
+      "non_reportable_count": 17,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 8
+    }
+  },
+  {
+    "ticker": "2792",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "四半期包括利益",
+    "segment_order": 4,
+    "segment_sales": null,
+    "segment_profit": 811.804,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "四半期包括利益",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-26",
+    "tdnet_doc_id": "22054480c3ae2cc066ec4ceb",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 8件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B-orient: page=3 orientation=unknown row_seg=2 row_mhdr=0 col_seg=0 col_metric=3 num_cross=9 period=4 bscf=0",
+      "Phase B-boost: skip page=3 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=3 orientation=unknown row_seg=2 row_mhdr=0 col_seg=0 col_metric=3 num_cross=9 period=4 bscf=0",
+      "Phase B-boost: skip page=3 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=9 orientation=unknown row_seg=3 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=3 bscf=1",
+      "Phase B-boost: skip page=9 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=8 orientation=unknown row_seg=4 row_mhdr=0 col_seg=0 col_metric=1 num_cross=2 period=0 bscf=0",
+      "Phase B-orient-decision: page=8 orientation=unknown density_rescue=no header_suppressed=no",
+      "Phase B-orient: page=6 orientation=unknown row_seg=0 row_mhdr=0 col_seg=1 col_metric=0 num_cross=0 period=3 bscf=3",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=6 bscf=3",
+      "Phase B-orient-decision: page=6 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=7 orientation=unknown row_seg=10 row_mhdr=0 col_seg=0 col_metric=11 num_cross=16 period=1 bscf=0",
+      "Phase B-boost: skip page=7 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=0 orientation=unknown row_seg=0 row_mhdr=1 col_seg=2 col_metric=0 num_cross=0 period=5 bscf=0",
+      "Phase B-boost: skip page=0 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=5 orientation=unknown row_seg=0 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=0 bscf=13",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=5 bscf=13",
+      "Phase B-orient-decision: page=5 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=8 orientation=unknown row_seg=4 row_mhdr=0 col_seg=0 col_metric=1 num_cross=2 period=0 bscf=0",
+      "Phase B-boost: page=8 seg_kw_bonus=+0.03",
+      "Phase B-orient-decision: page=8 orientation=unknown density_rescue=no header_suppressed=no",
+      "Phase B: best_table score=1.00 (報告セグメント; セグメント情報; 利益系:損益; 数値列2列; 数値行9行(5+); 数値密度9/25; 行数25; セグメント名行5行; 補助語3個; キャッシュ・フロー(減点); セグメント情報見出し(加点); 事業名パターン2行; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2-pre: column_first status=none segment_count=0 numeric_col_count=0 tokens=[]",
+      "Phase B-2: ACCEPT valid=0 narr=11 numdens=0.5652 repnum=10 cand_score=11.5 rescued_by=table_signal:narrative+detail_breakdown_table_rescue+header_numeric:no_valid_segment+table_signal:total_metric_dominant",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=1, raw=['四半期純利益    1,992,915  1,399,284'], reconstructed=['四半期純利益', '1,992,915', '1,399,284'], units=None",
+      "Unit: raw=千円, mult=1000, src=page_top",
+      "Phase C: transition B(25rows,2cols)→C(25rows,2cols) header_band=1 new_headers=['四半期純利益', '1,992,915', '1,399,284']",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: fallback rerun column diagnosis on Phase B source table sales_col=None profit_col=1",
+      "Phase D: sales_col=None, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=8, skip行=4, non_reportable=17",
+      "Phase F: レコード組立",
+      "Phase F-col: col_as_seg: no header row found (max_seg=0)",
+      "Phase F: 8件のセグメント抽出成功",
+      "Phase G-PF: pl_summary_post_filter SKIP col_as_seg=False n=8"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 8,
+          "score": 1.0,
+          "categories": {
+            "header": 0.49,
+            "numeric_layout": 0.28,
+            "segment_row": 0.33,
+            "exclusion": -0.15,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "報告セグメント; セグメント情報; 利益系:損益; 数値列2列; 数値行9行(5+); 数値密度9/25; 行数25; セグメント名行5行; 補助語3個; キャ",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 8,
+          "score": 0.73,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.28,
+            "segment_row": 0.23,
+            "exclusion": 0.0,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "利益系:損益; 数値列2列; 数値行8行(5+); 数値密度8/11; 行数11; セグメント名行5行; 補助語3個; 三拍子ボーナス(売上/利益+補助語+セグ",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "利益系:損益; 数値列2列; 数値行12行(5+); 数値密度12/15; 行数15; セグメント名行6行; 補助語2個; 三拍子ボーナス(売上/利益+補助語+",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行29行(5+); 数値密度29/38; 行数38; セグメント名行20行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 2,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 0,
+        "narrative_like": 11,
+        "bs_cf_like": 1,
+        "detail_breakdown_like": 4,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 0,
+        "pl_account_like": 1,
+        "top_samples": [
+          "四半期純利益:pl_account_like",
+          "その他の包括利益:unknown",
+          "その他有価証券評価差額金:bs_cf_like",
+          "繰延ヘッジ損益:unknown",
+          "為替換算調整勘定:unknown"
+        ],
+        "numeric_density": 0.5652,
+        "repeated_numeric_rows": 10,
+        "header_keyword_hits": 1,
+        "anchor_hits": 3,
+        "segment_name_like_rows": 5,
+        "narrative_penalty": 11.0,
+        "bs_cf_penalty": 0.0,
+        "rescued_by": "table_signal:narrative+detail_breakdown_table_rescue+header_numeric:no_valid_segment+table_signal:total_metric_dominant",
+        "candidate_score": 11.5
+      },
+      "phase_transition": {
+        "phase_b_rows": 25,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "四半期純利益    1,992,915  1,399,284",
+          "その他の包括利益",
+          "その他有価証券評価差額金  34,958  164,819"
+        ],
+        "phase_c_rows": 25,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "四半期純利益    1,992,915  1,399,284",
+          "その他の包括利益",
+          "その他有価証券評価差額金  34,958  164,819"
+        ],
+        "header_band_h": 1,
+        "best_table_has_sales": false,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "四半期純利益    1,992,915  1,399,284"
+        ],
+        "reconstructed_headers": [
+          "四半期純利益",
+          "その他の包括利益",
+          "その他有価証券評価差額金"
+        ],
+        "column_labels": [
+          [
+            "四半期純利益",
+            "1,992,915",
+            "1,399,284"
+          ],
+          [
+            "その他の包括利益"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like",
+          "sales"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.162,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.36,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "四半期純利益",
+            "scores": {
+              "net_income_like": 0.162,
+              "segment_profit_like": 0.063
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.162,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "その他の包括利益",
+            "scores": {
+              "net_income_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15,
+              "segment_profit_like": 0.36,
+              "operating_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.36,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "その他有価証券評価差額金",
+            "scores": {
+              "net_income_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15,
+              "segment_profit_like": 0.15,
+              "operating_profit_like": 0.15
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 1,
+            "header": "その他の包括利益",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "その他有価証券評価差額金",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "phase_b_fallback"
+      },
+      "page_score": 0.9649999999999997,
+      "table_score": 1.0,
+      "header_confidence": 0.7,
+      "col_confidence": 0.36,
+      "segment_count": 8,
+      "non_reportable_count": 17,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 8
+    }
+  },
+  {
+    "ticker": "2792",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "親会社株主に係る四半期包括利益",
+    "segment_order": 5,
+    "segment_sales": null,
+    "segment_profit": 811.804,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "親会社株主に係る四半期包括利益",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-26",
+    "tdnet_doc_id": "22054480c3ae2cc066ec4ceb",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 8件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B-orient: page=3 orientation=unknown row_seg=2 row_mhdr=0 col_seg=0 col_metric=3 num_cross=9 period=4 bscf=0",
+      "Phase B-boost: skip page=3 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=3 orientation=unknown row_seg=2 row_mhdr=0 col_seg=0 col_metric=3 num_cross=9 period=4 bscf=0",
+      "Phase B-boost: skip page=3 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=9 orientation=unknown row_seg=3 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=3 bscf=1",
+      "Phase B-boost: skip page=9 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=8 orientation=unknown row_seg=4 row_mhdr=0 col_seg=0 col_metric=1 num_cross=2 period=0 bscf=0",
+      "Phase B-orient-decision: page=8 orientation=unknown density_rescue=no header_suppressed=no",
+      "Phase B-orient: page=6 orientation=unknown row_seg=0 row_mhdr=0 col_seg=1 col_metric=0 num_cross=0 period=3 bscf=3",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=6 bscf=3",
+      "Phase B-orient-decision: page=6 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=7 orientation=unknown row_seg=10 row_mhdr=0 col_seg=0 col_metric=11 num_cross=16 period=1 bscf=0",
+      "Phase B-boost: skip page=7 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=0 orientation=unknown row_seg=0 row_mhdr=1 col_seg=2 col_metric=0 num_cross=0 period=5 bscf=0",
+      "Phase B-boost: skip page=0 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=5 orientation=unknown row_seg=0 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=0 bscf=13",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=5 bscf=13",
+      "Phase B-orient-decision: page=5 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=8 orientation=unknown row_seg=4 row_mhdr=0 col_seg=0 col_metric=1 num_cross=2 period=0 bscf=0",
+      "Phase B-boost: page=8 seg_kw_bonus=+0.03",
+      "Phase B-orient-decision: page=8 orientation=unknown density_rescue=no header_suppressed=no",
+      "Phase B: best_table score=1.00 (報告セグメント; セグメント情報; 利益系:損益; 数値列2列; 数値行9行(5+); 数値密度9/25; 行数25; セグメント名行5行; 補助語3個; キャッシュ・フロー(減点); セグメント情報見出し(加点); 事業名パターン2行; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2-pre: column_first status=none segment_count=0 numeric_col_count=0 tokens=[]",
+      "Phase B-2: ACCEPT valid=0 narr=11 numdens=0.5652 repnum=10 cand_score=11.5 rescued_by=table_signal:narrative+detail_breakdown_table_rescue+header_numeric:no_valid_segment+table_signal:total_metric_dominant",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=1, raw=['四半期純利益    1,992,915  1,399,284'], reconstructed=['四半期純利益', '1,992,915', '1,399,284'], units=None",
+      "Unit: raw=千円, mult=1000, src=page_top",
+      "Phase C: transition B(25rows,2cols)→C(25rows,2cols) header_band=1 new_headers=['四半期純利益', '1,992,915', '1,399,284']",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: fallback rerun column diagnosis on Phase B source table sales_col=None profit_col=1",
+      "Phase D: sales_col=None, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=8, skip行=4, non_reportable=17",
+      "Phase F: レコード組立",
+      "Phase F-col: col_as_seg: no header row found (max_seg=0)",
+      "Phase F: 8件のセグメント抽出成功",
+      "Phase G-PF: pl_summary_post_filter SKIP col_as_seg=False n=8"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 8,
+          "score": 1.0,
+          "categories": {
+            "header": 0.49,
+            "numeric_layout": 0.28,
+            "segment_row": 0.33,
+            "exclusion": -0.15,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "報告セグメント; セグメント情報; 利益系:損益; 数値列2列; 数値行9行(5+); 数値密度9/25; 行数25; セグメント名行5行; 補助語3個; キャ",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 8,
+          "score": 0.73,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.28,
+            "segment_row": 0.23,
+            "exclusion": 0.0,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "利益系:損益; 数値列2列; 数値行8行(5+); 数値密度8/11; 行数11; セグメント名行5行; 補助語3個; 三拍子ボーナス(売上/利益+補助語+セグ",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "利益系:損益; 数値列2列; 数値行12行(5+); 数値密度12/15; 行数15; セグメント名行6行; 補助語2個; 三拍子ボーナス(売上/利益+補助語+",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行29行(5+); 数値密度29/38; 行数38; セグメント名行20行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 2,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 0,
+        "narrative_like": 11,
+        "bs_cf_like": 1,
+        "detail_breakdown_like": 4,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 0,
+        "pl_account_like": 1,
+        "top_samples": [
+          "四半期純利益:pl_account_like",
+          "その他の包括利益:unknown",
+          "その他有価証券評価差額金:bs_cf_like",
+          "繰延ヘッジ損益:unknown",
+          "為替換算調整勘定:unknown"
+        ],
+        "numeric_density": 0.5652,
+        "repeated_numeric_rows": 10,
+        "header_keyword_hits": 1,
+        "anchor_hits": 3,
+        "segment_name_like_rows": 5,
+        "narrative_penalty": 11.0,
+        "bs_cf_penalty": 0.0,
+        "rescued_by": "table_signal:narrative+detail_breakdown_table_rescue+header_numeric:no_valid_segment+table_signal:total_metric_dominant",
+        "candidate_score": 11.5
+      },
+      "phase_transition": {
+        "phase_b_rows": 25,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "四半期純利益    1,992,915  1,399,284",
+          "その他の包括利益",
+          "その他有価証券評価差額金  34,958  164,819"
+        ],
+        "phase_c_rows": 25,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "四半期純利益    1,992,915  1,399,284",
+          "その他の包括利益",
+          "その他有価証券評価差額金  34,958  164,819"
+        ],
+        "header_band_h": 1,
+        "best_table_has_sales": false,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "四半期純利益    1,992,915  1,399,284"
+        ],
+        "reconstructed_headers": [
+          "四半期純利益",
+          "その他の包括利益",
+          "その他有価証券評価差額金"
+        ],
+        "column_labels": [
+          [
+            "四半期純利益",
+            "1,992,915",
+            "1,399,284"
+          ],
+          [
+            "その他の包括利益"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like",
+          "sales"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.162,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.36,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "四半期純利益",
+            "scores": {
+              "net_income_like": 0.162,
+              "segment_profit_like": 0.063
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.162,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "その他の包括利益",
+            "scores": {
+              "net_income_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15,
+              "segment_profit_like": 0.36,
+              "operating_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.36,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "その他有価証券評価差額金",
+            "scores": {
+              "net_income_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15,
+              "segment_profit_like": 0.15,
+              "operating_profit_like": 0.15
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 1,
+            "header": "その他の包括利益",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "その他有価証券評価差額金",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "phase_b_fallback"
+      },
+      "page_score": 0.9649999999999997,
+      "table_score": 1.0,
+      "header_confidence": 0.7,
+      "col_confidence": 0.36,
+      "segment_count": 8,
+      "non_reportable_count": 17,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 8
+    }
+  },
+  {
+    "ticker": "2792",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "従来、当社グループの報告セグメントは、「日本」、「ミャンマー」としておりましたが、第",
+    "segment_order": 6,
+    "segment_sales": null,
+    "segment_profit": 0.001,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "従来、当社グループの報告セグメントは、「日本」、「ミャンマー」としておりましたが、第",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-26",
+    "tdnet_doc_id": "22054480c3ae2cc066ec4ceb",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 8件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B-orient: page=3 orientation=unknown row_seg=2 row_mhdr=0 col_seg=0 col_metric=3 num_cross=9 period=4 bscf=0",
+      "Phase B-boost: skip page=3 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=3 orientation=unknown row_seg=2 row_mhdr=0 col_seg=0 col_metric=3 num_cross=9 period=4 bscf=0",
+      "Phase B-boost: skip page=3 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=9 orientation=unknown row_seg=3 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=3 bscf=1",
+      "Phase B-boost: skip page=9 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=8 orientation=unknown row_seg=4 row_mhdr=0 col_seg=0 col_metric=1 num_cross=2 period=0 bscf=0",
+      "Phase B-orient-decision: page=8 orientation=unknown density_rescue=no header_suppressed=no",
+      "Phase B-orient: page=6 orientation=unknown row_seg=0 row_mhdr=0 col_seg=1 col_metric=0 num_cross=0 period=3 bscf=3",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=6 bscf=3",
+      "Phase B-orient-decision: page=6 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=7 orientation=unknown row_seg=10 row_mhdr=0 col_seg=0 col_metric=11 num_cross=16 period=1 bscf=0",
+      "Phase B-boost: skip page=7 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=0 orientation=unknown row_seg=0 row_mhdr=1 col_seg=2 col_metric=0 num_cross=0 period=5 bscf=0",
+      "Phase B-boost: skip page=0 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=5 orientation=unknown row_seg=0 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=0 bscf=13",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=5 bscf=13",
+      "Phase B-orient-decision: page=5 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=8 orientation=unknown row_seg=4 row_mhdr=0 col_seg=0 col_metric=1 num_cross=2 period=0 bscf=0",
+      "Phase B-boost: page=8 seg_kw_bonus=+0.03",
+      "Phase B-orient-decision: page=8 orientation=unknown density_rescue=no header_suppressed=no",
+      "Phase B: best_table score=1.00 (報告セグメント; セグメント情報; 利益系:損益; 数値列2列; 数値行9行(5+); 数値密度9/25; 行数25; セグメント名行5行; 補助語3個; キャッシュ・フロー(減点); セグメント情報見出し(加点); 事業名パターン2行; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2-pre: column_first status=none segment_count=0 numeric_col_count=0 tokens=[]",
+      "Phase B-2: ACCEPT valid=0 narr=11 numdens=0.5652 repnum=10 cand_score=11.5 rescued_by=table_signal:narrative+detail_breakdown_table_rescue+header_numeric:no_valid_segment+table_signal:total_metric_dominant",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=1, raw=['四半期純利益    1,992,915  1,399,284'], reconstructed=['四半期純利益', '1,992,915', '1,399,284'], units=None",
+      "Unit: raw=千円, mult=1000, src=page_top",
+      "Phase C: transition B(25rows,2cols)→C(25rows,2cols) header_band=1 new_headers=['四半期純利益', '1,992,915', '1,399,284']",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: fallback rerun column diagnosis on Phase B source table sales_col=None profit_col=1",
+      "Phase D: sales_col=None, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=8, skip行=4, non_reportable=17",
+      "Phase F: レコード組立",
+      "Phase F-col: col_as_seg: no header row found (max_seg=0)",
+      "Phase F: 8件のセグメント抽出成功",
+      "Phase G-PF: pl_summary_post_filter SKIP col_as_seg=False n=8"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 8,
+          "score": 1.0,
+          "categories": {
+            "header": 0.49,
+            "numeric_layout": 0.28,
+            "segment_row": 0.33,
+            "exclusion": -0.15,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "報告セグメント; セグメント情報; 利益系:損益; 数値列2列; 数値行9行(5+); 数値密度9/25; 行数25; セグメント名行5行; 補助語3個; キャ",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 8,
+          "score": 0.73,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.28,
+            "segment_row": 0.23,
+            "exclusion": 0.0,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "利益系:損益; 数値列2列; 数値行8行(5+); 数値密度8/11; 行数11; セグメント名行5行; 補助語3個; 三拍子ボーナス(売上/利益+補助語+セグ",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "利益系:損益; 数値列2列; 数値行12行(5+); 数値密度12/15; 行数15; セグメント名行6行; 補助語2個; 三拍子ボーナス(売上/利益+補助語+",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行29行(5+); 数値密度29/38; 行数38; セグメント名行20行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 2,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 0,
+        "narrative_like": 11,
+        "bs_cf_like": 1,
+        "detail_breakdown_like": 4,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 0,
+        "pl_account_like": 1,
+        "top_samples": [
+          "四半期純利益:pl_account_like",
+          "その他の包括利益:unknown",
+          "その他有価証券評価差額金:bs_cf_like",
+          "繰延ヘッジ損益:unknown",
+          "為替換算調整勘定:unknown"
+        ],
+        "numeric_density": 0.5652,
+        "repeated_numeric_rows": 10,
+        "header_keyword_hits": 1,
+        "anchor_hits": 3,
+        "segment_name_like_rows": 5,
+        "narrative_penalty": 11.0,
+        "bs_cf_penalty": 0.0,
+        "rescued_by": "table_signal:narrative+detail_breakdown_table_rescue+header_numeric:no_valid_segment+table_signal:total_metric_dominant",
+        "candidate_score": 11.5
+      },
+      "phase_transition": {
+        "phase_b_rows": 25,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "四半期純利益    1,992,915  1,399,284",
+          "その他の包括利益",
+          "その他有価証券評価差額金  34,958  164,819"
+        ],
+        "phase_c_rows": 25,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "四半期純利益    1,992,915  1,399,284",
+          "その他の包括利益",
+          "その他有価証券評価差額金  34,958  164,819"
+        ],
+        "header_band_h": 1,
+        "best_table_has_sales": false,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "四半期純利益    1,992,915  1,399,284"
+        ],
+        "reconstructed_headers": [
+          "四半期純利益",
+          "その他の包括利益",
+          "その他有価証券評価差額金"
+        ],
+        "column_labels": [
+          [
+            "四半期純利益",
+            "1,992,915",
+            "1,399,284"
+          ],
+          [
+            "その他の包括利益"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like",
+          "sales"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.162,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.36,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "四半期純利益",
+            "scores": {
+              "net_income_like": 0.162,
+              "segment_profit_like": 0.063
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.162,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "その他の包括利益",
+            "scores": {
+              "net_income_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15,
+              "segment_profit_like": 0.36,
+              "operating_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.36,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "その他有価証券評価差額金",
+            "scores": {
+              "net_income_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15,
+              "segment_profit_like": 0.15,
+              "operating_profit_like": 0.15
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 1,
+            "header": "その他の包括利益",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "その他有価証券評価差額金",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "phase_b_fallback"
+      },
+      "page_score": 0.9649999999999997,
+      "table_score": 1.0,
+      "header_confidence": 0.7,
+      "col_confidence": 0.36,
+      "segment_count": 8,
+      "non_reportable_count": 17,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 8
+    }
+  },
+  {
+    "ticker": "2792",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "この変更により、前第",
+    "segment_order": 7,
+    "segment_sales": null,
+    "segment_profit": 0.003,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "この変更により、前第",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-26",
+    "tdnet_doc_id": "22054480c3ae2cc066ec4ceb",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 8件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B-orient: page=3 orientation=unknown row_seg=2 row_mhdr=0 col_seg=0 col_metric=3 num_cross=9 period=4 bscf=0",
+      "Phase B-boost: skip page=3 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=3 orientation=unknown row_seg=2 row_mhdr=0 col_seg=0 col_metric=3 num_cross=9 period=4 bscf=0",
+      "Phase B-boost: skip page=3 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=9 orientation=unknown row_seg=3 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=3 bscf=1",
+      "Phase B-boost: skip page=9 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=8 orientation=unknown row_seg=4 row_mhdr=0 col_seg=0 col_metric=1 num_cross=2 period=0 bscf=0",
+      "Phase B-orient-decision: page=8 orientation=unknown density_rescue=no header_suppressed=no",
+      "Phase B-orient: page=6 orientation=unknown row_seg=0 row_mhdr=0 col_seg=1 col_metric=0 num_cross=0 period=3 bscf=3",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=6 bscf=3",
+      "Phase B-orient-decision: page=6 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=7 orientation=unknown row_seg=10 row_mhdr=0 col_seg=0 col_metric=11 num_cross=16 period=1 bscf=0",
+      "Phase B-boost: skip page=7 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=0 orientation=unknown row_seg=0 row_mhdr=1 col_seg=2 col_metric=0 num_cross=0 period=5 bscf=0",
+      "Phase B-boost: skip page=0 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=5 orientation=unknown row_seg=0 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=0 bscf=13",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=5 bscf=13",
+      "Phase B-orient-decision: page=5 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=8 orientation=unknown row_seg=4 row_mhdr=0 col_seg=0 col_metric=1 num_cross=2 period=0 bscf=0",
+      "Phase B-boost: page=8 seg_kw_bonus=+0.03",
+      "Phase B-orient-decision: page=8 orientation=unknown density_rescue=no header_suppressed=no",
+      "Phase B: best_table score=1.00 (報告セグメント; セグメント情報; 利益系:損益; 数値列2列; 数値行9行(5+); 数値密度9/25; 行数25; セグメント名行5行; 補助語3個; キャッシュ・フロー(減点); セグメント情報見出し(加点); 事業名パターン2行; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2-pre: column_first status=none segment_count=0 numeric_col_count=0 tokens=[]",
+      "Phase B-2: ACCEPT valid=0 narr=11 numdens=0.5652 repnum=10 cand_score=11.5 rescued_by=table_signal:narrative+detail_breakdown_table_rescue+header_numeric:no_valid_segment+table_signal:total_metric_dominant",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=1, raw=['四半期純利益    1,992,915  1,399,284'], reconstructed=['四半期純利益', '1,992,915', '1,399,284'], units=None",
+      "Unit: raw=千円, mult=1000, src=page_top",
+      "Phase C: transition B(25rows,2cols)→C(25rows,2cols) header_band=1 new_headers=['四半期純利益', '1,992,915', '1,399,284']",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: fallback rerun column diagnosis on Phase B source table sales_col=None profit_col=1",
+      "Phase D: sales_col=None, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=8, skip行=4, non_reportable=17",
+      "Phase F: レコード組立",
+      "Phase F-col: col_as_seg: no header row found (max_seg=0)",
+      "Phase F: 8件のセグメント抽出成功",
+      "Phase G-PF: pl_summary_post_filter SKIP col_as_seg=False n=8"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 8,
+          "score": 1.0,
+          "categories": {
+            "header": 0.49,
+            "numeric_layout": 0.28,
+            "segment_row": 0.33,
+            "exclusion": -0.15,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "報告セグメント; セグメント情報; 利益系:損益; 数値列2列; 数値行9行(5+); 数値密度9/25; 行数25; セグメント名行5行; 補助語3個; キャ",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 8,
+          "score": 0.73,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.28,
+            "segment_row": 0.23,
+            "exclusion": 0.0,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "利益系:損益; 数値列2列; 数値行8行(5+); 数値密度8/11; 行数11; セグメント名行5行; 補助語3個; 三拍子ボーナス(売上/利益+補助語+セグ",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "利益系:損益; 数値列2列; 数値行12行(5+); 数値密度12/15; 行数15; セグメント名行6行; 補助語2個; 三拍子ボーナス(売上/利益+補助語+",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行29行(5+); 数値密度29/38; 行数38; セグメント名行20行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 2,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 0,
+        "narrative_like": 11,
+        "bs_cf_like": 1,
+        "detail_breakdown_like": 4,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 0,
+        "pl_account_like": 1,
+        "top_samples": [
+          "四半期純利益:pl_account_like",
+          "その他の包括利益:unknown",
+          "その他有価証券評価差額金:bs_cf_like",
+          "繰延ヘッジ損益:unknown",
+          "為替換算調整勘定:unknown"
+        ],
+        "numeric_density": 0.5652,
+        "repeated_numeric_rows": 10,
+        "header_keyword_hits": 1,
+        "anchor_hits": 3,
+        "segment_name_like_rows": 5,
+        "narrative_penalty": 11.0,
+        "bs_cf_penalty": 0.0,
+        "rescued_by": "table_signal:narrative+detail_breakdown_table_rescue+header_numeric:no_valid_segment+table_signal:total_metric_dominant",
+        "candidate_score": 11.5
+      },
+      "phase_transition": {
+        "phase_b_rows": 25,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "四半期純利益    1,992,915  1,399,284",
+          "その他の包括利益",
+          "その他有価証券評価差額金  34,958  164,819"
+        ],
+        "phase_c_rows": 25,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "四半期純利益    1,992,915  1,399,284",
+          "その他の包括利益",
+          "その他有価証券評価差額金  34,958  164,819"
+        ],
+        "header_band_h": 1,
+        "best_table_has_sales": false,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "四半期純利益    1,992,915  1,399,284"
+        ],
+        "reconstructed_headers": [
+          "四半期純利益",
+          "その他の包括利益",
+          "その他有価証券評価差額金"
+        ],
+        "column_labels": [
+          [
+            "四半期純利益",
+            "1,992,915",
+            "1,399,284"
+          ],
+          [
+            "その他の包括利益"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like",
+          "sales"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.162,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.36,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "四半期純利益",
+            "scores": {
+              "net_income_like": 0.162,
+              "segment_profit_like": 0.063
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.162,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "その他の包括利益",
+            "scores": {
+              "net_income_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15,
+              "segment_profit_like": 0.36,
+              "operating_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.36,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "その他有価証券評価差額金",
+            "scores": {
+              "net_income_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15,
+              "segment_profit_like": 0.15,
+              "operating_profit_like": 0.15
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 1,
+            "header": "その他の包括利益",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "その他有価証券評価差額金",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "phase_b_fallback"
+      },
+      "page_score": 0.9649999999999997,
+      "table_score": 1.0,
+      "header_confidence": 0.7,
+      "col_confidence": 0.36,
+      "segment_count": 8,
+      "non_reportable_count": 17,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 8
+    }
+  },
+  {
+    "ticker": "2792",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "当第",
+    "segment_order": 8,
+    "segment_sales": null,
+    "segment_profit": 0.003,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "当第",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-26",
+    "tdnet_doc_id": "22054480c3ae2cc066ec4ceb",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 8件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B-orient: page=3 orientation=unknown row_seg=2 row_mhdr=0 col_seg=0 col_metric=3 num_cross=9 period=4 bscf=0",
+      "Phase B-boost: skip page=3 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=3 orientation=unknown row_seg=2 row_mhdr=0 col_seg=0 col_metric=3 num_cross=9 period=4 bscf=0",
+      "Phase B-boost: skip page=3 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=9 orientation=unknown row_seg=3 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=3 bscf=1",
+      "Phase B-boost: skip page=9 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=8 orientation=unknown row_seg=4 row_mhdr=0 col_seg=0 col_metric=1 num_cross=2 period=0 bscf=0",
+      "Phase B-orient-decision: page=8 orientation=unknown density_rescue=no header_suppressed=no",
+      "Phase B-orient: page=6 orientation=unknown row_seg=0 row_mhdr=0 col_seg=1 col_metric=0 num_cross=0 period=3 bscf=3",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=6 bscf=3",
+      "Phase B-orient-decision: page=6 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=7 orientation=unknown row_seg=10 row_mhdr=0 col_seg=0 col_metric=11 num_cross=16 period=1 bscf=0",
+      "Phase B-boost: skip page=7 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=0 orientation=unknown row_seg=0 row_mhdr=1 col_seg=2 col_metric=0 num_cross=0 period=5 bscf=0",
+      "Phase B-boost: skip page=0 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=5 orientation=unknown row_seg=0 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=0 bscf=13",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=5 bscf=13",
+      "Phase B-orient-decision: page=5 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=8 orientation=unknown row_seg=4 row_mhdr=0 col_seg=0 col_metric=1 num_cross=2 period=0 bscf=0",
+      "Phase B-boost: page=8 seg_kw_bonus=+0.03",
+      "Phase B-orient-decision: page=8 orientation=unknown density_rescue=no header_suppressed=no",
+      "Phase B: best_table score=1.00 (報告セグメント; セグメント情報; 利益系:損益; 数値列2列; 数値行9行(5+); 数値密度9/25; 行数25; セグメント名行5行; 補助語3個; キャッシュ・フロー(減点); セグメント情報見出し(加点); 事業名パターン2行; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2-pre: column_first status=none segment_count=0 numeric_col_count=0 tokens=[]",
+      "Phase B-2: ACCEPT valid=0 narr=11 numdens=0.5652 repnum=10 cand_score=11.5 rescued_by=table_signal:narrative+detail_breakdown_table_rescue+header_numeric:no_valid_segment+table_signal:total_metric_dominant",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=1, raw=['四半期純利益    1,992,915  1,399,284'], reconstructed=['四半期純利益', '1,992,915', '1,399,284'], units=None",
+      "Unit: raw=千円, mult=1000, src=page_top",
+      "Phase C: transition B(25rows,2cols)→C(25rows,2cols) header_band=1 new_headers=['四半期純利益', '1,992,915', '1,399,284']",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: fallback rerun column diagnosis on Phase B source table sales_col=None profit_col=1",
+      "Phase D: sales_col=None, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=8, skip行=4, non_reportable=17",
+      "Phase F: レコード組立",
+      "Phase F-col: col_as_seg: no header row found (max_seg=0)",
+      "Phase F: 8件のセグメント抽出成功",
+      "Phase G-PF: pl_summary_post_filter SKIP col_as_seg=False n=8"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 8,
+          "score": 1.0,
+          "categories": {
+            "header": 0.49,
+            "numeric_layout": 0.28,
+            "segment_row": 0.33,
+            "exclusion": -0.15,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "報告セグメント; セグメント情報; 利益系:損益; 数値列2列; 数値行9行(5+); 数値密度9/25; 行数25; セグメント名行5行; 補助語3個; キャ",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 8,
+          "score": 0.73,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.28,
+            "segment_row": 0.23,
+            "exclusion": 0.0,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "利益系:損益; 数値列2列; 数値行8行(5+); 数値密度8/11; 行数11; セグメント名行5行; 補助語3個; 三拍子ボーナス(売上/利益+補助語+セグ",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "利益系:損益; 数値列2列; 数値行12行(5+); 数値密度12/15; 行数15; セグメント名行6行; 補助語2個; 三拍子ボーナス(売上/利益+補助語+",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行29行(5+); 数値密度29/38; 行数38; セグメント名行20行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 2,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 0,
+        "narrative_like": 11,
+        "bs_cf_like": 1,
+        "detail_breakdown_like": 4,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 0,
+        "pl_account_like": 1,
+        "top_samples": [
+          "四半期純利益:pl_account_like",
+          "その他の包括利益:unknown",
+          "その他有価証券評価差額金:bs_cf_like",
+          "繰延ヘッジ損益:unknown",
+          "為替換算調整勘定:unknown"
+        ],
+        "numeric_density": 0.5652,
+        "repeated_numeric_rows": 10,
+        "header_keyword_hits": 1,
+        "anchor_hits": 3,
+        "segment_name_like_rows": 5,
+        "narrative_penalty": 11.0,
+        "bs_cf_penalty": 0.0,
+        "rescued_by": "table_signal:narrative+detail_breakdown_table_rescue+header_numeric:no_valid_segment+table_signal:total_metric_dominant",
+        "candidate_score": 11.5
+      },
+      "phase_transition": {
+        "phase_b_rows": 25,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "四半期純利益    1,992,915  1,399,284",
+          "その他の包括利益",
+          "その他有価証券評価差額金  34,958  164,819"
+        ],
+        "phase_c_rows": 25,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "四半期純利益    1,992,915  1,399,284",
+          "その他の包括利益",
+          "その他有価証券評価差額金  34,958  164,819"
+        ],
+        "header_band_h": 1,
+        "best_table_has_sales": false,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "四半期純利益    1,992,915  1,399,284"
+        ],
+        "reconstructed_headers": [
+          "四半期純利益",
+          "その他の包括利益",
+          "その他有価証券評価差額金"
+        ],
+        "column_labels": [
+          [
+            "四半期純利益",
+            "1,992,915",
+            "1,399,284"
+          ],
+          [
+            "その他の包括利益"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like",
+          "sales"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.063,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.162,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.36,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 0,
+            "header": "四半期純利益",
+            "scores": {
+              "net_income_like": 0.162,
+              "segment_profit_like": 0.063
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.162,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "その他の包括利益",
+            "scores": {
+              "net_income_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15,
+              "segment_profit_like": 0.36,
+              "operating_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.36,
+            "selected": true
+          },
+          {
+            "col": 2,
+            "header": "その他有価証券評価差額金",
+            "scores": {
+              "net_income_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15,
+              "segment_profit_like": 0.15,
+              "operating_profit_like": 0.15
+            },
+            "best_role": "net_income_like",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 1,
+            "header": "その他の包括利益",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "その他有価証券評価差額金",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "phase_b_fallback"
+      },
+      "page_score": 0.9649999999999997,
+      "table_score": 1.0,
+      "header_confidence": 0.7,
+      "col_confidence": 0.36,
+      "segment_count": 8,
+      "non_reportable_count": 17,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 0,
+      "parse_quality_partial": 8
+    }
+  }
+]

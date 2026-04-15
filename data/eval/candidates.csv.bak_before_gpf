@@ -1,0 +1,90 @@
+pdf,ticker,detected_mode,parse_quality,quarantine_reason,segment_count,page_number,unit_text
+140120260204547727.pdf,?,ROW_BASED,sales_only,,4,0,"Unit: raw=千円, mult=1000, src=page_top"
+140120260225568450.pdf,?,ROW_BASED,partial,,7,0,"Unit: raw=百万円, mult=1000000, src=page_top"
+140120260303574773.pdf,?,quarantine,,candidate_guard:no_valid_segment_rows,0,,
+140120260304575669.pdf,?,quarantine,,candidate_guard:bs_cf_guard,0,,
+140120260304575759.pdf,?,ROW_BASED,partial,,7,2,"Unit: raw=千円, mult=1000, src=page_top"
+140120260304576030.pdf,?,ROW_BASED,partial,,6,0,"Unit: raw=千円, mult=1000, src=page_top"
+140120260306577666.pdf,?,ROW_BASED,full,,5,0,"Unit: raw=百万円, mult=1000000, src=page_top"
+140120260306577673.pdf,?,quarantine,,no_segment_table_candidate,0,,
+140120260309578005.pdf,?,ROW_BASED,partial,,32,0,"Unit: raw=千円, mult=1000, src=page_top"
+140120260310578871.pdf,?,COL_AS_SEG,full,,4,9,"Unit: raw=千円, mult=1000, src=header"
+140120260310578917.pdf,?,ROW_BASED,partial,,25,5,"Unit: raw=千円, mult=1000, src=page_top"
+140120260310578923.pdf,?,ROW_BASED,sales_only,,5,0,"Unit: raw=千円, mult=1000, src=page_top"
+140120260310579032.pdf,?,quarantine,,candidate_guard:bs_cf_guard,0,,
+140120260310579206.pdf,?,ROW_BASED,full,,1,1,"Unit: raw=千円, mult=1000, src=header"
+140120260311579461.pdf,?,ROW_BASED,full,,5,0,"Unit: raw=千円, mult=1000, src=page_top"
+140120260311579492.pdf,?,ROW_BASED,partial,,5,2,"Unit: raw=千円, mult=1000, src=header"
+140120260311579609.pdf,?,COL_AS_SEG,full,,3,9,"Unit: raw=千円, mult=1000, src=page_top"
+140120260311579628.pdf,?,ROW_BASED,partial,,6,8,"Unit: raw=百万円, mult=1000000, src=header"
+140120260311580151.pdf,?,quarantine,,no_segment_table_candidate,0,,
+140120260312580203.pdf,?,ROW_BASED,partial,,26,14,"Unit: raw=None, mult=None, src=None"
+140120260312580243.pdf,?,ROW_BASED,partial,,32,1,"Unit: raw=百万円, mult=1000000, src=nearby"
+140120260312580246.pdf,?,COL_AS_SEG,full,,3,9,"Unit: raw=百万円, mult=1000000, src=page_top"
+140120260312580339.pdf,?,COL_AS_SEG,full,,3,8,"Unit: raw=千円, mult=1000, src=page_top"
+140120260312580378.pdf,?,ROW_BASED,partial,,30,0,"Unit: raw=百万円, mult=1000000, src=page_top"
+140120260312580469.pdf,?,quarantine,,candidate_guard:bs_cf_guard,0,,
+140120260312580491.pdf,?,ROW_BASED,sales_only,,10,0,"Unit: raw=千円, mult=1000, src=page_top"
+140120260312580576.pdf,?,quarantine,,candidate_guard:bs_cf_guard,0,,
+140120260312580582.pdf,?,ROW_BASED,full,,9,0,"Unit: raw=千円, mult=1000, src=page_top"
+140120260312580646.pdf,?,ROW_BASED,full,,4,0,"Unit: raw=千円, mult=1000, src=page_top"
+140120260312580647.pdf,?,ROW_BASED,full,,36,0,"Unit: raw=百万円, mult=1000000, src=header"
+140120260312580654.pdf,?,ROW_BASED,partial,,32,5,"Unit: raw=百万円, mult=1000000, src=header"
+140120260312580690.pdf,?,quarantine,,no_segment_table_candidate,0,,
+140120260312580704.pdf,?,ROW_BASED,partial,,4,7,"Unit: raw=千円, mult=1000, src=page_top"
+140120260312580766.pdf,?,ROW_BASED,full,,5,6,"Unit: raw=千円, mult=1000, src=page_top"
+140120260312580819.pdf,?,ROW_BASED,partial,,3,2,"Unit: raw=千円, mult=1000, src=page_top"
+140120260312580835.pdf,?,COL_AS_SEG,sales_only,,2,11,"Unit: raw=千円, mult=1000, src=page_top"
+140120260312580844.pdf,?,quarantine,,no_segment_table_candidate,0,,
+140120260312580847.pdf,?,ROW_BASED,full,,5,0,"Unit: raw=千円, mult=1000, src=page_top"
+140120260312580849.pdf,?,ROW_BASED,full,,2,0,"Unit: raw=千円, mult=1000, src=page_top"
+140120260312580918.pdf,?,COL_AS_SEG,sales_only,,2,14,"Unit: raw=百万円, mult=1000000, src=page_top"
+140120260312580921.pdf,?,quarantine,,candidate_guard:bs_cf_guard,0,,
+140120260312580943.pdf,?,ROW_BASED,full,,3,0,"Unit: raw=百万円, mult=1000000, src=page_top"
+140120260312580948.pdf,?,quarantine,,candidate_guard:narrative_guard,0,,
+140120260312580991.pdf,?,COL_AS_SEG,full,,2,10,"Unit: raw=千円, mult=1000, src=page_top"
+140120260312581037.pdf,?,ROW_BASED,partial,,7,0,"Unit: raw=千円, mult=1000, src=page_top"
+140120260313580708.pdf,?,ROW_BASED,partial,,12,6,"Unit: raw=千円, mult=1000, src=header"
+140120260313580717.pdf,?,quarantine,,candidate_guard:narrative_guard,0,,
+140120260313581050.pdf,?,quarantine,,candidate_guard:no_valid_segment_rows,0,,
+140120260313581078.pdf,?,ROW_BASED,full,,5,0,"Unit: raw=千円, mult=1000, src=page_top"
+140120260313581088.pdf,?,ROW_BASED,partial,,24,12,"Unit: raw=百万円, mult=1000000, src=page_body"
+140120260313581133.pdf,?,COL_AS_SEG,full,,2,10,"Unit: raw=千円, mult=1000, src=page_top"
+140120260313581167.pdf,?,ROW_BASED,full,,2,9,"Unit: raw=千円, mult=1000, src=header"
+140120260313581191.pdf,?,ROW_BASED,full,,5,0,"Unit: raw=百万円, mult=1000000, src=nearby"
+140120260313581209.pdf,?,ROW_BASED,partial,,19,0,"Unit: raw=千円, mult=1000, src=page_top"
+140120260313581228.pdf,?,COL_AS_SEG,full,,2,9,"Unit: raw=千円, mult=1000, src=page_top"
+140120260313581230.pdf,?,quarantine,,candidate_guard:bs_cf_guard,0,,
+140120260313581307.pdf,?,quarantine,,candidate_guard:bs_cf_guard,0,,
+140120260313581310.pdf,?,ROW_BASED,full,,25,0,"Unit: raw=千円, mult=1000, src=page_top"
+140120260313581313.pdf,?,ROW_BASED,partial,,11,4,"Unit: raw=千円, mult=1000, src=header"
+140120260313581320.pdf,?,ROW_BASED,partial,,43,3,"Unit: raw=百万円, mult=1000000, src=page_top"
+140120260313581329.pdf,?,COL_AS_SEG,full,,2,12,"Unit: raw=千円, mult=1000, src=page_top"
+140120260313581337.pdf,?,ROW_BASED,partial,,12,6,"Unit: raw=千円, mult=1000, src=page_top"
+140120260313581339.pdf,?,ROW_BASED,partial,,6,6,"Unit: raw=千円, mult=1000, src=header"
+140120260313581377.pdf,?,ROW_BASED,partial,,6,5,"Unit: raw=千円, mult=1000, src=page_top"
+140120260313581385.pdf,?,ROW_BASED,partial,,12,0,"Unit: raw=千円, mult=1000, src=page_top"
+140120260313581389.pdf,?,COL_AS_SEG,full,,4,9,"Unit: raw=千円, mult=1000, src=header"
+140120260313581414.pdf,?,COL_AS_SEG,full,,2,11,"Unit: raw=千円, mult=1000, src=page_top"
+140120260313581416.pdf,?,quarantine,,no_segment_table_candidate,0,,
+140120260313581453.pdf,?,COL_AS_SEG,full,,2,9,"Unit: raw=千円, mult=1000, src=page_top"
+140120260313581479.pdf,?,ROW_BASED,sales_only,,2,15,"Unit: raw=百万円, mult=1000000, src=page_top"
+140120260313581490.pdf,?,quarantine,,candidate_guard:bs_cf_guard,0,,
+140120260313581523.pdf,?,ROW_BASED,partial,,5,2,"Unit: raw=百万円, mult=1000000, src=header"
+140120260313581537.pdf,?,ROW_BASED,partial,,5,5,"Unit: raw=百万円, mult=1000000, src=page_top"
+140120260313581558.pdf,?,ROW_BASED,partial,,6,1,"Unit: raw=百万円, mult=1000000, src=header"
+140120260313581579.pdf,?,quarantine,,candidate_guard:bs_cf_guard,0,,
+140120260313581581.pdf,?,ROW_BASED,full,,3,0,"Unit: raw=千円, mult=1000, src=page_top"
+140120260313581595.pdf,?,ROW_BASED,partial,,37,15,"Unit: raw=千円, mult=1000, src=page_top"
+140120260313581606.pdf,?,quarantine,,candidate_guard:bs_cf_guard,0,,
+140120260313581612.pdf,?,ROW_BASED,partial,,33,4,"Unit: raw=千円, mult=1000, src=nearby"
+140120260313581638.pdf,?,quarantine,,no_segment_table_candidate,0,,
+140120260313581653.pdf,?,ROW_BASED,partial,,12,3,"Unit: raw=百万円, mult=1000000, src=page_top"
+140120260313581677.pdf,?,ROW_BASED,full,,6,0,"Unit: raw=千円, mult=1000, src=nearby"
+140120260313581716.pdf,?,ROW_BASED,partial,,24,5,"Unit: raw=百万円, mult=1000000, src=page_body"
+140120260313581725.pdf,?,quarantine,,no_segment_table_candidate,0,,
+140120260313581728.pdf,?,quarantine,,candidate_guard:bs_cf_guard,0,,
+140120260313581742.pdf,?,quarantine,,candidate_guard:narrative_guard,0,,
+140120260313581778.pdf,?,quarantine,,candidate_guard:bs_cf_guard,0,,
+140120260313581822.pdf,?,ROW_BASED,partial,,5,16,"Unit: raw=千円, mult=1000, src=page_top"
+140120260313581833.pdf,?,ROW_BASED,full,,6,0,"Unit: raw=千円, mult=1000, src=page_top"

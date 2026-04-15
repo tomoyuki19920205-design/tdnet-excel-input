@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "5218",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "Optical Products",
+    "segment_order": 1,
+    "segment_sales": 4130,
+    "segment_profit": 35,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Optical Products",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-13",
+    "tdnet_doc_id": "2686be834d4d40d1963f9a9a",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "5218",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "Electronics",
+    "segment_order": 2,
+    "segment_sales": 3044,
+    "segment_profit": 293,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Electronics",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-13",
+    "tdnet_doc_id": "2686be834d4d40d1963f9a9a",
+    "row_type": "segment"
+  }
+]

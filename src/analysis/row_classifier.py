@@ -47,9 +47,15 @@ NARRATIVE_WEAK_KW = [
 # 後方互換用 (既存参照がある場合)
 NARRATIVE_KW = NARRATIVE_STRONG_KW + NARRATIVE_WEAK_KW
 
+# --- PL_summary_guard 用パターン ---
+# (A) 全社 PL 指標キーワード
+_PL_SUMMARY_METRICS = [
+    "売上高", "営業利益", "経常利益", "当期純利益", "親会社株主に帰属",
+]
 # 自然文シグナル: 助詞パターン
 _SENTENCE_PARTICLES = ("は", "が", "を", "に", "で", "と", "へ", "から", "まで")
 _SENTENCE_ENDINGS = ("により", "となりました", "なりました", "ました", "です", "ある", "おり")
+
 
 # --- BS/CF 項目 ---
 BS_CF_KW = [
@@ -416,6 +422,7 @@ class CandidateGuardResult:
     """候補テーブル全体の品質判定結果"""
     accepted: bool = False
     reject_reason: str = ""
+    dropped_by: str = ""  # Phase 2: 何で落とされたか (reject_reason より詳細)
 
     # 行分類集計
     total_rows: int = 0
@@ -427,15 +434,90 @@ class CandidateGuardResult:
     total_or_metric_like: int = 0
     garbage_fragment_like: int = 0
     unknown: int = 0
+    non_total_segment_rows: int = 0  # Phase 2: total-like を除外したセグメント行数
+
+    # 表シグナル (外部から渡される or 内部計算)
+    numeric_density: float = 0.0
+    repeated_numeric_rows: int = 0
+    header_keyword_hits: int = 0
+    segment_name_like_rows: int = 0
+    narrative_penalty: float = 0.0
+    bs_cf_penalty: float = 0.0
+    rescued_by: str = ""
+    candidate_score: float = 0.0
 
     # デバッグ用
     row_classifications: list[RowClassResult] = field(default_factory=list)
     top_samples: list[str] = field(default_factory=list)
 
 
+# ============================================================
+# 候補テーブルの表シグナル算出
+# ============================================================
+
+_NUMERIC_TOKEN_RE = re.compile(
+    r'[△▲]?\s*[\d,]+(?:\.\d+)?'
+)
+
+# Phase 2: total-like ラベル (non_total_segment_rows 算出用)
+_TOTAL_LIKE_LABELS = {
+    "合計", "計", "小計", "全社", "調整額", "消去", "連結",
+    "売上高", "営業利益", "経常利益", "純利益", "利益", "損失",
+    "収益", "営業収益", "純営業収益",
+    "内部売上高", "内部営業収益",
+    "セグメント間内部売上高", "セグメント間内部営業収益",
+}
+_TOTAL_LIKE_SUFFIXES = ("計", "合計", "小計")
+_TOTAL_LIKE_PREFIXES = ("消去又は全社", "消去・全社", "調整額及び全社")
+
+
+def compute_candidate_table_signals(
+    candidate_lines: list[str],
+) -> tuple[float, int, int]:
+    """
+    候補テーブル行テキストから numeric_density, repeated_numeric_rows,
+    distinct_numeric_positions を算出する。
+
+    Returns:
+        (numeric_density, repeated_numeric_rows, distinct_numeric_positions)
+    """
+    total_tokens = 0
+    numeric_tokens = 0
+    repeated_numeric_rows = 0
+    # Phase 3: 数値トークンが出現する列位置を集計
+    _num_pos_counter: dict[int, int] = {}  # pos -> count
+
+    for line in candidate_lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        tokens = stripped.split()
+        total_tokens += max(len(tokens), 1)
+        num_positions = [m.start() for m in _NUMERIC_TOKEN_RE.finditer(stripped)]
+        num_in_line = len(num_positions)
+        numeric_tokens += num_in_line
+        if num_in_line >= 2:
+            repeated_numeric_rows += 1
+        # 各数値位置を粗いバケット (10文字幅) で丸めて位置カウント
+        for pos in num_positions:
+            bucket = pos // 10
+            _num_pos_counter[bucket] = _num_pos_counter.get(bucket, 0) + 1
+
+    numeric_density = numeric_tokens / max(total_tokens, 1)
+    # distinct_numeric_positions: 2行以上で出現する位置バケットの数
+    distinct_numeric_positions = sum(
+        1 for cnt in _num_pos_counter.values() if cnt >= 2
+    )
+    return numeric_density, repeated_numeric_rows, distinct_numeric_positions
+
+
 def evaluate_candidate_guard(
     row_labels: list[str],
     *,
+    candidate_lines: list[str] | None = None,
+    header_keyword_hits: int = 0,
+    anchor_hits: int = 0,
+    segment_name_like_rows: int = 0,
     min_valid_segments: int = 2,
     narrative_ratio_threshold: float = 0.40,
     bs_cf_ratio_threshold: float = 0.15,
@@ -444,22 +526,81 @@ def evaluate_candidate_guard(
     """
     候補テーブルの行ラベル群を分類・集計し、候補を accept/reject する。
 
-    reject 条件:
-    1. narrative 汚染:
-       - narrative + garbage >= 2 かつ > valid_segment
-       - narrative / total >= 0.25
-    2. BS/CF 汚染:
-       - bs_cf >= 1 かつ valid_segment < 2
-       - bs_cf / total >= 0.15
-    3. detail breakdown 混在:
-       - detail > valid_segment
-       - detail + total_or_metric > 過半
-    4. valid segment 不足:
-       - valid_segment < 2
-    5. total/metric 優勢:
-       - total_or_metric >= valid_segment かつ valid_segment <= 1
+    表シグナル (header_keyword_hits, numeric_density, repeated_numeric_rows) が
+    十分強い場合は narrative_guard / bs_cf_guard の即死を回避し、候補として残す。
+
+    Args:
+        row_labels: 行ラベル群
+        candidate_lines: 候補テーブルの raw テキスト行 (numeric_density 算出用)
+        header_keyword_hits: 売上高/営業利益 等のヘッダーキーワードヒット数 (外部算出)
+        anchor_hits: セグメントアンカーキーワードヒット数 (外部算出)
+        segment_name_like_rows: セグメント名らしい行数 (外部算出)
     """
     result = CandidateGuardResult()
+
+    # --- 表シグナル算出 ---
+    numeric_density = 0.0
+    repeated_numeric_rows = 0
+    distinct_numeric_positions = 0
+    if candidate_lines:
+        numeric_density, repeated_numeric_rows, distinct_numeric_positions = (
+            compute_candidate_table_signals(candidate_lines)
+        )
+    result.numeric_density = round(numeric_density, 4)
+    result.repeated_numeric_rows = repeated_numeric_rows
+
+    # --- header_keyword_hits 内部補完 ---
+    # 外部算出値が 0 のとき、candidate_lines を直接スキャンして補完する。
+    # 正規化・拡張キーワード・前後近傍行の3点を強化。
+    if header_keyword_hits == 0 and candidate_lines:
+        _SALES_KW = [
+            "売上高", "外部顧客への売上高", "売上収益", "営業収益",
+            "net sales", "revenues",
+        ]
+        _PROFIT_KW = [
+            "セグメント利益", "セグメント損失", "営業利益",
+            "operating profit", "operating income",
+        ]
+
+        def _norm_hdr(s: str) -> str:
+            """文字間空白除去 + 全角スペース統一"""
+            s = s.replace("\u3000", " ").replace("\t", " ")
+            s = re.sub(r'(?<=[\u3040-\u9fff\uff00-\uffef])\s+(?=[\u3040-\u9fff\uff00-\uffef])', "", s)
+            s = re.sub(r'\s+', " ", s)
+            return s.lower()
+
+        _lines_normed = [_norm_hdr(ln) for ln in candidate_lines]
+        _found_sales = False
+        _found_profit = False
+        for _i, _ln in enumerate(_lines_normed):
+            # 前行・当該行・次行の近傍ウィンドウ
+            _window = _ln
+            if _i > 0:
+                _window = _lines_normed[_i - 1] + " " + _window
+            if _i < len(_lines_normed) - 1:
+                _window = _window + " " + _lines_normed[_i + 1]
+            if not _found_sales and any(kw in _window for kw in _SALES_KW):
+                _found_sales = True
+            if not _found_profit and any(kw in _window for kw in _PROFIT_KW):
+                _found_profit = True
+            if _found_sales and _found_profit:
+                break
+        header_keyword_hits = int(_found_sales) + int(_found_profit)
+
+    result.header_keyword_hits = header_keyword_hits
+    seg_header_flag = (header_keyword_hits >= 1)
+    result.segment_name_like_rows = segment_name_like_rows
+
+    # 表シグナル強度判定
+    _has_table_signal = (
+        header_keyword_hits >= 1
+        and numeric_density >= 0.10
+        and repeated_numeric_rows >= 2
+    )
+    _has_strong_table_signal = (
+        header_keyword_hits >= 2
+        and repeated_numeric_rows >= 3
+    )
 
     # 行分類
     classifications: list[RowClassResult] = []
@@ -492,6 +633,26 @@ def evaluate_candidate_guard(
     result.unknown = counts["unknown"]
     result.row_classifications = classifications
 
+    # Phase 2: non_total_segment_rows 算出
+    # total-like ラベル (合計/全社/調整額/消去等) を除外した行数
+    _non_total = 0
+    for cls in classifications:
+        if cls.class_name == "total_or_metric_like":
+            continue
+        if cls.class_name in ("narrative_like", "bs_cf_like", "pl_account_like",
+                              "garbage_fragment_like"):
+            continue
+        _lab = cls.label_normalized.strip()
+        if _lab in _TOTAL_LIKE_LABELS:
+            continue
+        if any(_lab.endswith(s) for s in _TOTAL_LIKE_SUFFIXES) and len(_lab) >= 2:
+            continue
+        if any(_lab.startswith(p) for p in _TOTAL_LIKE_PREFIXES):
+            continue
+        if _lab:  # 空ラベルは除外
+            _non_total += 1
+    result.non_total_segment_rows = _non_total
+
     # デバッグ用サンプル
     result.top_samples = [
         f"{cls.label_normalized}:{cls.class_name}"
@@ -510,48 +671,260 @@ def evaluate_candidate_guard(
     t = result.total_or_metric_like
     p = result.pl_account_like
 
-    # --- reject checks ---
+    # --- reject checks (表シグナル救済付き) ---
+
+    # 修正4: valid_segment が 1件以上あれば早期通過
+    if v >= 1:
+        result.accepted = True
+        return result
 
     # 1. narrative 汚染
-    # ★ garbage を narrative と同列にカウントしない
-    # narrative 単独で 3 行以上 かつ valid_segment より多い場合のみ reject
+    # narrative 単独で 3 行以上 かつ valid_segment より多い場合 reject
+    # ただし表シグナルが十分強ければ reject しない
+    _narrative_triggered = False
     if n >= 3 and n > v:
-        result.reject_reason = "narrative_guard"
-        return result
+        _narrative_triggered = True
     if total > 0 and n / total >= narrative_ratio_threshold:
-        result.reject_reason = "narrative_guard"
-        return result
+        _narrative_triggered = True
 
-    # 2. BS/CF 汚染
-    if b >= 1 and v < min_valid_segments:
-        result.reject_reason = "bs_cf_guard"
-        return result
-    if total > 0 and b / total >= bs_cf_ratio_threshold:
-        result.reject_reason = "bs_cf_guard"
-        return result
+    if _narrative_triggered:
+        result.narrative_penalty = float(n)
+        if _has_strong_table_signal:
+            # 強い表シグナル → narrative_guard を回避
+            result.rescued_by = "strong_table_signal:narrative"
+            logger.debug(
+                f"[candidate_guard] narrative_guard RESCUED: "
+                f"hdr={header_keyword_hits} numdens={numeric_density:.3f} "
+                f"repnum={repeated_numeric_rows} n={n} v={v}"
+            )
+        elif _has_table_signal:
+            # 表シグナルあり → narrative_guard を回避
+            result.rescued_by = "table_signal:narrative"
+            logger.debug(
+                f"[candidate_guard] narrative_guard RESCUED (weak): "
+                f"hdr={header_keyword_hits} numdens={numeric_density:.3f} "
+                f"repnum={repeated_numeric_rows} n={n} v={v}"
+            )
+        else:
+            # 修正3: valid_segment が 0件のときだけ reject
+            if v == 0:
+                result.reject_reason = "narrative_guard"
+                return result
 
-    # 3. PL 汚染
+    # 2. BS/CF 汚染 (表シグナル救済付き)
+    _bscf_triggered = False
+    # 修正2: b>=3 かつ valid_segment=0 のときだけ発火
+    if b >= 3 and v < 1:
+        _bscf_b_limit = 5 if result.header_keyword_hits >= 1 else 3
+        _bscf_light_exempt = (
+            b <= _bscf_b_limit
+            and (
+                segment_name_like_rows >= 3
+                or result.header_keyword_hits >= 1
+            )
+        )
+        if not _bscf_light_exempt:
+            _bscf_triggered = True
+    if total > 0 and b / total >= bs_cf_ratio_threshold and v == 0:
+        # Phase BでBS判定済みならスキップ
+        if not getattr(result, "bs_table_detected", False):
+            _bscf_triggered = True
+
+    if _bscf_triggered:
+        result.bs_cf_penalty = float(b)
+        if _has_table_signal:
+            # 表シグナルあり → bs_cf_guard を回避
+            if not result.rescued_by:
+                result.rescued_by = "table_signal:bs_cf"
+            else:
+                result.rescued_by += "+table_signal:bs_cf"
+            logger.debug(
+                f"[candidate_guard] bs_cf_guard RESCUED: "
+                f"hdr={header_keyword_hits} numdens={numeric_density:.3f} "
+                f"repnum={repeated_numeric_rows} b={b} v={v}"
+            )
+        else:
+            # DISABLED: allow PDF segment tables to pass
+            # result.reject_reason = "bs_cf_guard"
+            # return result
+            pass
+
+    # 3. PL 汚染 (rescue 対象外 — PL は表構造を持つため表シグナルでは区別できない)
     if p >= 3:
         result.reject_reason = "pl_guard"
         return result
 
-    # 4. detail breakdown 混在
+    # 4. detail breakdown 混在 (Phase 2: 表シグナル救済付き)
+    _detail_triggered = False
     if d > v:
-        result.reject_reason = "detail_breakdown_guard"
-        return result
+        _detail_triggered = True
     if total > 0 and (d + t) / total > 0.5 and v < min_valid_segments:
-        result.reject_reason = "invalid_structure"
-        return result
+        _detail_triggered = True
+
+    if _detail_triggered:
+        # Phase 2: header_keyword_hits >= 1 + repeated_numeric_rows >= 3
+        #          + segment_name_like_rows >= 2 + numeric_density >= 0.10 なら救済
+        _detail_rescue = (
+            header_keyword_hits >= 1
+            and repeated_numeric_rows >= 3
+            and segment_name_like_rows >= 2
+            and numeric_density >= 0.10
+        )
+        # 強救済条件: header >= 2 + repeated >= 4
+        _detail_strong_rescue = (
+            header_keyword_hits >= 2
+            and repeated_numeric_rows >= 4
+        )
+        if _detail_rescue or _detail_strong_rescue:
+            _rescue_tag = "detail_breakdown_table_rescue"
+            if _detail_strong_rescue:
+                _rescue_tag = "detail_breakdown_strong_rescue"
+            if not result.rescued_by:
+                result.rescued_by = _rescue_tag
+            else:
+                result.rescued_by += f"+{_rescue_tag}"
+            logger.debug(
+                f"[candidate_guard] detail_breakdown_guard RESCUED: "
+                f"hdr={header_keyword_hits} numdens={numeric_density:.3f} "
+                f"repnum={repeated_numeric_rows} segrows={segment_name_like_rows} "
+                f"d={d} v={v}"
+            )
+        else:
+            if d > v:
+                result.reject_reason = "detail_breakdown_guard"
+                result.dropped_by = f"detail_breakdown_guard:d={d}>v={v}"
+            else:
+                result.reject_reason = "invalid_structure"
+                result.dropped_by = f"invalid_structure:d+t={d+t}/{total}>0.5"
+            return result
 
     # 5. valid segment 不足
+    # anchor=0 でも header+numeric 信号が強ければ reject しない
     if v < min_valid_segments:
-        result.reject_reason = "no_valid_segment_rows"
-        return result
+        if _has_table_signal and segment_name_like_rows >= 2:
+            # 表シグナル + セグメント名行あり → reject しない
+            if not result.rescued_by:
+                result.rescued_by = "header_numeric:no_valid_segment"
+            else:
+                result.rescued_by += "+header_numeric:no_valid_segment"
+            logger.debug(
+                f"[candidate_guard] no_valid_segment_rows RESCUED: "
+                f"hdr={header_keyword_hits} numdens={numeric_density:.3f} "
+                f"repnum={repeated_numeric_rows} segrows={segment_name_like_rows} v={v}"
+            )
+        else:
+            # ================================================================
+            # Phase 3: Weak Table Rescue (check 5)
+            # ================================================================
+            # anchor=0, header=0 でも行構造 + 数値列構造が十分表らしければ rescue
+            _weak_rescue_5 = False
+            _weak_rescue_5_tag = ""
+            _has_col_structure = distinct_numeric_positions >= 2
 
-    # 6. total/metric 優勢
+            # A: segrows>=3 + repnum>=2 + numdens>=0.08 + 列構造あり
+            if (segment_name_like_rows >= 3 and repeated_numeric_rows >= 2
+                    and numeric_density >= 0.08 and _has_col_structure):
+                _weak_rescue_5 = True
+                _weak_rescue_5_tag = "weak_table_rescue:A"
+            # B: segrows>=2 + repnum>=3 + 列構造あり
+            elif (segment_name_like_rows >= 2 and repeated_numeric_rows >= 3
+                    and _has_col_structure):
+                _weak_rescue_5 = True
+                _weak_rescue_5_tag = "weak_table_rescue:B"
+
+            if _weak_rescue_5:
+                if not result.rescued_by:
+                    result.rescued_by = _weak_rescue_5_tag
+                else:
+                    result.rescued_by += f"+{_weak_rescue_5_tag}"
+                logger.debug(
+                    f"[WEAK] segrows={segment_name_like_rows} "
+                    f"repnum={repeated_numeric_rows} "
+                    f"numdens={numeric_density:.3f} "
+                    f"distinct_numpos={distinct_numeric_positions} "
+                    f"rescued_by={_weak_rescue_5_tag}"
+                )
+            else:
+                # disabled: downstream rescue / later phases に委ねる
+                # result.reject_reason = "no_valid_segment_rows"
+                # return result
+                pass
+
+    # 6. total/metric 優勢 (Phase 2: 表シグナル + non_total_segment_rows で救済)
     if t >= v and v <= 1:
-        result.reject_reason = "total_metric_dominant"
-        return result
+        _nts = result.non_total_segment_rows
+        _total_rescue = False
+        if _has_strong_table_signal and _nts >= 2:
+            _total_rescue = True
+        elif _has_table_signal and _nts >= 2:
+            _total_rescue = True
+
+        if _total_rescue:
+            _rescue_tag = "table_signal:total_metric_dominant"
+            if not result.rescued_by:
+                result.rescued_by = _rescue_tag
+            else:
+                result.rescued_by += f"+{_rescue_tag}"
+            logger.debug(
+                f"[candidate_guard] total_metric_dominant RESCUED: "
+                f"hdr={header_keyword_hits} numdens={numeric_density:.3f} "
+                f"repnum={repeated_numeric_rows} non_total={_nts} t={t} v={v}"
+            )
+        else:
+            # ================================================================
+            # Phase 3: Weak Table Rescue (check 6)
+            # ================================================================
+            _weak_rescue_6 = False
+            _weak_rescue_6_tag = ""
+            _has_col_structure = distinct_numeric_positions >= 2
+
+            # A: segrows>=3 + repnum>=2 + numdens>=0.08 + 列構造あり
+            if (segment_name_like_rows >= 3 and repeated_numeric_rows >= 2
+                    and numeric_density >= 0.08 and _has_col_structure):
+                _weak_rescue_6 = True
+                _weak_rescue_6_tag = "weak_table_rescue:A"
+            # B: segrows>=2 + repnum>=3 + 列構造あり
+            elif (segment_name_like_rows >= 2 and repeated_numeric_rows >= 3
+                    and _has_col_structure):
+                _weak_rescue_6 = True
+                _weak_rescue_6_tag = "weak_table_rescue:B"
+
+            if _weak_rescue_6:
+                if not result.rescued_by:
+                    result.rescued_by = _weak_rescue_6_tag
+                else:
+                    result.rescued_by += f"+{_weak_rescue_6_tag}"
+                logger.debug(
+                    f"[WEAK] segrows={segment_name_like_rows} "
+                    f"repnum={repeated_numeric_rows} "
+                    f"numdens={numeric_density:.3f} "
+                    f"distinct_numpos={distinct_numeric_positions} "
+                    f"rescued_by={_weak_rescue_6_tag}"
+                )
+            else:
+                # DISABLED: allow segment tables with strong total rows
+                # result.reject_reason = "total_metric_dominant"
+                # result.dropped_by = f"total_metric_dominant:t={t}>=v={v},nts={_nts}"
+                # return result
+                pass
+
+    # --- 候補スコア算出 (デバッグ/ログ用) ---
+    score = 0.0
+    score += min(anchor_hits, 3) * 2
+    score += min(header_keyword_hits, 3) * 3
+    if numeric_density >= 0.20:
+        score += 3
+    elif numeric_density >= 0.10:
+        score += 1
+    if repeated_numeric_rows >= 3:
+        score += 3
+    elif repeated_numeric_rows >= 2:
+        score += 1
+    if segment_name_like_rows >= 2:
+        score += 2
+    score -= result.narrative_penalty * 0.5
+    score -= result.bs_cf_penalty * 0.5
+    result.candidate_score = round(score, 1)
 
     # --- accept ---
     result.accepted = True
@@ -574,8 +947,11 @@ def log_candidate_guard(
         f"bs_cf={guard_result.bs_cf_like} "
         f"detail={guard_result.detail_breakdown_like} "
         f"total_metric={guard_result.total_or_metric_like} "
+        f"non_total={guard_result.non_total_segment_rows} "
         f"garbage={guard_result.garbage_fragment_like} "
         f"pl={guard_result.pl_account_like} "
+        f"rescued_by={guard_result.rescued_by or 'none'} "
+        f"dropped_by={guard_result.dropped_by or 'none'} "
         f"result={status}"
     )
     if guard_result.top_samples:

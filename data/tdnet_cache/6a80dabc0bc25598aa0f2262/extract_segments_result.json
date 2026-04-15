@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "8142",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Distributor Business",
+    "segment_order": 1,
+    "segment_sales": 200910,
+    "segment_profit": 5810,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Distributor Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "6a80dabc0bc25598aa0f2262",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "8142",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Cash And Carry Business",
+    "segment_order": 2,
+    "segment_sales": 45644,
+    "segment_profit": 1543,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Cash And Carry Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "6a80dabc0bc25598aa0f2262",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "8142",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Food Solution",
+    "segment_order": 3,
+    "segment_sales": 13193,
+    "segment_profit": 500,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Food Solution",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "6a80dabc0bc25598aa0f2262",
+    "row_type": "segment"
+  }
+]

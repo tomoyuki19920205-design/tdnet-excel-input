@@ -80,12 +80,20 @@ def _run_ingest(dry_run: bool) -> StepResult:
     return step
 
 
-def _run_process(dry_run: bool, skip_jquants: bool) -> StepResult:
+def _run_process(dry_run: bool, skip_jquants: bool, mode: str = "nightly",
+                 phase: str | None = None, limit_filings: int = 0,
+                 target_tickers: list[str] | None = None,
+                 canonical_lookback_days: int = 7) -> StepResult:
     step = StepResult("process")
     st = time.monotonic()
     try:
-        from tools.filings_process import run as process_run
-        result = process_run(dry_run=dry_run, skip_jquants=skip_jquants)
+        from tools.filings_process import run_batch
+        result = run_batch(
+            dry_run=dry_run, skip_jquants=skip_jquants, mode=mode,
+            phase=phase, limit_filings=limit_filings,
+            target_tickers=target_tickers,
+            canonical_lookback_days=canonical_lookback_days,
+        )
         step.detail = result
         push_errors = result.get("push", {}).get("errors", 0)
         step.status = "success" if push_errors == 0 else "warning"
@@ -93,6 +101,23 @@ def _run_process(dry_run: bool, skip_jquants: bool) -> StepResult:
         step.status = "failed"
         step.detail = {"error": str(e)}
         logger.error(f"[PIPELINE] process FAILED: {e}")
+    step.elapsed = time.monotonic() - st
+    return step
+
+
+def _run_process_realtime(dry_run: bool, max_jobs: int = 50) -> StepResult:
+    """queue 駆動の realtime process ステップ。"""
+    step = StepResult("process-realtime")
+    st = time.monotonic()
+    try:
+        from tools.filings_process import run_realtime
+        result = run_realtime(dry_run=dry_run, max_jobs=max_jobs)
+        step.detail = result
+        step.status = "success" if result.get("errors", 0) == 0 else "warning"
+    except Exception as e:
+        step.status = "failed"
+        step.detail = {"error": str(e)}
+        logger.error(f"[PIPELINE] process-realtime FAILED: {e}")
     step.elapsed = time.monotonic() - st
     return step
 
@@ -330,7 +355,8 @@ def main():
     )
     parser.add_argument(
         "command", nargs="?", default=None,
-        choices=["ingest", "process", "rebuild", "notify", "reconcile", "retry-failed", "backfill"],
+        choices=["ingest", "process", "process-realtime", "process-batch",
+                 "rebuild", "notify", "reconcile", "retry-failed", "backfill"],
         help="サブコマンド (省略時は全ステップ実行)",
     )
     parser.add_argument("--dry-run", action="store_true", help="書き込みをスキップ")
@@ -340,13 +366,32 @@ def main():
     parser.add_argument("--trigger", type=str, default="manual",
                         choices=["scheduler", "manual", "retry", "reconcile"],
                         help="トリガー種別")
+    parser.add_argument("--mode", type=str, default="nightly",
+                        choices=["realtime", "nightly"],
+                        help="process 実行モード (default: nightly)")
     parser.add_argument("--from", dest="from_date", type=str, help="開始日 (backfill)")
     parser.add_argument("--to", dest="to_date", type=str, help="終了日 (backfill)")
     parser.add_argument("--target-id", type=str, help="retry対象 target_id")
+    # ── process-batch 再現コマンド用オプション ──
+    parser.add_argument("--phase", type=str, default=None,
+                        choices=["push", "canonical"],
+                        help="process-batch の特定 phase のみ実行")
+    parser.add_argument("--verbose", action="store_true",
+                        help="DEBUG レベルログ有効化")
+    parser.add_argument("--limit-filings", type=int, default=0,
+                        help="filing 件数制限 (0=無制限)")
+    parser.add_argument("--target-tickers", type=str, nargs="*",
+                        help="特定 ticker のみ処理")
+    parser.add_argument("--lookback-days", type=int, default=7,
+                        help="canonical lookback 日数 (default: 7)")
     args = parser.parse_args()
 
+    # --verbose が指定されたら DEBUG レベルに
+    if getattr(args, 'verbose', False):
+        logging.getLogger().setLevel(logging.DEBUG)
+
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG if getattr(args, 'verbose', False) else logging.INFO,
         format="[%(asctime)s] %(message)s",
         datefmt="%H:%M:%S",
     )
@@ -387,6 +432,15 @@ def main():
     # サブコマンド
     cmd = args.command
 
+    # ── phase marker: PYTHON_START ──
+    logger.info(
+        f"===PYTHON_START=== pid={os.getpid()} cmd={cmd} trigger={args.trigger}"
+    )
+
+    # ── stale running cleanup (衛生管理) ──
+    from lib.pipeline.logging_utils import cleanup_stale_runs
+    cleanup_stale_runs(max_age_hours=2)
+
     if cmd is None:
         # 全ステップ (legacy 互換)
         if args.trigger == "scheduler":
@@ -412,6 +466,25 @@ def main():
     if args.trigger == "scheduler":
         if check_concurrent_run(cmd):
             logger.info(f"[PIPELINE] concurrent run detected for {cmd}, skipping")
+            logger.info(f"===PYTHON_END=== pid={os.getpid()} cmd={cmd} exit=0 reason=concurrent")
+            sys.exit(EXIT_OK)
+
+    # ── process: ingest running なら skip ──
+    if cmd == "process" and args.trigger == "scheduler":
+        from lib.pipeline.logging_utils import check_ingest_running
+        ingest_run_id = check_ingest_running()
+        if ingest_run_id:
+            logger.info(
+                f"===PROCESS_SKIP=== reason=ingest_running ingest_run_id={ingest_run_id}"
+            )
+            # pipeline_runs に skipped を記録
+            try:
+                with PipelineRun("process", trigger_type=args.trigger) as pl:
+                    pl.update(skipped=1)
+                    pl._stats["message_override"] = f"ingest running (id={ingest_run_id})"
+            except Exception:
+                pass
+            logger.info(f"===PYTHON_END=== pid={os.getpid()} cmd={cmd} exit=0 reason=ingest_running")
             sys.exit(EXIT_OK)
 
     def _run_subcommand_with_logging(
@@ -456,14 +529,33 @@ def main():
         step = _run_subcommand_with_logging(
             "ingest", lambda: _run_ingest(args.dry_run), trigger_type=trigger,
         )
-        sys.exit(EXIT_OK if step.status == "success" else EXIT_INGEST_FAIL)
+        exit_code = EXIT_OK if step.status == "success" else EXIT_INGEST_FAIL
+        logger.info(f"===PYTHON_END=== pid={os.getpid()} cmd={cmd} exit={exit_code}")
+        sys.exit(exit_code)
 
-    elif cmd == "process":
+    elif cmd == "process" or cmd == "process-batch":
         step = _run_subcommand_with_logging(
-            "process", lambda: _run_process(args.dry_run, args.skip_jquants),
+            "process", lambda: _run_process(
+                args.dry_run, args.skip_jquants, mode=args.mode,
+                phase=getattr(args, 'phase', None),
+                limit_filings=getattr(args, 'limit_filings', 0),
+                target_tickers=getattr(args, 'target_tickers', None),
+                canonical_lookback_days=getattr(args, 'lookback_days', 7),
+            ),
             trigger_type=trigger,
         )
-        sys.exit(EXIT_OK if step.status in ("success", "warning") else EXIT_INGEST_FAIL)
+        exit_code = EXIT_OK if step.status in ("success", "warning") else EXIT_INGEST_FAIL
+        logger.info(f"===PYTHON_END=== pid={os.getpid()} cmd={cmd} exit={exit_code}")
+        sys.exit(exit_code)
+
+    elif cmd == "process-realtime":
+        step = _run_subcommand_with_logging(
+            "process-realtime", lambda: _run_process_realtime(args.dry_run),
+            trigger_type=trigger,
+        )
+        exit_code = EXIT_OK if step.status in ("success", "warning") else EXIT_INGEST_FAIL
+        logger.info(f"===PYTHON_END=== pid={os.getpid()} cmd={cmd} exit={exit_code}")
+        sys.exit(exit_code)
 
     elif cmd == "rebuild":
         step = _run_subcommand_with_logging(

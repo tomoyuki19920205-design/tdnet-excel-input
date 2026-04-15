@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "7487",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "Non Woven Fabric",
+    "segment_order": 1,
+    "segment_sales": 7881,
+    "segment_profit": 462,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Non Woven Fabric",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "d829cd832131a4514b2fd5aa",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "7487",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "Other",
+    "segment_order": 2,
+    "segment_sales": 204,
+    "segment_profit": 62,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Other",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "d829cd832131a4514b2fd5aa",
+    "row_type": "segment"
+  }
+]

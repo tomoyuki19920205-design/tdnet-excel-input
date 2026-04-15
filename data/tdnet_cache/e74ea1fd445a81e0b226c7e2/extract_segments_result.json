@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "4934",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "Antiaging",
+    "segment_order": 1,
+    "segment_sales": 5544,
+    "segment_profit": 689,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Antiaging",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "e74ea1fd445a81e0b226c7e2",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "4934",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "Recovery",
+    "segment_order": 2,
+    "segment_sales": 1797,
+    "segment_profit": -63,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Recovery",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "e74ea1fd445a81e0b226c7e2",
+    "row_type": "segment"
+  }
+]

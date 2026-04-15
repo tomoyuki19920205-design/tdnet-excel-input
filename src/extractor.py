@@ -5,7 +5,8 @@ from __future__ import annotations
 
 import io
 import os
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, field
 import logging
 import re
 import zipfile
@@ -14,7 +15,7 @@ from xml.etree import ElementTree as ET
 
 import pdfplumber
 
-from .models import ExtractedFinancials, ForecastTarget, OrderMetric, ExtractedOrderMetrics
+from .models import ExtractedFinancials, ForecastTarget, OrderMetric, ExtractedOrderMetrics, FINANCIAL_STATEMENT_KEYWORDS
 from .utils import normalize_number, parse_scale_unit
 from .xbrl_clean import read_xbrl_bytes
 from .year_parser import (
@@ -525,8 +526,110 @@ def _extract_numbers_from_line(line: str, exclude_keyword: str | None = None) ->
     return results
 
 
+def _ocr_enabled() -> bool:
+    """OCRフォールバックが有効かどうかを環境変数で判定"""
+    return os.environ.get("PDF_OCR_ENABLED", "0") == "1"
+
+
+def _ocr_force_test() -> bool:
+    """[一時検証用] OCR経路を強制発火させるフラグ。検証後に削除すること。"""
+    return os.environ.get("PDF_OCR_FORCE_TEST", "0") == "1"
+
+
+def _run_ocr_pipeline(pdf_path: str) -> str | None:
+    """
+    OCRパイプライン: Ghostscript→Vision API→テキスト結合。
+    失敗時はNoneを返す（例外を投げない）。
+    """
+    try:
+        from .pdf.ocr.ghostscript_render import render_pdf_to_images
+        from .pdf.ocr.google_vision_ocr import GoogleVisionOcr
+        from .pdf.ocr.base import OcrError
+
+        images = render_pdf_to_images(pdf_path)
+        if not images:
+            logger.info("[OCR] Ghostscript: 0 pages rendered")
+            return None
+
+        ocr = GoogleVisionOcr()
+        texts: list[str] = []
+        for i, img in enumerate(images):
+            try:
+                page_result = ocr.ocr_image(img)
+                page_result.page_number = i + 1
+                if page_result.full_text:
+                    texts.append(page_result.full_text)
+            except OcrError as e:
+                logger.warning(f"[OCR] page {i+1} failed: {e}")
+
+        if not texts:
+            logger.info("[OCR] No text extracted from any page")
+            return None
+
+        combined = "\n".join(texts)
+        logger.info(f"[OCR] Total text length: {len(combined)}")
+        return combined
+
+    except Exception as e:
+        logger.warning(f"[OCR] Pipeline error: {e}")
+        return None
+
+
+
+def _extract_segments_from_ocr(ocr_text: str) -> list[SegmentExtracted]:
+    """OCRテキストからセグメントを抽出してSegmentExtractedリストに変換"""
+    try:
+        from .pdf.ocr.segment_extractor_ocr import extract_segments_from_ocr_text
+        result = extract_segments_from_ocr_text(ocr_text)
+        if not result.success or not result.segments:
+            return []
+        return [
+            SegmentExtracted(
+                segment_name=s.segment_name,
+                segment_order=s.segment_order,
+                segment_sales=s.segment_sales,
+                segment_profit=s.segment_profit,
+                raw_profit_label="ocr",
+                raw_text=f"[ocr] {s.segment_name}",
+            )
+            for s in result.segments
+        ]
+    except Exception as e:
+        logger.warning(f"[segment-ocr] extraction error: {e}")
+        return []
+
+
+def _extract_order_metrics_from_ocr(
+    ocr_text: str,
+) -> tuple[ExtractedOrderMetrics | None, str]:
+    """OCRテキストから受注メトリクスを抽出してExtractedOrderMetricsに変換"""
+    try:
+        from .pdf.ocr.order_extractor_ocr import extract_orders_from_ocr_text
+        result = extract_orders_from_ocr_text(ocr_text)
+        if not result.success or not result.metrics:
+            return None, f"ocr: {result.reason}"
+        metrics = [
+            OrderMetric(
+                metric_name=m.metric_name,
+                value=m.value,
+                raw_value=m.raw_value,
+                unit=m.unit,
+                confidence="low",
+                raw_text=m.raw_text,
+            )
+            for m in result.metrics
+        ]
+        return ExtractedOrderMetrics(
+            metrics=metrics,
+            source_unit=result.metrics[0].unit,
+        ), ""
+    except Exception as e:
+        logger.warning(f"[order-ocr] extraction error: {e}")
+        return None, f"ocr_error: {e}"
+
+
 def _extract_from_pdf(pdf_path: str) -> tuple[ExtractedFinancials | None, str]:
-    """PDFファイルから決算数値を抽出する"""
+    """PDFファイルから決算数値を抽出する（OCRフォールバック付き）"""
     try:
         with pdfplumber.open(pdf_path) as pdf:
             # 最初の3ページからテキスト抽出
@@ -536,8 +639,24 @@ def _extract_from_pdf(pdf_path: str) -> tuple[ExtractedFinancials | None, str]:
                 if page_text:
                     text += page_text + "\n"
 
+        # ── ① native textが空 → OCRでテキスト再取得 ──
+        ocr_used = False
+        # [一時検証用] 強制テスト: native textを空扱いにしてOCR経路を通す
+        if _ocr_force_test() and text.strip():
+            logger.info("[pdf-ocr] FORCE_TEST: native text suppressed to trigger OCR")
+            text = ""
         if not text.strip():
-            return None, "テキスト抽出不可（画像PDF？）"
+            if _ocr_enabled():
+                logger.info("[OCR] Native text empty, trying OCR fallback")
+                ocr_text = _run_ocr_pipeline(pdf_path)
+                if ocr_text and ocr_text.strip():
+                    text = ocr_text
+                    ocr_used = True
+                    logger.info("[OCR] OCR text acquired, re-running extraction")
+                else:
+                    return None, "テキスト抽出不可（画像PDF？）— OCR also failed"
+            else:
+                return None, "テキスト抽出不可（画像PDF？）"
 
         lines = text.split("\n")
 
@@ -550,19 +669,44 @@ def _extract_from_pdf(pdf_path: str) -> tuple[ExtractedFinancials | None, str]:
         gross_profit = _extract_value_near_keyword(lines, GROSS_PROFIT_KEYWORDS)
         operating_profit = _extract_value_near_keyword(lines, OP_KEYWORDS)
 
-        if sales is None and operating_profit is None:
-            return None, "売上高・営業利益ともに抽出できず"
+        # ── ② native数値抽出失敗 → OCRテキストで再抽出 ──
+        if sales is None and operating_profit is None and not ocr_used:
+            if _ocr_enabled():
+                logger.info("[OCR] Native extraction failed, trying OCR fallback")
+                ocr_text = _run_ocr_pipeline(pdf_path)
+                if ocr_text and ocr_text.strip():
+                    ocr_lines = ocr_text.split("\n")
+                    ocr_scale_str = _detect_scale(ocr_text)
+                    ocr_sales = _extract_value_near_keyword(ocr_lines, SALES_KEYWORDS)
+                    ocr_gp = _extract_value_near_keyword(ocr_lines, GROSS_PROFIT_KEYWORDS)
+                    ocr_op = _extract_value_near_keyword(ocr_lines, OP_KEYWORDS)
 
+                    if ocr_sales is not None or ocr_op is not None:
+                        sales = ocr_sales
+                        gross_profit = ocr_gp
+                        operating_profit = ocr_op
+                        scale_str = ocr_scale_str
+                        ocr_used = True
+                        logger.info(
+                            f"[OCR] OCR extraction success: "
+                            f"sales={sales}, gp={gross_profit}, op={operating_profit}"
+                        )
+
+        if sales is None and operating_profit is None:
+            suffix = " (OCR also failed)" if ocr_used else ""
+            return None, f"売上高・営業利益ともに抽出できず{suffix}"
+
+        source_label = "pdf_ocr" if ocr_used else "pdf"
         sources = {}
-        if sales is not None: sources["sales"] = "pdf"
-        if gross_profit is not None: sources["gross_profit"] = "pdf"
-        if operating_profit is not None: sources["operating_profit"] = "pdf"
+        if sales is not None: sources["sales"] = source_label
+        if gross_profit is not None: sources["gross_profit"] = source_label
+        if operating_profit is not None: sources["operating_profit"] = source_label
         return ExtractedFinancials(
             sales=sales,
             gross_profit=gross_profit,
             operating_profit=operating_profit,
             source_unit=scale_str,
-            confidence="medium",
+            confidence="low" if ocr_used else "medium",
             field_sources=sources,
         ), ""
 
@@ -897,7 +1041,7 @@ def _is_tanshin_title(title: str) -> bool:
     """
     タイトルが決算短信（PDFフォールバック対象）かを判定する。
 
-    ポジティブ条件: 「決算短信」を含む
+    ポジティブ条件: FINANCIAL_STATEMENT_KEYWORDS のいずれかを含む
     ネガティブ条件: 説明資料・質疑応答・再掲載等のキーワードを含む
 
     Returns:
@@ -913,9 +1057,10 @@ def _is_tanshin_title(title: str) -> bool:
         if kw.lower() in title_lower:
             return False
 
-    # ポジティブ条件: 「決算短信」を含む
-    if "決算短信" in title:
-        return True
+    # ポジティブ条件: 共通定数キーワードのいずれかを含む
+    for kw in FINANCIAL_STATEMENT_KEYWORDS:
+        if kw in title:
+            return True
 
     return False
 
@@ -1132,7 +1277,17 @@ def extract_order_metrics(
     except Exception as e:
         return None, f"PDF読み込みエラー: {e}"
 
+    # [一時検証用] 強制テスト: native textを空扱い
+    if _ocr_force_test() and text.strip():
+        logger.info("[pdf-ocr] FORCE_TEST: order native text suppressed")
+        text = ""
+    # ── ① テキスト空 → OCR fallback ──
     if not text.strip():
+        if _ocr_enabled():
+            logger.info("[order-ocr] Native text empty, trying OCR fallback")
+            ocr_text = _run_ocr_pipeline(pdf_path)
+            if ocr_text and ocr_text.strip():
+                return _extract_order_metrics_from_ocr(ocr_text)
         return None, "テキスト抽出不可"
 
     lines = text.split("\n")
@@ -1140,7 +1295,16 @@ def extract_order_metrics(
     # 受注系キーワードがテキスト内に存在するかチェック
     all_kws = ORDERS_KEYWORDS + BACKLOG_KEYWORDS + CARRYOVER_KEYWORDS
     has_any = any(kw in text for kw in all_kws)
+
+    # ── ② キーワードなし → OCR fallback ──
     if not has_any:
+        if _ocr_enabled():
+            logger.info("[order-ocr] No keywords in native text, trying OCR fallback")
+            ocr_text = _run_ocr_pipeline(pdf_path)
+            if ocr_text and ocr_text.strip():
+                result = _extract_order_metrics_from_ocr(ocr_text)
+                if result[0] is not None:
+                    return result
         return None, "no_order_keywords"
 
     # 単位検出
@@ -1193,7 +1357,15 @@ def extract_order_metrics(
                 f"{metric_name}: キーワード'{matched_kw}'はあるが合計行が見つからない"
             )
 
+    # ── ③ メトリクス0件 → OCR fallback ──
     if not metrics:
+        if _ocr_enabled():
+            logger.info("[order-ocr] Native extraction found 0 metrics, trying OCR fallback")
+            ocr_text = _run_ocr_pipeline(pdf_path)
+            if ocr_text and ocr_text.strip():
+                result = _extract_order_metrics_from_ocr(ocr_text)
+                if result[0] is not None:
+                    return result
         reason = "; ".join(quarantine_reasons) if quarantine_reasons else "no_extractable_values"
         return None, reason
 
@@ -1255,6 +1427,9 @@ class SegmentExtracted:
     segment_profit: float | None = None
     raw_profit_label: str = ""
     raw_text: str = ""
+    # Phase 2: Trace & Scores
+    rule_trace: list[str] = field(default_factory=list)
+    score_summary: dict = field(default_factory=dict)
 
 
 def _find_segment_table_region(lines: list[str]) -> tuple[int, int] | None:
@@ -1346,6 +1521,14 @@ def _detect_column_positions(
     return has_sales, has_profit, profit_label
 
 
+_extraction_tls = threading.local()
+
+
+def get_last_v2_segment_result():
+    """最後に実行された v2 セグメント抽出結果 (スレッドローカル) を取得。"""
+    return getattr(_extraction_tls, "last_v2_result", None)
+
+
 def extract_segment_financials(
     pdf_path: str,
     title: str,
@@ -1374,10 +1557,22 @@ def extract_segment_financials(
 
     v2_quarantine_reason = ""
 
+    # [一時検証用] 強制テスト: v2/v1をスキップしてOCR経路に直行
+    if _ocr_force_test() and _ocr_enabled():
+        logger.info("[pdf-ocr] FORCE_TEST: segment v2/v1 skipped, going to OCR")
+        ocr_text = _run_ocr_pipeline(pdf_path)
+        if ocr_text and ocr_text.strip():
+            ocr_segments = _extract_segments_from_ocr(ocr_text)
+            if ocr_segments:
+                return ocr_segments, ""
+        logger.info("[pdf-ocr] FORCE_TEST: OCR segment extraction failed")
+        return [], "force_test_ocr_failed"
+
     if use_v2:
         try:
             from .analysis.segment_detection_v2 import run_segment_detection_v2
             v2_result = run_segment_detection_v2(pdf_path, doc_id=doc_id, ticker=ticker)
+            _extraction_tls.last_v2_result = v2_result
 
             if v2_result.success and v2_result.segments:
                 # v2 成功 → SegmentExtracted に変換
@@ -1390,6 +1585,8 @@ def extract_segment_financials(
                         segment_profit=seg.segment_profit,
                         raw_profit_label=seg.raw_profit_label,
                         raw_text=seg.raw_text,
+                        rule_trace=v2_result.rule_trace,
+                        score_summary=v2_result.score_summary,
                     ))
                 logger.info(
                     f"[v2] セグメント抽出成功: {len(segments)}件, "
@@ -1409,6 +1606,16 @@ def extract_segment_financials(
     segments_v1, err_v1 = _extract_segment_financials_v1(pdf_path, title)
     if segments_v1:
         return segments_v1, ""
+
+    # ============ OCR fallback ============
+    if _ocr_enabled():
+        logger.info(f"[segment-ocr] v2/v1 both failed, trying OCR fallback")
+        ocr_text = _run_ocr_pipeline(pdf_path)
+        if ocr_text and ocr_text.strip():
+            ocr_segments = _extract_segments_from_ocr(ocr_text)
+            if ocr_segments:
+                return ocr_segments, ""
+            logger.info("[ocr] no improvement for segments")
 
     # V2 quarantine_reason を error に付与して返す (worker 側で抽出可能)
     if v2_quarantine_reason:

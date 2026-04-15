@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "4829",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "Creation Business",
+    "segment_order": 1,
+    "segment_sales": 1398,
+    "segment_profit": 294,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Creation Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-09",
+    "tdnet_doc_id": "82f44eaaa87a37f8df3340fe",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "4829",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "Solution Business",
+    "segment_order": 2,
+    "segment_sales": 1929,
+    "segment_profit": 150,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Solution Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-09",
+    "tdnet_doc_id": "82f44eaaa87a37f8df3340fe",
+    "row_type": "segment"
+  }
+]

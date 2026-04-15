@@ -1,0 +1,9 @@
+{
+  "filing_id": "9291d87e6d1b0dcd47440d94",
+  "ticker": "3843",
+  "stage": "segment_extraction_v2",
+  "review_hint": "too_few_valid_segments",
+  "hard_fail_reason": "too_few_valid_segments",
+  "selected_source": "xbrl",
+  "candidate_summary": "xbrl:quarantine(too_few_valid_segments) → html:skip(not_implemented) → pdf:not_attempted"
+}

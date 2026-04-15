@@ -1,0 +1,14 @@
+{
+  "filing_id": "6079ffe4a6ae762513e02c67",
+  "ticker": "7590",
+  "disclosure_date": "2026-03-05",
+  "title": "2026年１月期決算短信〔日本基準〕(連結)",
+  "doc_type": "financial_statement",
+  "source_url": "https://www.release.tdnet.info/inbs/140120260304576008.pdf",
+  "xbrl_url": "https://www.release.tdnet.info/inbs/081220260304576008.zip",
+  "listing_source": "tdnet_html",
+  "has_xbrl": false,
+  "xbrl_url_inferred": true,
+  "has_pdf": true,
+  "created_at": "2026-04-12T00:49:38.589144+09:00"
+}

@@ -1,0 +1,46 @@
+
+=======================================================
+  [1] BOOST SUMMARY
+=======================================================
+  total_filings:     7
+  skipped_lines:     0
+  missing_trace:     7
+  tables_seen:       0
+  tables_kept:       0
+  tables_rejected:   0
+  boosted_tables:    0
+  avg_base_score:    0.00
+  avg_final_score:   0.00
+
+=======================================================
+  [2] REJECT REASON COUNTS
+=======================================================
+  (none)
+
+=======================================================
+  [3] BOOST HIT COUNTS
+=======================================================
+  kw_bonus_hits                       0
+  header_bonus_hits                   0
+
+=======================================================
+  [4] OUTCOME DIFF HINTS
+=======================================================
+  -- status --
+  quarantined                         6
+  ok                                  1
+  -- quarantine reasons --
+  pdf_narrative_block_selected        0
+  pdf_segment_like_but_invalid_structure 0
+  pdf_no_sales_profit_columns         0
+
+=======================================================
+  [5] SAMPLE CASES
+=======================================================
+  -- boosted (passed) --
+    (none)
+  -- density rejected --
+    (none)
+  -- narrative rejected --
+    (none)
+=======================================================

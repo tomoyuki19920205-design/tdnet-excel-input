@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "211A",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "A0Construction Business",
+    "segment_order": 1,
+    "segment_sales": 1777,
+    "segment_profit": -18,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "A0Construction Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-13",
+    "tdnet_doc_id": "68aa3d7df6a5d57add35150e",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "211A",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "A0Real Estate",
+    "segment_order": 2,
+    "segment_sales": 635,
+    "segment_profit": 156,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "A0Real Estate",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-13",
+    "tdnet_doc_id": "68aa3d7df6a5d57add35150e",
+    "row_type": "segment"
+  }
+]

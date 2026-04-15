@@ -23,6 +23,7 @@ export interface TdnetEvent {
   primary_metric_yoy: string | null;
   display_title: string;
   display_summary: string;
+  formatted_message: string;
   sort_key: string | null;
   dedupe_key: string;
   notify_to_discord: boolean;
@@ -159,4 +160,5 @@ export const EVENT_SUBTYPE_LABELS: Record<string, string> = {
   special_dividend: "特別配当",
   commemorative_dividend: "記念配当",
   maintain: "据え置き",
+  undecided: "",  // サブタイプ未定の場合は親カテゴリラベルを表示
 };

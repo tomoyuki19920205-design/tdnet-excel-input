@@ -1,0 +1,14 @@
+{
+  "filing_id": "3dcf8c6f16aeeaf1cf7ae867",
+  "ticker": "2014",
+  "disclosure_date": "2026-03-23",
+  "title": "2026年２月期　決算短信（2025年８月10日～2026年２月９日）",
+  "doc_type": "financial_statement",
+  "source_url": "https://www.release.tdnet.info/inbs/140120260323586215.pdf",
+  "xbrl_url": "https://www.release.tdnet.info/inbs/081220260323586215.zip",
+  "listing_source": "tdnet_html",
+  "has_xbrl": false,
+  "xbrl_url_inferred": true,
+  "has_pdf": true,
+  "created_at": "2026-04-10T10:10:46.516784+09:00"
+}

@@ -28,7 +28,6 @@ from src.events.summary_notify import format_earnings_message, send_earnings_dis
 from src.events.earnings_guidance_extractor import (
     extract_guidance_from_zip,
     format_guidance_section,
-    make_fallback_summary,
 )
 from src.events.earnings_production_pipeline import _is_fy_or_4q
 
@@ -140,8 +139,6 @@ def main():
                 actual_op=earnings.op_current,
             )
             if guidance:
-                if guidance.outlook_text:
-                    guidance.outlook_summary = make_fallback_summary(guidance.outlook_text)
                 guidance_section = format_guidance_section(guidance)
                 if guidance_section:
                     full_message += "\n\n" + guidance_section

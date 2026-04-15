@@ -190,9 +190,19 @@ class TestDividendNotifyRules(unittest.TestCase):
         ratio = compute_dividend_increase_ratio(ev)
         self.assertIsNone(ratio)
 
-    def test_rev_none_not_notified(self):
-        """rev=None → 通知しない"""
-        ev = _make_dividend(prev=100, rev=None)
+    def test_rev_none_notified_as_simple(self):
+        """rev=None (金額未抽出) でも配当修正として簡易通知する"""
+        ev = _make_dividend(subtype="increase", prev=100, rev=None)
+        self.assertTrue(should_notify_event(ev))
+
+    def test_rev_none_undecided_notified(self):
+        """rev=None + subtype=undecided → 簡易通知する"""
+        ev = _make_dividend(subtype="undecided", prev=None, rev=None)
+        self.assertTrue(should_notify_event(ev))
+
+    def test_rev_none_decrease_not_notified(self):
+        """rev=None + subtype=decrease → 通知しない"""
+        ev = _make_dividend(subtype="decrease", prev=100, rev=None)
         self.assertFalse(should_notify_event(ev))
 
 

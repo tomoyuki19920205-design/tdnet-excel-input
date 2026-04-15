@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "3361",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "Energy Business",
+    "segment_order": 1,
+    "segment_sales": 14068,
+    "segment_profit": 1346,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Energy Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "6e6430ca3f48a6932fd02e10",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "3361",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "The Water Business",
+    "segment_order": 2,
+    "segment_sales": 5133,
+    "segment_profit": 910,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "The Water Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "6e6430ca3f48a6932fd02e10",
+    "row_type": "segment"
+  }
+]

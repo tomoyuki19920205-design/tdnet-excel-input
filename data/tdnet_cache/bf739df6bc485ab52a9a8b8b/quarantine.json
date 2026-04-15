@@ -1,0 +1,14 @@
+{
+  "filing_id": "bf739df6bc485ab52a9a8b8b",
+  "ticker": "1542",
+  "stage": "extracting_pdf",
+  "error_message": "period_quarter_unresolved:period='R8/1',quarter=''",
+  "review_hint": "pdf_extraction_failed",
+  "via": "pdf",
+  "candidate_reject_reason": "period_quarter_unresolved:period='R8/1',quarter=''",
+  "detector_v2_reason": "",
+  "detector_v1_reason": "period_quarter_unresolved:period='R8/1',quarter=''",
+  "xbrl_fallback_attempted": false,
+  "xbrl_fallback_succeeded": false,
+  "xbrl_failure_reason": ""
+}

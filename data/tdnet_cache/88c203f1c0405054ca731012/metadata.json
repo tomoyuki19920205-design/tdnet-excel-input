@@ -1,0 +1,14 @@
+{
+  "filing_id": "88c203f1c0405054ca731012",
+  "ticker": "6814",
+  "disclosure_date": "2026-04-09",
+  "title": "2026年2月期 決算短信〔日本基準〕(連結)",
+  "doc_type": "financial_statement",
+  "source_url": "https://www.release.tdnet.info/inbs/140120260326589376.pdf",
+  "xbrl_url": "https://www.release.tdnet.info/inbs/081220260326589376.zip",
+  "listing_source": "tdnet_html",
+  "has_xbrl": false,
+  "xbrl_url_inferred": true,
+  "has_pdf": true,
+  "created_at": "2026-04-10T10:13:39.266683+09:00"
+}

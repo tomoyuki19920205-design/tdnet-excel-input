@@ -259,83 +259,86 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
             </div>
           ) : (
             events.map((event, _idx) => {
-              // DEBUG: カテゴリ表示デバッグ (修正確認後に削除)
-              if (_idx < 5) {
-                console.log("ALERT_ROW:", {
-                  id: event.id?.slice(0, 8),
-                  event_type: event.event_type,
-                  normalized: getDisplayCategory(event.event_type, event.headline),
-                  headline: event.headline?.slice(0, 40),
-                });
-              }
               const badge = getBadgeConfig(event.event_type, event.headline);
               const strength = getStrengthDisplay(event);
               const priorityClass = !event.is_read ? getPriorityClass(event.priority_rank) : "";
               const subtypeLabel = event.event_subtype
-                ? EVENT_SUBTYPE_LABELS[event.event_subtype] || event.event_subtype
+                ? (EVENT_SUBTYPE_LABELS[event.event_subtype] ?? event.event_subtype)
                 : "";
 
               return (
                 <div
                   key={event.id}
-                  className={`alert-row ${!event.is_read ? "unread" : ""} ${
+                  className={`alert-card ${!event.is_read ? "unread" : ""} ${
                     selectedId === event.id ? "selected" : ""
                   } ${priorityClass}`}
                   onClick={() => handleSelectEvent(event)}
                 >
-                  <span className="alert-time">
-                    {formatTime(event.detected_at)}
-                  </span>
-                  <span className={`alert-badge ${badge.category}`}>
-                    {badge.emoji} {subtypeLabel || badge.label}
-                  </span>
-                  <span className="alert-ticker">{event.ticker}</span>
-                  <span className="alert-headline">
-                    <span className="company-name">{event.company_name}</span>
-                    {event.headline}
-                  </span>
-                  <span className="alert-strength">
-                    {strength.value}
-                    {strength.yoy && (
-                      <span
-                        style={{
-                          fontSize: "0.72rem",
-                          color: strength.yoy.startsWith("+")
-                            ? "var(--accent-green)"
-                            : "var(--accent-red)",
-                          marginLeft: "0.3rem",
-                        }}
+                  {/* Row 1: Time + Badge + Actions */}
+                  <div className="alert-card-header">
+                    <span className="alert-time">
+                      {formatTime(event.detected_at)}
+                    </span>
+                    <span className={`alert-badge ${badge.category}`}>
+                      {badge.emoji} {subtypeLabel || badge.label}
+                    </span>
+                    <span className="alert-card-actions">
+                      <button
+                        className={`action-btn ${event.is_starred ? "active" : ""}`}
+                        onClick={(e) => handleToggleStar(event, e)}
+                        title="スター"
                       >
-                        {strength.yoy}
-                      </span>
-                    )}
-                  </span>
-                  <span className="alert-actions">
-                    <button
-                      className={`action-btn ${event.is_starred ? "active" : ""}`}
-                      onClick={(e) => handleToggleStar(event, e)}
-                      title="スター"
-                    >
-                      {event.is_starred ? "⭐" : "☆"}
-                    </button>
-                    <button
-                      className={`action-btn ${!event.is_read ? "active" : ""}`}
-                      onClick={(e) => handleToggleRead(event, e)}
-                      title={event.is_read ? "未読に戻す" : "既読にする"}
-                    >
-                      {event.is_read ? "📖" : "📩"}
-                    </button>
-                    {event.comments_count > 0 && (
-                      <span
-                        style={{
-                          fontSize: "0.72rem",
-                          color: "var(--accent-purple)",
-                        }}
+                        {event.is_starred ? "⭐" : "☆"}
+                      </button>
+                      <button
+                        className={`action-btn ${!event.is_read ? "active" : ""}`}
+                        onClick={(e) => handleToggleRead(event, e)}
+                        title={event.is_read ? "未読に戻す" : "既読にする"}
                       >
-                        💬{event.comments_count}
-                      </span>
-                    )}
-                  </span>
+                        {event.is_read ? "📖" : "📩"}
+                      </button>
+                      {event.comments_count > 0 && (
+                        <span style={{ fontSize: "0.72rem", color: "var(--accent-purple)" }}>
+                          💬{event.comments_count}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+
+                  {/* Main content: formatted_message 最優先 */}
+                  {(() => {
+                    const fm = event.formatted_message?.trim() || "";
+                    let mainText = fm
+                      || [event.display_title, event.display_summary]
+                          .filter((s) => s?.trim())
+                          .join("\n")
+                      || event.headline
+                      || "";
+                    // 指標行なし(改行なし) → headline をメイン本文に統合
+                    const isShort = !mainText.includes("\n");
+                    if (
+                      isShort &&
+                      event.headline?.trim() &&
+                      !mainText.includes(event.headline.trim())
+                    ) {
+                      mainText = mainText + "\n" + event.headline;
+                    }
+
+                    // DEBUG
+                    if (_idx < 3) {
+                      console.log("[TDNET ALERT render]", {
+                        id: event.id,
+                        ticker: event.ticker,
+                        formatted_message: event.formatted_message,
+                        headline: event.headline,
+                        renderedMainText: mainText,
+                      });
+                    }
+
+                    return (
+                      <div className="alert-card-body">{mainText}</div>
+                    );
+                  })()}
                 </div>
               );
             })

@@ -79,11 +79,12 @@ class TestColumnRolePhase3:
         """数値列の大小分布から sales/profit を推定。"""
         from src.analysis.column_analysis import classify_columns
         # ヘッダーに role 情報がない場合でも数値の大小で推定
+        # Phase 3: MIN_MARGIN 条件があるため、magnitude 差が十分大きい必要がある
         headers = ["区分", "A", "B"]
         data_rows = [
-            ["事業X", "10,000", "500"],
-            ["事業Y", "20,000", "1,000"],
-            ["事業Z", "15,000", "800"],
+            ["事業X", "100,000", "50"],
+            ["事業Y", "200,000", "100"],
+            ["事業Z", "150,000", "80"],
         ]
         result = classify_columns(data_rows, headers)
         # sales は大きい方の列、profit は小さい方

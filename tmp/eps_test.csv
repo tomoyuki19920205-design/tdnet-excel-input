@@ -1,0 +1,6 @@
+﻿source_path,ticker,company_name,title,old_prev_eps,old_new_eps,new_prev_eps,new_new_eps,expected_prev_eps,expected_new_eps,diff_status,failure_category,error,old_status,new_status
+140120260204547040.pdf,,,業績予想の修正に関するお知らせ,,,,,,,both_missing,縦ブロック失敗,,,
+140120260204547727.pdf,,,業績予想の修正に関するお知らせ,,,,,,,both_missing,数値抽出失敗,,,
+140120260206549927.pdf,,,通期連結業績予想の修正及び通期個別業績見込みと前期実績との差異に関するお知らせ,,,136.04,3.0,,,new_only_detected,,,,
+140120260213561316.pdf,,,業績予想の修正に関するお知らせ,3.0,3.0,3.0,3.0,,,both_detected_same,,,,
+140120260213562293.pdf,,,業績予想の修正に関するお知らせ,,,,1.0,,,new_only_detected,縦ブロック失敗,,,

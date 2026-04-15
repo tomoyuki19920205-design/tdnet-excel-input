@@ -1,0 +1,11 @@
+=== Unknown Member Suffix Scan (132 ZIPs) ===
+
+Known suffixes (hit count):
+
+Unknown suffixes (6 unique):
+  SegmentsMember: 2722
+  SegmentMember: 951
+  SegmentsAndOthersMember: 581
+  SegmentsNotIncludedInReportableSegmentsAndOtherRevenueGeneratingBusinessActivitiesMember: 373
+  SegmentReportableSegmentMember: 34
+  SegmentsMemberReportableSegmentMember: 12

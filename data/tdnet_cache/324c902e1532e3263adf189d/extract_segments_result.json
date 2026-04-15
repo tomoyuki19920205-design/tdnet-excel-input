@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "1997",
+    "period": "R8/8",
+    "quarter": "2Q",
+    "segment_name": "Facility",
+    "segment_order": 1,
+    "segment_sales": 4630,
+    "segment_profit": 943,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Facility",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-03",
+    "tdnet_doc_id": "324c902e1532e3263adf189d",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "1997",
+    "period": "R8/8",
+    "quarter": "2Q",
+    "segment_name": "Solar Power Business",
+    "segment_order": 2,
+    "segment_sales": 80,
+    "segment_profit": 30,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Solar Power Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-03",
+    "tdnet_doc_id": "324c902e1532e3263adf189d",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "1997",
+    "period": "R8/8",
+    "quarter": "2Q",
+    "segment_name": "Other",
+    "segment_order": 3,
+    "segment_sales": 0,
+    "segment_profit": 0,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Other",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-03",
+    "tdnet_doc_id": "324c902e1532e3263adf189d",
+    "row_type": "segment"
+  }
+]

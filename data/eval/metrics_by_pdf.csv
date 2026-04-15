@@ -1,0 +1,4 @@
+﻿pdf,ticker,gt_table_type,detected_mode,gt_segment_count,ex_segment_count,missing_segment_count,extra_segment_count,exact_segment_set_match,sales_match_rate,profit_match_rate,both_match_rate,pdf_name_success,pdf_value_success,pdf_strict_success
+140120260310578871.pdf,7827,col_as_seg,COL_AS_SEG,4,4,0,0,1,1.0,1.0,1.0,1,1,1
+140120260311579609.pdf,?,col_as_seg,COL_AS_SEG,3,3,0,0,1,1.0,1.0,1.0,1,1,1
+140120260312580246.pdf,?,col_as_seg,COL_AS_SEG,3,3,0,0,1,1.0,1.0,1.0,1,1,1

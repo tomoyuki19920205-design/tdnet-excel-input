@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "3421",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "Outdoor Storage Sheds",
+    "segment_order": 1,
+    "segment_sales": 13606,
+    "segment_profit": 956,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Outdoor Storage Sheds",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-13",
+    "tdnet_doc_id": "052d74fedf359a5431fa70b5",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "3421",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "Office Furniture",
+    "segment_order": 2,
+    "segment_sales": 6138,
+    "segment_profit": 138,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Office Furniture",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-13",
+    "tdnet_doc_id": "052d74fedf359a5431fa70b5",
+    "row_type": "segment"
+  }
+]

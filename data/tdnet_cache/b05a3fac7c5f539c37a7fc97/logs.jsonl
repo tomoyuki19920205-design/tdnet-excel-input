@@ -1,0 +1,50 @@
+{"event": "v2_start", "ticker": "7865", "run_id": "cb63b363504e", "timestamp": "2026-04-09T21:59:06.054906+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-09T21:59:07.113999+09:00"}
+{"event": "v2_start", "ticker": "7865", "run_id": "fe1aa927c527", "timestamp": "2026-04-09T22:20:15.663050+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-09T22:20:16.503913+09:00"}
+{"event": "quarantined", "reason": "period_quarter_unresolved:period='R8/1',quarter=''", "review_hint": "pdf_extraction_failed", "candidate_reject_reason": "period_quarter_unresolved:period='R8/1',quarter=''", "xbrl_fallback_attempted": false, "timestamp": "2026-04-09T22:20:19.409437+09:00"}
+{"event": "v2_start", "ticker": "7865", "run_id": "2f0a7788fa90", "timestamp": "2026-04-09T22:38:58.759702+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-09T22:38:59.620168+09:00"}
+{"event": "quarantined", "reason": "period_quarter_unresolved:period='R8/1',quarter=''", "review_hint": "pdf_extraction_failed", "candidate_reject_reason": "period_quarter_unresolved:period='R8/1',quarter=''", "xbrl_fallback_attempted": false, "timestamp": "2026-04-09T22:39:02.520035+09:00"}
+{"event": "v2_start", "ticker": "7865", "run_id": "2c92cf8bc933", "timestamp": "2026-04-09T22:45:29.931418+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-09T22:45:30.753995+09:00"}
+{"event": "quarantined", "reason": "period_quarter_unresolved:period='R8/1',quarter=''", "review_hint": "pdf_extraction_failed", "candidate_reject_reason": "period_quarter_unresolved:period='R8/1',quarter=''", "xbrl_fallback_attempted": false, "timestamp": "2026-04-09T22:45:33.590650+09:00"}
+{"event": "v2_start", "ticker": "7865", "run_id": "9078816bd14e", "timestamp": "2026-04-10T07:43:19.390236+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T07:43:21.093071+09:00"}
+{"event": "quarantined", "reason": "period_quarter_unresolved:period='R8/1',quarter=''", "review_hint": "pdf_extraction_failed", "candidate_reject_reason": "period_quarter_unresolved:period='R8/1',quarter=''", "xbrl_fallback_attempted": false, "timestamp": "2026-04-10T07:43:32.542607+09:00"}
+{"event": "v2_start", "ticker": "7865", "run_id": "d2346dff7d83", "timestamp": "2026-04-10T18:33:05.284588+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T18:33:06.092935+09:00"}
+{"event": "quarantined", "reason": "no_segment_table", "review_hint": "pdf_table_parse_failed", "candidate_reject_reason": "no_segment_table", "xbrl_fallback_attempted": false, "timestamp": "2026-04-10T18:33:07.749390+09:00"}
+{"event": "v2_start", "ticker": "7865", "run_id": "e3de2d82516a", "timestamp": "2026-04-10T20:42:38.149733+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T20:42:38.986717+09:00"}
+{"event": "quarantined", "reason": "no_segment_table", "review_hint": "pdf_narrative_block_selected", "candidate_reject_reason": "candidate_guard:narrative_guard", "xbrl_fallback_attempted": false, "timestamp": "2026-04-10T20:42:44.047207+09:00"}
+{"event": "v2_start", "ticker": "7865", "run_id": "e78a527c7016", "timestamp": "2026-04-10T21:14:22.272813+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T21:14:23.143848+09:00"}
+{"event": "quarantined", "reason": "period_quarter_unresolved:period='R8/1',quarter=''", "review_hint": "pdf_extraction_failed", "candidate_reject_reason": "period_quarter_unresolved:period='R8/1',quarter=''", "xbrl_fallback_attempted": false, "timestamp": "2026-04-10T21:14:26.104132+09:00"}
+{"event": "v2_start", "ticker": "7865", "run_id": "88dfdda5dcdf", "timestamp": "2026-04-10T21:26:16.820600+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T21:26:17.631626+09:00"}
+{"event": "quarantined", "reason": "period_quarter_unresolved:period='R8/1',quarter=''", "review_hint": "pdf_extraction_failed", "candidate_reject_reason": "period_quarter_unresolved:period='R8/1',quarter=''", "xbrl_fallback_attempted": false, "timestamp": "2026-04-10T21:26:20.319627+09:00"}
+{"event": "v2_start", "ticker": "7865", "run_id": "4d829c2912cc", "timestamp": "2026-04-10T21:35:54.247243+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T21:35:55.180729+09:00"}
+{"event": "quarantined", "reason": "period_quarter_unresolved:period='R8/1',quarter=''", "review_hint": "pdf_extraction_failed", "candidate_reject_reason": "period_quarter_unresolved:period='R8/1',quarter=''", "xbrl_fallback_attempted": false, "timestamp": "2026-04-10T21:35:57.800573+09:00"}
+{"event": "v2_start", "ticker": "7865", "run_id": "8f5538f61f90", "timestamp": "2026-04-10T21:51:17.515349+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T21:51:18.416167+09:00"}
+{"event": "quarantined", "reason": "no_segment_table", "review_hint": "pdf_narrative_block_selected", "candidate_reject_reason": "candidate_guard:narrative_guard", "xbrl_fallback_attempted": false, "timestamp": "2026-04-10T21:51:24.185185+09:00"}
+{"event": "v2_start", "ticker": "7865", "run_id": "b23bf688ba15", "timestamp": "2026-04-10T21:57:13.938927+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T21:57:14.776108+09:00"}
+{"event": "quarantined", "reason": "period_quarter_unresolved:period='R8/1',quarter=''", "review_hint": "pdf_extraction_failed", "candidate_reject_reason": "period_quarter_unresolved:period='R8/1',quarter=''", "xbrl_fallback_attempted": false, "timestamp": "2026-04-10T21:57:17.623705+09:00"}
+{"event": "v2_start", "ticker": "7865", "run_id": "2c5b46b68449", "timestamp": "2026-04-10T22:04:22.784302+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T22:04:23.627236+09:00"}
+{"event": "quarantined", "reason": "period_quarter_unresolved:period='R8/1',quarter=''", "review_hint": "pdf_extraction_failed", "candidate_reject_reason": "period_quarter_unresolved:period='R8/1',quarter=''", "xbrl_fallback_attempted": false, "timestamp": "2026-04-10T22:04:26.794280+09:00"}
+{"event": "v2_start", "ticker": "7865", "run_id": "a61b9039c013", "timestamp": "2026-04-10T22:26:15.379429+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T22:26:16.238634+09:00"}
+{"event": "quarantined", "reason": "period_quarter_unresolved:period='R8/1',quarter=''", "review_hint": "pdf_extraction_failed", "candidate_reject_reason": "period_quarter_unresolved:period='R8/1',quarter=''", "xbrl_fallback_attempted": false, "timestamp": "2026-04-10T22:26:19.277120+09:00"}
+{"event": "v2_start", "ticker": "7865", "run_id": "407471ed83e4", "timestamp": "2026-04-10T23:10:41.759734+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T23:10:42.628269+09:00"}
+{"event": "quarantined", "reason": "period_quarter_unresolved:period='R8/1',quarter=''", "review_hint": "pdf_extraction_failed", "candidate_reject_reason": "period_quarter_unresolved:period='R8/1',quarter=''", "xbrl_fallback_attempted": false, "timestamp": "2026-04-10T23:10:45.495923+09:00"}
+{"event": "v2_start", "ticker": "7865", "run_id": "7e0865c7f8c7", "timestamp": "2026-04-10T23:30:36.301755+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T23:30:37.254928+09:00"}
+{"event": "quarantined", "reason": "period_quarter_unresolved:period='R8/1',quarter=''", "review_hint": "pdf_extraction_failed", "candidate_reject_reason": "period_quarter_unresolved:period='R8/1',quarter=''", "xbrl_fallback_attempted": false, "timestamp": "2026-04-10T23:30:40.425444+09:00"}
+{"event": "v2_start", "ticker": "7865", "run_id": "e25ec45ea5db", "timestamp": "2026-04-10T23:37:04.618180+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T23:37:05.557171+09:00"}
+{"event": "quarantined", "reason": "period_quarter_unresolved:period='R8/1',quarter=''", "review_hint": "pdf_extraction_failed", "candidate_reject_reason": "period_quarter_unresolved:period='R8/1',quarter=''", "xbrl_fallback_attempted": false, "timestamp": "2026-04-10T23:37:07.755792+09:00"}

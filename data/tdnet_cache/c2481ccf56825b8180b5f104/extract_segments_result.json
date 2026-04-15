@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "4716",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "Cloud And License",
+    "segment_order": 1,
+    "segment_sales": 177350,
+    "segment_profit": 66311,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Cloud And License",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-24",
+    "tdnet_doc_id": "c2481ccf56825b8180b5f104",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "4716",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "Hardware Systems",
+    "segment_order": 2,
+    "segment_sales": 10120,
+    "segment_profit": 336,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Hardware Systems",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-24",
+    "tdnet_doc_id": "c2481ccf56825b8180b5f104",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "4716",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "Service",
+    "segment_order": 3,
+    "segment_sales": 19200,
+    "segment_profit": 4506,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Service",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-24",
+    "tdnet_doc_id": "c2481ccf56825b8180b5f104",
+    "row_type": "segment"
+  }
+]

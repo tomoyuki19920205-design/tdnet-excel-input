@@ -1,0 +1,6 @@
+{"event": "v2_start", "ticker": "324A", "run_id": "793bcbb5fb3e", "timestamp": "2026-04-10T08:35:47.239203+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T08:35:48.911147+09:00"}
+{"event": "ok", "via": "pdf", "segments": 37, "fingerprint": "a364850d5f3cbe79d8f372c2", "timestamp": "2026-04-10T08:35:50.198127+09:00"}
+{"event": "v2_start", "ticker": "324A", "run_id": "b2fef1854a1d", "timestamp": "2026-04-10T10:46:18.737656+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T10:46:21.064213+09:00"}
+{"event": "ok", "via": "pdf", "segments": 37, "fingerprint": "a364850d5f3cbe79d8f372c2", "timestamp": "2026-04-10T10:46:25.985383+09:00"}

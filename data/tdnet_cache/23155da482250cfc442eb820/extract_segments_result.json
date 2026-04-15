@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "1433",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Demolition And Maintenance Business",
+    "segment_order": 1,
+    "segment_sales": 10818,
+    "segment_profit": 2168,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Demolition And Maintenance Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "23155da482250cfc442eb820",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "1433",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Other",
+    "segment_order": 2,
+    "segment_sales": 322,
+    "segment_profit": 69,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Other",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "23155da482250cfc442eb820",
+    "row_type": "segment"
+  }
+]

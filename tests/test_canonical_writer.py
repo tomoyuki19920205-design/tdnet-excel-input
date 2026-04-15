@@ -15,6 +15,8 @@ from lib.pipeline.canonical_writer import (
     normalize_segment_key,
     write_financials_canonical,
     write_segments_canonical,
+    expand_financials_rows,
+    expand_segments_rows,
 )
 
 
@@ -79,7 +81,146 @@ class TestNormalizeSegmentKey:
 
 
 # ================================================================
-# write_financials_canonical テスト
+# expand_financials_rows テスト
+# ================================================================
+
+
+class TestExpandFinancialsRows:
+    """expand_financials_rows のテスト (HTTP なし)。"""
+
+    def test_expansion(self):
+        """3 metrics → 3 rows"""
+        rows, skipped = expand_financials_rows(
+            ticker="6750", period="2026-03-31", quarter="FY",
+            metrics_dict={"sales": 100, "gross_profit": 50, "operating_profit": 30},
+            source="tdnet",
+        )
+        assert len(rows) == 3
+        assert skipped == 0
+        metrics = {r["metric"] for r in rows}
+        assert metrics == {"sales", "gross_profit", "operating_profit"}
+
+    def test_none_skipped(self):
+        rows, skipped = expand_financials_rows(
+            ticker="6750", period="2026-03-31", quarter="FY",
+            metrics_dict={"sales": 100, "gross_profit": None},
+            source="tdnet",
+        )
+        assert len(rows) == 1
+        assert skipped == 1
+
+    def test_all_none_empty(self):
+        rows, skipped = expand_financials_rows(
+            ticker="6750", period="2026-03-31", quarter="FY",
+            metrics_dict={"sales": None, "gross_profit": None},
+            source="tdnet",
+        )
+        assert len(rows) == 0
+        assert skipped == 2
+
+    def test_ticker_normalized(self):
+        rows, skipped = expand_financials_rows(
+            ticker="72030", period="2026-03-31", quarter="FY",
+            metrics_dict={"sales": 100},
+            source="jquants",
+        )
+        assert len(rows) == 1
+        assert rows[0]["ticker"] == "7203"
+
+    def test_invalid_ticker_empty(self):
+        rows, skipped = expand_financials_rows(
+            ticker="", period="2026-03-31", quarter="FY",
+            metrics_dict={"sales": 100},
+            source="tdnet",
+        )
+        assert len(rows) == 0
+        assert skipped == 1
+
+    def test_source_priority_auto(self):
+        rows, _ = expand_financials_rows(
+            ticker="6750", period="2026-03-31", quarter="FY",
+            metrics_dict={"sales": 100},
+            source="jquants",
+        )
+        assert rows[0]["source_priority"] == 6
+
+    def test_recency_key_present(self):
+        rows, _ = expand_financials_rows(
+            ticker="6750", period="2026-03-31", quarter="FY",
+            metrics_dict={"sales": 100},
+            source="tdnet",
+        )
+        assert rows[0]["recency_key"]
+        assert len(rows[0]["recency_key"]) > 0
+
+    def test_source_row_key_uses_normalized_ticker(self):
+        rows, _ = expand_financials_rows(
+            ticker="72030", period="2026-03-31", quarter="FY",
+            metrics_dict={"sales": 100},
+            source="jquants",
+        )
+        assert "|7203|" in rows[0]["source_row_key"]
+
+
+# ================================================================
+# expand_segments_rows テスト
+# ================================================================
+
+
+class TestExpandSegmentsRows:
+    """expand_segments_rows のテスト (HTTP なし)。"""
+
+    def test_expansion(self):
+        """2 segments × 2 metrics = 4 rows"""
+        rows, skipped = expand_segments_rows(
+            ticker="6750", period="2026-03-31", quarter="FY",
+            segments=[
+                {"segment_name": "自動車事業", "sales": 100, "profit": 50},
+                {"segment_name": "金融事業", "sales": 200, "profit": 80},
+            ],
+            source="xbrl",
+        )
+        assert len(rows) == 4
+        assert skipped == 0
+
+    def test_empty_name_skipped(self):
+        rows, skipped = expand_segments_rows(
+            ticker="6750", period="2026-03-31", quarter="FY",
+            segments=[
+                {"segment_name": "", "sales": 100, "profit": 50},
+                {"segment_name": "有効", "sales": 200, "profit": 80},
+            ],
+            source="xbrl",
+        )
+        assert skipped >= 1
+        assert len(rows) == 2
+
+    def test_ticker_normalized(self):
+        rows, _ = expand_segments_rows(
+            ticker="72030", period="2026-03-31", quarter="FY",
+            segments=[{"segment_name": "テスト", "sales": 100, "profit": 50}],
+            source="xbrl",
+        )
+        assert all(r["ticker"] == "7203" for r in rows)
+
+    def test_dedupe(self):
+        """同一 source_row_key が重複する場合、後勝ちで dedupe される"""
+        rows, _ = expand_segments_rows(
+            ticker="6750", period="2026-03-31", quarter="FY",
+            segments=[
+                {"segment_name": "テスト", "sales": 100, "profit": 50},
+                {"segment_name": "テスト", "sales": 200, "profit": 80},
+            ],
+            source="xbrl",
+        )
+        # 後勝ちで 2 rows (sales + profit)
+        assert len(rows) == 2
+        sales_row = [r for r in rows if r["metric"] == "sales"][0]
+        assert sales_row["value"] == 200
+
+
+# ================================================================
+# write_financials_canonical テスト (後方互換)
 # ================================================================
 
 
@@ -186,7 +327,7 @@ class TestWriteFinancialsCanonical:
 
 
 # ================================================================
-# write_segments_canonical テスト
+# write_segments_canonical テスト (後方互換)
 # ================================================================
 
 
@@ -263,3 +404,125 @@ class TestWriteSegmentsRowKeyDeterministic:
         keys1 = {r["source_row_key"] for r in calls[0]}
         keys2 = {r["source_row_key"] for r in calls[1]}
         assert keys1 == keys2
+
+
+# ================================================================
+# ticker 正規化ガード テスト
+# ================================================================
+
+
+class TestTickerNormalizationGuard:
+    """canonical_writer の最終防衛線としての ticker 正規化テスト。"""
+
+    def test_5digit_to_4digit(self):
+        """72030 → 7203 に正規化されて upsert される"""
+        mock_upsert = MagicMock(return_value={"ok": True, "count": 1, "error": None})
+        with patch("lib.pipeline.canonical_writer.supabase_upsert", mock_upsert):
+            result = write_financials_canonical(
+                ticker="72030",
+                period="2026-03-31",
+                quarter="FY",
+                metrics_dict={"sales": 100},
+                source="jquants",
+                config={"url": "x", "key": "y"},
+            )
+        assert result["written"] == 1
+        rows = mock_upsert.call_args[0][1]
+        assert rows[0]["ticker"] == "7203"
+
+    def test_alpha_5digit_to_4digit(self):
+        """130A0 → 130A に正規化される"""
+        mock_upsert = MagicMock(return_value={"ok": True, "count": 1, "error": None})
+        with patch("lib.pipeline.canonical_writer.supabase_upsert", mock_upsert):
+            result = write_financials_canonical(
+                ticker="130A0",
+                period="2026-03-31",
+                quarter="FY",
+                metrics_dict={"sales": 100},
+                source="jquants",
+                config={"url": "x", "key": "y"},
+            )
+        assert result["written"] == 1
+        rows = mock_upsert.call_args[0][1]
+        assert rows[0]["ticker"] == "130A"
+
+    def test_4digit_passthrough(self):
+        """7203 はそのまま通過"""
+        mock_upsert = MagicMock(return_value={"ok": True, "count": 1, "error": None})
+        with patch("lib.pipeline.canonical_writer.supabase_upsert", mock_upsert):
+            result = write_financials_canonical(
+                ticker="7203",
+                period="2026-03-31",
+                quarter="FY",
+                metrics_dict={"sales": 100},
+                source="tdnet",
+                config={"url": "x", "key": "y"},
+            )
+        assert result["written"] == 1
+        rows = mock_upsert.call_args[0][1]
+        assert rows[0]["ticker"] == "7203"
+
+    def test_invalid_ticker_skipped(self):
+        """空文字 ticker は invalid → skipped"""
+        mock_upsert = MagicMock()
+        with patch("lib.pipeline.canonical_writer.supabase_upsert", mock_upsert):
+            result = write_financials_canonical(
+                ticker="",
+                period="2026-03-31",
+                quarter="FY",
+                metrics_dict={"sales": 100},
+                source="tdnet",
+                config={"url": "x", "key": "y"},
+            )
+        assert result["written"] == 0
+        assert result["skipped"] == 1
+        assert mock_upsert.call_count == 0
+
+    def test_source_row_key_uses_normalized_ticker(self):
+        """source_row_key に正規化後の 4桁 ticker が使われる"""
+        mock_upsert = MagicMock(return_value={"ok": True, "count": 1, "error": None})
+        with patch("lib.pipeline.canonical_writer.supabase_upsert", mock_upsert):
+            write_financials_canonical(
+                ticker="72030",
+                period="2026-03-31",
+                quarter="FY",
+                metrics_dict={"sales": 100},
+                source="jquants",
+                config={"url": "x", "key": "y"},
+            )
+        rows = mock_upsert.call_args[0][1]
+        key = rows[0]["source_row_key"]
+        assert "|7203|" in key
+        assert "|72030|" not in key
+
+    def test_segments_5digit_normalized(self):
+        """segments writer でも 72030 → 7203 に正規化される"""
+        mock_upsert = MagicMock(return_value={"ok": True, "count": 2, "error": None})
+        with patch("lib.pipeline.canonical_writer.supabase_upsert", mock_upsert):
+            result = write_segments_canonical(
+                ticker="72030",
+                period="2026-03-31",
+                quarter="FY",
+                segments=[{"segment_name": "テスト", "sales": 100, "profit": 50}],
+                source="xbrl",
+                config={"url": "x", "key": "y"},
+            )
+        assert result["written"] == 2
+        rows = mock_upsert.call_args[0][1]
+        assert all(r["ticker"] == "7203" for r in rows)
+
+    def test_segments_invalid_ticker_skipped(self):
+        """segments writer でも invalid ticker はスキップ"""
+        mock_upsert = MagicMock()
+        with patch("lib.pipeline.canonical_writer.supabase_upsert", mock_upsert):
+            result = write_segments_canonical(
+                ticker="",
+                period="2026-03-31",
+                quarter="FY",
+                segments=[{"segment_name": "テスト", "sales": 100, "profit": 50}],
+                source="xbrl",
+                config={"url": "x", "key": "y"},
+            )
+        assert result["written"] == 0
+        assert mock_upsert.call_count == 0
+

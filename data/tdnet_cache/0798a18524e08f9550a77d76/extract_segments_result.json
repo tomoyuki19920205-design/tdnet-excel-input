@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "3681",
+    "period": "R7/12",
+    "quarter": "FY",
+    "segment_name": "Enterprise DX Segment",
+    "segment_order": 1,
+    "segment_sales": 3499,
+    "segment_profit": 527,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Enterprise DX Segment",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-31",
+    "tdnet_doc_id": "0798a18524e08f9550a77d76",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "3681",
+    "period": "R7/12",
+    "quarter": "FY",
+    "segment_name": "Event DX Segment",
+    "segment_order": 2,
+    "segment_sales": 3519,
+    "segment_profit": -2460,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Event DX Segment",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-31",
+    "tdnet_doc_id": "0798a18524e08f9550a77d76",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "3681",
+    "period": "R7/12",
+    "quarter": "FY",
+    "segment_name": "Thirdplace DX Segment",
+    "segment_order": 3,
+    "segment_sales": 2840,
+    "segment_profit": 787,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Thirdplace DX Segment",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-31",
+    "tdnet_doc_id": "0798a18524e08f9550a77d76",
+    "row_type": "segment"
+  }
+]

@@ -1,0 +1,21 @@
+{"event": "v2_start", "ticker": "2923", "run_id": "cb63b363504e", "timestamp": "2026-04-09T21:59:56.452346+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-09T21:59:58.527437+09:00"}
+{"event": "ok", "via": "pdf", "segments": 28, "fingerprint": "ced5b9a9773e61a8ce1b0c51", "timestamp": "2026-04-09T22:00:01.161671+09:00"}
+{"event": "v2_start", "ticker": "2923", "run_id": "fe1aa927c527", "timestamp": "2026-04-09T22:21:05.004204+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-09T22:21:05.936938+09:00"}
+{"event": "ok", "via": "pdf", "segments": 28, "fingerprint": "92ce0f95ffecb5f1f83dc62e", "timestamp": "2026-04-09T22:21:09.636816+09:00"}
+{"event": "v2_start", "ticker": "2923", "run_id": "2f0a7788fa90", "timestamp": "2026-04-09T22:39:49.303854+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-09T22:39:50.295892+09:00"}
+{"event": "ok", "via": "pdf", "segments": 28, "fingerprint": "9cef9b9e3dda80bb6e1377a8", "timestamp": "2026-04-09T22:39:53.153486+09:00"}
+{"event": "v2_start", "ticker": "2923", "run_id": "2c92cf8bc933", "timestamp": "2026-04-09T22:46:16.569427+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-09T22:46:17.416706+09:00"}
+{"event": "ok", "via": "pdf", "segments": 28, "fingerprint": "331ae2c0d459b2f6361b3b2b", "timestamp": "2026-04-09T22:46:21.405508+09:00"}
+{"event": "v2_start", "ticker": "2923", "run_id": "9078816bd14e", "timestamp": "2026-04-10T07:44:56.455120+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T07:44:58.143692+09:00"}
+{"event": "ok", "via": "pdf", "segments": 28, "fingerprint": "ca84e5a5f6aac19c2f1df3ee", "timestamp": "2026-04-10T07:45:02.187231+09:00"}
+{"event": "v2_start", "ticker": "2923", "run_id": "96fe496be3d3", "timestamp": "2026-04-10T10:02:34.451624+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-10T10:02:34.822504+09:00"}
+{"event": "ok", "via": "pdf", "segments": 28, "fingerprint": "ced5b9a9773e61a8ce1b0c51", "timestamp": "2026-04-10T10:02:36.809023+09:00"}
+{"event": "v2_start", "ticker": "2923", "run_id": "f4d9399a2cea", "timestamp": "2026-04-12T18:19:16.019488+09:00"}
+{"event": "pdf_only_start", "run_id": null, "timestamp": "2026-04-12T18:19:16.789648+09:00"}
+{"event": "ok", "via": "pdf", "segments": 2, "fingerprint": "dea02cc8933e10df98855d28", "timestamp": "2026-04-12T18:19:18.956783+09:00"}

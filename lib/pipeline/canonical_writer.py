@@ -16,6 +16,9 @@ from .source_priority import get_priority
 from .recency import make_recency_key
 from .db import supabase_upsert
 
+# ticker 正規化の最終防衛線 — 呼び出し元が忘れても writer が止める
+from src.common_ticker import normalize_ticker, is_valid_ticker
+
 logger = logging.getLogger("pipeline.canonical")
 JST = timezone(timedelta(hours=9))
 
@@ -117,10 +120,10 @@ def normalize_segment_key(name: str) -> str:
 
 
 # ================================================================
-# Financials canonical write
+# Financials: 展開ヘルパー (HTTP なし)
 # ================================================================
 
-def write_financials_canonical(
+def expand_financials_rows(
     *,
     ticker: str,
     period: str,
@@ -131,18 +134,31 @@ def write_financials_canonical(
     disclosure_datetime: str | None = None,
     correction_flag: bool = False,
     unit: str = "JPY",
-    config: dict,
-) -> dict:
-    """financials wide dict → canonical_financials (long) に upsert。
+) -> tuple[list[dict], int]:
+    """wide dict → canonical_financials long rows に展開。HTTP 呼び出しなし。
 
     Args:
-        metrics_dict: {"sales": 123, "gross_profit": 45, ...} (値は int | None)
+        metrics_dict: {"sales": 123, "gross_profit": 45, ...}
         source: "tdnet" | "jquants" etc.
-        config: supabase_upsert 用の config dict
 
     Returns:
-        {"written": int, "skipped": int, "errors": int}
+        (rows, skipped_count)  — rows は upsert 用 dict リスト
     """
+    raw_ticker = ticker
+    ticker = normalize_ticker(ticker)
+    if raw_ticker != ticker:
+        logger.info(
+            f"[canonical] ticker normalized: '{raw_ticker}' -> '{ticker}' "
+            f"source={source} period={period} quarter={quarter}"
+        )
+    if not is_valid_ticker(ticker):
+        logger.warning(
+            f"[canonical] INVALID ticker after normalization: "
+            f"raw='{raw_ticker}' normalized='{ticker}' source={source} "
+            f"period={period} quarter={quarter} — skipping"
+        )
+        return [], len(metrics_dict)
+
     now_iso = datetime.now(JST).isoformat()
     priority = get_priority(source)
     recency = make_recency_key(
@@ -177,42 +193,14 @@ def write_financials_canonical(
             "updated_at": now_iso,
         })
 
-    if not rows:
-        return {"written": 0, "skipped": skipped, "errors": 0}
-
-    try:
-        result = supabase_upsert(
-            "canonical_financials",
-            rows,
-            on_conflict="source_row_key",
-            config=config,
-        )
-        if result.get("ok"):
-            logger.info(
-                f"[canonical] financials written: ticker={ticker} period={period} "
-                f"quarter={quarter} rows={len(rows)}"
-            )
-            return {"written": len(rows), "skipped": skipped, "errors": 0}
-        else:
-            logger.warning(
-                f"[canonical] financials upsert failed (best-effort): "
-                f"ticker={ticker} period={period} quarter={quarter} "
-                f"error={result.get('error', 'unknown')}"
-            )
-            return {"written": 0, "skipped": skipped, "errors": len(rows)}
-    except Exception as e:
-        logger.warning(
-            f"[canonical] financials write EXCEPTION (best-effort): "
-            f"ticker={ticker} period={period} quarter={quarter} error={e}"
-        )
-        return {"written": 0, "skipped": skipped, "errors": len(rows)}
+    return rows, skipped
 
 
 # ================================================================
-# Segments canonical write
+# Segments: 展開ヘルパー (HTTP なし)
 # ================================================================
 
-def write_segments_canonical(
+def expand_segments_rows(
     *,
     ticker: str,
     period: str,
@@ -223,17 +211,47 @@ def write_segments_canonical(
     disclosure_datetime: str | None = None,
     correction_flag: bool = False,
     unit: str = "JPY",
-    config: dict,
-) -> dict:
-    """segment list → canonical_segments (long) に upsert。
+) -> tuple[list[dict], int]:
+    """segment list → canonical_segments long rows に展開。HTTP 呼び出しなし。
 
     Args:
         segments: [{"segment_name": "...", "sales": 123, "profit": 45}, ...]
         source: "xbrl" | "html" | "pdf" etc.
 
     Returns:
-        {"written": int, "skipped": int, "errors": int}
+        (rows, skipped_count)  — rows は upsert 用 dict リスト (dedupe 済み)
     """
+    # ── 必須改修 4: expand_segments_rows 入力ログ ──
+    logger.debug(
+        f"[canonical][debug] expand_segments_rows input "
+        f"ticker='{ticker}' period='{period}' quarter='{quarter}' "
+        f"source='{source}' segments_count={len(segments)}"
+    )
+
+    raw_ticker = ticker
+    ticker = normalize_ticker(ticker)
+    if raw_ticker != ticker:
+        logger.info(
+            f"[canonical] segments ticker normalized: '{raw_ticker}' -> '{ticker}' "
+            f"source={source} period={period} quarter={quarter}"
+        )
+
+    # ── 必須改修 4: 正規化後の値もログ ──
+    logger.debug(
+        f"[canonical][debug] expand_segments_rows normalized "
+        f"ticker='{ticker}' (raw='{raw_ticker}') "
+        f"valid={is_valid_ticker(ticker)}"
+    )
+
+    if not is_valid_ticker(ticker):
+        logger.warning(
+            f"[canonical] INVALID ticker for segments: "
+            f"raw='{raw_ticker}' normalized='{ticker}' source={source} "
+            f"period={period} quarter={quarter} — skipping"
+        )
+        return [], len(segments)
+
+
     now_iso = datetime.now(JST).isoformat()
     priority = get_priority(source)
     recency = make_recency_key(
@@ -255,7 +273,6 @@ def write_segments_canonical(
         seg_name = normalize_segment_name(raw_name)
         seg_key = normalize_segment_key(raw_name)
 
-        # metric ごとに 1行
         for metric in ("sales", "profit"):
             value = seg.get(metric)
             if value is None:
@@ -287,7 +304,7 @@ def write_segments_canonical(
             })
 
     if not rows:
-        return {"written": 0, "skipped": skipped, "errors": 0}
+        return [], skipped
 
     # --- source_row_key 重複検知 + dedupe (後勝ち) ---
     original_count = len(rows)
@@ -310,6 +327,111 @@ def write_segments_canonical(
             f"top_dups=[{top_dups_str}]"
         )
 
+    return rows, skipped
+
+
+# ================================================================
+# Financials canonical write (後方互換 — 高件数経路では使用禁止)
+# ================================================================
+
+def write_financials_canonical(
+    *,
+    ticker: str,
+    period: str,
+    quarter: str,
+    metrics_dict: dict[str, int | float | None],
+    source: str,
+    filing_id: str | None = None,
+    disclosure_datetime: str | None = None,
+    correction_flag: bool = False,
+    unit: str = "JPY",
+    config: dict,
+) -> dict:
+    """financials wide dict → canonical_financials (long) に upsert。
+
+    .. warning::
+        高件数経路 (nightly/batch) では使用禁止。
+        expand_financials_rows() + supabase_upsert() の一括方式を使うこと。
+        この関数は既存互換 / 小規模用途のみ。
+
+    Returns:
+        {"written": int, "skipped": int, "errors": int}
+    """
+    rows, skipped = expand_financials_rows(
+        ticker=ticker, period=period, quarter=quarter,
+        metrics_dict=metrics_dict, source=source,
+        filing_id=filing_id, disclosure_datetime=disclosure_datetime,
+        correction_flag=correction_flag, unit=unit,
+    )
+
+    if not rows:
+        return {"written": 0, "skipped": skipped, "errors": 0}
+
+    try:
+        result = supabase_upsert(
+            "canonical_financials",
+            rows,
+            on_conflict="source_row_key",
+            config=config,
+        )
+        if result.get("ok"):
+            logger.info(
+                f"[canonical] financials written: ticker={rows[0]['ticker']} period={period} "
+                f"quarter={quarter} rows={len(rows)}"
+            )
+            return {"written": len(rows), "skipped": skipped, "errors": 0}
+        else:
+            logger.warning(
+                f"[canonical] financials upsert failed (best-effort): "
+                f"ticker={rows[0]['ticker']} period={period} quarter={quarter} "
+                f"error={result.get('error', 'unknown')}"
+            )
+            return {"written": 0, "skipped": skipped, "errors": len(rows)}
+    except Exception as e:
+        logger.warning(
+            f"[canonical] financials write EXCEPTION (best-effort): "
+            f"ticker={ticker} period={period} quarter={quarter} error={e}"
+        )
+        return {"written": 0, "skipped": skipped, "errors": len(rows)}
+
+
+# ================================================================
+# Segments canonical write (後方互換 — 高件数経路では使用禁止)
+# ================================================================
+
+def write_segments_canonical(
+    *,
+    ticker: str,
+    period: str,
+    quarter: str,
+    segments: list[dict],
+    source: str,
+    filing_id: str | None = None,
+    disclosure_datetime: str | None = None,
+    correction_flag: bool = False,
+    unit: str = "JPY",
+    config: dict,
+) -> dict:
+    """segment list → canonical_segments (long) に upsert。
+
+    .. warning::
+        高件数経路 (nightly/batch) では使用禁止。
+        expand_segments_rows() + supabase_upsert() の一括方式を使うこと。
+        この関数は既存互換 / 小規模用途のみ。
+
+    Returns:
+        {"written": int, "skipped": int, "errors": int}
+    """
+    rows, skipped = expand_segments_rows(
+        ticker=ticker, period=period, quarter=quarter,
+        segments=segments, source=source,
+        filing_id=filing_id, disclosure_datetime=disclosure_datetime,
+        correction_flag=correction_flag, unit=unit,
+    )
+
+    if not rows:
+        return {"written": 0, "skipped": skipped, "errors": 0}
+
     try:
         result = supabase_upsert(
             "canonical_segments",
@@ -319,14 +441,14 @@ def write_segments_canonical(
         )
         if result.get("ok"):
             logger.info(
-                f"[canonical] segments written: ticker={ticker} period={period} "
+                f"[canonical] segments written: ticker={rows[0]['ticker']} period={period} "
                 f"quarter={quarter} rows={len(rows)}"
             )
             return {"written": len(rows), "skipped": skipped, "errors": 0}
         else:
             logger.warning(
                 f"[canonical] segments upsert failed (best-effort): "
-                f"ticker={ticker} period={period} quarter={quarter} "
+                f"ticker={rows[0]['ticker']} period={period} quarter={quarter} "
                 f"error={result.get('error', 'unknown')}"
             )
             return {"written": 0, "skipped": skipped, "errors": len(rows)}

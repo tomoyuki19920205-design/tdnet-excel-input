@@ -1,0 +1,14 @@
+{
+  "filing_id": "e490295e4f822a15c4f2ab63",
+  "ticker": "2769",
+  "disclosure_date": "2026-04-10",
+  "title": "2026年５月期　第３四半期決算短信（日本基準）（連結）",
+  "doc_type": "financial_statement",
+  "source_url": "https://www.release.tdnet.info/inbs/140120260410501724.pdf",
+  "xbrl_url": "https://www.release.tdnet.info/inbs/081220260410501724.zip",
+  "listing_source": "tdnet_html",
+  "has_xbrl": false,
+  "xbrl_url_inferred": true,
+  "has_pdf": true,
+  "created_at": "2026-04-10T17:26:42.634288+09:00"
+}

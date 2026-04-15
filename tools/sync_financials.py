@@ -55,6 +55,16 @@ _DEFAULT_RECENT_DAYS = 30
 
 JST = timezone(timedelta(hours=9))
 
+# ============================================================
+# 単位正規化 (J-Quants 円 → 百万円)
+# ============================================================
+# J-Quants API は円単位で数値を返す。
+# Viewer / canonical の基準単位は百万円なので、push 前に変換する。
+from lib.pipeline.unit_convert import to_millions as _to_millions  # noqa: E402
+
+# 百万円単位としては異常に大きい閾値 (= 元が円単位のまま混入した可能性)
+_ABNORMAL_MILLIONS_THRESHOLD = 1_000_000_000  # 百万円で10億 = 円で1000兆
+
 logger = logging.getLogger("sync_financials")
 
 
@@ -82,18 +92,24 @@ def _load_dotenv():
 class _SupabaseAPI:
     def __init__(self, url: str, key: str) -> None:
         self.rest_url = url.rstrip("/") + "/rest/v1"
+        self.session = requests.Session()
         self.headers = {
             "apikey": key,
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
             "Prefer": "return=headers-only,resolution=merge-duplicates",
         }
+        self.session.headers.update({
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        })
 
     def _request(self, method: str, url: str, **kwargs) -> requests.Response:
         last_exc = None
         for attempt in range(_RETRY_MAX):
             try:
-                r = requests.request(method, url, timeout=60, **kwargs)
+                r = self.session.request(method, url, timeout=60, **kwargs)
                 r.raise_for_status()
                 return r
             except (requests.ConnectionError, requests.Timeout) as e:
@@ -105,6 +121,14 @@ class _SupabaseAPI:
                 time.sleep(wait)
             except requests.HTTPError as e:
                 status = e.response.status_code if e.response else 0
+                # 重複キーエラー (PostgreSQL 21000) はリトライしても解決しない
+                if status == 500 and e.response is not None and "21000" in e.response.text:
+                    body = e.response.text[:500]
+                    logger.error(
+                        f"[API] HTTP 500 (duplicate key, code=21000) — リトライ不可\n"
+                        f"  レスポンス: {body}"
+                    )
+                    raise
                 if status == 429 or status >= 500:
                     last_exc = e
                     wait = _RETRY_BASE_SEC * (2 ** attempt)
@@ -127,6 +151,10 @@ class _SupabaseAPI:
                     )
                     raise
         raise last_exc  # type: ignore
+
+    def close(self):
+        """Session をクローズする。"""
+        self.session.close()
 
     def upsert_batch(
         self, table: str, data: list[dict], on_conflict: str = ""
@@ -282,19 +310,62 @@ def read_sqlite(
     # ticker 正規化 (5桁 local_code → 4桁 canonical ticker)
     from src.common_ticker import normalize_ticker as _norm_ticker
 
+    abnormal_count = 0
     for r in rows:
+        # J-Quants は円単位 → 百万円に正規化
+        sales_m = _to_millions(r["sales"])
+        gp_m = _to_millions(r["gross_profit"])
+        op_m = _to_millions(r["operating_profit"])
+
+        # 正規化後のバリデーション: 百万円として異常に大きい値を検知
+        for label, val in [("sales", sales_m), ("gross_profit", gp_m), ("operating_profit", op_m)]:
+            if val is not None and abs(val) > _ABNORMAL_MILLIONS_THRESHOLD:
+                abnormal_count += 1
+                if abnormal_count <= 5:  # 最初の5件だけログ
+                    logger.warning(
+                        f"[VALIDATE] 百万円として異常値: ticker={_norm_ticker(r['ticker'])} "
+                        f"period={r['period']} quarter={r['quarter']} "
+                        f"{label}={val} (raw={r[label]})"
+                    )
+
         data.append(
             {
                 "ticker": _norm_ticker(r["ticker"]),
                 "period": r["period"],
                 "quarter": r["quarter"],
-                "sales": r["sales"],
-                "gross_profit": r["gross_profit"],
-                "operating_profit": r["operating_profit"],
+                "sales": sales_m,
+                "gross_profit": gp_m,
+                "operating_profit": op_m,
                 "source": "jquants",
                 "updated_at": now_iso,
             }
         )
+
+    if abnormal_count > 0:
+        logger.warning(
+            f"[VALIDATE] 百万円として異常値が {abnormal_count} 件検出されました。"
+            f" 元データの単位を確認してください。"
+        )
+
+    # ── P4: ticker 正規化後の重複排除 ──
+    # SQL では 5桁 local_code で dedupe するが、normalize_ticker で 4桁化すると
+    # 同じ (ticker, period, quarter) が生まれうる → バッチ内 duplicate key 500 エラーの原因
+    seen_keys: set[tuple[str, str, str]] = set()
+    deduped_data: list[dict] = []
+    dup_count = 0
+    for d in data:
+        key = (d["ticker"], d["period"], d["quarter"])
+        if key in seen_keys:
+            dup_count += 1
+            continue
+        seen_keys.add(key)
+        deduped_data.append(d)
+    if dup_count > 0:
+        logger.info(
+            f"[DEDUPE] ticker正規化後の重複: {dup_count}件除去 "
+            f"({len(data)} → {len(deduped_data)})"
+        )
+    data = deduped_data
 
     logger.info(f"[SQLite] 重複排除後: {len(data):,} rows")
     return data, raw_stats
@@ -367,6 +438,7 @@ def sync(
 
     # ---- Supabase UPSERT ----
     api = _SupabaseAPI(supabase_url, supabase_key)
+    logger.info("[SYNC] requests.Session enabled (connection reuse)")
     total_batches = (len(data) + batch_size - 1) // batch_size
     t0 = time.time()
 
@@ -375,84 +447,104 @@ def sync(
         f"({total_batches} batches × {batch_size})"
     )
 
-    for i, chunk in enumerate(_chunks(data, batch_size), 1):
-        try:
-            n = api.upsert_batch(table, chunk, on_conflict="ticker,period,quarter")
-            stats["upserted"] += n
-            stats["batches"] += 1
-            elapsed = time.time() - t0
-            logger.info(
-                f"  batch {i}/{total_batches}: "
-                f"{n} rows upserted "
-                f"(累計 {stats['upserted']:,} / {len(data):,}, "
-                f"{elapsed:.1f}秒)"
-            )
-        except Exception as e:
-            stats["errors"] += 1
-            logger.error(
-                f"  batch {i}/{total_batches}: FAILED — {e}\n"
-                f"  (先頭行: {chunk[0] if chunk else 'empty'})"
-            )
-
-    stats["elapsed_sec"] = round(time.time() - t0, 1)
-
-    # ---- 同期後の検証 ----
-    logger.info("[VERIFY] Supabase 側の検証中...")
     try:
-        verify = api.select_count(table)
-        logger.info(f"[VERIFY] public.{table}: {verify['total_rows']:,} rows")
-    except Exception as e:
-        logger.warning(f"[VERIFY] 検証スキップ: {e}")
-
-    logger.info(
-        f"\n{'='*60}\n"
-        f"  SYNC 完了\n"
-        f"  upserted: {stats['upserted']:,} / {stats['deduped_rows']:,}\n"
-        f"  errors:   {stats['errors']}\n"
-        f"  elapsed:  {stats['elapsed_sec']}秒\n"
-        f"{'='*60}"
-    )
-
-    # ── Phase 2-A: canonical dual-write (best-effort) ──
-    if not dry_run and stats["upserted"] > 0:
-        try:
-            from lib.pipeline.canonical_writer import write_financials_canonical
-            from lib.pipeline.db import load_env, get_supabase_write_config
-            load_env()
-            canonical_config = get_supabase_write_config()
-            if canonical_config:
-                canonical_total = 0
-                canonical_errors = 0
-                for d in data:
-                    metrics_dict = {
-                        k: d.get(k)
-                        for k in ("sales", "gross_profit", "operating_profit")
-                    }
-                    cw_result = write_financials_canonical(
-                        ticker=d["ticker"],
-                        period=d["period"],
-                        quarter=d["quarter"],
-                        metrics_dict=metrics_dict,
-                        source="jquants",
-                        config=canonical_config,
-                    )
-                    canonical_total += cw_result["written"]
-                    canonical_errors += cw_result["errors"]
+        for i, chunk in enumerate(_chunks(data, batch_size), 1):
+            try:
+                n = api.upsert_batch(table, chunk, on_conflict="ticker,period,quarter")
+                stats["upserted"] += n
+                stats["batches"] += 1
+                elapsed = time.time() - t0
                 logger.info(
-                    f"[CANONICAL] financials dual-write (jquants): "
-                    f"written={canonical_total} errors={canonical_errors}"
+                    f"  batch {i}/{total_batches}: "
+                    f"{n} rows upserted "
+                    f"(累計 {stats['upserted']:,} / {len(data):,}, "
+                    f"{elapsed:.1f}秒)"
                 )
-            else:
-                logger.warning(
-                    "[CANONICAL] financials dual-write skipped: no write config"
+            except Exception as e:
+                stats["errors"] += 1
+                logger.error(
+                    f"  batch {i}/{total_batches}: FAILED — {e}\n"
+                    f"  (先頭行: {chunk[0] if chunk else 'empty'})"
                 )
-        except Exception as _cw_err:
-            logger.warning(
-                f"[CANONICAL] financials dual-write failed "
-                f"(best-effort, legacy unaffected): {_cw_err}"
-            )
 
-    return stats
+        stats["elapsed_sec"] = round(time.time() - t0, 1)
+
+        # ---- 同期後の検証 ----
+        logger.info("[VERIFY] Supabase 側の検証中...")
+        try:
+            verify = api.select_count(table)
+            logger.info(f"[VERIFY] public.{table}: {verify['total_rows']:,} rows")
+        except Exception as e:
+            logger.warning(f"[VERIFY] 検証スキップ: {e}")
+
+        logger.info(
+            f"\n{'='*60}\n"
+            f"  SYNC 完了\n"
+            f"  upserted: {stats['upserted']:,} / {stats['deduped_rows']:,}\n"
+            f"  errors:   {stats['errors']}\n"
+            f"  elapsed:  {stats['elapsed_sec']}秒\n"
+            f"{'='*60}"
+        )
+
+        # ── Phase 2-A: canonical dual-write (best-effort, batched) ──
+        if not dry_run and stats["upserted"] > 0:
+            try:
+                from lib.pipeline.canonical_writer import expand_financials_rows
+                from lib.pipeline.db import load_env, get_supabase_write_config, supabase_upsert
+                load_env()
+                canonical_config = get_supabase_write_config()
+                if canonical_config:
+                    all_canonical_rows: list[dict] = []
+                    canonical_skipped = 0
+                    for d in data:
+                        metrics_dict = {
+                            k: d.get(k)
+                            for k in ("sales", "gross_profit", "operating_profit")
+                        }
+                        expanded, skipped = expand_financials_rows(
+                            ticker=d["ticker"],
+                            period=d["period"],
+                            quarter=d["quarter"],
+                            metrics_dict=metrics_dict,
+                            source="jquants",
+                            unit="millions_jpy",
+                        )
+                        all_canonical_rows.extend(expanded)
+                        canonical_skipped += skipped
+
+                    if all_canonical_rows:
+                        upsert_result = supabase_upsert(
+                            "canonical_financials",
+                            all_canonical_rows,
+                            on_conflict="source_row_key",
+                            config=canonical_config,
+                            batch_size=200,
+                            session=api.session,
+                        )
+                        logger.info(
+                            f"[CANONICAL] financials dual-write (jquants, batched): "
+                            f"expanded={len(all_canonical_rows)} skipped={canonical_skipped} "
+                            f"ok={upsert_result.get('ok')} count={upsert_result.get('count', 0)} "
+                            f"batches={upsert_result.get('batches_succeeded', 0)}"
+                        )
+                    else:
+                        logger.info(
+                            f"[CANONICAL] financials dual-write: no rows to write "
+                            f"(skipped={canonical_skipped})"
+                        )
+                else:
+                    logger.warning(
+                        "[CANONICAL] financials dual-write skipped: no write config"
+                    )
+            except Exception as _cw_err:
+                logger.warning(
+                    f"[CANONICAL] financials dual-write failed "
+                    f"(best-effort, legacy unaffected): {_cw_err}"
+                )
+
+        return stats
+    finally:
+        api.close()
 
 
 # ============================================================

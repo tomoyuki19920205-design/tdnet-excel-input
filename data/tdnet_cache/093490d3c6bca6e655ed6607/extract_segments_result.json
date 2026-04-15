@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "7110",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "Hokuoh Kurashi No Douguten",
+    "segment_order": 1,
+    "segment_sales": 5112,
+    "segment_profit": 867,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Hokuoh Kurashi No Douguten",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-16",
+    "tdnet_doc_id": "093490d3c6bca6e655ed6607",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "7110",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "Foufou",
+    "segment_order": 2,
+    "segment_sales": 165,
+    "segment_profit": 2,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Foufou",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-16",
+    "tdnet_doc_id": "093490d3c6bca6e655ed6607",
+    "row_type": "segment"
+  }
+]

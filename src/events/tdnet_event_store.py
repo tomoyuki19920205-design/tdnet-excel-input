@@ -20,6 +20,11 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
 from .common_models import EventRecord, EventType
+from .common_notify import (
+    build_display_title,
+    build_display_summary,
+    build_formatted_message,
+)
 from .notify_rules import should_notify_event
 
 logger = logging.getLogger("tdnet_event_store")
@@ -190,142 +195,25 @@ def compute_priority_rank(event: EventRecord) -> int:
 
 
 # ============================================================
-# display_title / display_summary 生成
+# display_title / display_summary / formatted_message は
+# common_notify.build_display_title / build_display_summary / build_formatted_message を使用
+# (build_event_parts を唯一の元ネタとする共通フォーマッタ)
+
+
 # ============================================================
-def _get_payload(event: EventRecord) -> dict[str, Any]:
+# payload ヘルパー
+# ============================================================
+def _get_payload(event: EventRecord) -> dict:
+    """EventRecord の extracted_payload_json を parse して dict を返す"""
     if not event.extracted_payload_json:
         return {}
     try:
-        return json.loads(event.extracted_payload_json)
+        payload = json.loads(event.extracted_payload_json)
+        if isinstance(payload, dict):
+            return payload
     except (json.JSONDecodeError, TypeError):
-        return {}
-
-
-def build_display_title(event: EventRecord) -> str:
-    """ユーザーが読む表示タイトルを生成"""
-    payload = _get_payload(event)
-    ticker = event.ticker or "????"
-    name = event.company_name or ""
-    prefix = f"{ticker} {name}" if name else ticker
-
-    if event.event_type == EventType.BUYBACK:
-        ratio = payload.get("ratio_to_outstanding")
-        if ratio is not None:
-            return f"{prefix} | 自社株買い {ratio:.1f}%"
-        return f"{prefix} | 自社株買い"
-
-    elif event.event_type == EventType.FORECAST_REVISION:
-        subtype_ja = {
-            "upward": "上方修正", "downward": "下方修正",
-            "difference": "差異開示", "neutral": "予想修正",
-        }.get(event.subtype, "予想修正")
-        # 代表指標
-        for key, label in [
-            ("change_net_income_pct", "純利益"),
-            ("change_op_pct", "営業益"),
-            ("change_ordinary_pct", "経常益"),
-            ("change_sales_pct", "売上"),
-        ]:
-            val = payload.get(key)
-            if val is not None:
-                sign = "+" if val > 0 else ""
-                return f"{prefix} | {subtype_ja} {label}{sign}{val:.1f}%"
-        return f"{prefix} | {subtype_ja}"
-
-    elif event.event_type == EventType.DIVIDEND_REVISION:
-        prev = payload.get("previous_dividend_per_share")
-        rev = payload.get("revised_dividend_per_share")
-        if event.subtype == "special_dividend":
-            label = "特別配当"
-        elif event.subtype == "commemorative_dividend":
-            label = "記念配当"
-        elif prev is not None and rev is not None:
-            try:
-                prev_f, rev_f = float(prev), float(rev)
-                if prev_f > 0:
-                    pct = (rev_f - prev_f) / prev_f * 100
-                    sign = "+" if pct > 0 else ""
-                    return f"{prefix} | 増配 {sign}{pct:.1f}%"
-                elif prev_f == 0 and rev_f > 0:
-                    return f"{prefix} | 復配 {rev_f}円"
-            except (ValueError, TypeError):
-                pass
-            label = "配当修正"
-        else:
-            label = "配当修正"
-        return f"{prefix} | {label}"
-
-    return f"{prefix} | {event.event_type}"
-
-
-def build_display_summary(event: EventRecord) -> str:
-    """1-3行の短い要約テキストを生成"""
-    payload = _get_payload(event)
-    parts = []
-
-    if event.event_type == EventType.BUYBACK:
-        ratio = payload.get("ratio_to_outstanding")
-        amount = payload.get("amount_limit_million_yen")
-        shares = payload.get("shares_limit")
-        start = payload.get("start_date")
-        end = payload.get("end_date")
-        if ratio is not None:
-            parts.append(f"発行済株式の{ratio:.1f}%")
-        if amount is not None:
-            if amount >= 100:
-                parts.append(f"上限{amount/100:.1f}億円")
-            else:
-                parts.append(f"上限{amount:.0f}百万円")
-        if shares is not None:
-            if shares >= 10_000:
-                parts.append(f"{shares/10_000:.1f}万株")
-            else:
-                parts.append(f"{shares:,}株")
-        if start and end:
-            parts.append(f"期間: {start}〜{end}")
-
-    elif event.event_type == EventType.FORECAST_REVISION:
-        period = payload.get("period_label", "")
-        if period:
-            parts.append(period)
-        for label, key_rev, key_pct in [
-            ("純利益", "revised_net_income", "change_net_income_pct"),
-            ("営業益", "revised_op", "change_op_pct"),
-            ("売上", "revised_sales", "change_sales_pct"),
-        ]:
-            rev = payload.get(key_rev)
-            pct = payload.get(key_pct)
-            if rev is not None:
-                s = f"{label}: "
-                if isinstance(rev, (int, float)) and abs(rev) >= 100:
-                    s += f"{rev/100:.1f}億円"
-                elif rev is not None:
-                    s += f"{rev}百万円"
-                if pct is not None:
-                    sign = "+" if pct > 0 else ""
-                    s += f"({sign}{pct:.1f}%)"
-                parts.append(s)
-                if len(parts) >= 3:
-                    break
-
-    elif event.event_type == EventType.DIVIDEND_REVISION:
-        prev = payload.get("previous_dividend_per_share")
-        rev = payload.get("revised_dividend_per_share")
-        if prev is not None and rev is not None:
-            parts.append(f"配当: {prev}円 → {rev}円")
-        elif rev is not None:
-            parts.append(f"配当: {rev}円")
-        special = payload.get("special_dividend_per_share")
-        if special:
-            parts.append(f"特別配当: {special}円")
-        period = payload.get("fiscal_period", "")
-        if period:
-            parts.append(period)
-
-    if not parts:
-        parts.append(event.summary_text or event.title or "")
-
-    return " / ".join(parts[:3])
+        pass
+    return {}
 
 
 # ============================================================
@@ -462,6 +350,7 @@ def save_event_to_supabase(
         priority_rank = compute_priority_rank(event)
         display_title = build_display_title(event)
         display_summary = build_display_summary(event)
+        formatted_message = build_formatted_message(event)
         metric_name, metric_value, metric_yoy = _extract_primary_metric(event)
         strength = _compute_strength_score(event)
         notify_discord = should_notify_event(event)
@@ -487,6 +376,25 @@ def save_event_to_supabase(
         # 元の event_type を raw_payload に保存
         raw_payload["original_event_type"] = original_event_type
 
+        # text_extract_status: extracted 全数値が null なら "empty" フラグ付与
+        extracted = raw_payload.get("extracted", {})
+        if isinstance(extracted, dict):
+            numeric_fields = [
+                "revised_sales", "revised_op", "revised_ordinary", "revised_net_income",
+                "previous_sales", "previous_op", "previous_ordinary", "previous_net_income",
+                "total_amount", "share_count", "ratio_to_issued",
+                "previous_dividend", "revised_dividend",
+                "revised_dividend_per_share", "previous_dividend_per_share",
+                "shares_limit", "amount_limit_million_yen",
+            ]
+            has_any_number = any(extracted.get(f) is not None for f in numeric_fields)
+            if not has_any_number:
+                raw_payload["text_extract_status"] = "empty"
+                raw_payload["text_empty"] = True
+            else:
+                raw_payload["text_extract_status"] = "ok"
+                raw_payload["text_empty"] = False
+
         sort_key = _build_sort_key(priority_rank, detected_at, event.ticker or "")
 
         row = {
@@ -498,8 +406,8 @@ def save_event_to_supabase(
             "event_subtype": event.subtype or None,
             "headline": event.title or "",
             "summary": event.summary_text or "",
-            "source_url": None,
-            "pdf_url": None,
+            "source_url": event.doc_url or None,
+            "pdf_url": event.doc_url or None,
             "raw_payload": json.dumps(raw_payload, ensure_ascii=False, default=str),
             "strength_score": strength,
             "priority_rank": priority_rank,
@@ -508,6 +416,7 @@ def save_event_to_supabase(
             "primary_metric_yoy": metric_yoy,
             "display_title": display_title,
             "display_summary": display_summary,
+            "formatted_message": formatted_message,
             "sort_key": sort_key,
             "dedupe_key": dedupe_key,
             "notify_to_discord": notify_discord,

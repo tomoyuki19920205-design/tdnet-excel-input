@@ -376,19 +376,25 @@ def _clear_checkpoint(path: str) -> None:
 class _SupabaseAPI:
     def __init__(self, url: str, key: str) -> None:
         self.rest_url = url.rstrip("/") + "/rest/v1"
+        self.session = requests.Session()
         self.headers = {
             "apikey": key,
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
             "Prefer": "return=representation,resolution=merge-duplicates",
         }
+        self.session.headers.update({
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        })
 
     def _request(self, method: str, url: str,
                  **kwargs) -> requests.Response:
         last_exc = None
         for attempt in range(_RETRY_MAX):
             try:
-                r = requests.request(
+                r = self.session.request(
                     method, url, timeout=60, **kwargs
                 )
                 r.raise_for_status()
@@ -476,6 +482,90 @@ class _SupabaseAPI:
             headers=headers, params=params, json=data,
         )
         return len(data)
+
+    def close(self):
+        """Session をクローズする。"""
+        self.session.close()
+
+    def select_by_keys(
+        self, table: str, select: str,
+        key_column: str, keys: list[str],
+        chunk_size: int = 200,
+    ) -> list[dict]:
+        """対象キーのみをINクエリで部分取得する。
+
+        - keys は dedupe + None/空文字除去される
+        - keys が空の場合は即 [] を返す
+        - chunk_size で分割してクエリ発行（IN句サイズ制限対策）
+        - HTTP 502/503/504 のみリトライ（max=3, backoff=1s,2s,4s）
+        """
+        # dedupe + None/空除去
+        clean_keys = list(dict.fromkeys(
+            k for k in keys if k is not None and str(k).strip()
+        ))
+        if not clean_keys:
+            logger.info(
+                f"[DISCLOSURES] select_by_keys: "
+                f"keys empty after dedup, returning []"
+            )
+            return []
+
+        all_rows: list[dict] = []
+        max_retry = 3
+        for chunk in _chunks(clean_keys, chunk_size):
+            in_expr = ",".join(str(k) for k in chunk)
+            params = {
+                "select": select,
+                key_column: f"in.({in_expr})",
+            }
+            last_exc = None
+            for attempt in range(max_retry):
+                try:
+                    r = self.session.get(
+                        f"{self.rest_url}/{table}",
+                        headers={**self.headers, "Prefer": ""},
+                        params=params,
+                        timeout=30,
+                    )
+                    r.raise_for_status()
+                    all_rows.extend(r.json())
+                    break
+                except requests.HTTPError as e:
+                    status = (
+                        e.response.status_code
+                        if e.response else 0
+                    )
+                    if status in (502, 503, 504):
+                        last_exc = e
+                        wait = 1 * (2 ** attempt)  # 1s, 2s, 4s
+                        logger.warning(
+                            f"[DISCLOSURES] HTTP {status} "
+                            f"({attempt+1}/{max_retry})"
+                            f" — {wait}s backoff"
+                        )
+                        time.sleep(wait)
+                    else:
+                        raise
+                except (
+                    requests.ConnectionError,
+                    requests.Timeout,
+                ) as e:
+                    last_exc = e
+                    wait = 1 * (2 ** attempt)
+                    logger.warning(
+                        f"[DISCLOSURES] connection error "
+                        f"({attempt+1}/{max_retry})"
+                        f" — {wait}s backoff"
+                    )
+                    time.sleep(wait)
+            else:
+                raise last_exc  # type: ignore
+
+        logger.info(
+            f"[DISCLOSURES] existing lookup: "
+            f"fetched={len(all_rows)} keys (chunked)"
+        )
+        return all_rows
 
 
 # ============================================================
@@ -1010,8 +1100,11 @@ def push_sqlite_to_supabase(
 
     quarantine_path = os.path.join(_PROJECT_ROOT, _QUARANTINE_DB)
     api = _SupabaseAPI(supabase_url, supabase_key)
+    logger.info("[push] requests.Session enabled (connection reuse)")
 
     # --- SQLite 読み取り ---
+    logger.info("[push] phase=load_candidates START")
+    t_load = time.time()
     if not os.path.exists(db_path):
         raise FileNotFoundError(
             f"DBファイルが見つかりません: {db_path}"
@@ -1038,8 +1131,9 @@ def push_sqlite_to_supabase(
 
     target = len(rows)
     logger.info(
-        f"[PUSH] SQLite総行数: {total_count}, "
-        f"今回対象: {target} 件"
+        f"[push] phase=load_candidates END "
+        f"elapsed={time.time()-t_load:.1f}s "
+        f"total_rows={total_count} target_rows={target}"
     )
 
     stats = {
@@ -1080,7 +1174,8 @@ def push_sqlite_to_supabase(
         # Phase 1: companies 一括 upsert
         # =============================================
         if resume_phase <= 1:
-            logger.info("[Phase 1/4] companies 一括 upsert...")
+            logger.info("[push] phase=build_companies START")
+            t_phase = time.time()
             unique_tickers = sorted(
                 set(r["company_code"] for r in rows)
             )
@@ -1088,6 +1183,13 @@ def push_sqlite_to_supabase(
                 {"ticker_code": t, "is_active": True}
                 for t in unique_tickers
             ]
+            logger.info(
+                f"[push] phase=build_companies END "
+                f"elapsed={time.time()-t_phase:.1f}s "
+                f"rows={len(payloads)}"
+            )
+            logger.info("[push] phase=upsert_companies START")
+            t_phase = time.time()
             ticker_to_cid: dict[str, int] = {}
             for chunk in _chunks(payloads, _MASTER_BATCH):
                 result = api.upsert_batch(
@@ -1100,8 +1202,9 @@ def push_sqlite_to_supabase(
                     )
                 stats["companies_upserted"] += len(chunk)
             logger.info(
-                f"  → {len(ticker_to_cid)} 社 完了 "
-                f"({time.time()-t0:.1f}秒)"
+                f"[push] phase=upsert_companies END "
+                f"elapsed={time.time()-t_phase:.1f}s "
+                f"rows={len(ticker_to_cid)}"
             )
             _save_checkpoint(checkpoint_path, {
                 "phase": 1, "offset": 0, **stats,
@@ -1126,7 +1229,8 @@ def push_sqlite_to_supabase(
         # Phase 2: periods 一括 upsert
         # =============================================
         if resume_phase <= 2:
-            logger.info("[Phase 2/4] periods 一括 upsert...")
+            logger.info("[push] phase=build_periods START")
+            t_phase = time.time()
             seen: set[tuple] = set()
             payloads = []
             parse_errors = 0
@@ -1157,6 +1261,14 @@ def push_sqlite_to_supabase(
                 )
                 stats["errors"] += parse_errors
 
+            logger.info(
+                f"[push] phase=build_periods END "
+                f"elapsed={time.time()-t_phase:.1f}s "
+                f"rows={len(payloads)}"
+            )
+            logger.info("[push] phase=upsert_periods START")
+            t_phase = time.time()
+
             period_key_to_pid: dict[tuple, int] = {}
             for chunk in _chunks(payloads, _MASTER_BATCH):
                 result = api.upsert_batch(
@@ -1174,8 +1286,9 @@ def push_sqlite_to_supabase(
                     period_key_to_pid[key] = p["period_id"]
                 stats["periods_upserted"] += len(chunk)
             logger.info(
-                f"  → {len(period_key_to_pid)} 期間 完了 "
-                f"({time.time()-t0:.1f}秒)"
+                f"[push] phase=upsert_periods END "
+                f"elapsed={time.time()-t_phase:.1f}s "
+                f"rows={len(period_key_to_pid)}"
             )
             _save_checkpoint(checkpoint_path, {
                 "phase": 2, "offset": 0, **stats,
@@ -1206,7 +1319,8 @@ def push_sqlite_to_supabase(
         # Phase 3: disclosures 一括 upsert
         # =============================================
         if resume_phase <= 3:
-            logger.info("[Phase 3/4] disclosures 一括 upsert...")
+            logger.info("[push] phase=build_disclosures START")
+            t_phase = time.time()
             now_iso = datetime.now(JST).isoformat()
             seen_sha: set[str] = set()
             disc_payloads: list[dict] = []
@@ -1236,17 +1350,34 @@ def push_sqlite_to_supabase(
                 })
 
             logger.info(
-                f"  対象 disclosure: {len(disc_payloads)} 件"
+                f"[push] phase=build_disclosures END "
+                f"elapsed={time.time()-t_phase:.1f}s "
+                f"rows={len(disc_payloads)}"
             )
-            existing_disc = api.select_all(
-                "disclosures", "disclosure_id,sha256"
-            )
+            logger.info("[push] phase=upsert_disclosures START")
+            t_phase = time.time()
+            target_shas = [d["sha256"] for d in disc_payloads]
+            try:
+                existing_disc = api.select_by_keys(
+                    "disclosures", "disclosure_id,sha256",
+                    key_column="sha256", keys=target_shas,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[DISCLOSURES] FALLBACK: partial lookup "
+                    f"failed ({e}), using full scan"
+                )
+                existing_disc = api.select_all(
+                    "disclosures", "disclosure_id,sha256"
+                )
             existing_sha: dict[str, int] = {
                 d["sha256"]: d["disclosure_id"]
                 for d in existing_disc if d.get("sha256")
             }
             logger.info(
-                f"  既存 disclosure: {len(existing_sha)} 件"
+                f"[DISCLOSURES] existing hits: "
+                f"{len(existing_sha)} / target: "
+                f"{len(disc_payloads)}"
             )
 
             sha_to_disc_id: dict[str, int] = dict(existing_sha)
@@ -1272,8 +1403,9 @@ def push_sqlite_to_supabase(
                 logger.info("  新規なし（全件既存）")
 
             logger.info(
-                f"  → {len(sha_to_disc_id)} disclosure 完了 "
-                f"({time.time()-t0:.1f}秒)"
+                f"[push] phase=upsert_disclosures END "
+                f"elapsed={time.time()-t_phase:.1f}s "
+                f"rows={len(sha_to_disc_id)}"
             )
             _save_checkpoint(checkpoint_path, {
                 "phase": 3, "offset": 0, **stats,
@@ -1283,9 +1415,38 @@ def push_sqlite_to_supabase(
                 "[Phase 3/4] disclosures — "
                 "チェックポイントからスキップ"
             )
-            existing_disc = api.select_all(
-                "disclosures", "disclosure_id,sha256"
-            )
+            # payload経路を統一: 同じ disc_payloads 構築ロジックを使用
+            now_iso = datetime.now(JST).isoformat()
+            seen_sha_skip: set[str] = set()
+            disc_payloads = []
+            for r in rows:
+                ticker = r["company_code"]
+                fye = r["fiscal_year_end"]
+                q = _parse_quarter(r["quarter"])
+                if q is None:
+                    continue
+                sha = f"sqlite-sync-{ticker}-{fye}-Q{q}"
+                if sha in seen_sha_skip:
+                    continue
+                seen_sha_skip.add(sha)
+                cid = ticker_to_cid.get(ticker)
+                if cid is None:
+                    continue
+                disc_payloads.append({"sha256": sha})
+            target_shas = [d["sha256"] for d in disc_payloads]
+            try:
+                existing_disc = api.select_by_keys(
+                    "disclosures", "disclosure_id,sha256",
+                    key_column="sha256", keys=target_shas,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[DISCLOSURES] FALLBACK: partial lookup "
+                    f"failed ({e}), using full scan"
+                )
+                existing_disc = api.select_all(
+                    "disclosures", "disclosure_id,sha256"
+                )
             sha_to_disc_id = {
                 d["sha256"]: d["disclosure_id"]
                 for d in existing_disc if d.get("sha256")
@@ -1300,14 +1461,16 @@ def push_sqlite_to_supabase(
         phase4_offset = (
             resume_offset if resume_phase == 4 else 0
         )
+        logger.info("[push] phase=upsert_facts START")
+        t_phase_facts = time.time()
         logger.info(
-            f"[Phase 4/4] facts 一括 upsert "
-            f"(batch={batch_size}, offset={phase4_offset})..."
+            f"  batch={batch_size} offset={phase4_offset}"
         )
 
         fact_buf: list[dict] = []
         processed = phase4_offset
         batch_num = 0
+        _last_hb_facts = time.time()
 
         for idx, r in enumerate(rows):
             if idx < phase4_offset:
@@ -1438,6 +1601,15 @@ def push_sqlite_to_supabase(
                     "phase": 4, "offset": processed, **stats,
                 })
 
+            # ── 改修②: heartbeat (30秒間隔) ──
+            if time.time() - _last_hb_facts >= 30:
+                logger.info(
+                    f"[push] heartbeat phase=upsert_facts "
+                    f"elapsed={time.time()-t_phase_facts:.1f}s "
+                    f"progress={processed}/{target}"
+                )
+                _last_hb_facts = time.time()
+
         # 残り flush
         if fact_buf:
             batch_num += 1
@@ -1458,9 +1630,10 @@ def push_sqlite_to_supabase(
 
         elapsed = time.time() - t0
         logger.info(
-            f"  → facts 完了: {stats['facts_pushed']} 件 "
-            f"(sanitized={stats['facts_sanitized']}) "
-            f"({elapsed:.1f}秒)"
+            f"[push] phase=upsert_facts END "
+            f"elapsed={time.time()-t_phase_facts:.1f}s "
+            f"facts_pushed={stats['facts_pushed']} "
+            f"sanitized={stats['facts_sanitized']}"
         )
 
         # SANITIZE サマリ出力
@@ -1469,21 +1642,24 @@ def push_sqlite_to_supabase(
         # =============================================
         # Phase 5: TDnet → public.financials upsert
         # =============================================
-        logger.info(
-            "[Phase 5/5] TDnet → public.financials "
-            "upsert..."
-        )
+        logger.info("[push] phase=build_financials START")
+        t_phase_fin = time.time()
         fin_rows = _build_financials_rows_from_tdnet(rows)
         stats["financials_scanned"] = len(rows)
         stats["financials_built"] = len(fin_rows)
+        logger.info(
+            f"[push] phase=build_financials END "
+            f"elapsed={time.time()-t_phase_fin:.1f}s "
+            f"rows={len(fin_rows)}"
+        )
 
         if fin_rows:
-            logger.info(
-                f"  upsert対象: {len(fin_rows):,} 行"
-            )
+            logger.info("[push] phase=upsert_financials START")
+            t_phase_fin_up = time.time()
 
             financials_upserted = 0
             financials_errors = 0
+            _last_hb_fin = time.time()
 
             for chunk in _chunks(fin_rows, batch_size):
                 try:
@@ -1514,42 +1690,69 @@ def push_sqlite_to_supabase(
                     financials_errors += len(chunk)
                     stats["errors"] += len(chunk)
 
+                # ── heartbeat (30秒間隔) ──
+                if time.time() - _last_hb_fin >= 30:
+                    logger.info(
+                        f"[push] heartbeat phase=upsert_financials "
+                        f"elapsed={time.time()-t_phase_fin_up:.1f}s "
+                        f"progress={financials_upserted}/{len(fin_rows)}"
+                    )
+                    _last_hb_fin = time.time()
+
             stats["financials_inserted"] = financials_upserted
 
             logger.info(
-                f"[FINANCIALS] scanned={stats['financials_scanned']} "
+                f"[push] phase=upsert_financials END "
+                f"elapsed={time.time()-t_phase_fin_up:.1f}s "
+                f"scanned={stats['financials_scanned']} "
                 f"built={stats['financials_built']} "
                 f"upserted={financials_upserted} "
                 f"errors={financials_errors}"
             )
 
-            # ── Phase 2-A: canonical dual-write (best-effort) ──
+            # ── Phase 2-A: canonical dual-write (best-effort, batched) ──
             try:
-                from lib.pipeline.canonical_writer import write_financials_canonical
-                from lib.pipeline.db import get_supabase_write_config
+                from lib.pipeline.canonical_writer import expand_financials_rows
+                from lib.pipeline.db import get_supabase_write_config, supabase_upsert
                 canonical_config = get_supabase_write_config()
                 if canonical_config:
-                    canonical_total = 0
-                    canonical_errors = 0
+                    all_canonical_rows: list[dict] = []
+                    canonical_skipped = 0
                     for fr in fin_rows:
                         metrics_dict = {
                             k: fr.get(k)
                             for k in ("sales", "gross_profit", "operating_profit")
                         }
-                        cw_result = write_financials_canonical(
+                        expanded, skipped = expand_financials_rows(
                             ticker=fr["ticker"],
                             period=fr["period"],
                             quarter=fr["quarter"],
                             metrics_dict=metrics_dict,
                             source=fr.get("source", "tdnet"),
-                            config=canonical_config,
                         )
-                        canonical_total += cw_result["written"]
-                        canonical_errors += cw_result["errors"]
-                    logger.info(
-                        f"[CANONICAL] financials dual-write: "
-                        f"written={canonical_total} errors={canonical_errors}"
-                    )
+                        all_canonical_rows.extend(expanded)
+                        canonical_skipped += skipped
+
+                    if all_canonical_rows:
+                        upsert_result = supabase_upsert(
+                            "canonical_financials",
+                            all_canonical_rows,
+                            on_conflict="source_row_key",
+                            config=canonical_config,
+                            batch_size=200,
+                            session=api.session,
+                        )
+                        logger.info(
+                            f"[CANONICAL] financials dual-write (batched): "
+                            f"expanded={len(all_canonical_rows)} skipped={canonical_skipped} "
+                            f"ok={upsert_result.get('ok')} count={upsert_result.get('count', 0)} "
+                            f"batches={upsert_result.get('batches_succeeded', 0)}"
+                        )
+                    else:
+                        logger.info(
+                            f"[CANONICAL] financials dual-write: no rows to write "
+                            f"(skipped={canonical_skipped})"
+                        )
                 else:
                     logger.warning(
                         "[CANONICAL] financials dual-write skipped: "
@@ -1567,6 +1770,7 @@ def push_sqlite_to_supabase(
 
     finally:
         qdb.close()
+        api.close()
 
     stats["complete"] = True
     _clear_checkpoint(checkpoint_path)
@@ -1583,6 +1787,328 @@ def push_sqlite_to_supabase(
         f"errors={stats['errors']}"
     )
     return stats
+
+
+# ============================================================
+# Targeted push (realtime 用 — disclosure_id 限定)
+# ============================================================
+
+def push_sqlite_to_supabase_targeted(
+    db_path: str,
+    disclosure_ids: list[str],
+    *,
+    dry_run: bool = False,
+) -> dict:
+    """disclosure_ids に紐づく SQLite 行のみを Supabase に push する。
+
+    realtime process 専用の軽量版。全件走査しない。
+
+    Args:
+        db_path: SQLite DB パス (decision_db.db)
+        disclosure_ids: 対象の disclosure_id (= source_doc_id) リスト
+        dry_run: True なら Supabase 書き込みスキップ
+
+    Returns:
+        {
+            "target_disclosure_ids": list[str],
+            "target_rows_count": int,
+            "push_rows": {"companies": int, "periods": int, "disclosures": int,
+                          "facts": int, "financials": int},
+            "target_keys": list[tuple[str, str, str]],
+            "processed_rows": list[dict],
+            "errors": int,
+            "complete": bool,
+        }
+    """
+    import time as _time
+    _load_dotenv()
+    supabase_url = os.environ.get("SUPABASE_URL", "")
+    supabase_key = (
+        os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+        or os.environ.get("SUPABASE_ANON_KEY", "")
+    )
+    if not supabase_url or not supabase_key:
+        raise ValueError("Supabase credentials missing for targeted push")
+
+    stats: dict = {
+        "target_disclosure_ids": list(disclosure_ids),
+        "target_rows_count": 0,
+        "push_rows": {
+            "companies": 0, "periods": 0, "disclosures": 0,
+            "facts": 0, "financials": 0,
+        },
+        "target_keys": [],
+        "processed_rows": [],
+        "errors": 0,
+        "complete": False,
+    }
+
+    if not disclosure_ids:
+        stats["complete"] = True
+        logger.info("[TARGETED_PUSH] no disclosure_ids, skipping")
+        return stats
+
+    # ── SQLite から対象行を取得 ──
+    if not os.path.exists(db_path):
+        raise FileNotFoundError(f"DB not found: {db_path}")
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    placeholders = ",".join("?" for _ in disclosure_ids)
+    query = (
+        f"SELECT * FROM quarterly_results "
+        f"WHERE source_doc_id IN ({placeholders}) "
+        f"ORDER BY id"
+    )
+    rows = conn.execute(query, list(disclosure_ids)).fetchall()
+    conn.close()
+
+    stats["target_rows_count"] = len(rows)
+    logger.info(
+        f"[TARGETED_PUSH] disclosure_ids={len(disclosure_ids)} "
+        f"matched_rows={len(rows)}"
+    )
+
+    # ── 警告型ガード ──
+    if len(rows) > 500:
+        logger.warning(
+            f"[TARGETED_PUSH] STRONG WARNING: {len(rows)} rows for "
+            f"{len(disclosure_ids)} disclosure_ids — unusually large"
+        )
+    elif len(rows) > 100:
+        logger.warning(
+            f"[TARGETED_PUSH] WARNING: {len(rows)} rows for "
+            f"{len(disclosure_ids)} disclosure_ids"
+        )
+
+    if not rows:
+        stats["complete"] = True
+        logger.info("[TARGETED_PUSH] 0 rows matched, nothing to push")
+        return stats
+
+    # ── target_keys 導出 (canonical sync 連携用) ──
+    target_keys_set: set[tuple[str, str, str]] = set()
+    processed_rows_data: list[dict] = []
+    for r in rows:
+        ticker = normalize_ticker(r["company_code"])
+        period = r["fiscal_year_end"]
+        quarter = r["quarter"]
+        if ticker and period and quarter:
+            target_keys_set.add((ticker, period, quarter))
+            processed_rows_data.append({
+                "company_code": r["company_code"],
+                "ticker": ticker,
+                "period": period,
+                "quarter": quarter,
+                "source_doc_id": r["source_doc_id"],
+            })
+    stats["target_keys"] = list(target_keys_set)
+    stats["processed_rows"] = processed_rows_data
+    logger.info(
+        f"[TARGETED_PUSH] target_keys={len(target_keys_set)} "
+        f"processed_rows={len(processed_rows_data)}"
+    )
+
+    if dry_run:
+        stats["complete"] = True
+        logger.info("[TARGETED_PUSH] dry-run mode, skipping Supabase writes")
+        return stats
+
+    # ── Supabase push (対象行のみ) ──
+    api = _SupabaseAPI(supabase_url, supabase_key)
+    t0 = _time.time()
+    try:
+        # Phase 1: companies
+        unique_tickers = sorted(set(r["company_code"] for r in rows))
+        payloads = [{"ticker_code": t, "is_active": True} for t in unique_tickers]
+        ticker_to_cid: dict[str, int] = {}
+        for chunk in _chunks(payloads, _MASTER_BATCH):
+            result = api.upsert_batch("companies", chunk, on_conflict="ticker_code")
+            for c in result:
+                ticker_to_cid[c["ticker_code"]] = c["company_id"]
+        stats["push_rows"]["companies"] = len(payloads)
+        logger.info(
+            f"[TARGETED_PUSH] phase=companies elapsed={_time.time()-t0:.1f}s "
+            f"count={len(payloads)}"
+        )
+
+        # Phase 2: periods
+        t1 = _time.time()
+        seen_periods: set[tuple] = set()
+        period_payloads = []
+        for r in rows:
+            ticker = r["company_code"]
+            fye = r["fiscal_year_end"]
+            q = _parse_quarter(r["quarter"])
+            if q is None:
+                continue
+            pkey = (ticker, fye, q)
+            if pkey in seen_periods:
+                continue
+            seen_periods.add(pkey)
+            cid = ticker_to_cid.get(ticker)
+            if cid is None:
+                continue
+            period_payloads.append({
+                "company_id": cid,
+                "fiscal_year_end": fye,
+                "fiscal_year": int(fye.split("-")[0]),
+                "quarter": q,
+                "is_full_year": q == 4,
+            })
+
+        period_key_to_pid: dict[tuple, int] = {}
+        for chunk in _chunks(period_payloads, _MASTER_BATCH):
+            result = api.upsert_batch(
+                "periods", chunk, on_conflict="company_id,fiscal_year_end,quarter",
+            )
+            for p in result:
+                key = (p["company_id"], str(p["fiscal_year_end"]), p["quarter"])
+                period_key_to_pid[key] = p["period_id"]
+        stats["push_rows"]["periods"] = len(period_payloads)
+        logger.info(
+            f"[TARGETED_PUSH] phase=periods elapsed={_time.time()-t1:.1f}s "
+            f"count={len(period_payloads)}"
+        )
+
+        # Phase 3: disclosures
+        t2 = _time.time()
+        now_iso = datetime.now(JST).isoformat()
+        disc_payloads: list[dict] = []
+        seen_sha: set[str] = set()
+        for r in rows:
+            ticker = r["company_code"]
+            fye = r["fiscal_year_end"]
+            q = _parse_quarter(r["quarter"])
+            if q is None:
+                continue
+            sha = f"sqlite-sync-{ticker}-{fye}-Q{q}"
+            if sha in seen_sha:
+                continue
+            seen_sha.add(sha)
+            cid = ticker_to_cid.get(ticker)
+            if cid is None:
+                continue
+            disc_payloads.append({
+                "company_id": cid,
+                "source": "MANUAL",
+                "disclosed_at": now_iso,
+                "title": f"SQLite同期: {ticker} {fye} Q{q}",
+                "doc_type": "TANSHIN",
+                "is_target": True,
+                "sha256": sha,
+            })
+
+        # 既存チェック + 新規のみ insert
+        existing_disc = api.select_all("disclosures", "disclosure_id,sha256")
+        existing_sha_map: dict[str, int] = {
+            d["sha256"]: d["disclosure_id"]
+            for d in existing_disc if d.get("sha256")
+        }
+        sha_to_disc_id: dict[str, int] = dict(existing_sha_map)
+        new_disc = [d for d in disc_payloads if d["sha256"] not in existing_sha_map]
+        if new_disc:
+            for chunk in _chunks(new_disc, _MASTER_BATCH):
+                result = api.upsert_batch("disclosures", chunk, on_conflict="")
+                for d in result:
+                    sha_to_disc_id[d["sha256"]] = d["disclosure_id"]
+        stats["push_rows"]["disclosures"] = len(new_disc)
+        logger.info(
+            f"[TARGETED_PUSH] phase=disclosures elapsed={_time.time()-t2:.1f}s "
+            f"new={len(new_disc)} existing={len(disc_payloads)-len(new_disc)}"
+        )
+
+        # Phase 4: facts
+        t3 = _time.time()
+        fact_buf: list[dict] = []
+        for r in rows:
+            ticker = r["company_code"]
+            fye = r["fiscal_year_end"]
+            q_str = r["quarter"]
+            q = _parse_quarter(q_str)
+            if q is None:
+                continue
+            cid = ticker_to_cid.get(ticker)
+            if cid is None:
+                continue
+            pid = period_key_to_pid.get((cid, str(fye), q))
+            if pid is None:
+                continue
+            sha = f"sqlite-sync-{ticker}-{fye}-Q{q}"
+            disc_id = sha_to_disc_id.get(sha)
+            if disc_id is None:
+                continue
+            unit = r["unit"] or "百万円"
+            multiplier = _UNIT_MULTIPLIER.get(unit, 1)
+
+            for sqlite_col, metric in _METRIC_MAP.items():
+                raw_val = r[sqlite_col]
+                value_jpy = _sanitize_value(
+                    raw_val, multiplier,
+                    ticker=ticker, fye=fye, quarter=q_str, col=sqlite_col,
+                )
+                if value_jpy is None:
+                    if raw_val is not None:
+                        stats["errors"] += 1
+                    continue
+                fact_buf.append({
+                    "company_id": cid,
+                    "period_id": pid,
+                    "disclosure_id": disc_id,
+                    "scope": "CONSOLIDATED",
+                    "metric": metric,
+                    "value": value_jpy,
+                    "unit": "JPY",
+                    "quality": "IXBRL",
+                })
+
+        for chunk in _chunks(fact_buf, _BATCH_SIZE):
+            try:
+                api.upsert_batch_fast(
+                    "facts", chunk,
+                    on_conflict="disclosure_id,period_id,metric,scope",
+                )
+                stats["push_rows"]["facts"] += len(chunk)
+            except Exception as e:
+                logger.error(f"[TARGETED_PUSH] facts batch error: {e}")
+                stats["errors"] += len(chunk)
+        logger.info(
+            f"[TARGETED_PUSH] phase=facts elapsed={_time.time()-t3:.1f}s "
+            f"count={stats['push_rows']['facts']}"
+        )
+
+        # Phase 5: financials
+        t4 = _time.time()
+        fin_rows = _build_financials_rows_from_tdnet(rows)
+        if fin_rows:
+            for chunk in _chunks(fin_rows, _BATCH_SIZE):
+                try:
+                    api.upsert_batch_fast(
+                        "financials", chunk, on_conflict="ticker,period,quarter",
+                    )
+                    stats["push_rows"]["financials"] += len(chunk)
+                except Exception as e:
+                    logger.error(f"[TARGETED_PUSH] financials batch error: {e}")
+                    stats["errors"] += len(chunk)
+        logger.info(
+            f"[TARGETED_PUSH] phase=financials elapsed={_time.time()-t4:.1f}s "
+            f"count={stats['push_rows']['financials']}"
+        )
+
+        stats["complete"] = True
+        total_elapsed = _time.time() - t0
+        logger.info(
+            f"[TARGETED_PUSH] DONE total_elapsed={total_elapsed:.1f}s "
+            f"disclosure_ids={len(disclosure_ids)} "
+            f"rows={len(rows)} "
+            f"facts={stats['push_rows']['facts']} "
+            f"financials={stats['push_rows']['financials']} "
+            f"errors={stats['errors']}"
+        )
+        return stats
+    finally:
+        api.close()
 
 
 # ============================================================

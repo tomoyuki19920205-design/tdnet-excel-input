@@ -75,8 +75,14 @@ def _should_notify_dividend(event: EventRecord) -> bool:
     - special_dividend / commemorative_dividend → 常に通知
     - 無配→有配 (previous == 0, revised > 0) → 通知
     - 通常増配: previous > 0 かつ increase_ratio >= 0.20 → 通知
-    - それ以外 → 非通知
+    - 金額未抽出 (rev is None): subtype が 'decrease' 以外なら通知
+      (配当修正PDFが検知されたが金額抽出できなかった場合の簡易通知)
+    - 減配 (decrease) → 非通知
     """
+    # 減配は通知しない
+    if event.subtype == "decrease":
+        return False
+
     # 特別配当・記念配当は subtype で判定
     if event.subtype in ("special_dividend", "commemorative_dividend"):
         return True
@@ -87,7 +93,9 @@ def _should_notify_dividend(event: EventRecord) -> bool:
     rev = payload.get("revised_dividend_per_share")
 
     if rev is None:
-        return False
+        # 金額未抽出: 配当修正タイトルが検知されたこと自体を通知
+        # (decrease は上で除外済み)
+        return True
 
     try:
         prev_f = float(prev) if prev is not None else None

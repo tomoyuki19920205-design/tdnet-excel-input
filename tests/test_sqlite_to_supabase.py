@@ -23,6 +23,7 @@ from tools.sqlite_to_supabase import (
     _detect_source_origin,
     _normalize_to_millions,
     _build_financials_rows_from_tdnet,
+    _SupabaseAPI,
 )
 
 
@@ -660,3 +661,121 @@ class TestPush:
                 supabase_url="https://test.supabase.co",
                 supabase_key="test-key",
             )
+
+
+# ============================================================
+# テスト: select_by_keys
+# ============================================================
+class TestSelectByKeys:
+    def _make_api(self):
+        return _SupabaseAPI("https://test.supabase.co", "test-key")
+
+    @patch("tools.sqlite_to_supabase.requests.Session")
+    def test_basic_partial_lookup(self, MockSession):
+        """対象キーのみが返却される"""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = [
+            {"sha256": "sha-1", "disclosure_id": 1},
+            {"sha256": "sha-2", "disclosure_id": 2},
+        ]
+        mock_resp.raise_for_status.return_value = None
+
+        api = self._make_api()
+        api.session = MagicMock()
+        api.session.get.return_value = mock_resp
+
+        result = api.select_by_keys(
+            "disclosures", "disclosure_id,sha256",
+            key_column="sha256", keys=["sha-1", "sha-2"],
+        )
+        assert len(result) == 2
+        assert result[0]["sha256"] == "sha-1"
+        api.session.get.assert_called_once()
+
+    @patch("tools.sqlite_to_supabase.requests.Session")
+    def test_chunk_splitting(self, MockSession):
+        """大量キーが chunk_size で分割される"""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = []
+        mock_resp.raise_for_status.return_value = None
+
+        api = self._make_api()
+        api.session = MagicMock()
+        api.session.get.return_value = mock_resp
+
+        keys = [f"sha-{i}" for i in range(10)]
+        api.select_by_keys(
+            "disclosures", "disclosure_id,sha256",
+            key_column="sha256", keys=keys,
+            chunk_size=3,
+        )
+        # 10 keys / chunk_size 3 = 4 calls
+        assert api.session.get.call_count == 4
+
+    @patch("tools.sqlite_to_supabase.requests.Session")
+    def test_empty_keys_returns_empty(self, MockSession):
+        """空キーは即 [] を返す"""
+        api = self._make_api()
+        api.session = MagicMock()
+
+        assert api.select_by_keys(
+            "disclosures", "disclosure_id,sha256",
+            key_column="sha256", keys=[],
+        ) == []
+        api.session.get.assert_not_called()
+
+    @patch("tools.sqlite_to_supabase.requests.Session")
+    def test_dedupe_and_none_removal(self, MockSession):
+        """None/空文字・重複が除去される"""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = [
+            {"sha256": "sha-1", "disclosure_id": 1},
+        ]
+        mock_resp.raise_for_status.return_value = None
+
+        api = self._make_api()
+        api.session = MagicMock()
+        api.session.get.return_value = mock_resp
+
+        result = api.select_by_keys(
+            "disclosures", "disclosure_id,sha256",
+            key_column="sha256",
+            keys=["sha-1", "sha-1", None, "", "  ", "sha-1"],
+        )
+        assert len(result) == 1
+        # 重複・空が除去され 1回のGETリクエストのみ
+        api.session.get.assert_called_once()
+
+    @patch("tools.sqlite_to_supabase.requests.Session")
+    def test_retry_on_502(self, MockSession):
+        """HTTP 502 リトライが成功する"""
+        import requests as req
+
+        # 1回目: 502, 2回目: 成功
+        err_resp = MagicMock()
+        err_resp.status_code = 502
+        err_502 = req.HTTPError(response=err_resp)
+
+        ok_resp = MagicMock()
+        ok_resp.json.return_value = [
+            {"sha256": "sha-1", "disclosure_id": 1},
+        ]
+        ok_resp.raise_for_status.return_value = None
+
+        api = self._make_api()
+        api.session = MagicMock()
+        api.session.get.side_effect = [
+            MagicMock(
+                raise_for_status=MagicMock(side_effect=err_502),
+            ),
+            ok_resp,
+        ]
+
+        # リトライ待機をスキップ
+        with patch("tools.sqlite_to_supabase.time.sleep"):
+            result = api.select_by_keys(
+                "disclosures", "disclosure_id,sha256",
+                key_column="sha256", keys=["sha-1"],
+            )
+        assert len(result) == 1
+        assert api.session.get.call_count == 2

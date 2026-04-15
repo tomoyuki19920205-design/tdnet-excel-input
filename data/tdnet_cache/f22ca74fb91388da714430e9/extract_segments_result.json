@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "7068",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "Professional Service Business",
+    "segment_order": 1,
+    "segment_sales": 2218,
+    "segment_profit": 955,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Professional Service Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-26",
+    "tdnet_doc_id": "f22ca74fb91388da714430e9",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "7068",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "Saa S Business",
+    "segment_order": 2,
+    "segment_sales": 1010,
+    "segment_profit": 396,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Saa S Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-26",
+    "tdnet_doc_id": "f22ca74fb91388da714430e9",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "7068",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "DX Business",
+    "segment_order": 3,
+    "segment_sales": 375,
+    "segment_profit": 78,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "DX Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-26",
+    "tdnet_doc_id": "f22ca74fb91388da714430e9",
+    "row_type": "segment"
+  }
+]

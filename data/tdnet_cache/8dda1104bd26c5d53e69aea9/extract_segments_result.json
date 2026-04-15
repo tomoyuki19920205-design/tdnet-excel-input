@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "9692",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Integration Segment",
+    "segment_order": 1,
+    "segment_sales": 42953,
+    "segment_profit": 8786,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Integration Segment",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "8dda1104bd26c5d53e69aea9",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "9692",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Connected Segment",
+    "segment_order": 2,
+    "segment_sales": 11837,
+    "segment_profit": 2284,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Connected Segment",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "8dda1104bd26c5d53e69aea9",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "9692",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Solution Segment",
+    "segment_order": 3,
+    "segment_sales": 11091,
+    "segment_profit": 1939,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Solution Segment",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "8dda1104bd26c5d53e69aea9",
+    "row_type": "segment"
+  }
+]

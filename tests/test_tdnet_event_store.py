@@ -18,9 +18,11 @@ from src.events.common_models import EventRecord, EventType
 from src.events.tdnet_event_store import (
     build_dedupe_key,
     compute_priority_rank,
+    _normalize_display_category,
+)
+from src.events.common_notify import (
     build_display_title,
     build_display_summary,
-    _normalize_display_category,
 )
 
 
@@ -128,9 +130,10 @@ class TestDisplayTitle(unittest.TestCase):
         )
         title = build_display_title(ev)
         self.assertIn("自社株買い", title)
-        self.assertIn("4.2%", title)
-        self.assertIn("7203", title)
         self.assertIn("トヨタ", title)
+        # 新フォーマット: ratio は display_summary に
+        summary = build_display_summary(ev)
+        self.assertIn("4.2%", summary)
 
     def test_buyback_without_ratio(self):
         ev = _make_event(event_type=EventType.BUYBACK)
@@ -145,7 +148,8 @@ class TestDisplayTitle(unittest.TestCase):
         )
         title = build_display_title(ev)
         self.assertIn("上方修正", title)
-        self.assertIn("+25.3%", title)
+        # 新フォーマット: display_title は短い見出し、指標は display_summary に
+        self.assertIn("トヨタ", title)
 
     def test_forecast_downward(self):
         ev = _make_event(
@@ -155,7 +159,7 @@ class TestDisplayTitle(unittest.TestCase):
         )
         title = build_display_title(ev)
         self.assertIn("下方修正", title)
-        self.assertIn("-15.0%", title)
+        self.assertIn("トヨタ", title)
 
     def test_dividend_increase(self):
         ev = _make_event(
@@ -165,7 +169,10 @@ class TestDisplayTitle(unittest.TestCase):
         )
         title = build_display_title(ev)
         self.assertIn("増配", title)
-        self.assertIn("+20.0%", title)
+        # 新フォーマット: display_summary に配当額変化
+        summary = build_display_summary(ev)
+        self.assertIn("100", summary)
+        self.assertIn("120", summary)
 
     def test_dividend_resumption(self):
         ev = _make_event(
@@ -228,11 +235,12 @@ class TestDisplaySummary(unittest.TestCase):
         self.assertIn("70", summary)
 
     def test_empty_payload_fallback(self):
-        """payloadが空の場合、titleやsummary_textにフォールバック"""
-        ev = _make_event(event_type="other")
-        ev.summary_text = "テストサマリー"
+        """メトリクスなしの場合、titleにフォールバック"""
+        ev = _make_event(event_type=EventType.BUYBACK)
+        ev.title = "テストタイトル"
         summary = build_display_summary(ev)
-        self.assertIn("テストサマリー", summary)
+        # buyback with no payload: title にフォールバック
+        self.assertIn("テストタイトル", summary)
 
 
 # ============================================================

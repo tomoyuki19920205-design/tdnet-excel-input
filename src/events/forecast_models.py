@@ -38,6 +38,9 @@ class ForecastRevisionEvent:
     delta_eps: Optional[float] = None
     change_eps_pct: Optional[float] = None
 
+    # 専用抽出器が返す「今回の通期EPS予想」（補助フィールド、None は取得不能を意味する）
+    latest_full_year_eps: Optional[float] = None
+
     is_difference_disclosure: bool = False
     extraction_source: str = "fallback"    # pdf_text / html_text / fallback
     extracted_metrics_count: int = 0

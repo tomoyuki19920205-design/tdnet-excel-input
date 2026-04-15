@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "6696",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Traa S Business",
+    "segment_order": 1,
+    "segment_sales": 143,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Traa S Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "aaa1c9848a3fc372366bc74c",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "6696",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Product Sales Business",
+    "segment_order": 2,
+    "segment_sales": 219,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Product Sales Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "aaa1c9848a3fc372366bc74c",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "6696",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Technical Service",
+    "segment_order": 3,
+    "segment_sales": 123,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Technical Service",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "aaa1c9848a3fc372366bc74c",
+    "row_type": "segment"
+  }
+]

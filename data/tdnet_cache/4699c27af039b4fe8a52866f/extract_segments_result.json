@@ -1,0 +1,160 @@
+[
+  {
+    "ticker": "3192",
+    "period": "R8/11",
+    "quarter": "1Q",
+    "segment_name": "負債の部",
+    "segment_order": 1,
+    "segment_sales": 84.0,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_pdf",
+    "segment_name_norm": "負債の部",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "4699c27af039b4fe8a52866f",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 8件 (top=7, score=0.87)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B-orient: page=7 orientation=unknown row_seg=9 row_mhdr=0 col_seg=0 col_metric=10 num_cross=14 period=1 bscf=0",
+      "Phase B-boost: skip page=7 num_density=0.03 (<0.3)",
+      "Phase B-orient: page=3 orientation=unknown row_seg=2 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=6 bscf=0",
+      "Phase B-boost: skip page=3 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=5 orientation=unknown row_seg=0 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=4 bscf=9",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=5 bscf=9",
+      "Phase B-orient-decision: page=5 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=6 orientation=unknown row_seg=0 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=0 bscf=7",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=6 bscf=7",
+      "Phase B-orient-decision: page=6 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=8 orientation=unknown row_seg=8 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=4 bscf=1",
+      "Phase B-boost: skip page=8 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=0 orientation=unknown row_seg=0 row_mhdr=1 col_seg=2 col_metric=0 num_cross=0 period=5 bscf=0",
+      "Phase B-boost: skip page=0 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=7 orientation=unknown row_seg=9 row_mhdr=0 col_seg=0 col_metric=10 num_cross=14 period=1 bscf=0",
+      "Phase B-boost: skip page=7 num_density=0.02 (<0.3)",
+      "Phase B: best_table score=0.71 (売上系:収益; 数値列2列; 数値行26行(5+); 数値密度26/36; 行数36; セグメント名行17行; 補助語2個; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase A-V: entered",
+      "Phase A-V: vertical_fast_path success n=2"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 数値列2列; 数値行26行(5+); 数値密度26/36; 行数36; セグメント名行17行; 補助語2個; 三拍子ボーナス(売上/利益+補助語",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.47,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.31,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行38行(5+); 数値密度38/44; 行数44; セグメント名行28行; 補助語2個; 減価償却(減点); 事業名パターン2行",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ]
+    }
+  },
+  {
+    "ticker": "3192",
+    "period": "R8/11",
+    "quarter": "1Q",
+    "segment_name": "流動負債",
+    "segment_order": 2,
+    "segment_sales": 84.0,
+    "segment_profit": null,
+    "raw_profit_label": "",
+    "source": "backfill_pdf",
+    "segment_name_norm": "流動負債",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "4699c27af039b4fe8a52866f",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 8件 (top=7, score=0.87)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B-orient: page=7 orientation=unknown row_seg=9 row_mhdr=0 col_seg=0 col_metric=10 num_cross=14 period=1 bscf=0",
+      "Phase B-boost: skip page=7 num_density=0.03 (<0.3)",
+      "Phase B-orient: page=3 orientation=unknown row_seg=2 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=6 bscf=0",
+      "Phase B-boost: skip page=3 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=5 orientation=unknown row_seg=0 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=4 bscf=9",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=5 bscf=9",
+      "Phase B-orient-decision: page=5 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=6 orientation=unknown row_seg=0 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=0 bscf=7",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=6 bscf=7",
+      "Phase B-orient-decision: page=6 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=8 orientation=unknown row_seg=8 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=4 bscf=1",
+      "Phase B-boost: skip page=8 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=0 orientation=unknown row_seg=0 row_mhdr=1 col_seg=2 col_metric=0 num_cross=0 period=5 bscf=0",
+      "Phase B-boost: skip page=0 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=7 orientation=unknown row_seg=9 row_mhdr=0 col_seg=0 col_metric=10 num_cross=14 period=1 bscf=0",
+      "Phase B-boost: skip page=7 num_density=0.02 (<0.3)",
+      "Phase B: best_table score=0.71 (売上系:収益; 数値列2列; 数値行26行(5+); 数値密度26/36; 行数36; セグメント名行17行; 補助語2個; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase A-V: entered",
+      "Phase A-V: vertical_fast_path success n=2"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 6,
+          "score": 0.71,
+          "categories": {
+            "header": 0.12,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 数値列2列; 数値行26行(5+); 数値密度26/36; 行数36; セグメント名行17行; 補助語2個; 三拍子ボーナス(売上/利益+補助語",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.47,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.31,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行38行(5+); 数値密度38/44; 行数44; セグメント名行28行; 補助語2個; 減価償却(減点); 事業名パターン2行",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ]
+    }
+  }
+]

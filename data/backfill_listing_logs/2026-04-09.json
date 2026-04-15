@@ -1,0 +1,14 @@
+{
+  "date": "2026-04-09",
+  "provider": "tdnet_html",
+  "pages_attempted": 3,
+  "pages_succeeded": 2,
+  "pages_failed": 0,
+  "raw_filings": 199,
+  "filtered_out": 155,
+  "kept": 44,
+  "financial_statement_count": 44,
+  "forecast_revision_count": 0,
+  "other_types_count": 0,
+  "errors": []
+}

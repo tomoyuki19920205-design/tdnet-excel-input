@@ -1,0 +1,14 @@
+{
+  "filing_id": "bf21eb8ee0cf43caae509f6e",
+  "ticker": "7501",
+  "disclosure_date": "2026-04-10",
+  "title": "2026年11月期 第1四半期決算短信〔日本基準〕(非連結)",
+  "doc_type": "financial_statement",
+  "source_url": "https://www.release.tdnet.info/inbs/140120260410501588.pdf",
+  "xbrl_url": "https://www.release.tdnet.info/inbs/081220260410501588.zip",
+  "listing_source": "tdnet_html",
+  "has_xbrl": false,
+  "xbrl_url_inferred": true,
+  "has_pdf": true,
+  "created_at": "2026-04-10T18:03:19.317911+09:00"
+}

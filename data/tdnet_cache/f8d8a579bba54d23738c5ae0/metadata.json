@@ -1,0 +1,14 @@
+{
+  "filing_id": "f8d8a579bba54d23738c5ae0",
+  "ticker": "3501",
+  "disclosure_date": "2026-04-10",
+  "title": "2026年５月期第３四半期決算短信〔日本基準〕(連結)",
+  "doc_type": "financial_statement",
+  "source_url": "https://www.release.tdnet.info/inbs/140120260409500896.pdf",
+  "xbrl_url": "https://www.release.tdnet.info/inbs/081220260409500896.zip",
+  "listing_source": "tdnet_html",
+  "has_xbrl": false,
+  "xbrl_url_inferred": true,
+  "has_pdf": true,
+  "created_at": "2026-04-10T17:26:43.738020+09:00"
+}

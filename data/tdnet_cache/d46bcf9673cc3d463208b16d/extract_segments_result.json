@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "7265",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "Filter",
+    "segment_order": 1,
+    "segment_sales": 1869,
+    "segment_profit": 136,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Filter",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-03",
+    "tdnet_doc_id": "d46bcf9673cc3d463208b16d",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "7265",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "Burning Appliances",
+    "segment_order": 2,
+    "segment_sales": 80,
+    "segment_profit": 2,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Burning Appliances",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-03",
+    "tdnet_doc_id": "d46bcf9673cc3d463208b16d",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "7265",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "Other",
+    "segment_order": 3,
+    "segment_sales": 0,
+    "segment_profit": -2,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Other",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-03",
+    "tdnet_doc_id": "d46bcf9673cc3d463208b16d",
+    "row_type": "segment"
+  }
+]

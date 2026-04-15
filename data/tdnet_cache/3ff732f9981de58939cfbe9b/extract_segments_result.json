@@ -1,0 +1,5924 @@
+[
+  {
+    "ticker": "5132",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "現金及び預金",
+    "segment_order": 1,
+    "segment_sales": 1193.766,
+    "segment_profit": 1095.556,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "現金及び預金",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "3ff732f9981de58939cfbe9b",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.78 (事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パターン3行; 比率中心)",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=17 bscf=0 garbage=3",
+      "Phase B-2: ACCEPT alt candidate #3 valid=2 score=0.49",
+      "Phase B-2: ACCEPT valid=2 narr=0",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['資産の部', '流動資産'], reconstructed=['資産の部流動資産'], units=None",
+      "Phase C-2: descriptive_only_header detected, scanning lower rows",
+      "Phase C-2: stopped at dense numeric block",
+      "Phase C-2: no A/B metric headers found (C only=0); skipping helper-only reconstruction",
+      "Unit: raw=千円, mult=1000, src=page_body",
+      "Phase C: transition B(23rows,2cols)→C(23rows,2cols) header_band=2 new_headers=['資産の部流動資産']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: 簡易推定 (avg_num_cols=2.0) → sales only",
+      "Phase D: sales only - partial rescue mode",
+      "Phase D: column_fallback_numeric_layout sales_col=0",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D-3: profit near-sales recheck start sales_col=0",
+      "Phase D-3: profit near-sales selected col=1 role=operating_profit_like score=0.150 header='' candidates=10",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=14, skip行=5, non_reportable=9",
+      "Phase F: レコード組立",
+      "Phase F: 14件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.785,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.2,
+            "segment_row": 0.15,
+            "exclusion": -0.1,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パ",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.535,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.12,
+            "segment_row": 0.0,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列1列(減点); 数値行9行(5+); 数値密度9/20; 行数20; 財政状態(減",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行17行(5+); 数値密度17/23; 行数23; セグメント名行11行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行20行(5+); 数値密度20/28; 行数28; セグメント名行13行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.33,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": -0.5,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.5
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行11行(5+); 数値密度11/15; 行数15; セグメント名行9行; 補助語2個; PL強共起(6",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 17,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "クト型 AEIサービス 約して契約の期間内に納品:unknown",
+          "初期開発/導入支援 準委任 ・顧客の経営問題に対して中長期的に向き合いながらエンジニアやコン:narrative_like",
+          "サルタントの稼働やノウハウを安定的に提供:unknown",
+          "AEI ・「仮想人材派遣」関連技術に関する技術情報の提供や開発ライセン:garbage_fragment_like",
+          "関連売上 ス・利用ライセンスの供与:unknown"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 23,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "phase_c_rows": 23,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": false,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "資産の部",
+          "流動資産"
+        ],
+        "reconstructed_headers": [
+          "資産の部流動資産"
+        ],
+        "column_labels": [
+          [
+            "現金及び預金",
+            "1,193,766",
+            "1,095,556"
+          ],
+          [
+            "売掛金及び契約資産（純額）",
+            "315,586",
+            "362,026"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "sales",
+          "sales"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.48,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "資産の部流動資産"
+        ],
+        "new_headers": [
+          "資産の部流動資産"
+        ],
+        "reconstruction_steps": []
+      },
+      "profit_recheck_candidates": [
+        {
+          "col": 1,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        }
+      ],
+      "page_score": 1.0,
+      "table_score": 0.49,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 14,
+      "non_reportable_count": 9,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 14,
+      "parse_quality_partial": 0
+    }
+  },
+  {
+    "ticker": "5132",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "売掛金及び契約資産(純額)",
+    "segment_order": 2,
+    "segment_sales": 315.586,
+    "segment_profit": 362.026,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "売掛金及び契約資産(純額)",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "3ff732f9981de58939cfbe9b",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.78 (事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パターン3行; 比率中心)",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=17 bscf=0 garbage=3",
+      "Phase B-2: ACCEPT alt candidate #3 valid=2 score=0.49",
+      "Phase B-2: ACCEPT valid=2 narr=0",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['資産の部', '流動資産'], reconstructed=['資産の部流動資産'], units=None",
+      "Phase C-2: descriptive_only_header detected, scanning lower rows",
+      "Phase C-2: stopped at dense numeric block",
+      "Phase C-2: no A/B metric headers found (C only=0); skipping helper-only reconstruction",
+      "Unit: raw=千円, mult=1000, src=page_body",
+      "Phase C: transition B(23rows,2cols)→C(23rows,2cols) header_band=2 new_headers=['資産の部流動資産']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: 簡易推定 (avg_num_cols=2.0) → sales only",
+      "Phase D: sales only - partial rescue mode",
+      "Phase D: column_fallback_numeric_layout sales_col=0",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D-3: profit near-sales recheck start sales_col=0",
+      "Phase D-3: profit near-sales selected col=1 role=operating_profit_like score=0.150 header='' candidates=10",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=14, skip行=5, non_reportable=9",
+      "Phase F: レコード組立",
+      "Phase F: 14件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.785,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.2,
+            "segment_row": 0.15,
+            "exclusion": -0.1,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パ",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.535,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.12,
+            "segment_row": 0.0,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列1列(減点); 数値行9行(5+); 数値密度9/20; 行数20; 財政状態(減",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行17行(5+); 数値密度17/23; 行数23; セグメント名行11行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行20行(5+); 数値密度20/28; 行数28; セグメント名行13行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.33,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": -0.5,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.5
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行11行(5+); 数値密度11/15; 行数15; セグメント名行9行; 補助語2個; PL強共起(6",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 17,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "クト型 AEIサービス 約して契約の期間内に納品:unknown",
+          "初期開発/導入支援 準委任 ・顧客の経営問題に対して中長期的に向き合いながらエンジニアやコン:narrative_like",
+          "サルタントの稼働やノウハウを安定的に提供:unknown",
+          "AEI ・「仮想人材派遣」関連技術に関する技術情報の提供や開発ライセン:garbage_fragment_like",
+          "関連売上 ス・利用ライセンスの供与:unknown"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 23,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "phase_c_rows": 23,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": false,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "資産の部",
+          "流動資産"
+        ],
+        "reconstructed_headers": [
+          "資産の部流動資産"
+        ],
+        "column_labels": [
+          [
+            "現金及び預金",
+            "1,193,766",
+            "1,095,556"
+          ],
+          [
+            "売掛金及び契約資産（純額）",
+            "315,586",
+            "362,026"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "sales",
+          "sales"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.48,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "資産の部流動資産"
+        ],
+        "new_headers": [
+          "資産の部流動資産"
+        ],
+        "reconstruction_steps": []
+      },
+      "profit_recheck_candidates": [
+        {
+          "col": 1,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        }
+      ],
+      "page_score": 1.0,
+      "table_score": 0.49,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 14,
+      "non_reportable_count": 9,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 14,
+      "parse_quality_partial": 0
+    }
+  },
+  {
+    "ticker": "5132",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "前払費用",
+    "segment_order": 3,
+    "segment_sales": 20.139,
+    "segment_profit": 25.827,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "前払費用",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "3ff732f9981de58939cfbe9b",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.78 (事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パターン3行; 比率中心)",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=17 bscf=0 garbage=3",
+      "Phase B-2: ACCEPT alt candidate #3 valid=2 score=0.49",
+      "Phase B-2: ACCEPT valid=2 narr=0",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['資産の部', '流動資産'], reconstructed=['資産の部流動資産'], units=None",
+      "Phase C-2: descriptive_only_header detected, scanning lower rows",
+      "Phase C-2: stopped at dense numeric block",
+      "Phase C-2: no A/B metric headers found (C only=0); skipping helper-only reconstruction",
+      "Unit: raw=千円, mult=1000, src=page_body",
+      "Phase C: transition B(23rows,2cols)→C(23rows,2cols) header_band=2 new_headers=['資産の部流動資産']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: 簡易推定 (avg_num_cols=2.0) → sales only",
+      "Phase D: sales only - partial rescue mode",
+      "Phase D: column_fallback_numeric_layout sales_col=0",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D-3: profit near-sales recheck start sales_col=0",
+      "Phase D-3: profit near-sales selected col=1 role=operating_profit_like score=0.150 header='' candidates=10",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=14, skip行=5, non_reportable=9",
+      "Phase F: レコード組立",
+      "Phase F: 14件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.785,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.2,
+            "segment_row": 0.15,
+            "exclusion": -0.1,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パ",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.535,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.12,
+            "segment_row": 0.0,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列1列(減点); 数値行9行(5+); 数値密度9/20; 行数20; 財政状態(減",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行17行(5+); 数値密度17/23; 行数23; セグメント名行11行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行20行(5+); 数値密度20/28; 行数28; セグメント名行13行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.33,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": -0.5,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.5
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行11行(5+); 数値密度11/15; 行数15; セグメント名行9行; 補助語2個; PL強共起(6",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 17,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "クト型 AEIサービス 約して契約の期間内に納品:unknown",
+          "初期開発/導入支援 準委任 ・顧客の経営問題に対して中長期的に向き合いながらエンジニアやコン:narrative_like",
+          "サルタントの稼働やノウハウを安定的に提供:unknown",
+          "AEI ・「仮想人材派遣」関連技術に関する技術情報の提供や開発ライセン:garbage_fragment_like",
+          "関連売上 ス・利用ライセンスの供与:unknown"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 23,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "phase_c_rows": 23,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": false,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "資産の部",
+          "流動資産"
+        ],
+        "reconstructed_headers": [
+          "資産の部流動資産"
+        ],
+        "column_labels": [
+          [
+            "現金及び預金",
+            "1,193,766",
+            "1,095,556"
+          ],
+          [
+            "売掛金及び契約資産（純額）",
+            "315,586",
+            "362,026"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "sales",
+          "sales"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.48,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "資産の部流動資産"
+        ],
+        "new_headers": [
+          "資産の部流動資産"
+        ],
+        "reconstruction_steps": []
+      },
+      "profit_recheck_candidates": [
+        {
+          "col": 1,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        }
+      ],
+      "page_score": 1.0,
+      "table_score": 0.49,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 14,
+      "non_reportable_count": 9,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 14,
+      "parse_quality_partial": 0
+    }
+  },
+  {
+    "ticker": "5132",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "その他",
+    "segment_order": 4,
+    "segment_sales": 2.813,
+    "segment_profit": 4.848,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "その他",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "3ff732f9981de58939cfbe9b",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.78 (事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パターン3行; 比率中心)",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=17 bscf=0 garbage=3",
+      "Phase B-2: ACCEPT alt candidate #3 valid=2 score=0.49",
+      "Phase B-2: ACCEPT valid=2 narr=0",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['資産の部', '流動資産'], reconstructed=['資産の部流動資産'], units=None",
+      "Phase C-2: descriptive_only_header detected, scanning lower rows",
+      "Phase C-2: stopped at dense numeric block",
+      "Phase C-2: no A/B metric headers found (C only=0); skipping helper-only reconstruction",
+      "Unit: raw=千円, mult=1000, src=page_body",
+      "Phase C: transition B(23rows,2cols)→C(23rows,2cols) header_band=2 new_headers=['資産の部流動資産']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: 簡易推定 (avg_num_cols=2.0) → sales only",
+      "Phase D: sales only - partial rescue mode",
+      "Phase D: column_fallback_numeric_layout sales_col=0",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D-3: profit near-sales recheck start sales_col=0",
+      "Phase D-3: profit near-sales selected col=1 role=operating_profit_like score=0.150 header='' candidates=10",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=14, skip行=5, non_reportable=9",
+      "Phase F: レコード組立",
+      "Phase F: 14件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.785,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.2,
+            "segment_row": 0.15,
+            "exclusion": -0.1,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パ",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.535,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.12,
+            "segment_row": 0.0,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列1列(減点); 数値行9行(5+); 数値密度9/20; 行数20; 財政状態(減",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行17行(5+); 数値密度17/23; 行数23; セグメント名行11行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行20行(5+); 数値密度20/28; 行数28; セグメント名行13行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.33,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": -0.5,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.5
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行11行(5+); 数値密度11/15; 行数15; セグメント名行9行; 補助語2個; PL強共起(6",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 17,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "クト型 AEIサービス 約して契約の期間内に納品:unknown",
+          "初期開発/導入支援 準委任 ・顧客の経営問題に対して中長期的に向き合いながらエンジニアやコン:narrative_like",
+          "サルタントの稼働やノウハウを安定的に提供:unknown",
+          "AEI ・「仮想人材派遣」関連技術に関する技術情報の提供や開発ライセン:garbage_fragment_like",
+          "関連売上 ス・利用ライセンスの供与:unknown"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 23,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "phase_c_rows": 23,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": false,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "資産の部",
+          "流動資産"
+        ],
+        "reconstructed_headers": [
+          "資産の部流動資産"
+        ],
+        "column_labels": [
+          [
+            "現金及び預金",
+            "1,193,766",
+            "1,095,556"
+          ],
+          [
+            "売掛金及び契約資産（純額）",
+            "315,586",
+            "362,026"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "sales",
+          "sales"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.48,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "資産の部流動資産"
+        ],
+        "new_headers": [
+          "資産の部流動資産"
+        ],
+        "reconstruction_steps": []
+      },
+      "profit_recheck_candidates": [
+        {
+          "col": 1,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        }
+      ],
+      "page_score": 1.0,
+      "table_score": 0.49,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 14,
+      "non_reportable_count": 9,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 14,
+      "parse_quality_partial": 0
+    }
+  },
+  {
+    "ticker": "5132",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "建物(純額)",
+    "segment_order": 5,
+    "segment_sales": 5.809,
+    "segment_profit": 5.676,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "建物(純額)",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "3ff732f9981de58939cfbe9b",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.78 (事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パターン3行; 比率中心)",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=17 bscf=0 garbage=3",
+      "Phase B-2: ACCEPT alt candidate #3 valid=2 score=0.49",
+      "Phase B-2: ACCEPT valid=2 narr=0",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['資産の部', '流動資産'], reconstructed=['資産の部流動資産'], units=None",
+      "Phase C-2: descriptive_only_header detected, scanning lower rows",
+      "Phase C-2: stopped at dense numeric block",
+      "Phase C-2: no A/B metric headers found (C only=0); skipping helper-only reconstruction",
+      "Unit: raw=千円, mult=1000, src=page_body",
+      "Phase C: transition B(23rows,2cols)→C(23rows,2cols) header_band=2 new_headers=['資産の部流動資産']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: 簡易推定 (avg_num_cols=2.0) → sales only",
+      "Phase D: sales only - partial rescue mode",
+      "Phase D: column_fallback_numeric_layout sales_col=0",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D-3: profit near-sales recheck start sales_col=0",
+      "Phase D-3: profit near-sales selected col=1 role=operating_profit_like score=0.150 header='' candidates=10",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=14, skip行=5, non_reportable=9",
+      "Phase F: レコード組立",
+      "Phase F: 14件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.785,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.2,
+            "segment_row": 0.15,
+            "exclusion": -0.1,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パ",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.535,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.12,
+            "segment_row": 0.0,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列1列(減点); 数値行9行(5+); 数値密度9/20; 行数20; 財政状態(減",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行17行(5+); 数値密度17/23; 行数23; セグメント名行11行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行20行(5+); 数値密度20/28; 行数28; セグメント名行13行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.33,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": -0.5,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.5
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行11行(5+); 数値密度11/15; 行数15; セグメント名行9行; 補助語2個; PL強共起(6",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 17,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "クト型 AEIサービス 約して契約の期間内に納品:unknown",
+          "初期開発/導入支援 準委任 ・顧客の経営問題に対して中長期的に向き合いながらエンジニアやコン:narrative_like",
+          "サルタントの稼働やノウハウを安定的に提供:unknown",
+          "AEI ・「仮想人材派遣」関連技術に関する技術情報の提供や開発ライセン:garbage_fragment_like",
+          "関連売上 ス・利用ライセンスの供与:unknown"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 23,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "phase_c_rows": 23,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": false,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "資産の部",
+          "流動資産"
+        ],
+        "reconstructed_headers": [
+          "資産の部流動資産"
+        ],
+        "column_labels": [
+          [
+            "現金及び預金",
+            "1,193,766",
+            "1,095,556"
+          ],
+          [
+            "売掛金及び契約資産（純額）",
+            "315,586",
+            "362,026"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "sales",
+          "sales"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.48,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "資産の部流動資産"
+        ],
+        "new_headers": [
+          "資産の部流動資産"
+        ],
+        "reconstruction_steps": []
+      },
+      "profit_recheck_candidates": [
+        {
+          "col": 1,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        }
+      ],
+      "page_score": 1.0,
+      "table_score": 0.49,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 14,
+      "non_reportable_count": 9,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 14,
+      "parse_quality_partial": 0
+    }
+  },
+  {
+    "ticker": "5132",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "工具、器具及び備品(純額)",
+    "segment_order": 6,
+    "segment_sales": 0.325,
+    "segment_profit": 1.601,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "工具、器具及び備品(純額)",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "3ff732f9981de58939cfbe9b",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.78 (事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パターン3行; 比率中心)",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=17 bscf=0 garbage=3",
+      "Phase B-2: ACCEPT alt candidate #3 valid=2 score=0.49",
+      "Phase B-2: ACCEPT valid=2 narr=0",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['資産の部', '流動資産'], reconstructed=['資産の部流動資産'], units=None",
+      "Phase C-2: descriptive_only_header detected, scanning lower rows",
+      "Phase C-2: stopped at dense numeric block",
+      "Phase C-2: no A/B metric headers found (C only=0); skipping helper-only reconstruction",
+      "Unit: raw=千円, mult=1000, src=page_body",
+      "Phase C: transition B(23rows,2cols)→C(23rows,2cols) header_band=2 new_headers=['資産の部流動資産']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: 簡易推定 (avg_num_cols=2.0) → sales only",
+      "Phase D: sales only - partial rescue mode",
+      "Phase D: column_fallback_numeric_layout sales_col=0",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D-3: profit near-sales recheck start sales_col=0",
+      "Phase D-3: profit near-sales selected col=1 role=operating_profit_like score=0.150 header='' candidates=10",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=14, skip行=5, non_reportable=9",
+      "Phase F: レコード組立",
+      "Phase F: 14件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.785,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.2,
+            "segment_row": 0.15,
+            "exclusion": -0.1,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パ",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.535,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.12,
+            "segment_row": 0.0,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列1列(減点); 数値行9行(5+); 数値密度9/20; 行数20; 財政状態(減",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行17行(5+); 数値密度17/23; 行数23; セグメント名行11行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行20行(5+); 数値密度20/28; 行数28; セグメント名行13行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.33,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": -0.5,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.5
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行11行(5+); 数値密度11/15; 行数15; セグメント名行9行; 補助語2個; PL強共起(6",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 17,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "クト型 AEIサービス 約して契約の期間内に納品:unknown",
+          "初期開発/導入支援 準委任 ・顧客の経営問題に対して中長期的に向き合いながらエンジニアやコン:narrative_like",
+          "サルタントの稼働やノウハウを安定的に提供:unknown",
+          "AEI ・「仮想人材派遣」関連技術に関する技術情報の提供や開発ライセン:garbage_fragment_like",
+          "関連売上 ス・利用ライセンスの供与:unknown"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 23,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "phase_c_rows": 23,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": false,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "資産の部",
+          "流動資産"
+        ],
+        "reconstructed_headers": [
+          "資産の部流動資産"
+        ],
+        "column_labels": [
+          [
+            "現金及び預金",
+            "1,193,766",
+            "1,095,556"
+          ],
+          [
+            "売掛金及び契約資産（純額）",
+            "315,586",
+            "362,026"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "sales",
+          "sales"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.48,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "資産の部流動資産"
+        ],
+        "new_headers": [
+          "資産の部流動資産"
+        ],
+        "reconstruction_steps": []
+      },
+      "profit_recheck_candidates": [
+        {
+          "col": 1,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        }
+      ],
+      "page_score": 1.0,
+      "table_score": 0.49,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 14,
+      "non_reportable_count": 9,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 14,
+      "parse_quality_partial": 0
+    }
+  },
+  {
+    "ticker": "5132",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "有形固定資産合計",
+    "segment_order": 7,
+    "segment_sales": 6.134,
+    "segment_profit": 7.277,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "有形固定資産合計",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "3ff732f9981de58939cfbe9b",
+    "row_type": "total",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.78 (事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パターン3行; 比率中心)",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=17 bscf=0 garbage=3",
+      "Phase B-2: ACCEPT alt candidate #3 valid=2 score=0.49",
+      "Phase B-2: ACCEPT valid=2 narr=0",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['資産の部', '流動資産'], reconstructed=['資産の部流動資産'], units=None",
+      "Phase C-2: descriptive_only_header detected, scanning lower rows",
+      "Phase C-2: stopped at dense numeric block",
+      "Phase C-2: no A/B metric headers found (C only=0); skipping helper-only reconstruction",
+      "Unit: raw=千円, mult=1000, src=page_body",
+      "Phase C: transition B(23rows,2cols)→C(23rows,2cols) header_band=2 new_headers=['資産の部流動資産']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: 簡易推定 (avg_num_cols=2.0) → sales only",
+      "Phase D: sales only - partial rescue mode",
+      "Phase D: column_fallback_numeric_layout sales_col=0",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D-3: profit near-sales recheck start sales_col=0",
+      "Phase D-3: profit near-sales selected col=1 role=operating_profit_like score=0.150 header='' candidates=10",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=14, skip行=5, non_reportable=9",
+      "Phase F: レコード組立",
+      "Phase F: 14件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.785,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.2,
+            "segment_row": 0.15,
+            "exclusion": -0.1,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パ",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.535,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.12,
+            "segment_row": 0.0,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列1列(減点); 数値行9行(5+); 数値密度9/20; 行数20; 財政状態(減",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行17行(5+); 数値密度17/23; 行数23; セグメント名行11行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行20行(5+); 数値密度20/28; 行数28; セグメント名行13行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.33,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": -0.5,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.5
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行11行(5+); 数値密度11/15; 行数15; セグメント名行9行; 補助語2個; PL強共起(6",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 17,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "クト型 AEIサービス 約して契約の期間内に納品:unknown",
+          "初期開発/導入支援 準委任 ・顧客の経営問題に対して中長期的に向き合いながらエンジニアやコン:narrative_like",
+          "サルタントの稼働やノウハウを安定的に提供:unknown",
+          "AEI ・「仮想人材派遣」関連技術に関する技術情報の提供や開発ライセン:garbage_fragment_like",
+          "関連売上 ス・利用ライセンスの供与:unknown"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 23,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "phase_c_rows": 23,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": false,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "資産の部",
+          "流動資産"
+        ],
+        "reconstructed_headers": [
+          "資産の部流動資産"
+        ],
+        "column_labels": [
+          [
+            "現金及び預金",
+            "1,193,766",
+            "1,095,556"
+          ],
+          [
+            "売掛金及び契約資産（純額）",
+            "315,586",
+            "362,026"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "sales",
+          "sales"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.48,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "資産の部流動資産"
+        ],
+        "new_headers": [
+          "資産の部流動資産"
+        ],
+        "reconstruction_steps": []
+      },
+      "profit_recheck_candidates": [
+        {
+          "col": 1,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        }
+      ],
+      "page_score": 1.0,
+      "table_score": 0.49,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 14,
+      "non_reportable_count": 9,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 14,
+      "parse_quality_partial": 0
+    }
+  },
+  {
+    "ticker": "5132",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "ソフトウエア",
+    "segment_order": 8,
+    "segment_sales": 143.296,
+    "segment_profit": 168.229,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "ソフトウエア",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "3ff732f9981de58939cfbe9b",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.78 (事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パターン3行; 比率中心)",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=17 bscf=0 garbage=3",
+      "Phase B-2: ACCEPT alt candidate #3 valid=2 score=0.49",
+      "Phase B-2: ACCEPT valid=2 narr=0",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['資産の部', '流動資産'], reconstructed=['資産の部流動資産'], units=None",
+      "Phase C-2: descriptive_only_header detected, scanning lower rows",
+      "Phase C-2: stopped at dense numeric block",
+      "Phase C-2: no A/B metric headers found (C only=0); skipping helper-only reconstruction",
+      "Unit: raw=千円, mult=1000, src=page_body",
+      "Phase C: transition B(23rows,2cols)→C(23rows,2cols) header_band=2 new_headers=['資産の部流動資産']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: 簡易推定 (avg_num_cols=2.0) → sales only",
+      "Phase D: sales only - partial rescue mode",
+      "Phase D: column_fallback_numeric_layout sales_col=0",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D-3: profit near-sales recheck start sales_col=0",
+      "Phase D-3: profit near-sales selected col=1 role=operating_profit_like score=0.150 header='' candidates=10",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=14, skip行=5, non_reportable=9",
+      "Phase F: レコード組立",
+      "Phase F: 14件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.785,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.2,
+            "segment_row": 0.15,
+            "exclusion": -0.1,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パ",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.535,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.12,
+            "segment_row": 0.0,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列1列(減点); 数値行9行(5+); 数値密度9/20; 行数20; 財政状態(減",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行17行(5+); 数値密度17/23; 行数23; セグメント名行11行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行20行(5+); 数値密度20/28; 行数28; セグメント名行13行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.33,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": -0.5,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.5
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行11行(5+); 数値密度11/15; 行数15; セグメント名行9行; 補助語2個; PL強共起(6",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 17,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "クト型 AEIサービス 約して契約の期間内に納品:unknown",
+          "初期開発/導入支援 準委任 ・顧客の経営問題に対して中長期的に向き合いながらエンジニアやコン:narrative_like",
+          "サルタントの稼働やノウハウを安定的に提供:unknown",
+          "AEI ・「仮想人材派遣」関連技術に関する技術情報の提供や開発ライセン:garbage_fragment_like",
+          "関連売上 ス・利用ライセンスの供与:unknown"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 23,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "phase_c_rows": 23,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": false,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "資産の部",
+          "流動資産"
+        ],
+        "reconstructed_headers": [
+          "資産の部流動資産"
+        ],
+        "column_labels": [
+          [
+            "現金及び預金",
+            "1,193,766",
+            "1,095,556"
+          ],
+          [
+            "売掛金及び契約資産（純額）",
+            "315,586",
+            "362,026"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "sales",
+          "sales"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.48,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "資産の部流動資産"
+        ],
+        "new_headers": [
+          "資産の部流動資産"
+        ],
+        "reconstruction_steps": []
+      },
+      "profit_recheck_candidates": [
+        {
+          "col": 1,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        }
+      ],
+      "page_score": 1.0,
+      "table_score": 0.49,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 14,
+      "non_reportable_count": 9,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 14,
+      "parse_quality_partial": 0
+    }
+  },
+  {
+    "ticker": "5132",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "ソフトウエア仮勘定",
+    "segment_order": 9,
+    "segment_sales": 104.558,
+    "segment_profit": 107.805,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "ソフトウエア仮勘定",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "3ff732f9981de58939cfbe9b",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.78 (事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パターン3行; 比率中心)",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=17 bscf=0 garbage=3",
+      "Phase B-2: ACCEPT alt candidate #3 valid=2 score=0.49",
+      "Phase B-2: ACCEPT valid=2 narr=0",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['資産の部', '流動資産'], reconstructed=['資産の部流動資産'], units=None",
+      "Phase C-2: descriptive_only_header detected, scanning lower rows",
+      "Phase C-2: stopped at dense numeric block",
+      "Phase C-2: no A/B metric headers found (C only=0); skipping helper-only reconstruction",
+      "Unit: raw=千円, mult=1000, src=page_body",
+      "Phase C: transition B(23rows,2cols)→C(23rows,2cols) header_band=2 new_headers=['資産の部流動資産']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: 簡易推定 (avg_num_cols=2.0) → sales only",
+      "Phase D: sales only - partial rescue mode",
+      "Phase D: column_fallback_numeric_layout sales_col=0",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D-3: profit near-sales recheck start sales_col=0",
+      "Phase D-3: profit near-sales selected col=1 role=operating_profit_like score=0.150 header='' candidates=10",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=14, skip行=5, non_reportable=9",
+      "Phase F: レコード組立",
+      "Phase F: 14件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.785,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.2,
+            "segment_row": 0.15,
+            "exclusion": -0.1,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パ",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.535,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.12,
+            "segment_row": 0.0,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列1列(減点); 数値行9行(5+); 数値密度9/20; 行数20; 財政状態(減",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行17行(5+); 数値密度17/23; 行数23; セグメント名行11行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行20行(5+); 数値密度20/28; 行数28; セグメント名行13行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.33,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": -0.5,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.5
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行11行(5+); 数値密度11/15; 行数15; セグメント名行9行; 補助語2個; PL強共起(6",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 17,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "クト型 AEIサービス 約して契約の期間内に納品:unknown",
+          "初期開発/導入支援 準委任 ・顧客の経営問題に対して中長期的に向き合いながらエンジニアやコン:narrative_like",
+          "サルタントの稼働やノウハウを安定的に提供:unknown",
+          "AEI ・「仮想人材派遣」関連技術に関する技術情報の提供や開発ライセン:garbage_fragment_like",
+          "関連売上 ス・利用ライセンスの供与:unknown"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 23,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "phase_c_rows": 23,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": false,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "資産の部",
+          "流動資産"
+        ],
+        "reconstructed_headers": [
+          "資産の部流動資産"
+        ],
+        "column_labels": [
+          [
+            "現金及び預金",
+            "1,193,766",
+            "1,095,556"
+          ],
+          [
+            "売掛金及び契約資産（純額）",
+            "315,586",
+            "362,026"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "sales",
+          "sales"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.48,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "資産の部流動資産"
+        ],
+        "new_headers": [
+          "資産の部流動資産"
+        ],
+        "reconstruction_steps": []
+      },
+      "profit_recheck_candidates": [
+        {
+          "col": 1,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        }
+      ],
+      "page_score": 1.0,
+      "table_score": 0.49,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 14,
+      "non_reportable_count": 9,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 14,
+      "parse_quality_partial": 0
+    }
+  },
+  {
+    "ticker": "5132",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "無形固定資産合計",
+    "segment_order": 10,
+    "segment_sales": 247.85500000000002,
+    "segment_profit": 276.034,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "無形固定資産合計",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "3ff732f9981de58939cfbe9b",
+    "row_type": "total",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.78 (事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パターン3行; 比率中心)",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=17 bscf=0 garbage=3",
+      "Phase B-2: ACCEPT alt candidate #3 valid=2 score=0.49",
+      "Phase B-2: ACCEPT valid=2 narr=0",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['資産の部', '流動資産'], reconstructed=['資産の部流動資産'], units=None",
+      "Phase C-2: descriptive_only_header detected, scanning lower rows",
+      "Phase C-2: stopped at dense numeric block",
+      "Phase C-2: no A/B metric headers found (C only=0); skipping helper-only reconstruction",
+      "Unit: raw=千円, mult=1000, src=page_body",
+      "Phase C: transition B(23rows,2cols)→C(23rows,2cols) header_band=2 new_headers=['資産の部流動資産']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: 簡易推定 (avg_num_cols=2.0) → sales only",
+      "Phase D: sales only - partial rescue mode",
+      "Phase D: column_fallback_numeric_layout sales_col=0",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D-3: profit near-sales recheck start sales_col=0",
+      "Phase D-3: profit near-sales selected col=1 role=operating_profit_like score=0.150 header='' candidates=10",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=14, skip行=5, non_reportable=9",
+      "Phase F: レコード組立",
+      "Phase F: 14件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.785,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.2,
+            "segment_row": 0.15,
+            "exclusion": -0.1,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パ",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.535,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.12,
+            "segment_row": 0.0,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列1列(減点); 数値行9行(5+); 数値密度9/20; 行数20; 財政状態(減",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行17行(5+); 数値密度17/23; 行数23; セグメント名行11行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行20行(5+); 数値密度20/28; 行数28; セグメント名行13行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.33,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": -0.5,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.5
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行11行(5+); 数値密度11/15; 行数15; セグメント名行9行; 補助語2個; PL強共起(6",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 17,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "クト型 AEIサービス 約して契約の期間内に納品:unknown",
+          "初期開発/導入支援 準委任 ・顧客の経営問題に対して中長期的に向き合いながらエンジニアやコン:narrative_like",
+          "サルタントの稼働やノウハウを安定的に提供:unknown",
+          "AEI ・「仮想人材派遣」関連技術に関する技術情報の提供や開発ライセン:garbage_fragment_like",
+          "関連売上 ス・利用ライセンスの供与:unknown"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 23,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "phase_c_rows": 23,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": false,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "資産の部",
+          "流動資産"
+        ],
+        "reconstructed_headers": [
+          "資産の部流動資産"
+        ],
+        "column_labels": [
+          [
+            "現金及び預金",
+            "1,193,766",
+            "1,095,556"
+          ],
+          [
+            "売掛金及び契約資産（純額）",
+            "315,586",
+            "362,026"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "sales",
+          "sales"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.48,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "資産の部流動資産"
+        ],
+        "new_headers": [
+          "資産の部流動資産"
+        ],
+        "reconstruction_steps": []
+      },
+      "profit_recheck_candidates": [
+        {
+          "col": 1,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        }
+      ],
+      "page_score": 1.0,
+      "table_score": 0.49,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 14,
+      "non_reportable_count": 9,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 14,
+      "parse_quality_partial": 0
+    }
+  },
+  {
+    "ticker": "5132",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "投資有価証券",
+    "segment_order": 11,
+    "segment_sales": 0.873,
+    "segment_profit": 10.873000000000001,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "投資有価証券",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "3ff732f9981de58939cfbe9b",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.78 (事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パターン3行; 比率中心)",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=17 bscf=0 garbage=3",
+      "Phase B-2: ACCEPT alt candidate #3 valid=2 score=0.49",
+      "Phase B-2: ACCEPT valid=2 narr=0",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['資産の部', '流動資産'], reconstructed=['資産の部流動資産'], units=None",
+      "Phase C-2: descriptive_only_header detected, scanning lower rows",
+      "Phase C-2: stopped at dense numeric block",
+      "Phase C-2: no A/B metric headers found (C only=0); skipping helper-only reconstruction",
+      "Unit: raw=千円, mult=1000, src=page_body",
+      "Phase C: transition B(23rows,2cols)→C(23rows,2cols) header_band=2 new_headers=['資産の部流動資産']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: 簡易推定 (avg_num_cols=2.0) → sales only",
+      "Phase D: sales only - partial rescue mode",
+      "Phase D: column_fallback_numeric_layout sales_col=0",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D-3: profit near-sales recheck start sales_col=0",
+      "Phase D-3: profit near-sales selected col=1 role=operating_profit_like score=0.150 header='' candidates=10",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=14, skip行=5, non_reportable=9",
+      "Phase F: レコード組立",
+      "Phase F: 14件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.785,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.2,
+            "segment_row": 0.15,
+            "exclusion": -0.1,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パ",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.535,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.12,
+            "segment_row": 0.0,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列1列(減点); 数値行9行(5+); 数値密度9/20; 行数20; 財政状態(減",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行17行(5+); 数値密度17/23; 行数23; セグメント名行11行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行20行(5+); 数値密度20/28; 行数28; セグメント名行13行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.33,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": -0.5,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.5
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行11行(5+); 数値密度11/15; 行数15; セグメント名行9行; 補助語2個; PL強共起(6",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 17,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "クト型 AEIサービス 約して契約の期間内に納品:unknown",
+          "初期開発/導入支援 準委任 ・顧客の経営問題に対して中長期的に向き合いながらエンジニアやコン:narrative_like",
+          "サルタントの稼働やノウハウを安定的に提供:unknown",
+          "AEI ・「仮想人材派遣」関連技術に関する技術情報の提供や開発ライセン:garbage_fragment_like",
+          "関連売上 ス・利用ライセンスの供与:unknown"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 23,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "phase_c_rows": 23,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": false,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "資産の部",
+          "流動資産"
+        ],
+        "reconstructed_headers": [
+          "資産の部流動資産"
+        ],
+        "column_labels": [
+          [
+            "現金及び預金",
+            "1,193,766",
+            "1,095,556"
+          ],
+          [
+            "売掛金及び契約資産（純額）",
+            "315,586",
+            "362,026"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "sales",
+          "sales"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.48,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "資産の部流動資産"
+        ],
+        "new_headers": [
+          "資産の部流動資産"
+        ],
+        "reconstruction_steps": []
+      },
+      "profit_recheck_candidates": [
+        {
+          "col": 1,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        }
+      ],
+      "page_score": 1.0,
+      "table_score": 0.49,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 14,
+      "non_reportable_count": 9,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 14,
+      "parse_quality_partial": 0
+    }
+  },
+  {
+    "ticker": "5132",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "繰延税金資産",
+    "segment_order": 12,
+    "segment_sales": 57.737,
+    "segment_profit": 25.400000000000002,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "繰延税金資産",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "3ff732f9981de58939cfbe9b",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.78 (事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パターン3行; 比率中心)",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=17 bscf=0 garbage=3",
+      "Phase B-2: ACCEPT alt candidate #3 valid=2 score=0.49",
+      "Phase B-2: ACCEPT valid=2 narr=0",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['資産の部', '流動資産'], reconstructed=['資産の部流動資産'], units=None",
+      "Phase C-2: descriptive_only_header detected, scanning lower rows",
+      "Phase C-2: stopped at dense numeric block",
+      "Phase C-2: no A/B metric headers found (C only=0); skipping helper-only reconstruction",
+      "Unit: raw=千円, mult=1000, src=page_body",
+      "Phase C: transition B(23rows,2cols)→C(23rows,2cols) header_band=2 new_headers=['資産の部流動資産']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: 簡易推定 (avg_num_cols=2.0) → sales only",
+      "Phase D: sales only - partial rescue mode",
+      "Phase D: column_fallback_numeric_layout sales_col=0",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D-3: profit near-sales recheck start sales_col=0",
+      "Phase D-3: profit near-sales selected col=1 role=operating_profit_like score=0.150 header='' candidates=10",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=14, skip行=5, non_reportable=9",
+      "Phase F: レコード組立",
+      "Phase F: 14件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.785,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.2,
+            "segment_row": 0.15,
+            "exclusion": -0.1,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パ",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.535,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.12,
+            "segment_row": 0.0,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列1列(減点); 数値行9行(5+); 数値密度9/20; 行数20; 財政状態(減",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行17行(5+); 数値密度17/23; 行数23; セグメント名行11行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行20行(5+); 数値密度20/28; 行数28; セグメント名行13行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.33,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": -0.5,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.5
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行11行(5+); 数値密度11/15; 行数15; セグメント名行9行; 補助語2個; PL強共起(6",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 17,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "クト型 AEIサービス 約して契約の期間内に納品:unknown",
+          "初期開発/導入支援 準委任 ・顧客の経営問題に対して中長期的に向き合いながらエンジニアやコン:narrative_like",
+          "サルタントの稼働やノウハウを安定的に提供:unknown",
+          "AEI ・「仮想人材派遣」関連技術に関する技術情報の提供や開発ライセン:garbage_fragment_like",
+          "関連売上 ス・利用ライセンスの供与:unknown"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 23,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "phase_c_rows": 23,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": false,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "資産の部",
+          "流動資産"
+        ],
+        "reconstructed_headers": [
+          "資産の部流動資産"
+        ],
+        "column_labels": [
+          [
+            "現金及び預金",
+            "1,193,766",
+            "1,095,556"
+          ],
+          [
+            "売掛金及び契約資産（純額）",
+            "315,586",
+            "362,026"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "sales",
+          "sales"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.48,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "資産の部流動資産"
+        ],
+        "new_headers": [
+          "資産の部流動資産"
+        ],
+        "reconstruction_steps": []
+      },
+      "profit_recheck_candidates": [
+        {
+          "col": 1,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        }
+      ],
+      "page_score": 1.0,
+      "table_score": 0.49,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 14,
+      "non_reportable_count": 9,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 14,
+      "parse_quality_partial": 0
+    }
+  },
+  {
+    "ticker": "5132",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "その他",
+    "segment_order": 13,
+    "segment_sales": 9.576,
+    "segment_profit": 9.526,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "その他",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "3ff732f9981de58939cfbe9b",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.78 (事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パターン3行; 比率中心)",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=17 bscf=0 garbage=3",
+      "Phase B-2: ACCEPT alt candidate #3 valid=2 score=0.49",
+      "Phase B-2: ACCEPT valid=2 narr=0",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['資産の部', '流動資産'], reconstructed=['資産の部流動資産'], units=None",
+      "Phase C-2: descriptive_only_header detected, scanning lower rows",
+      "Phase C-2: stopped at dense numeric block",
+      "Phase C-2: no A/B metric headers found (C only=0); skipping helper-only reconstruction",
+      "Unit: raw=千円, mult=1000, src=page_body",
+      "Phase C: transition B(23rows,2cols)→C(23rows,2cols) header_band=2 new_headers=['資産の部流動資産']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: 簡易推定 (avg_num_cols=2.0) → sales only",
+      "Phase D: sales only - partial rescue mode",
+      "Phase D: column_fallback_numeric_layout sales_col=0",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D-3: profit near-sales recheck start sales_col=0",
+      "Phase D-3: profit near-sales selected col=1 role=operating_profit_like score=0.150 header='' candidates=10",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=14, skip行=5, non_reportable=9",
+      "Phase F: レコード組立",
+      "Phase F: 14件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.785,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.2,
+            "segment_row": 0.15,
+            "exclusion": -0.1,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パ",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.535,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.12,
+            "segment_row": 0.0,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列1列(減点); 数値行9行(5+); 数値密度9/20; 行数20; 財政状態(減",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行17行(5+); 数値密度17/23; 行数23; セグメント名行11行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行20行(5+); 数値密度20/28; 行数28; セグメント名行13行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.33,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": -0.5,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.5
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行11行(5+); 数値密度11/15; 行数15; セグメント名行9行; 補助語2個; PL強共起(6",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 17,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "クト型 AEIサービス 約して契約の期間内に納品:unknown",
+          "初期開発/導入支援 準委任 ・顧客の経営問題に対して中長期的に向き合いながらエンジニアやコン:narrative_like",
+          "サルタントの稼働やノウハウを安定的に提供:unknown",
+          "AEI ・「仮想人材派遣」関連技術に関する技術情報の提供や開発ライセン:garbage_fragment_like",
+          "関連売上 ス・利用ライセンスの供与:unknown"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 23,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "phase_c_rows": 23,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": false,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "資産の部",
+          "流動資産"
+        ],
+        "reconstructed_headers": [
+          "資産の部流動資産"
+        ],
+        "column_labels": [
+          [
+            "現金及び預金",
+            "1,193,766",
+            "1,095,556"
+          ],
+          [
+            "売掛金及び契約資産（純額）",
+            "315,586",
+            "362,026"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "sales",
+          "sales"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.48,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "資産の部流動資産"
+        ],
+        "new_headers": [
+          "資産の部流動資産"
+        ],
+        "reconstruction_steps": []
+      },
+      "profit_recheck_candidates": [
+        {
+          "col": 1,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        }
+      ],
+      "page_score": 1.0,
+      "table_score": 0.49,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 14,
+      "non_reportable_count": 9,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 14,
+      "parse_quality_partial": 0
+    }
+  },
+  {
+    "ticker": "5132",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "投資その他の資産合計",
+    "segment_order": 14,
+    "segment_sales": 68.187,
+    "segment_profit": 45.800000000000004,
+    "raw_profit_label": "operating_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "投資その他の資産合計",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-11",
+    "tdnet_doc_id": "3ff732f9981de58939cfbe9b",
+    "row_type": "total",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.78 (事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パターン3行; 比率中心)",
+      "Phase B-2: REJECT candidate_guard=narrative_guard valid=0 narr=17 bscf=0 garbage=3",
+      "Phase B-2: ACCEPT alt candidate #3 valid=2 score=0.49",
+      "Phase B-2: ACCEPT valid=2 narr=0",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['資産の部', '流動資産'], reconstructed=['資産の部流動資産'], units=None",
+      "Phase C-2: descriptive_only_header detected, scanning lower rows",
+      "Phase C-2: stopped at dense numeric block",
+      "Phase C-2: no A/B metric headers found (C only=0); skipping helper-only reconstruction",
+      "Unit: raw=千円, mult=1000, src=page_body",
+      "Phase C: transition B(23rows,2cols)→C(23rows,2cols) header_band=2 new_headers=['資産の部流動資産']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: resolution_strategy=new",
+      "Phase D: 簡易推定 (avg_num_cols=2.0) → sales only",
+      "Phase D: sales only - partial rescue mode",
+      "Phase D: column_fallback_numeric_layout sales_col=0",
+      "Phase D: ヘッダー全文フォールバックで列推定",
+      "Phase D-3: profit near-sales recheck start sales_col=0",
+      "Phase D-3: profit near-sales selected col=1 role=operating_profit_like score=0.150 header='' candidates=10",
+      "Phase D: sales_col=0, profit_col=1, role=operating_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=14, skip行=5, non_reportable=9",
+      "Phase F: レコード組立",
+      "Phase F: 14件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 3,
+          "score": 0.785,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.2,
+            "segment_row": 0.15,
+            "exclusion": -0.1,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列5列; 数値行3行(3+); 行数23; 事業セグメント見出し(加点); 事業名パ",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 3,
+          "score": 0.535,
+          "categories": {
+            "header": 0.535,
+            "numeric_layout": 0.12,
+            "segment_row": 0.0,
+            "exclusion": -0.12,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "事業セグメント; セグメント別; 売上系:売上高; 利益系:営業利益; 数値列1列(減点); 数値行9行(5+); 数値密度9/20; 行数20; 財政状態(減",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行17行(5+); 数値密度17/23; 行数23; セグメント名行11行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行20行(5+); 数値密度20/28; 行数28; セグメント名行13行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.33,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": -0.5,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": -0.5
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列2列; 数値行11行(5+); 数値密度11/15; 行数15; セグメント名行9行; 補助語2個; PL強共起(6",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": false,
+        "reject_reason": "narrative_guard",
+        "valid_segment_like": 0,
+        "narrative_like": 17,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 0,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "クト型 AEIサービス 約して契約の期間内に納品:unknown",
+          "初期開発/導入支援 準委任 ・顧客の経営問題に対して中長期的に向き合いながらエンジニアやコン:narrative_like",
+          "サルタントの稼働やノウハウを安定的に提供:unknown",
+          "AEI ・「仮想人材派遣」関連技術に関する技術情報の提供や開発ライセン:garbage_fragment_like",
+          "関連売上 ス・利用ライセンスの供与:unknown"
+        ]
+      },
+      "reclassification": {
+        "raw_reason": "narrative_guard",
+        "raw_hint": "pdf_narrative_block_selected",
+        "final_reason": "narrative_guard",
+        "final_hint": "pdf_narrative_block_selected",
+        "reclassified": false,
+        "basis": "not_target"
+      },
+      "phase_transition": {
+        "phase_b_rows": 23,
+        "phase_b_num_cols": 2,
+        "phase_b_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "phase_c_rows": 23,
+        "phase_c_num_cols": 2,
+        "phase_c_preview": [
+          "資産の部",
+          "流動資産",
+          "現金及び預金    1,193,766  1,095,556"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": false,
+        "best_table_has_profit": false
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "資産の部",
+          "流動資産"
+        ],
+        "reconstructed_headers": [
+          "資産の部流動資産"
+        ],
+        "column_labels": [
+          [
+            "現金及び預金",
+            "1,193,766",
+            "1,095,556"
+          ],
+          [
+            "売掛金及び契約資産（純額）",
+            "315,586",
+            "362,026"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "sales",
+          "sales"
+        ],
+        "best_sales_col": null,
+        "best_profit_col": null,
+        "profit_role": "",
+        "taxonomy_scores": [
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.48,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.15,
+            "operating_profit_like": 0.15,
+            "segment_profit_like": 0.15,
+            "ordinary_profit_like": 0.15,
+            "pretax_like": 0.15,
+            "net_income_like": 0.15,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "segment_profit_like": 0.15,
+              "net_income_like": 0.15,
+              "operating_profit_like": 0.15,
+              "pretax_like": 0.15,
+              "ordinary_profit_like": 0.15
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 1,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          },
+          {
+            "col": 2,
+            "header": "",
+            "scores": {
+              "sales": 0.15
+            },
+            "best_role": "sales",
+            "best_score": 0.15,
+            "selected": false
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "資産の部流動資産"
+        ],
+        "new_headers": [
+          "資産の部流動資産"
+        ],
+        "reconstruction_steps": []
+      },
+      "profit_recheck_candidates": [
+        {
+          "col": 1,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 1,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "operating_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "segment_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "ordinary_profit_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "pretax_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        },
+        {
+          "col": 2,
+          "role": "net_income_like",
+          "score": 0.15,
+          "header": "",
+          "current_role": "sales"
+        }
+      ],
+      "page_score": 1.0,
+      "table_score": 0.49,
+      "header_confidence": 0.5,
+      "col_confidence": 0.0,
+      "segment_count": 14,
+      "non_reportable_count": 9,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "operating_profit_like",
+      "parse_quality_full": 14,
+      "parse_quality_partial": 0
+    }
+  }
+]

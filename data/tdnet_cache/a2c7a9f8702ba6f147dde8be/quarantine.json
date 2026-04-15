@@ -1,0 +1,14 @@
+{
+  "filing_id": "a2c7a9f8702ba6f147dde8be",
+  "ticker": "8244",
+  "stage": "extracting_pdf",
+  "error_message": "picked_pl_table",
+  "review_hint": "pdf_pl_table_selected",
+  "via": "pdf",
+  "candidate_reject_reason": "picked_pl_table",
+  "detector_v2_reason": "",
+  "detector_v1_reason": "picked_pl_table",
+  "xbrl_fallback_attempted": false,
+  "xbrl_fallback_succeeded": false,
+  "xbrl_failure_reason": ""
+}

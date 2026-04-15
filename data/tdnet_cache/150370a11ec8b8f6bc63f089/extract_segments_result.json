@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "3093",
+    "period": "R8/2",
+    "quarter": "FY",
+    "segment_name": "Element",
+    "segment_order": 1,
+    "segment_sales": 47415,
+    "segment_profit": 6788,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Element",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-09",
+    "tdnet_doc_id": "150370a11ec8b8f6bc63f089",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "3093",
+    "period": "R8/2",
+    "quarter": "FY",
+    "segment_name": "Other",
+    "segment_order": 2,
+    "segment_sales": 1182,
+    "segment_profit": 62,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Other",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-09",
+    "tdnet_doc_id": "150370a11ec8b8f6bc63f089",
+    "row_type": "segment"
+  }
+]

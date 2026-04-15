@@ -41,7 +41,6 @@ from .earnings_summary_storage import (
 from .earnings_guidance_extractor import (
     extract_guidance_from_zip,
     format_guidance_section,
-    make_fallback_summary,
     GuidanceData,
 )
 
@@ -164,88 +163,6 @@ def _is_fy_or_4q(earnings: EarningsSummaryData, title: str) -> tuple[bool, str]:
     if _FY_TANSHIN_TITLE_RE.search(normalized):
         return True, "title_fy_tanshin_pattern"
     return False, "no_fy_indicator"
-
-
-# ============================================================
-# AI見通し要約専用関数
-# ============================================================
-
-_OUTLOOK_JSON_SCHEMA = {
-    "name": "outlook_analysis",
-    "strict": True,
-    "schema": {
-        "type": "object",
-        "properties": {
-            "summary": {"type": "string", "description": "見通し要約(1-3行)"},
-            "segment_factors": {
-                "type": "array", "items": {"type": "string"},
-                "description": "セグメント要因（需要/販売/製品別）",
-            },
-            "external_factors": {
-                "type": "array", "items": {"type": "string"},
-                "description": "外部環境要因（為替、資源価格、市況）",
-            },
-            "cost_factors": {
-                "type": "array", "items": {"type": "string"},
-                "description": "コスト要因（原材料、人件費、投資）",
-            },
-        },
-        "required": ["summary", "segment_factors", "external_factors", "cost_factors"],
-        "additionalProperties": False,
-    },
-}
-
-_OUTLOOK_SYSTEM_PROMPT = (
-    "あなたは日本の上場企業の決算短信から抽出された「今後の見通し」テキストを分析します。\n"
-    "数値は生成せず、テキストからの抽出のみ。\n"
-    "見通しの要点を1-3行のsummaryにまとめ、要因を3カテゴリに分類してください。\n"
-    "該当ない要因は空配列にしてください。"
-)
-
-
-def _summarize_outlook_with_ai(
-    outlook_text: str,
-    model: str = "",
-) -> dict:
-    """見通しテキストをAIで要因分類+要約する。
-
-    call_reason_format_api とは分離された専用関数。
-
-    Returns:
-        {
-            "summary": "1-3行の自然文要約",
-            "segment_factors": ["需要拡大", "新製品投入"],
-            "external_factors": ["為替影響", "市況改善"],
-            "cost_factors": ["原材料高", "人件費増"]
-        }
-    """
-    from .summary_ai_client import _get_openai_client, _call_responses_api, DEFAULT_MODEL
-
-    use_model = model or DEFAULT_MODEL
-
-    try:
-        client = _get_openai_client()
-        result, usage = _call_responses_api(
-            client,
-            input_text=outlook_text[:2000],
-            model=use_model,
-            schema=_OUTLOOK_JSON_SCHEMA,
-            system_prompt=_OUTLOOK_SYSTEM_PROMPT,
-        )
-        logger.info(
-            f"[OUTLOOK AI] OK tokens={usage.get('input_tokens', 0)}"
-            f"+{usage.get('output_tokens', 0)}"
-        )
-        return result
-    except Exception as e:
-        logger.warning(f"[OUTLOOK AI] failed: {e}")
-        # フォールバック: 元テキストの先頭200文字を要約として使用
-        return {
-            "summary": outlook_text[:200].strip(),
-            "segment_factors": [],
-            "external_factors": [],
-            "cost_factors": [],
-        }
 
 
 
@@ -425,10 +342,8 @@ def run_earnings_production(
                     )
 
                     guidance_extracted = guidance is not None and guidance.has_guidance
-                    outlook_text_found = guidance is not None and bool(guidance.outlook_text)
                     logger.info(
-                        f"[EARNINGS] {ticker} guidance_extracted={guidance_extracted} "
-                        f"outlook_text_found={outlook_text_found}"
+                        f"[EARNINGS] {ticker} guidance_extracted={guidance_extracted}"
                     )
 
                     if guidance:
@@ -442,77 +357,20 @@ def run_earnings_production(
                             f"eps_yoy={guidance.eps_yoy}"
                         )
 
-                    # ---- 見通し要約: AI > fallback > 空 ----
-                    outlook_source = "none"
-                    if guidance and guidance.outlook_text:
-                        if not dry_run:
-                            ai_outlook = _summarize_outlook_with_ai(
-                                guidance.outlook_text, model=model,
-                            )
-                            guidance.outlook_summary = ai_outlook.get("summary", "")
-                            guidance.outlook_factors = {
-                                "segment": ai_outlook.get("segment_factors", []),
-                                "external": ai_outlook.get("external_factors", []),
-                                "cost": ai_outlook.get("cost_factors", []),
-                            }
-                            if guidance.outlook_summary:
-                                outlook_source = "ai"
-                            logger.info(
-                                f"[EARNINGS] {ticker} outlook_ai_summarized=True "
-                                f"summary_len={len(guidance.outlook_summary)}"
-                            )
-                        else:
-                            # dry-run: AI呼び出しなし、前処理済みフォールバック
-                            guidance.outlook_summary = make_fallback_summary(
-                                guidance.outlook_text
-                            )
-                            if guidance.outlook_summary:
-                                outlook_source = "fallback"
-                            logger.info(
-                                f"[EARNINGS] {ticker} outlook_ai_summarized=False (dry-run) "
-                                f"outlook_text_len={len(guidance.outlook_text)} "
-                                f"fallback_summary_len={len(guidance.outlook_summary)} "
-                                f"fallback_summary={guidance.outlook_summary[:80]!r}"
-                            )
-
-                        # AI要約が空でも fallback にフォールバック
-                        if guidance.outlook_summary == "" and guidance.outlook_text:
-                            guidance.outlook_summary = make_fallback_summary(
-                                guidance.outlook_text
-                            )
-                            if guidance.outlook_summary:
-                                outlook_source = "fallback"
-
-                    if guidance and is_4q and guidance.eps_forecast is None:
-                        logger.warning(
-                            f"[EARNINGS] {ticker} eps_missing=True "
-                            f"(FY filing but EPS forecast not extracted)"
-                        )
-
-                    # ---- 通知にガイダンス + 見通しセクションを追加 ----
+                    # ---- 通知にガイダンスセクションを追加 ----
                     if guidance:
                         guidance_section = format_guidance_section(guidance)
                         if guidance_section:
                             full_message += "\n\n" + guidance_section
-                            outlook_included = "■ 見通し" in guidance_section
                             logger.info(
                                 f"[EARNINGS] {ticker} notification_sections_added=True "
-                                f"section_len={len(guidance_section)} "
-                                f"outlook_included={outlook_included} "
-                                f"outlook_source={outlook_source}"
+                                f"section_len={len(guidance_section)}"
                             )
                         else:
                             logger.info(
                                 f"[EARNINGS] {ticker} notification_sections_added=False "
-                                f"(no guidance/outlook to display)"
+                                f"(no guidance to display)"
                             )
-
-                    # ---- dry-run: outlook_preview ログ ----
-                    if guidance and guidance.outlook_summary:
-                        logger.info(
-                            f"[EARNINGS] {ticker} outlook_preview="
-                            f"'{guidance.outlook_summary[:80]}'"
-                        )
 
                 except Exception as e:
                     logger.warning(f"[EARNINGS] {ticker} guidance extraction failed: {e}")
@@ -521,7 +379,6 @@ def run_earnings_production(
                 # is_4q=False: ガイダンス対象外
                 logger.info(
                     f"[EARNINGS] {ticker} guidance_extracted=N/A "
-                    f"outlook_text_found=N/A outlook_ai_summarized=N/A "
                     f"(not FY/4Q, reason={fy_reason})"
                 )
 
@@ -578,8 +435,7 @@ def run_earnings_production(
                     save_data["guidance_sales_yoy"] = guidance.sales_yoy
                     save_data["guidance_op_yoy"] = guidance.op_yoy
                     save_data["guidance_eps_yoy"] = guidance.eps_yoy
-                if guidance and guidance.has_outlook:
-                    save_data["outlook_summary"] = guidance.outlook_summary
+
 
                 action = save_earnings_summary(conn, save_data)
                 if action == "inserted":

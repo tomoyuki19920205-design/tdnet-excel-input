@@ -1,0 +1,46 @@
+{
+  "run_id": "768e1e286dd0",
+  "timestamp": "20260329_155246",
+  "filing_count": 3,
+  "filings": [
+    {
+      "filing_id": "6a9d41aa4b9c4f4b94594ce1",
+      "ticker": "1358",
+      "disclosure_date": "2026-02-20",
+      "title": "2026年7月期　中間決算短信（2025年7月11日～2026年1月10日）",
+      "doc_url": "https://www.release.tdnet.info/inbs/140120260220566587.pdf",
+      "xbrl_url": "https://www.release.tdnet.info/inbs/081220260220566587.zip",
+      "doc_type": "financial_statement",
+      "company_name": "上場日経２倍",
+      "published_at": "2026-02-20 16:00",
+      "listing_source": "tdnet_html",
+      "has_xbrl": false
+    },
+    {
+      "filing_id": "b4f0e457ed78620fc5de17e6",
+      "ticker": "1305",
+      "disclosure_date": "2026-02-20",
+      "title": "2026年7月期 中間決算短信（2025年7月11日～2026年1月10日）",
+      "doc_url": "https://www.release.tdnet.info/inbs/140120260220566155.pdf",
+      "xbrl_url": "https://www.release.tdnet.info/inbs/081220260220566155.zip",
+      "doc_type": "financial_statement",
+      "company_name": "ｉＦＴＰＸ年１",
+      "published_at": "2026-02-20 11:20",
+      "listing_source": "tdnet_html",
+      "has_xbrl": false
+    },
+    {
+      "filing_id": "760eca25824469ae9f8f0063",
+      "ticker": "1320",
+      "disclosure_date": "2026-02-20",
+      "title": "2026年7月期 中間決算短信（2025年7月11日～2026年1月10日）",
+      "doc_url": "https://www.release.tdnet.info/inbs/140120260220566150.pdf",
+      "xbrl_url": "https://www.release.tdnet.info/inbs/081220260220566150.zip",
+      "doc_type": "financial_statement",
+      "company_name": "ｉＦ２２５年１",
+      "published_at": "2026-02-20 11:20",
+      "listing_source": "tdnet_html",
+      "has_xbrl": false
+    }
+  ]
+}

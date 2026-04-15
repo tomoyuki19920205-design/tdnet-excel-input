@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "3180",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "Goods Sales",
+    "segment_order": 1,
+    "segment_sales": 23009,
+    "segment_profit": 791,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Goods Sales",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-10",
+    "tdnet_doc_id": "7b7cdef2ee7d254dde65e080",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "3180",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "Store Design",
+    "segment_order": 2,
+    "segment_sales": 2607,
+    "segment_profit": 41,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Store Design",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-10",
+    "tdnet_doc_id": "7b7cdef2ee7d254dde65e080",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "3180",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "Other Related Solution",
+    "segment_order": 3,
+    "segment_sales": 2221,
+    "segment_profit": 245,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Other Related Solution",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-10",
+    "tdnet_doc_id": "7b7cdef2ee7d254dde65e080",
+    "row_type": "segment"
+  }
+]

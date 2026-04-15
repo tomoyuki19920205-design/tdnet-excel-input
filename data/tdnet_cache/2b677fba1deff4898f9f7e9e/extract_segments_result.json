@@ -1,0 +1,4337 @@
+[
+  {
+    "ticker": "7777",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "米国",
+    "segment_order": 1,
+    "segment_sales": 4065.0,
+    "segment_profit": 2301.0,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "米国",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "2b677fba1deff4898f9f7e9e",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=4, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.90 (売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン6行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=6 narr=21",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['前第３四半期連結累計期間 当第３四半期連結累計期間', '（自 2024年５月１日 （自 2025年５月１日 前年同期比'], reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比'], units=None",
+      "Unit: raw=百万円, mult=1000000, src=page_top",
+      "Phase C: transition B(37rows,3cols)→C(37rows,3cols) header_band=2 new_headers=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=1",
+      "Phase D-0: secondary_headers=['（自 2024年５月１日 （自 2025年５月１日 前年同期比']",
+      "Phase D-0: primary_reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間']",
+      "Phase D-0: primary_split_empty_or_non_metric, discarding primary_reconstructed",
+      "Phase D-0: body_metric_recovery starting",
+      "Phase D-0: body_metric_recovery found: ['売上高合計 5,059 7,346 +45.2％']",
+      "Phase D-0: body_metric_recovery found: ['略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D-0: body_metric_recovery_headers=['売上高合計 5,059 7,346 +45.2％', '略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=1, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=15, skip行=17, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 15件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 4,
+          "score": 0.9,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.77,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行10行(5+); 行数88; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.52,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行6行(5+); 数値密度6/12; 行数12",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.32,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.02,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列1列(減点); 数値行4行(3+); 行数76; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 6,
+        "narrative_like": 21,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 6,
+        "pl_account_like": 1,
+        "top_samples": [
+          "前第:garbage_fragment_like",
+          "（自:garbage_fragment_like",
+          "至:garbage_fragment_like",
+          "米国:garbage_fragment_like",
+          "欧州:valid_segment_like"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 37,
+        "phase_b_num_cols": 3,
+        "phase_b_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "phase_c_rows": 37,
+        "phase_c_num_cols": 3,
+        "phase_c_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比"
+        ],
+        "reconstructed_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "column_labels": [
+          [
+            "至 2025年１月31日） 至 2026年１月31日）"
+          ],
+          [
+            "米国 2,301 4,065 +76.7％"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like"
+        ],
+        "best_sales_col": 1,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.36,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.42,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.6,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "segment_profit_like": 0.21
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.21,
+            "selected": true
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高合計 5,059 7,346 +45.2％",
+            "scores": {
+              "sales": 0.18,
+              "total_sales_like": 0.36
+            },
+            "best_role": "total_sales_like",
+            "best_score": 0.36,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "sales": 0.6
+            },
+            "best_role": "sales",
+            "best_score": 0.6,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比"
+        ],
+        "new_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 1.0,
+      "table_score": 0.9,
+      "header_confidence": 0.5,
+      "col_confidence": 0.71,
+      "segment_count": 15,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_profit_like",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 10,
+      "parse_quality_partial": 5
+    }
+  },
+  {
+    "ticker": "7777",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "欧州",
+    "segment_order": 2,
+    "segment_sales": 1852.0,
+    "segment_profit": 1445.0,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "欧州",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "2b677fba1deff4898f9f7e9e",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=4, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.90 (売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン6行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=6 narr=21",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['前第３四半期連結累計期間 当第３四半期連結累計期間', '（自 2024年５月１日 （自 2025年５月１日 前年同期比'], reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比'], units=None",
+      "Unit: raw=百万円, mult=1000000, src=page_top",
+      "Phase C: transition B(37rows,3cols)→C(37rows,3cols) header_band=2 new_headers=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=1",
+      "Phase D-0: secondary_headers=['（自 2024年５月１日 （自 2025年５月１日 前年同期比']",
+      "Phase D-0: primary_reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間']",
+      "Phase D-0: primary_split_empty_or_non_metric, discarding primary_reconstructed",
+      "Phase D-0: body_metric_recovery starting",
+      "Phase D-0: body_metric_recovery found: ['売上高合計 5,059 7,346 +45.2％']",
+      "Phase D-0: body_metric_recovery found: ['略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D-0: body_metric_recovery_headers=['売上高合計 5,059 7,346 +45.2％', '略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=1, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=15, skip行=17, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 15件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 4,
+          "score": 0.9,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.77,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行10行(5+); 行数88; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.52,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行6行(5+); 数値密度6/12; 行数12",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.32,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.02,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列1列(減点); 数値行4行(3+); 行数76; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 6,
+        "narrative_like": 21,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 6,
+        "pl_account_like": 1,
+        "top_samples": [
+          "前第:garbage_fragment_like",
+          "（自:garbage_fragment_like",
+          "至:garbage_fragment_like",
+          "米国:garbage_fragment_like",
+          "欧州:valid_segment_like"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 37,
+        "phase_b_num_cols": 3,
+        "phase_b_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "phase_c_rows": 37,
+        "phase_c_num_cols": 3,
+        "phase_c_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比"
+        ],
+        "reconstructed_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "column_labels": [
+          [
+            "至 2025年１月31日） 至 2026年１月31日）"
+          ],
+          [
+            "米国 2,301 4,065 +76.7％"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like"
+        ],
+        "best_sales_col": 1,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.36,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.42,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.6,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "segment_profit_like": 0.21
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.21,
+            "selected": true
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高合計 5,059 7,346 +45.2％",
+            "scores": {
+              "sales": 0.18,
+              "total_sales_like": 0.36
+            },
+            "best_role": "total_sales_like",
+            "best_score": 0.36,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "sales": 0.6
+            },
+            "best_role": "sales",
+            "best_score": 0.6,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比"
+        ],
+        "new_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 1.0,
+      "table_score": 0.9,
+      "header_confidence": 0.5,
+      "col_confidence": 0.71,
+      "segment_count": 15,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_profit_like",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 10,
+      "parse_quality_partial": 5
+    }
+  },
+  {
+    "ticker": "7777",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "日本",
+    "segment_order": 3,
+    "segment_sales": 956.0,
+    "segment_profit": 914.0,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "日本",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "2b677fba1deff4898f9f7e9e",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=4, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.90 (売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン6行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=6 narr=21",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['前第３四半期連結累計期間 当第３四半期連結累計期間', '（自 2024年５月１日 （自 2025年５月１日 前年同期比'], reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比'], units=None",
+      "Unit: raw=百万円, mult=1000000, src=page_top",
+      "Phase C: transition B(37rows,3cols)→C(37rows,3cols) header_band=2 new_headers=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=1",
+      "Phase D-0: secondary_headers=['（自 2024年５月１日 （自 2025年５月１日 前年同期比']",
+      "Phase D-0: primary_reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間']",
+      "Phase D-0: primary_split_empty_or_non_metric, discarding primary_reconstructed",
+      "Phase D-0: body_metric_recovery starting",
+      "Phase D-0: body_metric_recovery found: ['売上高合計 5,059 7,346 +45.2％']",
+      "Phase D-0: body_metric_recovery found: ['略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D-0: body_metric_recovery_headers=['売上高合計 5,059 7,346 +45.2％', '略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=1, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=15, skip行=17, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 15件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 4,
+          "score": 0.9,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.77,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行10行(5+); 行数88; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.52,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行6行(5+); 数値密度6/12; 行数12",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.32,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.02,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列1列(減点); 数値行4行(3+); 行数76; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 6,
+        "narrative_like": 21,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 6,
+        "pl_account_like": 1,
+        "top_samples": [
+          "前第:garbage_fragment_like",
+          "（自:garbage_fragment_like",
+          "至:garbage_fragment_like",
+          "米国:garbage_fragment_like",
+          "欧州:valid_segment_like"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 37,
+        "phase_b_num_cols": 3,
+        "phase_b_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "phase_c_rows": 37,
+        "phase_c_num_cols": 3,
+        "phase_c_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比"
+        ],
+        "reconstructed_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "column_labels": [
+          [
+            "至 2025年１月31日） 至 2026年１月31日）"
+          ],
+          [
+            "米国 2,301 4,065 +76.7％"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like"
+        ],
+        "best_sales_col": 1,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.36,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.42,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.6,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "segment_profit_like": 0.21
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.21,
+            "selected": true
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高合計 5,059 7,346 +45.2％",
+            "scores": {
+              "sales": 0.18,
+              "total_sales_like": 0.36
+            },
+            "best_role": "total_sales_like",
+            "best_score": 0.36,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "sales": 0.6
+            },
+            "best_role": "sales",
+            "best_score": 0.6,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比"
+        ],
+        "new_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 1.0,
+      "table_score": 0.9,
+      "header_confidence": 0.5,
+      "col_confidence": 0.71,
+      "segment_count": 15,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_profit_like",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 10,
+      "parse_quality_partial": 5
+    }
+  },
+  {
+    "ticker": "7777",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "その他",
+    "segment_order": 4,
+    "segment_sales": 472.0,
+    "segment_profit": 398.0,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "その他",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "2b677fba1deff4898f9f7e9e",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=4, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.90 (売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン6行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=6 narr=21",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['前第３四半期連結累計期間 当第３四半期連結累計期間', '（自 2024年５月１日 （自 2025年５月１日 前年同期比'], reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比'], units=None",
+      "Unit: raw=百万円, mult=1000000, src=page_top",
+      "Phase C: transition B(37rows,3cols)→C(37rows,3cols) header_band=2 new_headers=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=1",
+      "Phase D-0: secondary_headers=['（自 2024年５月１日 （自 2025年５月１日 前年同期比']",
+      "Phase D-0: primary_reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間']",
+      "Phase D-0: primary_split_empty_or_non_metric, discarding primary_reconstructed",
+      "Phase D-0: body_metric_recovery starting",
+      "Phase D-0: body_metric_recovery found: ['売上高合計 5,059 7,346 +45.2％']",
+      "Phase D-0: body_metric_recovery found: ['略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D-0: body_metric_recovery_headers=['売上高合計 5,059 7,346 +45.2％', '略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=1, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=15, skip行=17, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 15件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 4,
+          "score": 0.9,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.77,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行10行(5+); 行数88; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.52,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行6行(5+); 数値密度6/12; 行数12",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.32,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.02,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列1列(減点); 数値行4行(3+); 行数76; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 6,
+        "narrative_like": 21,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 6,
+        "pl_account_like": 1,
+        "top_samples": [
+          "前第:garbage_fragment_like",
+          "（自:garbage_fragment_like",
+          "至:garbage_fragment_like",
+          "米国:garbage_fragment_like",
+          "欧州:valid_segment_like"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 37,
+        "phase_b_num_cols": 3,
+        "phase_b_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "phase_c_rows": 37,
+        "phase_c_num_cols": 3,
+        "phase_c_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比"
+        ],
+        "reconstructed_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "column_labels": [
+          [
+            "至 2025年１月31日） 至 2026年１月31日）"
+          ],
+          [
+            "米国 2,301 4,065 +76.7％"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like"
+        ],
+        "best_sales_col": 1,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.36,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.42,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.6,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "segment_profit_like": 0.21
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.21,
+            "selected": true
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高合計 5,059 7,346 +45.2％",
+            "scores": {
+              "sales": 0.18,
+              "total_sales_like": 0.36
+            },
+            "best_role": "total_sales_like",
+            "best_score": 0.36,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "sales": 0.6
+            },
+            "best_role": "sales",
+            "best_score": 0.6,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比"
+        ],
+        "new_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 1.0,
+      "table_score": 0.9,
+      "header_confidence": 0.5,
+      "col_confidence": 0.71,
+      "segment_count": 15,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_profit_like",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 10,
+      "parse_quality_partial": 5
+    }
+  },
+  {
+    "ticker": "7777",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "米国における製品販売は、",
+    "segment_order": 5,
+    "segment_sales": 76.7,
+    "segment_profit": 4065.0,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "米国における製品販売は、",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "2b677fba1deff4898f9f7e9e",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=4, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.90 (売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン6行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=6 narr=21",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['前第３四半期連結累計期間 当第３四半期連結累計期間', '（自 2024年５月１日 （自 2025年５月１日 前年同期比'], reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比'], units=None",
+      "Unit: raw=百万円, mult=1000000, src=page_top",
+      "Phase C: transition B(37rows,3cols)→C(37rows,3cols) header_band=2 new_headers=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=1",
+      "Phase D-0: secondary_headers=['（自 2024年５月１日 （自 2025年５月１日 前年同期比']",
+      "Phase D-0: primary_reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間']",
+      "Phase D-0: primary_split_empty_or_non_metric, discarding primary_reconstructed",
+      "Phase D-0: body_metric_recovery starting",
+      "Phase D-0: body_metric_recovery found: ['売上高合計 5,059 7,346 +45.2％']",
+      "Phase D-0: body_metric_recovery found: ['略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D-0: body_metric_recovery_headers=['売上高合計 5,059 7,346 +45.2％', '略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=1, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=15, skip行=17, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 15件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 4,
+          "score": 0.9,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.77,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行10行(5+); 行数88; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.52,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行6行(5+); 数値密度6/12; 行数12",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.32,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.02,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列1列(減点); 数値行4行(3+); 行数76; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 6,
+        "narrative_like": 21,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 6,
+        "pl_account_like": 1,
+        "top_samples": [
+          "前第:garbage_fragment_like",
+          "（自:garbage_fragment_like",
+          "至:garbage_fragment_like",
+          "米国:garbage_fragment_like",
+          "欧州:valid_segment_like"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 37,
+        "phase_b_num_cols": 3,
+        "phase_b_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "phase_c_rows": 37,
+        "phase_c_num_cols": 3,
+        "phase_c_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比"
+        ],
+        "reconstructed_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "column_labels": [
+          [
+            "至 2025年１月31日） 至 2026年１月31日）"
+          ],
+          [
+            "米国 2,301 4,065 +76.7％"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like"
+        ],
+        "best_sales_col": 1,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.36,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.42,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.6,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "segment_profit_like": 0.21
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.21,
+            "selected": true
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高合計 5,059 7,346 +45.2％",
+            "scores": {
+              "sales": 0.18,
+              "total_sales_like": 0.36
+            },
+            "best_role": "total_sales_like",
+            "best_score": 0.36,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "sales": 0.6
+            },
+            "best_role": "sales",
+            "best_score": 0.6,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比"
+        ],
+        "new_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 1.0,
+      "table_score": 0.9,
+      "header_confidence": 0.5,
+      "col_confidence": 0.71,
+      "segment_count": 15,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_profit_like",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 10,
+      "parse_quality_partial": 5
+    }
+  },
+  {
+    "ticker": "7777",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "高い成長を維持しており、前期から継続して計画を超えるトレンドが継続しております。第",
+    "segment_order": 6,
+    "segment_sales": 3.0,
+    "segment_profit": null,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "高い成長を維持しており、前期から継続して計画を超えるトレンドが継続しております。第",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "2b677fba1deff4898f9f7e9e",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=4, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.90 (売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン6行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=6 narr=21",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['前第３四半期連結累計期間 当第３四半期連結累計期間', '（自 2024年５月１日 （自 2025年５月１日 前年同期比'], reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比'], units=None",
+      "Unit: raw=百万円, mult=1000000, src=page_top",
+      "Phase C: transition B(37rows,3cols)→C(37rows,3cols) header_band=2 new_headers=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=1",
+      "Phase D-0: secondary_headers=['（自 2024年５月１日 （自 2025年５月１日 前年同期比']",
+      "Phase D-0: primary_reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間']",
+      "Phase D-0: primary_split_empty_or_non_metric, discarding primary_reconstructed",
+      "Phase D-0: body_metric_recovery starting",
+      "Phase D-0: body_metric_recovery found: ['売上高合計 5,059 7,346 +45.2％']",
+      "Phase D-0: body_metric_recovery found: ['略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D-0: body_metric_recovery_headers=['売上高合計 5,059 7,346 +45.2％', '略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=1, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=15, skip行=17, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 15件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 4,
+          "score": 0.9,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.77,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行10行(5+); 行数88; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.52,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行6行(5+); 数値密度6/12; 行数12",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.32,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.02,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列1列(減点); 数値行4行(3+); 行数76; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 6,
+        "narrative_like": 21,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 6,
+        "pl_account_like": 1,
+        "top_samples": [
+          "前第:garbage_fragment_like",
+          "（自:garbage_fragment_like",
+          "至:garbage_fragment_like",
+          "米国:garbage_fragment_like",
+          "欧州:valid_segment_like"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 37,
+        "phase_b_num_cols": 3,
+        "phase_b_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "phase_c_rows": 37,
+        "phase_c_num_cols": 3,
+        "phase_c_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比"
+        ],
+        "reconstructed_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "column_labels": [
+          [
+            "至 2025年１月31日） 至 2026年１月31日）"
+          ],
+          [
+            "米国 2,301 4,065 +76.7％"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like"
+        ],
+        "best_sales_col": 1,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.36,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.42,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.6,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "segment_profit_like": 0.21
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.21,
+            "selected": true
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高合計 5,059 7,346 +45.2％",
+            "scores": {
+              "sales": 0.18,
+              "total_sales_like": 0.36
+            },
+            "best_role": "total_sales_like",
+            "best_score": 0.36,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "sales": 0.6
+            },
+            "best_role": "sales",
+            "best_score": 0.6,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比"
+        ],
+        "new_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 1.0,
+      "table_score": 0.9,
+      "header_confidence": 0.5,
+      "col_confidence": 0.71,
+      "segment_count": 15,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_profit_like",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 10,
+      "parse_quality_partial": 5
+    }
+  },
+  {
+    "ticker": "7777",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "り成長が多少鈍化する傾向にありますが、当第",
+    "segment_order": 7,
+    "segment_sales": 3.0,
+    "segment_profit": null,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "り成長が多少鈍化する傾向にありますが、当第",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "2b677fba1deff4898f9f7e9e",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=4, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.90 (売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン6行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=6 narr=21",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['前第３四半期連結累計期間 当第３四半期連結累計期間', '（自 2024年５月１日 （自 2025年５月１日 前年同期比'], reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比'], units=None",
+      "Unit: raw=百万円, mult=1000000, src=page_top",
+      "Phase C: transition B(37rows,3cols)→C(37rows,3cols) header_band=2 new_headers=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=1",
+      "Phase D-0: secondary_headers=['（自 2024年５月１日 （自 2025年５月１日 前年同期比']",
+      "Phase D-0: primary_reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間']",
+      "Phase D-0: primary_split_empty_or_non_metric, discarding primary_reconstructed",
+      "Phase D-0: body_metric_recovery starting",
+      "Phase D-0: body_metric_recovery found: ['売上高合計 5,059 7,346 +45.2％']",
+      "Phase D-0: body_metric_recovery found: ['略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D-0: body_metric_recovery_headers=['売上高合計 5,059 7,346 +45.2％', '略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=1, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=15, skip行=17, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 15件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 4,
+          "score": 0.9,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.77,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行10行(5+); 行数88; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.52,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行6行(5+); 数値密度6/12; 行数12",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.32,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.02,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列1列(減点); 数値行4行(3+); 行数76; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 6,
+        "narrative_like": 21,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 6,
+        "pl_account_like": 1,
+        "top_samples": [
+          "前第:garbage_fragment_like",
+          "（自:garbage_fragment_like",
+          "至:garbage_fragment_like",
+          "米国:garbage_fragment_like",
+          "欧州:valid_segment_like"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 37,
+        "phase_b_num_cols": 3,
+        "phase_b_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "phase_c_rows": 37,
+        "phase_c_num_cols": 3,
+        "phase_c_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比"
+        ],
+        "reconstructed_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "column_labels": [
+          [
+            "至 2025年１月31日） 至 2026年１月31日）"
+          ],
+          [
+            "米国 2,301 4,065 +76.7％"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like"
+        ],
+        "best_sales_col": 1,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.36,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.42,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.6,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "segment_profit_like": 0.21
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.21,
+            "selected": true
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高合計 5,059 7,346 +45.2％",
+            "scores": {
+              "sales": 0.18,
+              "total_sales_like": 0.36
+            },
+            "best_role": "total_sales_like",
+            "best_score": 0.36,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "sales": 0.6
+            },
+            "best_role": "sales",
+            "best_score": 0.6,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比"
+        ],
+        "new_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 1.0,
+      "table_score": 0.9,
+      "header_confidence": 0.5,
+      "col_confidence": 0.71,
+      "segment_count": 15,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_profit_like",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 10,
+      "parse_quality_partial": 5
+    }
+  },
+  {
+    "ticker": "7777",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "略が引き続き効果を発揮し、第",
+    "segment_order": 8,
+    "segment_sales": 3.0,
+    "segment_profit": null,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "略が引き続き効果を発揮し、第",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "2b677fba1deff4898f9f7e9e",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=4, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.90 (売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン6行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=6 narr=21",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['前第３四半期連結累計期間 当第３四半期連結累計期間', '（自 2024年５月１日 （自 2025年５月１日 前年同期比'], reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比'], units=None",
+      "Unit: raw=百万円, mult=1000000, src=page_top",
+      "Phase C: transition B(37rows,3cols)→C(37rows,3cols) header_band=2 new_headers=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=1",
+      "Phase D-0: secondary_headers=['（自 2024年５月１日 （自 2025年５月１日 前年同期比']",
+      "Phase D-0: primary_reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間']",
+      "Phase D-0: primary_split_empty_or_non_metric, discarding primary_reconstructed",
+      "Phase D-0: body_metric_recovery starting",
+      "Phase D-0: body_metric_recovery found: ['売上高合計 5,059 7,346 +45.2％']",
+      "Phase D-0: body_metric_recovery found: ['略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D-0: body_metric_recovery_headers=['売上高合計 5,059 7,346 +45.2％', '略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=1, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=15, skip行=17, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 15件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 4,
+          "score": 0.9,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.77,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行10行(5+); 行数88; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.52,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行6行(5+); 数値密度6/12; 行数12",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.32,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.02,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列1列(減点); 数値行4行(3+); 行数76; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 6,
+        "narrative_like": 21,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 6,
+        "pl_account_like": 1,
+        "top_samples": [
+          "前第:garbage_fragment_like",
+          "（自:garbage_fragment_like",
+          "至:garbage_fragment_like",
+          "米国:garbage_fragment_like",
+          "欧州:valid_segment_like"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 37,
+        "phase_b_num_cols": 3,
+        "phase_b_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "phase_c_rows": 37,
+        "phase_c_num_cols": 3,
+        "phase_c_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比"
+        ],
+        "reconstructed_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "column_labels": [
+          [
+            "至 2025年１月31日） 至 2026年１月31日）"
+          ],
+          [
+            "米国 2,301 4,065 +76.7％"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like"
+        ],
+        "best_sales_col": 1,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.36,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.42,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.6,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "segment_profit_like": 0.21
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.21,
+            "selected": true
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高合計 5,059 7,346 +45.2％",
+            "scores": {
+              "sales": 0.18,
+              "total_sales_like": 0.36
+            },
+            "best_role": "total_sales_like",
+            "best_score": 0.36,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "sales": 0.6
+            },
+            "best_role": "sales",
+            "best_score": 0.6,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比"
+        ],
+        "new_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 1.0,
+      "table_score": 0.9,
+      "header_confidence": 0.5,
+      "col_confidence": 0.71,
+      "segment_count": 15,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_profit_like",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 10,
+      "parse_quality_partial": 5
+    }
+  },
+  {
+    "ticker": "7777",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "欧州における製品販売は、",
+    "segment_order": 9,
+    "segment_sales": 28.2,
+    "segment_profit": 1852.0,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "欧州における製品販売は、",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "2b677fba1deff4898f9f7e9e",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=4, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.90 (売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン6行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=6 narr=21",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['前第３四半期連結累計期間 当第３四半期連結累計期間', '（自 2024年５月１日 （自 2025年５月１日 前年同期比'], reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比'], units=None",
+      "Unit: raw=百万円, mult=1000000, src=page_top",
+      "Phase C: transition B(37rows,3cols)→C(37rows,3cols) header_band=2 new_headers=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=1",
+      "Phase D-0: secondary_headers=['（自 2024年５月１日 （自 2025年５月１日 前年同期比']",
+      "Phase D-0: primary_reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間']",
+      "Phase D-0: primary_split_empty_or_non_metric, discarding primary_reconstructed",
+      "Phase D-0: body_metric_recovery starting",
+      "Phase D-0: body_metric_recovery found: ['売上高合計 5,059 7,346 +45.2％']",
+      "Phase D-0: body_metric_recovery found: ['略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D-0: body_metric_recovery_headers=['売上高合計 5,059 7,346 +45.2％', '略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=1, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=15, skip行=17, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 15件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 4,
+          "score": 0.9,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.77,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行10行(5+); 行数88; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.52,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行6行(5+); 数値密度6/12; 行数12",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.32,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.02,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列1列(減点); 数値行4行(3+); 行数76; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 6,
+        "narrative_like": 21,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 6,
+        "pl_account_like": 1,
+        "top_samples": [
+          "前第:garbage_fragment_like",
+          "（自:garbage_fragment_like",
+          "至:garbage_fragment_like",
+          "米国:garbage_fragment_like",
+          "欧州:valid_segment_like"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 37,
+        "phase_b_num_cols": 3,
+        "phase_b_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "phase_c_rows": 37,
+        "phase_c_num_cols": 3,
+        "phase_c_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比"
+        ],
+        "reconstructed_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "column_labels": [
+          [
+            "至 2025年１月31日） 至 2026年１月31日）"
+          ],
+          [
+            "米国 2,301 4,065 +76.7％"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like"
+        ],
+        "best_sales_col": 1,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.36,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.42,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.6,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "segment_profit_like": 0.21
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.21,
+            "selected": true
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高合計 5,059 7,346 +45.2％",
+            "scores": {
+              "sales": 0.18,
+              "total_sales_like": 0.36
+            },
+            "best_role": "total_sales_like",
+            "best_score": 0.36,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "sales": 0.6
+            },
+            "best_role": "sales",
+            "best_score": 0.6,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比"
+        ],
+        "new_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 1.0,
+      "table_score": 0.9,
+      "header_confidence": 0.5,
+      "col_confidence": 0.71,
+      "segment_count": 15,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_profit_like",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 10,
+      "parse_quality_partial": 5
+    }
+  },
+  {
+    "ticker": "7777",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "ストリー試験(POPS)の結果が論文発表されたこともあり、当第",
+    "segment_order": 10,
+    "segment_sales": 3.0,
+    "segment_profit": null,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "ストリー試験(POPS)の結果が論文発表されたこともあり、当第",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "2b677fba1deff4898f9f7e9e",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=4, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.90 (売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン6行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=6 narr=21",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['前第３四半期連結累計期間 当第３四半期連結累計期間', '（自 2024年５月１日 （自 2025年５月１日 前年同期比'], reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比'], units=None",
+      "Unit: raw=百万円, mult=1000000, src=page_top",
+      "Phase C: transition B(37rows,3cols)→C(37rows,3cols) header_band=2 new_headers=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=1",
+      "Phase D-0: secondary_headers=['（自 2024年５月１日 （自 2025年５月１日 前年同期比']",
+      "Phase D-0: primary_reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間']",
+      "Phase D-0: primary_split_empty_or_non_metric, discarding primary_reconstructed",
+      "Phase D-0: body_metric_recovery starting",
+      "Phase D-0: body_metric_recovery found: ['売上高合計 5,059 7,346 +45.2％']",
+      "Phase D-0: body_metric_recovery found: ['略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D-0: body_metric_recovery_headers=['売上高合計 5,059 7,346 +45.2％', '略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=1, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=15, skip行=17, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 15件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 4,
+          "score": 0.9,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.77,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行10行(5+); 行数88; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.52,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行6行(5+); 数値密度6/12; 行数12",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.32,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.02,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列1列(減点); 数値行4行(3+); 行数76; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 6,
+        "narrative_like": 21,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 6,
+        "pl_account_like": 1,
+        "top_samples": [
+          "前第:garbage_fragment_like",
+          "（自:garbage_fragment_like",
+          "至:garbage_fragment_like",
+          "米国:garbage_fragment_like",
+          "欧州:valid_segment_like"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 37,
+        "phase_b_num_cols": 3,
+        "phase_b_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "phase_c_rows": 37,
+        "phase_c_num_cols": 3,
+        "phase_c_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比"
+        ],
+        "reconstructed_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "column_labels": [
+          [
+            "至 2025年１月31日） 至 2026年１月31日）"
+          ],
+          [
+            "米国 2,301 4,065 +76.7％"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like"
+        ],
+        "best_sales_col": 1,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.36,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.42,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.6,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "segment_profit_like": 0.21
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.21,
+            "selected": true
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高合計 5,059 7,346 +45.2％",
+            "scores": {
+              "sales": 0.18,
+              "total_sales_like": 0.36
+            },
+            "best_role": "total_sales_like",
+            "best_score": 0.36,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "sales": 0.6
+            },
+            "best_role": "sales",
+            "best_score": 0.6,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比"
+        ],
+        "new_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 1.0,
+      "table_score": 0.9,
+      "header_confidence": 0.5,
+      "col_confidence": 0.71,
+      "segment_count": 15,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_profit_like",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 10,
+      "parse_quality_partial": 5
+    }
+  },
+  {
+    "ticker": "7777",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "日本における製品販売は、",
+    "segment_order": 11,
+    "segment_sales": 4.5,
+    "segment_profit": 956.0,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "日本における製品販売は、",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "2b677fba1deff4898f9f7e9e",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=4, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.90 (売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン6行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=6 narr=21",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['前第３四半期連結累計期間 当第３四半期連結累計期間', '（自 2024年５月１日 （自 2025年５月１日 前年同期比'], reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比'], units=None",
+      "Unit: raw=百万円, mult=1000000, src=page_top",
+      "Phase C: transition B(37rows,3cols)→C(37rows,3cols) header_band=2 new_headers=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=1",
+      "Phase D-0: secondary_headers=['（自 2024年５月１日 （自 2025年５月１日 前年同期比']",
+      "Phase D-0: primary_reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間']",
+      "Phase D-0: primary_split_empty_or_non_metric, discarding primary_reconstructed",
+      "Phase D-0: body_metric_recovery starting",
+      "Phase D-0: body_metric_recovery found: ['売上高合計 5,059 7,346 +45.2％']",
+      "Phase D-0: body_metric_recovery found: ['略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D-0: body_metric_recovery_headers=['売上高合計 5,059 7,346 +45.2％', '略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=1, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=15, skip行=17, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 15件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 4,
+          "score": 0.9,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.77,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行10行(5+); 行数88; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.52,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行6行(5+); 数値密度6/12; 行数12",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.32,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.02,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列1列(減点); 数値行4行(3+); 行数76; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 6,
+        "narrative_like": 21,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 6,
+        "pl_account_like": 1,
+        "top_samples": [
+          "前第:garbage_fragment_like",
+          "（自:garbage_fragment_like",
+          "至:garbage_fragment_like",
+          "米国:garbage_fragment_like",
+          "欧州:valid_segment_like"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 37,
+        "phase_b_num_cols": 3,
+        "phase_b_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "phase_c_rows": 37,
+        "phase_c_num_cols": 3,
+        "phase_c_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比"
+        ],
+        "reconstructed_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "column_labels": [
+          [
+            "至 2025年１月31日） 至 2026年１月31日）"
+          ],
+          [
+            "米国 2,301 4,065 +76.7％"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like"
+        ],
+        "best_sales_col": 1,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.36,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.42,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.6,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "segment_profit_like": 0.21
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.21,
+            "selected": true
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高合計 5,059 7,346 +45.2％",
+            "scores": {
+              "sales": 0.18,
+              "total_sales_like": 0.36
+            },
+            "best_role": "total_sales_like",
+            "best_score": 0.36,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "sales": 0.6
+            },
+            "best_role": "sales",
+            "best_score": 0.6,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比"
+        ],
+        "new_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 1.0,
+      "table_score": 0.9,
+      "header_confidence": 0.5,
+      "col_confidence": 0.71,
+      "segment_count": 15,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_profit_like",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 10,
+      "parse_quality_partial": 5
+    }
+  },
+  {
+    "ticker": "7777",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "このような結果、当第",
+    "segment_order": 12,
+    "segment_sales": 4065.0,
+    "segment_profit": 3.0,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "このような結果、当第",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "2b677fba1deff4898f9f7e9e",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=4, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.90 (売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン6行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=6 narr=21",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['前第３四半期連結累計期間 当第３四半期連結累計期間', '（自 2024年５月１日 （自 2025年５月１日 前年同期比'], reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比'], units=None",
+      "Unit: raw=百万円, mult=1000000, src=page_top",
+      "Phase C: transition B(37rows,3cols)→C(37rows,3cols) header_band=2 new_headers=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=1",
+      "Phase D-0: secondary_headers=['（自 2024年５月１日 （自 2025年５月１日 前年同期比']",
+      "Phase D-0: primary_reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間']",
+      "Phase D-0: primary_split_empty_or_non_metric, discarding primary_reconstructed",
+      "Phase D-0: body_metric_recovery starting",
+      "Phase D-0: body_metric_recovery found: ['売上高合計 5,059 7,346 +45.2％']",
+      "Phase D-0: body_metric_recovery found: ['略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D-0: body_metric_recovery_headers=['売上高合計 5,059 7,346 +45.2％', '略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=1, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=15, skip行=17, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 15件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 4,
+          "score": 0.9,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.77,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行10行(5+); 行数88; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.52,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行6行(5+); 数値密度6/12; 行数12",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.32,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.02,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列1列(減点); 数値行4行(3+); 行数76; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 6,
+        "narrative_like": 21,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 6,
+        "pl_account_like": 1,
+        "top_samples": [
+          "前第:garbage_fragment_like",
+          "（自:garbage_fragment_like",
+          "至:garbage_fragment_like",
+          "米国:garbage_fragment_like",
+          "欧州:valid_segment_like"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 37,
+        "phase_b_num_cols": 3,
+        "phase_b_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "phase_c_rows": 37,
+        "phase_c_num_cols": 3,
+        "phase_c_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比"
+        ],
+        "reconstructed_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "column_labels": [
+          [
+            "至 2025年１月31日） 至 2026年１月31日）"
+          ],
+          [
+            "米国 2,301 4,065 +76.7％"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like"
+        ],
+        "best_sales_col": 1,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.36,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.42,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.6,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "segment_profit_like": 0.21
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.21,
+            "selected": true
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高合計 5,059 7,346 +45.2％",
+            "scores": {
+              "sales": 0.18,
+              "total_sales_like": 0.36
+            },
+            "best_role": "total_sales_like",
+            "best_score": 0.36,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "sales": 0.6
+            },
+            "best_role": "sales",
+            "best_score": 0.6,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比"
+        ],
+        "new_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 1.0,
+      "table_score": 0.9,
+      "header_confidence": 0.5,
+      "col_confidence": 0.71,
+      "segment_count": 15,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_profit_like",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 10,
+      "parse_quality_partial": 5
+    }
+  },
+  {
+    "ticker": "7777",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "日本で",
+    "segment_order": 13,
+    "segment_sales": 472.0,
+    "segment_profit": 956.0,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "日本で",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "2b677fba1deff4898f9f7e9e",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=4, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.90 (売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン6行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=6 narr=21",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['前第３四半期連結累計期間 当第３四半期連結累計期間', '（自 2024年５月１日 （自 2025年５月１日 前年同期比'], reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比'], units=None",
+      "Unit: raw=百万円, mult=1000000, src=page_top",
+      "Phase C: transition B(37rows,3cols)→C(37rows,3cols) header_band=2 new_headers=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=1",
+      "Phase D-0: secondary_headers=['（自 2024年５月１日 （自 2025年５月１日 前年同期比']",
+      "Phase D-0: primary_reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間']",
+      "Phase D-0: primary_split_empty_or_non_metric, discarding primary_reconstructed",
+      "Phase D-0: body_metric_recovery starting",
+      "Phase D-0: body_metric_recovery found: ['売上高合計 5,059 7,346 +45.2％']",
+      "Phase D-0: body_metric_recovery found: ['略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D-0: body_metric_recovery_headers=['売上高合計 5,059 7,346 +45.2％', '略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=1, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=15, skip行=17, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 15件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 4,
+          "score": 0.9,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.77,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行10行(5+); 行数88; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.52,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行6行(5+); 数値密度6/12; 行数12",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.32,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.02,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列1列(減点); 数値行4行(3+); 行数76; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 6,
+        "narrative_like": 21,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 6,
+        "pl_account_like": 1,
+        "top_samples": [
+          "前第:garbage_fragment_like",
+          "（自:garbage_fragment_like",
+          "至:garbage_fragment_like",
+          "米国:garbage_fragment_like",
+          "欧州:valid_segment_like"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 37,
+        "phase_b_num_cols": 3,
+        "phase_b_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "phase_c_rows": 37,
+        "phase_c_num_cols": 3,
+        "phase_c_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比"
+        ],
+        "reconstructed_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "column_labels": [
+          [
+            "至 2025年１月31日） 至 2026年１月31日）"
+          ],
+          [
+            "米国 2,301 4,065 +76.7％"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like"
+        ],
+        "best_sales_col": 1,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.36,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.42,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.6,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "segment_profit_like": 0.21
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.21,
+            "selected": true
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高合計 5,059 7,346 +45.2％",
+            "scores": {
+              "sales": 0.18,
+              "total_sales_like": 0.36
+            },
+            "best_role": "total_sales_like",
+            "best_score": 0.36,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "sales": 0.6
+            },
+            "best_role": "sales",
+            "best_score": 0.6,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比"
+        ],
+        "new_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 1.0,
+      "table_score": 0.9,
+      "header_confidence": 0.5,
+      "col_confidence": 0.71,
+      "segment_count": 15,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_profit_like",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 10,
+      "parse_quality_partial": 5
+    }
+  },
+  {
+    "ticker": "7777",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "加)と前年同期比",
+    "segment_order": 14,
+    "segment_sales": 45.2,
+    "segment_profit": null,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "加)と前年同期比",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "2b677fba1deff4898f9f7e9e",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=4, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.90 (売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン6行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=6 narr=21",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['前第３四半期連結累計期間 当第３四半期連結累計期間', '（自 2024年５月１日 （自 2025年５月１日 前年同期比'], reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比'], units=None",
+      "Unit: raw=百万円, mult=1000000, src=page_top",
+      "Phase C: transition B(37rows,3cols)→C(37rows,3cols) header_band=2 new_headers=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=1",
+      "Phase D-0: secondary_headers=['（自 2024年５月１日 （自 2025年５月１日 前年同期比']",
+      "Phase D-0: primary_reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間']",
+      "Phase D-0: primary_split_empty_or_non_metric, discarding primary_reconstructed",
+      "Phase D-0: body_metric_recovery starting",
+      "Phase D-0: body_metric_recovery found: ['売上高合計 5,059 7,346 +45.2％']",
+      "Phase D-0: body_metric_recovery found: ['略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D-0: body_metric_recovery_headers=['売上高合計 5,059 7,346 +45.2％', '略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=1, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=15, skip行=17, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 15件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 4,
+          "score": 0.9,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.77,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行10行(5+); 行数88; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.52,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行6行(5+); 数値密度6/12; 行数12",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.32,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.02,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列1列(減点); 数値行4行(3+); 行数76; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 6,
+        "narrative_like": 21,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 6,
+        "pl_account_like": 1,
+        "top_samples": [
+          "前第:garbage_fragment_like",
+          "（自:garbage_fragment_like",
+          "至:garbage_fragment_like",
+          "米国:garbage_fragment_like",
+          "欧州:valid_segment_like"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 37,
+        "phase_b_num_cols": 3,
+        "phase_b_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "phase_c_rows": 37,
+        "phase_c_num_cols": 3,
+        "phase_c_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比"
+        ],
+        "reconstructed_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "column_labels": [
+          [
+            "至 2025年１月31日） 至 2026年１月31日）"
+          ],
+          [
+            "米国 2,301 4,065 +76.7％"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like"
+        ],
+        "best_sales_col": 1,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.36,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.42,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.6,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "segment_profit_like": 0.21
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.21,
+            "selected": true
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高合計 5,059 7,346 +45.2％",
+            "scores": {
+              "sales": 0.18,
+              "total_sales_like": 0.36
+            },
+            "best_role": "total_sales_like",
+            "best_score": 0.36,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "sales": 0.6
+            },
+            "best_role": "sales",
+            "best_score": 0.6,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比"
+        ],
+        "new_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 1.0,
+      "table_score": 0.9,
+      "header_confidence": 0.5,
+      "col_confidence": 0.71,
+      "segment_count": 15,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_profit_like",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 10,
+      "parse_quality_partial": 5
+    }
+  },
+  {
+    "ticker": "7777",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "この結果、営業利益は",
+    "segment_order": 15,
+    "segment_sales": 1313.0,
+    "segment_profit": 707.0,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "この結果、営業利益は",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "2b677fba1deff4898f9f7e9e",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 5件 (top=4, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B: best_table score=0.90 (売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン6行; 比率中心; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2: ACCEPT valid=6 narr=21",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: band_h=2, raw=['前第３四半期連結累計期間 当第３四半期連結累計期間', '（自 2024年５月１日 （自 2025年５月１日 前年同期比'], reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比'], units=None",
+      "Unit: raw=百万円, mult=1000000, src=page_top",
+      "Phase C: transition B(37rows,3cols)→C(37rows,3cols) header_band=2 new_headers=['前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比']",
+      "Phase C-orient: parent_header_found=no",
+      "Phase B-orient: orientation=row_based/unknown col_as_seg=False seg_cols=[] sales_row=None profit_row=None",
+      "  col_as_seg_trace: col_as_seg: no header row found (max_seg=0)",
+      "Phase C-orient: horizontal_primary status=none (is_col_seg=False) → Phase D",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=1 secondary=1",
+      "Phase D-0: secondary_headers=['（自 2024年５月１日 （自 2025年５月１日 前年同期比']",
+      "Phase D-0: primary_reconstructed=['前第3四半期連結累計期間当第3四半期連結累計期間']",
+      "Phase D-0: primary_split_empty_or_non_metric, discarding primary_reconstructed",
+      "Phase D-0: body_metric_recovery starting",
+      "Phase D-0: body_metric_recovery found: ['売上高合計 5,059 7,346 +45.2％']",
+      "Phase D-0: body_metric_recovery found: ['略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D-0: body_metric_recovery_headers=['売上高合計 5,059 7,346 +45.2％', '略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成']",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=1, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=15, skip行=17, non_reportable=22",
+      "Phase F: レコード組立",
+      "Phase F: 15件のセグメント抽出成功"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 4,
+          "score": 0.9,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.3,
+            "segment_row": 0.36,
+            "exclusion": -0.1,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:売上高; 利益系:営業利益; 数値列3列; 数値行13行(5+); 数値密度13/37; 行数37; セグメント名行5行; 補助語2個; 事業名パターン",
+          "weak_evidence": false,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.77,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.23,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行10行(5+); 行数88; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.52,
+          "categories": {
+            "header": 0.24,
+            "numeric_layout": 0.28,
+            "segment_row": 0.0,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "売上系:収益; 利益系:営業利益; 数値列2列; 数値行6行(5+); 数値密度6/12; 行数12",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 7,
+          "score": 0.32,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.02,
+            "segment_row": 0.3,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列1列(減点); 数値行4行(3+); 行数76; セグメント名行3行; 事業名パターン12行",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 6,
+        "narrative_like": 21,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 0,
+        "total_or_metric_like": 1,
+        "garbage_fragment_like": 6,
+        "pl_account_like": 1,
+        "top_samples": [
+          "前第:garbage_fragment_like",
+          "（自:garbage_fragment_like",
+          "至:garbage_fragment_like",
+          "米国:garbage_fragment_like",
+          "欧州:valid_segment_like"
+        ]
+      },
+      "phase_transition": {
+        "phase_b_rows": 37,
+        "phase_b_num_cols": 3,
+        "phase_b_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "phase_c_rows": 37,
+        "phase_c_num_cols": 3,
+        "phase_c_preview": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比",
+          "至 2025年１月31日） 至 2026年１月31日）"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "前第３四半期連結累計期間 当第３四半期連結累計期間",
+          "（自 2024年５月１日 （自 2025年５月１日 前年同期比"
+        ],
+        "reconstructed_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "column_labels": [
+          [
+            "至 2025年１月31日） 至 2026年１月31日）"
+          ],
+          [
+            "米国 2,301 4,065 +76.7％"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like"
+        ],
+        "best_sales_col": 1,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.36,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.42,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.6,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.21,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "segment_profit_like": 0.21
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.21,
+            "selected": true
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高合計 5,059 7,346 +45.2％",
+            "scores": {
+              "sales": 0.18,
+              "total_sales_like": 0.36
+            },
+            "best_role": "total_sales_like",
+            "best_score": 0.36,
+            "selected": false
+          },
+          {
+            "col": 1,
+            "header": "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新",
+            "scores": {
+              "sales": 0.6
+            },
+            "best_role": "sales",
+            "best_score": 0.6,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "前第3四半期連結累計期間当第3四半期連結累計期間(自2024年5月1日(自2025年5月1日前年同期比"
+        ],
+        "new_headers": [
+          "売上高合計 5,059 7,346 +45.2％",
+          "略が引き続き効果を発揮し、第３四半期も過去最高の売上高を更新しております。貢献利益（※）の黒字と事業成"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 1.0,
+      "table_score": 0.9,
+      "header_confidence": 0.5,
+      "col_confidence": 0.71,
+      "segment_count": 15,
+      "non_reportable_count": 22,
+      "unit_raw": "百万円",
+      "unit_multiplier": 1000000,
+      "sales_col_role": "segment_profit_like",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 10,
+      "parse_quality_partial": 5
+    }
+  }
+]

@@ -1,0 +1,14 @@
+{
+  "filing_id": "ebe32536e3a5cc835112bb77",
+  "ticker": "2999",
+  "disclosure_date": "2026-04-10",
+  "title": "2026年８月期　第２四半期（中間期）決算短信〔日本基準〕（非連結）",
+  "doc_type": "financial_statement",
+  "source_url": "https://www.release.tdnet.info/inbs/140120260410501610.pdf",
+  "xbrl_url": "https://www.release.tdnet.info/inbs/081220260410501610.zip",
+  "listing_source": "tdnet_html",
+  "has_xbrl": false,
+  "xbrl_url_inferred": true,
+  "has_pdf": true,
+  "created_at": "2026-04-10T15:31:24.475211+09:00"
+}

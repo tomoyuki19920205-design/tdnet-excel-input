@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import sqlite3
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -20,10 +21,8 @@ from .common_models import (
     PipelineResult,
 )
 from .common_normalizers import compute_fingerprint, compute_text_hash
-from .common_storage import ensure_events_table, upsert_event, get_unnotified_events, mark_notified, mark_filtered
+from .common_storage import ensure_events_table, upsert_event, get_unnotified_events, mark_notified
 from .common_notify import send_event_discord
-from .notify_rules import filter_and_sort_events, should_notify_event
-from .tdnet_event_store import save_event_to_supabase
 
 # classifiers
 from .buyback_classifier import classify_buyback
@@ -174,19 +173,55 @@ def _buyback_to_event_record(
 # ============================================================
 # forecast_revision → EventRecord 変換
 # ============================================================
+def _has_forecast_change(forecast_event) -> bool:
+    """抽出データに実際の変化があるか判定（ゆるい検知）。
+
+    prev と rev が両方あって異なる、または片方だけある場合は変化とみなす。
+    """
+    has_change = False
+    for prev_attr, rev_attr in [
+        ("previous_net_income", "revised_net_income"),
+        ("previous_op", "revised_op"),
+        ("previous_ordinary", "revised_ordinary"),
+        ("previous_sales", "revised_sales"),
+        ("previous_eps", "revised_eps"),
+    ]:
+        prev = getattr(forecast_event, prev_attr, None)
+        rev = getattr(forecast_event, rev_attr, None)
+        # 両方あって異なる → 変化
+        if prev is not None and rev is not None:
+            if prev != rev:
+                has_change = True
+        # 片方だけある → 変化（OCRで片側だけ取れたケースを救う）
+        elif prev is not None or rev is not None:
+            has_change = True
+
+    logger.info(
+        f"[forecast] has_change={has_change} "
+        f"ni=({getattr(forecast_event, 'previous_net_income', None)},{getattr(forecast_event, 'revised_net_income', None)}) "
+        f"eps=({forecast_event.previous_eps},{forecast_event.revised_eps}) "
+        f"subtype={forecast_event.subtype}"
+    )
+    return has_change
+
+
 def _forecast_to_event_record(
     doc: DocumentMeta,
     forecast_event,
 ) -> EventRecord:
     payload = forecast_event.to_dict()
 
+    def _fp_val(v) -> str:
+        return str(v) if v is not None else ""
+
     fp_parts = [
         "forecast_revision",
         doc.ticker,
         forecast_event.period_label,
-        str(forecast_event.revised_sales or ""),
-        str(forecast_event.revised_op or ""),
-        str(forecast_event.revised_net_income or ""),
+        _fp_val(forecast_event.revised_sales),
+        _fp_val(forecast_event.revised_op),
+        _fp_val(forecast_event.revised_net_income),
+        _fp_val(forecast_event.revised_eps),
         forecast_event.subtype,
     ]
     fingerprint = compute_fingerprint(*fp_parts)
@@ -313,10 +348,6 @@ def _process_single_document(
                         "event_type": EventType.BUYBACK, "subtype": subtype,
                         "action": action, "event_id": eid,
                     })
-                    # Supabase保存 (best-effort, Viewer用に全イベント保存)
-                    if action == "inserted":
-                        sb_result = save_event_to_supabase(record, dry_run=dry_run)
-                        results[-1]["supabase"] = sb_result.get("action", "error")
         except Exception as e:
             logger.warning(f"[EVENT] buyback failed doc_id={doc.doc_id[:16]} ticker={doc.ticker}: {e}")
             results.append({"event_type": EventType.BUYBACK, "action": "error", "error": str(e)})
@@ -327,24 +358,34 @@ def _process_single_document(
             cls_result = classify_forecast(title, text[:2000])
             if cls_result.is_target:
                 is_diff = cls_result.subtype_hint == "difference"
-                forecast_ev = extract_forecast_revision(text, title, is_difference=is_diff)
-                record = _forecast_to_event_record(doc, forecast_ev)
-                if dry_run:
+                forecast_ev = extract_forecast_revision(
+                    text, title, is_difference=is_diff,
+                    pdf_path=doc.pdf_path, doc_url=doc.doc_url, doc_id=doc.doc_id,
+                )
+                # 変化判定: 実際の数値変化がなければスキップ
+                if not _has_forecast_change(forecast_ev):
+                    logger.info(
+                        f"[EVENT] forecast skipped (no_change_detected) "
+                        f"ticker={doc.ticker} subtype={forecast_ev.subtype}"
+                    )
                     results.append({
                         "event_type": EventType.FORECAST_REVISION, "subtype": forecast_ev.subtype,
-                        "action": "dry_run", "event_id": record.event_id,
-                        "summary": record.summary_text,
+                        "action": "no_change_detected", "event_id": "",
                     })
                 else:
-                    action, eid = upsert_event(conn, record)
-                    results.append({
-                        "event_type": EventType.FORECAST_REVISION, "subtype": forecast_ev.subtype,
-                        "action": action, "event_id": eid,
-                    })
-                    # Supabase保存 (best-effort)
-                    if action == "inserted":
-                        sb_result = save_event_to_supabase(record, dry_run=dry_run)
-                        results[-1]["supabase"] = sb_result.get("action", "error")
+                    record = _forecast_to_event_record(doc, forecast_ev)
+                    if dry_run:
+                        results.append({
+                            "event_type": EventType.FORECAST_REVISION, "subtype": forecast_ev.subtype,
+                            "action": "dry_run", "event_id": record.event_id,
+                            "summary": record.summary_text,
+                        })
+                    else:
+                        action, eid = upsert_event(conn, record)
+                        results.append({
+                            "event_type": EventType.FORECAST_REVISION, "subtype": forecast_ev.subtype,
+                            "action": action, "event_id": eid,
+                        })
         except Exception as e:
             logger.warning(f"[EVENT] forecast failed doc_id={doc.doc_id[:16]} ticker={doc.ticker}: {e}")
             results.append({"event_type": EventType.FORECAST_REVISION, "action": "error", "error": str(e)})
@@ -368,10 +409,6 @@ def _process_single_document(
                         "event_type": EventType.DIVIDEND_REVISION, "subtype": dividend_ev.subtype,
                         "action": action, "event_id": eid,
                     })
-                    # Supabase保存 (best-effort)
-                    if action == "inserted":
-                        sb_result = save_event_to_supabase(record, dry_run=dry_run)
-                        results[-1]["supabase"] = sb_result.get("action", "error")
         except Exception as e:
             logger.warning(f"[EVENT] dividend failed doc_id={doc.doc_id[:16]} ticker={doc.ticker}: {e}")
             results.append({"event_type": EventType.DIVIDEND_REVISION, "action": "error", "error": str(e)})
@@ -428,18 +465,13 @@ def process_documents(
                     elif dr.get("action") == "inserted":
                         result.detected += 1
                         result.saved += 1
+                    elif dr.get("action") == "updated":
+                        result.detected += 1
+                        result.saved += 1
                     elif dr.get("action") == "dry_run":
                         result.detected += 1
-                    elif dr.get("action") == "no_change":
+                    elif dr.get("action") in ("no_change", "no_change_detected"):
                         result.skipped += 1
-                    # Supabase カウンタ集計
-                    sb_action = dr.get("supabase", "")
-                    if sb_action == "inserted":
-                        result.supabase_saved += 1
-                    elif sb_action == "dedup_skipped":
-                        result.supabase_dedup_skipped += 1
-                    elif sb_action == "error":
-                        result.supabase_errors += 1
                     result.details.append(dr)
             except Exception as e:
                 result.errors += 1
@@ -448,29 +480,22 @@ def process_documents(
                     "doc_id": doc.doc_id, "ticker": doc.ticker, "action": "error", "error": str(e),
                 })
 
-        # 通知: フィルタ + ソート適用
+        # 通知: new のみ
         if webhook_url and not dry_run and conn:
             try:
                 unnotified = get_unnotified_events(conn)
-                notifiable, filtered_events = filter_and_sort_events(unnotified)
-                # 非通知対象を filtered ステータスに更新
-                for ev in filtered_events:
-                    mark_filtered(conn, ev.event_id)
-                    result.filtered += 1
-                # 通知対象をソート順で送信
-                for ev in notifiable:
+                for ev in unnotified:
+                    logger.info(f"notify_start_at: {datetime.now(timezone(timedelta(hours=9))).isoformat()}")
                     if send_event_discord(webhook_url, ev, dry_run=False):
                         mark_notified(conn, ev.event_id)
                         result.notified += 1
             except Exception as e:
                 logger.error(f"[EVENT] notification failed: {e}")
         elif dry_run and conn:
-            # dry-run: フィルタ + ソートを適用してプレビュー
+            # dry-run: 検知されたイベントをログ出力
             try:
                 unnotified = get_unnotified_events(conn)
-                notifiable, filtered_events = filter_and_sort_events(unnotified)
-                result.filtered = len(filtered_events)
-                for ev in notifiable:
+                for ev in unnotified:
                     send_event_discord("", ev, dry_run=True)
                     result.notified += 1
             except Exception as e:
@@ -483,10 +508,6 @@ def process_documents(
     logger.info(
         f"[EVENT] pipeline done: "
         f"processed={result.processed} detected={result.detected} "
-        f"saved={result.saved} filtered={result.filtered} "
-        f"notified={result.notified} errors={result.errors} "
-        f"supabase_saved={result.supabase_saved} "
-        f"supabase_dedup={result.supabase_dedup_skipped} "
-        f"supabase_errors={result.supabase_errors}"
+        f"saved={result.saved} notified={result.notified} errors={result.errors}"
     )
     return result

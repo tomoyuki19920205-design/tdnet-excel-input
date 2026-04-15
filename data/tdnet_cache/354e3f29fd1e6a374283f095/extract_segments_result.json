@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "8260",
+    "period": "R8/2",
+    "quarter": "FY",
+    "segment_name": "Department Store",
+    "segment_order": 1,
+    "segment_sales": 21247,
+    "segment_profit": 666,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Department Store",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "354e3f29fd1e6a374283f095",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "8260",
+    "period": "R8/2",
+    "quarter": "FY",
+    "segment_name": "Tomonokai",
+    "segment_order": 2,
+    "segment_sales": 35,
+    "segment_profit": 58,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Tomonokai",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "354e3f29fd1e6a374283f095",
+    "row_type": "segment"
+  }
+]

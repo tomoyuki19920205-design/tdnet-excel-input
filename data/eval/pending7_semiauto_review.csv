@@ -1,0 +1,8 @@
+﻿pdf,business_label_count,metric_only_header_flag,repeated_row_structure_flag,segment_header_flag,pl_summary_flag,auto_decision,decision_reason,recommended_manual_check
+140120260313581329.pdf,3,True,False,True,True,segment_yes,セグメント見出し12件 + 事業名ラベル3件,抽出されたセグメント名と一致するか目視確認
+140120260225568450.pdf,0,True,False,True,True,keep_no,全社PLサマリのみ（事業ラベル=0件、PLヘッダー行=2件）,事業別リストが存在しないことを確認
+140120260312580582.pdf,0,True,False,True,True,keep_no,全社PLサマリのみ（事業ラベル=0件、PLヘッダー行=3件）,事業別リストが存在しないことを確認
+140120260312581037.pdf,0,True,False,True,True,keep_no,全社PLサマリのみ（事業ラベル=0件、PLヘッダー行=3件）,事業別リストが存在しないことを確認
+140120260313581385.pdf,0,True,False,True,True,keep_no,全社PLサマリのみ（事業ラベル=0件、PLヘッダー行=4件）,事業別リストが存在しないことを確認
+140120260304576030.pdf,0,True,False,True,True,keep_no,全社PLサマリのみ（事業ラベル=0件、PLヘッダー行=3件）,事業別リストが存在しないことを確認
+140120260306577666.pdf,0,True,False,True,True,keep_no,全社PLサマリのみ（事業ラベル=0件、PLヘッダー行=3件）,事業別リストが存在しないことを確認

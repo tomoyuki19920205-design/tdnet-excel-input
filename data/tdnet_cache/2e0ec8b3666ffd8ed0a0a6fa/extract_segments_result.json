@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "2997",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Trunk Room Management",
+    "segment_order": 1,
+    "segment_sales": 1096,
+    "segment_profit": 19,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Trunk Room Management",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-16",
+    "tdnet_doc_id": "2e0ec8b3666ffd8ed0a0a6fa",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "2997",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Trunk Room Development Subdivision",
+    "segment_order": 2,
+    "segment_sales": 2531,
+    "segment_profit": 437,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Trunk Room Development Subdivision",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-16",
+    "tdnet_doc_id": "2e0ec8b3666ffd8ed0a0a6fa",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "2997",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Others",
+    "segment_order": 3,
+    "segment_sales": 371,
+    "segment_profit": 24,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Others",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-16",
+    "tdnet_doc_id": "2e0ec8b3666ffd8ed0a0a6fa",
+    "row_type": "segment"
+  }
+]

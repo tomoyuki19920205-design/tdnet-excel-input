@@ -96,6 +96,13 @@ def retry_with_backoff(
                 f"[retry] {stage} attempt {attempt}/{max_attempts} "
                 f"failed: {last_error[:100]}"
             )
+            # HTTP 404 は確定失敗 — リトライしない
+            if "xbrl_download_not_found" in last_error:
+                logger.info(f"[retry] {stage} 404 not_found — skip retry")
+                return RetryResult(
+                    success=False, attempts=attempt,
+                    last_error=last_error, timed_out=False,
+                )
             if attempt < max_attempts:
                 delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
                 sleep_fn(delay)

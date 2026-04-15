@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "6183",
+    "period": "R8/2",
+    "quarter": "FY",
+    "segment_name": "CRM Business",
+    "segment_order": 1,
+    "segment_sales": 145556,
+    "segment_profit": 11687,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "CRM Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-08",
+    "tdnet_doc_id": "7c0c46f6cbd2a2499817045e",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "6183",
+    "period": "R8/2",
+    "quarter": "FY",
+    "segment_name": "Other",
+    "segment_order": 2,
+    "segment_sales": 270,
+    "segment_profit": 603,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Other",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-08",
+    "tdnet_doc_id": "7c0c46f6cbd2a2499817045e",
+    "row_type": "segment"
+  }
+]

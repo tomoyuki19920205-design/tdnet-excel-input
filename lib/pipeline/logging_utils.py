@@ -169,3 +169,86 @@ def check_concurrent_run(
         )
         return True
     return False
+
+
+def cleanup_stale_runs(
+    job_type: str | None = None,
+    *,
+    max_age_hours: int = 2,
+    config: dict | None = None,
+) -> int:
+    """stale running 行を failed に落とす。起動時の衛生管理。
+
+    Returns:
+        クリーンアップした行数。
+    """
+    cfg = config or get_supabase_write_config()
+    if not cfg:
+        return 0
+    cutoff = datetime.now(JST) - timedelta(hours=max_age_hours)
+    params: dict[str, str] = {
+        "status": "eq.running",
+        "started_at": f"lt.{cutoff.isoformat()}",
+        "select": "id,job_type,started_at",
+    }
+    if job_type:
+        params["job_type"] = f"eq.{job_type}"
+
+    read_cfg = config or get_supabase_read_config()
+    rows = supabase_select("pipeline_runs", params=params, config=read_cfg)
+    if not rows:
+        return 0
+
+    cleaned = 0
+    for row in rows:
+        ok = supabase_update(
+            "pipeline_runs",
+            {
+                "status": "failed",
+                "finished_at": datetime.now(JST).isoformat(),
+                "message": f"auto-cleanup: stale>{max_age_hours}h",
+            },
+            params={"id": f"eq.{row['id']}"},
+            config=cfg,
+        )
+        if ok:
+            cleaned += 1
+
+    logger.info(
+        f"[pipeline_run] cleanup_stale_runs: {cleaned}/{len(rows)} rows cleaned "
+        f"({job_type or 'all'})"
+    )
+    return cleaned
+
+
+def check_ingest_running(
+    *,
+    max_age_minutes: int = 10,
+    config: dict | None = None,
+) -> int | None:
+    """ingest が現在 running かどうかを確認する。
+
+    Returns:
+        running 中の ingest の run_id (int)。なければ None。
+    """
+    cfg = config or get_supabase_read_config()
+    cutoff = datetime.now(JST) - timedelta(minutes=max_age_minutes)
+    rows = supabase_select(
+        "pipeline_runs",
+        params={
+            "job_type": "eq.ingest",
+            "status": "eq.running",
+            "started_at": f"gt.{cutoff.isoformat()}",
+            "select": "id,started_at",
+            "limit": "1",
+        },
+        config=cfg,
+    )
+    if rows:
+        run_id = rows[0].get("id")
+        logger.info(
+            f"[pipeline_run] ingest running detected: id={run_id} "
+            f"started={rows[0].get('started_at')}"
+        )
+        return run_id
+    return None

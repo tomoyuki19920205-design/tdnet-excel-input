@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "6668",
+    "period": "R8/8",
+    "quarter": "2Q",
+    "segment_name": "Related Business Of Semiconductor And LCD",
+    "segment_order": 1,
+    "segment_sales": 5016,
+    "segment_profit": 559,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Related Business Of Semiconductor And LCD",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "e28909d09ec186e58e255c6c",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "6668",
+    "period": "R8/8",
+    "quarter": "2Q",
+    "segment_name": "Related Business Of Research Institutes And Universities",
+    "segment_order": 2,
+    "segment_sales": 443,
+    "segment_profit": 41,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Related Business Of Research Institutes And Universities",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "e28909d09ec186e58e255c6c",
+    "row_type": "segment"
+  }
+]

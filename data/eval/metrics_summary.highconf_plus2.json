@@ -1,0 +1,29 @@
+﻿{
+  "generated_at": "2026-04-05T13:28:52.032276+09:00",
+  "base_gt": "C:\\Users\\takuy\\OneDrive\\tdnet-excel-input\\data\\eval\\screening_sheet.highconf_plus1.csv",
+  "applied_fixes": [
+    "140120260312580991.pdf"
+  ],
+  "before": {
+    "true_positive_count": 42,
+    "false_positive_count": 19,
+    "false_negative_count": 9,
+    "true_negative_count": 19,
+    "total_count": 89,
+    "detection_recall": 0.8235,
+    "detection_precision": 0.6885,
+    "f1_score": 0.75,
+    "quarantine_count": 24
+  },
+  "after": {
+    "true_positive_count": 43,
+    "false_positive_count": 18,
+    "false_negative_count": 9,
+    "true_negative_count": 19,
+    "total_count": 89,
+    "detection_recall": 0.8269,
+    "detection_precision": 0.7049,
+    "f1_score": 0.7611,
+    "quarantine_count": 24
+  }
+}

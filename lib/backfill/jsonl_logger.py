@@ -130,54 +130,79 @@ class RunLogger:
 
     def log_filing_result_v2(self, result, filing=None) -> None:
         """V2 worker (FilingResultV2) の結果をログ。"""
+        segment_records = getattr(result, "segment_records", None)
+        segment_record_count = len(segment_records) if segment_records is not None else 0
+        metrics = getattr(result, "metrics", None)
+        duration_ms = metrics.get("total_ms", 0) if metrics is not None else 0
+        account_like_ratio = getattr(result, "account_like_ratio", None)
+        account_like_ratio_rounded = round(account_like_ratio, 3) if account_like_ratio is not None else 0.0
+
         event = {
             "event": "filing_result",
             "worker_version": "v2",
-            "filing_id": result.filing_id,
+            "filing_id": getattr(result, "filing_id", None),
             "ticker": filing.ticker if filing else "",
-            "status": result.status,
-            "source": result.source,
-            "selected_path": result.selected_path,
-            "selected_source": result.source,
-            "selected_status": result.status,
-            "selected_confidence": result.confidence,
-            "confidence": result.confidence,
-            "via": result.via,
-            "fallback_used": result.fallback_used,
-            "fallback_reason": result.fallback_reason,
-            "hard_fail_reason": result.hard_fail_reason,
-            "quarantine_reason": result.quarantine_reason,
-            "raw_segment_count": result.raw_segment_count,
-            "valid_segment_count": result.valid_segment_count,
-            "invalid_segment_count": result.invalid_segment_count,
-            "sales_non_null_count": result.sales_non_null_count,
-            "profit_non_null_count": result.profit_non_null_count,
-            "account_like_ratio": round(result.account_like_ratio, 3),
-            "narrative_contamination": result.narrative_contamination,
-            "rows": len(result.segment_records),
-            "segment_count": len(result.segment_records),
-            "duration_ms": result.metrics.get("total_ms", 0),
-            "candidate_summary": result.candidate_summary,
+            "status": getattr(result, "status", None),
+            "worker_status": getattr(result, "status", None),
+            "source": getattr(result, "source", None),
+            "selected_path": getattr(result, "selected_path", None),
+            "selected_source": getattr(result, "source", None),
+            "selected_status": getattr(result, "status", None),
+            "selected_confidence": getattr(result, "confidence", None),
+            "confidence": getattr(result, "confidence", None),
+            "via": getattr(result, "via", None),
+            "fallback_used": getattr(result, "fallback_used", None),
+            "fallback_reason": getattr(result, "fallback_reason", None),
+            "hard_fail_reason": getattr(result, "hard_fail_reason", None),
+            "quarantine_reason": getattr(result, "quarantine_reason", None),
+            "raw_segment_count": getattr(result, "raw_segment_count", None),
+            "valid_segment_count": getattr(result, "valid_segment_count", None),
+            "invalid_segment_count": getattr(result, "invalid_segment_count", None),
+            "sales_non_null_count": getattr(result, "sales_non_null_count", None),
+            "profit_non_null_count": getattr(result, "profit_non_null_count", None),
+            "account_like_ratio": account_like_ratio_rounded,
+            "narrative_contamination": getattr(result, "narrative_contamination", None),
+            "rows": segment_record_count,
+            "segment_count": segment_record_count,
+            "duration_ms": duration_ms,
+            "candidate_summary": getattr(result, "candidate_summary", None),
             "listing_source": filing.listing_source if filing else "",
         }
         # candidate-level detail
         for c in getattr(result, "candidates", []):
-            prefix = c.source
-            event[f"{prefix}_attempted"] = c.attempted
-            event[f"{prefix}_available"] = c.available
-            event[f"{prefix}_skip_reason"] = c.skip_reason
-            if c.validation:
-                event[f"{prefix}_validator_status"] = c.validation.status.value
-                event[f"{prefix}_validator_reason"] = c.validation.hard_fail_reason.value
-            elif c.error:
+            prefix = getattr(c, "source", "unknown")
+            event[f"{prefix}_attempted"] = getattr(c, "attempted", None)
+            event[f"{prefix}_available"] = getattr(c, "available", None)
+            event[f"{prefix}_skip_reason"] = getattr(c, "skip_reason", None)
+            validation = getattr(c, "validation", None)
+            c_error = getattr(c, "error", None)
+            if validation:
+                event[f"{prefix}_validator_status"] = getattr(getattr(validation, "status", None), "value", None)
+                event[f"{prefix}_validator_reason"] = getattr(getattr(validation, "hard_fail_reason", None), "value", None)
+            elif c_error:
                 event[f"{prefix}_validator_status"] = "error"
-                event[f"{prefix}_validator_reason"] = c.error[:100]
+                event[f"{prefix}_validator_reason"] = c_error[:100]
             else:
                 event[f"{prefix}_validator_status"] = "not_attempted"
-                event[f"{prefix}_validator_reason"] = c.skip_reason
+                event[f"{prefix}_validator_reason"] = getattr(c, "skip_reason", None)
 
-        if result.result_fingerprint:
-            event["fingerprint"] = result.result_fingerprint
+        result_fingerprint = getattr(result, "result_fingerprint", None)
+        if result_fingerprint:
+            event["fingerprint"] = result_fingerprint
+
+        # Phase B-boost trace & scores
+        if isinstance(result, dict):
+            rule_trace = result.get("rule_trace")
+            score_summary = result.get("score_summary")
+        else:
+            rule_trace = getattr(result, "rule_trace", None)
+            score_summary = getattr(result, "score_summary", None)
+
+        if rule_trace:
+            event["rule_trace"] = rule_trace
+        if score_summary:
+            event["score_summary"] = score_summary
+
         self._write(event)
 
     def log_upsert(self, filing_id: str, batch_stats: dict) -> None:

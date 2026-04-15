@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "2669",
+    "period": "R8/2",
+    "quarter": "FY",
+    "segment_name": "Tenant Business",
+    "segment_order": 1,
+    "segment_sales": 47420,
+    "segment_profit": 2871,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Tenant Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-09",
+    "tdnet_doc_id": "765b62bdadabc231799a9c3c",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "2669",
+    "period": "R8/2",
+    "quarter": "FY",
+    "segment_name": "Outside Sale Business",
+    "segment_order": 2,
+    "segment_sales": 39233,
+    "segment_profit": -114,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Outside Sale Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-09",
+    "tdnet_doc_id": "765b62bdadabc231799a9c3c",
+    "row_type": "segment"
+  }
+]

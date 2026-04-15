@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "6083",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "Confirmation And Inspection",
+    "segment_order": 1,
+    "segment_sales": 13885,
+    "segment_profit": 3214,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Confirmation And Inspection",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-30",
+    "tdnet_doc_id": "9b07aa4ecd507ccd911a5593",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "6083",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "Infrastock And Environmental Related",
+    "segment_order": 2,
+    "segment_sales": 3486,
+    "segment_profit": 177,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Infrastock And Environmental Related",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-30",
+    "tdnet_doc_id": "9b07aa4ecd507ccd911a5593",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "6083",
+    "period": "R8/5",
+    "quarter": "3Q",
+    "segment_name": "Other",
+    "segment_order": 3,
+    "segment_sales": 242,
+    "segment_profit": 45,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Other",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-30",
+    "tdnet_doc_id": "9b07aa4ecd507ccd911a5593",
+    "row_type": "segment"
+  }
+]

@@ -1,0 +1,9 @@
+{
+  "filing_id": "211b0608b30efc9079801d92",
+  "ticker": "9976",
+  "stage": "segment_extraction_v2",
+  "review_hint": "too_few_sales",
+  "hard_fail_reason": "too_few_sales",
+  "selected_source": "xbrl",
+  "candidate_summary": "xbrl:quarantine(too_few_sales) → html:skip(not_implemented) → pdf:not_attempted"
+}

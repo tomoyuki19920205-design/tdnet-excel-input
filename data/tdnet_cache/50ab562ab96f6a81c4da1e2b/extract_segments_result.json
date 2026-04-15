@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "6546",
+    "period": "R7/12",
+    "quarter": "FY",
+    "segment_name": "Automatic Door Related",
+    "segment_order": 1,
+    "segment_sales": 8671125,
+    "segment_profit": 2039382,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Automatic Door Related",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-19",
+    "tdnet_doc_id": "50ab562ab96f6a81c4da1e2b",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "6546",
+    "period": "R7/12",
+    "quarter": "FY",
+    "segment_name": "Fixture Related",
+    "segment_order": 2,
+    "segment_sales": 4038662,
+    "segment_profit": 462367,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Fixture Related",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-19",
+    "tdnet_doc_id": "50ab562ab96f6a81c4da1e2b",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "6546",
+    "period": "R7/12",
+    "quarter": "FY",
+    "segment_name": "Other",
+    "segment_order": 3,
+    "segment_sales": 856941,
+    "segment_profit": -15322,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Other",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-19",
+    "tdnet_doc_id": "50ab562ab96f6a81c4da1e2b",
+    "row_type": "segment"
+  }
+]

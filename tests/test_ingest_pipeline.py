@@ -559,3 +559,138 @@ class TestIxbrlNonFractionParse:
         finally:
             os.unlink(path)
 
+
+# ============================================================
+# T12: _process_single() の返り値に disclosure_id が含まれる
+# ============================================================
+
+class TestProcessSingleReturnsDisclosureId:
+    """_process_single() の成功返り値に disclosure_id が含まれる"""
+
+    def test_success_result_contains_disclosure_id(self):
+        """inserted/updated 時の返り値に disclosure_id キーが存在する"""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            config = _make_config(tmpdir)
+            state_db = StateDB(config.state_db_path)
+            decision_db = MigrationDB(config.decision_db_path)
+
+            # テスト用XBRL ZIPを作成
+            zip_bytes = _make_xbrl_zip(
+                xbrl_content=_SAMPLE_XBRL,
+                entry_name="XBRLData/Summary/test-ixbrl.htm",
+            )
+            zip_path = os.path.join(tmpdir, "test.zip")
+            with open(zip_path, "wb") as f:
+                f.write(zip_bytes)
+
+            item = _make_disclosure(
+                code="0812",
+                title="2025年12月期 第3四半期決算短信〔日本基準〕(連結)",
+                disclosure_id="test-disclosure-abc123",
+            )
+
+            # download_document をモックして、ローカルのZIPを返す
+            with patch("tools.tdnet_ingest.download_document", return_value=zip_path):
+                from tools.tdnet_ingest import _process_single
+                result = _process_single(
+                    item, config, state_db, decision_db,
+                    run_id="test-run-1", dry_run=False,
+                )
+
+            assert result["status"] in ("inserted", "updated", "no_change")
+            assert "disclosure_id" in result
+            assert result["disclosure_id"] == "test-disclosure-abc123"
+
+            decision_db.close()
+            state_db.close()
+
+
+# ============================================================
+# T13: _enqueue_disclosure_ids() の動作テスト
+# ============================================================
+
+class TestEnqueueDisclosureIds:
+    """filings_ingest._enqueue_disclosure_ids() の動作確認"""
+
+    def test_inserted_and_updated_are_enqueued(self):
+        """inserted/updated の disclosure_id が enqueue される"""
+        from tools.filings_ingest import _enqueue_disclosure_ids
+
+        ingest_result = {
+            "results": [
+                {"status": "inserted", "disclosure_id": "doc-001", "code": "0812"},
+                {"status": "updated", "disclosure_id": "doc-002", "code": "7921"},
+                {"status": "skipped", "disclosure_id": "doc-003", "code": "1234"},
+                {"status": "error", "disclosure_id": "doc-004", "code": "5678"},
+                {"status": "no_change", "disclosure_id": "doc-005", "code": "9999"},
+            ],
+        }
+
+        enqueued_ids = []
+
+        def mock_enqueue_job(*, job_type, target_type, target_id, priority):
+            enqueued_ids.append(target_id)
+            return {"ok": True}
+
+        with patch("lib.pipeline.queue.enqueue_job", side_effect=mock_enqueue_job):
+            with patch("lib.pipeline.db.load_env"):
+                _enqueue_disclosure_ids(ingest_result)
+
+        # inserted + updated のみ（skipped, error, no_change は除外）
+        assert enqueued_ids == ["doc-001", "doc-002"]
+
+    def test_duplicate_disclosure_ids_are_deduped(self):
+        """同一 disclosure_id は dedupe される"""
+        from tools.filings_ingest import _enqueue_disclosure_ids
+
+        ingest_result = {
+            "results": [
+                {"status": "inserted", "disclosure_id": "doc-dup", "code": "0812"},
+                {"status": "updated", "disclosure_id": "doc-dup", "code": "0812"},
+                {"status": "inserted", "disclosure_id": "doc-unique", "code": "7921"},
+            ],
+        }
+
+        enqueued_ids = []
+
+        def mock_enqueue_job(*, job_type, target_type, target_id, priority):
+            enqueued_ids.append(target_id)
+            return {"ok": True}
+
+        with patch("lib.pipeline.queue.enqueue_job", side_effect=mock_enqueue_job):
+            with patch("lib.pipeline.db.load_env"):
+                _enqueue_disclosure_ids(ingest_result)
+
+        assert enqueued_ids == ["doc-dup", "doc-unique"]
+
+    def test_missing_disclosure_id_is_skipped(self):
+        """disclosure_id キーがない結果は安全にスキップ"""
+        from tools.filings_ingest import _enqueue_disclosure_ids
+
+        ingest_result = {
+            "results": [
+                {"status": "inserted", "code": "0812"},  # disclosure_id なし
+                {"status": "inserted", "disclosure_id": "", "code": "7921"},  # 空文字
+                {"status": "inserted", "disclosure_id": "doc-valid", "code": "1234"},
+            ],
+        }
+
+        enqueued_ids = []
+
+        def mock_enqueue_job(*, job_type, target_type, target_id, priority):
+            enqueued_ids.append(target_id)
+            return {"ok": True}
+
+        with patch("lib.pipeline.queue.enqueue_job", side_effect=mock_enqueue_job):
+            with patch("lib.pipeline.db.load_env"):
+                _enqueue_disclosure_ids(ingest_result)
+
+        assert enqueued_ids == ["doc-valid"]
+
+    def test_empty_results_no_enqueue(self):
+        """結果が空なら何もしない"""
+        from tools.filings_ingest import _enqueue_disclosure_ids
+
+        # enqueue_job がインポートされないことを確認（内部で呼ばれない）
+        _enqueue_disclosure_ids({"results": []})
+        _enqueue_disclosure_ids({})

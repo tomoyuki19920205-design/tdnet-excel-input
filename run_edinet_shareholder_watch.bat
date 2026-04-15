@@ -1,21 +1,36 @@
 @echo off
+setlocal enabledelayedexpansion
 chcp 65001 >nul 2>&1
 REM ============================================================
-REM EDINET shareholder watch (yuho/hanki major shareholders) - Task Scheduler
+REM EDINET shareholder watch (Task Scheduler)
+REM   - mkdir lockdir for exclusive execution
+REM   - daily log with START / END / exit_code
 REM ============================================================
 cd /d "C:\Users\takuy\OneDrive\tdnet-excel-input"
 
-REM Create logs directory
+REM --- Ensure directories ---
 if not exist "logs" mkdir "logs"
+if not exist "tmp" mkdir "tmp"
 
-REM Get date string via PowerShell for reliable YYYYMMDD
-for /f %%d in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd"') do set YYYYMMDD=%%d
+REM --- Date stamp ---
+for /f %%d in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd"') do set "YYYYMMDD=%%d"
+set "LOGFILE=logs\edinet_shareholder_watch_!YYYYMMDD!.log"
 
-set LOGFILE=logs\edinet_shareholder_watch_%YYYYMMDD%.log
+REM --- Lock (mkdir is atomic on Windows) ---
+set "LOCKDIR=tmp\edinet_shareholder_watch.lockdir"
+mkdir "!LOCKDIR!" 2>nul
+if errorlevel 1 (
+    echo [%DATE% %TIME%] LOCK_SKIP: another instance is running >> "!LOGFILE!"
+    exit /b 0
+)
 
-echo [%DATE% %TIME%] ==== START edinet_shareholder_watch ==== >> "%LOGFILE%" 2>&1
-.venv\Scripts\python.exe scripts\edinet_shareholder_watch.py --once >> "%LOGFILE%" 2>&1
-set EXIT_CODE=%ERRORLEVEL%
-echo [%DATE% %TIME%] ==== END exit_code=%EXIT_CODE% ==== >> "%LOGFILE%" 2>&1
+REM --- Execute ---
+echo [%DATE% %TIME%] ==== START edinet_shareholder_watch ==== >> "!LOGFILE!" 2>&1
+.venv\Scripts\python.exe scripts\edinet_shareholder_watch.py --once >> "!LOGFILE!" 2>&1
+set "EXIT_CODE=!ERRORLEVEL!"
+echo [%DATE% %TIME%] ==== END exit_code=!EXIT_CODE! ==== >> "!LOGFILE!" 2>&1
 
-exit /b %EXIT_CODE%
+REM --- Release lock ---
+rmdir "!LOCKDIR!" 2>nul
+
+exit /b !EXIT_CODE!

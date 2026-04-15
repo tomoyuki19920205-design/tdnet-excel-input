@@ -1,0 +1,602 @@
+[
+  {
+    "ticker": "5079",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "外部顧客への売上高",
+    "segment_order": 1,
+    "segment_sales": 7846.169,
+    "segment_profit": 18002.669,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "外部顧客への売上高",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-13",
+    "tdnet_doc_id": "0e3a0b8a560b2deace1b1c17",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 8件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B-orient: page=9 orientation=column_based row_seg=1 row_mhdr=1 col_seg=4 col_metric=2 num_cross=5 period=0 bscf=0",
+      "Phase B-orient-decision: page=9 orientation=column_based density_rescue=yes header_suppressed=no",
+      "Phase B-boost: page=9 seg_kw_bonus=+0.06",
+      "Phase B-boost: page=9 column_based_bonus=+0.08 col_seg=4 col_metric=2 num_cross=5 rescued_by=column_based_signal",
+      "Phase B-boost: page=9 header_label_boost=+0.04 non_num=2/2",
+      "Phase B-orient-decision: page=9 orientation=column_based density_rescue=yes header_suppressed=no",
+      "Phase B-orient: page=8 orientation=unknown row_seg=4 row_mhdr=0 col_seg=0 col_metric=1 num_cross=1 period=0 bscf=0",
+      "Phase B-boost: page=8 header_label_boost=+0.04 non_num=2/3",
+      "Phase B-orient-decision: page=8 orientation=unknown density_rescue=no header_suppressed=no",
+      "Phase B-orient: page=6 orientation=unknown row_seg=0 row_mhdr=0 col_seg=1 col_metric=0 num_cross=0 period=2 bscf=3",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=6 bscf=3",
+      "Phase B-orient-decision: page=6 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=5 orientation=unknown row_seg=0 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=0 bscf=9",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=5 bscf=9",
+      "Phase B-orient-decision: page=5 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=0 orientation=unknown row_seg=0 row_mhdr=1 col_seg=2 col_metric=0 num_cross=0 period=5 bscf=0",
+      "Phase B-boost: skip page=0 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=0 orientation=unknown row_seg=0 row_mhdr=1 col_seg=2 col_metric=0 num_cross=0 period=5 bscf=0",
+      "Phase B-boost: skip page=0 num_density=0.00 (<0.3)",
+      "Phase B: best_table score=1.00 (報告セグメント; セグメント情報; 事業セグメント; 売上系:売上高; 利益系:セグメント利益; 数値列5列; 数値行4行(3+); 行数17; セグメント名行2行; 補助語2個; セグメント情報見出し(加点); 事業名パターン3行; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2-pre: column_first status=none segment_count=0 numeric_col_count=0 tokens=[]",
+      "Phase B-2: ACCEPT valid=2 narr=2 numdens=0.5476 repnum=4 cand_score=20.0 rescued_by=detail_breakdown_strong_rescue",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: preamble_trim skipped=2 stop_reason=table_header_term first=['（セグメント情報等の注記）', '当第３四半期連結累計期間(自 2025年５月１日 至 2026年１月31日)']",
+      "Phase C: band_h=2, raw=['１ 報告セグメントごとの売上高及び利益又は損失の金額に関する情報', '(単位：千円)'], reconstructed=['1報告セグメントごとの売上高及び利益又は損失の金額に関する情報'], units=千円",
+      "Unit: raw=千円, mult=1000, src=header",
+      "Phase C: transition B(17rows,5cols)→C(15rows,5cols) header_band=2 new_headers=['1報告セグメントごとの売上高及び利益又は損失の金額に関する情報']",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: dual_metric_split: ['1報告セグメントごとの売上高及び利益又は損失の金額に関する情報'] → ['売上高', '利益又は損失']",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=0, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=3, skip行=7, non_reportable=14",
+      "Phase F: レコード組立",
+      "Phase F-col: col_as_seg: too few numeric cross (2)",
+      "Phase F: 2件のセグメント抽出成功",
+      "Phase G-PF: pl_summary_post_filter SKIP col_as_seg=False n=2"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 9,
+          "score": 1.0,
+          "categories": {
+            "header": 0.73,
+            "numeric_layout": 0.2,
+            "segment_row": 0.31,
+            "exclusion": 0.0,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "報告セグメント; セグメント情報; 事業セグメント; 売上系:売上高; 利益系:セグメント利益; 数値列5列; 数値行4行(3+); 行数17; セグメント名行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行9行(5+); 数値密度9/12; 行数12; セグメント名行5行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行29行(5+); 数値密度29/35; 行数35; セグメント名行23行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 8,
+          "score": 0.32,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.07,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列1列(減点); 数値行5行(5+); 数値密度5/7; セグメント名行4行; 補助語2個",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 2,
+        "narrative_like": 2,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 3,
+        "total_or_metric_like": 5,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "（セグメント情報等の注記）:detail_breakdown_like",
+          "当第:narrative_like",
+          ":garbage_fragment_like",
+          "(単位：千円):detail_breakdown_like",
+          "報告セグメント:valid_segment_like"
+        ],
+        "numeric_density": 0.5476,
+        "repeated_numeric_rows": 4,
+        "header_keyword_hits": 2,
+        "anchor_hits": 4,
+        "segment_name_like_rows": 2,
+        "narrative_penalty": 0.0,
+        "bs_cf_penalty": 0.0,
+        "rescued_by": "detail_breakdown_strong_rescue",
+        "candidate_score": 20.0
+      },
+      "phase_transition": {
+        "phase_b_rows": 17,
+        "phase_b_num_cols": 5,
+        "phase_b_preview": [
+          "（セグメント情報等の注記）",
+          "当第３四半期連結累計期間(自 2025年５月１日 至 2026年１月31日)",
+          "１ 報告セグメントごとの売上高及び利益又は損失の金額に関する情報"
+        ],
+        "phase_c_rows": 15,
+        "phase_c_num_cols": 5,
+        "phase_c_preview": [
+          "１ 報告セグメントごとの売上高及び利益又は損失の金額に関する情報",
+          "(単位：千円)",
+          "報告セグメント"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "１ 報告セグメントごとの売上高及び利益又は損失の金額に関する情報",
+          "(単位：千円)"
+        ],
+        "reconstructed_headers": [
+          "売上高",
+          "利益又は損失"
+        ],
+        "column_labels": [
+          [
+            "報告セグメント"
+          ],
+          [
+            "その他"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like"
+        ],
+        "best_sales_col": 0,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.57,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "利益又は損失",
+            "scores": {
+              "segment_profit_like": 0.57
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.57,
+            "selected": true
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高",
+            "scores": {
+              "sales": 0.18
+            },
+            "best_role": "sales",
+            "best_score": 0.18,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "1報告セグメントごとの売上高及び利益又は損失の金額に関する情報"
+        ],
+        "new_headers": [
+          "売上高",
+          "利益又は損失"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 1.0,
+      "table_score": 1.0,
+      "header_confidence": 0.6,
+      "col_confidence": 0.6799999999999999,
+      "segment_count": 2,
+      "non_reportable_count": 14,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 2,
+      "parse_quality_partial": 0
+    }
+  },
+  {
+    "ticker": "5079",
+    "period": "R8/4",
+    "quarter": "3Q",
+    "segment_name": "セグメント利益",
+    "segment_order": 2,
+    "segment_sales": 551.78,
+    "segment_profit": 392.618,
+    "raw_profit_label": "segment_profit_like",
+    "source": "backfill_pdf",
+    "segment_name_norm": "セグメント利益",
+    "extractor_route": "pdf",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-13",
+    "tdnet_doc_id": "0e3a0b8a560b2deace1b1c17",
+    "row_type": "segment",
+    "rule_trace": [
+      "Phase A: ページスコアリング開始",
+      "Phase A: 候補ページ 8件 (top=3, score=1.00)",
+      "Phase B: テーブルスコアリング開始",
+      "Phase B-orient: page=9 orientation=column_based row_seg=1 row_mhdr=1 col_seg=4 col_metric=2 num_cross=5 period=0 bscf=0",
+      "Phase B-orient-decision: page=9 orientation=column_based density_rescue=yes header_suppressed=no",
+      "Phase B-boost: page=9 seg_kw_bonus=+0.06",
+      "Phase B-boost: page=9 column_based_bonus=+0.08 col_seg=4 col_metric=2 num_cross=5 rescued_by=column_based_signal",
+      "Phase B-boost: page=9 header_label_boost=+0.04 non_num=2/2",
+      "Phase B-orient-decision: page=9 orientation=column_based density_rescue=yes header_suppressed=no",
+      "Phase B-orient: page=8 orientation=unknown row_seg=4 row_mhdr=0 col_seg=0 col_metric=1 num_cross=1 period=0 bscf=0",
+      "Phase B-boost: page=8 header_label_boost=+0.04 non_num=2/3",
+      "Phase B-orient-decision: page=8 orientation=unknown density_rescue=no header_suppressed=no",
+      "Phase B-orient: page=6 orientation=unknown row_seg=0 row_mhdr=0 col_seg=1 col_metric=0 num_cross=0 period=2 bscf=3",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=6 bscf=3",
+      "Phase B-orient-decision: page=6 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=5 orientation=unknown row_seg=0 row_mhdr=0 col_seg=0 col_metric=0 num_cross=0 period=0 bscf=9",
+      "Phase B-boost: header_boost_suppressed_by_bs_cf page=5 bscf=9",
+      "Phase B-orient-decision: page=5 orientation=unknown density_rescue=no header_suppressed=yes",
+      "Phase B-orient: page=0 orientation=unknown row_seg=0 row_mhdr=1 col_seg=2 col_metric=0 num_cross=0 period=5 bscf=0",
+      "Phase B-boost: skip page=0 num_density=0.00 (<0.3)",
+      "Phase B-orient: page=0 orientation=unknown row_seg=0 row_mhdr=1 col_seg=2 col_metric=0 num_cross=0 period=5 bscf=0",
+      "Phase B-boost: skip page=0 num_density=0.00 (<0.3)",
+      "Phase B: best_table score=1.00 (報告セグメント; セグメント情報; 事業セグメント; 売上系:売上高; 利益系:セグメント利益; 数値列5列; 数値行4行(3+); 行数17; セグメント名行2行; 補助語2個; セグメント情報見出し(加点); 事業名パターン3行; 三拍子ボーナス(売上/利益+補助語+セグメント行))",
+      "Phase B-2-pre: column_first status=none segment_count=0 numeric_col_count=0 tokens=[]",
+      "Phase B-2: ACCEPT valid=2 narr=2 numdens=0.5476 repnum=4 cand_score=20.0 rescued_by=detail_breakdown_strong_rescue",
+      "Phase C: ヘッダーグリッド再構築",
+      "Phase C: preamble_trim skipped=2 stop_reason=table_header_term first=['（セグメント情報等の注記）', '当第３四半期連結累計期間(自 2025年５月１日 至 2026年１月31日)']",
+      "Phase C: band_h=2, raw=['１ 報告セグメントごとの売上高及び利益又は損失の金額に関する情報', '(単位：千円)'], reconstructed=['1報告セグメントごとの売上高及び利益又は損失の金額に関する情報'], units=千円",
+      "Unit: raw=千円, mult=1000, src=header",
+      "Phase C: transition B(17rows,5cols)→C(15rows,5cols) header_band=2 new_headers=['1報告セグメントごとの売上高及び利益又は損失の金額に関する情報']",
+      "Phase D: 列ロール分類",
+      "Phase D-0: split result primary=2 secondary=0",
+      "Phase D: dual_metric_split: ['1報告セグメントごとの売上高及び利益又は損失の金額に関する情報'] → ['売上高', '利益又は損失']",
+      "Phase D: resolution_strategy=new",
+      "Phase D: sales_col=0, profit_col=1, role=segment_profit_like",
+      "Phase E: 行ロール分類",
+      "Phase E: 抽出可能行=3, skip行=7, non_reportable=14",
+      "Phase F: レコード組立",
+      "Phase F-col: col_as_seg: too few numeric cross (2)",
+      "Phase F: 2件のセグメント抽出成功",
+      "Phase G-PF: pl_summary_post_filter SKIP col_as_seg=False n=2"
+    ],
+    "score_summary": {
+      "all_table_scores": [
+        {
+          "page": 9,
+          "score": 1.0,
+          "categories": {
+            "header": 0.73,
+            "numeric_layout": 0.2,
+            "segment_row": 0.31,
+            "exclusion": 0.0,
+            "sequence": 0.1,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "報告セグメント; セグメント情報; 事業セグメント; 売上系:売上高; 利益系:セグメント利益; 数値列5列; 数値行4行(3+); 行数17; セグメント名行",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 6,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行9行(5+); 数値密度9/12; 行数12; セグメント名行5行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 5,
+          "score": 0.49,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.28,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列2列; 数値行29行(5+); 数値密度29/35; 行数35; セグメント名行23行; 補助語2個",
+          "weak_evidence": true,
+          "heading_like": false
+        },
+        {
+          "page": 8,
+          "score": 0.32,
+          "categories": {
+            "header": 0.0,
+            "numeric_layout": 0.07,
+            "segment_row": 0.21,
+            "exclusion": 0.0,
+            "sequence": 0.0,
+            "heading": 0.0,
+            "text_block": 0.0,
+            "pl_penalty": 0.0
+          },
+          "reason": "数値列1列(減点); 数値行5行(5+); 数値密度5/7; セグメント名行4行; 補助語2個",
+          "weak_evidence": false,
+          "heading_like": false
+        }
+      ],
+      "toc_guard": {
+        "is_toc": false,
+        "candidate_toc_lines": 0,
+        "candidate_toc_ratio": 0.0,
+        "page_toc_lines": 0,
+        "page_toc_score": 0.0,
+        "page_is_toc": false,
+        "dotted_leader_count": 0,
+        "page_number_like_count": 1,
+        "reject_reason": ""
+      },
+      "candidate_guard": {
+        "accepted": true,
+        "reject_reason": "",
+        "valid_segment_like": 2,
+        "narrative_like": 2,
+        "bs_cf_like": 0,
+        "detail_breakdown_like": 3,
+        "total_or_metric_like": 5,
+        "garbage_fragment_like": 3,
+        "pl_account_like": 0,
+        "top_samples": [
+          "（セグメント情報等の注記）:detail_breakdown_like",
+          "当第:narrative_like",
+          ":garbage_fragment_like",
+          "(単位：千円):detail_breakdown_like",
+          "報告セグメント:valid_segment_like"
+        ],
+        "numeric_density": 0.5476,
+        "repeated_numeric_rows": 4,
+        "header_keyword_hits": 2,
+        "anchor_hits": 4,
+        "segment_name_like_rows": 2,
+        "narrative_penalty": 0.0,
+        "bs_cf_penalty": 0.0,
+        "rescued_by": "detail_breakdown_strong_rescue",
+        "candidate_score": 20.0
+      },
+      "phase_transition": {
+        "phase_b_rows": 17,
+        "phase_b_num_cols": 5,
+        "phase_b_preview": [
+          "（セグメント情報等の注記）",
+          "当第３四半期連結累計期間(自 2025年５月１日 至 2026年１月31日)",
+          "１ 報告セグメントごとの売上高及び利益又は損失の金額に関する情報"
+        ],
+        "phase_c_rows": 15,
+        "phase_c_num_cols": 5,
+        "phase_c_preview": [
+          "１ 報告セグメントごとの売上高及び利益又は損失の金額に関する情報",
+          "(単位：千円)",
+          "報告セグメント"
+        ],
+        "header_band_h": 2,
+        "best_table_has_sales": true,
+        "best_table_has_profit": true
+      },
+      "column_diagnosis": {
+        "raw_headers": [
+          "１ 報告セグメントごとの売上高及び利益又は損失の金額に関する情報",
+          "(単位：千円)"
+        ],
+        "reconstructed_headers": [
+          "売上高",
+          "利益又は損失"
+        ],
+        "column_labels": [
+          [
+            "報告セグメント"
+          ],
+          [
+            "その他"
+          ]
+        ],
+        "column_roles": [
+          "segment_label",
+          "segment_profit_like"
+        ],
+        "best_sales_col": 0,
+        "best_profit_col": 1,
+        "profit_role": "segment_profit_like",
+        "taxonomy_scores": [
+          {
+            "sales": 0.18,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.0,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.5,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 0.0
+          },
+          {
+            "sales": 0.0,
+            "external_sales": 0.0,
+            "internal_sales": 0.0,
+            "total_sales_like": 0.0,
+            "operating_profit_like": 0.0,
+            "segment_profit_like": 0.57,
+            "ordinary_profit_like": 0.0,
+            "pretax_like": 0.0,
+            "net_income_like": 0.0,
+            "margin_like": 0.0,
+            "assets_like": 0.0,
+            "depreciation_like": 0.0,
+            "capex_like": 0.0,
+            "segment_label": 0.0,
+            "ratio": 0.0,
+            "yoy": 0.0,
+            "unknown": 1.0
+          }
+        ],
+        "profit_candidates": [
+          {
+            "col": 1,
+            "header": "利益又は損失",
+            "scores": {
+              "segment_profit_like": 0.57
+            },
+            "best_role": "segment_profit_like",
+            "best_score": 0.57,
+            "selected": true
+          }
+        ],
+        "sales_candidates": [
+          {
+            "col": 0,
+            "header": "売上高",
+            "scores": {
+              "sales": 0.18
+            },
+            "best_role": "sales",
+            "best_score": 0.18,
+            "selected": true
+          }
+        ],
+        "header_role_scores": {},
+        "resolution_strategy": "new",
+        "legacy_headers": [
+          "1報告セグメントごとの売上高及び利益又は損失の金額に関する情報"
+        ],
+        "new_headers": [
+          "売上高",
+          "利益又は損失"
+        ],
+        "reconstruction_steps": []
+      },
+      "page_score": 1.0,
+      "table_score": 1.0,
+      "header_confidence": 0.6,
+      "col_confidence": 0.6799999999999999,
+      "segment_count": 2,
+      "non_reportable_count": 14,
+      "unit_raw": "千円",
+      "unit_multiplier": 1000,
+      "sales_col_role": "segment_label",
+      "profit_col_role": "segment_profit_like",
+      "parse_quality_full": 2,
+      "parse_quality_partial": 0
+    }
+  }
+]

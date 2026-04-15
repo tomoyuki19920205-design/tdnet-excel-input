@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "9720",
+    "period": "R8/11",
+    "quarter": "1Q",
+    "segment_name": "Hotel",
+    "segment_order": 1,
+    "segment_sales": 1703,
+    "segment_profit": 184,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Hotel",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-08",
+    "tdnet_doc_id": "056dbea52275caed7b561257",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "9720",
+    "period": "R8/11",
+    "quarter": "1Q",
+    "segment_name": "Real Estate Leasing Business",
+    "segment_order": 2,
+    "segment_sales": 12,
+    "segment_profit": 9,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Real Estate Leasing Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-08",
+    "tdnet_doc_id": "056dbea52275caed7b561257",
+    "row_type": "segment"
+  }
+]

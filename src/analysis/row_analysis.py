@@ -272,6 +272,16 @@ def _classify_single_row(
             score=0.7, reason=f"セグメント名候補(ラベル:{label}, 数値{num_count}個)",
         )
 
+    # --- rescue: label が空でも数値トークンが2個以上の行はセグメント行として救済 ---
+    # has_nums=True / len(label)==0 / num_count>=2 の3条件すべてを要求する
+    # 1数値のみの行・len(label)==1の一般救済はここでは行わない
+    if has_nums and len(label) == 0 and num_count >= 2:
+        return RowClassification(
+            row_index=idx, role=RowRole.SEGMENT, label=label,
+            is_extractable=True, is_reportable_segment=True,
+            score=0.5, reason=f"rescue:label空・数値{num_count}個",
+        )
+
     # --- 不明 ---
     return RowClassification(
         row_index=idx, role=RowRole.UNKNOWN, label=label,

@@ -1,0 +1,14 @@
+{
+  "filing_id": "0db716111c27e16423ae52a7",
+  "ticker": "1928",
+  "disclosure_date": "2026-03-05",
+  "title": "2026年1月期決算短信〔日本基準〕(連結)",
+  "doc_type": "financial_statement",
+  "source_url": "https://www.release.tdnet.info/inbs/140120260304576061.pdf",
+  "xbrl_url": "https://www.release.tdnet.info/inbs/081220260304576061.zip",
+  "listing_source": "tdnet_html",
+  "has_xbrl": false,
+  "xbrl_url_inferred": true,
+  "has_pdf": true,
+  "created_at": "2026-04-12T00:49:32.199576+09:00"
+}

@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "6898",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Electronic Parts Materials Business",
+    "segment_order": 1,
+    "segment_sales": 1536,
+    "segment_profit": -113,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Electronic Parts Materials Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "c56843b50d849264bdc866a3",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "6898",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Real Estate Lease Business",
+    "segment_order": 2,
+    "segment_sales": 67,
+    "segment_profit": 50,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Real Estate Lease Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-12",
+    "tdnet_doc_id": "c56843b50d849264bdc866a3",
+    "row_type": "segment"
+  }
+]

@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "4378",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "Solution",
+    "segment_order": 1,
+    "segment_sales": 175,
+    "segment_profit": 42,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Solution",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-13",
+    "tdnet_doc_id": "71b3a0420deaaaa8513b163d",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "4378",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "Analytics Business",
+    "segment_order": 2,
+    "segment_sales": 216,
+    "segment_profit": -30,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Analytics Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-13",
+    "tdnet_doc_id": "71b3a0420deaaaa8513b163d",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "4378",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "M And A Advisory Business",
+    "segment_order": 3,
+    "segment_sales": null,
+    "segment_profit": -16,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "M And A Advisory Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-13",
+    "tdnet_doc_id": "71b3a0420deaaaa8513b163d",
+    "row_type": "segment"
+  }
+]

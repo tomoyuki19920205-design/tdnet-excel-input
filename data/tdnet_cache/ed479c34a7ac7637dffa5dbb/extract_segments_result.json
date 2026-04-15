@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "278A",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "A0Drone Solutions Segment",
+    "segment_order": 1,
+    "segment_sales": 4162,
+    "segment_profit": -435,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "A0Drone Solutions Segment",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-16",
+    "tdnet_doc_id": "ed479c34a7ac7637dffa5dbb",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "278A",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "A0UAS Traffic Management",
+    "segment_order": 2,
+    "segment_sales": 619,
+    "segment_profit": -710,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "A0UAS Traffic Management",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-16",
+    "tdnet_doc_id": "ed479c34a7ac7637dffa5dbb",
+    "row_type": "segment"
+  }
+]

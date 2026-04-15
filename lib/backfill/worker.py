@@ -32,6 +32,11 @@ class FilingResult:
     metrics: dict = field(default_factory=dict)
     cache_paths: dict = field(default_factory=dict)
     result_fingerprint: str | None = None
+    # Phase 2: Trace & Scores
+    rule_trace: list[str] = field(default_factory=list)
+    score_summary: dict[str, Any] = field(default_factory=dict)
+    quarantine_reason: str = ""
+    selected_path: str = "unknown"
 
 
 def compute_result_fingerprint(segment_records: list[dict]) -> str:
@@ -249,15 +254,22 @@ def _extract_segments(doc_path, filing, financials_data, via, fid, metrics, *, r
     from lib.backfill.retry import retry_with_backoff
 
     def _extract():
-        from src.extractor import extract_segment_financials
+        from src.extractor import extract_segment_financials, get_last_v2_segment_result
         segments, seg_err = extract_segment_financials(
             doc_path, filing.title, doc_id=fid, ticker=filing.ticker,
         )
+        # trace / scores capture
+        v2_res = get_last_v2_segment_result()
+        _extract.rule_trace = v2_res.rule_trace if v2_res else []
+        _extract.score_summary = v2_res.score_summary if v2_res else {}
+
         if not segments:
             raise RuntimeError(seg_err or "no_segments_found")
         return segments
 
     t = time.monotonic()
+    _extract.rule_trace = []
+    _extract.score_summary = {}
     r = retry_with_backoff(
         _extract, stage="pdf",
         max_attempts=retry_pdf, timeout_sec=timeout_pdf,
@@ -267,7 +279,7 @@ def _extract_segments(doc_path, filing, financials_data, via, fid, metrics, *, r
     metrics["segment_ms"] = int((time.monotonic() - t) * 1000)
 
     if not r.success:
-        return [], r.last_error or "segment_extraction_failed"
+        return [], r.last_error or "segment_extraction_failed", getattr(_extract, "rule_trace", []), getattr(_extract, "score_summary", {})
 
     period = (financials_data or {}).get("period", "")
     quarter = (financials_data or {}).get("quarter", "")
@@ -309,8 +321,10 @@ def _extract_segments(doc_path, filing, financials_data, via, fid, metrics, *, r
             "disclosure_date": filing.disclosure_date,
             "tdnet_doc_id": fid,
             "row_type": _classify_row_type(seg_name),
+            "rule_trace": getattr(seg, "rule_trace", []),
+            "score_summary": getattr(seg, "score_summary", {}),
         })
-    return records, ""
+    return records, "", getattr(_extract, "rule_trace", []), getattr(_extract, "score_summary", {})
 
 
 # ================================================================
@@ -371,10 +385,17 @@ def process_one_filing(
         save_extract_financials_result(paths, financials_data)
 
     _update_state(state_store, fid, "running", stage="extracting_segments")
-    segment_records, seg_err = _extract_segments(
-        doc_path, filing, financials_data, via, fid, metrics,
-        retry_pdf=retry_pdf, timeout_pdf=timeout_pdf, sleep_fn=_sleep,
-    ) if doc_path else ([], "no_doc_path")
+    if doc_path:
+        _seg_result = _extract_segments(
+            doc_path, filing, financials_data, via, fid, metrics,
+            retry_pdf=retry_pdf, timeout_pdf=timeout_pdf, sleep_fn=_sleep,
+        )
+    else:
+        _seg_result = ([], "no_doc_path", [], {})
+    segment_records = _seg_result[0] if len(_seg_result) > 0 else []
+    seg_err        = _seg_result[1] if len(_seg_result) > 1 else ""
+    rule_trace     = _seg_result[2] if len(_seg_result) > 2 else []
+    score_summary  = _seg_result[3] if len(_seg_result) > 3 else {}
 
     if segment_records:
         save_extract_segments_result(paths, segment_records)
@@ -385,7 +406,7 @@ def process_one_filing(
 
     if segment_records:
         append_filing_log(paths, {"event": "ok", "via": via, "segments": len(segment_records), "fingerprint": fp, "attempts": metrics.get("attempts", {})})
-        return FilingResult(filing_id=fid, status="ok", via=via, segment_records=segment_records, financial_records=[financials_data] if financials_data else [], metrics=metrics, cache_paths={"cache_dir": str(paths.cache_dir)}, result_fingerprint=fp)
+        return FilingResult(filing_id=fid, status="ok", via=via, segment_records=segment_records, financial_records=[financials_data] if financials_data else [], metrics=metrics, cache_paths={"cache_dir": str(paths.cache_dir)}, result_fingerprint=fp, rule_trace=rule_trace, score_summary=score_summary)
 
     reason = seg_err or "unknown"
     v2_reason = None
@@ -659,7 +680,7 @@ def process_one_filing(
         "candidate_reject_reason": best_reason or "",
         "xbrl_fallback_attempted": xbrl_fallback_attempted,
     })
-    return FilingResult(filing_id=fid, status="quarantined", via=via, quarantine=q, financial_records=[financials_data] if financials_data else [], metrics=metrics, cache_paths={"cache_dir": str(paths.cache_dir)})
+    return FilingResult(filing_id=fid, status="quarantined", via=via, quarantine=q, financial_records=[financials_data] if financials_data else [], metrics=metrics, cache_paths={"cache_dir": str(paths.cache_dir)}, rule_trace=rule_trace, score_summary=score_summary)
 
 
 # ================================================================
@@ -883,10 +904,14 @@ def process_one_filing_pdf_only(
                 pass
 
     via = "pdf"
-    segment_records, seg_err = _extract_segments(
+    _seg_result = _extract_segments(
         doc_path, filing, financials_data, via, fid, metrics,
         retry_pdf=retry_pdf, timeout_pdf=timeout_pdf, sleep_fn=_sleep,
     )
+    segment_records = _seg_result[0] if len(_seg_result) > 0 else []
+    seg_err        = _seg_result[1] if len(_seg_result) > 1 else ""
+    rule_trace     = _seg_result[2] if len(_seg_result) > 2 else []
+    score_summary  = _seg_result[3] if len(_seg_result) > 3 else {}
 
     elapsed = int((time.monotonic() - t0) * 1000)
     metrics["total_ms"] = elapsed
@@ -902,6 +927,8 @@ def process_one_filing_pdf_only(
             metrics=metrics,
             cache_paths={"cache_dir": str(paths.cache_dir)},
             result_fingerprint=fp,
+            rule_trace=rule_trace,
+            score_summary=score_summary,
         )
 
     reason = seg_err or "pdf_extraction_failed"
@@ -1052,6 +1079,8 @@ def process_one_filing_pdf_only(
         financial_records=[financials_data] if financials_data else [],
         metrics=metrics,
         cache_paths={"cache_dir": str(paths.cache_dir)},
+        rule_trace=rule_trace,
+        score_summary=score_summary,
     )
 
 

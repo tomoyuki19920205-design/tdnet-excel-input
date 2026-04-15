@@ -50,6 +50,11 @@ except ImportError:
 # パス・定数
 # ============================================================
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from tools.state_io import atomic_json_save, safe_json_load  # noqa: E402
+
 _STATE_DIR = _PROJECT_ROOT / "state"
 _SEEN_FILE = _STATE_DIR / "edinet_shareholder_seen.json"
 _SNAPSHOT_FILE = _STATE_DIR / "shareholder_snapshot_cache.json"
@@ -106,10 +111,8 @@ def _load_dotenv():
 # 状態管理: seen_doc_ids
 # ============================================================
 def load_seen_state() -> dict:
-    if _SEEN_FILE.exists():
-        with open(_SEEN_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"seen_doc_ids": [], "last_checked_at": None}
+    _default = {"seen_doc_ids": [], "last_checked_at": None}
+    return safe_json_load(_SEEN_FILE, default=_default)
 
 
 def save_seen_state(state: dict):
@@ -117,24 +120,18 @@ def save_seen_state(state: dict):
     ids = state.get("seen_doc_ids", [])
     if len(ids) > MAX_SEEN_IDS:
         state["seen_doc_ids"] = ids[-MAX_SEEN_IDS:]
-    with open(_SEEN_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
+    atomic_json_save(_SEEN_FILE, state)
 
 
 # ============================================================
 # 状態管理: shareholder_snapshot_cache
 # ============================================================
 def load_snapshot_cache() -> dict:
-    if _SNAPSHOT_FILE.exists():
-        with open(_SNAPSHOT_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+    return safe_json_load(_SNAPSHOT_FILE, default={})
 
 
 def save_snapshot_cache(cache: dict):
-    _STATE_DIR.mkdir(parents=True, exist_ok=True)
-    with open(_SNAPSHOT_FILE, "w", encoding="utf-8") as f:
-        json.dump(cache, f, ensure_ascii=False, indent=2)
+    atomic_json_save(_SNAPSHOT_FILE, cache)
 
 
 # ============================================================
@@ -1063,6 +1060,13 @@ def main():
         sys.exit(1)
 
     log.info("=== EDINET 株主欄監視 開始 ===")
+    log.info("  pid=%d  cwd=%s", os.getpid(), os.getcwd())
+    log.info("  repo_root=%s", _PROJECT_ROOT)
+    log.info("  script=%s", Path(__file__).resolve())
+    log.info("  python=%s", sys.executable)
+    log.info("  argv=%s", sys.argv)
+    log.info("  seen_file=%s", _SEEN_FILE)
+    log.info("  snapshot_file=%s", _SNAPSHOT_FILE)
     log.info("対象株主: %s", ", ".join(TARGET_SHAREHOLDER_ALIASES.keys()))
     mode_str = ("seed-state" if args.seed_state
                 else "seed-snapshot" if args.seed_snapshot

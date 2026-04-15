@@ -1,0 +1,79 @@
+﻿ticker	company	status	fill_applied	fill_type	period	segment_name	sales	profit	unit	source_pdf	review_flag	review_reason
+1515	日鉄鉱業	SUCCESS	yes	fill2	previous	鉱石	49027	5936	百万円	1515日鉄鉱業.pdf	yes	period補完=fill2
+1515	日鉄鉱業	SUCCESS	yes	fill2	previous	金属	83369	1298	百万円	1515日鉄鉱業.pdf	yes	period補完=fill2
+1515	日鉄鉱業	SUCCESS	yes	fill2	previous	機械・環境	12041	1502	百万円	1515日鉄鉱業.pdf	yes	period補完=fill2
+1515	日鉄鉱業	SUCCESS	yes	fill2	previous	不動産	2156	1256	百万円	1515日鉄鉱業.pdf	yes	period補完=fill2
+1515	日鉄鉱業	SUCCESS	yes	fill2	previous	再生可能エネルギー	1341	407	百万円	1515日鉄鉱業.pdf	yes	period補完=fill2
+1515	日鉄鉱業	SUCCESS	yes	fill2	current	鉱石	51585	6758	百万円	1515日鉄鉱業.pdf	yes	period補完=fill2
+1515	日鉄鉱業	SUCCESS	yes	fill2	current	金属	83115	3310	百万円	1515日鉄鉱業.pdf	yes	period補完=fill2
+1515	日鉄鉱業	SUCCESS	yes	fill2	current	機械・環境	12463	1547	百万円	1515日鉄鉱業.pdf	yes	period補完=fill2
+1515	日鉄鉱業	SUCCESS	yes	fill2	current	不動産	4036	2918	百万円	1515日鉄鉱業.pdf	yes	period補完=fill2
+1515	日鉄鉱業	SUCCESS	yes	fill2	current	再生可能エネルギー	1424	554	百万円	1515日鉄鉱業.pdf	yes	period補完=fill2
+4078	堺化学	SUCCESS	yes	fill1	previous	触媒	2449	163	百万円	4078 堺化学pdf.pdf	yes	period補完=fill1
+4078	堺化学	SUCCESS	yes	fill1	previous	無機材料	5237	790	百万円	4078 堺化学pdf.pdf	yes	period補完=fill1
+4078	堺化学	SUCCESS	yes	fill1	previous	医療事業	6740	201	百万円	4078 堺化学pdf.pdf	yes	period補完=fill1
+4078	堺化学	SUCCESS	yes	fill1	current	触媒	2529	542	百万円	4078 堺化学pdf.pdf	yes	period補完=fill1
+4078	堺化学	SUCCESS	yes	fill1	current	無機材料	4680	887	百万円	4078 堺化学pdf.pdf	yes	period補完=fill1
+4078	堺化学	SUCCESS	yes	fill1	current	医療事業	6581	161	百万円	4078 堺化学pdf.pdf	yes	period補完=fill1
+5803	フジクラ	SUCCESS	yes	fill2	previous	情報通信事業部門	308402	61017	百万円	5803 フジクラ.pdf	yes	period補完=fill2
+5803	フジクラ	SUCCESS	yes	fill2	previous	エレクトロニクス事業部門	143163	19443	百万円	5803 フジクラ.pdf	yes	period補完=fill2
+5803	フジクラ	SUCCESS	yes	fill2	previous	自動車事業部門	134859	5381	百万円	5803 フジクラ.pdf	yes	period補完=fill2
+5803	フジクラ	SUCCESS	yes	fill2	previous	エネルギー事業部門	111164	8145	百万円	5803 フジクラ.pdf	yes	period補完=fill2
+5803	フジクラ	SUCCESS	yes	fill2	previous	不動産事業部門	8110	3774	百万円	5803 フジクラ.pdf	yes	period補完=fill2
+5803	フジクラ	SUCCESS	yes	fill2	current	情報通信事業部門	464065	114241	百万円	5803 フジクラ.pdf	yes	period補完=fill2
+5803	フジクラ	SUCCESS	yes	fill2	current	エレクトロニクス事業部門	131703	6858	百万円	5803 フジクラ.pdf	yes	period補完=fill2
+5803	フジクラ	SUCCESS	yes	fill2	current	自動車事業部門	129503	3831	百万円	5803 フジクラ.pdf	yes	period補完=fill2
+5803	フジクラ	SUCCESS	yes	fill2	current	エネルギー事業部門	115153	14818	百万円	5803 フジクラ.pdf	yes	period補完=fill2
+5803	フジクラ	SUCCESS	yes	fill2	current	不動産事業部門	8296	3741	百万円	5803 フジクラ.pdf	yes	period補完=fill2
+5805	SWCC	SUCCESS	yes	fill1	previous	エネルギー・インフラ事業	97822	12973	百万円	5805SWCC.pdf	yes	period補完=fill1
+5805	SWCC	SUCCESS	yes	fill1	previous	通信・コンポーネンツ事業	108213	3925	百万円	5805SWCC.pdf	yes	period補完=fill1
+5805	SWCC	SUCCESS	yes	fill1	current	エネルギー・インフラ事業	95891	14080	百万円	5805SWCC.pdf	yes	period補完=fill1
+5805	SWCC	SUCCESS	yes	fill1	current	通信・コンポーネンツ事業	126294	5493	百万円	5805SWCC.pdf	yes	period補完=fill1
+5985	サンコール	SUCCESS	yes	fill2	previous	日本	30238	565	百万円	5985サンコール.pdf	yes	period補完=fill2
+5985	サンコール	SUCCESS	yes	fill2	previous	北米	7985	-196	百万円	5985サンコール.pdf	yes	period補完=fill2
+5985	サンコール	SUCCESS	yes	fill2	previous	アジア	10972	2280	百万円	5985サンコール.pdf	yes	period補完=fill2
+5985	サンコール	SUCCESS	yes	fill2	previous	欧州	64	-13	百万円	5985サンコール.pdf	yes	period補完=fill2
+5985	サンコール	SUCCESS	yes	fill2	current	日本	22620	2366	百万円	5985サンコール.pdf	yes	period補完=fill2
+5985	サンコール	SUCCESS	yes	fill2	current	北米	6762	460	百万円	5985サンコール.pdf	yes	period補完=fill2
+5985	サンコール	SUCCESS	yes	fill2	current	アジア	12324	3311	百万円	5985サンコール.pdf	yes	period補完=fill2
+5985	サンコール	SUCCESS	yes	fill2	current	欧州	47	-23	百万円	5985サンコール.pdf	yes	period補完=fill2
+6264	マルマエ	SUCCESS	yes	fill3	current	精密部品事業	3931	825	百万円	6264マルマエ.pdf	yes	period補完=fill3
+6264	マルマエ	SUCCESS	yes	fill3	current	機能材料事業	4780	744	百万円	6264マルマエ.pdf	yes	period補完=fill3
+6674	GSユアサ	SUCCESS	yes	fill2	previous	自動車電池	74362	7042	百万円	6674 GSユアサ.pdf	yes	period補完=fill2
+6674	GSユアサ	SUCCESS	yes	fill2	previous	産業電池電源	90058	10149	百万円	6674 GSユアサ.pdf	yes	period補完=fill2
+6674	GSユアサ	SUCCESS	yes	fill2	previous	車載用リチウムイオン電池	67204	-1158	百万円	6674 GSユアサ.pdf	yes	period補完=fill2
+6674	GSユアサ	SUCCESS	yes	fill2	current	自動車電池	79213	7926	百万円	6674 GSユアサ.pdf	yes	period補完=fill2
+6674	GSユアサ	SUCCESS	yes	fill2	current	産業電池電源	93312	10224	百万円	6674 GSユアサ.pdf	yes	period補完=fill2
+6674	GSユアサ	SUCCESS	yes	fill2	current	車載用リチウムイオン電池	70298	2683	百万円	6674 GSユアサ.pdf	yes	period補完=fill2
+6701	日本電気	SUCCESS	yes	fill2	previous	ITサービス	1667806	118907	百万円	6701日本電気.pdf	yes	period補完=fill2
+6701	日本電気	SUCCESS	yes	fill2	previous	社会インフラ	567198	39341	百万円	6701日本電気.pdf	yes	period補完=fill2
+6701	日本電気	SUCCESS	yes	fill2	current	ITサービス	1712998	195675	百万円	6701日本電気.pdf	yes	period補完=fill2
+6701	日本電気	SUCCESS	yes	fill2	current	社会インフラ	620327	27871	百万円	6701日本電気.pdf	yes	period補完=fill2
+6946	アビオニクス	SUCCESS	yes	fill2	previous	情報システム	10930	1986	百万円	6946 アビオニクス.pdf	yes	period補完=fill2
+6946	アビオニクス	SUCCESS	yes	fill2	previous	電子機器	2740	-321	百万円	6946 アビオニクス.pdf	yes	period補完=fill2
+6946	アビオニクス	SUCCESS	yes	fill2	current	情報システム	16002	3170	百万円	6946 アビオニクス.pdf	yes	period補完=fill2
+6946	アビオニクス	SUCCESS	yes	fill2	current	電子機器	3850	201	百万円	6946 アビオニクス.pdf	yes	period補完=fill2
+7826	フルヤ金属	SUCCESS	no	-	previous	電子	3380	1251	百万円	7826フルヤ金属.pdf	yes	既知急変注意会社
+7826	フルヤ金属	SUCCESS	no	-	previous	薄膜	5339	2055	百万円	7826フルヤ金属.pdf	yes	既知急変注意会社
+7826	フルヤ金属	SUCCESS	no	-	previous	サーマル	2321	765	百万円	7826フルヤ金属.pdf	yes	既知急変注意会社
+7826	フルヤ金属	SUCCESS	no	-	previous	ファインケミカル・リサイクル	13589	3764	百万円	7826フルヤ金属.pdf	yes	既知急変注意会社
+7826	フルヤ金属	SUCCESS	no	-	previous	サプライチェーン支援	1549	-1	百万円	7826フルヤ金属.pdf	yes	既知急変注意会社
+7826	フルヤ金属	SUCCESS	no	-	current	電子	5408	1076	百万円	7826フルヤ金属.pdf	yes	既知急変注意会社
+7826	フルヤ金属	SUCCESS	no	-	current	薄膜	6581	2878	百万円	7826フルヤ金属.pdf	yes	既知急変注意会社
+7826	フルヤ金属	SUCCESS	no	-	current	サーマル	2885	860	百万円	7826フルヤ金属.pdf	yes	既知急変注意会社
+7826	フルヤ金属	SUCCESS	no	-	current	ファインケミカル・リサイクル	9799	2489	百万円	7826フルヤ金属.pdf	yes	既知急変注意会社
+7826	フルヤ金属	SUCCESS	no	-	current	サプライチェーン支援	8673	716	百万円	7826フルヤ金属.pdf	yes	既知急変注意会社
+8244	近鉄百貨店	SUCCESS	yes	fill2	previous	百貨店業	93104	3921	百万円	8244近鉄百貨店.pdf	yes	period補完=fill2
+8244	近鉄百貨店	SUCCESS	yes	fill2	previous	卸・小売業	15623	375	百万円	8244近鉄百貨店.pdf	yes	period補完=fill2
+8244	近鉄百貨店	SUCCESS	yes	fill2	previous	内装業	6362	873	百万円	8244近鉄百貨店.pdf	yes	period補完=fill2
+8244	近鉄百貨店	SUCCESS	yes	fill2	previous	不動産業	349	216	百万円	8244近鉄百貨店.pdf	yes	period補完=fill2
+8244	近鉄百貨店	SUCCESS	yes	fill2	current	百貨店業	103225	5692	百万円	8244近鉄百貨店.pdf	yes	period補完=fill2
+8244	近鉄百貨店	SUCCESS	yes	fill2	current	卸・小売業	15736	196	百万円	8244近鉄百貨店.pdf	yes	period補完=fill2
+8244	近鉄百貨店	SUCCESS	yes	fill2	current	内装業	6981	788	百万円	8244近鉄百貨店.pdf	yes	period補完=fill2
+8244	近鉄百貨店	SUCCESS	yes	fill2	current	不動産業	391	241	百万円	8244近鉄百貨店.pdf	yes	period補完=fill2
+JX	JX金属	SUCCESS	yes	fill1	previous	半導体材料	110866	20209	百万円	JX金属.pdf	yes	period補完=fill1
+JX	JX金属	SUCCESS	yes	fill1	previous	情報通信材料	186873	20875	百万円	JX金属.pdf	yes	period補完=fill1
+JX	JX金属	SUCCESS	yes	fill1	previous	基礎材料	222364	50787	百万円	JX金属.pdf	yes	period補完=fill1
+JX	JX金属	SUCCESS	yes	fill1	current	半導体材料	130244	29897	百万円	JX金属.pdf	yes	period補完=fill1
+JX	JX金属	SUCCESS	yes	fill1	current	情報通信材料	236153	23771	百万円	JX金属.pdf	yes	period補完=fill1
+JX	JX金属	SUCCESS	yes	fill1	current	基礎材料	257705	80171	百万円	JX金属.pdf	yes	period補完=fill1

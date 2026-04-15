@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "6267",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "Package Machine",
+    "segment_order": 1,
+    "segment_sales": 4395,
+    "segment_profit": 455,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Package Machine",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-06",
+    "tdnet_doc_id": "1d33ec388ae6467544f24717",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "6267",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "Production Machine",
+    "segment_order": 2,
+    "segment_sales": 197,
+    "segment_profit": -94,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Production Machine",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-06",
+    "tdnet_doc_id": "1d33ec388ae6467544f24717",
+    "row_type": "segment"
+  }
+]

@@ -1,0 +1,36 @@
+[
+  {
+    "ticker": "8013",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Wholesales Business",
+    "segment_order": 1,
+    "segment_sales": 10839,
+    "segment_profit": -224,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Wholesales Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-13",
+    "tdnet_doc_id": "32ef04d3bc57baf9a666b15d",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "8013",
+    "period": "R8/1",
+    "quarter": "FY",
+    "segment_name": "Home Shopping Mail Order Business",
+    "segment_order": 2,
+    "segment_sales": 2517,
+    "segment_profit": 87,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Home Shopping Mail Order Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-13",
+    "tdnet_doc_id": "32ef04d3bc57baf9a666b15d",
+    "row_type": "segment"
+  }
+]

@@ -1,0 +1,59 @@
+{
+  "run_id": "fbbb3279c7cf",
+  "timestamp": "20260331_145753",
+  "filing_count": 4,
+  "filings": [
+    {
+      "filing_id": "b1d87b825b3f79080e683309",
+      "ticker": "1952",
+      "disclosure_date": "2026-02-16",
+      "title": "2026年3月期 第3四半期決算短信〔日本基準〕（連結）（公認会計士等による期中レビューの完了）",
+      "doc_url": null,
+      "xbrl_url": "https://www.release.tdnet.info/inbs/081220260216562736.zip",
+      "doc_type": "financial_statement",
+      "company_name": "",
+      "published_at": "",
+      "listing_source": "manifest",
+      "has_xbrl": true
+    },
+    {
+      "filing_id": "32bee1925149af08b9c73ac9",
+      "ticker": "5582",
+      "disclosure_date": "2026-02-16",
+      "title": "2026年６月期 第２四半期（中間期）決算短信〔日本基準〕（非連結）",
+      "doc_url": null,
+      "xbrl_url": "https://www.release.tdnet.info/inbs/081220260216562543.zip",
+      "doc_type": "financial_statement",
+      "company_name": "",
+      "published_at": "",
+      "listing_source": "manifest",
+      "has_xbrl": true
+    },
+    {
+      "filing_id": "65a22593a97953dc7df5981e",
+      "ticker": "6039",
+      "disclosure_date": "2026-02-16",
+      "title": "2026年３月期 第３四半期決算短信〔日本基準〕（連結）",
+      "doc_url": null,
+      "xbrl_url": "https://www.release.tdnet.info/inbs/081220260216563131.zip",
+      "doc_type": "financial_statement",
+      "company_name": "",
+      "published_at": "",
+      "listing_source": "manifest",
+      "has_xbrl": true
+    },
+    {
+      "filing_id": "2156c66f7928f1ed99a94c06",
+      "ticker": "7707",
+      "disclosure_date": "2026-02-16",
+      "title": "2026年６月期 第２四半期（中間期）決算短信〔日本基準〕(連結)",
+      "doc_url": null,
+      "xbrl_url": "https://www.release.tdnet.info/inbs/081220260213560125.zip",
+      "doc_type": "financial_statement",
+      "company_name": "",
+      "published_at": "",
+      "listing_source": "manifest",
+      "has_xbrl": true
+    }
+  ]
+}

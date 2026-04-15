@@ -282,8 +282,8 @@ class BackfillStateStore:
 
         params.append(filing_id)
         sql = f"UPDATE filing_state SET {', '.join(parts)} WHERE filing_id = ?"
-        self.conn.execute(sql, params)
-        self.conn.commit()
+        with self.conn:
+            self.conn.execute(sql, params)
 
     def mark_done(
         self,

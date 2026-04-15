@@ -1,0 +1,14 @@
+{
+  "filing_id": "d67f3a135943b7c3941e4705",
+  "ticker": "4880",
+  "stage": "extracting_pdf",
+  "error_message": "no_segment_table",
+  "review_hint": "pdf_table_parse_failed",
+  "via": "pdf",
+  "candidate_reject_reason": "bs_table_detected",
+  "detector_v2_reason": "bs_table_detected",
+  "detector_v1_reason": "no_segment_table",
+  "xbrl_fallback_attempted": false,
+  "xbrl_fallback_succeeded": false,
+  "xbrl_failure_reason": ""
+}

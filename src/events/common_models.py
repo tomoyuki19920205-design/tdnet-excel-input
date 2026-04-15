@@ -45,6 +45,7 @@ class EventRecord:
     company_name: str = ""
     disclosure_datetime: str = ""
     title: str = ""
+    doc_url: str = ""               # 開示書類の元URL
     event_type: str = ""          # buyback / forecast_revision / dividend_revision
     subtype: str = ""             # resolution / upward / increase etc.
     importance: int = 50

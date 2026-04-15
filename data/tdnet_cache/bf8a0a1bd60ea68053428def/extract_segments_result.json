@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "1383",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "Vegetable Seedling And Seedling Related",
+    "segment_order": 1,
+    "segment_sales": 604,
+    "segment_profit": -206,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Vegetable Seedling And Seedling Related",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-16",
+    "tdnet_doc_id": "bf8a0a1bd60ea68053428def",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "1383",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "Agriculture And Horticultural Seed Material Sales",
+    "segment_order": 2,
+    "segment_sales": 161,
+    "segment_profit": -2,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Agriculture And Horticultural Seed Material Sales",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-16",
+    "tdnet_doc_id": "bf8a0a1bd60ea68053428def",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "1383",
+    "period": "R8/10",
+    "quarter": "1Q",
+    "segment_name": "Retail",
+    "segment_order": 3,
+    "segment_sales": 22,
+    "segment_profit": -5,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Retail",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-16",
+    "tdnet_doc_id": "bf8a0a1bd60ea68053428def",
+    "row_type": "segment"
+  }
+]

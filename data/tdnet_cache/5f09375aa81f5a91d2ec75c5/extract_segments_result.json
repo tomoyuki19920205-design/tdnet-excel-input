@@ -1,0 +1,53 @@
+[
+  {
+    "ticker": "1444",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "Remodeling Business",
+    "segment_order": 1,
+    "segment_sales": 2473,
+    "segment_profit": -7,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Remodeling Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-17",
+    "tdnet_doc_id": "5f09375aa81f5a91d2ec75c5",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "1444",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "Real Estate Business",
+    "segment_order": 2,
+    "segment_sales": 39,
+    "segment_profit": -3,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Real Estate Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-17",
+    "tdnet_doc_id": "5f09375aa81f5a91d2ec75c5",
+    "row_type": "segment"
+  },
+  {
+    "ticker": "1444",
+    "period": "R8/7",
+    "quarter": "2Q",
+    "segment_name": "Constructing Detached House Business",
+    "segment_order": 3,
+    "segment_sales": 98,
+    "segment_profit": -28,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Constructing Detached House Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-03-17",
+    "tdnet_doc_id": "5f09375aa81f5a91d2ec75c5",
+    "row_type": "segment"
+  }
+]

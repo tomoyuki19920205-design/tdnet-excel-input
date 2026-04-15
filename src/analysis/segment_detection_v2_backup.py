@@ -1,0 +1,4365 @@
+# ============================================================
+# segment_detection_v2.py  Ev2 統合エンジン (Phase 2)
+# ============================================================
+"""
+Phase A-G を統合しぁEPDF セグメント表自動検�E v2、E
+
+Phase 2 追加:
+  - unit_detection 統吁E
+  - segment_name_normalizer 統吁E
+  - ColumnRole taxonomy 活用
+  - RowRole is_reportable_segment 活用
+  - quarantine review jsonl 出劁E
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+from dataclasses import dataclass, field, asdict
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
+from typing import Any
+
+import pdfplumber
+
+from .page_scoring import score_segment_page, rank_candidate_pages, apply_sequence_boost, PageScore
+from .table_scoring import score_segment_table, find_table_regions, TableScore, is_weak_evidence_table, is_heading_like_table
+from .header_analysis import (
+    detect_header_band,
+    reconstruct_header_grid,
+    extract_header_units,
+    normalize_header,
+    HeaderGrid,
+    _NUM_PATTERN,
+)
+from .column_analysis import classify_columns, ColumnAnalysisResult, ColumnRole
+from .row_analysis import classify_rows, RowAnalysisResult, RowRole
+from .unit_detection import detect_unit_for_table, UnitDetectionResult
+from .segment_name_normalizer import normalize_segment_name, SegmentNameNormalizationResult
+
+
+logger = logging.getLogger("tdnet.v2")
+
+JST = timezone(timedelta(hours=9))
+
+
+# ============================================================
+# V2 結果 (Phase 2 拡張)
+# ============================================================
+
+@dataclass
+class SegmentRecordV2:
+    """v2 で抽出されたセグメンチE件"""
+    segment_name: str = ""
+    segment_order: int = 0
+    segment_sales: float | None = None
+    segment_profit: float | None = None
+    raw_profit_label: str = ""
+    raw_text: str = ""
+    confidence: float = 0.0
+    provenance: dict[str, Any] = field(default_factory=dict)
+    # Phase 2 追加
+    segment_name_raw: str = ""
+    segment_name_normalized: str = ""
+    segment_name_normalize_rule: str | None = None
+    segment_name_confidence: float = 1.0
+    unit_raw: str | None = None
+    unit_multiplier: int | None = None
+    currency: str | None = None
+    unit_source: str | None = None
+    unit_confidence: float = 0.0
+    row_role: str = ""
+    is_reportable_segment: bool = True
+    sales_col_role: str = ""
+    profit_col_role: str = ""
+    extraction_engine: str = "v2"
+    parse_quality: str = "full"  # "full" | "partial_sales_only"
+
+
+@dataclass
+class V2DetectionResult:
+    """v2 検�Eの全体結果"""
+    segments: list[SegmentRecordV2] = field(default_factory=list)
+    quarantine_reason: str = ""
+    failed_stage: str = ""
+    review_hint: str = ""
+    rule_trace: list[str] = field(default_factory=list)
+    score_summary: dict[str, Any] = field(default_factory=dict)
+    used_v2: bool = False
+    # Phase 2 追加
+    unit_info: UnitDetectionResult | None = None
+    candidate_tables_count: int = 0
+    scored_pages_count: int = 0
+
+    @property
+    def success(self) -> bool:
+        return len(self.segments) > 0 and not self.quarantine_reason
+
+
+def _extract_numbers_from_line(line: str) -> list[float]:
+    """行から数値を抽出する (extractor.py と同筁E"""
+    results: list[float] = []
+    for m in re.finditer(r'[△▲]?\s*[\d,]+(?:\.\d+)?', line):
+        raw = m.group()
+        is_neg = "△" in raw or "▲" in raw
+        num_str = re.sub(r'[△▲\s,]', '', raw)
+        try:
+            val = float(num_str)
+            if is_neg:
+                val = -val
+            results.append(val)
+        except ValueError:
+            continue
+    return results
+
+
+def _pdfplumber_table_to_lines(raw_table: list[list[str | None]]) -> list[str]:
+    """pdfplumber extract_tables() の結果をテキスト行リストに変換する、E
+
+    吁E���E セル値を空白区刁E��で結合した斁E���E、E
+    None セルは空斁E���Eにする、E
+    """
+    lines: list[str] = []
+    for row in raw_table:
+        cells = [(cell or "").strip() for cell in row]
+        line = "  ".join(cells)
+        if line.strip():
+            lines.append(line)
+    return lines
+
+
+# ============================================================
+# Orientation Helpers  E行�Eース / 列�Eース 2段構え (追加)
+# ============================================================
+
+def _norm_text(s: str | None) -> str:
+    """None 安�E・全角半角正規化・連続空白縮紁E�E簡易テキスト正規化、E""
+    if s is None:
+        return ""
+    # 全角スペ�Eス・改衁EↁE半角スペ�Eス
+    s = s.replace("\u3000", " ").replace("\n", " ").replace("\r", " ")
+    # 全角英数 ↁE半见E
+    result = []
+    for c in s:
+        code = ord(c)
+        if 0xFF01 <= code <= 0xFF5E:
+            result.append(chr(code - 0xFEE0))
+        else:
+            result.append(c)
+    s = "".join(result)
+    # 連続空白縮紁E�E前後トリム
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+# 持E��ラベル: 売丁E利益系 (許容)
+_METRIC_POSITIVE_RE = re.compile(
+    r"(売上|売上髁E営業収益|収益|利益|営業利益|事業利益|セグメント利益|経常利益|"
+    r"EBITDA|ebitda|調整額|合訁E損失|利益\s*[\(�E�E損失[\)�E�]|"
+    r"Revenue|Sales|Profit|Loss|EBIT)"
+)
+# BS/CF 系: 持E��ラベルから除夁E
+_METRIC_EXCLUDE_RE = re.compile(
+    r"(賁E��|負債|純賁E��|現金|営業活動|投賁E��動|財務活動|当期末|前期末|前年同期|"
+    r"Assets|Liabilities|Net assets|Cash flows|Current assets|Fixed assets)"
+)
+
+
+def _is_metric_label(text: str) -> bool:
+    """左列�E持E��行ラベル判宁E 売丁E利益系を拾ぁEBS/CF は弾く、E""
+    t = _norm_text(text)
+    if not t:
+        return False
+    if _METRIC_EXCLUDE_RE.search(t):
+        return False
+    return bool(_METRIC_POSITIVE_RE.search(t))
+
+
+# 期間比輁E��ベル
+_PERIOD_RE = re.compile(
+    r"(当期|前期|当四半期|前四半期|前年同期|"
+    r"\d{4}年\d{1,2}月期|第\d+四半期|累訁E通期|増減|増減率|前期末|当期末)"
+)
+
+
+def _is_period_label(text: str) -> bool:
+    """期間比輁E��を弾くため�E簡易ラベル判定、E""
+    t = _norm_text(text)
+    if not t:
+        return False
+    return bool(_PERIOD_RE.search(t))
+
+
+# BS/CF 系ラベル
+# NOTE: 単独「賁E��」「固定賁E��」「負債」「純賁E��」�E除外、E
+#   - 「固定賁E��売却盁E除却損」などのPL科目を誤判定しなぁE��ぁE��合訁Eの部などBS斁E��語に絞る、E
+#   - 「セグメント賁E��」「賁E��の調整額」なども除外される、E
+#   - 修正前�E bscf_hits 数と同等か下回ることを意図、E
+_BS_CF_RE = re.compile(
+    r"(流動賁E��合訁E流動賁E��(?![\w])|固定賁E��合訁E賁E��合訁E賁E��の部|無形固定賁E��合訁E繰延賁E��|"
+    r"負債合訁E負債の部|純賁E��合訁E純賁E��の部|"
+    r"現金及び預��|コールローン|投賁E��託|"
+    r"営業活動|投賁E��動|財務活動|キャチE��ュ.?フロー|"
+    r"Assets|Liabilities|Net assets|Current assets|Cash flows)"
+)
+
+
+# ── Fix-1: Phase F PL科目フィルタ用正規表現 ────────────────────────────
+# 完�E一致寁E���E�末尾の括弧注記�Eみ許容�E�、E
+# 「営業利益率」「売上高構�E比」などにはマッチしなぁE��E
+_PL_ACCOUNT_FILTER_RE = re.compile(
+    r'^(?:'
+    r'売上髁E売上原価|売上総利益|'
+    r'販売費及�E一般管琁E��|販売費|一般管琁E��|'
+    r'営業利益|営業損失|営業利益又は営業損失|'
+    r'受取利息|支払利息|受取配当��|受取手数料|'
+    r'経常利益|経常損失|経常利益又は経常損失|'
+    r'税引前(?:中閁E?(?:四半朁E?(?:紁E?(?:利益|損失)|'
+    r'税��等調整剁E?:中閁E?(?:四半朁E?(?:紁E?(?:利益|損失)|'
+    r'法人稁E?:、住民税及び事業稁E?|住民税|事業税|'
+    r'(?:当期|中間|四半朁E紁E?:利益|損失)|'
+    r'当社株主に帰属すめE?:当期|中間|四半朁E紁E?:利益|損失)|'
+    r'親会社株主に帰属すめE?:当期|中間|四半朁E紁E?:利益|損失)|'
+    r'非支配株主持�E|'
+    r'完�E工事髁E完�E工事原価|完�E工事総利益|'
+    r'売電収�E|売電費用|為替差[損益]|'
+    r'固定賁E��(?:売却|除却|処刁E[損益]|'
+    r'投賁E��価証券(?:売却|渁E��|評価)[損益]|'
+    r'補助金収入|仕�E割引|雑収入|補修費用|業務受託手数料|'
+    r'持�E法による投賁E?:損失|利盁E|持�E変動損失|事業構造改喁E��用'
+    r')(?:\s*[�E�E][^�E�E]*[�E�E]|[�E�E])?$'
+)
+
+
+def _is_bs_cf_label(text: str) -> bool:
+    """BS/CF 系ラベル判定、E""
+    t = _norm_text(text)
+    if not t:
+        return False
+    return bool(_BS_CF_RE.search(t))
+
+
+# 列�Eース上�Eセグメント見�Eし候裁E
+_SEG_HDR_POSITIVE_RE = re.compile(
+    r"(事業|セグメンチE部門|国冁E海外|日本|北米|欧州|アジア|そ�E他|"
+    r"Segment|Business|Division|Domestic|Overseas|Japan|Asia|Europe|Americas)"
+)
+_SEG_HDR_EXCLUDE_RE = re.compile(
+    r"^(売上|利益|損失|合訁E調整額|消去|全社|賁E��|負債|純賁E��|"
+    r"当期|前期|前年同期|増減|累訁ESales|Revenue|Profit|Loss|Total|Assets)"
+)
+
+
+def _is_segment_header_text(text: str) -> bool:
+    """列�Eース上�Eのセグメント見�Eし候補判定、E
+
+    許容: 事業・部門・地域名など短ぁE��有名詁E
+    除夁E 純粋な持E��名・期間ラベル・BS 系・長斁E�E句点入めE
+    """
+    t = _norm_text(text)
+    if not t or len(t) > 30:
+        return False
+    # 句点 or 長斁E�E除夁E
+    if "、E in t or "、E in t:
+        return False
+    if _SEG_HDR_EXCLUDE_RE.search(t):
+        return False
+    if _METRIC_EXCLUDE_RE.search(t):
+        return False
+    if _PERIOD_RE.search(t):
+        return False
+    if _SEG_HDR_POSITIVE_RE.search(t):
+        return True
+    # 短ぁE��本語固有名詁E(2斁E��以上�E和字で構�E)
+    jp_chars = sum(1 for c in t if "\u3000" < c <= "\u9fff" or "\uff00" <= c <= "\uffef")
+    if jp_chars >= 2 and 2 <= len(t) <= 15:
+        return True
+    return False
+
+
+_ORIENT_NUM_RE = re.compile(r"^[△▲\-]?\s*[\d,]+(?:\.\d+)?$")
+
+
+def _detect_orientation_signals(
+    table_lines: list[str],
+    raw_table: list[list[str | None]] | None = None,
+) -> dict:
+    """候補テーブルから row_based / column_based / unknown の向きを推定する、E
+
+    Parameters
+    ----------
+    table_lines : list[str]
+        スペ�Eス区刁E��で結合済みの行文字�EリスチE(Phase B-boost の non_empty と同じ)、E
+    raw_table : list[list[str|None]] | None
+        pdfplumber の raw セル配�E。渡せる場合�Eセル構造を優先して判定する、E
+        None の場合�E table_lines をセル刁E��して代用する、E
+
+    Returns
+    -------
+    dict
+        orientation, row_seg_hits, row_metric_header_hits,
+        col_seg_hits, col_metric_hits, numeric_cross_hits,
+        period_label_hits, bs_cf_hits, orientation_trace
+    """
+    # --- セル配�Eを確宁E---
+    if raw_table is not None:
+        # pdfplumber 由来のセル構造を使ぁE
+        rows: list[list[str]] = [
+            [_norm_text(cell) for cell in row]
+            for row in raw_table
+            if any((cell or "").strip() for cell in row)
+        ]
+    else:
+        # table_lines をタチE褁E��スペ�Eスで刁E��してセル配�Eを�E構篁E
+        rows = []
+        for line in table_lines:
+            cells = [_norm_text(c) for c in re.split(r"\s{2,}|\t", line)]
+            cells = [c for c in cells if c]
+            if cells:
+                rows.append(cells)
+
+    if not rows:
+        return {
+            "orientation": "unknown",
+            "row_seg_hits": 0, "row_metric_header_hits": 0,
+            "col_seg_hits": 0, "col_metric_hits": 0,
+            "numeric_cross_hits": 0, "period_label_hits": 0,
+            "bs_cf_hits": 0, "orientation_trace": {},
+        }
+
+    n_rows = len(rows)
+
+    # ---- period / BS-CF カウンチE(全セル対象) ----
+    period_label_hits = 0
+    bs_cf_hits = 0
+    for row in rows:
+        for cell in row:
+            if _is_period_label(cell):
+                period_label_hits += 1
+            if _is_bs_cf_label(cell):
+                bs_cf_hits += 1
+
+    # ---- row_based シグナル ----
+    # 左端列にセグメント名っぽぁE��数値チE��ストが褁E�� ↁErow_seg_hits
+    row_seg_hits = 0
+    for row in rows:
+        if not row:
+            continue
+        left_cell = row[0]
+        if left_cell and not _ORIENT_NUM_RE.fullmatch(left_cell):
+            # セグメント名候裁E _is_segment_header_text また�E短ぁE��字日本誁E
+            if _is_segment_header_text(left_cell):
+                row_seg_hits += 1
+
+    # 上佁E行に売丁E利益系ヘッダーがあめEↁErow_metric_header_hits
+    row_metric_header_hits = 0
+    for row in rows[:3]:
+        for cell in row[1:]:  # 左端はセグメント名列なので除夁E
+            if _is_metric_label(cell):
+                row_metric_header_hits += 1
+
+    # ---- column_based シグナル ----
+    # 上佁E、E行�E2列目以降にセグメント名っぽぁE��数値チE��ストが褁E�� ↁEcol_seg_hits
+    col_seg_hits = 0
+    for row in rows[:2]:
+        for cell in row[1:]:
+            if cell and not _ORIENT_NUM_RE.fullmatch(cell) and _is_segment_header_text(cell):
+                col_seg_hits += 1
+
+    # 左端列�E3行目以降に _is_metric_label 該当が褁E�� ↁEcol_metric_hits
+    # (ただぁEBS/CF ラベルはカウントしなぁE
+    col_metric_hits = 0
+    for row in rows[2:]:  # 先頭2行�Eヘッダー候補なのでスキチE�E
+        if not row:
+            continue
+        left_cell = row[0]
+        if left_cell and _is_metric_label(left_cell) and not _is_bs_cf_label(left_cell):
+            col_metric_hits += 1
+
+    # 持E��衁EÁEセグメント�Eの交点に数値が褁E�� ↁEnumeric_cross_hits
+    # col_metric_hits ぁE1 以上�EチE�Eタ行につぁE��、E列目以降�E数値セル数を合訁E
+    numeric_cross_hits = 0
+    for row in rows[2:]:
+        if not row:
+            continue
+        left_cell = row[0]
+        if left_cell and _is_metric_label(left_cell) and not _is_bs_cf_label(left_cell):
+            num_in_row = sum(
+                1 for cell in row[1:]
+                if cell and _ORIENT_NUM_RE.fullmatch(cell)
+            )
+            numeric_cross_hits += num_in_row
+
+    # ---- 向き判宁E----
+    is_row = (row_seg_hits >= 2 and row_metric_header_hits >= 1)
+    is_col = (col_seg_hits >= 2 and col_metric_hits >= 2 and numeric_cross_hits >= 2)
+
+    # BS/CF / 期間比輁E��強ぁE��合�E column_based を弱める
+    col_suppressed = False
+    if is_col and (period_label_hits >= col_seg_hits or bs_cf_hits >= 2):
+        is_col = False
+        col_suppressed = True
+
+    if is_row and is_col:
+        # 両シグナルが立ってぁE��場吁E BS/CF が少なぁE��を優允EↁErow_based を優允E
+        orientation = "row_based"
+    elif is_row:
+        orientation = "row_based"
+    elif is_col:
+        orientation = "column_based"
+    else:
+        orientation = "unknown"
+
+    orientation_trace = {
+        "row_seg_hits": row_seg_hits,
+        "row_metric_header_hits": row_metric_header_hits,
+        "col_seg_hits": col_seg_hits,
+        "col_metric_hits": col_metric_hits,
+        "numeric_cross_hits": numeric_cross_hits,
+        "period_label_hits": period_label_hits,
+        "bs_cf_hits": bs_cf_hits,
+        "is_row": is_row,
+        "is_col": is_col,
+        "col_suppressed": col_suppressed,
+        "n_rows": n_rows,
+    }
+
+    return {
+        "orientation": orientation,
+        "row_seg_hits": row_seg_hits,
+        "row_metric_header_hits": row_metric_header_hits,
+        "col_seg_hits": col_seg_hits,
+        "col_metric_hits": col_metric_hits,
+        "numeric_cross_hits": numeric_cross_hits,
+        "period_label_hits": period_label_hits,
+        "bs_cf_hits": bs_cf_hits,
+        "orientation_trace": orientation_trace,
+    }
+
+
+# ============================================================
+# Column-First Detection (横型レイアウチE セグメント名が�Eヘッダーにある)
+# ============================================================
+
+from dataclasses import dataclass as _dcls
+
+@_dcls
+class _ColumnFirstResult:
+    """detect_column_based_segments の戻り値"""
+    status: str = ""            # "ok" / "partial_column" / "none"
+    segment_tokens: list = None  # 検�Eしたセグメント�Eト�Eクン
+    header_row: str = ""        # ヘッダー行テキスチE
+    segment_count: int = 0
+    numeric_col_count: int = 0  # ヘッダー以外�EチE�Eタ行における数値列数
+
+    def __post_init__(self):
+        if self.segment_tokens is None:
+            self.segment_tokens = []
+
+
+# セグメント名らしぁE��ーワーチE(列�EチE��ー用)
+_COL_SEG_POSITIVE = re.compile(
+    r'(事業|部門|セグメンチEビジネス|カンパニー|ユニッチE事業部|'
+    r'国冁E海外|日本|北米|欧州|アジア|中国|東南アジア|大洋州|米州|中東|南米|アフリカ|'
+    r'Segment|Business|Division|Unit|Domestic|Overseas|'
+    r'Japan|Asia|Europe|Americas|Global)'
+)
+_COL_SEG_NOISE = re.compile(
+    r'^(売上|利益|損益|収益|賁E��|費用|合訁E調整|消去|全社|本社|連結|'
+    r'Sales|Revenue|Profit|Loss|Assets|Total|Adjustment|Eliminations|'
+    r'Corporate|Common|前期|当期|前年|今期|予想|実績|\d|%|�E�E'
+)
+_NUM_RE = re.compile(r'^[△▲]?[\d,]+(?:\.\d+)?$')
+
+
+def _is_column_segment_token(token: str) -> str:
+    """ト�Eクンがセグメント�Eヘッダーとして有効かチェチE��、E
+    戻り値: 'valid' / 'weak' / 'noise'
+    """
+    t = token.strip()
+    if not t or len(t) < 2:
+        return "noise"
+    if _NUM_RE.fullmatch(t):
+        return "noise"
+    if _COL_SEG_NOISE.match(t):
+        return "noise"
+    if _COL_SEG_POSITIVE.search(t):
+        return "valid"
+    # 短ぁE��本語固有名詁E 3斁E��以上で漢孁Eカナ主体ならweak
+    jp_chars = sum(1 for c in t if '\u3000' <= c <= '\u9fff' or '\uff00' <= c <= '\uffef')
+    if jp_chars >= 2 and len(t) >= 2:
+        return "weak"
+    return "noise"
+
+
+def detect_column_based_segments(table_lines: list[str]) -> _ColumnFirstResult:
+    """横型セグメント表�E�セグメント名が�Eヘッダーにある�E�を検�Eする、E
+
+    ロジチE��:
+    1. 先頭から最初�E「非数値のみの行」をヘッダー行候補とする
+    2. そ�E行をスペ�Eス区刁E��でト�Eクン匁E
+    3. 吁E��ークンめE_is_column_segment_token で評価
+    4. valid >= 2 なめEstatus='ok'
+       valid >= 1 AND weak >= 1 AND numeric_col_count >= 2 なめEstatus='partial_column'
+       それ以外なめEstatus='none'
+    """
+    if not table_lines:
+        return _ColumnFirstResult(status="none")
+
+    # ヘッダー衁E 先頭3行以冁E��数値が少なぁE��を探ぁE
+    header_row = ""
+    header_line_idx = -1
+    for i, line in enumerate(table_lines[:4]):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # 数値ト�Eクンの割合が低い行をヘッダー候補とする
+        tokens = re.split(r'\s{2,}|\t', stripped)
+        num_tok = sum(1 for t in tokens if _NUM_RE.fullmatch(t.strip()))
+        if len(tokens) >= 2 and num_tok / len(tokens) < 0.5:
+            header_row = stripped
+            header_line_idx = i
+            break
+
+    if not header_row:
+        return _ColumnFirstResult(status="none")
+
+    tokens = [t.strip() for t in re.split(r'\s{2,}|\t', header_row) if t.strip()]
+
+    valid_count = 0
+    weak_count = 0
+    seg_tokens: list[str] = []
+    for tok in tokens:
+        kind = _is_column_segment_token(tok)
+        if kind == "valid":
+            valid_count += 1
+            seg_tokens.append(tok)
+        elif kind == "weak":
+            weak_count += 1
+            seg_tokens.append(tok)
+
+    total_seg = valid_count + weak_count
+
+    # チE�Eタ行�E数値列数を計箁E(ヘッダー行以降から最大3行を対象)
+    numeric_col_count = 0
+    data_start = header_line_idx + 1
+    data_sample = [l for l in table_lines[data_start:data_start + 4] if l.strip()]
+    if data_sample:
+        col_has_num = {}
+        for dline in data_sample:
+            dtokens = re.split(r'\s{2,}|\t', dline.strip())
+            for ci, dt in enumerate(dtokens):
+                if _NUM_RE.fullmatch(dt.strip()):
+                    col_has_num[ci] = True
+        numeric_col_count = len(col_has_num)
+
+    # status 判宁E
+    if valid_count >= 2:
+        status = "ok"
+    elif valid_count >= 1 and weak_count >= 1 and numeric_col_count >= 2:
+        # strict: valid が最佁Eつ忁E��E+ 数値列も確誁E
+        status = "partial_column"
+    else:
+        status = "none"
+
+    return _ColumnFirstResult(
+        status=status,
+        segment_tokens=seg_tokens,
+        header_row=header_row,
+        segment_count=total_seg,
+        numeric_col_count=numeric_col_count,
+    )
+
+
+# ============================================================
+# Column-as-Segment: 刁EセグメンチE/ 衁E持E��E横持ちセグメント表
+# ============================================================
+
+# 列�EチE��ー除外ラベル�E�合計�E調整・消去・連結系 + PLサマリ列�EチE��ー固定値�E�E
+_COL_HDR_EXCL: frozenset[str] = frozenset([
+    "訁E, "合訁E, "報告セグメント訁E, "調整顁E,
+    "消去また�E全社", "消去又�E全社", "消去・全社", "全社",
+    "連絁E, "四半期連結損益計算書計上顁E, "要紁E��半期連結財務諸表計上顁E,
+    # PLサマリ列�EチE��ー固定値�E�最も頻出するスペ�Eスなし版�E�E
+    "報告セグメンチE, "中間連結損益計算書計上顁E,
+])
+
+# 列�EチE��ー誤認防止: PLサマリ列�EチE��ー系の正規表現
+# スペ�Eス入り変形・「その仁E注)N」単独・期間ラベル刁Eを除外すめE
+_COL_HDR_LIKE_RE = re.compile(
+    r"^("
+    r"報呁E?:\s*セグメンチE?\s*$"
+    r"|(?:四半期|中間|連結|要紁E��半期連結財務諸表)?\s*損益計算書\s*計上額\s*$"
+    r"|(?:四半期|中間|連結|要紁E��半期連結財務諸表)?\s*(?:連絁E?(?:損益計算書)?\s*計上額\s*$"
+    r"|要紁E��半期連結財務諸表\s*計上顁E
+    r"|(?:中間連絁E?損益\s*計算書\s*計上顁E
+    r"|.*損益.*計上額\s*$"          # スペ�Eス入り変形全般�E�侁E 四半期連絁E損益計算書 計上額！E
+    r"|.*財務諸表.*計上額\s*$"      # 要紁E��半期連結財務諸表 計上顁E筁E
+    r"|そ�E他\s*[�E�E]?注[�E�E]?\s*\d*\s*$"
+    r"|[�E�E]?注[�E�E]?\s*\d+\s*$"
+    r"|[IⅠ①-③Ⅱ-Ⅸ]\s*(前|彁E"
+    r")",
+    re.UNICODE,
+)
+
+
+def _is_col_hdr_like(text: str) -> bool:
+    """COL_AS_SEG でセグメント名候補から除外すべき�Eヘッダー系語かどぁE��を判定、E
+
+    対象:
+    - 報呁E報告セグメンチE
+    - 損益計算書計上顁E系�E�スペ�Eス変形含む�E�E
+    - そ�E仁E注)N 単独
+    - _COL_HDR_EXCL 固定セチE��
+    """
+    if not text:
+        return False
+    t = text.strip()
+    if t in _COL_HDR_EXCL:
+        return True
+    return bool(_COL_HDR_LIKE_RE.search(t))
+
+# 売上行キーワード（優先頁E��E
+_SALES_ROW_KWS: list[str] = [
+    "外部顧客への売上髁E,
+    "顧客との契紁E��ら生じる収益",
+    "売上髁E,
+    "営業収益",
+]
+
+# 利益行キーワード（優先頁E��E
+_PROFIT_ROW_KWS: list[str] = [
+    "セグメント利益又は損失",
+    "セグメント利盁E△損失)",
+    "セグメント利益（△損失�E�E,
+    "セグメント損盁E,
+    "セグメント利盁E,
+    "営業利盁E,
+]
+
+
+def _build_cell_grid(
+    raw_table: list[list[str | None]] | None,
+    table_lines: list[str],
+) -> list[list[str]]:
+    """raw_table / table_lines から正規化済みセルグリチE��を構築する、E""
+    if raw_table:
+        return [
+            [_norm_text(cell) for cell in row]
+            for row in raw_table
+            if any((cell or "").strip() for cell in row)
+        ]
+    rows: list[list[str]] = []
+    for line in table_lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        cells = [_norm_text(c) for c in re.split(r"\s{2,}|\t", stripped)]
+        cells = [c for c in cells if c]
+        if cells:
+            rows.append(cells)
+    return rows
+
+
+def _find_matching_raw_table(
+    best_table_lines: list[str],
+    raw_tables_on_page: list[list[list[str | None]]],
+) -> list[list[str | None]] | None:
+    """best_table_lines に最も一致する raw_table をテキストオーバ�EラチE�Eで選ぶ、E
+
+    先頭チE�Eブルを盲目皁E��返す代わりに、同一ペ�Eジ冁E�E褁E��チE�Eブルから
+    最良一致を探し、オーバ�EラチE�E玁E< 0.3 の場合�E None を返す、E
+    """
+    if not raw_tables_on_page:
+        return None
+    best_text: set[str] = set()
+    for line in best_table_lines:
+        for token in re.split(r"\s+", line.strip()):
+            t = _norm_text(token)
+            if t and len(t) >= 2:
+                best_text.add(t)
+    if not best_text:
+        return None
+    best_match: list[list[str | None]] | None = None
+    best_score = 0.0
+    for raw_tbl in raw_tables_on_page:
+        tbl_text: set[str] = set()
+        for row in raw_tbl:
+            for cell in row:
+                t = _norm_text(cell)
+                if t and len(t) >= 2:
+                    tbl_text.add(t)
+        if not tbl_text:
+            continue
+        overlap = len(best_text & tbl_text)
+        score = overlap / max(len(best_text), len(tbl_text), 1)
+        if score > best_score:
+            best_score = score
+            best_match = raw_tbl
+    return best_match if best_score >= 0.1 else None
+
+
+def _is_column_as_segment_table(
+    raw_table: list[list[str | None]] | None,
+    table_lines: list[str],
+) -> dict:
+    """横持ちセグメント表�E��E=セグメンチE/ 衁E持E��）かどぁE��判定する、E
+
+    Returns
+    -------
+    dict:
+        is_col_seg      : bool
+        header_row_idx  : int           ヘッダー行�EグリチE��上インチE��クス
+        seg_col_indices : list[int]     セグメント�EインチE��クスリスチE
+        sales_row_idx   : int | None    売上行インチE��クス
+        profit_row_idx  : int | None    利益行インチE��クス
+        trace           : list[str]
+    """
+    trace: list[str] = []
+    _base = {
+        "is_col_seg": False,
+        "header_row_idx": -1,
+        "seg_col_indices": [],
+        "sales_row_idx": None,
+        "profit_row_idx": None,
+        "trace": trace,
+    }
+    grid = _build_cell_grid(raw_table, table_lines)
+    if not grid or len(grid) < 3:
+        trace.append("col_as_seg: grid too small")
+        return _base
+
+    n_rows = len(grid)
+
+    # Step 1: 上部最大5行からセグメント�EチE��ー行を探ぁE
+    scan_limit = min(5, n_rows - 1)
+    best_hdr_ri = -1
+    best_seg_count = 0
+    for ri in range(scan_limit):
+        row = grid[ri]
+        seg_hit = 0
+        for cell in row[1:]:  # col 0 は行ラベル列なのでスキチE�E
+            if not cell or _ORIENT_NUM_RE.fullmatch(cell):
+                continue
+            # header_like_segment_name_guard: PLサマリ列�EチE��ー系を除夁E
+            if _is_col_hdr_like(cell):
+                continue
+            if _is_segment_header_text(cell):
+                seg_hit += 1
+        if seg_hit >= 2 and seg_hit > best_seg_count:
+            best_seg_count = seg_hit
+            best_hdr_ri = ri
+
+    if best_hdr_ri < 0:
+        trace.append(f"col_as_seg: no header row found (max_seg={best_seg_count})")
+        return _base
+
+    # Step 2: セグメント�EインチE��クスを確宁E
+    # header_like_segment_name_guard を適用: 列�EチE��ー系語�Eセグメント�Eから除夁E
+    hdr_row = grid[best_hdr_ri]
+    seg_col_indices: list[int] = [
+        ci for ci, cell in enumerate(hdr_row)
+        if ci > 0  # col 0 は行ラベル刁E
+        and cell
+        and not _ORIENT_NUM_RE.fullmatch(cell)
+        and not _is_col_hdr_like(cell)        # ↁEheader_like_segment_name_guard
+        and _is_segment_header_text(cell)
+    ]
+    if len(seg_col_indices) < 2:
+        trace.append(f"col_as_seg: too few seg cols ({len(seg_col_indices)}) [after hdr_guard]")
+        return _base
+
+    # Step 3: ヘッダー行以降�E左端列に持E��語が 2件以丁E+ 売丁E利益行探索
+    data_start = best_hdr_ri + 1
+    metric_hits = 0
+    sales_row_idx: int | None = None
+    profit_row_idx: int | None = None
+
+    for ri in range(data_start, n_rows):
+        row = grid[ri]
+        if not row:
+            continue
+        left = row[0]
+        if not left:
+            continue
+        if _is_metric_label(left):
+            metric_hits += 1
+        if sales_row_idx is None:
+            for kw in _SALES_ROW_KWS:
+                if kw in left:
+                    sales_row_idx = ri
+                    break
+        if profit_row_idx is None:
+            for kw in _PROFIT_ROW_KWS:
+                if kw in left:
+                    profit_row_idx = ri
+                    break
+
+    if metric_hits < 2:
+        trace.append(f"col_as_seg: too few metric rows ({metric_hits})")
+        return _base
+
+    # Step 4: マトリクス交点に数値ぁE4件以丁E
+    numeric_cross = 0
+    for ri in range(data_start, n_rows):
+        row = grid[ri]
+        if not row:
+            continue
+        if not _is_metric_label(row[0]):
+            continue
+        for ci in seg_col_indices:
+            if ci < len(row) and row[ci] and _ORIENT_NUM_RE.fullmatch(row[ci]):
+                numeric_cross += 1
+
+    if numeric_cross < 4:
+        trace.append(f"col_as_seg: too few numeric cross ({numeric_cross})")
+        return _base
+
+    trace.append(
+        f"col_as_seg: DETECTED hdr={best_hdr_ri} "
+        f"seg_cols={seg_col_indices} metrics={metric_hits} "
+        f"cross={numeric_cross} sales_row={sales_row_idx} profit_row={profit_row_idx}"
+    )
+    return {
+        "is_col_seg": True,
+        "header_row_idx": best_hdr_ri,
+        "seg_col_indices": seg_col_indices,
+        "sales_row_idx": sales_row_idx,
+        "profit_row_idx": profit_row_idx,
+        "trace": trace,
+    }
+
+
+def _extract_col_as_segment(
+    raw_table: list[list[str | None]] | None,
+    table_lines: list[str],
+    col_seg_info: dict,
+    *,
+    unit_multiplier: int | None = None,
+    unit_raw: str | None = None,
+) -> list[dict]:
+    """column-as-segment モードでセグメントレコードを抽出する、E
+
+    Returns
+    -------
+    list of dicts: [{segment_name, sales, profit}]
+    """
+    records: list[dict] = []
+    grid = _build_cell_grid(raw_table, table_lines)
+    if not grid:
+        return records
+
+    hdr_ri: int = col_seg_info["header_row_idx"]
+    seg_col_indices: list[int] = col_seg_info["seg_col_indices"]
+    sales_ri: int | None = col_seg_info["sales_row_idx"]
+    profit_ri: int | None = col_seg_info["profit_row_idx"]
+
+    if hdr_ri < 0 or hdr_ri >= len(grid):
+        return records
+    hdr_row = grid[hdr_ri]
+
+    def _parse_num(cell: str) -> float | None:
+        if not cell:
+            return None
+        # セルに褁E��値�E�侁E "1,831,763 -"�E�が入ってぁE��場合�E先頭の数値ト�Eクンのみ使ぁE
+        # まず�E頭の △/▲ 付き数値パターンを探ぁE
+        m = re.search(r'([△▲]?\s*[\d,]+(?:\.\d+)?)', cell)
+        if not m:
+            return None
+        token = m.group(1)
+        is_neg = '△' in token or '▲' in token
+        num_str = re.sub(r'[△▲,\s]', '', token)
+        try:
+            val = float(num_str)
+            return -val if is_neg else val
+        except ValueError:
+            return None
+
+    def _apply_unit(val: float | None) -> float | None:
+        if val is None:
+            return None
+        if unit_multiplier and unit_multiplier != 1_000_000:
+            return _apply_unit_multiplier(val, unit_multiplier)
+        if unit_raw:
+            return _normalize_unit_legacy(val, unit_raw)
+        return val
+
+    for ci in seg_col_indices:
+        seg_name = hdr_row[ci] if ci < len(hdr_row) else ""
+        # header_like_segment_name_guard: 抽出時にも二重チェチE��
+        if not seg_name or _is_col_hdr_like(seg_name):
+            continue
+
+        sales_val: float | None = None
+        if sales_ri is not None and sales_ri < len(grid):
+            s_row = grid[sales_ri]
+            if ci < len(s_row):
+                sales_val = _apply_unit(_parse_num(s_row[ci]))
+
+        profit_val: float | None = None
+        if profit_ri is not None and profit_ri < len(grid):
+            p_row = grid[profit_ri]
+            if ci < len(p_row):
+                profit_val = _apply_unit(_parse_num(p_row[ci]))
+
+        if sales_val is None and profit_val is None:
+            continue
+
+        records.append({
+            "segment_name": seg_name,
+            "sales": sales_val,
+            "profit": profit_val,
+        })
+
+    return records
+
+
+# ============================================================
+# quarantine review jsonl 出劁E
+# ============================================================
+
+_REVIEW_DIR = None  # 初期化時に設定可能
+
+
+def set_review_output_dir(path: str) -> None:
+    """quarantine review jsonl の出力�Eを設宁E""
+    global _REVIEW_DIR
+    _REVIEW_DIR = path
+
+
+def write_quarantine_review(
+    result: V2DetectionResult,
+    *,
+    doc_id: str = "",
+    ticker: str = "",
+    source_file: str = "",
+    best_table_lines: list[str] | None = None,
+    column_diagnosis: dict | None = None,
+    table_index: int | None = None,
+) -> None:
+    """quarantine 案件めEreview 用 jsonl に出劁E(Phase 2 強化版)"""
+    try:
+        review_dir = _REVIEW_DIR or os.environ.get("TDNET_REVIEW_DIR", "")
+        if not review_dir:
+            review_dir = str(Path(__file__).resolve().parents[2] / "review")
+
+        os.makedirs(review_dir, exist_ok=True)
+        review_path = os.path.join(review_dir, "quarantine_review_segment.jsonl")
+
+        # header/row snapshot (強匁E header 10衁E row_labels 20件)
+        header_snapshot = []
+        row_labels_sample = []
+        if best_table_lines:
+            header_snapshot = [l.strip() for l in best_table_lines[:10] if l.strip()]
+            for l in best_table_lines:
+                m = re.match(r'^([^\d\u25B3\u25B2\-\uFF0D]*)', l.strip())
+                if m and m.group(1).strip():
+                    row_labels_sample.append(m.group(1).strip())
+            row_labels_sample = row_labels_sample[:20]
+
+        record = {
+            "doc_id": doc_id or "?",
+            "ticker": ticker or "?",
+            "source_file": source_file or "?",
+            "failed_stage": result.failed_stage,
+            "quarantine_reason": result.quarantine_reason,
+            "review_hint": result.review_hint,
+            "table_index": table_index,
+            "candidate_tables": result.candidate_tables_count,
+            "best_table_score": result.score_summary.get("table_score"),
+            "sales_col_role": result.score_summary.get("sales_col_role"),
+            "profit_col_role": result.score_summary.get("profit_col_role"),
+            "unit_raw": result.unit_info.unit_raw if result.unit_info else None,
+            "unit_multiplier": result.unit_info.unit_multiplier if result.unit_info else None,
+            "header_snapshot": header_snapshot,
+            "row_labels_sample": row_labels_sample,
+            "extraction_engine": "v2",
+            "rule_trace": result.rule_trace[-5:] if result.rule_trace else [],
+            "timestamp": datetime.now(JST).isoformat(),
+        }
+
+        # column diagnosis (no_sales_profit_columns 用)
+        if column_diagnosis:
+            record["candidate_column_labels"] = column_diagnosis.get("column_labels", [])
+            record["candidate_column_roles"] = column_diagnosis.get("column_roles", [])
+            record["column_taxonomy_scores"] = column_diagnosis.get("taxonomy_scores", [])
+            record["reconstructed_headers"] = column_diagnosis.get("reconstructed_headers", [])
+            record["header_role_fallback_scores"] = column_diagnosis.get("header_role_scores", {})
+        else:
+            record["candidate_column_labels"] = []
+            record["candidate_column_roles"] = []
+
+        with open(review_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+
+    except Exception as e:
+        logger.warning(f"[v2] quarantine review 書き込み失敁E {e}")
+
+
+def _build_column_diagnosis(col_result, reconstructed, data_rows, fallback_scores=None, raw_headers=None):
+    """no_sales_profit_columns quarantine 用の column 診断惁E��を構篁E""
+    diag = {}
+    # raw header rows
+    diag["raw_headers"] = list(raw_headers) if raw_headers else []
+    # 再構築�EチE��ー
+    diag["reconstructed_headers"] = list(reconstructed) if reconstructed else []
+    # 列ラベル (data_rows の先頭2行かめE
+    column_labels = []
+    if data_rows:
+        for row in data_rows[:2]:
+            column_labels.append(row)
+    diag["column_labels"] = column_labels
+    # 列ロール (classify_columns の結果)
+    if hasattr(col_result, "column_roles") and col_result.column_roles:
+        diag["column_roles"] = [str(r) for r in col_result.column_roles]
+    else:
+        diag["column_roles"] = []
+    # sales/profit candidates
+    diag["best_sales_col"] = col_result.best_sales_col
+    diag["best_profit_col"] = col_result.best_profit_col
+    diag["profit_role"] = col_result.profit_role if hasattr(col_result, "profit_role") else ""
+    # taxonomy スコア (列ごとの全roleスコア  E先頭5列�Eみ)
+    if hasattr(col_result, "role_score_breakdown") and col_result.role_score_breakdown:
+        diag["taxonomy_scores"] = col_result.role_score_breakdown[:5]
+    else:
+        diag["taxonomy_scores"] = []
+
+    # --- profit / sales candidate 詳細 ---
+    profit_candidates = []
+    sales_candidates = []
+    _profit_roles = {
+        "operating_profit_like", "segment_profit_like", "ordinary_profit_like",
+        "pretax_like", "net_income_like",
+    }
+    _sales_roles = {"sales", "external_sales", "total_sales_like"}
+    breakdown = col_result.role_score_breakdown if hasattr(col_result, "role_score_breakdown") else []
+    headers_list = list(reconstructed) if reconstructed else []
+    for ci, sc in enumerate(breakdown):
+        if not isinstance(sc, dict):
+            continue
+        header = headers_list[ci] if ci < len(headers_list) else ""
+        # profit
+        profit_scores = {r: round(sc.get(r, 0), 3) for r in _profit_roles if sc.get(r, 0) > 0}
+        if profit_scores:
+            best_p_role = max(profit_scores, key=lambda r: profit_scores[r])
+            profit_candidates.append({
+                "col": ci,
+                "header": header[:30],
+                "scores": profit_scores,
+                "best_role": best_p_role,
+                "best_score": profit_scores[best_p_role],
+                "selected": ci == col_result.best_profit_col,
+            })
+        # sales
+        sales_scores = {r: round(sc.get(r, 0), 3) for r in _sales_roles if sc.get(r, 0) > 0}
+        if sales_scores:
+            best_s_role = max(sales_scores, key=lambda r: sales_scores[r])
+            sales_candidates.append({
+                "col": ci,
+                "header": header[:30],
+                "scores": sales_scores,
+                "best_role": best_s_role,
+                "best_score": sales_scores[best_s_role],
+                "selected": ci == col_result.best_sales_col,
+            })
+    diag["profit_candidates"] = profit_candidates
+    diag["sales_candidates"] = sales_candidates
+
+    # header fallback スコア
+    if fallback_scores:
+        diag["header_role_scores"] = {str(k): round(v, 3) if isinstance(v, float) else v
+                                       for k, v in fallback_scores.items()}
+    else:
+        diag["header_role_scores"] = {}
+    return diag
+
+
+# ============================================================
+# Phase 5: Multi-page Table Merge
+# ============================================================
+
+def _try_merge_adjacent_pages(
+    table_candidates: list[tuple[TableScore, list[str], str, float, int]],
+    pages_data: list[tuple[str, int]],
+    page_candidates: list,
+) -> list[tuple[TableScore, list[str], str, float, int]]:
+    """
+    隣接ペ�EジのチE�Eブル候補を結合して再スコアリングする、E
+
+    結合条件:
+      - ペ�Eジ番号が連綁E(page N と N+1)
+      - 数値列数が近い (差2以冁E
+      - 行構造が似てぁE��
+
+    header 継承:
+      - 1ペ�Eジ目にヘッダー行あめE+ 2ペ�Eジ目にヘッダーなぁEↁE継承
+
+    Returns:
+        merge 候補�EリスチE(通常候補と同�E比輁E��)
+    """
+    if len(table_candidates) < 2:
+        return []
+
+    merge_results: list[tuple[TableScore, list[str], str, float, int]] = []
+
+    # ペ�Eジ番号でグルーピング
+    by_page: dict[int, list[tuple[TableScore, list[str], str, float, int]]] = {}
+    for tc in table_candidates:
+        page_no = tc[4]
+        by_page.setdefault(page_no, []).append(tc)
+
+    page_numbers = sorted(by_page.keys())
+
+    for i in range(len(page_numbers) - 1):
+        pg_a = page_numbers[i]
+        pg_b = page_numbers[i + 1]
+
+        # 連続�Eージのみ
+        if pg_b != pg_a + 1:
+            continue
+
+        for tc_a in by_page[pg_a]:
+            for tc_b in by_page[pg_b]:
+                ts_a, lines_a = tc_a[0], tc_a[1]
+                ts_b, lines_b = tc_b[0], tc_b[1]
+
+                # 列数チェチE��
+                if abs(ts_a.numeric_col_count - ts_b.numeric_col_count) > 2:
+                    continue
+
+                # merge: 2ペ�Eジ目のヘッダーが弱ぁE��合�E1ペ�Eジ目のヘッダーを継承
+                merged_lines = list(lines_a)
+
+                # 2ペ�Eジ目からヘッダーらしくなぁE��だけを追加
+                # (ヘッダー判宁E 数値を含まなぁE��ぁE��が先頭にある場合�EスキチE�E)
+                skip_count = 0
+                for line in lines_b[:3]:
+                    stripped = line.strip()
+                    if stripped and not re.search(r'[\d,]{3,}', stripped) and len(stripped) < 50:
+                        skip_count += 1
+                    else:
+                        break
+
+                # 2ペ�Eジ目のチE�Eタ行を追加 (ヘッダー部刁E�E最大2行スキチE�E)
+                if skip_count <= 2 and ts_b.has_sales_header:
+                    # 2ペ�Eジ目も�EチE��ーあり ↁEそ�Eまま結合しなぁE
+                    continue
+
+                data_start = min(skip_count, 2)
+                merged_lines.extend(lines_b[data_start:])
+
+                # 再スコアリング
+                merged_ts = score_segment_table(
+                    merged_lines, "", 0, ts_a.start_line, ts_b.end_line
+                )
+
+                # merge 後スコアが両方の単�Eージより高い場合�Eみ候補に
+                if merged_ts.score > max(ts_a.score, ts_b.score):
+                    # page_text は1ペ�Eジ目を使用、page_score は高い方
+                    best_ps = max(tc_a[3], tc_b[3])
+                    merge_results.append(
+                        (merged_ts, merged_lines, tc_a[2], best_ps, pg_a)
+                    )
+
+    return merge_results
+
+
+# ============================================================
+# 縦持ち fast path 補助関数群 (Phase C-V 用)
+# ============================================================
+
+def _vd_parse_num(v: str | None) -> float | None:  # noqa: F811
+    s = str(v or "").replace(",", "").replace("△", "-").replace("▲", "-").strip()
+    if not s:
+        return None
+    try:
+        return float(s)
+    except Exception:
+        return None
+
+
+_VD_METRIC_LABELS: frozenset[str] = frozenset([
+    "売上髁E, "売上収盁E, "営業収益", "収益",
+    "営業利盁E, "セグメント利盁E, "利盁E, "事業利盁E, "合訁E, "訁E,
+])
+
+_VD_SKIP_SEG_NAMES: frozenset[str] = frozenset([
+    "合訁E, "訁E, "そ�E仁E, "消去", "調整",
+    "報告セグメント訁E, "全社",
+])
+
+
+def _vd_is_vertical_fast(lines: list[str]) -> bool:  # noqa: F811
+    """縦持ち判宁E 売上衁E+ 持E��衁E2件以上がある、E""
+    if not lines:
+        return False
+    sales_kws: frozenset[str] = frozenset(["売上髁E, "売上収盁E, "営業収益", "収益"])
+    metric_kws: frozenset[str] = sales_kws | frozenset(["営業利盁E, "セグメント利盁E, "利盁E, "事業利盁E])
+    has_sales_row = False
+    metric_rows = 0
+    for line in lines[:30]:
+        s = str(line or "").strip()
+        if not s:
+            continue
+        if any(kw in s for kw in sales_kws):
+            has_sales_row = True
+        if any(kw in s for kw in metric_kws):
+            metric_rows += 1
+    return has_sales_row and metric_rows >= 1
+
+
+def _vd_extract_segments_vertical(
+    header_lines: list[str],
+    data_rows: list[list[str]],
+    unit_multiplier: int | None,
+) -> list:
+    """縦持ち fast path 抽出: header_lines=前�E琁E��みチE��スト行、data_rows=刁E��済み列トークン行�Eリスト、E""
+    seg_names: list[str] = []
+    for line in header_lines:
+        tokens = [t.strip() for t in str(line or "").split() if t.strip()]
+        for tok in tokens:
+            if tok not in _VD_METRIC_LABELS and tok not in seg_names:
+                seg_names.append(tok)
+
+    if not seg_names:
+        return []
+
+    sales_kws: frozenset[str] = frozenset(["売上髁E, "売上収盁E, "営業収益", "収益"])
+    profit_kws: frozenset[str] = frozenset(["営業利盁E, "セグメント利盁E, "利盁E, "事業利盁E])
+    sales_row: list[str] | None = None
+    profit_row: list[str] | None = None
+
+    for row in data_rows[:30]:
+        if not row:
+            continue
+        label = str(row[0]).strip()
+        if sales_row is None and any(kw in label for kw in sales_kws):
+            sales_row = row
+        if profit_row is None and any(kw in label for kw in profit_kws):
+            profit_row = row
+
+    if sales_row is None:
+        return []
+
+    mult = unit_multiplier if unit_multiplier and unit_multiplier != 1 else 1
+    segments: list = []
+
+    for i, seg_name in enumerate(seg_names):
+        if seg_name in _VD_SKIP_SEG_NAMES:
+            continue
+        col_idx = i + 1
+        s_raw = sales_row[col_idx] if col_idx < len(sales_row) else None
+        p_raw = (
+            profit_row[col_idx]
+            if profit_row is not None and col_idx < len(profit_row)
+            else None
+        )
+        s_num = _vd_parse_num(s_raw)
+        p_num = _vd_parse_num(p_raw)
+        if s_num is None and p_num is None:
+            continue
+        pq = "full" if s_num is not None and p_num is not None else "partial_sales_only"
+        segments.append(SegmentRecordV2(
+            segment_name=seg_name,
+            segment_order=len(segments) + 1,
+            segment_sales=None if s_num is None else float(s_num) * mult,
+            segment_profit=None if p_num is None else float(p_num) * mult,
+            segment_name_raw=seg_name,
+            segment_name_normalized=seg_name,
+            unit_multiplier=unit_multiplier,
+            extraction_engine="v2",
+            parse_quality=pq,
+        ))
+
+    return segments
+
+
+def _vd_build_data_rows_from_lines(lines: list[str]) -> list[list[str]]:
+    """best_table_lines から data_rows を軽量�E構築すめE(pre-PhaseD 用)、E""
+    data_rows: list[list[str]] = []
+    for line in lines or []:
+        s = str(line or "").strip()
+        if not s:
+            continue
+        tokens = [t.strip() for t in s.split() if t.strip()]
+        if tokens:
+            data_rows.append(tokens)
+    return data_rows
+
+
+# ============================================================
+# run_segment_detection_v2 (Phase 2 + Phase 5)
+# ============================================================
+
+def run_segment_detection_v2(
+    pdf_path: str,
+    *,
+    top_pages: int = 8,
+    min_page_score: float = 0.10,
+    min_table_score: float = 0.20,
+    min_confidence: float = 0.30,
+    doc_id: str = "",
+    ticker: str = "",
+) -> V2DetectionResult:
+    """
+    Phase A-G 統吁E PDF セグメント表自動検�E v2 (Phase 2)、E
+    """
+    result = V2DetectionResult()
+    trace: list[str] = []
+
+    # ================================================================
+    # Phase A: ペ�Eジスコアリング
+    # ================================================================
+    trace.append("Phase A: ペ�Eジスコアリング開姁E)
+
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            pages_data: list[tuple[str, int]] = []
+            # Phase 6: pdfplumber tables も取得して region 不在時に利用
+            pages_tables: dict[int, list[list[list[str | None]]]] = {}
+            for i, page in enumerate(pdf.pages[:15]):
+                page_text = page.extract_text() or ""
+                pages_data.append((page_text, i))
+                try:
+                    raw_tables = page.extract_tables() or []
+                    pages_tables[i] = raw_tables
+                except Exception:
+                    pages_tables[i] = []
+    except Exception as e:
+        result.quarantine_reason = f"PDF読み込みエラー: {e}"
+        result.failed_stage = "page_scoring"
+        result.review_hint = "PDFファイルを開けません、E
+        result.rule_trace = trace
+        return result
+
+    if not pages_data:
+        result.quarantine_reason = "チE��スト抽出不可"
+        result.failed_stage = "page_scoring"
+        result.review_hint = "PDFからチE��ストが抽出できません。OCR対象候補です、E
+        result.rule_trace = trace
+        return result
+
+    page_scores: list[PageScore] = []
+    for text, page_no in pages_data:
+        ps = score_segment_page(text, page_no)
+        page_scores.append(ps)
+
+    result.scored_pages_count = len(page_scores)
+
+    # --- ETF / 投信ペ�EジガーチE Phase A ---
+    # ETF系KW >= 2 のペ�Eジは候補から除外するためスコアめE0.0 に差し戻す、E
+    # (委託老E��酬・受託老E��酬・有価証券売買等損益�E追加信託�E一部交揁E筁E
+    _ETF_PAGE_KWS = (
+        "委託老E��酬",
+        "受託老E��酬",
+        "有価証券売買等損盁E,
+        "追加信訁E,
+        "一部交揁E,
+        "投賁E��託財産",
+    )
+    # ---- ペ�Eジ単佁EETF ガーチE スコアめE0.0 に差し戻ぁE----
+    for _etf_ps in page_scores:
+        _etf_text = pages_data[_etf_ps.page_no][0]
+        _etf_hits = sum(1 for kw in _ETF_PAGE_KWS if kw in _etf_text)
+        if _etf_hits >= 2:
+            trace.append(
+                f"Phase A: etf_page_guard page={_etf_ps.page_no} "
+                f"etf_hits={_etf_hits} score={_etf_ps.score:.2f}ↁE.0"
+            )
+            _etf_ps.score = 0.0
+
+    # ---- 斁E��レベル ETF ガーチE 全ペ�Eジ合訁EKW >= 4 で早朁Equarantine ----
+    # 褁E��ペ�Eジにまたがって KW が�E散する ETF 斁E��(1305 筁Eを捕捉する、E
+    _doc_etf_hits = sum(
+        sum(1 for kw in _ETF_PAGE_KWS if kw in pd[0])
+        for pd in pages_data
+    )
+    if _doc_etf_hits >= 4:
+        trace.append(
+            f"Phase A: etf_doc_guard doc_etf_hits={_doc_etf_hits} ↁEquarantine(etf_document)"
+        )
+        result.quarantine_reason = "etf_document"
+        result.failed_stage = "page_scoring"
+        result.review_hint = "pdf_etf_or_investment_trust_document"
+        result.rule_trace = trace
+        write_quarantine_review(result, doc_id=doc_id, ticker=ticker,
+                                source_file=pdf_path, best_table_lines=[])
+        return result
+
+    # Phase 4: ペ�Eジ連続性ブ�EスチE(前後�Eージの相互補宁E
+    apply_sequence_boost(page_scores)
+
+    candidates = rank_candidate_pages(page_scores, top_n=top_pages, min_score=min_page_score)
+
+    # --- ペ�Eジ候裁Efallback: 通常閾値で候補ゼロなら相対閾値で再選宁E---
+    if not candidates:
+        fallback_min_score = min_page_score * 0.5
+        candidates = rank_candidate_pages(
+            page_scores, top_n=top_pages, min_score=fallback_min_score
+        )
+        if candidates:
+            trace.append(
+                f"Phase A: page_fallback min_score={min_page_score:.2f}→{fallback_min_score:.2f} "
+                f"rescued {len(candidates)} pages"
+            )
+
+    # --- Phase 3: 弱表ペ�Eジ fallback ---
+    # 通常候補ゼロの場合、�Eージ全体�E表シグナルで候補化
+    if not candidates:
+        from .row_classifier import compute_candidate_table_signals
+        _weak_page_candidates: list[PageScore] = []
+        for ps in page_scores:
+            _wp_text = pages_data[ps.page_no][0]
+            _wp_lines = _wp_text.split("\n")
+            _wp_numdens, _wp_repnum, _wp_dnp = compute_candidate_table_signals(_wp_lines)
+            # segment_name_like_rows を簡易カウンチE
+            _wp_segrows = 0
+            _wp_seg_re = re.compile(r'.*(事業|部門|セグメンチEビジネス|カンパニー)$')
+            for _wpl in _wp_lines:
+                _wpls = _wpl.strip()
+                if not _wpls:
+                    continue
+                _wpm = re.match(r'^([^\d△▲\-�E�]{2,30})', _wpls)
+                if _wpm:
+                    _wplabel = _wpm.group(1).strip()
+                    if _wp_seg_re.match(_wplabel) or any(
+                        kw in _wplabel for kw in ["国冁E, "海夁E, "日本", "不動産", "物流E]
+                    ):
+                        _wp_segrows += 1
+
+            # 弱表候補条件
+            if ((_wp_segrows >= 3 and _wp_repnum >= 2)
+                    or (_wp_numdens >= 0.08 and _wp_repnum >= 3)
+                    or (ps.score > 0 and _wp_segrows >= 2 and _wp_repnum >= 2)):
+                _weak_page_candidates.append(ps)
+                trace.append(
+                    f"Phase A: weak_table_page_fallback page={ps.page_no} "
+                    f"segrows={_wp_segrows} repnum={_wp_repnum} "
+                    f"numdens={_wp_numdens:.3f} candidate_source=weak_table_page_fallback"
+                )
+
+        if _weak_page_candidates:
+            _weak_page_candidates.sort(key=lambda x: x.score, reverse=True)
+            candidates = _weak_page_candidates[:top_pages]
+            trace.append(
+                f"Phase A: weak_table_page_fallback rescued {len(candidates)} pages"
+            )
+
+    if not candidates:
+        result.quarantine_reason = "no_segment_page_candidate"
+        result.failed_stage = "page_scoring"
+        result.review_hint = "pdf_no_segment_page_candidate"
+        result.rule_trace = trace
+        result.score_summary["page_scores"] = [
+            {"page": ps.page_no, "score": ps.score} for ps in page_scores
+        ]
+        write_quarantine_review(result, doc_id=doc_id, ticker=ticker, source_file=pdf_path)
+        return result
+    # --- Phase 3.5: 弱スコア補宁E---
+    # 候補�EージはあるぁEmax_page_score <= 0.20 の場合、構造シグナルが強ぁE�Eージを追加
+    if candidates:
+        _max_cand_score = max(c.score for c in candidates)
+        if _max_cand_score <= 0.20:
+            _existing_pages = {c.page_no for c in candidates}
+            _struct_supplement: list[PageScore] = []
+            for _ss_ps in page_scores:
+                if _ss_ps.page_no in _existing_pages:
+                    continue
+                _ss_text = pages_data[_ss_ps.page_no][0]
+                _ss_lines = _ss_text.split("\n")
+                _ss_multi_num = sum(
+                    1 for sl in _ss_lines
+                    if len(re.findall(r'[△▲\-]?[\d,]+(?:\.\d+)?', sl)) >= 2
+                )
+                _ss_seg_rows = 0
+                _ss_seg_re = re.compile(r'.*(事業|部門|セグメンチEビジネス|カンパニー)$')
+                for sl in _ss_lines:
+                    sls = sl.strip()
+                    if sls:
+                        sm = re.match(r'^([^\d△▲\-�E�]{2,30})', sls)
+                        if sm and (_ss_seg_re.match(sm.group(1).strip())
+                                   or any(kw in sm.group(1) for kw in
+                                          ["国冁E, "海夁E, "日本", "不動産", "物流E,
+                                           "建設", "金融", "製造"])):
+                            _ss_seg_rows += 1
+                if _ss_multi_num >= 4 and _ss_seg_rows >= 3:
+                    _struct_supplement.append(_ss_ps)
+                    trace.append(
+                        f"Phase A: structure_supplement page={_ss_ps.page_no} "
+                        f"multi_num={_ss_multi_num} seg_rows={_ss_seg_rows} "
+                        f"candidate_source=structure_supplement"
+                    )
+            if _struct_supplement:
+                candidates.extend(_struct_supplement[:3])
+                trace.append(
+                    f"Phase A: structure_supplement added {len(_struct_supplement[:3])} pages "
+                    f"(max_cand_score={_max_cand_score:.2f})"
+                )
+
+    trace.append(f"Phase A: 候補�Eージ {len(candidates)}件 (top={candidates[0].page_no}, score={candidates[0].score:.2f})")
+
+    # --- バックアチE�E候裁E 後半 2 ペ�Eジを追加 (列�Eース詳細表対忁E ---
+    # 前半ペ�Eジだけに偏らなぁE��ぁE��最征Eペ�EジめElow-priority でバックアチE�E追加する、E
+    # 既に候補�EりしてぁE��ペ�EジはスキチE�E、E
+    # BS/CF/持�EガーチE セグメント表でなぁE��務諸表ペ�Eジを除外する、E
+    _TAIL_BSCF_KWS = (
+        "キャチE��ュ・フロー",        # CF計算書
+        "現金及び現金同等物",         # CF補注
+        "財政状態計算書",             # BS(IFRS)
+        "貸借対照表",                 # BS(J-GAAP)
+        "キャチE��ュフロー",           # CF(表記揺めE
+        "持�E変動計算書",             # 持�E変動
+        "株主賁E��等変動計算書",       # 株主賁E��変動
+    )
+    if page_scores:
+        _existing_page_nos = {c.page_no for c in candidates}
+        _n_scored = len(page_scores)
+        # 後半 2 ペ�Eジ (index で後ろから 2 件)
+        _tail_pages = page_scores[max(0, _n_scored - 2):]
+        _added_tail = []
+        for _tp in _tail_pages:
+            if _tp.page_no not in _existing_page_nos:
+                # BS/CF ガーチE ペ�EジチE��ストでキーワードを確誁E(1種でも一致でスキチE�E)
+                _tp_text = pages_data[_tp.page_no][0] if _tp.page_no < len(pages_data) else ""
+                _bscf_hits = sum(1 for kw in _TAIL_BSCF_KWS if kw in _tp_text)
+                if _bscf_hits >= 1:
+                    trace.append(
+                        f"Phase A: tail_backup skip page={_tp.page_no} "
+                        f"bs_cf_guard bscf_hits={_bscf_hits}"
+                    )
+                    continue
+                _added_tail.append(_tp)
+
+        if _added_tail:
+            candidates.extend(_added_tail)
+            trace.append(
+                f"Phase A: tail_backup added {len(_added_tail)} pages "
+                f"(pages={[t.page_no for t in _added_tail]})"
+            )
+
+    # ================================================================
+    # Phase B: チE�Eブルスコアリング (Phase 5 強匁E+ Phase 6 pdfplumber tables)
+    # ================================================================
+    trace.append("Phase B: チE�Eブルスコアリング開姁E)
+
+    # Phase 5: 全候補テーブルを集めて同�E比輁E
+    all_table_candidates: list[tuple[TableScore, list[str], str, float, int]] = []
+    # tuple: (TableScore, table_lines, page_text, page_score, page_no)
+    total_candidate_tables = 0
+
+    for page_candidate in candidates:
+        page_no = page_candidate.page_no
+        page_text = pages_data[page_no][0]
+        lines = page_text.split("\n")
+
+        regions = find_table_regions(lines)
+
+        if regions:
+            # 通常: region ベ�Eスの候裁E
+            for idx, (start, end, nearby) in enumerate(regions):
+                table_lines = lines[start:end]
+                ts = score_segment_table(table_lines, nearby, idx, start, end)
+                total_candidate_tables += 1
+                if ts.score >= min_table_score or is_weak_evidence_table(ts):
+                    all_table_candidates.append(
+                        (ts, table_lines, page_text, page_candidate.score, page_no)
+                    )
+        else:
+            # Phase 6: region なぁEↁEpdfplumber tables を�Eに試ぁE
+            pdf_tables = pages_tables.get(page_no, [])
+            pdfplumber_used = False
+            for tbl_idx, raw_tbl in enumerate(pdf_tables):
+                tbl_lines = _pdfplumber_table_to_lines(raw_tbl)
+                if len(tbl_lines) < 3:
+                    continue  # 3行未満は候補夁E
+                ts = score_segment_table(tbl_lines, "", tbl_idx, 0, len(tbl_lines))
+                total_candidate_tables += 1
+                if ts.score >= min_table_score or is_weak_evidence_table(ts):
+                    all_table_candidates.append(
+                        (ts, tbl_lines, page_text, page_candidate.score, page_no)
+                    )
+                    pdfplumber_used = True
+
+            # pdfplumber tables で候補なぁEↁEペ�Eジ全体テキストを fallback
+            if not pdfplumber_used:
+                ts = score_segment_table(lines, "", 0, 0, len(lines))
+                total_candidate_tables += 1
+                if ts.score >= min_table_score or is_weak_evidence_table(ts):
+                    all_table_candidates.append(
+                        (ts, lines, page_text, page_candidate.score, page_no)
+                    )
+
+    # Phase 5: multi-page table merge
+    merge_candidates = _try_merge_adjacent_pages(
+        all_table_candidates, pages_data, candidates
+    )
+    for mc in merge_candidates:
+        all_table_candidates.append(mc)
+        total_candidate_tables += 1
+
+    result.candidate_tables_count = total_candidate_tables
+
+    # ================================================================
+    # Phase B-boost: チE�Eブル候補�E追加フィルタ + 加点 (既存スコアに上乗せ)
+    # ================================================================
+    _boosted: list[tuple[TableScore, list[str], str, float, int]] = []
+    _quasi_rescued_pages: set[int] = set()  # quasi_col_rescue 発動�Eージを追跡
+    for tc in all_table_candidates:
+        ts, tbl_lines, pg_text, pg_score, pg_no = tc
+
+        non_empty = [l.strip() for l in tbl_lines if l.strip()]
+        n_lines = len(non_empty)
+
+        # ② 行数フィルタ: 3行未満は除夁E
+        if n_lines < 3:
+            trace.append(f"Phase B-boost: skip page={pg_no} rows={n_lines} (<3)")
+            continue
+
+        # --- ETF / 投信ペ�EジガーチE Phase B-boost 保険 ---
+        # Phase A で弾けなかっぁEedge case を保護する、E
+        _pg_text_b = pages_data[pg_no][0] if pg_no < len(pages_data) else ""
+        _etf_hits_b = sum(1 for kw in _ETF_PAGE_KWS if kw in _pg_text_b)
+        if _etf_hits_b >= 2:
+            trace.append(
+                f"Phase B-boost: etf_page_guard skip page={pg_no} etf_hits={_etf_hits_b}"
+            )
+            continue
+
+        # ---- 新要E orientation シグナル判宁E----
+        # tc に raw_table が紐付いてぁE��ば渡してセル構造を優先する、E
+        # regions ルートでは raw_table ぁENone のため、pages_tables から pdfplumber
+        # チE�Eブルをフォールバックとして取得し、セル構造でより正確に判定する、E
+        _raw_tbl = tc[5] if len(tc) > 5 else None
+        if _raw_tbl is None:
+            _page_pdf_tbls = pages_tables.get(pg_no, [])
+            if _page_pdf_tbls:
+                # 最大行数のチE�Eブルを代表として使用
+                _raw_tbl = max(_page_pdf_tbls, key=lambda t: len(t))
+        _orient = _detect_orientation_signals(non_empty, raw_table=_raw_tbl)
+        _orientation = _orient["orientation"]
+        _row_seg_hits = _orient["row_seg_hits"]
+        _row_mhdr_hits = _orient["row_metric_header_hits"]
+        _col_seg_hits = _orient["col_seg_hits"]
+        _col_metric_hits = _orient["col_metric_hits"]
+        _numeric_cross_hits = _orient["numeric_cross_hits"]
+        _period_label_hits = _orient["period_label_hits"]
+        _bs_cf_hits = _orient["bs_cf_hits"]
+        seg_header_flag = (_row_mhdr_hits >= 1)
+
+        trace.append(
+            f"Phase B-orient: page={pg_no} orientation={_orientation} "
+            f"row_seg={_row_seg_hits} row_mhdr={_row_mhdr_hits} "
+            f"col_seg={_col_seg_hits} col_metric={_col_metric_hits} "
+            f"num_cross={_numeric_cross_hits} "
+            f"period={_period_label_hits} bscf={_bs_cf_hits}"
+        )
+
+        # ---- column_based 判定条件�E�E条件同時成立！E----
+        _col_rescue_condition = (
+            _orientation == "column_based"
+            and _col_seg_hits >= 2
+            and _col_metric_hits >= 2
+            and _numeric_cross_hits >= 2
+        )
+
+        # ---- quasi_column_based: row_based だが実質 column_based に近いケース ----
+        # 限定条件: col_seg>=3, col_metric>=2, num_cross>=2, bscf==0, period<col_seg
+        # (BS/CF 混入なし�E期間ラベルよりセグメント�Eヘッダーが多い ↁEセグメント詳細表と推宁E
+        _quasi_col_rescue_condition = (
+            _orientation == "row_based"
+            and _col_seg_hits >= 3
+            and _col_metric_hits >= 2
+            and _numeric_cross_hits >= 2
+            and _bs_cf_hits == 0
+            and _period_label_hits < _col_seg_hits
+        )
+
+        # ① 数値寁E��スコア: 数値セル玁E0.3 未満は除夁E
+        total_cells = 0
+        numeric_cells = 0
+        _num_cell_re = re.compile(r'[△▲\-]?\s*[\d,]+(?:\.\d+)?')
+        for row in non_empty:
+            cells = re.split(r'\s{2,}|\t', row)
+            for cell in cells:
+                c = cell.strip()
+                if not c:
+                    continue
+                total_cells += 1
+                if _num_cell_re.fullmatch(c):
+                    numeric_cells += 1
+        num_density = numeric_cells / total_cells if total_cells > 0 else 0.0
+
+        _density_rescued = False
+        if num_density < 0.3 and n_lines > 5:
+            # column_based 3条件同時成竁EↁErescue
+            if _col_rescue_condition:
+                _density_rescued = True
+                trace.append(
+                    f"Phase B-orient-decision: page={pg_no} orientation={_orientation} "
+                    f"density_rescue=yes header_suppressed=no"
+                )
+            # quasi_column_based (限定条件) ↁErescue
+            elif _quasi_col_rescue_condition:
+                _density_rescued = True
+                _quasi_rescued_pages.add(pg_no)  # Phase B-2 で pl_guard 緩和に使ぁE
+                trace.append(
+                    f"Phase B-orient-decision: page={pg_no} orientation={_orientation} "
+                    f"density_rescue=yes(quasi_col) col_seg={_col_seg_hits} "
+                    f"col_metric={_col_metric_hits} num_cross={_numeric_cross_hits} "
+                    f"bscf={_bs_cf_hits} period={_period_label_hits}"
+                )
+            else:
+                # 短ぁE��ーブル (≤5衁E はキーワードだけで判断可能なので除外しなぁE
+                trace.append(
+                    f"Phase B-boost: skip page={pg_no} num_density={num_density:.2f} (<0.3)"
+                )
+                continue
+
+        boost = 0.0
+
+        # ③ セグメントキーワード加点
+        all_text_joined = "\n".join(non_empty)
+        _seg_kw_bonus = 0.0
+        for kw in ("事業", "セグメンチE, "部門"):
+            if kw in all_text_joined:
+                _seg_kw_bonus += 0.03
+        if _seg_kw_bonus > 0:
+            boost += _seg_kw_bonus
+            trace.append(
+                f"Phase B-boost: page={pg_no} seg_kw_bonus=+{_seg_kw_bonus:.2f}"
+            )
+
+        # ④ narrative排除強匁E 句点「。」が多いブロチE��は除夁E
+        period_lines = sum(1 for l in non_empty if l.count("、E) >= 1)
+        if n_lines > 0 and period_lines / n_lines >= 0.4:
+            trace.append(
+                f"Phase B-boost: skip page={pg_no} narrative "
+                f"period_lines={period_lines}/{n_lines}"
+            )
+            continue
+
+        # ---- 向き別ルーチE----
+        _header_suppressed = False
+
+        if _orientation == "column_based":
+            # ---- column_based ルーチE----
+            # column_based_bonus: +0.08 固宁E
+            _col_bonus = 0.08
+            boost += _col_bonus
+            trace.append(
+                f"Phase B-boost: page={pg_no} column_based_bonus=+{_col_bonus:.2f} "
+                f"col_seg={_col_seg_hits} col_metric={_col_metric_hits} "
+                f"num_cross={_numeric_cross_hits} rescued_by=column_based_signal"
+            )
+            # ⑤ header_label_boost は column_based にも適用�E�ES/CF 強の場合�E抑制�E�E
+            header_rows = non_empty[:2]
+            if header_rows and _bs_cf_hits < 2:
+                header_non_num = 0
+                header_total = 0
+                for hr in header_rows:
+                    hcells = re.split(r'\s{2,}|\t', hr)
+                    for hc in hcells:
+                        hc = hc.strip()
+                        if not hc:
+                            continue
+                        header_total += 1
+                        if not _num_cell_re.fullmatch(hc):
+                            header_non_num += 1
+                if header_total > 0 and header_non_num / header_total >= 0.6:
+                    boost += 0.04
+                    trace.append(
+                        f"Phase B-boost: page={pg_no} header_label_boost=+0.04 "
+                        f"non_num={header_non_num}/{header_total}"
+                    )
+            elif _bs_cf_hits >= 2:
+                _header_suppressed = True
+
+            trace.append(
+                f"Phase B-orient-decision: page={pg_no} orientation=column_based "
+                f"density_rescue={'yes' if _density_rescued else 'no'} "
+                f"header_suppressed={'yes' if _header_suppressed else 'no'}"
+            )
+
+        elif _orientation == "row_based":
+            # ---- row_based ルーチE 既存ロジチE��を維持E----
+            # ⑤ ヘッダー判定強匁E 上佁E行に非数値が多い場吁E+スコア
+            # ただぁEbs_cf_hits >= 2 のとき�E header_label_boost を抑制
+            header_rows = non_empty[:2]
+            if header_rows:
+                header_non_num = 0
+                header_total = 0
+                for hr in header_rows:
+                    hcells = re.split(r'\s{2,}|\t', hr)
+                    for hc in hcells:
+                        hc = hc.strip()
+                        if not hc:
+                            continue
+                        header_total += 1
+                        if not _num_cell_re.fullmatch(hc):
+                            header_non_num += 1
+                if header_total > 0 and header_non_num / header_total >= 0.6:
+                    if (not seg_header_flag) and _bs_cf_hits >= 3:
+                        # BS/CF 汚染強 (bscf>=3) ↁEheader_label_boost を抑制
+                        # 注記衁E流動賁E��合計筁Eの1、E件混入では suppress しなぁE
+                        _header_suppressed = True
+                        trace.append(
+                            f"Phase B-boost: header_boost_suppressed_by_bs_cf "
+                            f"page={pg_no} bscf={_bs_cf_hits}"
+                        )
+                    else:
+                        boost += 0.04
+                        trace.append(
+                            f"Phase B-boost: page={pg_no} header_label_boost=+0.04 "
+                            f"non_num={header_non_num}/{header_total}"
+                        )
+
+            trace.append(
+                f"Phase B-orient-decision: page={pg_no} orientation=row_based "
+                f"density_rescue=no "
+                f"header_suppressed={'yes' if _header_suppressed else 'no'}"
+            )
+
+        else:
+            # ---- unknown ルーチE 既存ロジチE��のみ・追加 boost なぁE----
+            # ⑤ ヘッダー判定強匁E(既存と同じ。追加 boost は付けなぁE
+            header_rows = non_empty[:2]
+            if header_rows:
+                header_non_num = 0
+                header_total = 0
+                for hr in header_rows:
+                    hcells = re.split(r'\s{2,}|\t', hr)
+                    for hc in hcells:
+                        hc = hc.strip()
+                        if not hc:
+                            continue
+                        header_total += 1
+                        if not _num_cell_re.fullmatch(hc):
+                            header_non_num += 1
+                if header_total > 0 and header_non_num / header_total >= 0.6:
+                    if (not seg_header_flag) and _bs_cf_hits >= 3:
+                        # BS/CF 汚染強 (bscf>=3) ↁEheader_label_boost を抑制
+                        _header_suppressed = True
+                        trace.append(
+                            f"Phase B-boost: header_boost_suppressed_by_bs_cf "
+                            f"page={pg_no} bscf={_bs_cf_hits}"
+                        )
+                    else:
+                        boost += 0.04
+                        trace.append(
+                            f"Phase B-boost: page={pg_no} header_label_boost=+0.04 "
+                            f"non_num={header_non_num}/{header_total}"
+                        )
+
+            trace.append(
+                f"Phase B-orient-decision: page={pg_no} orientation=unknown "
+                f"density_rescue=no "
+                f"header_suppressed={'yes' if _header_suppressed else 'no'}"
+            )
+
+        if boost > 0:
+            ts.score = min(1.0, ts.score + boost)
+
+        _boosted.append(tc)
+
+
+    all_table_candidates = _boosted
+
+    # Phase 5: 全候補から最高スコアを選抁E
+    if not all_table_candidates:
+        result.quarantine_reason = "no_segment_table_candidate"
+        result.failed_stage = "table_scoring"
+        result.review_hint = "pdf_no_segment_table_candidate"
+        result.rule_trace = trace
+        # debug: 全候補スコア惁E��
+        result.score_summary["all_table_scores"] = []
+        write_quarantine_review(result, doc_id=doc_id, ticker=ticker,
+                                source_file=pdf_path, best_table_lines=[])
+        return result
+
+    # スコア降頁E��ソーチE
+    all_table_candidates.sort(key=lambda x: x[0].score, reverse=True)
+    best_table, best_table_lines, best_page_text, best_page_score, best_page_no = (
+        all_table_candidates[0]
+    )
+
+    # --- heading block fallback ---
+    # top1 が見�EしブロチE��型なら、次の靁Eheading 候補にフォールバック
+    heading_fallback_used = False
+    if is_heading_like_table(best_table) and len(all_table_candidates) > 1:
+        for alt_idx in range(1, len(all_table_candidates)):
+            alt_ts = all_table_candidates[alt_idx][0]
+            if not is_heading_like_table(alt_ts) and alt_ts.score >= 0.15:
+                trace.append(
+                    f"Phase B: heading_fallback top1=heading_like(score={best_table.score:.2f}) "
+                    f"ↁEtop{alt_idx+1}(score={alt_ts.score:.2f})"
+                )
+                best_table, best_table_lines, best_page_text, best_page_score, best_page_no = (
+                    all_table_candidates[alt_idx]
+                )
+                heading_fallback_used = True
+                break
+
+    # debug: 全候補�Eスコア惁E��を保持
+    result.score_summary["all_table_scores"] = [
+        {
+            "page": c[4],
+            "score": round(c[0].score, 3),
+            "categories": c[0].score_categories,
+            "reason": c[0].reason[:80],
+            "weak_evidence": is_weak_evidence_table(c[0]),
+            "heading_like": is_heading_like_table(c[0]),
+        }
+        for c in all_table_candidates[:5]
+    ]
+
+    fb_tag = " (heading_fallback)" if heading_fallback_used else ""
+    trace.append(f"Phase B: best_table score={best_table.score:.2f} ({best_table.reason}){fb_tag}")
+
+    # ================================================================
+    # Phase A-V: 縦持ち fast path�E�Eest_table 確定直後！E
+    # page_scoring / candidate_guard より前に縦持ち表を早期救済する、E
+    # header_lines / result.unit_info 未確定�Eため軽量代替を使用、E
+    # ================================================================
+    trace.append("Phase A-V: entered")
+
+    if _vd_is_vertical_fast(best_table_lines):
+        _av_unit_mult = (
+            result.unit_info.unit_multiplier if result.unit_info is not None else None
+        )
+        _av_header_lines = best_table_lines[:3]   # header_lines 未定義のため先頭3行を代替
+        _av_rows = _vd_build_data_rows_from_lines(best_table_lines)
+        _av_segs = _vd_extract_segments_vertical(_av_header_lines, _av_rows, _av_unit_mult)
+
+        if 2 <= len(_av_segs) <= 10:
+            result.segments = _av_segs
+            result.used_v2 = True
+            trace.append(f"Phase A-V: vertical_fast_path success n={len(_av_segs)}")
+            result.rule_trace = trace
+            return result
+
+        trace.append(
+            f"Phase A-V: vertical_fast_path skipped "
+            f"(segs={len(_av_segs)} not in [2,10], fallthrough)"
+        )
+    else:
+        trace.append("Phase A-V: not_vertical_fast")
+
+    # ================================================================
+    # Phase B-1.5: TOC Guard (目次ペ�Eジ / TOC チE�Eブル除夁E
+    # ================================================================
+
+    from .toc_detection import detect_toc_candidate, detect_toc_page
+
+    # candidate 行での TOC チェチE��
+    _toc_cand = detect_toc_candidate(best_table_lines)
+
+    # ペ�EジチE��スト�E体での TOC チェチE�� (candidate 行が局所皁E�� TOC を捉えられなぁE��合�E補宁E
+    _best_page_text = pages_data[best_page_no][0] if best_page_no < len(pages_data) else ""
+    _best_page_lines = _best_page_text.split("\n") if _best_page_text else []
+    _toc_page = detect_toc_page(_best_page_lines)
+
+    # 統合判宁E candidate OR page で TOC
+    _is_toc = _toc_cand.is_toc_candidate or _toc_page.is_toc_page
+    _toc_reason = _toc_cand.reject_reason or ("toc_page_detected" if _toc_page.is_toc_page else "")
+
+    result.score_summary["toc_guard"] = {
+        "is_toc": _is_toc,
+        "candidate_toc_lines": _toc_cand.toc_line_count,
+        "candidate_toc_ratio": round(_toc_cand.toc_line_ratio, 3),
+        "page_toc_lines": _toc_page.toc_line_count,
+        "page_toc_score": round(_toc_page.toc_score, 3),
+        "page_is_toc": _toc_page.is_toc_page,
+        "dotted_leader_count": max(_toc_cand.dotted_leader_count, _toc_page.dotted_leader_count),
+        "page_number_like_count": max(_toc_cand.page_number_like_count, _toc_page.page_number_like_count),
+        "reject_reason": _toc_reason,
+    }
+
+    if _is_toc:
+        trace.append(
+            f"Phase B-1.5: TOC detected "
+            f"cand_toc={_toc_cand.toc_line_count} page_toc={_toc_page.toc_line_count} "
+            f"page_score={_toc_page.toc_score:.2f} reason={_toc_reason}"
+        )
+
+        # 代替候補で TOC でなぁE��のを探ぁE
+        _toc_alt_found = False
+        for _toc_alt_idx in range(1, min(len(all_table_candidates), 6)):
+            _toc_alt_ts, _toc_alt_lines, _toc_alt_text, _, _toc_alt_page = all_table_candidates[_toc_alt_idx]
+            _toc_alt_cand = detect_toc_candidate(_toc_alt_lines)
+            _toc_alt_page_lines = _toc_alt_text.split("\n") if _toc_alt_text else []
+            _toc_alt_page_result = detect_toc_page(_toc_alt_page_lines)
+            _alt_is_toc = _toc_alt_cand.is_toc_candidate or _toc_alt_page_result.is_toc_page
+            if not _alt_is_toc:
+                # TOC でなぁE��補を採用
+                best_table = _toc_alt_ts
+                best_table_lines = _toc_alt_lines
+                best_page_no = _toc_alt_page
+                trace.append(
+                    f"Phase B-1.5: ACCEPT alt candidate #{_toc_alt_idx+1} "
+                    f"(non-TOC, score={_toc_alt_ts.score:.2f})"
+                )
+                _toc_alt_found = True
+                break
+            else:
+                trace.append(
+                    f"Phase B-1.5: alt #{_toc_alt_idx+1} also TOC "
+                    f"(cand={_toc_alt_cand.toc_line_count} page={_toc_alt_page_result.toc_line_count})"
+                )
+
+        if not _toc_alt_found:
+            # 全候補が TOC ↁEquarantine
+            result.quarantine_reason = "toc_page_guard"
+            result.failed_stage = "toc_guard"
+            result.review_hint = "pdf_toc_page_selected"
+            result.rule_trace = trace
+            trace.append(
+                f"Phase B-1.5: REJECT all candidates are TOC pages "
+                f"(checked {min(len(all_table_candidates), 6)} candidates)"
+            )
+            write_quarantine_review(
+                result, doc_id=doc_id, ticker=ticker,
+                source_file=pdf_path, best_table_lines=best_table_lines,
+            )
+            return result
+
+    # ================================================================
+    # Phase B-1.9: best_table swap  EBS表が選ばれた場合に後続セグメント候補へ差し替ぁE
+    # ================================================================
+    # スコアリング式�E変更せず、候補リスト�E2番手以降を検索して差し替えるだけ、E
+    # 差し替え条件�E�E条件同時成立！E
+    #   1. segment_like_rows >= 2
+    #   2. table_text に "売丁E を含む or has_sales_header
+    #   3. table_text に "利盁E を含む or has_profit_header
+    #   4. account_like_rows < segment_like_rows  (BS 衁E< セグメント衁E
+    # bs_cf_guard / narrative_guard の条件は変更しなぁE��E
+    if (
+        len(all_table_candidates) > 1
+        and best_table.account_like_rows >= max(best_table.segment_like_rows, 1)
+    ):
+        for _sw_idx in range(1, len(all_table_candidates)):
+            _sw_ts, _sw_lines = all_table_candidates[_sw_idx][0], all_table_candidates[_sw_idx][1]
+            _sw_page          = all_table_candidates[_sw_idx][4]
+            _sw_text          = "\n".join(_sw_lines)
+            _sw_has_sales     = _sw_ts.has_sales_header or "売丁E in _sw_text
+            _sw_has_profit    = _sw_ts.has_profit_header or "利盁E in _sw_text
+            _sw_not_bs        = _sw_ts.account_like_rows < max(_sw_ts.segment_like_rows, 1)
+            if (
+                _sw_ts.segment_like_rows >= 2
+                and _sw_has_sales
+                and _sw_has_profit
+                and _sw_not_bs
+            ):
+                trace.append(
+                    f"Phase B-2: swapped best_table to later segment-like candidate "
+                    f"#{_sw_idx + 1} seg_like={_sw_ts.segment_like_rows} "
+                    f"account_like={_sw_ts.account_like_rows} page={_sw_page} "
+                    f"score={_sw_ts.score:.2f}"
+                )
+                best_table       = _sw_ts
+                best_table_lines = _sw_lines
+                best_page_no     = _sw_page
+                break
+
+    # ================================================================
+    # Phase B-1.95: BS table early reject
+    # best_table に sales/profit ヘッダーがなく、BSキーワードが含まれる場合�E即 quarantine
+    # ================================================================
+    _BS_KWS = [
+        "賁E��釁E,
+        "賁E��剰余��",
+        "利益剰余��",
+        "純賁E��",
+        "株主賁E��",
+        "允E��",
+    ]
+    if not best_table.has_sales_header and not best_table.has_profit_header:
+        _bs_headers_joined = " ".join(best_table_lines[:5])
+        if any(kw in _bs_headers_joined for kw in _BS_KWS):
+            trace.append(
+                f"Phase B-1.95: REJECT bs_table_detected "
+                f"(BS keywords in table header area, no sales/profit header)"
+            )
+            result.quarantine_reason = "bs_table_detected"
+            result.failed_stage = "phase_b_bs_reject"
+            result.review_hint = "pdf_bs_table_selected"
+            result.bs_table_detected = True
+            result.rule_trace = trace
+            write_quarantine_review(
+                result, doc_id=doc_id, ticker=ticker,
+                source_file=pdf_path, best_table_lines=best_table_lines,
+            )
+            return result
+
+    # ================================================================
+    # Phase B-V: 縦持ち fast path
+    # セグメントが列�E持E��が行�E表めEpdfplumber raw table から直接抽出、E
+    # 成功時�Eみ return。失敗時は Phase B-2-pre 以降へスルー、E
+    # ================================================================
+    _v_mult = _vd_detect_unit_multiplier(best_page_text)
+    _v_headers, _v_rows = _vd_extract_headers_and_rows(
+        pages_tables.get(best_page_no, [])
+    )
+    if _vd_is_vertical_fast(best_table_lines):
+        _v_segments = _vd_build_segments(_v_headers, _v_rows, _v_mult)
+        trace.append(
+            f"Phase B-V: vertical_fast headers={_v_headers[:4]} "
+            f"sales_row={'found' if _v_rows else 'none'} "
+            f"records={len(_v_segments)}"
+        )
+        if len(_v_segments) >= 2:
+            result.review_hint = "pdf_vertical_fast_path"
+            result.rule_trace = trace + [
+                f"Phase B-V: vertical_fast_path success n={len(_v_segments)} unit_mult={_v_mult}"
+            ]
+            result.segments = _v_segments
+            return result
+    else:
+        trace.append(
+            f"Phase B-V: skip (not vertical_fast) page={best_page_no}"
+        )
+
+    # ================================================================
+    # Phase B-2-pre: Column-First Detection (横型レイアウチEguard bypass)
+    # ================================================================
+    # セグメント名が�Eヘッダー側にある表では row-based candidate_guard ぁE
+    # no_valid_segment_rows を誤判定するため、column-first "ok" の場合�E
+    # guard をスキチE�Eしてそ�Eまま採用する、E
+    _col_first_result = detect_column_based_segments(best_table_lines)
+    trace.append(
+        f"Phase B-2-pre: column_first status={_col_first_result.status} "
+        f"segment_count={_col_first_result.segment_count} "
+        f"numeric_col_count={_col_first_result.numeric_col_count} "
+        f"tokens={_col_first_result.segment_tokens[:5]}"
+    )
+
+    _column_first_bypass = False
+    # bypass 条件: status=="ok" AND numeric_col_count >= 2
+    # (ヘッダーだけ拾ってぁE��ケースの誤bypass防止)
+    _col_first_ok = (
+        _col_first_result.status == "ok"
+        and _col_first_result.numeric_col_count >= 2
+    )
+    if _col_first_ok:
+        # Column-First Detection 成功 ↁErow-based guard をバイパス
+        _column_first_bypass = True
+        result.score_summary["candidate_guard"] = {
+            "accepted": True,
+            "reject_reason": "",
+            "guard_bypassed": True,
+            "detection_mode": "column_first",
+            "column_first_segment_count": _col_first_result.segment_count,
+            "column_first_numeric_col_count": _col_first_result.numeric_col_count,
+            "column_first_tokens": _col_first_result.segment_tokens[:8],
+            "valid_segment_like": _col_first_result.segment_count,
+            "narrative_like": 0,
+            "bs_cf_like": 0,
+        }
+        result.score_summary["guard_bypassed"] = True
+        result.score_summary["detection_mode"] = "column_first"
+        trace.append(
+            f"Phase B-2-pre: COLUMN_FIRST BYPASS "
+            f"ↁEguard skipped (segment_count={_col_first_result.segment_count} "
+            f"numeric_col_count={_col_first_result.numeric_col_count})"
+        )
+        logger.info(
+            f"[v2] column_first bypass: page={best_page_no} "
+            f"segment_count={_col_first_result.segment_count} "
+            f"numeric_col_count={_col_first_result.numeric_col_count} "
+            f"tokens={_col_first_result.segment_tokens[:5]}"
+        )
+    elif _col_first_result.status == "ok":
+        # ok だぁEnumeric_col_count < 2 ↁEbypass せず guard に流す
+        trace.append(
+            f"Phase B-2-pre: column_first ok but numeric_col_count={_col_first_result.numeric_col_count} < 2 "
+            f"ↁEskip bypass, fallthrough to candidate_guard"
+        )
+
+    # ================================================================
+    # Phase B-2: Candidate Guard (行�E顁E+ narrative/BS/CF 汚染検�E)
+    # column-first bypass 時�Eこ�EブロチE��全体をスキチE�E
+    # ================================================================
+    if not _column_first_bypass:
+        from .row_classifier import evaluate_candidate_guard, log_candidate_guard, normalize_label
+        import re as _re_cg
+
+        # --- 候補テーブルの表シグナル算�E (外部で算�Eして guard に渡ぁE ---
+        # header_keyword_hits: best_table から取征E
+        _cg_header_keyword_hits = int(best_table.has_sales_header) + int(best_table.has_profit_header)
+        # anchor_hits: best_table の score_breakdown から推宁E
+        _cg_anchor_hits = sum(
+            1 for k in best_table.score_breakdown
+            if k.startswith("seg:") or k.startswith("seg_heading_strong:")
+        )
+        # segment_name_like_rows: best_table の構造惁E��
+        _cg_segment_name_like_rows = best_table.segment_like_rows
+
+        # best_table_lines から行ラベルを抽出
+        _cg_labels: list[str] = []
+        for _cg_line in best_table_lines:
+            _cg_stripped = _cg_line.strip()
+            if not _cg_stripped:
+                continue
+            # 数値がある行�Eラベル部刁E��抽出
+            _cg_m = _re_cg.match(r'^([^\d△▲\-�E�]*)', _cg_stripped)
+            if _cg_m and _cg_m.group(1).strip():
+                _cg_labels.append(_cg_m.group(1).strip())
+            elif _cg_stripped:
+                _cg_labels.append(_cg_stripped)
+
+        cg_result = evaluate_candidate_guard(
+            _cg_labels,
+            candidate_lines=best_table_lines,
+            header_keyword_hits=_cg_header_keyword_hits,
+            anchor_hits=_cg_anchor_hits,
+            segment_name_like_rows=_cg_segment_name_like_rows,
+        )
+        log_candidate_guard(cg_result, page=best_page_no, table_index=best_table.table_index)
+
+        # --- 候補スコアログ ---
+        logger.debug(
+            f"[CAND] score={cg_result.candidate_score} "
+            f"anchor={_cg_anchor_hits} hdr={_cg_header_keyword_hits} "
+            f"numdens={cg_result.numeric_density:.4f} "
+            f"repnum={cg_result.repeated_numeric_rows} "
+            f"segrows={_cg_segment_name_like_rows} "
+            f"narr_pen={cg_result.narrative_penalty} "
+            f"bscf_pen={cg_result.bs_cf_penalty} "
+            f"rescued_by={cg_result.rescued_by or 'none'} "
+            f"result={'ACCEPT' if cg_result.accepted else 'REJECT:' + cg_result.reject_reason}"
+        )
+
+        result.score_summary["candidate_guard"] = {
+            "accepted": cg_result.accepted,
+            "reject_reason": cg_result.reject_reason,
+            "valid_segment_like": cg_result.valid_segment_like,
+            "narrative_like": cg_result.narrative_like,
+            "bs_cf_like": cg_result.bs_cf_like,
+            "detail_breakdown_like": cg_result.detail_breakdown_like,
+            "total_or_metric_like": cg_result.total_or_metric_like,
+            "garbage_fragment_like": cg_result.garbage_fragment_like,
+            "pl_account_like": cg_result.pl_account_like,
+            "top_samples": cg_result.top_samples[:5],
+            # 表シグナル
+            "numeric_density": cg_result.numeric_density,
+            "repeated_numeric_rows": cg_result.repeated_numeric_rows,
+            "header_keyword_hits": _cg_header_keyword_hits,
+            "anchor_hits": _cg_anchor_hits,
+            "segment_name_like_rows": _cg_segment_name_like_rows,
+            "narrative_penalty": cg_result.narrative_penalty,
+            "bs_cf_penalty": cg_result.bs_cf_penalty,
+            "rescued_by": cg_result.rescued_by,
+            "candidate_score": cg_result.candidate_score,
+        }
+
+        # --- quasi_col_rescue override: pl_guard のみをバイパス ---
+        # quasi_col_rescue で density_rescue された�EージぁEpl_guard で弾かれた場合、E
+        # pl_guard を解除して続行する、Ebs_cf_guard / narrative_guard は解除しなぁE
+        if (
+            not cg_result.accepted
+            and cg_result.reject_reason == "pl_guard"
+            and best_page_no in _quasi_rescued_pages
+        ):
+            trace.append(
+                f"Phase B-2: quasi_col_rescue OVERRIDE pl_guard page={best_page_no} "
+                f"valid={cg_result.valid_segment_like} garbage={cg_result.garbage_fragment_like}"
+            )
+            cg_result.accepted = True
+            cg_result.reject_reason = ""
+            result.score_summary["candidate_guard"]["accepted"] = True
+            result.score_summary["candidate_guard"]["reject_reason"] = ""
+            result.score_summary["candidate_guard"]["rescued_by"] = "quasi_col_rescue_override"
+
+        if not cg_result.accepted:
+            # candidate guard で reject ↁEreview_hint マッピング
+
+            _hint_map = {
+                "narrative_guard": "pdf_narrative_block_selected",
+                "bs_cf_guard": "pdf_narrative_block_selected",
+                "pl_guard": "pdf_pl_table_selected",
+                "detail_breakdown_guard": "pdf_segment_like_but_invalid_structure",
+                "invalid_structure": "pdf_segment_like_but_invalid_structure",
+                "no_valid_segment_rows": "pdf_no_segment_table_after_guard",
+                "total_metric_dominant": "pdf_no_segment_table_after_guard",
+            }
+            raw_hint = _hint_map.get(cg_result.reject_reason, "pdf_no_segment_table_after_guard")
+            raw_reason = cg_result.reject_reason
+
+            # Reclassification layer: detail_breakdown_guard のぁE��表なぁEnarrative page を�E刁E��E
+            from .hint_reclassifier import reclassify_candidate_failure
+            _reclass = reclassify_candidate_failure(
+                raw_reason=raw_reason,
+                raw_hint=raw_hint,
+                valid_segment=cg_result.valid_segment_like,
+                narrative=cg_result.narrative_like,
+                garbage=cg_result.garbage_fragment_like,
+                detail_breakdown=cg_result.detail_breakdown_like,
+                bs_cf=cg_result.bs_cf_like,
+                pl_account=cg_result.pl_account_like,
+                total_or_metric=cg_result.total_or_metric_like,
+                has_sales_header=best_table.has_sales_header,
+                has_profit_header=best_table.has_profit_header,
+            )
+
+            hint = _reclass.final_hint
+            result.score_summary["reclassification"] = {
+                "raw_reason": raw_reason,
+                "raw_hint": raw_hint,
+                "final_reason": _reclass.final_reason,
+                "final_hint": _reclass.final_hint,
+                "reclassified": _reclass.reclassified,
+                "basis": _reclass.basis,
+            }
+
+            # ================================================================
+            # Phase 2 pre-rescue: total_metric_dominant / detail_breakdown_guard /
+            # no_segment_narrative_page を表シグナルベ�Eスで rescue
+            # ================================================================
+            _p2_rescue_reasons = {
+                "total_metric_dominant", "detail_breakdown_guard",
+                "no_segment_narrative_page",
+            }
+            _p2_rescue_succeeded = False
+
+            if raw_reason in _p2_rescue_reasons or _reclass.final_reason in _p2_rescue_reasons:
+                _p2_hdr = _cg_header_keyword_hits
+                _p2_repnum = cg_result.repeated_numeric_rows
+                _p2_segrows = _cg_segment_name_like_rows
+                _p2_numdens = cg_result.numeric_density
+
+                # 救済条件 A: hdr >= 2 + repnum >= 3
+                _p2_cond_a = (_p2_hdr >= 2 and _p2_repnum >= 3)
+                # 救済条件 B: segrows >= 2 + numdens >= 0.10 + 数値刁E2本以丁E
+                _p2_cond_b = (
+                    _p2_segrows >= 2
+                    and _p2_numdens >= 0.10
+                    and _p2_repnum >= 2
+                )
+
+                if _p2_cond_a or _p2_cond_b:
+                    _p2_rescue_succeeded = True
+                    _p2_rescue_tag = f"phase2_pre_rescue:{raw_reason}"
+                    # reject 状態を完�Eにクリア
+                    result.quarantine_reason = ""
+                    result.failed_stage = ""
+                    result.review_hint = ""
+                    cg_result.reject_reason = ""
+                    cg_result.dropped_by = ""
+                    if not cg_result.rescued_by:
+                        cg_result.rescued_by = _p2_rescue_tag
+                    else:
+                        cg_result.rescued_by += f"+{_p2_rescue_tag}"
+                    trace.append(
+                        f"Phase B-2: Phase2 PRE-RESCUE for {raw_reason}: "
+                        f"hdr={_p2_hdr} numdens={_p2_numdens:.3f} "
+                        f"repnum={_p2_repnum} segrows={_p2_segrows} "
+                        f"cond_a={_p2_cond_a} cond_b={_p2_cond_b}"
+                    )
+                    result.score_summary["phase2_pre_rescue"] = {
+                        "original_reason": raw_reason,
+                        "reclassified_reason": _reclass.final_reason,
+                        "rescue_tag": _p2_rescue_tag,
+                        "hdr": _p2_hdr,
+                        "numdens": round(_p2_numdens, 4),
+                        "repnum": _p2_repnum,
+                        "segrows": _p2_segrows,
+                        "cond_a": _p2_cond_a,
+                        "cond_b": _p2_cond_b,
+                    }
+
+            if _p2_rescue_succeeded:
+                pass  # Phase C/D に fall through
+            else:
+                # ================================================================
+                # Invalid Structure Rescue: detail/total 優勢でめEvalid_segment>=2 なめE
+                # parent row のみ抽出して rescue を試みめE
+                # ================================================================
+                _rescue_reasons = {"detail_breakdown_guard", "invalid_structure"}
+                _rescue_attempted = False
+                _rescue_succeeded = False
+                v = cg_result.valid_segment_like
+                n = cg_result.narrative_like
+                g = cg_result.garbage_fragment_like
+                d = cg_result.detail_breakdown_like
+                t = cg_result.total_or_metric_like
+                p = cg_result.pl_account_like
+                b = cg_result.bs_cf_like
+                total_rows = cg_result.total_rows
+
+                if (raw_reason in _rescue_reasons
+                        and v >= 2
+                        and (n + g) <= total_rows * 0.5  # narrative/garbage が過半でなぁE
+                        and p < 3                          # PL 汚染なぁE
+                        and b <= 1                         # BS/CF 汚染なぁE
+                        and (best_table.has_sales_header or best_table.has_profit_header
+                             or best_table.score >= 0.3)):
+                    _rescue_attempted = True
+                    trace.append(
+                        f"Phase B-2: RESCUE attempt: valid={v} detail={d} total={t} "
+                        f"narr={n} garbage={g} pl={p} bscf={b} "
+                        f"has_sales_hdr={best_table.has_sales_header} "
+                        f"has_profit_hdr={best_table.has_profit_header}"
+                    )
+                    # 親行�Eみを残したラベルリストで再評価  Eguard を通過させめE
+                    result.score_summary["invalid_structure_rescue"] = {
+                        "attempted": True,
+                        "valid_segment": v,
+                        "detail_breakdown": d,
+                        "total_or_metric": t,
+                        "narrative": n,
+                        "garbage": g,
+                    }
+                    # guard をバイパスして Phase C/D に進む (parent filter は Phase F で適用)
+                    _rescue_succeeded = True
+                    result.quarantine_reason = ""
+                    result.failed_stage = ""
+                    result.review_hint = ""
+                    trace.append(
+                        f"Phase B-2: RESCUE accepted  Eproceeding to Phase C/D with parent-row filter"
+                    )
+                    # cg_result.accepted めETrue 相当にして下へ fall through
+                else:
+                    # rescue 不適格 ↁE従来通り reject
+                    if raw_reason in _rescue_reasons:
+                        result.score_summary["invalid_structure_rescue"] = {
+                            "attempted": False,
+                            "reason": (
+                                f"ineligible: v={v} n={n} g={g} p={p} b={b} "
+                                f"hdr_sales={best_table.has_sales_header} "
+                                f"hdr_profit={best_table.has_profit_header}"
+                            ),
+                        }
+
+                # ── bs_cf_guard 救渁E セグメント表らしさが十�Eな場合だけスキチE�E ──
+                # 救済ルーチE(ぁE��れか一つ成立で通過):
+                #   ルーチE (既孁E: segment_like_rows>=2 AND has_sales AND has_profit (チE�Eブル行参照)
+                #   ルーチE: segment_header_flag(ペ�EジKW) AND segment_like_rows>=3 AND (has_sales OR has_profit)
+                #   ルーチE: valid_segment_like>=2 AND has_sales AND has_profit (ペ�EジチE��スト参照)
+                #   ルーチE: repeated_rows(segment_like_rows>=5) AND has_sales AND has_profit (ペ�EジチE��スト参照)
+                # bs_cf_guard 専用。他�E guard には適用しなぁE��E
+                _bscf_rescue_table_text = "\n".join(best_table_lines)
+                _bscf_has_sales  = best_table.has_sales_header  or "売丁E in _bscf_rescue_table_text
+                _bscf_has_profit = best_table.has_profit_header or "利盁E in _bscf_rescue_table_text
+
+                # ペ�EジチE��スト参照 (save: ルーチE/C 用)
+                _bscf_page_text = (
+                    pages_data[best_page_no][0]
+                    if best_page_no < len(pages_data)
+                    else ""
+                )
+                _bscf_has_sales_page  = _bscf_has_sales  or "売丁E in _bscf_page_text
+                _bscf_has_profit_page = _bscf_has_profit or "利盁E in _bscf_page_text
+
+                # セグメント見�Eし判宁E(ルーチE 用)
+                _BSCF_SEG_HEADER_KWS = (
+                    "セグメント情報", "報告セグメンチE, "セグメント利盁E,
+                    "事業別", "所在地別", "セグメント別",
+                )
+                _bscf_seg_header_flag = any(kw in _bscf_page_text for kw in _BSCF_SEG_HEADER_KWS)
+
+                # ── ルーチE�E�既存）──
+                _bscf_rescue_reason: str = ""
+                if (
+                    not _rescue_succeeded
+                    and "bs_cf_guard" in _reclass.final_reason
+                    and best_table.segment_like_rows >= 2
+                    and _bscf_has_sales
+                    and _bscf_has_profit
+                ):
+                    _rescue_succeeded = True
+                    _bscf_rescue_reason = "bs_cf_guard_rescue:table_sales_profit"
+
+                # ── ルーチE: segment_header_flag ──
+                if (
+                    not _rescue_succeeded
+                    and "bs_cf_guard" in _reclass.final_reason
+                    and _bscf_seg_header_flag
+                    and best_table.segment_like_rows >= 3
+                    and (_bscf_has_sales_page or _bscf_has_profit_page)
+                ):
+                    _rescue_succeeded = True
+                    _bscf_rescue_reason = "bs_cf_guard_rescue:segment_header"
+
+                # ── ルーチE: valid_segment_like + ペ�EジチE��スト売上�E利盁E──
+                if (
+                    not _rescue_succeeded
+                    and "bs_cf_guard" in _reclass.final_reason
+                    and cg_result.valid_segment_like >= 2
+                    and _bscf_has_sales_page
+                    and _bscf_has_profit_page
+                ):
+                    _rescue_succeeded = True
+                    _bscf_rescue_reason = "bs_cf_guard_rescue:biz_sales_profit"
+
+                # ── ルーチE: repeated_rows�E�反復構造�E�──
+                if (
+                    not _rescue_succeeded
+                    and "bs_cf_guard" in _reclass.final_reason
+                    and best_table.segment_like_rows >= 5
+                    and _bscf_has_sales_page
+                    and _bscf_has_profit_page
+                ):
+                    _rescue_succeeded = True
+                    _bscf_rescue_reason = "bs_cf_guard_rescue:repeated_rows"
+
+                if _rescue_succeeded and _bscf_rescue_reason:
+                    trace.append(
+                        f"Phase B-2: bs_cf_guard RESCUED "
+                        f"reason={_bscf_rescue_reason} "
+                        f"seg_like_rows={best_table.segment_like_rows} "
+                        f"valid_seg={cg_result.valid_segment_like} "
+                        f"seg_hdr={_bscf_seg_header_flag} "
+                        f"has_sales={_bscf_has_sales_page} has_profit={_bscf_has_profit_page}"
+                    )
+                    result.quarantine_reason = ""
+                    result.failed_stage = ""
+                    result.review_hint = ""
+                    result.score_summary["candidate_guard"]["accepted"] = True
+                    result.score_summary["candidate_guard"]["rescued_by"] = _bscf_rescue_reason
+
+                if not _rescue_succeeded:
+                    result.quarantine_reason = f"candidate_guard:{_reclass.final_reason}"
+                    result.failed_stage = "candidate_guard"
+                    result.review_hint = hint
+                    result.rule_trace = trace
+                    trace.append(
+                        f"Phase B-2: REJECT candidate_guard={raw_reason} "
+                        f"valid={cg_result.valid_segment_like} narr={cg_result.narrative_like} "
+                        f"bscf={cg_result.bs_cf_like} garbage={cg_result.garbage_fragment_like}"
+                    )
+                    if _reclass.reclassified:
+                        trace.append(
+                            f"Phase B-2: RECLASSIFIED {raw_reason} ↁE{_reclass.final_reason} "
+                            f"({_reclass.basis})"
+                        )
+
+                    # 他�E候補も試ぁE
+                    _alt_accepted = False
+                    for _alt_idx in range(1, min(len(all_table_candidates), 4)):
+                        _alt_ts, _alt_lines, _, _, _alt_page = all_table_candidates[_alt_idx]
+                        _alt_labels = []
+                        for _al in _alt_lines:
+                            _als = _al.strip()
+                            if not _als:
+                                continue
+                            _alm = _re_cg.match(r'^([^\d△▲\-�E�]*)', _als)
+                            if _alm and _alm.group(1).strip():
+                                _alt_labels.append(_alm.group(1).strip())
+                        # 代替候補にも表シグナルを渡ぁE
+                        _alt_hdr_hits = int(_alt_ts.has_sales_header) + int(_alt_ts.has_profit_header)
+                        _alt_anchor = sum(
+                            1 for k in _alt_ts.score_breakdown
+                            if k.startswith("seg:") or k.startswith("seg_heading_strong:")
+                        )
+                        _alt_cg = evaluate_candidate_guard(
+                            _alt_labels,
+                            candidate_lines=_alt_lines,
+                            header_keyword_hits=_alt_hdr_hits,
+                            anchor_hits=_alt_anchor,
+                            segment_name_like_rows=_alt_ts.segment_like_rows,
+                        )
+                        if _alt_cg.accepted:
+                            # こ�E候補を採用
+                            best_table = _alt_ts
+                            best_table_lines = _alt_lines
+                            best_page_no = _alt_page
+                            cg_result = _alt_cg
+                            trace.append(
+                                f"Phase B-2: ACCEPT alt candidate #{_alt_idx+1} "
+                                f"valid={_alt_cg.valid_segment_like} score={_alt_ts.score:.2f} "
+                                f"rescued_by={_alt_cg.rescued_by or 'none'}"
+                            )
+                            result.quarantine_reason = ""
+                            result.failed_stage = ""
+                            result.review_hint = ""
+                            _alt_accepted = True
+                            break
+
+                    if not _alt_accepted:
+                        # ================================================================
+                        # Phase 3.5: 構造 fallback  E全ペ�Eジから構造シグナルが強ぁE
+                        # ペ�Eジを探して guard を�E実衁E
+                        # ================================================================
+                        _struct_fb_found = False
+                        _struct_fb_pages_tried = 0
+                        for _sfb_ps in page_scores:
+                            _sfb_page_no = _sfb_ps.page_no
+                            # 既に試したペ�EジはスキチE�E
+                            if _sfb_page_no == best_page_no:
+                                continue
+                            if any(_sfb_page_no == c[4] for c in all_table_candidates[:4]):
+                                continue
+                            _sfb_text = pages_data[_sfb_page_no][0]
+                            _sfb_lines = _sfb_text.split("\n")
+
+                            # 構造シグナルチェチE��
+                            _sfb_multi_num = sum(
+                                1 for sl in _sfb_lines
+                                if len(re.findall(r'[△▲\-]?[\d,]+(?:\.\d+)?', sl)) >= 2
+                            )
+                            _sfb_seg_rows = 0
+                            _sfb_seg_re = re.compile(r'.*(事業|部門|セグメンチEビジネス|カンパニー)$')
+                            for sl in _sfb_lines:
+                                sls = sl.strip()
+                                if sls:
+                                    sm = re.match(r'^([^\d△▲\-�E�]{2,30})', sls)
+                                    if sm and (_sfb_seg_re.match(sm.group(1).strip())
+                                               or any(kw in sm.group(1) for kw in
+                                                      ["国冁E, "海夁E, "日本", "不動産", "物流E,
+                                                       "建設", "金融", "製造"])):
+                                        _sfb_seg_rows += 1
+
+                            if _sfb_multi_num < 4 or _sfb_seg_rows < 2:
+                                continue
+
+                            _struct_fb_pages_tried += 1
+                            if _struct_fb_pages_tried > 3:
+                                break
+
+                            # こ�Eペ�Eジで find_table_regions を実衁E
+                            from .table_scoring import find_table_regions as _sfb_ftr
+                            from .table_scoring import score_segment_table as _sfb_sst
+                            from .table_scoring import is_weak_evidence_table as _sfb_iwet
+                            _sfb_regions = _sfb_ftr(_sfb_lines)
+                            for _sfb_ridx, (_sfb_rs, _sfb_re, _sfb_nearby) in enumerate(_sfb_regions):
+                                _sfb_tlines = _sfb_lines[_sfb_rs:_sfb_re]
+                                _sfb_ts = _sfb_sst(_sfb_tlines, _sfb_nearby, _sfb_ridx, _sfb_rs, _sfb_re)
+                                if _sfb_ts.score < min_table_score and not _sfb_iwet(_sfb_ts):
+                                    continue
+                                # candidate_guard 再実衁E
+                                _sfb_labels = []
+                                for _sfl in _sfb_tlines:
+                                    _sfls = _sfl.strip()
+                                    if not _sfls:
+                                        continue
+                                    _sfm = _re_cg.match(r'^([^\d△▲\-�E�]*)', _sfls)
+                                    if _sfm and _sfm.group(1).strip():
+                                        _sfb_labels.append(_sfm.group(1).strip())
+                                    elif _sfls:
+                                        _sfb_labels.append(_sfls)
+                                _sfb_hdr = int(_sfb_ts.has_sales_header) + int(_sfb_ts.has_profit_header)
+                                _sfb_anchor = sum(1 for k in _sfb_ts.score_breakdown
+                                                  if k.startswith("seg:") or k.startswith("seg_heading_strong:"))
+                                _sfb_cg = evaluate_candidate_guard(
+                                    _sfb_labels,
+                                    candidate_lines=_sfb_tlines,
+                                    header_keyword_hits=_sfb_hdr,
+                                    anchor_hits=_sfb_anchor,
+                                    segment_name_like_rows=_sfb_ts.segment_like_rows,
+                                )
+                                if _sfb_cg.accepted:
+                                    best_table = _sfb_ts
+                                    best_table_lines = _sfb_tlines
+                                    best_page_no = _sfb_page_no
+                                    cg_result = _sfb_cg
+                                    result.quarantine_reason = ""
+                                    result.failed_stage = ""
+                                    result.review_hint = ""
+                                    _struct_fb_found = True
+                                    trace.append(
+                                        f"Phase B-2: STRUCTURE_FALLBACK accepted "
+                                        f"page={_sfb_page_no} region={_sfb_ridx} "
+                                        f"score={_sfb_ts.score:.2f} "
+                                        f"multi_num={_sfb_multi_num} seg_rows={_sfb_seg_rows} "
+                                        f"candidate_source=structure_fallback"
+                                    )
+                                    break
+                            if _struct_fb_found:
+                                break
+
+                        if not _struct_fb_found:
+                            trace.append(
+                                f"Phase B-2: STRUCTURE_FALLBACK not found "
+                                f"tried={_struct_fb_pages_tried} pages"
+                            )
+                            write_quarantine_review(
+                                result, doc_id=doc_id, ticker=ticker,
+                                source_file=pdf_path, best_table_lines=best_table_lines,
+                            )
+                            return result
+
+    if _column_first_bypass:
+        trace.append(
+            f"Phase B-2: ACCEPT (column_first_bypass) "
+            f"segment_count={_col_first_result.segment_count} "
+            f"tokens={_col_first_result.segment_tokens[:5]}"
+        )
+    else:
+        trace.append(
+            f"Phase B-2: ACCEPT valid={cg_result.valid_segment_like} "
+            f"narr={cg_result.narrative_like} "
+            f"numdens={cg_result.numeric_density:.4f} "
+            f"repnum={cg_result.repeated_numeric_rows} "
+            f"cand_score={cg_result.candidate_score} "
+            f"rescued_by={cg_result.rescued_by or 'none'}"
+        )
+
+    # ================================================================
+    # Phase C: ヘッダーグリチE��再構篁E(Phase 7 刁E��ヘッダー復允E
+    # ================================================================
+    trace.append("Phase C: ヘッダーグリチE��再構篁E)
+
+    # --- Phase B→C 遷移ログ ---
+    from .table_scoring import _count_numeric_columns as _cnt_num_cols
+    _phase_b_rows = len(best_table_lines)
+    _phase_b_num_cols = _cnt_num_cols(best_table_lines)
+    _phase_b_preview = [l.strip()[:60] for l in best_table_lines[:3]]
+
+    # Phase 7: 前置き行を除去 (日仁E吁E��E開示定型斁E
+    from .header_analysis import trim_non_table_preamble
+    trimmed_table_lines, preamble_debug = trim_non_table_preamble(best_table_lines)
+    if preamble_debug["skipped_count"] > 0:
+        trace.append(
+            f"Phase C: preamble_trim skipped={preamble_debug['skipped_count']} "
+            f"stop_reason={preamble_debug.get('stop_reason', '?')} "
+            f"first={preamble_debug['skipped_lines'][:3]}"
+        )
+
+    header_band_h = detect_header_band(trimmed_table_lines)
+    header_lines = trimmed_table_lines[:header_band_h]
+    data_lines = trimmed_table_lines[header_band_h:]
+
+    # Phase 5 legacy: reconstruct_header_grid (fallback 用に保持)
+    legacy_reconstructed = reconstruct_header_grid(header_lines)
+    header_units = extract_header_units(header_lines)
+
+    # Phase 7 new: 刁E��ヘッダー復允E
+    from .header_reconstruction import reconstruct_from_lines
+    recon_result = reconstruct_from_lines(header_lines)
+
+    # raw header rows めEdebug に残す
+    raw_header_texts = [h.strip() for h in header_lines]
+
+    # --- CID 破損検�E ---
+    # PDF チE��スト抽出で (cid:XXXX) が大量に出る場合�Eフォント埋め込み不良
+    _cid_sample = " ".join(best_table_lines[:min(10, len(best_table_lines))])
+    _cid_count = _cid_sample.count("(cid:")
+    if _cid_count >= 5:
+        result.quarantine_reason = "pdf_text_cid_corrupted"
+        result.failed_stage = "header_extraction"
+        result.review_hint = "pdf_text_cid_corrupted"
+        result.rule_trace = trace
+        trace.append(f"Phase C: CID corrupted detected (cid_count={_cid_count} in top 10 lines)")
+        return result
+
+    # 新旧ヘッダーを両方保持
+    new_reconstructed = recon_result.reconstructed_headers
+    reconstruction_steps = recon_result.steps
+
+    header_conf = 0.5
+    if len(new_reconstructed) >= 2:
+        header_conf += 0.2
+    if header_units:
+        header_conf += 0.1
+
+    trace.append(f"Phase C: band_h={header_band_h}, raw={raw_header_texts[:3]}, reconstructed={new_reconstructed[:5]}, units={header_units}")
+    if reconstruction_steps:
+        for step in reconstruction_steps[:3]:
+            trace.append(f"Phase C: merge {step.get('type','?')} {step.get('parts',[])} -> {step.get('result','?')} score={step.get('score','?')}")
+
+    # --- Helper: text-only token 抽出 (数値/注訁Esection除夁E ---
+    def _extract_text_tokens(line: str) -> list[str]:
+        """行かめEtext-only token を抽出し、数値/注訁Esection語を除外する、E""
+        tokens = re.split(r'\s{2,}|\t', line.strip())
+        text_tokens = []
+        for t in tokens:
+            t_s = t.strip()
+            if not t_s:
+                continue
+            _t_c = t_s.replace(",", "").replace("△", "-").replace("▲", "-").replace("�E�E, "-")
+            if _NUM_PATTERN.fullmatch(_t_c):
+                continue
+            if re.fullmatch(r'[△▲\-�E�]?[\d,]+\.?\d*[%�E�E?', _t_c):
+                continue
+            if re.match(r'^[�E�E]注[�E�E]', t_s):
+                continue
+            text_tokens.append(t_s)
+        return text_tokens
+
+    # --- Helper: dual-metric header 刁E�� ---
+    _SALES_SPLIT_KW = ["売上髁E, "売上収盁E, "営業収益", "経常収益",
+                        "外部顧客への売上髁E, "外部顧客への売上収盁E]
+    _PROFIT_SPLIT_KW = ["セグメント利盁E, "セグメント損失", "セグメント利益又は損失",
+                         "セグメント損盁E, "営業利盁E, "営業損失", "事業利盁E,
+                         "コア営業利盁E, "経常利盁E, "利益又は損失", "EBITDA",
+                         "セグメント利盁E△損失)", "セグメント利益（△損失�E�E]
+
+    def _split_dual_metric_headers(headers: list[str]) -> list[str]:
+        """売上系誁E利益系語が同一 header に共存する場合、�E割する、E""
+        result_hdrs = []
+        for h in headers:
+            found_sales = None
+            found_profit = None
+            for kw in sorted(_SALES_SPLIT_KW, key=len, reverse=True):
+                if kw in h:
+                    found_sales = kw
+                    break
+            for kw in sorted(_PROFIT_SPLIT_KW, key=len, reverse=True):
+                if kw in h:
+                    found_profit = kw
+                    break
+            if found_sales and found_profit and found_sales != found_profit:
+                result_hdrs.append(found_sales)
+                result_hdrs.append(found_profit)
+            else:
+                result_hdrs.append(h)
+        return result_hdrs
+
+    # --- Phase C-2: descriptive_only_header ガーチE---
+    from .header_reconstruction import is_descriptive_segment_header, split_header_rows_for_role_detection
+    if is_descriptive_segment_header(raw_header_texts) and is_descriptive_segment_header(new_reconstructed):
+        trace.append("Phase C-2: descriptive_only_header detected, scanning lower rows")
+
+        _METRIC_A_KW = [
+            "売上髁E, "売上収盁E, "営業収益", "経常収益",
+            "外部顧客への売上髁E, "外部顧客への売上収盁E,
+        ]
+        _METRIC_B_KW = [
+            "セグメント利盁E, "セグメント損失", "セグメント利益又は損失",
+            "セグメント損盁E, "営業利盁E, "営業損失",
+            "事業利盁E, "事業損失", "コア営業利盁E, "経常利盁E,
+            "利益又は損失", "EBITDA",
+        ]
+        _METRIC_C_KW = [
+            "そ�E仁E, "調整顁E, "合訁E, "全社", "消去",
+            "報告セグメント情報", "報告セグメントに関する惁E��",
+            "セグメント賁E��", "減価償却費", "設備投賁E,
+        ]
+
+        _scan_limit = min(15, len(data_lines))
+        _recovered_a: list[str] = []
+        _recovered_b: list[str] = []
+        _recovered_c: list[str] = []
+        _num_dense_rows = 0
+
+        for _dl in data_lines[:_scan_limit]:
+            _dls = _dl.strip()
+            if not _dls:
+                continue
+            _tokens = re.split(r'\s{2,}|\t', _dls)
+            _num_t = sum(1 for t in _tokens if t.strip() and _NUM_PATTERN.search(t))
+            if len(_tokens) >= 2 and _num_t / len(_tokens) > 0.5:
+                _num_dense_rows += 1
+                if _num_dense_rows >= 2:
+                    trace.append("Phase C-2: stopped at dense numeric block")
+                    break
+                continue
+
+            has_a = any(kw in _dls for kw in _METRIC_A_KW)
+            has_b = any(kw in _dls for kw in _METRIC_B_KW)
+            has_c = any(kw in _dls for kw in _METRIC_C_KW)
+
+            if has_a or has_b:
+                text_tokens = _extract_text_tokens(_dls)
+                if text_tokens:
+                    if has_a:
+                        _recovered_a.extend(text_tokens)
+                        trace.append(f"Phase C-2: recovered A (sales): {text_tokens}")
+                    elif has_b:
+                        _recovered_b.extend(text_tokens)
+                        trace.append(f"Phase C-2: recovered B (profit): {text_tokens}")
+            elif has_c:
+                _recovered_c.append(_dls)
+
+        # primary header = A + B tokens を直接使用 (reconstruct_from_lines を通さなぁE
+        _primary_tokens = _recovered_a + _recovered_b
+        if _primary_tokens:
+            new_reconstructed = _split_dual_metric_headers(_primary_tokens)
+            trace.append(
+                f"Phase C-2: direct tokens A={len(_recovered_a)} B={len(_recovered_b)} "
+                f"C(skipped)={len(_recovered_c)} ↁEheaders={new_reconstructed[:5]}"
+            )
+        else:
+            trace.append(
+                f"Phase C-2: no A/B metric headers found "
+                f"(C only={len(_recovered_c)}); skipping helper-only reconstruction"
+            )
+
+    # ================================================================
+    # Unit Detection (Phase 2)
+    # ================================================================
+    unit_result = detect_unit_for_table(
+        page_text=best_page_text,
+        table_headers=header_lines,
+        nearby_text="\n".join(best_table_lines[:3]),
+    )
+    result.unit_info = unit_result
+    trace.append(f"Unit: raw={unit_result.unit_raw}, mult={unit_result.unit_multiplier}, src={unit_result.unit_source}")
+
+    # --- Phase C 後�E移ログ ---
+    _phase_c_rows = len(trimmed_table_lines)
+    _phase_c_num_cols = _cnt_num_cols(trimmed_table_lines)
+    _phase_c_preview = [l.strip()[:60] for l in trimmed_table_lines[:3]]
+    trace.append(
+        f"Phase C: transition B({_phase_b_rows}rows,{_phase_b_num_cols}cols)→C({_phase_c_rows}rows,{_phase_c_num_cols}cols) "
+        f"header_band={header_band_h} new_headers={new_reconstructed[:3]}"
+    )
+    result.score_summary["phase_transition"] = {
+        "phase_b_rows": _phase_b_rows,
+        "phase_b_num_cols": _phase_b_num_cols,
+        "phase_b_preview": _phase_b_preview,
+        "phase_c_rows": _phase_c_rows,
+        "phase_c_num_cols": _phase_c_num_cols,
+        "phase_c_preview": _phase_c_preview,
+        "header_band_h": header_band_h,
+        "best_table_has_sales": best_table.has_sales_header,
+        "best_table_has_profit": best_table.has_profit_header,
+    }
+
+    # ================================================================
+    # Phase C-V(pre): 縦持ち fast path�E�Eandidate_guard 通過直後！E
+    # Phase D に入る前に縦持ち表を早期救済、E
+    # header_lines / result.unit_info が準備された最初�Eタイミング、E
+    # ================================================================
+    trace.append("Phase C-V(pre): entered")
+
+    if _vd_is_vertical_fast(best_table_lines):
+        _cv_unit_mult = (
+            result.unit_info.unit_multiplier
+            if result.unit_info is not None
+            else None
+        )
+        _cv_rows = _vd_build_data_rows_from_lines(best_table_lines)
+        _cv_segs = _vd_extract_segments_vertical(header_lines, _cv_rows, _cv_unit_mult)
+
+        if 2 <= len(_cv_segs) <= 10:
+            result.segments = _cv_segs
+            result.used_v2 = True
+            trace.append(
+                f"Phase C-V(pre): vertical_fast_path success n={len(_cv_segs)} "
+                f"unit_mult={_cv_unit_mult}"
+            )
+            result.rule_trace = trace
+            return result
+
+        trace.append(
+            f"Phase C-V(pre): vertical_fast_path skipped "
+            f"(segs={len(_cv_segs)} not in [2,10], fallthrough)"
+        )
+    else:
+        trace.append("Phase C-V(pre): not_vertical_fast")
+
+    # ================================================================
+    # Phase D: 列ロール刁E��E(Phase 7 二段構え: new ↁElegacy fallback)
+    # ================================================================
+    trace.append("Phase D: 列ロール刁E��E)
+
+    data_rows: list[list[str]] = []
+    for line in data_lines:
+        if not line.strip():
+            continue
+        tokens = re.split(r'\s{2,}|\t', line.strip())
+        tokens = [t.strip() for t in tokens]
+        data_rows.append(tokens)
+
+    # ================================================================
+    # Phase C-V: 縦持ち fast path
+    # data_rows が準備された最初�E時点。�E功時のみ early return、E
+    # ================================================================
+    if _vd_is_vertical_fast(best_table_lines):
+        _cv_unit_mult = (
+            result.unit_info.unit_multiplier
+            if result.unit_info is not None
+            else None
+        )
+        _cv_segs = _vd_extract_segments_vertical(
+            header_lines, data_rows, _cv_unit_mult
+        )
+        if 2 <= len(_cv_segs) <= 10:
+            result.segments = _cv_segs
+            result.used_v2 = True
+            trace.append(
+                f"Phase C-V: vertical_fast_path success n={len(_cv_segs)} "
+                f"unit_mult={_cv_unit_mult}"
+            )
+            result.rule_trace = trace
+            return result
+        trace.append(
+            f"Phase C-V: vertical_fast_path skipped "
+            f"(segs={len(_cv_segs)} not in [2,10], fallthrough to Phase D)"
+        )
+    else:
+        trace.append(
+            f"Phase C-V: skip (not vertical_fast) page={best_page_no}"
+        )
+
+    # Phase D-0: header splitting  E期間/比輁E��を secondary に刁E��
+    _header_split = split_header_rows_for_role_detection(raw_header_texts)
+    _primary_header_rows = _header_split["primary"]
+    _secondary_header_rows = _header_split["secondary"]
+    _primary_reconstructed = None
+
+    trace.append(
+        f"Phase D-0: split result primary={len(_primary_header_rows)} secondary={len(_secondary_header_rows)}"
+    )
+
+    _D0_METRIC_KW = [
+        "売上髁E, "売上収盁E, "営業収益", "経常収益",
+        "営業利盁E, "セグメント利盁E, "事業利盁E, "コア営業利盁E,
+        "経常利盁E, "セグメント損盁E, "利益又は損失", "EBITDA",
+        "外部顧客への売上髁E, "外部顧客への売上収盁E,
+    ]
+
+    if _secondary_header_rows and _primary_header_rows:
+        trace.append(f"Phase D-0: secondary_headers={[h.strip()[:60] for h in _secondary_header_rows]}")
+        # primary rows から再構篁E
+        recon_primary = reconstruct_from_lines(_primary_header_rows)
+        _primary_reconstructed = recon_primary.reconstructed_headers
+        if _primary_reconstructed:
+            trace.append(f"Phase D-0: primary_reconstructed={_primary_reconstructed[:5]}")
+            # メトリクス妥当性検証
+            _primary_text = " ".join(_primary_reconstructed)
+            _has_metric = any(kw in _primary_text for kw in _D0_METRIC_KW)
+            if not _has_metric:
+                trace.append("Phase D-0: primary_split_empty_or_non_metric, discarding primary_reconstructed")
+                _primary_reconstructed = None
+        else:
+            trace.append("Phase D-0: primary_reconstructed is empty after reconstruction")
+            _primary_reconstructed = None
+    elif _secondary_header_rows and not _primary_header_rows:
+        # 全衁Esecondary ↁEprimary 空 ↁEsplit 失敁E
+        trace.append("Phase D-0: primary_split_empty (all rows are secondary), falling back")
+
+    # D-0 body metric recovery: primary_split 失敁Eempty 時に data_lines からメトリクス行を探索
+    if _primary_reconstructed is None and _secondary_header_rows:
+        trace.append("Phase D-0: body_metric_recovery starting")
+        _body_metric_tokens: list[str] = []
+        _body_scan = min(15, len(data_lines))
+        _body_num_dense = 0
+        for _bml in data_lines[:_body_scan]:
+            _bmls = _bml.strip()
+            if not _bmls:
+                continue
+            # 数値寁E��停止
+            _bm_tokens = re.split(r'\s{2,}|\t', _bmls)
+            _bm_num = sum(1 for t in _bm_tokens if t.strip() and _NUM_PATTERN.search(t))
+            if len(_bm_tokens) >= 2 and _bm_num / len(_bm_tokens) > 0.5:
+                _body_num_dense += 1
+                if _body_num_dense >= 2:
+                    break
+                continue
+            # 注訁Esection title 除夁E
+            if re.match(r'^[�E�E]注[�E�E]', _bmls):
+                continue
+            if "の冁E��" in _bmls or "冁E��は" in _bmls:
+                continue
+            # メトリクス語チェチE�� ↁEtext-only tokens
+            if any(kw in _bmls for kw in _D0_METRIC_KW):
+                _bm_text = _extract_text_tokens(_bmls)
+                if _bm_text:
+                    _body_metric_tokens.extend(_bm_text)
+                    trace.append(f"Phase D-0: body_metric_recovery found: {_bm_text}")
+
+        if _body_metric_tokens:
+            # dual-metric split して直接使用 (reconstruct_from_lines を通さなぁE
+            new_reconstructed = _split_dual_metric_headers(_body_metric_tokens)
+            trace.append(f"Phase D-0: body_metric_recovery_headers={new_reconstructed[:5]}")
+        else:
+            trace.append("Phase D-0: body_metric_recovery found nothing")
+
+    # dual-metric split めEnew_reconstructed にも適用 (C-2 以外�E経路用)
+    if new_reconstructed:
+        _pre_split = new_reconstructed[:]
+        new_reconstructed = _split_dual_metric_headers(new_reconstructed)
+        if new_reconstructed != _pre_split:
+            trace.append(f"Phase D: dual_metric_split: {_pre_split[:3]} ↁE{new_reconstructed[:5]}")
+
+    # 1) new 方式で試衁E(primary_reconstructed があれ�Eそれを優允E
+    _headers_for_classify = _primary_reconstructed if _primary_reconstructed else new_reconstructed
+    col_result = classify_columns(data_rows, _headers_for_classify)
+    resolution_strategy = "new" if _primary_reconstructed is None else "primary_split"
+
+    # 2) primary_split で不十刁E��めEnew_reconstructed で再試衁E
+    if not col_result.has_sales and not col_result.has_profit and _primary_reconstructed:
+        col_result_full = classify_columns(data_rows, new_reconstructed)
+        if col_result_full.has_sales or col_result_full.has_profit:
+            col_result = col_result_full
+            resolution_strategy = "new"
+            trace.append("Phase D: primary_split unresolved, falling back to full new_reconstructed")
+
+    # 3) new が不十刁E��めElegacy fallback
+    if not col_result.has_sales and not col_result.has_profit:
+        col_result_legacy = classify_columns(data_rows, legacy_reconstructed)
+        if col_result_legacy.has_sales or col_result_legacy.has_profit:
+            col_result = col_result_legacy
+            resolution_strategy = "legacy_fallback"
+            trace.append("Phase D: legacy fallback adopted (new method unresolved)")
+
+    # debug: 使用ヘッダーを記録
+    active_headers = _headers_for_classify if resolution_strategy == "primary_split" else (
+        new_reconstructed if resolution_strategy == "new" else legacy_reconstructed
+    )
+    trace.append(f"Phase D: resolution_strategy={resolution_strategy}")
+
+    # --- Phase D-0b: numeric-only header + slide 誁EↁEexplanation_slide 再�E顁E---
+    _explanation_slide_forced = False
+    if col_result.best_sales_col is None and col_result.best_profit_col is None:
+        _non_empty_headers = [h.strip() for h in (new_reconstructed or []) if h.strip()]
+        _all_headers_numeric = (
+            len(_non_empty_headers) > 0
+            and all(
+                _NUM_PATTERN.fullmatch(h.replace(",", "").replace("△", "").replace("▲", ""))
+                for h in _non_empty_headers
+            )
+        )
+        if _all_headers_numeric:
+            _SLIDE_CHECK_KW = [
+                "決算説明賁E��", "四半期業績推移", "業績推移", "財務データ",
+                "見通し", "事業体制", "説明賁E��",
+            ]
+            _preamble_text = " ".join(best_table_lines[:5]) if best_table_lines else ""
+            _slide_in_context = any(
+                (kw in best_page_text) or (kw in _preamble_text) for kw in _SLIDE_CHECK_KW
+            )
+            if _slide_in_context:
+                best_table.non_segment_type = "explanation_slide"
+                _explanation_slide_forced = True
+                result.quarantine_reason = "non_segment_table_explanation_slide"
+                result.review_hint = "pdf_non_segment_table"
+                trace.append("Phase D-0b: explanation_slide forced (quarantine_reason + review_hint set)")
+            else:
+                trace.append("Phase D-0b: numeric_only_header but no slide context")
+
+    # debug 惁E��  E列診断を常に保持
+    col_diag = _build_column_diagnosis(
+        col_result, active_headers, data_rows, raw_headers=raw_header_texts
+    )
+    col_diag["resolution_strategy"] = resolution_strategy
+    col_diag["legacy_headers"] = legacy_reconstructed[:5]
+    col_diag["new_headers"] = new_reconstructed[:5]
+    col_diag["reconstruction_steps"] = reconstruction_steps[:5]
+    result.score_summary["column_diagnosis"] = col_diag
+
+    # ================================================================
+    # Phase D-2: strong-table fallback
+    # ================================================================
+    # Phase B で strong table (numeric_cols>=2 + sales/profit header) なのに
+    # Phase C/D で sales/profit が立たなぁE��合、Phase B 允E��ーブルで冁Eclassify
+    _strong_table_fallback_used = False
+    if (not col_result.has_sales and not col_result.has_profit
+            and _phase_b_num_cols >= 2
+            and (best_table.has_sales_header or best_table.has_profit_header)):
+        # Phase B 允E��ーブルから直接 data_rows を作�E
+        _fb_data_rows: list[list[str]] = []
+        for _fbl in best_table_lines:
+            _fbl_s = _fbl.strip()
+            if not _fbl_s:
+                continue
+            _fb_tokens = re.split(r'\s{2,}|\t', _fbl_s)
+            _fb_tokens = [t.strip() for t in _fb_tokens]
+            _fb_data_rows.append(_fb_tokens)
+        # Phase B 允E��から�EチE��ーを取征E
+        _fb_headers = [row[0] if row else "" for row in _fb_data_rows[:3]]
+        _fb_col_result = classify_columns(_fb_data_rows, _fb_headers)
+        if _fb_col_result.has_sales or _fb_col_result.has_profit:
+            col_result = _fb_col_result
+            resolution_strategy = "phase_b_fallback"
+            _strong_table_fallback_used = True
+            trace.append(
+                f"Phase D: fallback rerun column diagnosis on Phase B source table "
+                f"sales_col={_fb_col_result.best_sales_col} profit_col={_fb_col_result.best_profit_col}"
+            )
+            # data_rows めEPhase B 允E��差替
+            data_rows = _fb_data_rows
+            active_headers = _fb_headers
+            # col_diag 再構篁E
+            col_diag = _build_column_diagnosis(
+                col_result, active_headers, data_rows, raw_headers=raw_header_texts
+            )
+            col_diag["resolution_strategy"] = resolution_strategy
+            result.score_summary["column_diagnosis"] = col_diag
+
+    _fallback_scores_for_quarantine: dict = {}
+
+    if not col_result.has_sales and not col_result.has_profit:
+        full_header_text = "\n".join(best_table_lines[:min(10, len(best_table_lines))])
+        from .header_analysis import score_header_role
+        fallback_scores = score_header_role(full_header_text)
+        has_sales_fb = fallback_scores.get("sales", 0) >= 0.3
+        has_profit_fb = any(
+            fallback_scores.get(r, 0) >= 0.3
+            for r in ["operating_profit", "segment_profit", "ordinary_profit"]
+        )
+
+        # 2-3列表の簡易推宁E 数値列が2つなめEsales + profit とみなぁE
+        if not has_sales_fb and not has_profit_fb:
+            # data_rows からまず試ぁE
+            sample_rows = data_rows[:5] if data_rows else []
+            if not sample_rows:
+                # data_rows が空なめEbest_table_lines 全体から試ぁE
+                sample_rows = [
+                    re.split(r'\s{2,}|\t', l.strip())
+                    for l in best_table_lines[:10]
+                    if _NUM_PATTERN.search(l)
+                ]
+            num_cols = []
+            for row in sample_rows:
+                nc = sum(1 for cell in row if _NUM_PATTERN.search(cell if isinstance(cell, str) else ""))
+                num_cols.append(nc)
+            avg_num_cols = sum(num_cols) / max(len(num_cols), 1)
+            if avg_num_cols >= 1.5:
+                has_sales_fb = True
+                if avg_num_cols >= 2.5:
+                    has_profit_fb = True
+                    trace.append(f"Phase D: 簡易推宁E(avg_num_cols={avg_num_cols:.1f}) ↁEsales+profit")
+                else:
+                    trace.append(f"Phase D: 簡易推宁E(avg_num_cols={avg_num_cols:.1f}) ↁEsales only")
+
+        if not has_sales_fb and not has_profit_fb:
+            # D-3/D-4/D-5 を経由させるためEearly return せず flag を立てめE
+            _fallback_scores_for_quarantine = fallback_scores
+            trace.append("Phase D: header/numeric fallback failed, deferring quarantine to post-fallbacks")
+
+        # sales のみでも続衁E(partial rescue)
+        if has_sales_fb and not has_profit_fb:
+            trace.append("Phase D: sales only - partial rescue mode")
+
+        # fallback 結果めEcol_result に反映 (numeric layout fallback)
+        # has_sales / has_profit / profit_role は read-only property なので
+        # underlying フィールド�Eみ更新する
+        try:
+            if has_sales_fb and col_result.best_sales_col is None:
+                col_result.best_sales_col = 0
+                trace.append("Phase D: column_fallback_numeric_layout sales_col=0")
+            if has_profit_fb and col_result.best_profit_col is None:
+                col_result.best_profit_col = 1
+                # column_roles を忁E��サイズまで拡張して role を設宁E
+                while len(col_result.column_roles) <= 1:
+                    col_result.column_roles.append("unknown")
+                col_result.column_roles[1] = "numeric_layout_fallback"
+                trace.append("Phase D: column_fallback_numeric_layout profit_col=1")
+        except Exception as e:
+            trace.append(f"Phase D: column_fallback_numeric_layout error={e}")
+
+        trace.append("Phase D: ヘッダー全斁E��ォールバックで列推宁E)
+
+    # ================================================================
+    # Phase D-3: profit near-sales recheck (強化版)
+    # ================================================================
+    # sales_col のみ立って profit_col=None のとき、E��接列を緩和閾値で再探索
+    if col_result.best_sales_col is not None and col_result.best_profit_col is None:
+        _sc = col_result.best_sales_col
+        trace.append(f"Phase D-3: profit near-sales recheck start sales_col={_sc}")
+        _recheck_candidates = []
+        _recheck_details = []  # debug 用
+        for _off in [1, 2, -1, -2, 3, -3]:
+            _adj = _sc + _off
+            if 0 <= _adj < len(col_result.role_score_breakdown):
+                _adj_scores = col_result.role_score_breakdown[_adj]
+                _adj_role = col_result.column_roles[_adj] if _adj < len(col_result.column_roles) else "unknown"
+                _adj_header = ""
+                if active_headers and _adj < len(active_headers):
+                    _adj_header = active_headers[_adj]
+                # ratio/yoy/margin/assets は除夁E
+                if _adj_role in ("ratio", "yoy", "margin_like", "assets_like",
+                                 "depreciation_like", "capex_like", "segment_label"):
+                    _recheck_details.append(
+                        f"col={_adj} role={_adj_role} header={_adj_header!r} ↁEskip (excluded role)"
+                    )
+                    continue
+                for _pr in ["operating_profit_like", "segment_profit_like",
+                            "ordinary_profit_like", "pretax_like", "net_income_like"]:
+                    _ps = _adj_scores.get(_pr, 0)
+                    if _ps >= 0.03:  # 非常に緩ぁE��値で候補集めE
+                        _recheck_candidates.append((_adj, _pr, _ps, _adj_header, _adj_role))
+                # 候補なし�E場合も記録
+                _best_pr_score = max((_adj_scores.get(r, 0) for r in
+                    ["operating_profit_like", "segment_profit_like",
+                     "ordinary_profit_like", "pretax_like", "net_income_like"]), default=0)
+                _recheck_details.append(
+                    f"col={_adj} role={_adj_role} header={_adj_header!r} "
+                    f"best_profit_score={_best_pr_score:.3f}"
+                )
+
+        # 候補を score_summary に記録
+        result.score_summary["profit_recheck_candidates"] = [
+            {"col": c[0], "role": c[1], "score": round(c[2], 3),
+             "header": c[3], "current_role": c[4]}
+            for c in _recheck_candidates
+        ]
+
+        if _recheck_candidates:
+            _recheck_candidates.sort(key=lambda x: x[2], reverse=True)
+            _best_rc = _recheck_candidates[0]
+            # 採用閾値: 0.05 以上で採用
+            if _best_rc[2] >= 0.05:
+                col_result.best_profit_col = _best_rc[0]
+                while len(col_result.column_roles) <= _best_rc[0]:
+                    col_result.column_roles.append("unknown")
+                col_result.column_roles[_best_rc[0]] = _best_rc[1]
+                trace.append(
+                    f"Phase D-3: profit near-sales selected col={_best_rc[0]} "
+                    f"role={_best_rc[1]} score={_best_rc[2]:.3f} "
+                    f"header={_best_rc[3]!r} candidates={len(_recheck_candidates)}"
+                )
+            else:
+                trace.append(
+                    f"Phase D-3: profit near-sales candidates found but below threshold "
+                    f"best_score={_best_rc[2]:.3f} candidates={len(_recheck_candidates)}"
+                )
+        else:
+            trace.append("Phase D-3: profit near-sales no candidate")
+
+    # ================================================================
+    # Phase D-4: numeric virtual columns reconstruction
+    # ================================================================
+    # column_roles ぁEsegment_label のみだぁEPhase B で numeric_cols >= 2 なめE
+    # best_table_lines から直接数値位置を見て仮想列�E構�E
+    _effective_roles = [r for r in col_result.column_roles if r != "unknown"]
+    if (set(_effective_roles) <= {"segment_label", ""}
+            and _phase_b_num_cols >= 2
+            and col_result.best_sales_col is None):
+        # 吁E���E数値セル位置を集訁E
+        _num_positions: list[list[int]] = []
+        for _vl in best_table_lines:
+            _vtokens = re.split(r'\s{2,}|\t', _vl.strip())
+            _npos = [i for i, t in enumerate(_vtokens)
+                     if t.strip() and _NUM_PATTERN.search(t)]
+            if _npos:
+                _num_positions.append(_npos)
+        if _num_positions:
+            # 最頻出の数値列数を取征E
+            from collections import Counter
+            _col_counts = Counter(len(p) for p in _num_positions)
+            _most_common_ncols = _col_counts.most_common(1)[0][0]
+            if _most_common_ncols >= 2:
+                # 仮想皁E�� sales=最初�E数値刁E profit=2番目の数値刁E
+                col_result.best_sales_col = 0
+                col_result.best_profit_col = 1
+                while len(col_result.column_roles) <= 1:
+                    col_result.column_roles.append("unknown")
+                col_result.column_roles[0] = "sales"
+                col_result.column_roles[1] = "virtual_profit"
+                trace.append(
+                    f"Phase D: virtual columns reconstruction "
+                    f"most_common_ncols={_most_common_ncols} "
+                    f"num_rows={len(_num_positions)}"
+                )
+            elif _most_common_ncols == 1:
+                col_result.best_sales_col = 0
+                while len(col_result.column_roles) <= 0:
+                    col_result.column_roles.append("unknown")
+                col_result.column_roles[0] = "sales"
+                trace.append(
+                    f"Phase D: virtual columns reconstruction (sales only) "
+                    f"num_rows={len(_num_positions)}"
+                )
+
+    # ================================================================
+    # Phase D-5: ratio misclassification guard
+    # ================================================================
+    # ratio 判定�Eみで sales/profit が�E滁EↁEratio を抑制して冁Eclassify
+    if (col_result.best_sales_col is None
+            and col_result.best_profit_col is None
+            and any(r in ("ratio", "margin_like") for r in col_result.column_roles)
+            and (best_table.has_sales_header or best_table.has_profit_header)):
+        # ratio/margin スコアを半減させて冁Eclassify
+        _ratio_guard_data = data_rows if data_rows else [
+            re.split(r'\s{2,}|\t', l.strip()) for l in best_table_lines
+            if l.strip()
+        ]
+        _ratio_guard_result = classify_columns(_ratio_guard_data, active_headers)
+        # ratio/margin を取り除ぁE��後�Eスコアで再判宁E
+        if _ratio_guard_result.has_sales or _ratio_guard_result.has_profit:
+            # ratio が本当に支配的か確誁E
+            _ratio_dominated = all(
+                r in ("ratio", "margin_like", "unknown", "segment_label", "")
+                for r in col_result.column_roles
+            )
+            if _ratio_dominated:
+                col_result = _ratio_guard_result
+                trace.append("Phase D: ratio misclassification guard applied")
+
+    # ================================================================
+    # Phase D-rescue: sales/profit 列不�Eでも数値列構造があれ�E暫定候補を保持
+    # ================================================================
+    if col_result.best_sales_col is None and col_result.best_profit_col is None:
+        # data_rows から吁E�Eの数値皁E��性を解极E
+        _dr_num_col_info: list[dict] = []  # [{col, num_count, total, pct_count, decimal_count, median, header}]
+        _dr_n_cols = max((len(row) for row in data_rows), default=0) if data_rows else 0
+
+        for _drc in range(_dr_n_cols):
+            _dr_vals: list[float] = []
+            _dr_total = 0
+            _dr_pct = 0
+            _dr_decimal = 0
+            _dr_header = active_headers[_drc] if active_headers and _drc < len(active_headers) else ""
+            for _drr in data_rows:
+                if _drc < len(_drr):
+                    _cell = _drr[_drc].strip()
+                    if not _cell:
+                        continue
+                    _dr_total += 1
+                    if "%" in _cell or "�E�E in _cell:
+                        _dr_pct += 1
+                    if "." in _cell:
+                        _dr_decimal += 1
+                    _clean = _cell.replace(",", "").replace("△", "-").replace("▲", "-").replace("�E�E, "-")
+                    try:
+                        _dr_vals.append(float(_clean))
+                    except ValueError:
+                        pass
+            _dr_num_count = len(_dr_vals)
+            _dr_median = 0.0
+            if _dr_vals:
+                _sorted = sorted(abs(v) for v in _dr_vals)
+                _dr_median = _sorted[len(_sorted) // 2]
+            _dr_num_col_info.append({
+                "col": _drc, "num_count": _dr_num_count, "total": _dr_total,
+                "pct_count": _dr_pct, "decimal_count": _dr_decimal,
+                "median": _dr_median, "header": _dr_header,
+            })
+
+        # 除外条件: 構�E毁E割吁E件数/数釁E列を除夁E
+        _RESCUE_EXCLUDE_HEADERS = ["構�E毁E, "割吁E, "件数", "数釁E, "比率", "増減率",
+                                    "前年毁E, "前年同期毁E, "前期毁E, "玁E]
+
+        _dr_valid_cols: list[dict] = []
+        for _info in _dr_num_col_info:
+            # チE��スト�E (数値玁E< 50%) は除夁E
+            if _info["total"] > 0 and _info["num_count"] / _info["total"] < 0.5:
+                continue
+            # 数値行が 2 未満は除夁E
+            if _info["num_count"] < 2:
+                continue
+            # 構�E毁E数量系ヘッダーは除夁E
+            _hdr = _info["header"]
+            if any(ex in _hdr for ex in _RESCUE_EXCLUDE_HEADERS):
+                continue
+            # ratio-like (% が多い or 小数+中央値が小さぁE は除夁E
+            if _info["total"] > 0 and _info["pct_count"] / _info["total"] >= 0.3:
+                continue
+            if (_info["total"] > 0 and _info["decimal_count"] / _info["total"] >= 0.5
+                    and _info["median"] < 200):
+                continue
+            _dr_valid_cols.append(_info)
+
+        # Phase 3: 列スコアリングベ�Eスで sales/profit を割彁E
+        _dr_repnum = cg_result.repeated_numeric_rows if hasattr(cg_result, 'repeated_numeric_rows') else 0
+        _DR_MIN_SCORE = 1.5
+        _DR_MIN_MARGIN = 0.5
+
+        if len(_dr_valid_cols) >= 1 and _dr_repnum >= 3:
+            from .column_analysis import _compute_column_score as _dr_col_score
+
+            # 全 valid 列�Eスコアを算�E
+            _dr_scored: list[dict] = []
+            for _dv in _dr_valid_cols:
+                _dv_idx = _dv["col"]
+                _dv_sc = _dr_col_score(
+                    _dv_idx, data_rows,
+                    col_result.role_score_breakdown if col_result.role_score_breakdown else [],
+                    col_result.column_roles if col_result.column_roles else [],
+                    active_headers if active_headers else [],
+                )
+                _dv_sc["rescue_info"] = _dv
+                _dr_scored.append(_dv_sc)
+
+            # ログ: 全列スコア
+            for _dsc in _dr_scored:
+                trace.append(
+                    f"[COLSCORE] col={_dsc['col']} "
+                    f"sales={_dsc['sales_score']:.1f} profit={_dsc['profit_score']:.1f} "
+                    f"fill={_dsc['fill_rate']:.2f} mag={_dsc['magnitude']:.2f} "
+                    f"hdr={_dsc['header']!r}"
+                )
+
+            # sales 確宁E score 最大 + margin
+            _dr_scored.sort(key=lambda x: x["sales_score"], reverse=True)
+            _dr_sales_col = None
+            if len(_dr_scored) >= 2:
+                if (_dr_scored[0]["sales_score"] >= _DR_MIN_SCORE
+                        and (_dr_scored[0]["sales_score"] - _dr_scored[1]["sales_score"]) >= _DR_MIN_MARGIN):
+                    _dr_sales_col = _dr_scored[0]["col"]
+            elif len(_dr_scored) == 1 and _dr_scored[0]["sales_score"] >= _DR_MIN_SCORE:
+                _dr_sales_col = _dr_scored[0]["col"]
+
+            if _dr_sales_col is not None:
+                col_result.best_sales_col = _dr_sales_col
+                while len(col_result.column_roles) <= _dr_sales_col:
+                    col_result.column_roles.append("unknown")
+                col_result.column_roles[_dr_sales_col] = "sales"
+
+                # profit 確宁E まず隣接列を優先探索
+                _dr_profit_col = None
+                _dr_profit_reason = ""
+
+                # 1) 隣接列探索 (±1, ±2, ±3)
+                for _adj_off in [1, -1, 2, -2, 3, -3]:
+                    _adj_idx = _dr_sales_col + _adj_off
+                    _adj_cands = [s for s in _dr_scored if s["col"] == _adj_idx]
+                    if _adj_cands and _adj_cands[0]["profit_score"] >= _DR_MIN_SCORE:
+                        _dr_profit_col = _adj_idx
+                        _dr_profit_reason = f"adjacent(offset={_adj_off})"
+                        break
+
+                # 2) 隣接で見つからなければ全列かめEprofit_score 最大 (margin 条件付き)
+                if _dr_profit_col is None:
+                    _profit_cands = [s for s in _dr_scored if s["col"] != _dr_sales_col]
+                    _profit_cands.sort(key=lambda x: x["profit_score"], reverse=True)
+                    if len(_profit_cands) >= 2:
+                        if (_profit_cands[0]["profit_score"] >= _DR_MIN_SCORE
+                                and (_profit_cands[0]["profit_score"] - _profit_cands[1]["profit_score"]) >= _DR_MIN_MARGIN):
+                            _dr_profit_col = _profit_cands[0]["col"]
+                            _dr_profit_reason = "best_score"
+                    elif len(_profit_cands) == 1 and _profit_cands[0]["profit_score"] >= _DR_MIN_SCORE:
+                        _dr_profit_col = _profit_cands[0]["col"]
+                        _dr_profit_reason = "only_candidate"
+
+                if _dr_profit_col is not None:
+                    col_result.best_profit_col = _dr_profit_col
+                    while len(col_result.column_roles) <= _dr_profit_col:
+                        col_result.column_roles.append("unknown")
+                    col_result.column_roles[_dr_profit_col] = "segment_profit_like"
+
+                trace.append(
+                    f"[COLRESCUE] sales_col={_dr_sales_col} "
+                    f"profit_col={_dr_profit_col} "
+                    f"profit_reason={_dr_profit_reason or 'none'} "
+                    f"valid_num_cols={len(_dr_valid_cols)} "
+                    f"repnum={_dr_repnum} "
+                    f"reason=best_column_score"
+                )
+            else:
+                # sales 未確宁E(margin 不足)
+                trace.append(
+                    f"Phase D-rescue: sales_margin_insufficient "
+                    f"valid_num_cols={len(_dr_valid_cols)} repnum={_dr_repnum} "
+                    f"best_sales_score={_dr_scored[0]['sales_score']:.1f}" if _dr_scored else
+                    f"Phase D-rescue: no scored columns"
+                )
+        else:
+            trace.append(
+                f"Phase D-rescue: not triggered "
+                f"valid_num_cols={len(_dr_valid_cols)} repnum={_dr_repnum}"
+            )
+
+    # ================================================================
+    # Phase D-final: 最絁Equarantine 判宁E(全 fallback 征E
+    # ================================================================
+    if col_result.best_sales_col is None and col_result.best_profit_col is None:
+        # true no-sales/no-profit ↁEquarantine
+        result.quarantine_reason = "segment_table_found_but_no_sales_profit_columns"
+        result.failed_stage = "column_classification"
+        # non_segment_type に応じて review_hint を�E顁E
+        _nst = best_table.non_segment_type
+        if _nst == "company_profile":
+            result.quarantine_reason = "non_segment_table_company_profile"
+            result.review_hint = "pdf_non_segment_table"
+        elif _nst == "correction_or_notice":
+            result.quarantine_reason = "non_segment_table_correction_or_notice"
+            result.review_hint = "pdf_non_segment_table"
+        elif _nst == "narrative_text":
+            result.quarantine_reason = "non_segment_table_narrative_text"
+            result.review_hint = "pdf_non_segment_table"
+        elif _nst == "explanation_slide":
+            result.quarantine_reason = "non_segment_table_explanation_slide"
+            result.review_hint = "pdf_non_segment_table"
+        else:
+            result.review_hint = "pdf_no_sales_profit_columns"
+        result.rule_trace = trace
+        result.score_summary["column_scores"] = col_result.role_score_breakdown
+        result.score_summary["profit_col_role"] = col_result.profit_role
+        result.score_summary["non_segment_type"] = _nst
+        _fb_scores = _fallback_scores_for_quarantine
+        col_diag = _build_column_diagnosis(col_result, active_headers, data_rows, _fb_scores, raw_headers=raw_header_texts)
+        write_quarantine_review(result, doc_id=doc_id, ticker=ticker,
+                                source_file=pdf_path, best_table_lines=best_table_lines,
+                                column_diagnosis=col_diag)
+        return result
+
+    # ================================================================
+    # Phase D-6: profit inference from value distribution
+    # ================================================================
+    # sales_col はあるぁEprofit_col=None の場合、E��接 numeric 列�E
+    # 値刁E��E��めEratio (小数/百刁E��) を除外して profit を推定する、E
+    if col_result.best_sales_col is not None and col_result.best_profit_col is None:
+        _sc_idx = col_result.best_sales_col
+        trace.append(f"Phase D-6: profit inference start sales_col={_sc_idx} num data_rows={len(data_rows)}")
+
+        # data_rows の吁E�Eの値を収雁E
+        _d6_candidates: list[tuple[int, float, str]] = []  # (col_idx, score, reason)
+
+        for _ci in range(len(col_result.column_roles)):
+            if _ci == _sc_idx:
+                continue
+            _role = col_result.column_roles[_ci] if _ci < len(col_result.column_roles) else ""
+            # segment_label は除夁E
+            if _role == "segment_label":
+                continue
+
+            # 列�E値を収雁E
+            _vals: list[float] = []
+            _pct_count = 0
+            _decimal_count = 0
+            _total_cells = 0
+            for _dr in data_rows:
+                if _ci < len(_dr):
+                    _cell = _dr[_ci].strip()
+                    if not _cell:
+                        continue
+                    _total_cells += 1
+                    if "%" in _cell or "�E�E in _cell:
+                        _pct_count += 1
+                    if "." in _cell:
+                        _decimal_count += 1
+                    _clean = _cell.replace(",", "").replace("△", "-").replace("▲", "-").replace("�E�E, "-").replace("(", "-").replace(")", "").replace("�E�E, "-").replace("�E�E, "")
+                    try:
+                        _vals.append(float(_clean))
+                    except ValueError:
+                        pass
+
+            if not _vals or _total_cells < 2:
+                continue
+
+            # ratio 判宁E 値が小さぁE(-200�E�E00) かつ % or 小数が多い
+            _abs_vals = [abs(v) for v in _vals]
+            _median = sorted(_abs_vals)[len(_abs_vals) // 2]
+            _is_ratio_like = False
+            if _pct_count / _total_cells >= 0.3:
+                _is_ratio_like = True
+            elif _decimal_count / _total_cells >= 0.5 and _median < 200:
+                _is_ratio_like = True
+            elif _median < 10 and max(_abs_vals) < 200:
+                _is_ratio_like = True
+
+            # ヘッダーに「率」、E」「比」があれば ratio
+            _hdr = ""
+            if _ci < len(col_result.column_roles):
+                # active_headers から取征E
+                if active_headers and _ci < len(active_headers):
+                    _hdr = active_headers[_ci]
+            _hdr_lower = _hdr.replace(" ", "").lower() if _hdr else ""
+            if any(rk in _hdr_lower for rk in ["玁E, "%", "�E�E, "毁E, "ratio", "margin"]):
+                _is_ratio_like = True
+
+            # ヘッダーに profit KW があれ�E強候裁E
+            _has_profit_kw = False
+            if _hdr:
+                _profit_kws = ["利盁E, "損失", "損益", "profit", "income", "loss"]
+                _ratio_override_kws = ["玁E, "margin"]
+                _hdr_has_profit = any(pk in _hdr_lower for pk in _profit_kws)
+                _hdr_has_ratio_override = any(rk in _hdr_lower for rk in _ratio_override_kws)
+                if _hdr_has_profit and not _hdr_has_ratio_override:
+                    _has_profit_kw = True
+                    _is_ratio_like = False  # profit KW があれ�E ratio 判定を override
+
+            if _is_ratio_like:
+                trace.append(f"Phase D-6: col={_ci} skipped (ratio-like: median={_median:.1f} pct={_pct_count} decimal={_decimal_count})")
+                continue
+
+            # profit スコア計箁E
+            _adjacency_score = max(0, 1.0 - abs(_ci - _sc_idx) * 0.3)
+            _fill_score = len(_vals) / max(_total_cells, 1)
+            _kw_score = 0.5 if _has_profit_kw else 0.0
+            _d6_score = _adjacency_score * 0.3 + _fill_score * 0.3 + _kw_score * 0.4
+
+            _d6_candidates.append((_ci, _d6_score, f"adj={_adjacency_score:.2f} fill={_fill_score:.2f} kw={_kw_score:.2f} median={_median:.0f}"))
+
+        if _d6_candidates:
+            _d6_candidates.sort(key=lambda x: x[1], reverse=True)
+            _best_d6 = _d6_candidates[0]
+            if _best_d6[1] >= 0.15:
+                col_result.best_profit_col = _best_d6[0]
+                while len(col_result.column_roles) <= _best_d6[0]:
+                    col_result.column_roles.append("unknown")
+                col_result.column_roles[_best_d6[0]] = "segment_profit_like"
+                trace.append(
+                    f"Phase D-6: ACCEPT profit_col={_best_d6[0]} score={_best_d6[1]:.3f} ({_best_d6[2]}) "
+                    f"candidates={len(_d6_candidates)}"
+                )
+            else:
+                trace.append(
+                    f"Phase D-6: no candidate above threshold "
+                    f"best_score={_best_d6[1]:.3f} candidates={len(_d6_candidates)}"
+                )
+        else:
+            trace.append("Phase D-6: no numeric columns to evaluate")
+
+    # sales-only 正式化
+    if col_result.best_sales_col is not None and col_result.best_profit_col is None:
+        trace.append("Phase D: accepted sales-only fallback (parse_quality=partial_sales_only)")
+
+
+    trace.append(f"Phase D: sales_col={col_result.best_sales_col}, profit_col={col_result.best_profit_col}, role={col_result.profit_role}")
+
+    # ================================================================
+    # Phase E: 行ロール刁E��E
+    # ================================================================
+    trace.append("Phase E: 行ロール刁E��E)
+
+    label_col_idx = col_result.label_col_candidates[0] if col_result.label_col_candidates else 0
+
+    row_result = classify_rows(
+        best_table_lines,
+        label_col_idx=label_col_idx,
+        header_band_height=header_band_h,
+    )
+
+    if row_result.extractable_count == 0:
+        result.quarantine_reason = "segment_table_found_but_no_rows_extracted"
+        result.failed_stage = "row_classification"
+        result.review_hint = "セグメント名行が検�Eされません。行ラベルパターンの確認を、E
+        result.rule_trace = trace
+        result.score_summary["row_roles"] = [
+            {"row": r.row_index, "role": r.role, "label": r.label}
+            for r in row_result.rows
+        ]
+        write_quarantine_review(result, doc_id=doc_id, ticker=ticker,
+                                source_file=pdf_path, best_table_lines=best_table_lines)
+        return result
+
+    trace.append(f"Phase E: 抽出可能衁E{row_result.extractable_count}, skip衁E{len(row_result.skip_rows)}, non_reportable={row_result.non_reportable_count}")
+
+    # ================================================================
+    # Phase F: セグメントレコード絁E��E(Phase 2 拡張)
+    # ================================================================
+    trace.append("Phase F: レコード絁E��E)
+
+    segments: list[SegmentRecordV2] = []
+    order = 0
+
+    # 単佁E unit_detection 優先、フォールバックに header_units
+    unit_multiplier = unit_result.unit_multiplier
+    unit_raw = unit_result.unit_raw
+
+    if unit_multiplier is None and header_units:
+        # legacy fallback
+        from .header_analysis import detect_unit_annotations
+        legacy_unit = detect_unit_annotations(best_page_text) or header_units
+        unit_raw = legacy_unit
+
+    # sales / profit col role 吁E
+    sales_col_role = ""
+    if col_result.best_sales_col is not None and col_result.best_sales_col < len(col_result.column_roles):
+        sales_col_role = col_result.column_roles[col_result.best_sales_col]
+    profit_col_role = col_result.profit_role
+
+    # ================================================================
+    # Phase F pre-scan: profit inference for text-line tables
+    # ================================================================
+    # sales_only の場合、テキスト行�E nums[1+] ぁEratio ぁEprofit かを事前判宁E
+    _pf_profit_idx: int | None = None  # nums 冁E�E profit 位置 (0-indexed)
+    if col_result.has_sales and not col_result.has_profit:
+        # 全セグメント行�E nums を収雁E
+        _pf_all_nums: list[list[float]] = []
+        _pf_all_raw: list[list[str]] = []
+        for _pf_row in row_result.segment_rows:
+            _pf_line = best_table_lines[_pf_row.row_index].strip()
+            _pf_nums = _extract_numbers_from_line(_pf_line)
+            _pf_all_nums.append(_pf_nums)
+            # raw tokens for % check
+            _pf_raw_tokens = [m.group() for m in re.finditer(r'[△▲]?\s*[\d,]+(?:\.\d+)?[%�E�E?', _pf_line)]
+            _pf_all_raw.append(_pf_raw_tokens)
+
+        # 吁E��置 (1, 2, ...) の値を収雁E��て ratio/profit 判宁E
+        max_nums = max((len(n) for n in _pf_all_nums), default=0)
+        if max_nums >= 2:
+            for _pf_pos in range(1, max_nums):
+                _pf_vals = []
+                _pf_pct = 0
+                _pf_dec = 0
+                _pf_total = 0
+                for _ri, _pf_n in enumerate(_pf_all_nums):
+                    if _pf_pos < len(_pf_n):
+                        _pf_vals.append(abs(_pf_n[_pf_pos]))
+                        _pf_total += 1
+                        # % check from raw line
+                        _pf_raw_line = best_table_lines[row_result.segment_rows[_ri].row_index]
+                        if "%" in _pf_raw_line or "�E�E in _pf_raw_line:
+                            # check if this specific position has %
+                            if _pf_pos < len(_pf_all_raw[_ri]) and ("%" in _pf_all_raw[_ri][_pf_pos] or "�E�E in _pf_all_raw[_ri][_pf_pos]):
+                                _pf_pct += 1
+                        if "." in str(_pf_n[_pf_pos]):
+                            _pf_dec += 1
+
+                if not _pf_vals or _pf_total < 2:
+                    continue
+
+                _pf_vals.sort()
+                _pf_median = _pf_vals[len(_pf_vals) // 2]
+
+                # ratio 判宁E 小さぁE�� + 小数/% が多い
+                _pf_is_ratio = False
+                if _pf_total > 0:
+                    if _pf_pct / _pf_total >= 0.3:
+                        _pf_is_ratio = True
+                    elif _pf_dec / _pf_total >= 0.5 and _pf_median < 200:
+                        _pf_is_ratio = True
+                    elif _pf_median < 10 and max(_pf_vals) < 200:
+                        _pf_is_ratio = True
+
+                if not _pf_is_ratio:
+                    _pf_profit_idx = _pf_pos
+                    trace.append(f"Phase F: profit inference: pos={_pf_pos} median={_pf_median:.1f} pct={_pf_pct}/{_pf_total} dec={_pf_dec}/{_pf_total} -> PROFIT")
+                    break
+                else:
+                    trace.append(f"Phase F: profit inference: pos={_pf_pos} median={_pf_median:.1f} pct={_pf_pct}/{_pf_total} dec={_pf_dec}/{_pf_total} -> RATIO (skip)")
+
+        # profit_col_role を設宁E
+        if _pf_profit_idx is not None:
+            profit_col_role = "segment_profit_like"
+
+    # ================================================================
+    # Phase F pre-filter: rescue mode の場吁Eparent row のみ保持
+    # ================================================================
+    _rescue_mode = result.score_summary.get("invalid_structure_rescue", {}).get("attempted", False)
+    _rescue_dropped_detail = 0
+    _rescue_dropped_total = 0
+    _rescue_kept_adjustment = 0
+
+    if _rescue_mode and row_result.segment_rows:
+        from .row_classifier import classify_row_label as _classify_row_label_rescue
+        _TOTAL_DROP_LABELS = {
+            "訁E, "合訁E, "小訁E, "収益", "営業収益", "純営業収益",
+            "連絁E, "冁E��売上髁E, "セグメント間冁E��売上髁E,
+            "セグメント間冁E��営業収益",
+        }
+        _ADJUSTMENT_KEEP_LABELS = {"調整顁E, "全社", "そ�E仁E}
+
+        _parent_rows = []
+        for _rc in row_result.segment_rows:
+            _lab = _rc.label.strip()
+            # classify this row
+            _row_cls = _classify_row_label_rescue(_lab)
+            _is_detail = (_row_cls.class_name == "detail_breakdown_like")
+            _is_total = (_row_cls.class_name == "total_or_metric_like")
+            _is_narrative = (_row_cls.class_name == "narrative_like")
+            _is_pl = (_row_cls.class_name == "pl_account_like")
+            _is_bscf = (_row_cls.class_name == "bs_cf_like")
+            _is_garbage = (_row_cls.class_name == "garbage_fragment_like")
+
+            # 合訁E訁E純営業収益 は常に drop
+            if any(kw == _lab for kw in _TOTAL_DROP_LABELS):
+                _rescue_dropped_total += 1
+                continue
+            if _lab.endswith("訁E) and len(_lab) >= 2 and _lab not in _ADJUSTMENT_KEEP_LABELS:
+                _rescue_dropped_total += 1
+                continue
+
+            # detail / bracket detail ↁEdrop
+            if _is_detail:
+                _rescue_dropped_detail += 1
+                continue
+
+            # total/metric ↁEdrop (ただぁE調整顁E全社/そ�E仁Eは keep)
+            if _is_total and _lab not in _ADJUSTMENT_KEEP_LABELS:
+                _rescue_dropped_total += 1
+                continue
+
+            # narrative / PL / BS/CF / garbage ↁEdrop
+            if _is_narrative or _is_pl or _is_bscf or _is_garbage:
+                _rescue_dropped_detail += 1
+                continue
+
+            # 調整顁E全社/そ�E仁Eは条件付き保持
+            if _lab in _ADJUSTMENT_KEEP_LABELS:
+                _rescue_kept_adjustment += 1
+
+            _parent_rows.append(_rc)
+
+        # rescue 成功判宁E parent rows ぁE2件以上残れば rescue 成功
+        if len(_parent_rows) >= 2:
+            row_result_segment_rows = _parent_rows
+            trace.append(
+                f"Phase F: RESCUE filter: kept={len(_parent_rows)} "
+                f"dropped_detail={_rescue_dropped_detail} "
+                f"dropped_total={_rescue_dropped_total} "
+                f"kept_adjustment={_rescue_kept_adjustment}"
+            )
+            result.score_summary["invalid_structure_rescue"]["succeeded"] = True
+            result.score_summary["invalid_structure_rescue"]["parent_rows_built"] = len(_parent_rows)
+            result.score_summary["invalid_structure_rescue"]["dropped_detail"] = _rescue_dropped_detail
+            result.score_summary["invalid_structure_rescue"]["dropped_total"] = _rescue_dropped_total
+            result.score_summary["invalid_structure_rescue"]["kept_adjustment"] = _rescue_kept_adjustment
+        else:
+            # rescue 失敁E parent rows 不足
+            trace.append(
+                f"Phase F: RESCUE failed: parent_rows={len(_parent_rows)} < 2, "
+                f"reverting to quarantine"
+            )
+            result.score_summary["invalid_structure_rescue"]["succeeded"] = False
+            result.score_summary["invalid_structure_rescue"]["parent_rows_built"] = len(_parent_rows)
+            result.quarantine_reason = "candidate_guard:detail_breakdown_guard"
+            result.failed_stage = "candidate_guard"
+            result.review_hint = "pdf_segment_like_but_invalid_structure"
+            write_quarantine_review(
+                result, doc_id=doc_id, ticker=ticker,
+                source_file=pdf_path, best_table_lines=best_table_lines,
+            )
+            return result
+    else:
+        row_result_segment_rows = row_result.segment_rows
+
+    # ================================================================
+    # Phase F-col: column-as-segment モード試行（横持ちセグメント表優先！E
+    # ================================================================
+    # best_table と同一ペ�Eジの raw_table をテキストオーバ�EラチE�Eで特定する、E
+    # 先頭チE�Eブルではなく最良一致を使ぁE��同ペ�Eジ褁E��チE�Eブル対策）、E
+    _fcol_raw = _find_matching_raw_table(
+        best_table_lines, pages_tables.get(best_page_no, [])
+    )
+    _col_seg_info = _is_column_as_segment_table(_fcol_raw, best_table_lines)
+    for _ftr in _col_seg_info["trace"]:
+        trace.append(f"Phase F-col: {_ftr}")
+
+    _col_as_seg_used = False
+    if _col_seg_info["is_col_seg"]:
+        _col_records = _extract_col_as_segment(
+            _fcol_raw, best_table_lines, _col_seg_info,
+            unit_multiplier=unit_multiplier, unit_raw=unit_raw,
+        )
+        trace.append(
+            f"Phase F-col: records={len(_col_records)} "
+            f"sales_row={_col_seg_info['sales_row_idx']} "
+            f"profit_row={_col_seg_info['profit_row_idx']}"
+        )
+        if len(_col_records) >= 2:
+            # column-as-segment モードでセグメントを絁E��立てめE
+            for _cr in _col_records:
+                order += 1
+                _cr_name = _cr["segment_name"]
+                _cr_sales = _cr["sales"]
+                _cr_profit = _cr["profit"]
+                _cr_pq = "full" if _cr_sales is not None and _cr_profit is not None else "partial_sales_only"
+                _cr_norm = normalize_segment_name(_cr_name, ticker=ticker)
+                _cr_conf = _compute_confidence(
+                    best_page_score, best_table.score, header_conf,
+                    col_result.confidence, 0.7,
+                )
+                segments.append(SegmentRecordV2(
+                    segment_name=_cr_norm.normalized_name,
+                    segment_order=order,
+                    segment_sales=_cr_sales,
+                    segment_profit=_cr_profit,
+                    raw_profit_label="col_as_segment",
+                    raw_text=_cr_name,
+                    confidence=_cr_conf,
+                    provenance={
+                        "page_no": best_page_no,
+                        "table_no": best_table.table_index,
+                        "col_as_segment": True,
+                        "sales_row": _col_seg_info["sales_row_idx"],
+                        "profit_row": _col_seg_info["profit_row_idx"],
+                    },
+                    segment_name_raw=_cr_name,
+                    segment_name_normalized=_cr_norm.normalized_name,
+                    segment_name_normalize_rule=_cr_norm.normalize_rule,
+                    segment_name_confidence=_cr_norm.confidence,
+                    unit_raw=unit_raw,
+                    unit_multiplier=unit_multiplier,
+                    currency=unit_result.currency,
+                    unit_source=unit_result.unit_source,
+                    unit_confidence=unit_result.confidence,
+                    row_role="col_as_segment",
+                    is_reportable_segment=True,
+                    sales_col_role="col_as_segment",
+                    profit_col_role="col_as_segment" if _cr_profit is not None else "",
+                    extraction_engine="v2",
+                    parse_quality=_cr_pq,
+                ))
+            _col_as_seg_used = True
+            trace.append(f"Phase F-col: SUCCESS {len(segments)} segments (col_as_segment mode)")
+        else:
+            trace.append(
+                f"Phase F-col: records={len(_col_records)} < 2, falling back to row-based"
+            )
+
+    if not _col_as_seg_used:
+        # ── 従来の行�Eース Phase F ルーチE(fallback) ──────────────────────
+        for row_cls in row_result_segment_rows:
+            line = best_table_lines[row_cls.row_index].strip()
+            nums = _extract_numbers_from_line(line)
+
+            if not nums:
+                continue
+
+            seg_name_raw = row_cls.label
+
+            # ── Fix-1: PL科目フィルタ ──────────────────────────────────────
+            # PL 損益計算書の科目名（売上高�E営業利益�E売上原価 etc.�E��E
+            # セグメント名として不正なのでスキチE�Eする。order は戻さなぁE��E
+            if _PL_ACCOUNT_FILTER_RE.match(seg_name_raw.strip()):
+                trace.append(f"Phase F: skip PL_account name={seg_name_raw!r}")
+                continue
+
+            seg_sales = None
+            seg_profit = None
+
+            # 列ロールベ�Eスで割り当て
+            if col_result.has_sales and col_result.has_profit:
+                if len(nums) >= 2:
+                    sales_idx = col_result.best_sales_col or 0
+                    profit_idx = col_result.best_profit_col or 1
+                    if sales_idx < profit_idx:
+                        seg_sales = nums[0]
+                        seg_profit = nums[1] if len(nums) > 1 else None
+                    else:
+                        seg_profit = nums[0]
+                        seg_sales = nums[1] if len(nums) > 1 else None
+                elif len(nums) == 1:
+                    seg_sales = nums[0]
+            elif col_result.has_sales:
+                seg_sales = nums[0] if nums else None
+                # Phase F profit inference: nums[1] ぁEprofit-like なら採用
+                if seg_sales is not None and len(nums) >= 2 and _pf_profit_idx is not None:
+                    seg_profit = nums[_pf_profit_idx]
+            elif col_result.has_profit:
+                seg_profit = nums[0] if nums else None
+            else:
+                if len(nums) >= 2:
+                    seg_sales = nums[0]
+                    seg_profit = nums[1]
+                elif len(nums) == 1:
+                    seg_sales = nums[0]
+
+            # ── Fix-2: numeric_layout_fallback profit 値域ガーチE────────────
+            # profit_col_role ぁEnumeric_layout_fallback�E��EチE��ーなし位置推定）�Eとき、E
+            # 絶対値 < 1.0�E�百丁E�Eベ�Eス�E��E比率/構�E比と判断して None に戻す、E
+            if (seg_profit is not None
+                    and profit_col_role == "numeric_layout_fallback"
+                    and abs(seg_profit) < 1.0):
+                trace.append(
+                    f"Phase F: profit suppressed (numeric_layout_fallback ratio guard) "
+                    f"val={seg_profit} seg={seg_name_raw!r}"
+                )
+                seg_profit = None
+
+            # 単位正規化 (unit_detection ベ�Eス)
+            if unit_multiplier and unit_multiplier != 1_000_000:
+                if seg_sales is not None:
+                    seg_sales = _apply_unit_multiplier(seg_sales, unit_multiplier)
+                if seg_profit is not None:
+                    seg_profit = _apply_unit_multiplier(seg_profit, unit_multiplier)
+            elif unit_raw:
+                # legacy string-based
+                if seg_sales is not None:
+                    seg_sales = _normalize_unit_legacy(seg_sales, unit_raw)
+                if seg_profit is not None:
+                    seg_profit = _normalize_unit_legacy(seg_profit, unit_raw)
+
+            order += 1
+
+            # segment name 正規化
+            name_norm = normalize_segment_name(seg_name_raw, ticker=ticker)
+
+            # confidence 算�E
+            conf = _compute_confidence(
+                best_page_score, best_table.score, header_conf,
+                col_result.confidence, row_cls.score,
+            )
+
+            # parse_quality
+            pq = "full" if seg_sales is not None and seg_profit is not None else "partial_sales_only"
+
+            segments.append(SegmentRecordV2(
+                segment_name=name_norm.normalized_name,
+                segment_order=order,
+                segment_sales=seg_sales,
+                segment_profit=seg_profit,
+                raw_profit_label=profit_col_role,
+                raw_text=line,
+                confidence=conf,
+                provenance={
+                    "page_no": best_table.start_line,
+                    "table_no": best_table.table_index,
+                    "row_no": row_cls.row_index,
+                    "col_sales": col_result.best_sales_col,
+                    "col_profit": col_result.best_profit_col,
+                    "page_score": best_page_score,
+                    "table_score": best_table.score,
+                    "header_confidence": header_conf,
+                    "col_confidence": col_result.confidence,
+                    "row_score": row_cls.score,
+                },
+                # Phase 2 fields
+                segment_name_raw=seg_name_raw,
+                segment_name_normalized=name_norm.normalized_name,
+                segment_name_normalize_rule=name_norm.normalize_rule,
+                segment_name_confidence=name_norm.confidence,
+                unit_raw=unit_raw,
+                unit_multiplier=unit_multiplier,
+                currency=unit_result.currency,
+                unit_source=unit_result.unit_source,
+                unit_confidence=unit_result.confidence,
+                row_role=row_cls.role,
+                is_reportable_segment=row_cls.is_reportable_segment,
+                sales_col_role=sales_col_role,
+                profit_col_role=profit_col_role,
+                extraction_engine="v2",
+                parse_quality=pq,
+            ))
+
+    # ================================================================
+    # Phase G: 最終判宁E
+    # ================================================================
+    if not segments:
+        result.quarantine_reason = "segment_table_found_but_no_rows_extracted"
+        result.failed_stage = "record_assembly"
+        result.review_hint = "数値割当に失敗。�E位置と数値パターンが合ってぁE��ぁE��能性、E
+        result.rule_trace = trace
+        write_quarantine_review(result, doc_id=doc_id, ticker=ticker,
+                                source_file=pdf_path, best_table_lines=best_table_lines)
+        return result
+
+    trace.append(f"Phase F: {len(segments)}件のセグメント抽出成功")
+
+    result.segments = segments
+    result.used_v2 = True
+    result.rule_trace = trace
+
+    # parse_quality 雁E��E
+    _pq_full = sum(1 for s in segments if s.parse_quality == "full")
+    _pq_partial = sum(1 for s in segments if s.parse_quality == "partial_sales_only")
+    _all_partial = _pq_full == 0 and _pq_partial > 0
+
+    result.score_summary.update({
+        "page_score": best_page_score,
+        "table_score": best_table.score,
+        "header_confidence": header_conf,
+        "col_confidence": col_result.confidence,
+        "segment_count": len(segments),
+        "non_reportable_count": row_result.non_reportable_count,
+        "unit_raw": unit_raw,
+        "unit_multiplier": unit_multiplier,
+        "sales_col_role": sales_col_role,
+        "profit_col_role": profit_col_role,
+        "parse_quality_full": _pq_full,
+        "parse_quality_partial": _pq_partial,
+    })
+
+    # 全セグメントが partial_sales_only なめEreview_hint を設宁E
+    if _all_partial:
+        result.review_hint = "pdf_partial_sales_only"
+
+    # ================================================================
+    # Phase G-PF: PLサマリ誤誁Epost-filter�E�保守版�E�E
+    # ================================================================
+    # 目皁E 全社PLサマリ列！EOL_AS_SEG�E��E誤検�EめEpost_filter で排除する、E
+    #       BS/株主賁E��変動表系は candidate_guard 以外での除外�E副作用が大きいため対象外、E
+    # 制紁E candidate_guard は触らなぁE/ segment_count 単独閾値カチE��は禁止 /
+    #       business_label_count=0 単独では落とさなぁE
+    # 発火条件: COL_AS_SEG モードで、�Eセグメント名が「報告」「損益計算書計上額」系のみ
+    # rescue: セグメント名に「報告」「損益計算書計上額」以外�E実名称ぁE件でもあれ�E発火しなぁE
+    _gpf_names = [s.segment_name_raw or s.segment_name for s in segments]
+    _gpf_n = len(_gpf_names)
+
+    # ── PLサマリ列！EOL_AS_SEG�E�用: 「報告」「損益計算書計上額」系 ─────────
+    # スペ�Eス変形は \"計上額\" 末尾ワイルドカードで対応するが、E
+    # 、E*?計上顁E」�E 581228 (GT=yes) のFNを引き起こすため、より�E体的なパターンに限宁E
+    _PL_COL_RE = re.compile(
+        r"^("
+        r"報呁E?:\s*セグメンチE?\s*$"
+        r"|(?:四半期|中間|連結|要紁E��半期連結財務諸表)?\s*損益計算書\s*計上額\s*$"
+        r"|要紁E��半期連結財務諸表\s*計上額\s*$"
+        r"|そ�E他\s*[�E�E]?注[�E�E]?\d*\s*$"
+        r")",
+        re.UNICODE,
+    )
+
+    # COL_AS_SEGモード�E場合�Eみ発火を検訁E(_col_as_seg_used は Phase F-col で設定済み)
+    _gpf_is_col_as_seg = _col_as_seg_used
+
+    if _gpf_is_col_as_seg and _gpf_n >= 1:
+        _gpf_pl_col_hits = sum(
+            1 for nm in _gpf_names if _PL_COL_RE.search(nm.strip())
+        )
+        # 全セグメントが PLサマリ列系 = FP確宁E
+        _gpf_fire_pl_col = _gpf_pl_col_hits >= _gpf_n
+
+        if _gpf_fire_pl_col:
+            trace.append(
+                f"Phase G-PF: pl_summary_post_filter FIRED "
+                f"mode=COL_AS_SEG n={_gpf_n} pl_col_hits={_gpf_pl_col_hits} "
+                f"names={_gpf_names[:3]}"
+            )
+            result.segments = []
+            result.quarantine_reason = "pl_summary_post_filter"
+            result.failed_stage = "post_filter"
+            result.review_hint = "pl_summary_post_filter"
+            result.rule_trace = trace
+            write_quarantine_review(
+                result, doc_id=doc_id, ticker=ticker,
+                source_file=pdf_path, best_table_lines=best_table_lines,
+            )
+            return result
+
+        trace.append(
+            f"Phase G-PF: pl_summary_post_filter PASS "
+            f"mode=COL_AS_SEG n={_gpf_n} pl_col_hits={_gpf_pl_col_hits}"
+        )
+    else:
+        trace.append(
+            f"Phase G-PF: pl_summary_post_filter SKIP "
+            f"col_as_seg={_gpf_is_col_as_seg} n={_gpf_n}"
+        )
+
+    return result
+
+
+# ============================================================
+# Phase B-V: 縦持ち fast path 補助関数
+# ============================================================
+
+def _vd_parse_num(v) -> float | None:
+    s = str(v or "").replace(",", "").replace("△", "-").replace("▲", "-").strip()
+    if not s:
+        return None
+    try:
+        return float(s)
+    except Exception:
+        return None
+
+
+def _vd_detect_unit_multiplier(page_text: str) -> float:
+    text = str(page_text or "")
+    if "儁E�E" in text:
+        return 100_000_000.0
+    if "百丁E�E" in text:
+        return 1_000_000.0
+    if "十E�E" in text:
+        return 1_000.0
+    return 1.0
+
+
+def _vd_is_vertical_fast(lines: list) -> bool:
+    """縦持ち判宁E 売上衁E+ 持E��衁E2件以上がある、E""
+    if not lines:
+        return False
+    has_sales_row = False
+    metric_rows = 0
+    for line in lines[:30]:
+        s = str(line or "").strip()
+        if not s:
+            continue
+        if any(kw in s for kw in ["売上髁E, "売上収盁E, "営業収益", "収益"]):
+            has_sales_row = True
+        if any(kw in s for kw in [
+            "売上髁E, "売上収盁E, "営業収益", "収益",
+            "営業利盁E, "セグメント利盁E, "利盁E, "事業利盁E,
+        ]):
+            metric_rows += 1
+    return has_sales_row and metric_rows >= 1
+
+
+def _vd_extract_headers_and_rows(
+    raw_tables,
+) -> tuple[list[str], list[list[str]]]:
+    """pages_tables の raw pdfplumber tables から headers と rows を抽出、E""
+    if not raw_tables:
+        return [], []
+    for tbl in raw_tables:
+        if not tbl or len(tbl) < 2:
+            continue
+        normalized = [[str(c or "").strip() for c in row] for row in tbl]
+        header_row = normalized[0]
+        if len(header_row) < 3:
+            continue
+        # 先頭列�E持E��名なのでスキチE�E、残りをセグメント名とみなぁE
+        headers = [h for h in header_row[1:] if h]
+        if len(headers) < 2:
+            continue
+        rows = normalized[1:]
+        if len(rows) < 2:
+            continue
+        return headers, rows
+    return [], []
+
+
+def _vd_build_segments(
+    headers: list[str],
+    rows: list[list[str]],
+    mult: float,
+) -> list:
+    """headers ÁErows からセグメントレコードを構築、E""
+    sales_row = None
+    profit_row = None
+    for row in rows[:30]:
+        if not row:
+            continue
+        label = str(row[0] if len(row) >= 1 else "").strip()
+        if sales_row is None and any(
+            kw in label for kw in ["売上髁E, "売上収盁E, "営業収益", "収益"]
+        ):
+            sales_row = row
+        if profit_row is None and any(
+            kw in label for kw in ["営業利盁E, "セグメント利盁E, "利盁E, "事業利盁E]
+        ):
+            profit_row = row
+    if sales_row is None:
+        return []
+    out = []
+    for i, name in enumerate(headers):
+        seg_name = str(name or "").strip()
+        if not seg_name:
+            continue
+        if any(kw in seg_name for kw in ["合訁E, "訁E, "そ�E仁E, "消去", "調整"]):
+            continue
+        col_idx = i + 1  # row[0] は持E��名
+        s_raw = sales_row[col_idx] if col_idx < len(sales_row) else None
+        p_raw = (
+            profit_row[col_idx]
+            if profit_row is not None and col_idx < len(profit_row)
+            else None
+        )
+        s_num = _vd_parse_num(s_raw)
+        p_num = _vd_parse_num(p_raw)
+        if s_num is None and p_num is None:
+            continue
+        out.append(
+            SegmentRecordV2(
+                segment_name=seg_name,
+                segment_sales=None if s_num is None else s_num * mult,
+                segment_profit=None if p_num is None else p_num * mult,
+                extraction_engine="v2_vertical_fast",
+            )
+        )
+    return out
+
+
+def _apply_unit_multiplier(value: float, multiplier: int) -> float:
+
+    """unit_detection の multiplier で百丁E�Eベ�Eスへ正規化"""
+    if multiplier == 1_000_000:
+        return value  # そ�Eまま
+    elif multiplier > 1_000_000:
+        # 儁E�E (100_000_000) ↁEÁE00
+        return value * (multiplier / 1_000_000)
+    elif multiplier < 1_000_000 and multiplier > 0:
+        # 十E�E (1_000) ↁE÷1000
+        return value * (multiplier / 1_000_000)
+    return value
+
+
+def _normalize_unit_legacy(value: float, unit: str) -> float:
+    """百丁E�Eベ�Eスへ正規化 (legacy string-based)"""
+    if unit == "儁E�E":
+        return value * 100
+    elif unit == "十E�E":
+        return value / 1000 if abs(value) >= 1000 else value
+    elif unit == "冁E:
+        return value / 1_000_000 if abs(value) >= 1_000_000 else value
+    return value
+
+
+def _compute_confidence(
+    page_score: float,
+    table_score: float,
+    header_conf: float,
+    col_conf: float,
+    row_score: float,
+) -> float:
+    """吁E��階�Eスコアを統合してconfidenceを算�E"""
+    weighted = (
+        page_score * 0.10
+        + table_score * 0.25
+        + header_conf * 0.20
+        + col_conf * 0.25
+        + row_score * 0.20
+    )
+    return min(max(weighted, 0.0), 1.0)
+
+
+# 後方互換: Phase 1 の _normalize_unit
+_normalize_unit = _normalize_unit_legacy

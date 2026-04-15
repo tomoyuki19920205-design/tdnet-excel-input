@@ -1,0 +1,111 @@
+{
+  "run_id": "orient_test",
+  "timestamp": "20260329",
+  "filing_count": 8,
+  "filings": [
+    {
+      "filing_id": "833a4ce6b4aa2fc0b250cdbd",
+      "ticker": "5255",
+      "title": "",
+      "disclosure_date": "2024-01-01",
+      "doc_url": "",
+      "company_name": "",
+      "has_xbrl": false,
+      "doc_type": "financial_statement",
+      "xbrl_url": "",
+      "published_at": "",
+      "listing_source": "manifest"
+    },
+    {
+      "filing_id": "dc0df4a82a452be5f7e10762",
+      "ticker": "1456",
+      "title": "",
+      "disclosure_date": "2024-01-01",
+      "doc_url": "",
+      "company_name": "",
+      "has_xbrl": false,
+      "doc_type": "financial_statement",
+      "xbrl_url": "",
+      "published_at": "",
+      "listing_source": "manifest"
+    },
+    {
+      "filing_id": "f9c1b263c7871cb2d052a8d7",
+      "ticker": "1457",
+      "title": "",
+      "disclosure_date": "2024-01-01",
+      "doc_url": "",
+      "company_name": "",
+      "has_xbrl": false,
+      "doc_type": "financial_statement",
+      "xbrl_url": "",
+      "published_at": "",
+      "listing_source": "manifest"
+    },
+    {
+      "filing_id": "42646f0328b522149ce558ca",
+      "ticker": "1466",
+      "title": "",
+      "disclosure_date": "2024-01-01",
+      "doc_url": "",
+      "company_name": "",
+      "has_xbrl": false,
+      "doc_type": "financial_statement",
+      "xbrl_url": "",
+      "published_at": "",
+      "listing_source": "manifest"
+    },
+    {
+      "filing_id": "672bbdb1807ecb0a9742cc71",
+      "ticker": "1473",
+      "title": "",
+      "disclosure_date": "2024-01-01",
+      "doc_url": "",
+      "company_name": "",
+      "has_xbrl": false,
+      "doc_type": "financial_statement",
+      "xbrl_url": "",
+      "published_at": "",
+      "listing_source": "manifest"
+    },
+    {
+      "filing_id": "4645573bcf2920b1b5b3bb9e",
+      "ticker": "1474",
+      "title": "",
+      "disclosure_date": "2024-01-01",
+      "doc_url": "",
+      "company_name": "",
+      "has_xbrl": false,
+      "doc_type": "financial_statement",
+      "xbrl_url": "",
+      "published_at": "",
+      "listing_source": "manifest"
+    },
+    {
+      "filing_id": "cbd9e9eb100bd19c016c9847",
+      "ticker": "1479",
+      "title": "",
+      "disclosure_date": "2024-01-01",
+      "doc_url": "",
+      "company_name": "",
+      "has_xbrl": false,
+      "doc_type": "financial_statement",
+      "xbrl_url": "",
+      "published_at": "",
+      "listing_source": "manifest"
+    },
+    {
+      "filing_id": "5beb7de90a90c1a1c51735c2",
+      "ticker": "1481",
+      "title": "",
+      "disclosure_date": "2024-01-01",
+      "doc_url": "",
+      "company_name": "",
+      "has_xbrl": false,
+      "doc_type": "financial_statement",
+      "xbrl_url": "",
+      "published_at": "",
+      "listing_source": "manifest"
+    }
+  ]
+}

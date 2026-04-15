@@ -14,7 +14,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from .common_ticker import strip_tdnet_trailing_zero
-from .models import DisclosureItem, DisclosureType
+from .models import DisclosureItem, DisclosureType, FINANCIAL_STATEMENT_KEYWORDS
 from .utils import sha256, today_yyyymmdd
 from lib.backfill.xbrl_url_inference import infer_xbrl_url_from_pdf
 
@@ -60,7 +60,8 @@ def classify_disclosure(title: str) -> str | None:
     タイトルから開示タイプを分類する。
 
     Returns:
-        DisclosureType.FORECAST_REVISION | DisclosureType.FINANCIAL_STATEMENT | None
+        DisclosureType.FORECAST_REVISION | DisclosureType.FINANCIAL_STATEMENT
+        | DisclosureType.DIVIDEND_REVISION | None
     """
     n = normalize_title(title)
 
@@ -72,15 +73,19 @@ def classify_disclosure(title: str) -> str | None:
     has_revision = any(kw in n for kw in revision_keywords)
 
     if has_gyoseki_or_yoso and has_revision:
-        # 「業績」を含まず「配当」だけの場合は対象外
-        # 例: 「配当予想の修正」→ 対象外, 「業績予想及び配当予想の修正」→ 対象
+        # 「業績」を含まず「配当」だけの場合は
+        # forecast_revision ではなく dividend_revision として分類
         if "業績" not in n and "配当" in n:
-            return None
+            return DisclosureType.DIVIDEND_REVISION
         return DisclosureType.FORECAST_REVISION
 
+    # ── dividend_revision 判定 ──
+    # 「配当」+修正系キーワードを含むが「予想」を含まないケースもカバー
+    if "配当" in n and has_revision:
+        return DisclosureType.DIVIDEND_REVISION
+
     # ── financial_statement 判定 ──
-    fs_keywords = ["決算短信", "四半期決算", "通期決算", "訂正決算短信"]
-    if any(kw in n for kw in fs_keywords):
+    if any(kw in n for kw in FINANCIAL_STATEMENT_KEYWORDS):
         return DisclosureType.FINANCIAL_STATEMENT
 
     return None

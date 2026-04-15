@@ -1,0 +1,31 @@
+﻿.\.venv\Scripts\python.exe : 14:13:36 [retry_quarantine] [start] mode=DRY-RUN state_db=C:\Users\takuy\OneDrive\tdnet-excel-input\data/bac
+kfill_state.db
+発生場所 行:1 文字:1
++ .\.venv\Scripts\python.exe tools/retry_quarantine_segments.py --dry-r ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (14:13:36 [retry...ckfill_state.db:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+14:13:36 [retry_quarantine] [start] only_hint=pdf_partial_sales_only limit=60 include_rescued_partial=True
+14:13:36 [retry_quarantine] [targets] 5 filings (quarantined=5, rescued_partial=0)
+14:13:40 [retry_quarantine] [progress] 5/5 rescued=0 still_q=5
+
+============================================================
+  Quarantine Retry - DRY-RUN
+============================================================
+  total_targets           : 5
+  rescued                 : 0
+  still_quarantined       : 5
+  rescue_rate             : 0.0%
+  elapsed_sec             : 3.9
+  avg_sec_per_filing      : 0.78
+
+  hint_breakdown_before:
+    pdf_no_sales_profit_columns             : 5
+
+  hint_breakdown_after:
+    pdf_no_sales_profit_columns             : 5
+
+  hint_transition:
+    pdf_no_sales_profit_columns         -> pdf_no_sales_profit_columns        : 5
+============================================================

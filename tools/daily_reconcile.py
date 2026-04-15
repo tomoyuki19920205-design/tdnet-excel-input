@@ -56,18 +56,20 @@ def _record_issue(
 
 
 def check_stuck_jobs(config: dict, dry_run: bool) -> int:
-    """running が1時間以上続いている job_queue を検出。"""
+    """running が1時間以上続いている job_queue を検出し、pending に戻す。"""
     cutoff = (datetime.now(JST) - timedelta(hours=1)).isoformat()
     rows = supabase_select(
         "job_queue",
         params={
             "status": "eq.running",
             "started_at": f"lt.{cutoff}",
-            "select": "id,job_type,target_id,started_at",
+            "select": "id,job_type,target_id,started_at,attempts",
         },
         config=config,
     )
+    requeued = 0
     for row in rows:
+        attempts = row.get("attempts", 0)
         _record_issue(
             "stuck_job",
             f"job_queue id={row['id']} type={row.get('job_type')} "
@@ -75,6 +77,88 @@ def check_stuck_jobs(config: dict, dry_run: bool) -> int:
             severity="error",
             config=config,
             dry_run=dry_run,
+        )
+        # retry_count <= 3 なら pending に戻す
+        if attempts <= 3 and not dry_run:
+            try:
+                supabase_update(
+                    "job_queue",
+                    {"status": "pending", "started_at": None, "finished_at": None},
+                    params={"id": f"eq.{row['id']}"},
+                    config=config,
+                )
+                requeued += 1
+                logger.info(
+                    f"[reconcile] stuck job requeued: id={row['id']} "
+                    f"attempts={attempts}"
+                )
+            except Exception as e:
+                logger.error(f"[reconcile] stuck job requeue failed: {e}")
+        elif attempts > 3:
+            logger.warning(
+                f"[reconcile] stuck job id={row['id']} exceeded max retries "
+                f"(attempts={attempts}), needs manual review"
+            )
+    if requeued:
+        logger.info(f"[reconcile] requeued {requeued} stuck jobs")
+    return len(rows)
+
+
+def check_failed_jobs(config: dict, dry_run: bool) -> int:
+    """failed ジョブを検出し、retry_count <= 3 なら pending に戻す。"""
+    rows = supabase_select(
+        "job_queue",
+        params={
+            "status": "eq.failed",
+            "select": "id,job_type,target_id,error_message,attempts,finished_at",
+            "order": "created_at.desc",
+            "limit": "100",
+        },
+        config=config,
+    )
+    requeued = 0
+    permanent_failures = 0
+    for row in rows:
+        attempts = row.get("attempts", 0)
+        if attempts <= 3:
+            if not dry_run:
+                try:
+                    supabase_update(
+                        "job_queue",
+                        {
+                            "status": "pending",
+                            "started_at": None,
+                            "finished_at": None,
+                            "error_message": None,
+                        },
+                        params={"id": f"eq.{row['id']}"},
+                        config=config,
+                    )
+                    requeued += 1
+                    logger.info(
+                        f"[reconcile] failed job requeued: id={row['id']} "
+                        f"type={row.get('job_type')} target={row.get('target_id')} "
+                        f"attempts={attempts}"
+                    )
+                except Exception as e:
+                    logger.error(f"[reconcile] failed job requeue failed: {e}")
+            else:
+                requeued += 1  # dry-run でもカウント
+        else:
+            permanent_failures += 1
+            _record_issue(
+                "permanent_failure",
+                f"job_queue id={row['id']} type={row.get('job_type')} "
+                f"target={row.get('target_id')} attempts={attempts} "
+                f"error={row.get('error_message', '')[:200]}",
+                severity="error",
+                config=config,
+                dry_run=dry_run,
+            )
+    if requeued:
+        logger.info(
+            f"[reconcile] requeued {requeued} failed jobs "
+            f"(permanent_failures={permanent_failures})"
         )
     return len(rows)
 
@@ -166,22 +250,27 @@ def run(*, dry_run: bool = False) -> dict:
 
     logger.info("[reconcile] starting daily reconcile checks")
 
-    # 1. stuck jobs
+    # 1. stuck jobs 検出 + 自動再投入
     n = check_stuck_jobs(config, dry_run)
     results["stuck_jobs"] = n
     issues_total += n
 
-    # 2. rebuild backlog
+    # 2. failed jobs 検出 + 自動再投入
+    n = check_failed_jobs(config, dry_run)
+    results["failed_jobs"] = n
+    issues_total += n
+
+    # 3. rebuild backlog
     n = check_rebuild_backlog(config, dry_run)
     results["rebuild_backlog"] = n
     issues_total += n
 
-    # 3. financials duplicates
+    # 4. financials duplicates
     n = check_financials_duplicates(config, dry_run)
     results["financials_duplicates"] = n
     issues_total += n
 
-    # 4. quarantine spike
+    # 5. quarantine spike
     n = check_quarantine_spike(config, dry_run)
     results["quarantine_today"] = n
 

@@ -1,0 +1,19 @@
+[
+  {
+    "ticker": "3647",
+    "period": "R8/8",
+    "quarter": "2Q",
+    "segment_name": "Sustainable Business",
+    "segment_order": 1,
+    "segment_sales": 6,
+    "segment_profit": -18,
+    "raw_profit_label": "",
+    "source": "backfill_xbrl",
+    "segment_name_norm": "Sustainable Business",
+    "extractor_route": "xbrl",
+    "source_doc_type": "earnings_summary",
+    "disclosure_date": "2026-04-10",
+    "tdnet_doc_id": "5b2c1d2d2dda8f851a3b87cd",
+    "row_type": "segment"
+  }
+]

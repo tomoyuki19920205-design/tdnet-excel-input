@@ -38,6 +38,8 @@ _METRIC_MAP = {
 # gross_margin は比率のため除外 (value=金額のみ)
 # unit: quarterly_results.unit が "JPY" or None -> "JPY"
 
+from src.common_ticker import normalize_ticker as _normalize_ticker
+
 _VALID_QUARTERS = {"1Q", "2Q", "3Q", "FY"}
 _QUARTER_MAP = {"4Q": "FY"}
 
@@ -110,7 +112,7 @@ def load_sqlite_financials(db_path: str) -> list[dict]:
             skip_counts["invalid_quarter"] = skip_counts.get("invalid_quarter", 0) + 1
             continue
 
-        ticker = rdict.get("company_code", "")
+        ticker = _normalize_ticker(rdict.get("company_code", ""))
         period = rdict.get("fiscal_year_end", "")
         if not ticker or not period:
             skip_counts["missing_key"] = skip_counts.get("missing_key", 0) + 1

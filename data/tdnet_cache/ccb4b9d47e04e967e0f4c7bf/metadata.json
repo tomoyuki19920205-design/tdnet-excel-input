@@ -1,0 +1,14 @@
+{
+  "filing_id": "ccb4b9d47e04e967e0f4c7bf",
+  "ticker": "3282",
+  "disclosure_date": "2026-03-17",
+  "title": "2026年１月期決算短信(REIT)",
+  "doc_type": "financial_statement",
+  "source_url": "https://www.release.tdnet.info/inbs/140120260316583072.pdf",
+  "xbrl_url": "https://www.release.tdnet.info/inbs/081220260316583072.zip",
+  "listing_source": "tdnet_html",
+  "has_xbrl": false,
+  "xbrl_url_inferred": true,
+  "has_pdf": true,
+  "created_at": "2026-04-10T08:57:13.134590+09:00"
+}

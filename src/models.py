@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 class DisclosureType:
     FORECAST_REVISION = "forecast_revision"
     FINANCIAL_STATEMENT = "financial_statement"
+    DIVIDEND_REVISION = "dividend_revision"
 
 
 @dataclass
@@ -99,6 +100,19 @@ class WriteResult:
         return self.status == "success"
 
 
+# ============================================================
+# 決算短信判定キーワード（共通定数）
+# ============================================================
+# fetcher.classify_disclosure() と extractor._is_tanshin_title() の
+# 両方がこの定数を参照する。ズレ防止のため必ずここで一元管理。
+FINANCIAL_STATEMENT_KEYWORDS = [
+    "決算短信",
+    "四半期決算",
+    "通期決算",
+    "訂正決算短信",
+]
+
+
 # ステータス定数
 class Status:
     SUCCESS = "success"
@@ -112,3 +126,5 @@ class Status:
     ACTUAL_NOT_APPLICABLE = "actual_not_applicable"
     UNCONFIRMED_YEAR = "unconfirmed_year"
     ALREADY_PROCESSED = "already_processed"
+    # retryable skip: 将来のコード修正で再処理可能なスキップ
+    SKIPPED_NOT_TANSHIN = "skipped_not_tanshin"

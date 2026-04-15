@@ -1,0 +1,85 @@
+{
+  "run_id": "421c9b1d03ee",
+  "timestamp": "20260329_111718",
+  "filing_count": 6,
+  "filings": [
+    {
+      "filing_id": "ce01fb016ea7c738acb587a6",
+      "ticker": "3296",
+      "disclosure_date": "2026-02-18",
+      "title": "2025年12月期決算短信（ＲＥＩＴ）",
+      "doc_url": "https://www.release.tdnet.info/inbs/140120260218564376.pdf",
+      "xbrl_url": "https://www.release.tdnet.info/inbs/081220260218564376.zip",
+      "doc_type": "financial_statement",
+      "company_name": "Ｒ－日本リート",
+      "published_at": "2026-02-18 16:00",
+      "listing_source": "tdnet_html",
+      "has_xbrl": false
+    },
+    {
+      "filing_id": "829110db7945b080dba12f7d",
+      "ticker": "3470",
+      "disclosure_date": "2026-02-19",
+      "title": "2025年12月期　決算短信（ＲＥＩＴ）",
+      "doc_url": "https://www.release.tdnet.info/inbs/140120260218564830.pdf",
+      "xbrl_url": "https://www.release.tdnet.info/inbs/081220260218564830.zip",
+      "doc_type": "financial_statement",
+      "company_name": "Ｒ－マリモリート",
+      "published_at": "2026-02-19 15:30",
+      "listing_source": "tdnet_html",
+      "has_xbrl": false
+    },
+    {
+      "filing_id": "c16be57be230d1d784698528",
+      "ticker": "170A",
+      "disclosure_date": "2026-02-19",
+      "title": "2026年1月期　決算短信（2025年7月12日～2026年1月11日）",
+      "doc_url": "https://www.release.tdnet.info/inbs/140120260219564893.pdf",
+      "xbrl_url": "https://www.release.tdnet.info/inbs/081220260219564893.zip",
+      "doc_type": "financial_statement",
+      "company_name": "ＳＭＴ　日本好配当株",
+      "published_at": "2026-02-19 09:15",
+      "listing_source": "tdnet_html",
+      "has_xbrl": false
+    },
+    {
+      "filing_id": "4d4d8e4ab5d694d04f6bd5e5",
+      "ticker": "257A",
+      "disclosure_date": "2026-02-19",
+      "title": "2026年1月期　決算短信（2025年7月12日～2026年1月11日）",
+      "doc_url": "https://www.release.tdnet.info/inbs/140120260219564896.pdf",
+      "xbrl_url": "https://www.release.tdnet.info/inbs/081220260219564896.zip",
+      "doc_type": "financial_statement",
+      "company_name": "ＳＭＴ　日本株厳選投",
+      "published_at": "2026-02-19 09:15",
+      "listing_source": "tdnet_html",
+      "has_xbrl": false
+    },
+    {
+      "filing_id": "87a7bc10207dd701d956e7f1",
+      "ticker": "2642",
+      "disclosure_date": "2026-02-19",
+      "title": "2026年1月期　決算短信（2025年7月12日～2026年1月11日）",
+      "doc_url": "https://www.release.tdnet.info/inbs/140120260219564889.pdf",
+      "xbrl_url": "https://www.release.tdnet.info/inbs/081220260219564889.zip",
+      "doc_type": "financial_statement",
+      "company_name": "ＳＭＴ低炭素日本株",
+      "published_at": "2026-02-19 09:15",
+      "listing_source": "tdnet_html",
+      "has_xbrl": false
+    },
+    {
+      "filing_id": "132634a6ef3b2a5c6c9fd82e",
+      "ticker": "1366",
+      "disclosure_date": "2026-02-20",
+      "title": "2026年1月期（2025年1月11日～2026年1月10日）決算短信",
+      "doc_url": "https://www.release.tdnet.info/inbs/140120260220566033.pdf",
+      "xbrl_url": "https://www.release.tdnet.info/inbs/081220260220566033.zip",
+      "doc_type": "financial_statement",
+      "company_name": "ｉＦ２２５Ｗベア",
+      "published_at": "2026-02-20 11:00",
+      "listing_source": "tdnet_html",
+      "has_xbrl": false
+    }
+  ]
+}

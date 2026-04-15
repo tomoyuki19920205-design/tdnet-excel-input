@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import requests
 
 from .common_models import EventRecord, EventType
-from .notify_rules import is_resumption_dividend, compute_dividend_increase_ratio
 
 logger = logging.getLogger("event_notify")
 
@@ -51,6 +51,34 @@ def _fmt_pct(val: float | None) -> str:
         return "---"
     sign = "+" if val > 0 else ""
     return f"{sign}{val:.1f}%"
+
+
+def _format_eps_value(val: float | None) -> str | None:
+    """EPS値を円単位でフォーマット。整数なら小数なし、小数ありなら表示。"""
+    if val is None:
+        return None
+    if val == int(val):
+        return f"{int(val)}円"
+    # 過剰桁を出さない: 小数点以下の有効桁をそのまま
+    formatted = f"{val:g}円"
+    return formatted
+
+
+def _format_eps_change(prev: float | None, revised: float | None) -> str | None:
+    """EPS修正行をフォーマット。両方あるときだけ返す。
+
+    Returns: 'EPS: 100円→150円(+50.0%)' or None
+    """
+    if prev is None or revised is None:
+        return None
+    prev_str = _format_eps_value(prev)
+    rev_str = _format_eps_value(revised)
+    # prev==0 の場合は % を省略
+    if prev == 0:
+        return f"EPS: {prev_str}→{rev_str}"
+    pct = (revised - prev) / abs(prev) * 100
+    sign = "+" if pct > 0 else ""
+    return f"EPS: {prev_str}→{rev_str}({sign}{pct:.1f}%)"
 
 
 def format_buyback_msg(event: EventRecord) -> str:
@@ -130,6 +158,13 @@ def format_forecast_msg(event: EventRecord) -> str:
         if count >= 2:
             break
 
+    # EPS行（利益指標とは独立した別枠）
+    eps_prev = payload.get("previous_eps")
+    eps_rev = payload.get("revised_eps")
+    eps_line = _format_eps_change(eps_prev, eps_rev)
+    if eps_line:
+        parts.append(eps_line)
+
     if period:
         parts.append(period)
 
@@ -146,43 +181,25 @@ def format_dividend_msg(event: EventRecord) -> str:
             pass
 
     disp = f"{event.company_name}（{event.ticker}）" if event.company_name else event.ticker
+    subtype_ja = {
+        "increase": "増配", "decrease": "減配",
+        "special_dividend": "特別配当", "commemorative_dividend": "記念配当",
+        "maintain": "据え置き", "undecided": "配当予想修正",
+    }.get(event.subtype, "配当予想修正")
+    emoji = {"increase": "💰", "decrease": "📉", "special_dividend": "🎁",
+             "commemorative_dividend": "🎉"}.get(event.subtype, "💵")
 
-    # 復配判定
-    if is_resumption_dividend(event):
-        label = "復配"
-        emoji = "💰"
-    elif event.subtype == "special_dividend":
-        label = "特別配当"
-        emoji = "🎁"
-    elif event.subtype == "commemorative_dividend":
-        label = "記念配当"
-        emoji = "🎉"
-    elif event.subtype == "increase":
-        label = "増配"
-        emoji = "💰"
-    elif event.subtype == "decrease":
-        label = "減配"
-        emoji = "📉"
-    else:
-        label = {"maintain": "据え置き", "undecided": "配当予想修正"}.get(event.subtype, "配当予想修正")
-        emoji = "💵"
-
-    # 1行: ヘッダー + 配当額 + 増配率 + 利回り + 対象期(末尾)
+    # 1行: ヘッダー + 配当額 + 利回り + 対象期(末尾)
     period = payload.get("fiscal_period", "")
     basis = payload.get("dividend_basis", "")
-    parts = [f"{emoji}【{label}】{disp}"]
+    parts = [f"{emoji}【{subtype_ja}】{disp}"]
 
     prev = payload.get("previous_dividend_per_share")
     rev = payload.get("revised_dividend_per_share")
+    delta = payload.get("delta_dividend_per_share")
     if prev is not None and rev is not None:
-        inc_ratio = compute_dividend_increase_ratio(event)
-        if inc_ratio is not None:
-            pct_str = f"(+{inc_ratio * 100:.1f}%)"
-        else:
-            pct_str = ""
-        parts.append(f"{prev}円→{rev}円{pct_str}")
-    elif rev is not None:
-        parts.append(f"→{rev}円")
+        delta_str = f"({'+' if delta and delta > 0 else ''}{delta}円)" if delta is not None else ""
+        parts.append(f"{prev}円→{rev}円{delta_str}")
 
     special = payload.get("special_dividend_per_share")
     if special:
@@ -243,6 +260,15 @@ def send_event_discord(
     try:
         r = requests.post(webhook_url, json={"content": msg}, timeout=10)
         r.raise_for_status()
+        sent_at = datetime.now(timezone(timedelta(hours=9)))
+        logger.info(f"discord_sent_at: {sent_at.isoformat()}")
+        if event.first_seen_at:
+            try:
+                first_seen = datetime.fromisoformat(event.first_seen_at)
+                diff = (sent_at - first_seen).total_seconds()
+                logger.info(f"detect_to_notify_sec: {diff:.2f}")
+            except Exception:
+                pass
         logger.info(
             f"[NOTIFY] sent event_id={event.event_id[:12]} "
             f"type={event.event_type} ticker={event.ticker}"

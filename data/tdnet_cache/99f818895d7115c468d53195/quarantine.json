@@ -1,0 +1,14 @@
+{
+  "filing_id": "99f818895d7115c468d53195",
+  "ticker": "180A",
+  "stage": "extracting_pdf",
+  "error_message": "no_segment_table",
+  "review_hint": "pdf_table_parse_failed",
+  "via": "pdf",
+  "candidate_reject_reason": "etf_document",
+  "detector_v2_reason": "etf_document",
+  "detector_v1_reason": "no_segment_table",
+  "xbrl_fallback_attempted": false,
+  "xbrl_fallback_succeeded": false,
+  "xbrl_failure_reason": ""
+}

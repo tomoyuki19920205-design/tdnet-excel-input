@@ -1,0 +1,14 @@
+{
+  "filing_id": "8c0ce238d30ef44475d68b26",
+  "ticker": "1540",
+  "disclosure_date": "2026-03-05",
+  "title": "2026年1月期(2025年1月21日～2026年1月20日)決算短信",
+  "doc_type": "financial_statement",
+  "source_url": "https://www.release.tdnet.info/inbs/140120260305576604.pdf",
+  "xbrl_url": "https://www.release.tdnet.info/inbs/081220260305576604.zip",
+  "listing_source": "tdnet_html",
+  "has_xbrl": false,
+  "xbrl_url_inferred": true,
+  "has_pdf": true,
+  "created_at": "2026-04-12T00:49:20.520303+09:00"
+}

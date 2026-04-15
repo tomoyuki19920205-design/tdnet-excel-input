@@ -82,19 +82,12 @@ export default function AlertDetailPanel({
   };
 
   const displayCat = getDisplayCategory(event.event_type, event.headline);
-  // DEBUG: 詳細パネルデバッグ (修正確認後に削除)
-  console.log("DETAIL_PANEL:", {
-    id: event.id?.slice(0, 8),
-    event_type: event.event_type,
-    normalized: displayCat,
-    headline: event.headline?.slice(0, 40),
-  });
   const badge = EVENT_TYPE_CONFIG[displayCat] || {
     label: "その他",
     emoji: "📄",
   };
   const subtypeLabel = event.event_subtype
-    ? EVENT_SUBTYPE_LABELS[event.event_subtype] || event.event_subtype
+    ? (EVENT_SUBTYPE_LABELS[event.event_subtype] ?? event.event_subtype)
     : "";
 
   const formatDateTime = (dt: string | null) => {
@@ -118,10 +111,29 @@ export default function AlertDetailPanel({
     return `${MM}/${DD} ${hh}:${mm}`;
   };
 
+  // formatted_message → display_title+display_summary フォールバック
+  let mainMessage = event.formatted_message?.trim()
+    ? event.formatted_message
+    : [event.display_title, event.display_summary]
+        .filter((s) => s?.trim())
+        .join("\n")
+      || event.headline
+      || "";
+
+  // 指標行なし(改行なし) → headline をメイン本文に統合
+  const isShort = !mainMessage.includes("\n");
+  if (
+    isShort &&
+    event.headline?.trim() &&
+    !mainMessage.includes(event.headline.trim())
+  ) {
+    mainMessage = mainMessage + "\n" + event.headline;
+  }
+
   return (
     <div className="detail-panel">
-      {/* Title */}
-      <h2 className="detail-title">{event.display_title || event.headline}</h2>
+      {/* Main message: Discord と同一内容 */}
+      <div className="detail-main-message">{mainMessage}</div>
 
       {/* Meta info */}
       <div className="detail-meta">
@@ -148,36 +160,6 @@ export default function AlertDetailPanel({
         <span className="detail-meta-label">優先度</span>
         <span className="detail-meta-value">Rank {event.priority_rank}</span>
       </div>
-
-      {/* Primary Metric */}
-      {event.primary_metric_value && (
-        <div className="detail-metric">
-          <div>
-            <div className="detail-metric-name">
-              {event.primary_metric_name || "指標"}
-            </div>
-            <div className="detail-metric-value">
-              {event.primary_metric_value}
-            </div>
-          </div>
-          {event.primary_metric_yoy && (
-            <span
-              className={`detail-metric-yoy ${
-                event.primary_metric_yoy.startsWith("+")
-                  ? "positive"
-                  : "negative"
-              }`}
-            >
-              {event.primary_metric_yoy}
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Summary */}
-      {event.display_summary && (
-        <div className="detail-summary">{event.display_summary}</div>
-      )}
 
       {/* Action buttons */}
       <div className="detail-actions">
