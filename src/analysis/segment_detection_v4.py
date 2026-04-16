@@ -2826,12 +2826,20 @@ def _run_v4_inner(
             )
             if _qg_result is not None:
                 return _qg_result
+            result.quarantine_reason = "low_segment_count"
+            return result
 
         # 条件2: 補助列名のみ（実質セグメントなし）
         _QUALITY_GATE_EXCLUDE = frozenset([
-            "その他", "連結", "合計", "調整額", "調整", "消去", "全社",
+            "その他",
+            "連結",
+            "調整額",
+            "調整額等",
+            "全社",
+            "消去",
+            "共通",
         ])
-        core_names = [n for n in seg_names if n not in _QUALITY_GATE_EXCLUDE]
+        core_names = [n for n in seg_names if (n or "").strip() not in _QUALITY_GATE_EXCLUDE]
         if len(core_names) == 0:
             _qg_result = _maybe_try_vision_fallback(
                 log.get("pdf_path", ""), result, log, trace,
@@ -2839,6 +2847,8 @@ def _run_v4_inner(
             )
             if _qg_result is not None:
                 return _qg_result
+            result.quarantine_reason = "only_other_consolidated"
+            return result
     return result
 
 
@@ -2858,6 +2868,8 @@ _VISION_FLAG_ENV: str = "ENABLE_VISION_SEGMENT_FALLBACK"
 # vision fallback を発動する reject_reason のホワイトリスト
 VISION_FALLBACK_REASONS: frozenset = frozenset([
     "no_valid_horizontal_segment_table",
+    "low_segment_count",
+    "only_other_consolidated",
 ])
 
 
@@ -3018,6 +3030,17 @@ def _maybe_try_vision_fallback(
     from src.analysis.segment_detection_v4 import V4DetectionResult
     new_result = V4DetectionResult()
     new_result.segments = vfr.segment_records
+    new_result.extracted_periods = [
+        PeriodResultV4(
+            period_type="current",
+            period_label="",
+            page_index_0based=vfr.selected_page if vfr.selected_page is not None else -1,
+            page_index_1based=(vfr.selected_page + 1) if vfr.selected_page is not None else -1,
+            segments=vfr.segment_records,
+            sales_row_label="",
+            profit_row_label="セグメント利益",
+        )
+    ]
     new_result.quarantine_reason = ""
     new_result.failed_stage = ""
     new_result.rule_trace = trace + [
