@@ -67,7 +67,7 @@ class BackfillStateStore:
     def __init__(self, db_path: str = "data/backfill_state.db") -> None:
         self.db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        self.conn = sqlite3.connect(db_path, check_same_thread=False, isolation_level=None)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(_SCHEMA)
@@ -282,8 +282,7 @@ class BackfillStateStore:
 
         params.append(filing_id)
         sql = f"UPDATE filing_state SET {', '.join(parts)} WHERE filing_id = ?"
-        with self.conn:
-            self.conn.execute(sql, params)
+        self.conn.execute(sql, params)
 
     def mark_done(
         self,

@@ -1,4 +1,4 @@
-"""
+﻿"""
 segment_detection_v4.py — シンプル決め打ち横型セグメント抽出器 v4
 =====================================================================
 
@@ -97,6 +97,10 @@ _WORD_EXCLUDE: list[str] = [
 # Phase 4: 横型表の左端ヘッダー検出ワード
 _HORIZ_LEFT_KEYWORDS: list[str] = ["売上", "利益", "計", "合計"]
 
+# 縦持ちフォーマット救済: 列ヘッダーに現れる指標語（行=セグメント、列=指標 のレイアウト）
+_VERT_SALES_HEADER_KEYWORDS: list[str] = ["売上高", "売上収益", "外部顧客", "合計"]
+_VERT_PROFIT_HEADER_KEYWORDS: list[str] = ["利益", "損失", "セグメント利益", "営業利益"]
+
 # Phase 5: segment name 除外語（部分一致）
 # 注: 「その他」は正規の報告セグメント名として頻出するため除外しない
 _SEG_NAME_EXCLUDE: frozenset[str] = frozenset([
@@ -169,6 +173,63 @@ _NUM_RE = re.compile(r"^[\s\d,△▲\-\u2212\.\(\)（）▽]+$")
 
 # 目次行末ページ番号抽出パターン
 _TOC_PAGE_NUM_RE = re.compile(r"(\d+)\s*$")
+
+# 単一セグメント・セグメント情報省略の検出パターン
+# これらが PDF テキストに含まれる場合は AI fallback に送らずに打ち切る
+_SINGLE_SEGMENT_PATTERNS: list[str] = [
+    # ダイレクト単一セグメント表記
+    "単一セグメント",
+    "実質的に単一セグメント",
+    "実質的に単一のセグメント",
+    "単一のセグメントであるため",
+    "単一の報告セグメント",
+    "単一の報告セグメントであるため",
+    "報告セグメントは単一",
+    "報告セグメントは1つ",
+    "報告セグメントは一つ",
+    "事業セグメントは単一",
+    "事業セグメントは1区分",
+    "単一事業のため",
+    "単一事業であるため",
+    # 記載省略系
+    "セグメント情報の記載を省略",
+    "セグメント情報の記載は省略",
+    "セグメント情報を省略",
+    "セグメント情報については記載を省略",
+    "記載を省略しております",
+    "記載を省略しており",
+    "記載を省略している",
+    # 重要性が乏しい系
+    "重要性が乏しいためセグメント情報の記載を省略",
+    "重要性が乏しいため記載を省略",
+    "重要性が乏しいため",
+    "開示情報としての重要性が乏しいため",
+    "重要なセグメントがない",
+    "重要なセグメントはない",
+    # 事業のみXXX系
+    "情報関連事業のみ",
+    "医薬品事業のみ",
+    "飲食事業以外の重要なセグメントがない",
+    # 90%超ルール系
+    "全セグメントの売上高の合計",
+    "全セグメントの利益の合計",
+    "全セグメントの資産の合計",
+    "売上高の合計に占める割合",
+    "利益の合計に占める割合",
+    "資産の合計に占める割合",
+    "いずれも90%を超える",
+    "いずれも90％を超える",
+    "90%を超えるため、記載を省略",
+    "90％を超えるため、記載を省略",
+]
+
+# 単一セグメント判定の偽陽性を防ぐ否定ヒント
+# これらが同一ページテキストに多数出現する場合は単一セグメントと断定しない
+_SINGLE_SEGMENT_NEGATIVE_HINTS: list[str] = [
+    "セグメント情報",
+    "報告セグメント",
+    "事業セグメント",
+]
 
 
 # ==============================================================
@@ -310,6 +371,37 @@ def _row_numeric_ratio(row: list[Any], skip_col0: bool = True) -> float:
         return 0.0
     numeric_count = sum(1 for c in non_empty if _is_numeric_like(_normalize_seg_name(c)))
     return numeric_count / len(non_empty)
+
+
+def _is_single_segment_omission_text(text: str) -> bool:
+    """PDF テキストに単一セグメント・省略の明示記載があるか判定する。
+
+    1次
+チェック: _SINGLE_SEGMENT_PATTERNS 完全一致。
+    補助条件: 「。3e業のみ」かつ「記載を省略」、または 90%超ルール。
+    NEGATIVE_HINTS必須ゲートは除去（パターン自体が十分具体的なため）。
+    """
+    s = (text or "").replace("\u3000", " ")
+    if not s:
+        return False
+
+    # 主判定: パターン完全一致
+    if any(p in s for p in _SINGLE_SEGMENT_PATTERNS):
+        return True
+
+    # 補助条件: 「XXX事業のみ」 かつ 「記載を省略」
+    if "事業のみ" in s and "記載を省略" in s:
+        return True
+
+    # 補助条件: 90%超ルールで省略
+    if (
+        ("90%" in s or "90％" in s)
+        and "記載を省略" in s
+        and ("売上高" in s or "利益" in s or "資産" in s)
+    ):
+        return True
+
+    return False
 
 
 # ==============================================================
@@ -2214,6 +2306,117 @@ def _try_merge_page_tables(
 
 
 # ==============================================================
+# 縦持ちフォーマット救済
+# ==============================================================
+
+def _try_vertical_format_rescue(
+    pdf: pdfplumber.PDF,
+    candidate_pages: list[int],
+    ticker: str,
+    result: V4DetectionResult,
+    log: dict[str, Any],
+    trace: list[str],
+) -> V4DetectionResult | None:
+    """
+    横型判定（Phase4）で全テーブルが落ちた後の縦持ちフォーマット救済（1回限り）。
+
+    縦持ちフォーマット: 行=セグメント名、列=指標（売上高/利益）
+    ─ ヘッダー行に指標語があり、Col 0 にセグメント名が並ぶ表を対象とする。
+    既存の Phase 0-8 / vision fallback ロジックには一切触れない。
+    """
+    for page_idx in candidate_pages:
+        if page_idx >= len(pdf.pages):
+            continue
+        page = pdf.pages[page_idx]
+        tables, _, _ = _extract_tables_with_retry(page)
+        if not tables:
+            continue
+        for tbl_idx, raw_table in enumerate(tables):
+            if not raw_table or len(raw_table) < 3:
+                continue
+            header = [_cell_str(c) for c in raw_table[0]]
+            if len(header) < 3:
+                continue
+
+            # ヘッダー行（col 1以降）に売上・利益の指標語を探す
+            sales_col: int | None = None
+            profit_col: int | None = None
+            for ci, h in enumerate(header[1:], start=1):
+                if sales_col is None and any(kw in h for kw in _VERT_SALES_HEADER_KEYWORDS):
+                    sales_col = ci
+                if profit_col is None and any(kw in h for kw in _VERT_PROFIT_HEADER_KEYWORDS):
+                    profit_col = ci
+            if sales_col is None and profit_col is None:
+                continue
+
+            # Col 0 からセグメント名と数値を抽出
+            records: list[SegmentRecordV4] = []
+            for row in raw_table[1:]:
+                if not row:
+                    continue
+                seg_name = _normalize_seg_name(_cell_str(row[0]))
+                if not seg_name or _is_category_cell(seg_name) or _is_numeric_like(seg_name):
+                    continue
+                sales_val = (
+                    _parse_num(row[sales_col])
+                    if sales_col is not None and sales_col < len(row)
+                    else None
+                )
+                profit_val = (
+                    _parse_num(row[profit_col])
+                    if profit_col is not None and profit_col < len(row)
+                    else None
+                )
+                if sales_val is None and profit_val is None:
+                    continue
+                records.append(SegmentRecordV4(
+                    segment_name=seg_name,
+                    segment_order=len(records) + 1,
+                    segment_sales=sales_val,
+                    segment_profit=profit_val,
+                    raw_profit_label=header[profit_col] if profit_col is not None else "",
+                    extraction_engine="v4_vert",
+                ))
+
+            p8_log: dict[str, Any] = {}
+            ok, reject_reason = _phase8_validate(records, p8_log)
+            if not ok:
+                trace.append(
+                    f"VertRescue: page={page_idx} tbl={tbl_idx} REJECT reason={reject_reason}"
+                )
+                continue
+
+            logger.info(
+                "[v4-vert] ACCEPTED ticker=%s page=%d tbl=%d segs=%d "
+                "sales_col=%s profit_col=%s",
+                ticker, page_idx + 1, tbl_idx, len(records), sales_col, profit_col,
+            )
+            trace.append(
+                f"VertRescue: page={page_idx} tbl={tbl_idx} ACCEPTED n={len(records)}"
+            )
+            new_pr = PeriodResultV4(
+                period_type="current",
+                period_label="",
+                page_index_0based=page_idx,
+                page_index_1based=page_idx + 1,
+                segments=records,
+            )
+            new_result = V4DetectionResult()
+            new_result.segments = records
+            new_result.extracted_periods = [new_pr]
+            new_result.quarantine_reason = ""
+            new_result.failed_stage = ""
+            new_result.rule_trace = trace
+            new_result.log = log
+            log["best_page"] = page_idx
+            log["n_segments"] = len(records)
+            return new_result
+
+    return None
+
+
+
+# ==============================================================
 # メインエントリーポイント
 # ==============================================================
 
@@ -2312,6 +2515,41 @@ def _run_v4_inner(
     period_counts: dict[str, int] = {}   # {"previous": 1, "current": 0, "unknown": 1, ...}
     # unknown ブロック全件を記録 (block_id, PeriodResultV4) — fill2 用
     unknown_blocks_list: list[tuple[str, PeriodResultV4]] = []
+
+    # ── 単一セグメント省略スキャン（candidate_pages 確定直後・表ループ前） ──
+    # candidate_pages の前後1ページを含めてスキャンし、省略表記が見つかれば即打ち切り
+    _single_seg_scan_pages: list[int] = []
+    _seen_scan_pages: set[int] = set()
+    for _p in candidate_pages:
+        for _q in (_p - 1, _p, _p + 1):
+            if _q < 0 or _q >= len(pdf.pages):
+                continue
+            if _q in _seen_scan_pages:
+                continue
+            _seen_scan_pages.add(_q)
+            _single_seg_scan_pages.append(_q)
+
+    for _p in _single_seg_scan_pages:
+        try:
+            _scan_text = pdf.pages[_p].extract_text() or ""
+        except Exception:
+            _scan_text = ""
+
+        if _is_single_segment_omission_text(_scan_text):
+            result.segments = []
+            result.extracted_periods = []
+            result.failed_stage = ""
+            result.quarantine_reason = "single_segment_omitted"
+            result.rule_trace = trace + [f"single_segment_omitted:p{_p + 1}"]
+            result.log = log
+            logger.info(
+                "[v4] SINGLE_SEGMENT_OMITTED pdf=%s ticker=%s page=%s",
+                log.get("pdf_path", ""),
+                ticker,
+                _p + 1,
+            )
+            return result
+    # ── end 単一セグメント省略スキャン ─────────────────────────────────────────
 
     for page_idx in candidate_pages:
         if page_idx >= len(pdf.pages):
@@ -2735,7 +2973,7 @@ def _run_v4_inner(
     # ------------------------------------------------------------------
     result.extracted_periods = list(period_best.values())
 
-    if not result.extracted_periods:
+    if not result.extracted_periods and result.quarantine_reason != "single_segment_omitted":
         result.quarantine_reason = "no_valid_horizontal_segment_table"
         result.failed_stage = "extraction"
         log["reject_reason"] = result.quarantine_reason
@@ -2744,6 +2982,12 @@ def _run_v4_inner(
             "[v4] FAILED pdf=%s reason=%s",
             log.get("pdf_path"), result.quarantine_reason,
         )
+        # 縦持ち / 段組み 簡易再構成（横表判定で落ちた後の1回限り救済）
+        _vert_result = _try_vertical_format_rescue(
+            pdf, candidate_pages, ticker, result, log, trace,
+        )
+        if _vert_result is not None:
+            return _vert_result
         # ------------------------------------------------------------------
         # Vision fallback 試行 (feature flag OFF のときは何もしない)
         # ------------------------------------------------------------------

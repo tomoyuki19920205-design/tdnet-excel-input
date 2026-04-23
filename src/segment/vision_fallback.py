@@ -28,6 +28,8 @@ import logging
 import os
 import re
 import sys
+import threading
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -39,6 +41,11 @@ if sys.platform == "win32":
                 _s.reconfigure(encoding="utf-8", errors="replace")
             except Exception:
                 pass
+
+# OpenAI Vision API レート制御
+# 同時呼び出しをこのプロセス内で最大 3 に制限し、429 を抑制する。
+_VISION_SEMAPHORE = threading.Semaphore(2)
+_VISION_RATE_SLEEP_SEC: float = 0.5
 
 # SegmentRecordV4 は呼び出し元と同一プロジェクト内に存在する
 # NOTE: 循環 import を避けるため遅延 or 直接參照
@@ -241,13 +248,15 @@ def _call_openai_vision(
     last_err = ""
     for attempt in range(max_retries + 1):  # 0, 1  (初回 + retry 1回)
         try:
-            response = client.chat.completions.create(
-                model=model,
-                response_format={"type": "json_object"},
-                messages=_messages,
-                max_tokens=1024,
-                temperature=0.0,
-            )
+            with _VISION_SEMAPHORE:
+                time.sleep(_VISION_RATE_SLEEP_SEC)
+                response = client.chat.completions.create(
+                    model=model,
+                    response_format={"type": "json_object"},
+                    messages=_messages,
+                    max_tokens=1024,
+                    temperature=0.0,
+                )
             _content = response.choices[0].message.content or ""
             if isinstance(_content, bytes):
                 _content = _content.decode("utf-8", "replace")
@@ -535,6 +544,7 @@ def extract_segments_with_vision(
         if _p not in _seen:
             pages_to_try.append(_p)
             _seen.add(_p)
+    pages_to_try = pages_to_try[:4]  # Vision API 呼び出し回数を最大4ページに制限
 
     logger.info(
         "[v4-vision-fallback] ticker=%s candidates=%s pages_to_try=%s provider=%s model=%s",

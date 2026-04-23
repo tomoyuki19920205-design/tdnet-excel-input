@@ -394,3 +394,183 @@ def _handle_failed_v2(result, fid, store):
     except Exception as e:
         logger.warning(f"[phase2_v2] mark_failed failed {fid}: {e}")
 
+
+# ================================================================
+# V4 Runner
+# ================================================================
+
+def run_phase2_v4(
+    pending: list[dict],
+    filing_map: dict,
+    *,
+    store,
+    metrics,                            # BackfillMetricsV2
+    run_logger: RunLogger,
+    run_id: str,
+    cache_root: str = "data/tdnet_cache",
+    workers: int = 4,
+    retry_download: int = 3,
+    retry_xbrl: int = 2,
+    retry_pdf: int = 1,
+    timeout_download: int = 30,
+    timeout_xbrl: int = 60,
+    timeout_pdf: int = 120,
+    segment_buffer: list[dict] | None = None,
+    fid_buffer: list[str] | None = None,
+    db_batch_size: int = 200,
+    flush_every_seconds: int = 300,
+    flush_callback=None,
+) -> list:
+    """V4 worker 経路: XBRL-first → V4 PDF fallback を1パスで実行。
+
+    process_one_filing_v4 は XBRL が取れない場合に
+    run_segment_detection_v4 で PDF 抽出を行う。
+    V1 fallback は呼ばない。
+
+    Returns:
+        FilingResultV2 のリスト
+    """
+    from lib.backfill.worker_v4 import process_one_filing_v4
+    from lib.backfill.worker_v2 import FilingResultV2
+
+    if segment_buffer is None:
+        segment_buffer = []
+    if fid_buffer is None:
+        fid_buffer = []
+
+    all_results: list[FilingResultV2] = []
+    last_flush = time.monotonic()
+
+    logger.info(f"[phase2_v4] Starting V4 worker with {workers} workers, {len(pending)} filings")
+
+    def _v4_process(fi):
+        return process_one_filing_v4(
+            fi,
+            cache_root=cache_root,
+            state_store=store,
+            retry_download=retry_download,
+            retry_xbrl=retry_xbrl,
+            retry_pdf=retry_pdf,
+            timeout_download=timeout_download,
+            timeout_xbrl=timeout_xbrl,
+            timeout_pdf=timeout_pdf,
+            run_id=run_id,
+        )
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        # FIXED POPULATION mode 対応:
+        # pending を filing_map に含まれる fid のみに絞り込み、
+        # filing_map に存在するが pending にない fid（done 済み等）も投入対象に追加する。
+        _pending_map = {row["filing_id"]: row for row in pending if row["filing_id"] in filing_map}
+        for fid in filing_map:
+            if fid not in _pending_map:
+                _pending_map[fid] = {"filing_id": fid}
+        pending = list(_pending_map.values())
+
+        futures = {}
+        for row in pending:
+            fid = row["filing_id"]
+            fi = filing_map.get(fid)
+            if not fi:
+                logger.warning(f"[phase2_v4] skip {fid}: not in listing")
+                continue
+            futures[executor.submit(_v4_process, fi)] = (fid, fi)
+
+        for i, fut in enumerate(as_completed(futures), 1):
+            fid, fi = futures[fut]
+            try:
+                result = fut.result()
+            except Exception as e:
+                logger.error(f"[phase2_v4] {fid} exception: {e}")
+                result = FilingResultV2(
+                    filing_id=fid, status="failed", source="", selected_path="none",
+                    confidence=0.0, reason=f"worker_exception: {e}",
+                    hard_fail_reason="", quarantine_reason="worker_exception",
+                    fallback_used=False, fallback_reason="",
+                    raw_segment_count=0, valid_segment_count=0, invalid_segment_count=0,
+                    sales_non_null_count=0, profit_non_null_count=0,
+                    metrics={"total_ms": 0},
+                )
+                try:
+                    store.mark_failed(fid, error=str(e), stage="v4_worker_exception")
+                except Exception:
+                    pass
+
+            all_results.append(result)
+            metrics.record_v2_result(result)
+            run_logger.log_filing_result_v2(result, fi)
+
+            # status routing
+            if result.status in ("ok", "partial"):
+                _handle_ok_v4(result, fid, store, segment_buffer, fid_buffer)
+            elif result.status == "skipped_normal":
+                # 正常スキップ: quarantined には入れず done として記録
+                try:
+                    store.mark_done(fid, via="skipped_normal", segment_count=0,
+                                    duration_ms=result.metrics.get("total_ms", 0))
+                except Exception:
+                    pass
+            elif result.status == "quarantined":
+                _handle_quarantine_v4(result, fid, store)
+            elif result.status == "failed":
+                _handle_failed_v4(result, fid, store)
+
+            # periodic flush
+            now_t = time.monotonic()
+            if flush_callback and (
+                len(segment_buffer) >= db_batch_size
+                or (now_t - last_flush > flush_every_seconds and segment_buffer)
+            ):
+                flush_callback(segment_buffer, fid_buffer)
+                last_flush = time.monotonic()
+
+            if i % 20 == 0 or i == len(futures):
+                ok_count = sum(1 for r in all_results if r.status == "ok")
+                partial_count = sum(1 for r in all_results if r.status == "partial")
+                q_count = sum(1 for r in all_results if r.status == "quarantined")
+                logger.info(
+                    f"[phase2_v4] progress: {i}/{len(futures)} "
+                    f"ok={ok_count} partial={partial_count} quarantined={q_count}"
+                )
+
+    return all_results
+
+
+def _handle_ok_v4(result, fid, store, seg_buf, fid_buf):
+    seg_buf.extend(result.segment_records)
+    fid_buf.append(fid)
+    try:
+        store.mark_done(
+            fid, via=result.selected_path,
+            segment_count=len(result.segment_records),
+            result_fingerprint=result.result_fingerprint,
+            duration_ms=result.metrics.get("total_ms", 0),
+        )
+    except Exception as e:
+        logger.warning(f"[phase2_v4] mark_done failed {fid}: {e}")
+
+
+def _handle_quarantine_v4(result, fid, store):
+    try:
+        q = result.quarantine or {}
+        store.mark_quarantined(
+            fid,
+            error=q.get("hard_fail_reason", result.quarantine_reason),
+            stage="segment_extraction_v4",
+            review_hint=result.quarantine_reason,
+        )
+    except Exception as e:
+        logger.warning(f"[phase2_v4] mark_quarantined failed {fid}: {e}")
+
+
+def _handle_failed_v4(result, fid, store):
+    try:
+        store.mark_failed(
+            fid,
+            error=result.reason[:500],
+            stage="phase2_v4",
+        )
+    except Exception as e:
+        logger.warning(f"[phase2_v4] mark_failed failed {fid}: {e}")
+
+

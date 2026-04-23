@@ -27,6 +27,13 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+# .env から環境変数を自動ロード（OPENAI_API_KEY など）
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv 未インストール時はスキップ
+
 from lib.backfill.listing_provider import CompositeListingProvider
 from lib.backfill.listing_sources.tdnet_html import TdnetHtmlListingProvider
 from lib.backfill.state_store import BackfillStateStore
@@ -37,6 +44,40 @@ from lib.backfill.jsonl_logger import RunLogger, generate_run_id
 from lib.backfill.filing_selector import should_process_for_segment_backfill
 
 logger = logging.getLogger("backfill")
+
+
+# ============================================================
+# PRO Market 除外判定
+# ============================================================
+
+def _is_pro_market_filing(filing) -> bool:
+    """TOKYO PRO Market 等 PRO Market 銅柀4の開示か判定する。"""
+    market = ""
+    if isinstance(filing, dict):
+        market = (
+            filing.get("market")
+            or filing.get("market_name")
+            or filing.get("market_segment")
+            or filing.get("exchange")
+            or ""
+        )
+    else:
+        market = (
+            getattr(filing, "market", None)
+            or getattr(filing, "market_name", None)
+            or getattr(filing, "market_segment", None)
+            or getattr(filing, "exchange", None)
+            or ""
+        )
+    s = str(market).replace("\u3000", " ").strip().upper()
+    if not s:
+        return False
+    return (
+        "PRO MARKET" in s
+        or "TOKYO PRO MARKET" in s
+        or s == "TPM"
+        or "TPM " in s
+    )
 
 
 # ============================================================
@@ -214,14 +255,15 @@ def run_backfill(
     repair_extracted: bool = False,
     only_earnings_summary: bool = True,
     exclude_corrections: bool = True,
-    worker_version: str = "v2",
+    worker_version: str = "v4",
     filing_list_path: str | None = None,
     reset_target: bool = False,
 ) -> dict:
     """バックフィルを実行する (Phase 1 / Phase 2 自動選択)。"""
     run_id = generate_run_id()
     use_v2 = worker_version == "v2"
-    metrics = BackfillMetricsV2() if use_v2 else BackfillMetrics()
+    use_v4 = worker_version == "v4"
+    metrics = BackfillMetricsV2() if (use_v2 or use_v4) else BackfillMetrics()
 
     if log_jsonl_path is None:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -247,6 +289,8 @@ def run_backfill(
     if filing_list_path:
         # 固定母集団モード: manifest から直接読み込み、listing provider skip
         filings = _load_filing_list(filing_list_path)
+        if applied_limit:
+            filings = filings[:applied_limit]
         logger.info(f"[backfill] FIXED POPULATION mode: {len(filings)} filings from manifest")
         print(f"[backfill] FIXED POPULATION mode: {len(filings)} filings")
     else:
@@ -273,6 +317,9 @@ def run_backfill(
                 exclude_corrections=exclude_corrections,
                 only_earnings_summary=only_earnings_summary,
             )
+            if ok and _is_pro_market_filing(fi):
+                ok = False
+                reason = "pro_market"
             if ok:
                 accepted.append(fi)
             else:
@@ -334,11 +381,16 @@ def run_backfill(
     if stale > 0:
         logger.info(f"[backfill] reset {stale} stale running entries")
 
-    if resume:
-        if retry_quarantine:
-            store.reset_for_retry(statuses=["quarantined"])
-        if retry_failed:
-            store.reset_for_retry(statuses=["failed"])
+    # retry_quarantine / retry_failed は --resume なしでも単独で動作する
+    # quarantined/failed -> queued にリセットすることで get_pending() に載る
+    if retry_quarantine:
+        _rq = store.reset_for_retry(statuses=["quarantined"])
+        logger.info(f"[backfill] retry_quarantine: {_rq} quarantined -> queued")
+        print(f"[backfill] retry_quarantine: {_rq} filings reset quarantined -> queued")
+    if retry_failed:
+        _rf = store.reset_for_retry(statuses=["failed"])
+        logger.info(f"[backfill] retry_failed: {_rf} failed -> queued")
+        print(f"[backfill] retry_failed: {_rf} filings reset failed -> queued")
 
     # done/extracted repair: resume または --repair-extracted 時に自動リセット
     if resume or repair_extracted:
@@ -363,14 +415,19 @@ def run_backfill(
 
     # ── 3. Pending ──
     _limit_for_query = applied_limit or 0  # 0 = unlimited in state store
-    logger.info(f"[backfill] get_candidates start: resume={resume} applied_limit={applied_limit or 'unlimited'}")
+    logger.info(
+        f"[backfill] get_candidates start: resume={resume} "
+        f"retry_quarantine={retry_quarantine} applied_limit={applied_limit or 'unlimited'}"
+    )
     if resume:
+        # resume モード: queued/running/needs_pdf + オプションの quarantined/failed も含める
         pending = store.get_resume_candidates(
             limit=_limit_for_query, tickers=tickers,
             include_quarantined=retry_quarantine,
             include_failed=retry_failed,
         )
     else:
+        # 通常モード: queued のみ（retry_quarantine 時は上で reset_for_retry 済み）
         pending = store.get_pending(limit=_limit_for_query, tickers=tickers)
 
     metrics.total_filings = len(pending)
@@ -403,7 +460,21 @@ def run_backfill(
     logger.info(f"[backfill] phase={mode} stage start: input_count={len(pending)}")
     print(f"[backfill] {mode} start: {len(pending)} filings")
 
-    if use_v2:
+    if use_v4:
+        from lib.backfill.phase2_runner import run_phase2_v4
+        run_phase2_v4(
+            pending, filing_map,
+            store=store, metrics=metrics, run_logger=run_logger, run_id=run_id,
+            cache_root=cache_root,
+            workers=workers,
+            retry_download=retry_download, retry_xbrl=retry_xbrl, retry_pdf=retry_pdf,
+            timeout_download=timeout_download, timeout_xbrl=timeout_xbrl, timeout_pdf=timeout_pdf,
+            segment_buffer=segment_buffer, fid_buffer=fid_buffer,
+            db_batch_size=db_batch_size,
+            flush_every_seconds=flush_every_seconds,
+            flush_callback=_flush if decision_db_path else None,
+        )
+    elif use_v2:
         from lib.backfill.phase2_runner import run_phase2_v2
         run_phase2_v2(
             pending, filing_map,
@@ -733,6 +804,9 @@ def _run_dry_run(
             exclude_corrections=exclude_corrections,
             only_earnings_summary=only_earnings_summary,
         )
+        if ok and _is_pro_market_filing(fi):
+            ok = False
+            reason = "pro_market"
         entry = {
             "ticker": fi.ticker,
             "disclosure_date": fi.disclosure_date,
@@ -883,8 +957,8 @@ def main():
                         help="訂正資料を除外 (デフォルト ON)")
     parser.add_argument("--no-exclude-corrections", dest="exclude_corrections", action="store_false",
                         help="訂正資料も対象にする")
-    parser.add_argument("--worker-version", type=str, default="v2", choices=["v1", "v2"],
-                        help="Worker version: v1 (legacy PDF-only) or v2 (XBRL-first source-aware, default)")
+    parser.add_argument("--worker-version", type=str, default="v4", choices=["v1", "v2", "v4"],
+                        help="Worker version: v1 (legacy PDF-only) / v2 (XBRL-first) / v4 (XBRL-first + V4 PDF fallback, default)")
     parser.add_argument("--dry-run", action="store_true",
                         help="集計のみ。download・extract・upsert しない")
 

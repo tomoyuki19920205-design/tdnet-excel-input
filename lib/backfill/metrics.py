@@ -405,6 +405,7 @@ class BackfillMetricsV2:
             "source": getattr(result, "source", None),
             "selected_path": getattr(result, "selected_path", None),
             "confidence": getattr(result, "confidence", None),
+            "reason": getattr(result, "reason", None),
             "fallback_used": getattr(result, "fallback_used", None),
             "fallback_reason": getattr(result, "fallback_reason", None),
             "hard_fail_reason": getattr(result, "hard_fail_reason", None),
@@ -418,6 +419,7 @@ class BackfillMetricsV2:
             "narrative_contamination": getattr(result, "narrative_contamination", None),
             "segment_record_count": segment_record_count,
             "duration_ms": duration_ms,
+            "metrics": metrics or {},
         })
         if getattr(result, "status", None) in ("ok", "partial"):
             self.total_segment_rows += segment_record_count
@@ -454,31 +456,93 @@ class BackfillMetricsV2:
         fallback_count = sum(1 for r in self._filing_results if r["fallback_used"])
         fallback_reason_bd = self._count_by("fallback_reason")
         fallback_reason_bd.pop("", None)
-        quarantine_reason_bd = {}
-        hard_fail_reason_bd = {}
+        quarantine_reason_bd: dict[str, int] = {}
+        hard_fail_reason_bd: dict[str, int] = {}
+        skip_reason_bd: dict[str, int] = {}
         for r in self._filing_results:
             if r["status"] == "quarantined":
                 qr = r["quarantine_reason"] or "unknown"
                 quarantine_reason_bd[qr] = quarantine_reason_bd.get(qr, 0) + 1
                 hfr = r["hard_fail_reason"] or "unknown"
                 hard_fail_reason_bd[hfr] = hard_fail_reason_bd.get(hfr, 0) + 1
+            elif r["status"] == "skipped_normal":
+                # reason (etf_like / reit_like 等) を優先、なければ quarantine_reason / hard_fail_reason
+                sr = r.get("reason") or r.get("quarantine_reason") or r.get("hard_fail_reason") or "unknown"
+                skip_reason_bd[sr] = skip_reason_bd.get(sr, 0) + 1
         narrative_count = sum(1 for r in self._filing_results if r["narrative_contamination"])
 
+        # AI フォールバック内訳（metrics フィールドから集計）
+        ai_used_count = 0
+        ai_success_count = 0
+        ai_no_segments_count = 0
+        ai_parse_error_count = 0
+        ai_api_error_count = 0
+        # AI period/quarter 補完メトリクス
+        ai_period_type_resolved_count = 0
+        ai_quarter_resolved_count = 0
+        ai_period_unresolved_count = 0
+        ai_period_reason_breakdown: dict[str, int] = {}
+        for r in self._filing_results:
+            _m = r.get("metrics", {}) or {}
+            if _m.get("ai_used"):
+                ai_used_count += 1
+                _reason = _m.get("ai_reason", "")
+                if _reason == "ai_ok":
+                    ai_success_count += 1
+                elif _reason == "ai_no_segments":
+                    ai_no_segments_count += 1
+                elif _reason == "ai_parse_error":
+                    ai_parse_error_count += 1
+                elif _reason == "ai_api_error":
+                    ai_api_error_count += 1
+                # period/quarter 補完の集計（ai_ok 時のみ意味があるが全 ai_used で記録）
+                if _m.get("ai_period_type_resolved"):
+                    ai_period_type_resolved_count += 1
+                if _m.get("ai_quarter_resolved"):
+                    ai_quarter_resolved_count += 1
+                if _reason == "ai_ok" and not _m.get("ai_period_type_resolved") and not _m.get("ai_quarter_resolved"):
+                    ai_period_unresolved_count += 1
+                _p_reason = _m.get("ai_period_reason", "") or ""
+                if _p_reason:
+                    ai_period_reason_breakdown[_p_reason] = (
+                        ai_period_reason_breakdown.get(_p_reason, 0) + 1
+                    )
+
         return {
-            "worker_version": "v2",
+            "worker_version": "v4",
             "total_filings": n,
             "filing_ok": status_bd.get("ok", 0),
             "filing_partial": status_bd.get("partial", 0),
+            "filing_skipped_normal": status_bd.get("skipped_normal", 0),
             "filing_quarantined": status_bd.get("quarantined", 0),
             "filing_failed": status_bd.get("failed", 0),
             "selected_path_xbrl": path_bd.get("xbrl", 0),
             "selected_path_html": path_bd.get("html", 0),
             "selected_path_pdf": path_bd.get("pdf", 0),
+            "selected_path_ai": path_bd.get("ai", 0),
             "selected_path_none": path_bd.get("none", 0),
             "fallback_used_count": fallback_count,
             "fallback_reason_breakdown": fallback_reason_bd,
             "quarantine_reason_breakdown": dict(sorted(quarantine_reason_bd.items())),
             "hard_fail_reason_breakdown": dict(sorted(hard_fail_reason_bd.items())),
+            "skip_reason_breakdown": dict(sorted(skip_reason_bd.items())),
+            # AI フォールバック内訳
+            "ai_used_count": ai_used_count,
+            "ai_success_count": ai_success_count,
+            "ai_no_segments_count": ai_no_segments_count,
+            "ai_parse_error_count": ai_parse_error_count,
+            "ai_api_error_count": ai_api_error_count,
+            "ai_reason_breakdown": {
+                "ai_ok": ai_success_count,
+                "ai_no_segments": ai_no_segments_count,
+                "ai_parse_error": ai_parse_error_count,
+                "ai_api_error": ai_api_error_count,
+            },
+            # AI period/quarter 補完
+            "ai_period_type_resolved_count": ai_period_type_resolved_count,
+            "ai_quarter_resolved_count": ai_quarter_resolved_count,
+            "ai_period_unresolved_count": ai_period_unresolved_count,
+            "ai_period_reason_breakdown": dict(sorted(ai_period_reason_breakdown.items())),
             "avg_valid_segment_count": round(self._avg_of("valid_segment_count"), 2),
             "median_valid_segment_count": round(self._median_of("valid_segment_count"), 1),
             "avg_sales_non_null_count": round(self._avg_of("sales_non_null_count"), 2),
