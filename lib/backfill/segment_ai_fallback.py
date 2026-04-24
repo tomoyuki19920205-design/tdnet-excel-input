@@ -354,15 +354,6 @@ def extract_segments_with_ai(
     ))
 
     # API 呼び出し
-    # DEBUG: dump prompt to file for inspection (remove before production)
-    try:
-        from pathlib import Path
-        Path("tmp").mkdir(exist_ok=True)
-        Path("tmp/ai_user_prompt.txt").write_text(user_prompt, encoding="utf-8")
-        Path("tmp/ai_system_prompt.txt").write_text(_SYSTEM_PROMPT, encoding="utf-8")
-    except Exception:
-        pass
-
     raw_text, api_err = _call_openai_text(
         system_prompt=_SYSTEM_PROMPT,
         user_prompt=user_prompt,

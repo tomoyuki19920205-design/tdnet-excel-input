@@ -1,4 +1,4 @@
-﻿"""
+"""
 segment_detection_v4.py — シンプル決め打ち横型セグメント抽出器 v4
 =====================================================================
 
@@ -1120,7 +1120,6 @@ def _process_one_block(
     1期間ブロック（sub_table）を Phase4〜8 で処理する。
     成功すれば PeriodResultV4 を返す。失敗すれば None。
     """
-    _debug_blk_5713 = (ticker == "5713")
     prefix = f"page={page_idx} tbl={tbl_idx} blk={block_idx} [{period_type}]"
 
     # Phase 4
@@ -1128,14 +1127,6 @@ def _process_one_block(
     if not _phase4_is_horizontal_table(sub_table, p4_log, tbl_idx, page_idx):
         reject = p4_log[-1].get("reject", "?") if p4_log else "?"
         trace.append(f"Phase4: {prefix} NOT horizontal reason={reject}")
-        # ── [v4-5713-candidate] Phase4 落ち ──────────────────────────────────
-        if _debug_blk_5713:
-            logger.info(
-                "[v4-5713-candidate] ticker=5713 page_1based=%d tbl=%d blk=%d "
-                "accepted=no reason=phase4_%s",
-                page_idx + 1, tbl_idx, block_idx, reject,
-            )
-        # ── end ──────────────────────────────────────────────────────────────
         return None
     trace.append(f"Phase4: {prefix} IS horizontal")
 
@@ -1144,39 +1135,12 @@ def _process_one_block(
     seg_cols, header_rows = _phase5_get_segment_names(sub_table, p5_log)
     log.setdefault("phase5_logs", []).append(p5_log)
 
-    # ── [v4-5713-phase5] Phase5 結果 ────────────────────────────────────────
-    if _debug_blk_5713:
-        _chosen_names = [s[1] for s in seg_cols]
-        _rejected_hdr = p5_log.get("rejected_header_cells", [])
-        _final_rej    = p5_log.get("final_numeric_reject", [])
-        _row0_nr      = p5_log.get("row0_numeric_ratio", "?")
-        _row1_nr      = p5_log.get("row1_numeric_ratio", "?")
-        _two_row      = p5_log.get("use_two_row_header", "?")
-        logger.info(
-            "[v4-5713-phase5] ticker=5713 page_1based=%d tbl=%d blk=%d "
-            "seg_count=%d chosen=%s rejected_cells=%s final_numeric_rej=%s "
-            "row0_nr=%s row1_nr=%s two_row_header=%s",
-            page_idx + 1, tbl_idx, block_idx,
-            len(seg_cols), _chosen_names, _rejected_hdr, _final_rej,
-            _row0_nr, _row1_nr, _two_row,
-        )
-    # ── end [v4-5713-phase5] ────────────────────────────────────────────────
 
     if len(seg_cols) < 2:
         trace.append(
             f"Phase5: {prefix} seg_cols={len(seg_cols)} < 2 "
             f"header_rows={header_rows} → skip"
         )
-        # ── [v4-5713-candidate] Phase5 落ち ──────────────────────────────────
-        if _debug_blk_5713:
-            logger.info(
-                "[v4-5713-candidate] ticker=5713 page_1based=%d tbl=%d blk=%d "
-                "accepted=no reason=phase5_seg_count_lt2 seg_count=%d "
-                "row0_contaminated=%s row1_contaminated=%s",
-                page_idx + 1, tbl_idx, block_idx, len(seg_cols),
-                p5_log.get("row0_contaminated"), p5_log.get("row1_contaminated"),
-            )
-        # ── end ──────────────────────────────────────────────────────────────
         return None
     trace.append(f"Phase5: {prefix} seg_cols={len(seg_cols)} names={[s[1] for s in seg_cols]}")
 
@@ -1193,14 +1157,6 @@ def _process_one_block(
 
     if sales_row is None and profit_row is None:
         trace.append(f"Phase6: {prefix} both missing → skip")
-        # ── [v4-5713-candidate] Phase6 落ち ──────────────────────────────────
-        if _debug_blk_5713:
-            logger.info(
-                "[v4-5713-candidate] ticker=5713 page_1based=%d tbl=%d blk=%d "
-                "accepted=no reason=phase6_no_sales_and_profit",
-                page_idx + 1, tbl_idx, block_idx,
-            )
-        # ── end ──────────────────────────────────────────────────────────────
         return None
 
     # Phase 7
@@ -1215,27 +1171,9 @@ def _process_one_block(
 
     if not ok:
         trace.append(f"Phase8: {prefix} REJECT reason={reason}")
-        # ── [v4-5713-candidate] Phase8 落ち ──────────────────────────────────
-        if _debug_blk_5713:
-            _v8 = p8_log.get("validation", {})
-            logger.info(
-                "[v4-5713-candidate] ticker=5713 page_1based=%d tbl=%d blk=%d "
-                "accepted=no reason=phase8_%s n_seg=%s n_sales=%s n_profit=%s",
-                page_idx + 1, tbl_idx, block_idx, reason,
-                _v8.get("n_seg"), _v8.get("n_sales"), _v8.get("n_profit"),
-            )
-        # ── end ──────────────────────────────────────────────────────────────
         return None
 
     trace.append(f"Phase8: {prefix} ACCEPTED n={len(records)}")
-    # ── [v4-5713-candidate] 採用確定 ─────────────────────────────────────────
-    if _debug_blk_5713:
-        logger.info(
-            "[v4-5713-candidate] ticker=5713 page_1based=%d tbl=%d blk=%d "
-            "accepted=yes seg_count=%d period_type=%s",
-            page_idx + 1, tbl_idx, block_idx, len(records), period_type,
-        )
-    # ── end [v4-5713-candidate] ──────────────────────────────────────────────
 
     # ── [v3-period] 期間確定ログ (1セグメント1行) ──────────────────────────
     ev = f"header:{period_label[:40]}" if period_label else "(no_label)"

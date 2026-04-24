@@ -572,17 +572,6 @@ def _run_phase1(
             fid, fi = futures[fut]
             try:
                 result = fut.result()
-
-                import json
-                
-                import os
-                base_dir = os.path.dirname(os.path.dirname(__file__))
-                output_path = os.path.join(base_dir, "data", "backfill_results.jsonl")
-                with open(output_path, "a", encoding="utf-8") as f:
-                    try:
-                        f.write(json.dumps(result, ensure_ascii=False) + "\n")
-                    except Exception:
-                        pass
             except Exception as e:
                 logger.error(f"[backfill] {fid} exception: {e}")
                 result = None

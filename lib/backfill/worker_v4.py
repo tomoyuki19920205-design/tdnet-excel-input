@@ -223,7 +223,7 @@ def _has_segment_page_signal(pdf_path: str, ticker: str = "") -> bool:
     try:
         import fitz  # type: ignore
         with fitz.open(pdf_path) as doc:
-            for page in doc:
+            for page in doc[:50]:
                 text = page.get_text()
                 if any(kw in text for kw in _SEGMENT_PAGE_SIGNALS):
                     import re as _re
@@ -547,9 +547,11 @@ def process_one_filing_v4(
         else:
             # 正常スキップ判定（XBRL・PDF 両方失敗時のみ実行）
             _pdf_err = pdf_candidate.error or ""
+            _cached_normal_skip = ""
             if not _pdf_err.startswith("normal_skip:") and not _is_ai_fallback_applicable(_pdf_err):
                 # doc_path なし等でまだ normal_skip 判定されていない場合のみ補完
-                _pdf_err = f"normal_skip:{_detect_normal_skip(doc_path, filing.ticker, getattr(filing, 'title', ''))}"
+                _cached_normal_skip = _detect_normal_skip(doc_path, filing.ticker, getattr(filing, 'title', ''))
+                _pdf_err = f"normal_skip:{_cached_normal_skip}"
             if _pdf_err.startswith("normal_skip:"):
                 _skip_reason = _pdf_err[len("normal_skip:"):]
                 if _skip_reason:
@@ -579,7 +581,7 @@ def process_one_filing_v4(
             # 両方失敗 → AI フォールバック試行
             _pdf_err_for_ai = pdf_candidate.error or ""
             # AI 前に単一セグメント・省略系を再確認（_is_ai_fallback_applicable=True パスでの漏れを捕捉）
-            _pre_ai_skip = _detect_normal_skip(doc_path, filing.ticker, _filing_title)
+            _pre_ai_skip = _cached_normal_skip or _detect_normal_skip(doc_path, filing.ticker, _filing_title)
             if _pre_ai_skip:
                 logger.info(
                     "[v4] PRE-AI NORMAL SKIP ticker=%s reason=%s",
