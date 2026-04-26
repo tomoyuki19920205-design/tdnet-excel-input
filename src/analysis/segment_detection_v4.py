@@ -780,6 +780,36 @@ def _phase4_is_horizontal_table(
 # Phase 5: segment name取得（2行スパンヘッダー対応）
 # ==============================================================
 
+# ── B/S科目 deny リスト（セグメント名として現れてはいけない貸借対照表科目）
+_BS_DENY_NAMES: frozenset[str] = frozenset({
+    "支払手形及び買掛金", "電子記録債務", "短期借入金", "長期借入金",
+    "未払金", "未払法人税等", "賞与引当金", "役員賞与引当金",
+    "退職給付に係る負債", "資本金", "資本剰余金", "利益剰余金",
+    "自己株式", "現金及び預金", "受取手形", "売掛金",
+    "契約資産", "棚卸資産",
+})
+
+# ── 本文断片シグナル（MD&A 等の地の文に頻出する表現）
+_NARRATIVE_SIGNALS: tuple[str, ...] = (
+    "この結果", "当第", "提供しております", "以上の結果",
+    "なお、", "また、", "により", "ことから、",
+)
+
+
+def _is_narrative_fragment(name: str) -> bool:
+    """セグメント名候補が本文断片（narrative fragment）か判定する。
+
+    - 20文字以上
+    - かつ _NARRATIVE_SIGNALS の何れかを含む、または句読点が2個以上
+    """
+    if len(name) < 20:
+        return False
+    if any(sig in name for sig in _NARRATIVE_SIGNALS):
+        return True
+    punct_count = sum(1 for c in name if c in "、。，．・")
+    return punct_count >= 2
+
+
 def _phase5_get_segment_names(
     raw_table: list[list[Any]],
     log: dict[str, Any],
@@ -895,6 +925,35 @@ def _phase5_get_segment_names(
         [s[1] for s in segments], header_rows, use_two_row_header,
         row0_numeric_ratio, row1_numeric_ratio, rejected_cells,
     )
+
+    # ---- B/S科目支配チェック ----
+    # セグメント名の大半がB/S科目の場合、B/S表を誤認識している可能性が高い
+    _total = len(segments)
+    if _total > 0:
+        _bs_count = sum(1 for _, _n in segments if _n in _BS_DENY_NAMES)
+        if _bs_count >= 3 or (_bs_count / _total) >= 0.4:
+            log["segment_names"] = []
+            log["reject_reason"] = "bs_like_candidate"
+            log["bs_item_count"] = _bs_count
+            logger.debug(
+                "[v4] Phase5: REJECT bs_like_candidate bs_count=%d total=%d names=%s",
+                _bs_count, _total, [s[1] for s in segments],
+            )
+            return [], header_rows
+
+        # ---- 本文断片支配チェック ----
+        # セグメント名の大半が長い文章/句読点混じりの場合、地の文を誤認識している
+        _narr_count = sum(1 for _, _n in segments if _is_narrative_fragment(_n))
+        if _narr_count >= 3 or (_narr_count / _total) >= 0.4:
+            log["segment_names"] = []
+            log["reject_reason"] = "narrative_like_candidate"
+            log["narrative_fragment_count"] = _narr_count
+            logger.debug(
+                "[v4] Phase5: REJECT narrative_like_candidate narr_count=%d total=%d names=%s",
+                _narr_count, _total, [s[1] for s in segments[:5]],
+            )
+            return [], header_rows
+
     return segments, header_rows
 
 
