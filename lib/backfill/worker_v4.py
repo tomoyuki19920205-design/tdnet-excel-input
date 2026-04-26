@@ -316,6 +316,19 @@ def _try_pdf_source_v4(
         if not quarter and getattr(pr, "quarter", None):
             quarter = pr.quarter
 
+    # --- FY フォールバック (PDF経路のみ): 年次決算短信で quarter が未解決の場合 ---
+    # 「○年○月期 決算短信」のように四半期表記が一切ないタイトルを救済する。
+    if not quarter:
+        _title = getattr(filing, "title", "") or ""
+        _ANNUAL_KW = ("決算短信", "有価証券報告書", "Annual Report")
+        _QUARTER_KW = (
+            "第1四半期", "第２四半期", "第2四半期",
+            "第３四半期", "第3四半期",
+            "中間", "1st Quarter", "2nd Quarter", "3rd Quarter",
+        )
+        if any(x in _title for x in _ANNUAL_KW) and not any(x in _title for x in _QUARTER_KW):
+            quarter = "FY"
+
     if not period or not quarter:
         return SourceCandidate(
             source="pdf", attempted=True, available=True,
