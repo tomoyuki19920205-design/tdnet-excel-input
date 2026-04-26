@@ -773,6 +773,37 @@ def process_one_filing_v4(
                     best = xbrl_candidate
             else:
                 # AI フォールバック非対象（通常の quarantine 経路）
+                # PDF error に単一セグメント / 省略系の理由が記録されている場合は
+                # quarantine に入れず skipped_normal として返す（B優先度案件の救済）
+                _NS_SKIP_REASONS = {"single_segment_omitted", "segment_disclosure_omitted"}
+                _raw_pdf_err_ns = pdf_candidate.error or ""
+                _ns_skip = next(
+                    (r for r in _NS_SKIP_REASONS if r in _raw_pdf_err_ns), ""
+                )
+                if _ns_skip:
+                    logger.info(
+                        "[phase2_v4] normal skip after xbrl failure: reason=%s ticker=%s",
+                        _ns_skip, filing.ticker,
+                    )
+                    elapsed = int((time.monotonic() - t0) * 1000)
+                    metrics["total_ms"] = elapsed
+                    append_filing_log(paths, {
+                        "event": "skipped_normal", "ticker": filing.ticker,
+                        "reason": _ns_skip, "pipeline": "v4",
+                    })
+                    return FilingResultV2(
+                        filing_id=fid, status="skipped_normal",
+                        source="", selected_path="none",
+                        confidence=0.0, reason=_ns_skip,
+                        hard_fail_reason="", quarantine_reason="",
+                        fallback_used=True, fallback_reason=fallback_reason,
+                        raw_segment_count=0, valid_segment_count=0,
+                        invalid_segment_count=0, sales_non_null_count=0,
+                        profit_non_null_count=0,
+                        metrics={**metrics, "total_ms": elapsed},
+                        cache_paths={"cache_dir": str(paths.cache_dir)},
+                        route_mode="normal_skip",
+                    )
                 metrics["ai_used"] = False
                 best = xbrl_candidate
 
