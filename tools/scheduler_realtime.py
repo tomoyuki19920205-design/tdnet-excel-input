@@ -210,7 +210,7 @@ def main() -> int:
             step = run_step("ingest", [
                 PYTHON, "tools/pipeline_run.py", "ingest",
                 "--trigger", "scheduler", *dry_flag,
-            ], timeout_sec=90)
+            ], timeout_sec=300)
             steps.append(step)
             logger.info(f"[TIMING] ingest_end_at={datetime.now(JST).isoformat(timespec='seconds')} ingest_sec={step.duration:.1f}")
         else:

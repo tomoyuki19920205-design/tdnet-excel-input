@@ -248,7 +248,7 @@ def _select_financials_rows(
         for ticker, period, quarter in target_keys:
             cursor = conn.execute(
                 "SELECT * FROM quarterly_results "
-                "WHERE company_code = ? AND period = ? AND quarter = ?",
+                "WHERE company_code = ? AND fiscal_year_end = ? AND quarter = ?",
                 (ticker, period, quarter),
             )
             for r in cursor:

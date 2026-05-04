@@ -170,3 +170,49 @@ export async function deleteComment(supabase: SupabaseClient, commentId: string,
     .eq("user_id", userId);
   if (error) throw error;
 }
+
+// ============================================================
+// セグメント業績取得
+// ============================================================
+export interface SegmentRow {
+  segment_name: string;
+  segment_sales: number | null;
+  segment_profit: number | null;
+  period: string | null;
+  quarter: string | null;
+  data_source: string | null;
+}
+
+/**
+ * segment_financials からセグメント業績を取得する。
+ * company_code / fiscal_year_end / quarter で絞り込み。
+ * period / quarter が null の場合は ticker のみで最新件を取得。
+ */
+export async function fetchSegmentFinancials(
+  supabase: SupabaseClient,
+  ticker: string,
+  period?: string | null,
+  quarter?: string | null,
+): Promise<SegmentRow[]> {
+  try {
+    let q = supabase
+      .from("segment_financials")
+      .select("segment_name, segment_sales, segment_profit, period, quarter, data_source")
+      .eq("ticker", ticker)
+      .neq("data_source", "excel_legacy")  // excel_legacy を除外
+      .order("period", { ascending: false })
+      .order("segment_name", { ascending: true })
+      .limit(100);
+
+    // デバッグ: period/quarter filter 一時無効
+    // if (period) q = q.eq("period", period);
+    // if (quarter) q = q.eq("quarter", quarter);
+
+    const { data, error } = await q;
+    if (error) throw error;
+    return (data || []) as SegmentRow[];
+  } catch {
+    // テーブル不在またはRLS拒否の場合は空を返す
+    return [];
+  }
+}

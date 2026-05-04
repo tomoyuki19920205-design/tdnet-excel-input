@@ -199,6 +199,7 @@ def _call_responses_api(
                 "schema": use_schema["schema"],
             }
         },
+        timeout=30,
     )
 
     # レスポンスからテキスト出力を取得

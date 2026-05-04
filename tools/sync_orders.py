@@ -29,7 +29,7 @@ import requests
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 sys.path.insert(0, _PROJECT_ROOT)
 
-_DEFAULT_DB = os.path.join(_PROJECT_ROOT, "data", "decision_db.db")
+_DEFAULT_DB = os.path.join(_PROJECT_ROOT, "decision_db.db")  # 本番メインDB
 _LOG_DIR = os.path.join(_PROJECT_ROOT, "logs")
 
 _RETRY_MAX = 3
@@ -377,6 +377,15 @@ def main():
     logger.info(f"  mode:   {'DRY-RUN' if is_dry_run else 'APPLY'}")
     logger.info(f"  sqlite: {args.db}")
     logger.info(f"  log:    {log_file}")
+
+    # ---- 起動時DB確認ログ ----
+    try:
+        _chk_conn = sqlite3.connect(args.db)
+        _chk_cnt = _chk_conn.execute("SELECT COUNT(*) FROM order_metrics").fetchone()[0]
+        _chk_conn.close()
+        logger.info(f"  order_metrics: {_chk_cnt} rows in {args.db}")
+    except Exception as _chk_e:
+        logger.warning(f"  order_metrics 件数確認失敗: {_chk_e}")
 
     # ---- .env ----
     _load_dotenv()

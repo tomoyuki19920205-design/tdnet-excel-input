@@ -5,15 +5,22 @@ from __future__ import annotations
 # Source Priority Map
 # ============================================================
 # 小さいほど高優先。勝者判定で source_priority ASC を使う。
+#
+# jquants 優先度について:
+#   J-Quants は TSE 公式 PL 集計データ（証券取引所由来）。
+#   sales / operating_profit 等の PL 主要値は高信頼性。
+#   gross_profit / sga 等の補完値は jquants に存在しないことが多く
+#   その場合は tdnet 等が自動採用される（競合なし）。
+#   summary_xbrl(1) < jquants(2) = attachment_xbrl(2) < html/tdnet(3) < pdf(4) < legacy(5)
 
 SOURCE_PRIORITY: dict[str, int] = {
     # ── financials source ──
     "summary_xbrl": 1,
     "attachment_xbrl": 2,
+    "jquants": 2,        # J-Quants: TSE公式集計データ → attachment_xbrl と同格
     "html_table": 3,
     "pdf_table": 4,
     "legacy_excel": 5,
-    "jquants": 6,
     # ── segment source (実データ値) ──
     # SegmentRawRow.source: 'xbrl' | 'html' | 'pdf' | 'tdnet'
     # xbrl は summary_xbrl 相当、html/pdf はそれぞれ html_table/pdf_table 相当

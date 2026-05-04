@@ -361,61 +361,64 @@ def _process_single(
         except Exception:
             pass
 
-    # ── セグメント別売上・利益抽出（失敗しても全体を止めない） ──
-    seg_metrics = {}  # v2 Phase 2 メトリクス
+    # ── セグメント別売上・利益抽出（V4専用） ──
+    # extract_segment_financials (旧V1/V2/V3) は停止済み。V4のみ使用。
+    seg_metrics: dict = {"v4_route": True}
+    _V4_NORMAL_SKIP = {"single_segment_omitted", "no_segment_page", "no_segment_table", "skipped_normal"}
     try:
-        seg_list, seg_reason = extract_segment_financials(
-            pdf_path=doc_path,
-            title=item.title,
-            doc_id=disclosure_id,
-            ticker=code,
-        )
-        if seg_list:
-            seg_metrics["segment_records"] = len(seg_list)
+        from src.analysis.segment_detection_v4 import run_segment_detection_v4
+        _v4r = run_segment_detection_v4(doc_path, ticker=code)
+        _v4_segs_list = getattr(_v4r, "segments", []) or []
+        _v4_ok = bool(_v4r.success or _v4_segs_list)
+        _v4_reason = getattr(_v4r, "quarantine_reason", None) or "none"
+
+        if _v4_ok and _v4_segs_list:
+            # ── V4成功：保存 ──
+            seg_metrics["segment_records"] = len(_v4_segs_list)
             seg_metrics["segment_detected"] = True
-            for seg in seg_list:
+            seg_metrics["v4_success"] = True
+            for seg in _v4_segs_list:
                 seg_result = decision_db.upsert_segment(
                     company_code=code,
                     fiscal_year_end=fiscal_year_end,
                     quarter=financials.quarter,
-                    segment_name=seg.segment_name,
-                    segment_order=seg.segment_order,
-                    segment_sales=seg.segment_sales,
-                    segment_profit=seg.segment_profit,
-                    raw_profit_label=seg.raw_profit_label,
+                    segment_name=seg.get("segment_name", "") if isinstance(seg, dict) else getattr(seg, "segment_name", ""),
+                    segment_order=seg.get("segment_order", 0) if isinstance(seg, dict) else getattr(seg, "segment_order", 0),
+                    segment_sales=seg.get("segment_sales") if isinstance(seg, dict) else getattr(seg, "segment_sales", None),
+                    segment_profit=seg.get("segment_profit") if isinstance(seg, dict) else getattr(seg, "segment_profit", None),
+                    raw_profit_label=seg.get("raw_profit_label", "") if isinstance(seg, dict) else getattr(seg, "raw_profit_label", ""),
                     data_source="tdnet",
-                    actor="tdnet_ingest",
-                    source="tdnet",
+                    actor="tdnet_ingest_v4",
+                    source="v4",
                     tdnet_disclosure_id=disclosure_id,
                     run_id=run_id,
                 )
+                _sname = seg.get("segment_name", "") if isinstance(seg, dict) else getattr(seg, "segment_name", "")
+                _ssales = seg.get("segment_sales") if isinstance(seg, dict) else getattr(seg, "segment_sales", None)
+                _sprofit = seg.get("segment_profit") if isinstance(seg, dict) else getattr(seg, "segment_profit", None)
                 logger.info(
-                    f"[SEGMENT] {code} {financials.quarter} "
-                    f"{seg.segment_name}: sales={seg.segment_sales} profit={seg.segment_profit} ({seg_result})"
+                    f"[SEGMENT_V4] {code} {financials.quarter} "
+                    f"{_sname}: sales={_ssales} profit={_sprofit} ({seg_result})"
                 )
             decision_db.commit()
+            logger.info(f"[SEGMENT_V4] {code} ok segs={len(_v4_segs_list)} reason={_v4_reason}")
 
-            # v2 メトリクス収集 (v2 が使われた場合)
-            try:
-                from src.analysis.segment_detection_v2 import run_segment_detection_v2
-                v2r = run_segment_detection_v2(doc_path, doc_id=disclosure_id, ticker=code)
-                seg_metrics["v2_adopted"] = v2r.used_v2
-                seg_metrics["v1_fallback"] = not v2r.used_v2
-                seg_metrics["candidate_tables"] = v2r.candidate_tables_count
-                seg_metrics["scored_pages"] = v2r.scored_pages_count
-                seg_metrics["unit_unknown"] = v2r.unit_info is None or v2r.unit_info.unit_multiplier is None if v2r.unit_info is not None else True
-                seg_metrics["profit_col_role"] = v2r.score_summary.get("profit_col_role", "")
-                seg_metrics["non_reportable_rows"] = v2r.score_summary.get("non_reportable_count", 0)
-            except Exception:
-                seg_metrics["v2_adopted"] = False
-                seg_metrics["v1_fallback"] = True
-        elif seg_reason:
+        elif _v4_reason in _V4_NORMAL_SKIP:
+            # ── 正常skip（単一セグメント省略等）：quarantine不要 ──
             seg_metrics["segment_detected"] = False
-            seg_metrics["quarantine_reason"] = seg_reason
-            if seg_reason not in ("no_segment_table", "テキスト抽出不可"):
+            seg_metrics["v4_skipped_normal"] = True
+            seg_metrics["v4_skip_reason"] = _v4_reason
+            logger.info(f"[SEGMENT_V4] {code} normal_skip reason={_v4_reason}")
+
+        else:
+            # ── V4失敗・低信頼・想定外 ──
+            seg_metrics["segment_detected"] = False
+            seg_metrics["v4_quarantined"] = True
+            seg_metrics["quarantine_reason"] = _v4_reason
+            if _v4_reason not in ("none",):
                 decision_db.quarantine_record(
                     company_code=code,
-                    reason=seg_reason,
+                    reason=f"v4:{_v4_reason}",
                     fiscal_year_end=fiscal_year_end,
                     quarter=financials.quarter,
                     metric_type="segment",
@@ -423,14 +426,17 @@ def _process_single(
                     source_doc_id=disclosure_id,
                 )
                 decision_db.commit()
-                logger.info(f"[SEGMENT] {code} quarantine: {seg_reason[:80]}")
-    except Exception as e:
-        logger.warning(f"[SEGMENT] {code} extraction error (non-fatal): {e}")
+            logger.info(f"[SEGMENT_V4] {code} quarantine reason={_v4_reason}")
+
+    except Exception as _v4_ex:
+        logger.warning(f"[SEGMENT_V4] {code} exception (non-fatal): {_v4_ex}")
         seg_metrics["segment_detected"] = False
+        seg_metrics["v4_exception"] = True
+        seg_metrics["quarantine_reason"] = f"v4_exception:{_v4_ex!s:.80}"
         try:
             decision_db.quarantine_record(
                 company_code=code,
-                reason=f"segment_extraction_error: {e}",
+                reason=f"v4_exception:{_v4_ex!s:.120}",
                 fiscal_year_end=fiscal_year_end,
                 quarter=financials.quarter,
                 metric_type="segment",
@@ -481,15 +487,12 @@ def build_ingest_summary(results, all_items, target_items, success_count, run_id
     summary["files_zip"] = sum(1 for r in results if r.get("source_type") == "zip")
     seg_records_total = 0
     seg_detected_docs = 0
-    v2_adopted = 0
-    v1_fallback = 0
-    unit_unknown = 0
-    profit_col_unknown = 0
-    non_reportable_total = 0
-    candidate_tables_sum = 0
-    scored_pages_sum = 0
-    docs_with_v2 = 0
-    quarantine_reasons = {}
+    v4_success = 0
+    v4_skipped_normal = 0
+    v4_quarantined = 0
+    v4_exception = 0
+    quarantine_reasons: dict[str, int] = {}
+    skip_reason_counts: dict[str, int] = {}
     for r in results:
         sm = r.get("seg_metrics", {})
         if not sm:
@@ -497,40 +500,39 @@ def build_ingest_summary(results, all_items, target_items, success_count, run_id
         seg_records_total += sm.get("segment_records", 0)
         if sm.get("segment_detected"):
             seg_detected_docs += 1
-        if sm.get("v2_adopted"):
-            v2_adopted += 1
-            docs_with_v2 += 1
-            candidate_tables_sum += sm.get("candidate_tables", 0)
-            scored_pages_sum += sm.get("scored_pages", 0)
-            non_reportable_total += sm.get("non_reportable_rows", 0)
-            if sm.get("unit_unknown"):
-                unit_unknown += 1
-            if not sm.get("profit_col_role"):
-                profit_col_unknown += 1
-        if sm.get("v1_fallback"):
-            v1_fallback += 1
+        if sm.get("v4_success"):
+            v4_success += 1
+        if sm.get("v4_skipped_normal"):
+            v4_skipped_normal += 1
+            sr = sm.get("v4_skip_reason", "unknown")
+            skip_reason_counts[sr] = skip_reason_counts.get(sr, 0) + 1
+        if sm.get("v4_quarantined"):
+            v4_quarantined += 1
+        if sm.get("v4_exception"):
+            v4_exception += 1
         qr = sm.get("quarantine_reason", "")
         if qr:
             quarantine_reasons[qr] = quarantine_reasons.get(qr, 0) + 1
     summary["segment_records"] = seg_records_total
     summary["segment_detected_docs"] = seg_detected_docs
-    summary["v2_adopted"] = v2_adopted
-    summary["v1_fallback"] = v1_fallback
-    summary["unit_unknown_count"] = unit_unknown
-    summary["profit_col_unknown_count"] = profit_col_unknown
-    summary["non_reportable_rows_count"] = non_reportable_total
-    summary["avg_candidate_tables_per_doc"] = (
-        round(candidate_tables_sum / docs_with_v2, 1) if docs_with_v2 else 0
-    )
-    summary["avg_scored_pages_per_doc"] = (
-        round(scored_pages_sum / docs_with_v2, 1) if docs_with_v2 else 0
+    summary["v4_success"] = v4_success
+    summary["v4_skipped_normal"] = v4_skipped_normal
+    summary["v4_quarantined"] = v4_quarantined
+    summary["v4_exception"] = v4_exception
+    summary["v4_segments_total"] = seg_records_total
+    summary["avg_segments_per_doc"] = (
+        round(seg_records_total / seg_detected_docs, 1) if seg_detected_docs else 0
     )
     if quarantine_reasons:
         top = sorted(quarantine_reasons.items(), key=lambda x: -x[1])[:5]
         summary["quarantine_reason_top"] = dict(top)
     else:
         summary["quarantine_reason_top"] = {}
-    summary["quarantined"] = summary["errors"] + sum(quarantine_reasons.values())
+    if skip_reason_counts:
+        summary["v4_skip_reason_top"] = dict(
+            sorted(skip_reason_counts.items(), key=lambda x: -x[1])[:5]
+        )
+    summary["quarantined"] = summary["errors"] + v4_quarantined + v4_exception
     summary["elapsed"] = round(elapsed, 2)
     return summary
 
@@ -556,18 +558,16 @@ def print_ingest_summary(summary):
     if summary.get("failed_codes"):
         print(f"  失敗コード      : {', '.join(summary['failed_codes'])}")
     print()
-    print("  [Segment v2 メトリクス]")
+    print("  [Segment V4 メトリクス]")
     for label, key in [
-        ("segment_records", "segment_records"),
+        ("segment_records",      "segment_records"),
         ("segment_detected_docs", "segment_detected_docs"),
-        ("v2_adopted", "v2_adopted"),
-        ("v1_fallback", "v1_fallback"),
-        ("unit_unknown", "unit_unknown_count"),
-        ("profit_col_unknown", "profit_col_unknown_count"),
-        ("non_reportable_rows", "non_reportable_rows_count"),
-        ("avg_candidate_tables", "avg_candidate_tables_per_doc"),
-        ("avg_scored_pages", "avg_scored_pages_per_doc"),
-        ("quarantined", "quarantined"),
+        ("v4_success",           "v4_success"),
+        ("v4_skipped_normal",    "v4_skipped_normal"),
+        ("v4_quarantined",       "v4_quarantined"),
+        ("v4_exception",         "v4_exception"),
+        ("avg_segments_per_doc", "avg_segments_per_doc"),
+        ("quarantined",          "quarantined"),
     ]:
         print(f"  {label:24s}: {summary.get(key, 0)}")
     print(f"  {'elapsed':24s}: {summary.get('elapsed', 0):.1f}s")
@@ -576,13 +576,17 @@ def print_ingest_summary(summary):
         print("  [quarantine_reason_top]")
         for reason, count in qr_top.items():
             print(f"    {reason}: {count}")
+    skip_top = summary.get("v4_skip_reason_top", {})
+    if skip_top:
+        print("  [v4_skip_reason_top]")
+        for reason, count in skip_top.items():
+            print(f"    {reason}: {count}")
     print()
     kv_keys = [
         "files_total", "files_pdf", "files_zip", "success", "errors",
         "skipped", "quarantined", "segment_records", "segment_detected_docs",
-        "v2_adopted", "v1_fallback", "avg_candidate_tables_per_doc",
-        "avg_scored_pages_per_doc", "unit_unknown_count",
-        "profit_col_unknown_count", "non_reportable_rows_count", "elapsed",
+        "v4_success", "v4_skipped_normal", "v4_quarantined", "v4_exception",
+        "avg_segments_per_doc", "elapsed",
     ]
     kv_pairs = " ".join(f"{k}={summary.get(k, 0)}" for k in kv_keys)
     qr_str = ",".join(f"{k}={v}" for k, v in qr_top.items()) if qr_top else "none"
@@ -772,6 +776,45 @@ def run_ingest(
         except Exception as e:
             logger.error(f"[INGEST] event_pipeline failed (non-fatal): {e}", exc_info=True)
             summary["event_pipeline"] = {"error": str(e)}
+
+        # ── 決算短信V2詳細解析（feature flag: ENABLE_EARNINGS_V2_PIPELINE=1） ──
+        # earnings_summaries 保存 + Supabase tdnet_events 反映。
+        # webhook_url="" 固定: Discord通知・time.sleep(1.5) を完全回避。
+        # 失敗してもingest全体は成功扱い。
+        if os.environ.get("ENABLE_EARNINGS_V2_PIPELINE", "") == "1":
+            _ev2_conn = None
+            try:
+                import sqlite3 as _sqlite3
+                from src.events.earnings_production_pipeline import run_earnings_production
+                logger.info("[EARNINGS_V2] enabled: running earnings_production_pipeline")
+                _ev2_conn = _sqlite3.connect(decision_db_path)
+                _ev2_result = run_earnings_production(
+                    docs=items,          # 全取得文書（内部で決算短信のみフィルタ）
+                    conn=_ev2_conn,
+                    webhook_url="",      # Discord通知・sleep を回避
+                    dry_run=dry_run,
+                )
+                summary["earnings_v2"] = {
+                    "tanshin": _ev2_result.tanshin_count,
+                    "saved": _ev2_result.saved_count,
+                    "skipped": _ev2_result.already_exists_count,
+                    "notified": _ev2_result.notified_count,
+                    "errors": len(_ev2_result.errors),
+                }
+                logger.info(
+                    f"[EARNINGS_V2] completed: "
+                    f"total={_ev2_result.tanshin_count} "
+                    f"saved={_ev2_result.saved_count} "
+                    f"skipped={_ev2_result.already_exists_count} "
+                    f"notified={_ev2_result.notified_count} "
+                    f"tickers={','.join(_ev2_result.saved_tickers) or '-'}"
+                )
+            except Exception as _ev2_e:
+                logger.warning(f"[EARNINGS_V2] failed non-fatal: {_ev2_e}")
+                summary["earnings_v2"] = {"error": str(_ev2_e)}
+            finally:
+                if _ev2_conn is not None:
+                    _ev2_conn.close()
 
         return {"total": len(results), "results": results, "summary": summary}
     finally:

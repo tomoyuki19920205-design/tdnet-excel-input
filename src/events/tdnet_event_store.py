@@ -20,11 +20,6 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
 from .common_models import EventRecord, EventType
-from .common_notify import (
-    build_display_title,
-    build_display_summary,
-    build_formatted_message,
-)
 from .notify_rules import should_notify_event
 
 logger = logging.getLogger("tdnet_event_store")
@@ -173,6 +168,7 @@ _PRIORITY_MAP = {
     (EventType.DIVIDEND_REVISION, "increase"): 30,
     (EventType.DIVIDEND_REVISION, "special_dividend"): 30,
     (EventType.DIVIDEND_REVISION, "commemorative_dividend"): 30,
+    ("earnings", None): 40,
     (EventType.FORECAST_REVISION, "downward"): 50,
     (EventType.FORECAST_REVISION, "difference"): 50,
     (EventType.FORECAST_REVISION, "neutral"): 60,
@@ -348,9 +344,11 @@ def save_event_to_supabase(
         result["dedupe_key"] = dedupe_key
 
         priority_rank = compute_priority_rank(event)
-        display_title = build_display_title(event)
-        display_summary = build_display_summary(event)
-        formatted_message = build_formatted_message(event)
+        # display_title / display_summary / formatted_message:
+        # EventRecord のフィールドを直接使う（event_type ごとの整形は呼び出し側の責務）
+        display_title = event.title or ""
+        display_summary = event.summary_text or ""
+        formatted_message = event.summary_text or ""
         metric_name, metric_value, metric_yoy = _extract_primary_metric(event)
         strength = _compute_strength_score(event)
         notify_discord = should_notify_event(event)

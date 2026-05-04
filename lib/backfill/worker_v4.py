@@ -914,6 +914,11 @@ def process_one_filing_v4(
 
     selected_path = best.source if (validation and segment_records) else "none"
 
+    logger.info(
+        "[path-timer] ticker=%s path=%s elapsed_ms=%d",
+        filing.ticker, selected_path, elapsed,
+    )
+
     return FilingResultV2(
         filing_id=fid,
         status=worker_status,

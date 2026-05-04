@@ -43,6 +43,8 @@ from .earnings_guidance_extractor import (
     format_guidance_section,
     GuidanceData,
 )
+from .common_models import EventRecord
+from .tdnet_event_store import save_event_to_supabase
 
 logger = logging.getLogger("earnings_production")
 
@@ -63,6 +65,7 @@ class EarningsProductionResult:
     filtered_count: int = 0         # 通知条件非該当
     no_yoy_count: int = 0           # YOYなしスキップ
     errors: list[str] = field(default_factory=list)
+    saved_tickers: list[str] = field(default_factory=list)  # DB新規保存できたticker一覧
 
 
 # ============================================================
@@ -327,10 +330,14 @@ def run_earnings_production(
             # ---- 4Q専用: 来期ガイダンス + 見通し ----
             guidance: GuidanceData | None = None
             is_4q, fy_reason = _is_fy_or_4q(earnings, doc.title)
+            # quarter を is_4q と同タイミングで確定（ログ・DB保存で一致させる）
+            fiscal_year, quarter = _parse_fiscal_info(doc.title, earnings)
+            if is_4q and quarter not in ("FY", "4Q", "1Q", "2Q", "3Q"):
+                quarter = "FY"
             logger.info(
                 f"[EARNINGS] {ticker} is_fy_or_4q={is_4q} "
                 f"reason={fy_reason} "
-                f"quarter={earnings.quarter!r} title={doc.title[:40]!r}"
+                f"quarter={quarter!r} title={doc.title[:40]!r}"
             )
 
             if is_4q:
@@ -385,9 +392,6 @@ def run_earnings_production(
             # ---- summary_short 生成 ----
             summary_short = summary_line
 
-            # ---- fiscal_year / quarter 解析 ----
-            fiscal_year, quarter = _parse_fiscal_info(doc.title, earnings)
-
             # ---- セグメントJSON ----
             seg_json = ""
             if earnings.segments:
@@ -440,6 +444,22 @@ def run_earnings_production(
                 action = save_earnings_summary(conn, save_data)
                 if action == "inserted":
                     result.saved_count += 1
+                    result.saved_tickers.append(ticker)
+                    # ---- tdnet_events へ earnings イベントを best-effort 保存 ----
+                    try:
+                        _save_earnings_to_tdnet_events(
+                            doc=doc,
+                            earnings=earnings,
+                            company_name=company_name,
+                            full_message=full_message,
+                            guidance=guidance,
+                            fiscal_year=fiscal_year,
+                            quarter=quarter,
+                            xbrl_path=xbrl_path,
+                            dry_run=dry_run,
+                        )
+                    except Exception as _e:
+                        logger.warning(f"[EARNINGS_STORE] {ticker} tdnet_events save failed (non-fatal): {_e}")
                 else:
                     result.already_exists_count += 1
                     continue  # 既存の場合は通知もスキップ
@@ -504,5 +524,125 @@ def _format_reasons_with_ai(narrative: NarrativeData, model: str = "") -> dict:
     )
     logger.info(
         f"[EARNINGS] AI format OK: tokens={usage.get('input_tokens', 0)}+{usage.get('output_tokens', 0)}"
+    )
+    return result
+
+
+# ============================================================
+# tdnet_events 保存ヘルパー
+# ============================================================
+def _build_earnings_event_record(
+    doc,
+    earnings: EarningsSummaryData,
+    company_name: str,
+    full_message: str,
+    guidance,
+    fiscal_year: str,
+    quarter: str,
+    xbrl_path: str,
+) -> EventRecord:
+    """EarningsSummaryData → EventRecord（tdnet_events 保存用）"""
+    # extracted payload: PL + セグメント + ガイダンス
+    extracted: dict = {
+        "ticker": doc.ticker,
+        "fiscal_year": fiscal_year,
+        "quarter": quarter,
+        "sales_current": earnings.sales_current,
+        "sales_yoy": earnings.sales_yoy,
+        "op_current": earnings.op_current,
+        "op_yoy": earnings.op_yoy,
+        "has_yoy": earnings.has_yoy,
+        "segments": [
+            {"name": s.name, "sales": s.sales_current, "profit": s.profit_current}
+            for s in (earnings.segments or [])
+        ],
+        "source_url": getattr(doc, "xbrl_url", "") or getattr(doc, "doc_url", ""),
+        "xbrl_path": xbrl_path,
+    }
+    if guidance and guidance.has_guidance:
+        extracted["guidance"] = {
+            "sales_forecast": guidance.sales_forecast,
+            "op_forecast": guidance.op_forecast,
+            "eps_forecast": guidance.eps_forecast,
+            "sales_yoy": guidance.sales_yoy,
+            "op_yoy": guidance.op_yoy,
+            "eps_yoy": guidance.eps_yoy,
+        }
+
+    raw_payload = {"title": getattr(doc, "title", "")}
+
+    # disclosure_datetime: published_at → disclosure_datetime 優先
+    disclosure_dt = (
+        getattr(doc, "disclosure_datetime", "")
+        or getattr(doc, "published_at", "")
+        or ""
+    )
+
+    return EventRecord(
+        source_doc_id=(
+            getattr(doc, "disclosure_id", "")
+            or getattr(doc, "doc_id", "")
+            or ""
+        ),
+        ticker=doc.ticker,
+        company_name=company_name,
+        disclosure_datetime=disclosure_dt,
+        title=getattr(doc, "title", ""),
+        doc_url=getattr(doc, "xbrl_url", "") or getattr(doc, "doc_url", ""),
+        event_type="earnings",
+        subtype=quarter,                    # "FY" / "1Q" / "2Q" / "3Q"
+        importance=60,
+        summary_text=earnings.format_summary_line(clip=2.0),
+        raw_payload_json=json.dumps(
+            {"raw": raw_payload}, ensure_ascii=False
+        ),
+        extracted_payload_json=json.dumps(
+            extracted, ensure_ascii=False, default=str
+        ),
+        fingerprint=_compute_earnings_fingerprint(
+            doc.ticker,
+            getattr(doc, "title", ""),
+            getattr(doc, "disclosure_id", "") or getattr(doc, "doc_id", ""),
+        ),
+    )
+
+
+def _save_earnings_to_tdnet_events(
+    doc,
+    earnings: EarningsSummaryData,
+    company_name: str,
+    full_message: str,
+    guidance,
+    fiscal_year: str,
+    quarter: str,
+    xbrl_path: str,
+    dry_run: bool = False,
+) -> dict:
+    """earnings イベントを Supabase tdnet_events へ best-effort 保存。
+
+    formatted_message には format_earnings_message() の出力をそのまま使う。
+    失敗しても呼び出し元の処理は継続する。
+
+    Returns: {"action": "inserted"|"dedup_skipped"|"error"|"dry_run", ...}
+    """
+    record = _build_earnings_event_record(
+        doc=doc,
+        earnings=earnings,
+        company_name=company_name,
+        full_message=full_message,
+        guidance=guidance,
+        fiscal_year=fiscal_year,
+        quarter=quarter,
+        xbrl_path=xbrl_path,
+    )
+    # summary_text に full_message を直接セット
+    # → tdnet_event_store.build_formatted_message() の代わりに
+    #   format_earnings_message() の出力を Viewer の formatted_message として使う
+    record.summary_text = full_message
+
+    result = save_event_to_supabase(record, dry_run=dry_run)
+    logger.info(
+        f"[EARNINGS_STORE] {doc.ticker} tdnet_events: action={result.get('action')} "
+        f"dedupe_key={result.get('dedupe_key', '')[:12]}..."
     )
     return result

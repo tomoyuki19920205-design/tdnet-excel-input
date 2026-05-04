@@ -49,24 +49,37 @@ _BUYBACK_SUBTYPE_MAP = {
 # ============================================================
 # テキスト取得ヘルパー
 # ============================================================
-def _get_text(doc: DocumentMeta) -> str:
-    """文書のテキストを取得。text_body があればそのまま、なければ pdf_path / doc_url から抽出。"""
+def _get_text(doc: "DocumentMeta") -> str:
+    """文書のテキストを取得（互換性維持用）。_get_text_and_pdf() のラッパー。"""
+    text, _ = _get_text_and_pdf(doc)
+    return text
+
+
+def _get_text_and_pdf(doc: "DocumentMeta") -> tuple[str, str]:
+    """文書のテキストとローカルPDFパスを取得。
+
+    副作用: doc_url から PDF をダウンロードした場合は doc.pdf_path を自動補完する。
+    戻り値: (text, local_pdf_path)
+    """
+    # 既存 text_body
     if doc.text_body:
-        return doc.text_body
+        return doc.text_body, doc.pdf_path or ""
 
     # ローカルPDFから抽出
     if doc.pdf_path and os.path.isfile(doc.pdf_path):
         extracted = _extract_text_from_pdf_path(doc.pdf_path)
         if extracted:
-            return extracted
+            return extracted, doc.pdf_path
 
-    # URL から PDF をダウンロードして抽出
+    # URL から PDF をダウンロードして保存・抽出
     if doc.doc_url:
-        extracted = _extract_text_from_pdf_url(doc.doc_url)
-        if extracted:
-            return extracted
+        text, local_path = _download_and_save_pdf(doc.doc_url)
+        if local_path:
+            doc.pdf_path = local_path  # 自動補完
+        if text:
+            return text, local_path
 
-    return ""
+    return "", ""
 
 
 def _extract_text_from_pdf_path(pdf_path: str) -> str:
@@ -84,17 +97,26 @@ def _extract_text_from_pdf_path(pdf_path: str) -> str:
 
 
 def _extract_text_from_pdf_url(url: str) -> str:
-    """URLからPDFをダウンロードしてテキスト抽出"""
+    """URLからPDFをダウンロードしてテキスト抽出 (旧形式、互换性維持用)"""
+    text, _ = _download_and_save_pdf(url)
+    return text
+
+
+def _download_and_save_pdf(url: str, save_dir: str = "") -> tuple[str, str]:
+    """URLからPDFをダウンロードしてテキスト抽出し、ディスクに保存する。
+
+    戻り値: (extracted_text, local_pdf_path)
+    失敗時: ("", "")
+    """
     if not url:
-        return ""
+        return "", ""
     try:
         import io
         import pdfplumber
         import requests
 
-        # TDNET PDFのURLかチェック
         if not any(h in url for h in ["tdnet.info", "disclosure.edinet"]):
-            return ""
+            return "", ""
 
         resp = requests.get(url, timeout=15, headers={
             "User-Agent": "Mozilla/5.0 (compatible; TDNETEventBot/1.0)"
@@ -102,21 +124,48 @@ def _extract_text_from_pdf_url(url: str) -> str:
         resp.raise_for_status()
 
         content_type = resp.headers.get("Content-Type", "")
-        if "pdf" not in content_type.lower() and not resp.content[:5] == b"%PDF-":
-            return ""
+        if "pdf" not in content_type.lower() and resp.content[:5] != b"%PDF-":
+            return "", ""
 
-        with pdfplumber.open(io.BytesIO(resp.content)) as pdf:
+        pdf_bytes = resp.content
+
+        # --- data/docs/ にPDFを保存 ---
+        local_path = ""
+        try:
+            if not save_dir:
+                save_dir = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                    "data", "docs"
+                )
+            os.makedirs(save_dir, exist_ok=True)
+            # URL末尾のファイル名 or doc_id を使う
+            fname = url.rstrip("/").split("/")[-1]
+            if not fname.endswith(".pdf"):
+                fname = fname + ".pdf"
+            local_path = os.path.join(save_dir, fname)
+            if not os.path.exists(local_path):
+                with open(local_path, "wb") as f:
+                    f.write(pdf_bytes)
+                logger.info(f"[PDF_SAVED] {local_path}")
+            else:
+                logger.debug(f"[PDF_CACHED] {local_path}")
+        except Exception as save_err:
+            logger.warning(f"[PDF_SAVE_FAIL] {url[:60]}: {save_err}")
+            local_path = ""
+
+        # --- テキスト抽出 ---
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             texts = [page.extract_text() or "" for page in pdf.pages[:10]]
             text = "\n".join(texts)
             if text.strip():
                 logger.debug(f"[EVENT] PDF downloaded and extracted: {url[:60]}... ({len(text)} chars)")
-            return text
+            return text, local_path
 
     except ImportError:
         pass
     except Exception as e:
         logger.debug(f"[EVENT] PDF download failed (non-fatal): {url[:60]}... {e}")
-    return ""
+    return "", ""
 
 
 # ============================================================
@@ -211,6 +260,24 @@ def _forecast_to_event_record(
 ) -> EventRecord:
     payload = forecast_event.to_dict()
 
+    # 配当年間合計が取れている場合は payload に付加（通知文生成で利用）
+    for _div_key in (
+        "dividend_annual_total_previous",
+        "dividend_annual_total_revised",
+        "dividend_delta",
+        "dividend_change_pct",
+    ):
+        _div_val = getattr(forecast_event, _div_key, None)
+        if _div_val is not None:
+            payload[_div_key] = _div_val
+
+    if payload.get("dividend_annual_total_revised") is not None:
+        logger.info(
+            f"[forecast_dividend_payload] "
+            f"prev={payload.get('dividend_annual_total_previous')} "
+            f"rev={payload.get('dividend_annual_total_revised')}"
+        )
+
     def _fp_val(v) -> str:
         return str(v) if v is not None else ""
 
@@ -244,6 +311,7 @@ def _forecast_to_event_record(
         raw_payload_json=json.dumps({"title": doc.title}, ensure_ascii=False),
         extracted_payload_json=json.dumps(payload, ensure_ascii=False, default=str),
         fingerprint=fingerprint,
+        doc_url=doc.doc_url or "",
     )
 
 
@@ -314,8 +382,15 @@ def _process_single_document(
     Returns: [{event_type, subtype, action, event_id}, ...]
     """
     results = []
-    text = _get_text(doc)
+    text, _pdf_path = _get_text_and_pdf(doc)  # PDFをダウンロード保存しdoc.pdf_pathを補完
     title = doc.title
+
+    logger.info(
+        f"[FORECAST_CALL] doc_id={doc.doc_id[:16] if doc.doc_id else '?'} "
+        f"ticker={doc.ticker} "
+        f"pdf_path={doc.pdf_path!r} "
+        f"doc_url={doc.doc_url[:60] if doc.doc_url else ''!r}"
+    )
 
     allowed = event_types or {EventType.BUYBACK, EventType.FORECAST_REVISION, EventType.DIVIDEND_REVISION}
 
@@ -373,6 +448,25 @@ def _process_single_document(
                         "action": "no_change_detected", "event_id": "",
                     })
                 else:
+                    # ---- 配当年間合計を同一PDFから抽出して付加 ----
+                    _fcast_pdf = doc.pdf_path or _pdf_path or ""
+                    if _fcast_pdf:
+                        try:
+                            from .dividend_extractor import _extract_dividend_annual_total_via_fitz
+                            _div_result = _extract_dividend_annual_total_via_fitz(_fcast_pdf)
+                            if _div_result and _div_result.get("annual_total_revised") is not None:
+                                _d_prev = _div_result.get("annual_total_previous")
+                                _d_rev  = _div_result["annual_total_revised"]
+                                forecast_ev.dividend_annual_total_previous = _d_prev
+                                forecast_ev.dividend_annual_total_revised  = _d_rev
+                                if _d_prev is not None:
+                                    forecast_ev.dividend_delta = round(_d_rev - _d_prev, 2)
+                                    forecast_ev.dividend_change_pct = (
+                                        round((_d_rev - _d_prev) / abs(_d_prev) * 100, 1)
+                                        if _d_prev != 0 else None
+                                    )
+                        except Exception as _div_e:
+                            logger.debug(f"[forecast_dividend_fitz] skip: {_div_e}")
                     record = _forecast_to_event_record(doc, forecast_ev)
                     if dry_run:
                         results.append({
@@ -395,7 +489,15 @@ def _process_single_document(
         try:
             cls_result = classify_dividend(title, text[:2000])
             if cls_result.is_target:
-                dividend_ev = extract_dividend_revision(text, title)
+                _div_pdf = doc.pdf_path or _pdf_path or ""
+                logger.info(
+                    f"[DIVIDEND_CALL] ticker={doc.ticker} pdf_path={_div_pdf!r}"
+                )
+                dividend_ev = extract_dividend_revision(
+                    text,
+                    title,
+                    pdf_path=_div_pdf,
+                )
                 record = _dividend_to_event_record(doc, dividend_ev, db_path=db_path)
                 if dry_run:
                     results.append({

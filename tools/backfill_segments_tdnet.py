@@ -13,6 +13,8 @@ Usage:
 """
 from __future__ import annotations
 
+import os
+
 import argparse
 import csv
 import json
@@ -258,6 +260,7 @@ def run_backfill(
     worker_version: str = "v4",
     filing_list_path: str | None = None,
     reset_target: bool = False,
+    force_done: bool = False,
 ) -> dict:
     """バックフィルを実行する (Phase 1 / Phase 2 自動選択)。"""
     run_id = generate_run_id()
@@ -412,6 +415,25 @@ def run_backfill(
         if reset_count > 0:
             logger.info(f"[backfill] reset-target: {reset_count} filings -> queued")
             print(f"[backfill] reset-target: {reset_count} filings -> queued")
+
+    # --force-done: done / partial / skipped_normal / quarantined を全て再実行対象にする
+    # (retryable 制約を無視して強制リセット)
+    if force_done:
+        logger.info("[reprocess] force rerun enabled")
+        print("[reprocess] force rerun enabled")
+        _force_statuses = ["done", "partial", "skipped_normal", "quarantined"]
+        _ph = ",".join("?" * len(_force_statuses))
+        store.conn.execute(
+            f"UPDATE filing_state "
+            f"SET status='queued', stage='listing', "
+            f"    last_error=NULL, last_error_stage=NULL "
+            f"WHERE status IN ({_ph})",
+            _force_statuses,
+        )
+        _fd = store.conn.execute("SELECT changes()").fetchone()[0]
+        store.conn.commit()
+        logger.info(f"[reprocess] force_done: {_fd} filings reset -> queued")
+        print(f"[reprocess] force_done: {_fd} filings reset -> queued")
 
     # ── 3. Pending ──
     _limit_for_query = applied_limit or 0  # 0 = unlimited in state store
@@ -905,7 +927,11 @@ def main():
     parser.add_argument("--listing-provider", type=str, default="tdnet_html")
     parser.add_argument("--cache-root", type=str, default="data/tdnet_cache")
     parser.add_argument("--state-db", type=str, default="data/backfill_state.db")
-    parser.add_argument("--decision-db", type=str, default=None)
+    parser.add_argument(
+        "--decision-db", type=str,
+        default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "decision_db.db"),
+        help="セグメント保存先 SQLite (default: PROJECT_ROOT/decision_db.db)",
+    )
     parser.add_argument("--db-batch-size", type=int, default=200)
     parser.add_argument("--skip-pdf", action="store_true")
     parser.add_argument("--only-xbrl", action="store_true")
@@ -950,6 +976,8 @@ def main():
                         help="Worker version: v1 (legacy PDF-only) / v2 (XBRL-first) / v4 (XBRL-first + V4 PDF fallback, default)")
     parser.add_argument("--dry-run", action="store_true",
                         help="集計のみ。download・extract・upsert しない")
+    parser.add_argument("--force-done", action="store_true",
+                        help="done/partial/skipped_normal/quarantined を全て再実行対象にする (upsert 更新)")
 
     args = parser.parse_args()
 
@@ -987,6 +1015,7 @@ def main():
             worker_version=args.worker_version,
             filing_list_path=args.filing_list,
             reset_target=args.reset_target,
+            force_done=args.force_done,
         )
     except Exception:
         import traceback

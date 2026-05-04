@@ -766,3 +766,66 @@ html, body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
 }
+
+/* ============================================================
+   Segment Financials Table
+   ============================================================ */
+.segment-section {
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.segment-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 0.75rem;
+}
+
+.segment-empty {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  padding: 0.5rem 0;
+}
+
+.segment-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.segment-table th {
+  text-align: right;
+  color: var(--text-muted);
+  font-weight: 500;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.segment-table th:first-child {
+  text-align: left;
+}
+
+.segment-table td {
+  text-align: right;
+  color: var(--text-primary);
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid rgba(42,53,80,0.5);
+  font-family: var(--font-mono);
+}
+
+.segment-table td:first-child {
+  text-align: left;
+  font-family: var(--font-sans);
+  color: var(--text-secondary);
+  font-weight: 500;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.segment-table tbody tr:hover td {
+  background: var(--bg-card-hover);
+}

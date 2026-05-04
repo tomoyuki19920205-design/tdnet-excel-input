@@ -199,7 +199,26 @@ def main() -> int:
         ], timeout_sec=600)
         steps.append(step)
 
-        # ── Step 4: rebuild ──
+        # ── Step 4: J-Quants 財務取得（直近30日分）+ details gross_profit 補完 ──
+        step = run_step("fetch-jquants-fin", [
+            PYTHON, "-X", "utf8",
+            "tools/fetch_jquants_financials.py",
+            "--recent-days", "30",
+            *([] if args.dry_run else ["--apply"]),
+            "--enable-details-gp",  # /v2/fins/details から gross_profit を自動補完
+        ], timeout_sec=900)         # details 補完分で処理時間が延びるため 600→900
+        steps.append(step)
+
+        # ── Step 5: sync_financials（J-Quants DB → Supabase financials） ──
+        step = run_step("sync-jquants-fin", [
+            PYTHON, "-X", "utf8",
+            "tools/sync_financials.py",
+            "--recent", "30",
+            *([] if args.dry_run else ["--apply"]),
+        ], timeout_sec=300)
+        steps.append(step)
+
+        # ── Step 6: rebuild ──
         step = run_step("rebuild", [
             PYTHON, "tools/pipeline_run.py", "rebuild",
             "--trigger", "scheduler", *dry_flag,

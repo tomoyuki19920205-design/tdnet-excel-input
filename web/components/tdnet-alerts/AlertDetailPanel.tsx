@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
   markAsRead,
@@ -8,9 +8,12 @@ import {
   toggleStar,
   fetchComments,
   addComment,
+  fetchSegmentFinancials,
 } from "@/lib/tdnet-alerts/queries";
 import type { EnrichedEvent, TdnetEventComment } from "@/lib/tdnet-alerts/types";
+import type { SegmentRow } from "@/lib/tdnet-alerts/queries";
 import { EVENT_TYPE_CONFIG, EVENT_SUBTYPE_LABELS, getDisplayCategory } from "@/lib/tdnet-alerts/types";
+import { buildSegmentViewData } from "@/lib/tdnet-alerts/segment-normalize";
 
 interface AlertDetailPanelProps {
   event: EnrichedEvent;
@@ -27,7 +30,12 @@ export default function AlertDetailPanel({
   const [newComment, setNewComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
+  const [rawSegments, setRawSegments] = useState<SegmentRow[]>([]);
+  const [segLoading, setSegLoading] = useState(false);
   const supabaseRef = useRef(createClient());
+
+  // rawSegments が変わった時だけ統合キー計算を実行（再描画のたびには走らない）
+  const segmentViewData = useMemo(() => buildSegmentViewData(rawSegments), [rawSegments]);
 
   const loadComments = useCallback(async () => {
     try {
@@ -41,7 +49,21 @@ export default function AlertDetailPanel({
   useEffect(() => {
     loadComments();
     setShowRaw(false);
-  }, [loadComments]);
+    setRawSegments([]);
+    // earnings / forecast イベントのみセグメント取得
+    const cat = getDisplayCategory(event.event_type, event.headline);
+    if (cat === "earnings" || cat === "forecast") {
+      setSegLoading(true);
+      // raw_payload から period / quarter を取得（なければ null で最新を取得）
+      const payload = event.raw_payload as Record<string, unknown>;
+      const period = (payload?.period ?? payload?.fiscal_year_end ?? null) as string | null;
+      const quarter = (payload?.quarter ?? null) as string | null;
+      fetchSegmentFinancials(supabaseRef.current, event.ticker, period, quarter)
+        .then((rows) => setRawSegments(rows))
+        .catch(() => setRawSegments([]))
+        .finally(() => setSegLoading(false));
+    }
+  }, [loadComments, event.id, event.ticker, event.event_type, event.headline, event.raw_payload]);
 
   const handleToggleRead = async () => {
     try {
@@ -204,6 +226,49 @@ export default function AlertDetailPanel({
           )}
         </div>
       )}
+
+      {/* Segment financials */}
+      {(() => {
+        const cat = getDisplayCategory(event.event_type, event.headline);
+        if (cat !== "earnings" && cat !== "forecast") return null;
+        return (
+          <div className="segment-section">
+            <div className="segment-title">📊 セグメント業績</div>
+            {segLoading ? (
+              <div className="segment-empty">読み込み中...</div>
+            ) : segmentViewData.length === 0 ? (
+              <div className="segment-empty">セグメント業績なし</div>
+            ) : (
+              <table className="segment-table">
+                <thead>
+                  <tr>
+                    <th>セグメント</th>
+                    <th>売上高 (百万円)</th>
+                    <th>営業利益 (百万円)</th>
+                    <th>利益率</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {segmentViewData.map((row) => {
+                    const margin =
+                      row.segment_sales && row.segment_profit && row.segment_sales !== 0
+                        ? ((row.segment_profit / row.segment_sales) * 100).toFixed(1) + "%"
+                        : "—";
+                    return (
+                      <tr key={row.display_key}>
+                        <td>{row.display_name}</td>
+                        <td>{row.segment_sales != null ? row.segment_sales.toLocaleString() : "—"}</td>
+                        <td>{row.segment_profit != null ? row.segment_profit.toLocaleString() : "—"}</td>
+                        <td>{margin}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Comments */}
       <div className="comments-section">

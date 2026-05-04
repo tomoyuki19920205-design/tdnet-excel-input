@@ -32,6 +32,9 @@ def _fmt_amount_billion(val_million: float | None) -> str:
     """百万円 → 表示用（億円 or 百万円）"""
     if val_million is None:
         return "---"
+    # 1,000,000,000 百万円 = 1,000兆円超は e+N 等の異常値とみなす
+    if abs(val_million) >= 1_000_000_000:
+        return "---"
     if abs(val_million) >= 100:
         return f"{val_million / 100:.1f}億円"
     return f"{val_million:.0f}百万円"
@@ -160,15 +163,48 @@ def format_forecast_msg(event: EventRecord) -> str:
 
     # EPS行（利益指標とは独立した別枠）
     eps_prev = payload.get("previous_eps")
-    eps_rev = payload.get("revised_eps")
+    eps_rev  = payload.get("revised_eps")
+    # 異常値ガード: abs > 10000 なら通知文に出さない (DB保存値が壊れていても安全)
+    _EPS_NOTIFY_MAX = 10_000
+    if eps_prev is not None and abs(eps_prev) > _EPS_NOTIFY_MAX:
+        eps_prev = None
+    if eps_rev is not None and abs(eps_rev) > _EPS_NOTIFY_MAX:
+        eps_rev = None
     eps_line = _format_eps_change(eps_prev, eps_rev)
     if eps_line:
         parts.append(eps_line)
 
+    # 配当行（dividend_annual_total_revised がある場合のみ追記）
+    div_prev = payload.get("dividend_annual_total_previous")
+    div_rev  = payload.get("dividend_annual_total_revised")
+    if div_rev is not None:
+        def _fmt_div(v: float) -> str:
+            return f"{int(v)}円" if v == int(v) else f"{v:g}円"
+        if div_prev is not None and div_prev != 0:
+            pct  = (div_rev - div_prev) / abs(div_prev) * 100
+            sign = "+" if pct > 0 else ""
+            parts.append(f"配当: {_fmt_div(div_prev)}→{_fmt_div(div_rev)}({sign}{pct:.1f}%)")
+        elif div_prev is not None:
+            parts.append(f"配当: {_fmt_div(div_prev)}→{_fmt_div(div_rev)}")
+        else:
+            parts.append(f"配当: {_fmt_div(div_rev)}")
+
     if period:
         parts.append(period)
 
-    return _truncate("\u3000\u3000".join(parts)) + _TAIL
+    # 開示URL（event.doc_url を優先、なければ payload["doc_url"] を fallback）
+    url = event.doc_url or payload.get("doc_url", "") or ""
+    body = _truncate("\u3000\u3000".join(parts))
+    if url:
+        return body + "\n" + f"開示: {url}" + _TAIL
+    return body + _TAIL
+
+
+def _fmt_div_amount(val: float) -> str:
+    """配当額を表示用文字列に変換（整数なら .0 なし）"""
+    if val == int(val):
+        return f"{int(val)}円"
+    return f"{val:g}円"
 
 
 def format_dividend_msg(event: EventRecord) -> str:
@@ -196,10 +232,25 @@ def format_dividend_msg(event: EventRecord) -> str:
 
     prev = payload.get("previous_dividend_per_share")
     rev = payload.get("revised_dividend_per_share")
-    delta = payload.get("delta_dividend_per_share")
-    if prev is not None and rev is not None:
-        delta_str = f"({'+' if delta and delta > 0 else ''}{delta}円)" if delta is not None else ""
-        parts.append(f"{prev}円→{rev}円{delta_str}")
+
+    # 配当額修正行: {区分}配当: {前回}円→{今回}円({増減率})
+    if rev is not None:
+        basis_label = basis if basis else "配当"
+        prev_str = _fmt_div_amount(prev) if prev is not None else "---"
+
+        # 増減率の算出
+        pct_str = ""
+        if prev is not None and prev != 0:
+            delta = payload.get("delta_dividend_per_share")
+            if delta is not None:
+                pct = delta / abs(prev) * 100
+            else:
+                pct = (rev - prev) / abs(prev) * 100
+            sign = "+" if pct > 0 else ""
+            pct_str = f"({sign}{pct:.1f}%)"
+
+        parts.append(f"{basis_label}配当: {prev_str}→{_fmt_div_amount(rev)}{pct_str}")
+    # rev が None の場合は配当額行なし（タイトルのみにフォールバック）
 
     special = payload.get("special_dividend_per_share")
     if special:

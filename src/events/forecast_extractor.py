@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """forecast_extractor.py — 業績予想修正テキストからの値抽出
 
 PDF/HTML/テキストから以下を抽出する:
@@ -540,13 +540,27 @@ _UNIT_MULTIPLIER = {
 
 
 def _apply_unit(val: float | None, unit: str, is_eps: bool = False) -> float | None:
-    """単位を百万円に変換。EPSは円単位のまま返す"""
+    """金額を百万円単位へ正規化する。EPSは円単位なので変換しない。"""
     if val is None:
         return None
     if is_eps:
-        return val  # EPSは円単位のまま
-    mult = _UNIT_MULTIPLIER.get(unit, 1.0)
-    return val * mult
+        return val
+
+    u = str(unit or "")
+
+    # 完全一致ではなく部分一致で判定する。
+    # 正常文字列: 億円 / 百万円 / 千円 / 円
+    # 文字化け文字列: 蜆・・=億円, 逋ｾ荳・・=百万円, 蜊・・=千円, 蜀・=円
+    if "億" in u or "蜆" in u:
+        return val * 100.0
+    if "千" in u or "蜊" in u:
+        return val * 0.001
+    if "百" in u or "逋" in u:
+        return val
+    if "円" in u or "蜀" in u:
+        return val * 0.000001
+
+    return val
 
 
 # ============================================================
@@ -626,9 +640,10 @@ def _detect_column_order(lines: list[str], ref_idx: int) -> dict[str, int]:
     ref_idx の前20行を走査してヘッダー候補を探す。
     3段階マッチ（完全一致→正規化後→辞書）で検出し、
     re.finditer() による出現位置でソートして列インデックスを割り当てる。
-    見つからなければデフォルト順序（売上,営利,経常,純利,EPS）。
+    見つからなければデフォルト順序（売上,営利,経常,純利）。EPS はヘッダー明示時のみ。
     """
-    default_map = {"sales": 0, "op": 1, "ordinary": 2, "net_income": 3, "eps": 4}
+    # EPS は default_map に含めない。ヘッダー行で明示的に検出された場合のみ col_map に入る。
+    default_map = {"sales": 0, "op": 1, "ordinary": 2, "net_income": 3}
 
     search_start = max(0, ref_idx - 20)
     search_end = ref_idx
@@ -1202,18 +1217,10 @@ def _extract_from_text(
         confidence += 0.40
         event.extraction_source = source
 
-    # ---- Phase 1.2: Native/Regex (EPS専有検索/縦ブロック) ※pdfplumber座標ガード抜き ----
-    if not _is_reliable_eps(event.previous_eps, event.revised_eps):
-        eps_p_prev, eps_p_rev = _find_eps_from_lines(lines)
-        if (eps_p_prev is not None or eps_p_rev is not None):
-            # 既存より完備度が高い、または信頼できる場合に採用
-            curr_count = sum(1 for x in [event.previous_eps, event.revised_eps] if x is not None)
-            new_count = sum(1 for x in [eps_p_prev, eps_p_rev] if x is not None)
-            if new_count > curr_count or _is_reliable_eps(eps_p_prev, eps_p_rev):
-                event.previous_eps = eps_p_prev
-                event.revised_eps = eps_p_rev
-                event.delta_eps = _calc_delta(eps_p_prev, eps_p_rev)
-                event.change_eps_pct = _calc_pct(eps_p_prev, eps_p_rev)
+    # ---- Phase 1.2: 縦ブロックEPS専用検索 — 誤検出リスクのため無効化 ----
+    # _find_eps_from_lines() は "当期純利益" "1株" 等の汎用ラベルに誤ヒットして
+    # 売上高・利益の巨大値をEPSとして拾うことがある。
+    # EPS はヘッダー明示列 (Phase 1) または pdfplumber 明示列 (Phase 4) でのみ採用する。
     
     # 信頼できるEPSが取れたら Native 段階で即 return
     if _is_reliable_eps(event.previous_eps, event.revised_eps):
@@ -1222,6 +1229,20 @@ def _extract_from_text(
         event.extracted_metrics_count = metrics_count
         event.subtype = _determine_subtype(event, is_difference)
         event.importance = _calc_importance(event)
+        # ---- EPS 最終ガード (native early return) ----
+        _EPS_MAX = 10_000
+        _eps_sanitized = False
+        if event.previous_eps is not None and abs(event.previous_eps) > _EPS_MAX:
+            logger.info(f"[forecast_eps_sanitize] stage=native prev={event.previous_eps} > 10000, cleared")
+            event.previous_eps = None
+            _eps_sanitized = True
+        if event.revised_eps is not None and abs(event.revised_eps) > _EPS_MAX:
+            logger.info(f"[forecast_eps_sanitize] stage=native rev={event.revised_eps} > 10000, cleared")
+            event.revised_eps = None
+            _eps_sanitized = True
+        if _eps_sanitized:
+            event.delta_eps = None
+            event.change_eps_pct = None
         return event
 
     # ---- Phase 2: Prose (文章中) 抽出 ----
@@ -1242,6 +1263,20 @@ def _extract_from_text(
         event.extracted_metrics_count = metrics_count
         event.subtype = _determine_subtype(event, is_difference)
         event.importance = _calc_importance(event)
+        # ---- EPS 最終ガード (prose early return) ----
+        _EPS_MAX = 10_000
+        _eps_sanitized = False
+        if event.previous_eps is not None and abs(event.previous_eps) > _EPS_MAX:
+            logger.info(f"[forecast_eps_sanitize] stage=prose prev={event.previous_eps} > 10000, cleared")
+            event.previous_eps = None
+            _eps_sanitized = True
+        if event.revised_eps is not None and abs(event.revised_eps) > _EPS_MAX:
+            logger.info(f"[forecast_eps_sanitize] stage=prose rev={event.revised_eps} > 10000, cleared")
+            event.revised_eps = None
+            _eps_sanitized = True
+        if _eps_sanitized:
+            event.delta_eps = None
+            event.change_eps_pct = None
         return event
 
     # ---- Phase 3: Note (注記) 抽出 ----
@@ -1260,6 +1295,20 @@ def _extract_from_text(
         event.extracted_metrics_count = metrics_count
         event.subtype = _determine_subtype(event, is_difference)
         event.importance = _calc_importance(event)
+        # ---- EPS 最終ガード (note early return) ----
+        _EPS_MAX = 10_000
+        _eps_sanitized = False
+        if event.previous_eps is not None and abs(event.previous_eps) > _EPS_MAX:
+            logger.info(f"[forecast_eps_sanitize] stage=note prev={event.previous_eps} > 10000, cleared")
+            event.previous_eps = None
+            _eps_sanitized = True
+        if event.revised_eps is not None and abs(event.revised_eps) > _EPS_MAX:
+            logger.info(f"[forecast_eps_sanitize] stage=note rev={event.revised_eps} > 10000, cleared")
+            event.revised_eps = None
+            _eps_sanitized = True
+        if _eps_sanitized:
+            event.delta_eps = None
+            event.change_eps_pct = None
         return event
 
     # ---- Phase 4: pdfplumber (最終 Fallback) ----
@@ -1269,33 +1318,88 @@ def _extract_from_text(
         logger.debug(f"[FORECAST] Final fallback to pdfplumber for {pdf_path}")
         
         # 1. 表抽出のレスキュー (Phase 4.1)
+        # pdfplumber_table と fitz拡張抽出 の両方を取って優れた方を採用
         pdf_table_result = _extract_via_pdfplumber_table(pdf_path)
-        if pdf_table_result and pdf_table_result.get("metrics_count", 0) >= metrics_count:
-            table_result = pdf_table_result
-            metrics_count = table_result.get("metrics_count", 0)
-            event.extraction_source = "pdfplumber_table"
+        fitz_result      = _extract_fitz_table_with_extended_labels(pdf_path, pdf_path[-16:])
+
+        def _result_score(r: dict | None) -> tuple[int, int, int]:
+            """(ペア数, metrics_count, eps有無) の比較タプルを返す。"""
+            if not r:
+                return (0, 0, 0)
+            pairs = sum(
+                1 for m in ["sales", "op", "ordinary", "net_income", "eps"]
+                if r.get(f"previous_{m}") is not None
+                and r.get(f"revised_{m}") is not None
+            )
+            mc  = r.get("metrics_count", 0)
+            has_eps = 1 if r.get("revised_eps") is not None else 0
+            return (pairs, mc, has_eps)
+
+        base_score = _result_score(pdf_table_result)
+        fitz_score = _result_score(fitz_result)
+
+        logger.info(
+            f"[forecast_compare] base_pairs={base_score[0]} base_mc={base_score[1]} "
+            f"fitz_pairs={fitz_score[0]} fitz_mc={fitz_score[1]}"
+        )
+
+        # 採用判定: スコアタプル比較（fitz が同点以上 かつ ペア1以上なら fitz 優先）
+        use_fitz = (
+            fitz_result is not None
+            and fitz_score[0] > 0          # fitz に prev/rev ペアが1つ以上
+            and fitz_score >= base_score   # fitz が勝ちまたは同点
+        )
+
+        chosen = fitz_result if use_fitz else pdf_table_result
+        chosen_source = "pdfplumber_table_fitz" if use_fitz else "pdfplumber_table"
+
+        if use_fitz:
+            logger.info(
+                f"[forecast_adopt] selected=fitz reason=more_pairs "
+                f"base_pairs={base_score[0]} fitz_pairs={fitz_score[0]}"
+            )
+
+        if chosen and chosen.get("metrics_count", 0) >= metrics_count:
+            metrics_count = chosen.get("metrics_count", 0)
+            event.extraction_source = chosen_source
             for metric in ["sales", "op", "ordinary", "net_income", "eps"]:
-                setattr(event, f"previous_{metric}", table_result.get(f"previous_{metric}"))
-                setattr(event, f"revised_{metric}", table_result.get(f"revised_{metric}"))
-                setattr(event, f"delta_{metric}", table_result.get(f"delta_{metric}"))
-                setattr(event, f"change_{metric}_pct", table_result.get(f"change_{metric}_pct"))
+                setattr(event, f"previous_{metric}", chosen.get(f"previous_{metric}"))
+                setattr(event, f"revised_{metric}",  chosen.get(f"revised_{metric}"))
+                setattr(event, f"delta_{metric}",    chosen.get(f"delta_{metric}"))
+                setattr(event, f"change_{metric}_pct", chosen.get(f"change_{metric}_pct"))
             confidence += 0.20
 
-        # 2. 座標座標ガード付き縦ブロック (Phase 4.2)
-        eps_guard_prev, eps_guard_rev = _find_eps_from_lines_with_guard(lines, pdf_path)
-        p_count = sum(1 for x in [event.previous_eps, event.revised_eps] if x is not None)
-        g_count = sum(1 for x in [eps_guard_prev, eps_guard_rev] if x is not None)
-        if g_count > p_count or _is_reliable_eps(eps_guard_prev, eps_guard_rev):
-            event.previous_eps = eps_guard_prev
-            event.revised_eps = eps_guard_rev
-            event.delta_eps = _calc_delta(eps_guard_prev, eps_guard_rev)
-            event.change_eps_pct = _calc_pct(eps_guard_prev, eps_guard_rev)
-            logger.info(f"[EPS_FINAL_ADOPTED] Adopted via pdfplumber guard: {eps_guard_rev}")
+        # 2. 座標ガード付き縦ブロック (Phase 4.2) — 誤検出リスクのため無効化
+        # _find_eps_from_lines_with_guard() は縦ブロック探索を含み、
+        # 売上高等の巨大値をEPSに誤割り当てする可能性があるため停止。
+        # pdfplumber テーブル (Phase 4.1) の明示列で取れた場合のみEPSを採用する。
 
     event.extracted_metrics_count = metrics_count
     event.confidence = min(round(confidence, 2), 1.0)
     event.subtype = _determine_subtype(event, is_difference)
     event.importance = _calc_importance(event)
+
+    # ---- EPS 異常値サニタイズ (全ルート共通: fallback 含む) ----
+    _EPS_MAX = 10_000
+    _eps_sanitized = False
+    if event.previous_eps is not None and abs(event.previous_eps) > _EPS_MAX:
+        logger.info(
+            f"[forecast_eps_sanitize] prev={event.previous_eps} rev={event.revised_eps} "
+            f"reason=abs_gt_10000"
+        )
+        event.previous_eps = None
+        _eps_sanitized = True
+    if event.revised_eps is not None and abs(event.revised_eps) > _EPS_MAX:
+        if not _eps_sanitized:
+            logger.info(
+                f"[forecast_eps_sanitize] prev={event.previous_eps} rev={event.revised_eps} "
+                f"reason=abs_gt_10000"
+            )
+        event.revised_eps = None
+        _eps_sanitized = True
+    if _eps_sanitized:
+        event.delta_eps = None
+        event.change_eps_pct = None
 
     return event
 
@@ -1318,15 +1422,30 @@ def _extract_via_pdfplumber_table(pdf_path: str) -> dict | None:
                     for row in table:
                         clean_table.append([_normalize_label(str(cell)) if cell else "" for cell in row])
                     
-                    # ヘッダー行を特定 (キーワードが含まれる行)
+                    # ヘッダー行を特定 (スコアベース: 最多カテゴリ一致行を採用)
+                    _TBL_HDR_SCORE: dict[str, list[str]] = {
+                        "sales":      ["売上高", "営業収益", "売上収益"],
+                        "op":         ["営業利益", "営業損益"],
+                        "ordinary":   ["経常利益", "経常損益"],
+                        "net_income": ["当期純利益", "四半期純利益", "純利益", "親会社株主"],
+                        "eps_hint":   ["EPS", "1株当たり", "1株利益", "円銭"],
+                    }
                     header_row = -1
-                    for i, row in enumerate(clean_table):
-                        row_text = "".join([str(c) for c in row if c])
-                        if any(lbl in row_text for lbl in ["EPS", "1株当たり", "純利益", "売上高"]):
+                    _tbl_best_score = 0
+                    for i, row in enumerate(clean_table[:30]):
+                        row_text = "".join(str(c) for c in row if c)
+                        s = sum(
+                            1 for lbls in _TBL_HDR_SCORE.values()
+                            if any(lbl in row_text for lbl in lbls)
+                        )
+                        if s > _tbl_best_score:
+                            _tbl_best_score = s
                             header_row = i
-                            break
-                    
                     if header_row != -1:
+                        logger.debug(
+                            f"[forecast_table_header] row={header_row} score={_tbl_best_score}"
+                        )
+
                         # カラムマップの構築
                         col_map = {}
                         for j, cell in enumerate(clean_table[header_row]):
@@ -1663,8 +1782,8 @@ def _extract_from_ocr_lines(
         if len(rev_nums) < 3 and rev_line_idx + 1 < len(lines):
             rev_nums.extend(_extract_numbers_from_line(lines[rev_line_idx + 1]))
 
-    # ラベル行でヘッダー列順を検出
-    col_map = {"sales": 0, "op": 1, "ordinary": 2, "net_income": 3, "eps": 4}
+    # ラベル行でヘッダー列順を検出。EPSはdefault_mapに含めない（明示列のみ採用）
+    col_map = {"sales": 0, "op": 1, "ordinary": 2, "net_income": 3}
     # ヘッダー行を前回行より前で探す
     ref_idx = prev_line_idx or rev_line_idx
     if ref_idx is not None:
@@ -1719,23 +1838,9 @@ def _extract_from_ocr_lines(
             event.delta_eps = delta_val
             event.change_eps_pct = pct_val
 
-    # ---- EPS 専用フォールバック検出 ----
-    # EPS は別セクション（「(円 銭)」ヘッダー下）に出ることが多い
-    # 上記で取れなかった場合、専用走査を行う
-    if event.revised_eps is None:
-        eps_prev, eps_rev = _find_eps_from_lines(lines)
-        if eps_rev is not None:
-            event.previous_eps = eps_prev
-            event.revised_eps = eps_rev
-            if eps_prev is not None and eps_rev is not None:
-                event.delta_eps = _calc_delta(eps_prev, eps_rev)
-                event.change_eps_pct = _calc_pct(eps_prev, eps_rev)
-            metrics_count += 1
-            confidence += 0.05
-            logger.debug(
-                f"[forecast_ocr] eps_fallback: "
-                f"previous_eps={eps_prev} revised_eps={eps_rev}"
-            )
+    # ---- EPS 専用フォールバック検出 — 誤検出リスクのため無効化 ----
+    # _find_eps_from_lines() は縦ブロック探索で売上高等の巨大値を拾うことがある。
+    # OCR経路でもEPSはヘッダー明示列（col_mapにepsが存在する場合）のみ採用する。
 
     if metrics_count > 0:
         # 異常値検出
@@ -1800,8 +1905,18 @@ _EPS_BLOCK_EXCLUDE_KEYWORDS = [
 ]
 
 
-def _score_eps_candidate(value: float | None, line_text: str, is_revised: bool = False, label_pos: int = -1, val_pos: int = -1) -> float:
+def _score_eps_candidate(
+    value: float | None,
+    line_text: str,
+    is_revised: bool = False,
+    label_pos: int = -1,
+    val_pos: int = -1,
+    near_context: str = "",
+) -> float:
     """EPS数値候補の『らしさ』をスコアリングしてランク付けする。
+
+    near_context: 候補行の周辺（ヘッダー行など）を結合したテキスト。
+    5b/5c のペナルティは単一行だけでなく near_context も含めて評価する。
     """
     if value is None:
         return -10.0
@@ -1809,6 +1924,8 @@ def _score_eps_candidate(value: float | None, line_text: str, is_revised: bool =
     score = 0.0
     val_abs = abs(value)
     text_normalized = _normalize_label(line_text)
+    # 近傍テキスト（単一行 + 周辺行）を結合して文脈判定に使う
+    near = text_normalized + " " + _normalize_label(near_context)
 
     # 1. 範囲ボーナス (EPSとして一般的な範囲: 0.1 ~ 5000)
     if 0.1 <= val_abs <= 5000:
@@ -1826,7 +1943,7 @@ def _score_eps_candidate(value: float | None, line_text: str, is_revised: bool =
         score += 3.0
     if "銭" in text_normalized:
         score += 5.0
-    
+
     # 位置的な近接性ボーナス (同一行の右側の数値を優先)
     if label_pos >= 0 and val_pos > label_pos:
         score += 3.0
@@ -1840,8 +1957,33 @@ def _score_eps_candidate(value: float | None, line_text: str, is_revised: bool =
             score -= 30.0
 
     # 5. 特定値ペナルティ (1.0 や 2.0 や 0.0 は極めて怪しい)
-    if val_abs in [0.0, 1.0, 2.0, 3.0, 4.0]: # 1桁の整数は基本的にノイズ
+    if val_abs in [0.0, 1.0, 2.0, 3.0, 4.0]:  # 1桁の整数は基本的にノイズ
         score -= 30.0
+
+    # 5b. 百万円コンテキストペナルティ
+    # 近傍テキスト（候補行 + ヘッダー周辺行）に「百万円」があり、
+    # EPS 固有アンカーが近傍にない場合 => PL列の数値と判定して強減点
+    _eps_unit_anchors = ["1株", "一株", "EPS", "ＥＰＳ", "円", "銭"]
+    has_eps_anchor_near = any(a in near for a in _eps_unit_anchors)
+    has_million_unit = (
+        "百万円" in near
+        or "単位：百万円" in near
+        or "単位:百万円" in near
+    )
+    if has_million_unit and not has_eps_anchor_near:
+        score -= 100.0  # 百万円単位 + EPSアンカーなし => PL列確定
+
+    # 5c. 業績項目ラベルペナルティ
+    # 近傍テキストに売上高・利益ラベルがあり EPS アンカーがない場合も減点
+    _pl_labels = [
+        "売上高", "営業利益", "経常利益",
+        "親会社株主に帰属する当期純利益", "当期純利益", "四半期純利益", "純利益",
+    ]
+    _eps_label_anchors = ["1株", "一株", "EPS", "ＥＰＳ"]
+    has_eps_label_near = any(a in near for a in _eps_label_anchors)
+    if any(pl in near for pl in _pl_labels):
+        if not has_eps_label_near:
+            score -= 80.0  # PL行ラベル + EPSアンカーなし => PL値
 
     # 6. 改訂/前回ラベルとの一致ボーナス
     if is_revised:
@@ -1970,6 +2112,11 @@ def _find_eps_from_lines(
                     eps_rev_idx = i
                     break
 
+        # 近傍コンテキスト: eps_header_idx 前後 5 行を結合して単位・ラベル判定に使う
+        ctx_start = max(0, eps_header_idx - 5)
+        ctx_end = min(len(lines), eps_header_idx + 10)
+        _near_ctx = " ".join(lines[ctx_start:ctx_end])
+
         if eps_prev_idx is not None:
             raw_line = lines[eps_prev_idx]
             label_pos = -1
@@ -1979,7 +2126,15 @@ def _find_eps_from_lines(
                     break
             nums_with_pos = _get_numbers_with_positions(raw_line)
             for val, v_pos in nums_with_pos:
-                all_prev_candidates.append((val, _score_eps_candidate(val, raw_line, is_revised=False, label_pos=label_pos, val_pos=v_pos), eps_header_idx))
+                all_prev_candidates.append((
+                    val,
+                    _score_eps_candidate(
+                        val, raw_line,
+                        is_revised=False, label_pos=label_pos, val_pos=v_pos,
+                        near_context=_near_ctx,
+                    ),
+                    eps_header_idx,
+                ))
 
         if eps_rev_idx is not None:
             raw_line = lines[eps_rev_idx]
@@ -1990,7 +2145,15 @@ def _find_eps_from_lines(
                     break
             nums_with_pos = _get_numbers_with_positions(raw_line)
             for val, v_pos in nums_with_pos:
-                all_rev_candidates.append((val, _score_eps_candidate(val, raw_line, is_revised=True, label_pos=label_pos, val_pos=v_pos), eps_header_idx))
+                all_rev_candidates.append((
+                    val,
+                    _score_eps_candidate(
+                        val, raw_line,
+                        is_revised=True, label_pos=label_pos, val_pos=v_pos,
+                        near_context=_near_ctx,
+                    ),
+                    eps_header_idx,
+                ))
 
     # スコア順にソートしてトップを採用
     all_prev_candidates.sort(key=lambda x: x[1], reverse=True)
@@ -2156,6 +2319,657 @@ def _return_with_eps_log(
     return event
 
 
+# ============================================================
+# FORECAST_FITZ_ONLY モード (座標ベース抽出のみ)
+# ============================================================
+
+# 前回行として認識するラベル (compact 文字列で照合)
+_FITZ_PREV_LABELS = [
+    "前回発表予想", "前回公表予想", "前回予想", "前回修正予想",
+    "修正前", "訂正前",
+    "直近に公表されている予想", "直近公表予想",
+    "当初予想", "前回発表", "前回公表",
+    "予想(a)", "予想（a）", "予想(A)", "予想（A）",
+    "(a)", "（a）", "(A)", "（A）",
+]
+
+# 今回行として認識するラベル (compact 文字列で照合)
+_FITZ_REV_LABELS = [
+    "今回修正予想", "今回公表予想", "今回予想", "今回修正",
+    "修正後", "修正予想", "新予想",
+    "今回発表予想", "今回発表",
+    "予想(b)", "予想（b）", "予想(B)", "予想（B）",
+    "(b)", "（b）", "(B)", "（B）",
+]
+
+
+def _fitz_compact(s: str) -> str:
+    """スペース・全角スペース除去 + NFKC 正規化した compact 文字列を返す。"""
+    s = unicodedata.normalize("NFKC", s)
+    return s.replace(" ", "").replace("\u3000", "").lower()
+
+
+def _extract_fitz_table_with_extended_labels(pdf_path: str, doc_label: str = "?") -> dict | None:
+    """FORECAST_FITZ_ONLY 専用の pdfplumber テーブル抽出。
+
+    extract_words() + 座標昇順ソート + ヘッダーX座標ベース列割り当て。
+    - PDF描画順を無視し、x0 昇順で左→右の列順に復元する
+    - ヘッダーX中心座標との距離で数値を列に割り当てる
+    - EPS列は厳格語のみ。純利益/百万円列をEPSとしない
+    - _find_eps_from_lines 系・OCR 系は一切呼ばない
+    """
+    # ─── EPS ヘッダー語 ───
+    # Strong: これがあればEPS列確定
+    _EPS_STRONG = [
+        "eps", "ｅｐｓ",
+        "1株当たり当期純利益", "1株当たり四半期純利益",
+        "1株当たり純利益", "1株利益", "1株当たり利益",
+        "当期純利益(1株)", "当期純利益（1株）",
+        "純利益(円)", "純利益（円）",
+        "円銭",
+    ]
+    # Context: 「1株」等が単独で出る場合、次行結合でEPS判定
+    _EPS_CONTEXT = ["1株", "一株", "１株"]
+    # Deny: これだけではEPS列にしない（百万円ヘッダー等）
+    _EPS_DENY_STANDALONE = ["百万円", "配当金", "1株当たり配当金", "利益率"]
+
+    # ─── 通常フィールドラベル ───
+    _FIELD_LABELS: dict[str, list[str]] = {
+        "sales":      ["売上高", "営業収益", "売上収益"],
+        "op":         ["営業利益", "営業損益"],
+        "ordinary":   ["経常利益", "経常損益", "経常収益"],
+        "net_income": [
+            "当期純利益", "四半期純利益", "純利益",
+            "親会社株主に帰属する当期純利益",
+            "親会社株主に帰属する四半期純利益",
+        ],
+    }
+
+    # ─── ヘッダー行検出キーワード ───
+    _HDR_DETECT = [
+        "売上高", "営業利益", "経常利益", "当期純利益", "純利益",
+        "eps", "1株当たり", "1株", "営業収益",
+    ]
+
+    Y_MERGE_TOL = 5   # 同一行とみなすY差 (pt)
+    X_WORD_GAP  = 10  # 同一トークンとみなすX間隔 (pt)
+
+    def _group_rows(raw_words: list[dict]) -> list[list[dict]]:
+        """words を Y 座標でグループ化し、各行を x0 昇順ソートして返す。"""
+        raw_words.sort(key=lambda w: (w["top"], w["x0"]))
+        rows: list[list[dict]] = []
+        cur: list[dict] = [raw_words[0]]
+        cur_top = raw_words[0]["top"]
+        for w in raw_words[1:]:
+            if abs(w["top"] - cur_top) <= Y_MERGE_TOL:
+                cur.append(w)
+            else:
+                rows.append(sorted(cur, key=lambda x: x["x0"]))
+                cur = [w]
+                cur_top = w["top"]
+        if cur:
+            rows.append(sorted(cur, key=lambda x: x["x0"]))
+        return rows
+
+    def _row_to_tokens(row_words: list[dict]) -> list[dict]:
+        """近接 words を結合して {'text','x0','x1','cx'} トークンリストへ。"""
+        tokens: list[dict] = []
+        if not row_words:
+            return tokens
+        cur = dict(row_words[0])
+        cur_text = cur["text"]
+        for w in row_words[1:]:
+            if w["x0"] - cur["x1"] <= X_WORD_GAP:
+                cur_text += w["text"]
+                cur["x1"] = w["x1"]
+            else:
+                tokens.append({"text": cur_text, "x0": cur["x0"],
+                                "x1": cur["x1"], "cx": (cur["x0"] + cur["x1"]) / 2})
+                cur = dict(w)
+                cur_text = w["text"]
+        tokens.append({"text": cur_text, "x0": cur["x0"],
+                        "x1": cur["x1"], "cx": (cur["x0"] + cur["x1"]) / 2})
+        return tokens
+
+    # ─── EPS 強判定: 複合セット同時出現ペア ───
+    _EPS_STRONG_SETS = [
+        ("1株",      "利益"),
+        ("eps",      "円"),
+        ("1株当たり", "当期純利益"),
+        ("一株",     "利益"),
+        ("１株",     "利益"),
+    ]
+    # 単独1語では弱判定とする語
+    _EPS_WEAK_STANDALONE = ["eps", "ｅｐｓ", "円銭", "1株", "一株", "１株"]
+    # 複合語（これ単体で強判定）
+    _EPS_COMPOUND = [
+        "1株当たり当期純利益", "1株当たり四半期純利益",
+        "1株当たり純利益", "1株利益", "1株当たり利益",
+        "当期純利益(1株)", "当期純利益（1株）",
+        "純利益(円)", "純利益（円）",
+    ]
+    # 文字化けパターン
+    _GARBLED_RE = re.compile(
+        r"(cid:\d+|\(cid:\d+\)|[譌譛繧縺繝繁繊蠖蟄])"
+    )
+
+    def _is_garbled(text: str) -> bool:
+        """文字化け比率が 30% 超なら True。"""
+        if not text:
+            return False
+        return len(_GARBLED_RE.findall(text)) / max(len(text), 1) > 0.30
+
+    def _eps_strength(cell_text: str, below_text: str = "") -> str:
+        """EPS ヘッダーとしての強度を返す。
+
+        Returns:
+            'strong' … 強判定（採用優先）
+            'weak'   … 弱判定（最右候補がなければ採用）
+            'none'   … EPS ヘッダーではない
+        """
+        if _is_garbled(cell_text) or _is_garbled(below_text):
+            return "none"
+        combined = _fitz_compact(cell_text + below_text)
+        if any(_fitz_compact(d) in combined for d in _EPS_DENY_STANDALONE):
+            return "none"
+        # 複合セット同時出現 → strong
+        for w1, w2 in _EPS_STRONG_SETS:
+            if _fitz_compact(w1) in combined and _fitz_compact(w2) in combined:
+                return "strong"
+        # 複合語単体 → strong
+        if any(_fitz_compact(c) in combined for c in _EPS_COMPOUND):
+            return "strong"
+        # _EPS_STRONG リスト内の単独1語 → weak
+        if any(_fitz_compact(e) in combined for e in _EPS_STRONG):
+            return "weak"
+        # コンテキスト語 (1株等) 単独 → weak
+        if any(_fitz_compact(c) in combined for c in _EPS_CONTEXT):
+            return "weak"
+        return "none"
+
+    best_res: dict | None = None
+    try:
+        import pdfplumber
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages[:5]:
+                raw_words = page.extract_words(x_tolerance=3, y_tolerance=3)
+                if not raw_words:
+                    continue
+
+                # ─── Step 1: 座標ソート ───
+                grouped_rows = _group_rows(raw_words)
+                logger.info(
+                    f"[forecast_fitz_sort] sorted_by_x=True "
+                    f"rows={len(grouped_rows)} doc_id={doc_label}"
+                )
+
+                # ─── Step 2: ヘッダー行を特定（スコアベース、最多フィールドマッチ行を選択） ───
+                # フィールドヒント語 (ヘッダー行スコアリング用)
+                _HDR_SCORE_WORDS: dict[str, list[str]] = {
+                    "sales":      ["売上高", "営業収益", "売上収益"],
+                    "op":         ["営業利益", "営業損益"],
+                    "ordinary":   ["経常利益", "経常損益"],
+                    "net_income": ["当期純利益", "四半期純利益", "純利益", "親会社株主"],
+                    "eps_hint":   ["eps", "1株当たり", "1株利益", "円銭"],
+                }
+
+                def _score_row(rw: list[dict]) -> int:
+                    rc = _fitz_compact("".join(w["text"] for w in rw))
+                    return sum(
+                        1 for labels in _HDR_SCORE_WORDS.values()
+                        if any(_fitz_compact(lbl) in rc for lbl in labels)
+                    )
+
+                hdr_idx = -1
+                hdr_tokens: list[dict] = []
+                best_score = 0
+                # 先頭30行までスキャン（タイトル等が前にある場合も考慮）
+                for ri, rw in enumerate(grouped_rows[:30]):
+                    s = _score_row(rw)
+                    if s > best_score:
+                        best_score = s
+                        hdr_idx = ri
+                        hdr_tokens = _row_to_tokens(rw)
+
+                if hdr_idx == -1 or best_score == 0:
+                    print("[forecast_fitz_sort] header_row=not_found, skipping page")
+                    continue
+
+                print(
+                    f"[forecast_fitz_sort] header_row_idx={hdr_idx} score={best_score}"
+                )
+
+                # ─── Step 3: col_x_map 構築（フィールド → ヘッダーX中心） ───
+                col_x_map: dict[str, float] = {}
+
+                # 次行を2段ヘッダー用に取得
+                below_tokens: list[dict] = []
+                if hdr_idx + 1 < len(grouped_rows):
+                    below_row_compact = _fitz_compact(
+                        "".join(w["text"] for w in grouped_rows[hdr_idx + 1])
+                    )
+                    is_data_row = any(
+                        _fitz_compact(lbl) in below_row_compact
+                        for lbl in _FITZ_REV_LABELS + _FITZ_PREV_LABELS
+                    )
+                    if not is_data_row:
+                        below_tokens = _row_to_tokens(grouped_rows[hdr_idx + 1])
+
+                # EPS 候補を全収集してから最右の強候補を選択する
+                # (cx, strength, combined_label)
+                eps_candidates: list[tuple[float, str, str]] = []
+
+                for tok in hdr_tokens:
+                    tok_cx = tok["cx"]
+
+                    # 2段用: 同X付近の下段セル
+                    below_text = ""
+                    for bt in below_tokens:
+                        if abs(bt["cx"] - tok_cx) < 25:
+                            below_text = bt["text"]
+                            break
+
+                    strength = _eps_strength(tok["text"], below_text)
+                    if strength != "none":
+                        lbl = _fitz_compact(tok["text"] + below_text)
+                        eps_candidates.append((tok_cx, strength, lbl))
+                        logger.info(
+                            f"[forecast_fitz_eps] candidate "
+                            f"header_text={tok['text']!r} "
+                            f"strength={strength} "
+                            f"header_x={tok_cx:.1f}"
+                        )
+                        continue  # EPS候補は通常フィールド判定に流さない
+
+                    # 通常フィールド判定 (全フィールドにログあり)
+                    for field, labels in _FIELD_LABELS.items():
+                        if field in col_x_map:
+                            continue
+                        combined_field = _fitz_compact(tok["text"] + below_text)
+                        if any(_fitz_compact(lbl) in combined_field for lbl in labels):
+                            col_x_map[field] = tok_cx
+                            print(
+                                f"[forecast_fitz_colmap_build] "
+                                f"field={field} "
+                                f"header_text={tok['text']!r} "
+                                f"header_x={tok_cx:.1f}"
+                            )
+                            break
+
+                # EPS 候補 → 最右の強候補、なければ最右の弱候補を採用
+                strong_cands = [(cx, lbl) for cx, st, lbl in eps_candidates if st == "strong"]
+                weak_cands   = [(cx, lbl) for cx, st, lbl in eps_candidates if st == "weak"]
+                if strong_cands:
+                    best_cx, best_lbl = max(strong_cands, key=lambda x: x[0])
+                    col_x_map["eps"] = best_cx
+                    logger.info(
+                        f"[forecast_fitz_eps] selected=strong "
+                        f"combined={best_lbl!r} "
+                        f"header_x={best_cx:.1f} "
+                        f"mapped_cluster=x{best_cx:.0f}"
+                    )
+                elif weak_cands:
+                    best_cx, best_lbl = max(weak_cands, key=lambda x: x[0])
+                    col_x_map["eps"] = best_cx
+                    logger.info(
+                        f"[forecast_fitz_eps] selected=weak "
+                        f"combined={best_lbl!r} "
+                        f"header_x={best_cx:.1f} "
+                        f"mapped_cluster=x{best_cx:.0f}"
+                    )
+
+                if not col_x_map:
+                    continue
+
+                if "eps" not in col_x_map:
+                    print(
+                        "[forecast_fitz_eps] header_text=not_found "
+                        "mapped_cluster=None (eps col not detected in table)"
+                    )
+
+                print(
+                    f"[forecast_fitz_colmap] "
+                    f"sales_x={col_x_map.get('sales', 'N/A')} "
+                    f"op_x={col_x_map.get('op', 'N/A')} "
+                    f"ordinary_x={col_x_map.get('ordinary', 'N/A')} "
+                    f"net_income_x={col_x_map.get('net_income', 'N/A')} "
+                    f"eps_x={col_x_map.get('eps', 'N/A')}"
+                )
+
+                # ─── Step 4: 動的 tolerance 計算 ───
+                xs = sorted(col_x_map.values())
+                if len(xs) >= 2:
+                    min_gap = min(xs[i + 1] - xs[i] for i in range(len(xs) - 1))
+                    col_tol = max(15.0, min(45.0, min_gap * 0.45))
+                else:
+                    col_tol = 30.0
+
+                # ─── Step 5: 前回行・今回行を X ソート済み行から探す ───
+                prev_tokens: list[dict] | None = None
+                rev_tokens:  list[dict] | None = None
+                prev_row_idx: int = -1
+                rev_row_idx:  int = -1
+
+                for ri in range(hdr_idx + 1, len(grouped_rows)):
+                    rw = grouped_rows[ri]
+                    row_text = "".join(w["text"] for w in rw)
+                    cmp = _fitz_compact(row_text)
+
+                    if rev_tokens is None and any(
+                        _fitz_compact(lbl) in cmp for lbl in _FITZ_REV_LABELS
+                    ):
+                        rev_tokens = _row_to_tokens(rw)
+                        rev_row_idx = ri
+                        print(
+                            f"[forecast_fitz_row] rev_row_found=True "
+                            f"rev_row_text={row_text[:80]!r}"
+                        )
+                    elif prev_tokens is None and any(
+                        _fitz_compact(lbl) in cmp for lbl in _FITZ_PREV_LABELS
+                    ):
+                        prev_tokens = _row_to_tokens(rw)
+                        prev_row_idx = ri
+                        print(
+                            f"[forecast_fitz_row] prev_row_found=True "
+                            f"prev_row_text={row_text[:80]!r}"
+                        )
+                    if prev_tokens is not None and rev_tokens is not None:
+                        break
+
+                print(
+                    f"[forecast_fitz_row_detect] "
+                    f"prev_row_found={prev_tokens is not None} "
+                    f"rev_row_found={rev_tokens is not None}"
+                )
+                if prev_tokens is None:
+                    print(
+                        "[forecast_fitz_row] prev_row_found=False "
+                        "reason=no_label_matched_in_extended_list"
+                    )
+                if rev_tokens is None:
+                    continue
+
+                # ─── Step 5b: 行テキスト・数値一覧ログ（診断用） ───
+                def _log_row_detail(tokens: list[dict], kind: str) -> None:
+                    row_text_full = "".join(t["text"] for t in tokens)
+                    nums = [
+                        v for t in tokens
+                        if (v := _parse_cell_value(t["text"])) is not None
+                        and abs(v) not in {0.0, 1.0, 2.0, 3.0, 4.0}
+                    ]
+                    print(
+                        f"[forecast_fitz_row_text] kind={kind} "
+                        f"text={row_text_full[:100]!r}"
+                    )
+                    print(
+                        f"[forecast_fitz_row_numbers] kind={kind} "
+                        f"count={len(nums)} nums={nums}"
+                    )
+
+                if prev_tokens is not None:
+                    _log_row_detail(prev_tokens, "prev")
+                _log_row_detail(rev_tokens, "rev")
+
+                # ─── Step 5c: continuation フォールバック ───
+                # ラベル行に数値がなく、直後行に数値が分離している場合に対応
+                def _count_nums(tokens: list[dict]) -> int:
+                    return sum(
+                        1 for t in tokens
+                        if (v := _parse_cell_value(t["text"])) is not None
+                        and abs(v) not in {0.0, 1.0, 2.0, 3.0, 4.0}
+                    )
+
+                def _try_continuation(
+                    tokens: list[dict],
+                    row_idx: int,
+                    kind: str,
+                ) -> list[dict]:
+                    if row_idx < 0 or _count_nums(tokens) >= 4:
+                        return tokens
+                    for offset in range(1, 4):
+                        next_ri = row_idx + offset
+                        if next_ri >= len(grouped_rows):
+                            break
+                        cand = _row_to_tokens(grouped_rows[next_ri])
+                        cand_nums = [
+                            v for t in cand
+                            if (v := _parse_cell_value(t["text"])) is not None
+                            and abs(v) not in {0.0, 1.0, 2.0, 3.0, 4.0}
+                        ]
+                        if len(cand_nums) >= 4:
+                            print(
+                                f"[forecast_fitz_row_continuation] kind={kind} "
+                                f"from_row={row_idx} adopted_row={next_ri} "
+                                f"nums={cand_nums}"
+                            )
+                            return cand
+                    return tokens
+
+                if prev_tokens is not None:
+                    prev_tokens = _try_continuation(prev_tokens, prev_row_idx, "prev")
+                rev_tokens = _try_continuation(rev_tokens, rev_row_idx, "rev")
+
+                # ─── Step 6: X距離で数値を列に割り当て ───
+                def _assign_by_x(
+                    tokens: list[dict],
+                    row_label: str,
+                ) -> dict[str, float | None]:
+                    assigned: dict[str, float | None] = {f: None for f in col_x_map}
+                    for tok in tokens:
+                        val = _parse_cell_value(tok["text"])
+                        if val is None or abs(val) in {0.0, 1.0, 2.0, 3.0, 4.0}:
+                            continue
+                        tok_cx = tok["cx"]
+                        nearest_field, nearest_dist = None, float("inf")
+                        for field, hdr_x in col_x_map.items():
+                            d = abs(tok_cx - hdr_x)
+                            if d < nearest_dist:
+                                nearest_dist = d
+                                nearest_field = field
+                        accepted = nearest_dist <= col_tol
+                        # 全フィールドのassignログ (修正3)
+                        reason = "within_tolerance" if accepted else "out_of_tolerance"
+                        print(
+                            f"[forecast_fitz_assign] field={nearest_field} row={row_label} "
+                            f"value={val} num_x={tok_cx:.1f} "
+                            f"header_x={col_x_map.get(nearest_field, 'N/A')} "
+                            f"dist={nearest_dist:.1f} accepted={accepted} reason={reason}"
+                        )
+                        if accepted and nearest_field and assigned[nearest_field] is None:
+                            assigned[nearest_field] = val
+                    return assigned
+
+                prev_assigned = _assign_by_x(prev_tokens, "prev") if prev_tokens else {
+                    f: None for f in col_x_map
+                }
+                rev_assigned = _assign_by_x(rev_tokens, "rev")
+
+                # ─── Step 7: res 構築 ───
+                res: dict = {"metrics_count": 0}
+                for field in col_x_map:
+                    pv = prev_assigned.get(field)
+                    rv = rev_assigned.get(field)
+                    if rv is not None:
+                        res["metrics_count"] += 1
+                    res[f"previous_{field}"] = pv
+                    res[f"revised_{field}"] = rv
+
+                 # ─── Step 7c: 位置ベース fallback ───
+                # colmap が不足している場合、数値を X 昇順で
+                # sales / op / ordinary / net_income / eps に位置マッピングする
+                _POSITIONAL_FIELDS = ["sales", "op", "ordinary", "net_income", "eps"]
+                _colmap_missing = (
+                    len(col_x_map) < 3
+                    or any(f not in col_x_map for f in ["sales", "net_income", "eps"])
+                )
+                if _colmap_missing:
+                    def _sorted_nums(tokens: list[dict]) -> list[tuple[float, float]]:
+                        return sorted(
+                            [
+                                (t["cx"], v)
+                                for t in tokens
+                                if (v := _parse_cell_value(t["text"])) is not None
+                                and abs(v) not in {0.0, 1.0, 2.0, 3.0, 4.0}
+                            ],
+                            key=lambda x: x[0],
+                        )
+
+                    rev_sorted = _sorted_nums(rev_tokens)
+                    prev_sorted = _sorted_nums(prev_tokens) if prev_tokens else []
+
+                    if len(rev_sorted) >= 5:
+                        print(
+                            f"[forecast_fitz_positional_fallback] "
+                            f"fields={','.join(_POSITIONAL_FIELDS)} "
+                            f"nums={[v for _, v in rev_sorted[:5]]}"
+                        )
+                        for i, field in enumerate(_POSITIONAL_FIELDS):
+                            # revised: 未割り当てのみ上書き
+                            if res.get(f"revised_{field}") is None and i < len(rev_sorted):
+                                res[f"revised_{field}"] = rev_sorted[i][1]
+                                res["metrics_count"] += 1
+                            # previous: 未割り当てのみ上書き
+                            if res.get(f"previous_{field}") is None and i < len(prev_sorted):
+                                res[f"previous_{field}"] = prev_sorted[i][1]
+
+                # ─── Step 7b: revised_eps > 10000 の場合 EPS 再検証 (修正2) ───
+                # 巨大 EPS は列割り当てミスの可能性が高い。
+                # EPS ヘッダーの右側に小数値があればそちらで上書きする。
+                rev_eps = res.get("revised_eps")
+                if rev_eps is not None and abs(rev_eps) > 10000 and "eps" in col_x_map:
+                    eps_hdr_x = col_x_map["eps"]
+                    logger.info(
+                        f"[forecast_fitz_eps_recheck] revised_eps={rev_eps} >10000, "
+                        f"scanning right of eps_hdr_x={eps_hdr_x:.1f}"
+                    )
+                    # rev_tokens をもう一度スキャンして eps_hdr_x より右の小数値を探す
+                    best_decimal_val: float | None = None
+                    best_decimal_x: float = float("inf")
+                    for tok in (rev_tokens or []):
+                        tok_cx = tok["cx"]
+                        if tok_cx <= eps_hdr_x:
+                            continue
+                        cand = _parse_cell_value(tok["text"])
+                        if cand is None:
+                            continue
+                        # 小数値（EPS らしい範囲: 0.01 〜 9999）
+                        if 0.01 <= abs(cand) <= 9999 and tok_cx < best_decimal_x:
+                            best_decimal_val = cand
+                            best_decimal_x = tok_cx
+                    if best_decimal_val is not None:
+                        logger.info(
+                            f"[forecast_fitz_eps_recheck] override "
+                            f"old={rev_eps} new={best_decimal_val} "
+                            f"new_x={best_decimal_x:.1f}"
+                        )
+                        res["revised_eps"] = best_decimal_val
+                    else:
+                        logger.info(
+                            "[forecast_fitz_eps_recheck] no suitable right-side value, "
+                            "clearing revised_eps to None"
+                        )
+                        res["revised_eps"] = None
+                        # metrics_count 補正
+                        res["metrics_count"] = max(0, res["metrics_count"] - 1)
+
+                if best_res is None or res["metrics_count"] > best_res["metrics_count"]:
+                    best_res = res
+
+    except Exception as e:
+        logger.debug(f"[forecast_fitz] pdfplumber extract failed: {e}")
+
+    if best_res:
+        for metric in ["sales", "op", "ordinary", "net_income", "eps"]:
+            p = best_res.get(f"previous_{metric}")
+            r = best_res.get(f"revised_{metric}")
+            best_res[f"delta_{metric}"] = _calc_delta(p, r)
+            best_res[f"change_{metric}_pct"] = _calc_pct(p, r)
+
+    return best_res
+
+
+
+def _extract_fitz_only(
+    text: str,
+    title: str = "",
+    is_difference: bool = False,
+    pdf_path: str = "",
+    doc_id: str = "",
+) -> ForecastRevisionEvent:
+    """FORECAST_FITZ_ONLY=1 時の抽出器。
+
+    pdfplumber 座標ベース抽出のみを使用する。
+    以下は一切呼ばない:
+    - _find_eps_from_lines()
+    - _find_eps_from_lines_with_guard()
+    - OCR fallback
+    - テキスト近傍 EPS 抽出 (prose/note)
+    座標ベースで取れなかった項目は None のまま返す。
+    """
+    _doc_label = doc_id[:16] if doc_id else "?"
+    logger.info(f"[forecast_mode] fitz_only enabled doc_id={_doc_label}")
+
+    event = ForecastRevisionEvent()
+    event.is_difference_disclosure = is_difference
+    setattr(event, "extraction_stage", "fitz_only")
+    setattr(event, "fallback_used", False)
+
+    full_text = _normalize_text(text)
+    full_title = _normalize_text(title)
+    event.period_label = _detect_period(full_text) or _detect_period(full_title)
+    event.basis = _detect_basis(full_text) or _detect_basis(full_title)
+
+    metrics_count = 0
+    if pdf_path and os.path.exists(pdf_path):
+        # 拡張ラベル対応の専用テーブル抽出を使う
+        table_result = _extract_fitz_table_with_extended_labels(pdf_path, _doc_label)
+        if table_result:
+            metrics_count = table_result.get("metrics_count", 0)
+            for metric in ["sales", "op", "ordinary", "net_income", "eps"]:
+                setattr(event, f"previous_{metric}", table_result.get(f"previous_{metric}"))
+                setattr(event, f"revised_{metric}", table_result.get(f"revised_{metric}"))
+                setattr(event, f"delta_{metric}", table_result.get(f"delta_{metric}"))
+                setattr(event, f"change_{metric}_pct", table_result.get(f"change_{metric}_pct"))
+            event.extraction_source = "pdfplumber_table_fitz_only"
+            logger.info(
+                f"[forecast_fitz] sales=({event.previous_sales},{event.revised_sales}) "
+                f"op=({event.previous_op},{event.revised_op}) "
+                f"ordinary=({event.previous_ordinary},{event.revised_ordinary}) "
+                f"net_income=({event.previous_net_income},{event.revised_net_income})"
+            )
+            logger.info(
+                f"[forecast_fitz] eps_prev={event.previous_eps} eps_rev={event.revised_eps}"
+            )
+        else:
+            logger.info(f"[forecast_fitz] table_result=None doc_id={_doc_label}")
+    else:
+        logger.info(
+            f"[forecast_fitz] no pdf_path, skipping coordinate extraction doc_id={_doc_label}"
+        )
+
+    event.extracted_metrics_count = metrics_count
+    event.confidence = 0.5 if metrics_count > 0 else 0.0
+    event.subtype = _determine_subtype(event, is_difference)
+    event.importance = _calc_importance(event)
+
+    # ---- EPS 異常値最終ガード (fitz_only 経路) ----
+    _EPS_MAX_FITZ = 10_000
+    _fitz_eps_sanitized = False
+    if event.previous_eps is not None and abs(event.previous_eps) > _EPS_MAX_FITZ:
+        logger.info(f"[fitz_eps_sanitize] prev={event.previous_eps} > 10000, cleared")
+        event.previous_eps = None
+        _fitz_eps_sanitized = True
+    if event.revised_eps is not None and abs(event.revised_eps) > _EPS_MAX_FITZ:
+        logger.info(f"[fitz_eps_sanitize] rev={event.revised_eps} > 10000, cleared")
+        event.revised_eps = None
+        _fitz_eps_sanitized = True
+    if _fitz_eps_sanitized:
+        event.delta_eps = None
+        event.change_eps_pct = None
+
+    return event
+
+
 def extract_forecast_revision(
     text: str,
     title: str = "",
@@ -2166,9 +2980,20 @@ def extract_forecast_revision(
 ) -> ForecastRevisionEvent:
     """テキストから業績予想修正イベントを抽出する。
 
-    Phase 1: Native/Prose/Note (および pdfplumber) による軽量・高速抽出
-    Phase 2: OCR Fallback (最終手段)
+    FORECAST_FITZ_ONLY=1 の場合: pdfplumber座標ベース抽出のみ（OCR/テキスト近傍無効）
+    通常時: Phase 1: Native/Prose/Note (および pdfplumber) による軽量・高速抽出
+            Phase 2: OCR Fallback (最終手段)
     """
+    # ---- FORECAST_FITZ_ONLY スイッチ ----
+    if os.environ.get("FORECAST_FITZ_ONLY", "").strip() == "1":
+        return _extract_fitz_only(
+            text=text,
+            title=title,
+            is_difference=is_difference,
+            pdf_path=pdf_path,
+            doc_id=doc_id,
+        )
+
     _doc_label = doc_id[:16] if doc_id else "?"
 
     # ---- Phase 1: 既存テキストおよび pdfplumber から抽出 ----
@@ -2772,3 +3597,5 @@ def extract_latest_full_year_eps(text: str) -> float | None:
         f"score={best_score:.1f} reason={best_reason}"
     )
     return best_val
+
+

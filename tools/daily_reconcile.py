@@ -22,7 +22,7 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from lib.pipeline.db import load_env, get_supabase_config, supabase_select, supabase_upsert
+from lib.pipeline.db import load_env, get_supabase_config, supabase_select, supabase_upsert, supabase_update
 from lib.pipeline.logging_utils import PipelineRun
 
 logger = logging.getLogger("pipeline.reconcile")

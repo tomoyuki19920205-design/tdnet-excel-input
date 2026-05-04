@@ -70,6 +70,7 @@ export type FilterType =
   | "buyback"
   | "forecast_up"
   | "dividend"
+  | "earnings"
   | "today";
 
 export interface AlertsFilter {
