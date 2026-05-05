@@ -499,7 +499,7 @@ def _extract_col_as_segment(
 # 対象から除外する列ラベル（計等）
 _RAW_TBL_EXCL: frozenset = frozenset([
     "計", "小計", "合計", "総計", "小計額", "計額",
-    "担当者間取引除去のこ
+    "担当者間取引除去",
     "調整額", "消去", "全社", "全社・消去", "消去又は全社",
     "連結", "連結損益計算書計上額",
     "四半期連結損益計算書計上額",
@@ -2920,16 +2920,29 @@ def run_segment_detection_v2(
 
         # 単位正規化 (unit_detection ベース)
         if unit_multiplier and unit_multiplier != 1_000_000:
+            # _apply_unit_multiplier は百万円を返す
             if seg_sales is not None:
                 seg_sales = _apply_unit_multiplier(seg_sales, unit_multiplier)
             if seg_profit is not None:
                 seg_profit = _apply_unit_multiplier(seg_profit, unit_multiplier)
         elif unit_raw:
-            # legacy string-based
+            # substring 一致で百万円へ正規化（legacy の完全一致バグを回避）
+            _sales_before = seg_sales
+            _profit_before = seg_profit
             if seg_sales is not None:
-                seg_sales = _normalize_unit_legacy(seg_sales, unit_raw)
+                seg_sales = _normalize_segment_value_to_millions(
+                    seg_sales, unit_raw=unit_raw
+                )
             if seg_profit is not None:
-                seg_profit = _normalize_unit_legacy(seg_profit, unit_raw)
+                seg_profit = _normalize_segment_value_to_millions(
+                    seg_profit, unit_raw=unit_raw
+                )
+            if _sales_before != seg_sales or _profit_before != seg_profit:
+                trace.append(
+                    f"UnitNormalizeToMillions: unit_raw={unit_raw!r}, "
+                    f"sales={_sales_before}->{seg_sales}, "
+                    f"profit={_profit_before}->{seg_profit}"
+                )
 
         order += 1
 
@@ -3186,6 +3199,28 @@ def _normalize_unit_legacy(value: float, unit: str) -> float:
     elif unit == "円":
         return value / 1_000_000 if abs(value) >= 1_000_000 else value
     return value
+
+
+def _normalize_segment_value_to_millions(
+    val: float | None,
+    unit_raw: str | None = None,
+    unit_multiplier: int | None = None,
+) -> float | None:
+    """セグメント数値を百万円単位に正規化する（サブストリング一致）。
+
+    _normalize_unit_legacy の完全一致バグを回避するため unit_raw は 'in' 判定を使用。
+    _apply_unit_multiplier が既に百万円を返す場合は呼び出さないこと。
+    """
+    if val is None:
+        return None
+    unit = str(unit_raw or "").strip()
+    if "千円" in unit or "Thousand" in unit or unit_multiplier == 1_000:
+        return val / 1_000
+    if "百万円" in unit or "Million" in unit or unit_multiplier == 1_000_000:
+        return val
+    if "億円" in unit or "HundredMillion" in unit or unit_multiplier == 100_000_000:
+        return val * 100
+    return val
 
 
 def _compute_confidence(
