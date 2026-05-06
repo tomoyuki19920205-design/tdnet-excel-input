@@ -246,6 +246,53 @@ def _has_segment_page_signal(pdf_path: str, ticker: str = "") -> bool:
 # V4 PDF 抽出ヘルパー
 # ============================================================
 
+# 単位検出: 優先順位付き（高精度 → 低精度の順）
+# 百万円を千円より先に検索して誤一致を防ぐ
+_UNIT_DETECT_PATTERNS: list[tuple[str, str, int]] = [
+    # 億円
+    ("単位：億円", "億円", 100_000_000),
+    ("単位:億円", "億円", 100_000_000),
+    ("（億円）", "億円", 100_000_000),
+    ("(億円)", "億円", 100_000_000),
+    ("HundredMillion", "億円", 100_000_000),
+    # 百万円
+    ("単位：百万円", "百万円", 1_000_000),
+    ("単位:百万円", "百万円", 1_000_000),
+    ("（百万円）", "百万円", 1_000_000),
+    ("(百万円)", "百万円", 1_000_000),
+    ("Million Yen", "百万円", 1_000_000),
+    ("million yen", "百万円", 1_000_000),
+    # 千円（最後に評価）
+    ("単位：千円", "千円", 1_000),
+    ("単位:千円", "千円", 1_000),
+    ("（千円）", "千円", 1_000),
+    ("(千円)", "千円", 1_000),
+    ("Thousand Yen", "千円", 1_000),
+    ("thousand yen", "千円", 1_000),
+]
+
+
+def _detect_pdf_unit(doc_path: str) -> tuple[str | None, int | None]:
+    """PDFページテキストから単位（千円/百万円/億円）を検出する。
+
+    優先順位付きパターン一致を使用し、最初の30ページを走査する。
+    検出できない場合は (None, None) を返す。
+    """
+    if not doc_path:
+        return None, None
+    try:
+        import fitz  # type: ignore
+        with fitz.open(doc_path) as doc:
+            for page in doc[:30]:
+                text = page.get_text()
+                for marker, unit_raw, unit_mult in _UNIT_DETECT_PATTERNS:
+                    if marker in text:
+                        return unit_raw, unit_mult
+    except Exception:
+        pass
+    return None, None
+
+
 def _try_pdf_source_v4(
     doc_path: str,
     filing,
@@ -339,10 +386,33 @@ def _try_pdf_source_v4(
     # SegmentRecordV4 → dict レコードに変換
     records = []
     _TRACE_TICKERS = {"2901", "2936"}
+
+    # PDF全体から単位を検出（セグメント側の unit_raw が全て None の場合のfallback）
+    _pdf_unit_raw: str | None = None
+    _pdf_unit_mult: int | None = None
+    _all_units_missing = all(
+        getattr(s, "unit_raw", None) is None
+        and getattr(s, "unit_multiplier", None) is None
+        for s in v4_result.segments
+    )
+    if _all_units_missing:
+        _pdf_unit_raw, _pdf_unit_mult = _detect_pdf_unit(doc_path)
+        if _pdf_unit_raw:
+            logger.info(
+                "[UNIT_DETECT] ticker=%s unit_raw=%r mult=%s (pdf_text_fallback)",
+                filing.ticker, _pdf_unit_raw, _pdf_unit_mult,
+            )
+        else:
+            logger.warning(
+                "[UNIT_DETECT] ticker=%s unit not detected from PDF text",
+                filing.ticker,
+            )
+
     for seg in v4_result.segments:
         seg_name = getattr(seg, "segment_name", "") or ""
-        _unit_raw = getattr(seg, "unit_raw", None)
-        _unit_mult = getattr(seg, "unit_multiplier", None)
+        # seg 自体が持つ unit を優先、なければ PDF テキスト検出値を fallback
+        _unit_raw = getattr(seg, "unit_raw", None) or _pdf_unit_raw
+        _unit_mult = getattr(seg, "unit_multiplier", None) or _pdf_unit_mult
 
         # unit 不明時はログに出す（変換は migration_db._to_millions に委ねる）
         if _unit_raw is None and _unit_mult is None:
