@@ -42,6 +42,41 @@ def _normalize_note(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n").rstrip()
 
 
+def _to_millions(
+    val: float | None,
+    unit_raw: str | None,
+    unit_multiplier: int | None,
+    *,
+    context: str = "",
+) -> float | None:
+    """segment_financials 保存前の百万円単位強制正規化。
+
+    unit_raw / unit_multiplier を参照し変換する。
+    値の大きさによる判定は禁止（誤変換リスク）。
+    unit 不明時は変換せずにログを出す。
+    """
+    if val is None:
+        return None
+    unit = str(unit_raw or "").strip()
+    mult = unit_multiplier
+
+    # 千円判定
+    if "千円" in unit or "Thousand" in unit or mult == 1_000:
+        return val / 1_000
+    # 百万円判定（変換不要）
+    if "百万円" in unit or "Million" in unit or mult == 1_000_000:
+        return val
+    # 億円判定
+    if "億円" in unit or "HundredMillion" in unit or mult == 100_000_000:
+        return val * 100
+
+    # unit 不明 → 変換せず警告のみ
+    logger.warning(
+        "[UnitNorm] unit不明のため変換スキップ: val=%s unit_raw=%r mult=%s %s",
+        val, unit_raw, mult, context,
+    )
+    return val
+
 # ------------------------------------------------------------------
 # テーブル作成 SQL
 # ------------------------------------------------------------------
@@ -591,6 +626,8 @@ class MigrationDB:
         segment_sales: float | None = None,
         segment_profit: float | None = None,
         *,
+        unit_raw: str | None = None,
+        unit_multiplier: int | None = None,
         raw_profit_label: str = "",
         data_source: str = "migration",
         actor: str = "migration",
@@ -606,6 +643,13 @@ class MigrationDB:
     ) -> str:
         """Returns: 'inserted' / 'updated' / 'no_change'"""
         now = _now_jst()
+
+        # ── 百万円単位正規化（INSERT/UPDATE 前に必ず適用）─────────────
+        _ctx = f"ticker={company_code} period={fiscal_year_end} q={quarter} seg={segment_name}"
+        segment_sales = _to_millions(segment_sales, unit_raw, unit_multiplier, context=_ctx)
+        segment_profit = _to_millions(segment_profit, unit_raw, unit_multiplier, context=_ctx)
+        # ──────────────────────────────────────────────────────────────
+
         # 既存チェック
         cur = self._conn.execute(
             """
