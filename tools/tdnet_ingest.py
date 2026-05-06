@@ -386,6 +386,8 @@ def _process_single(
                     segment_order=seg.get("segment_order", 0) if isinstance(seg, dict) else getattr(seg, "segment_order", 0),
                     segment_sales=seg.get("segment_sales") if isinstance(seg, dict) else getattr(seg, "segment_sales", None),
                     segment_profit=seg.get("segment_profit") if isinstance(seg, dict) else getattr(seg, "segment_profit", None),
+                    unit_raw=seg.get("unit_raw") if isinstance(seg, dict) else getattr(seg, "unit_raw", None),
+                    unit_multiplier=seg.get("unit_multiplier") if isinstance(seg, dict) else getattr(seg, "unit_multiplier", None),
                     raw_profit_label=seg.get("raw_profit_label", "") if isinstance(seg, dict) else getattr(seg, "raw_profit_label", ""),
                     data_source="tdnet",
                     actor="tdnet_ingest_v4",

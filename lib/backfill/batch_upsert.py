@@ -67,6 +67,8 @@ def batch_upsert_segments(
                     segment_order=rec.get("segment_order", 0),
                     segment_sales=rec.get("segment_sales"),
                     segment_profit=rec.get("segment_profit"),
+                    unit_raw=rec.get("unit_raw"),
+                    unit_multiplier=rec.get("unit_multiplier"),
                     raw_profit_label=rec.get("raw_profit_label", ""),
                     data_source=rec.get("source", source),
                     actor=actor,

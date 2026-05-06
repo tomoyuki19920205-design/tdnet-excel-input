@@ -186,6 +186,8 @@ def main():
                             segment_order=seg.segment_order,
                             segment_sales=seg.segment_sales,
                             segment_profit=seg.segment_profit,
+                            unit_raw=getattr(seg, "unit_raw", None),
+                            unit_multiplier=getattr(seg, "unit_multiplier", None),
                             raw_profit_label=seg.raw_profit_label,
                             data_source="tdnet",
                             actor="backfill_seg",
