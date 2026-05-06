@@ -338,8 +338,26 @@ def _try_pdf_source_v4(
 
     # SegmentRecordV4 → dict レコードに変換
     records = []
+    _TRACE_TICKERS = {"2901", "2936"}
     for seg in v4_result.segments:
         seg_name = getattr(seg, "segment_name", "") or ""
+        _unit_raw = getattr(seg, "unit_raw", None)
+        _unit_mult = getattr(seg, "unit_multiplier", None)
+
+        # unit 不明時はログに出す（変換は migration_db._to_millions に委ねる）
+        if _unit_raw is None and _unit_mult is None:
+            logger.warning(
+                "[SEG_UNIT_TRACE] unit missing: ticker=%s seg=%s sales=%s",
+                filing.ticker, seg_name, getattr(seg, "segment_sales", None),
+            )
+        elif str(filing.ticker) in _TRACE_TICKERS:
+            logger.info(
+                "[SEG_UNIT_TRACE] ticker=%s segment=%s unit_raw=%r "
+                "unit_multiplier=%s sales_before=%s",
+                filing.ticker, seg_name, _unit_raw, _unit_mult,
+                getattr(seg, "segment_sales", None),
+            )
+
         records.append({
             "ticker": filing.ticker,
             "period": period,
@@ -348,6 +366,8 @@ def _try_pdf_source_v4(
             "segment_order": getattr(seg, "segment_order", 0),
             "segment_sales": getattr(seg, "segment_sales", None),
             "segment_profit": getattr(seg, "segment_profit", None),
+            "unit_raw": _unit_raw,
+            "unit_multiplier": _unit_mult,
             "raw_profit_label": getattr(seg, "raw_profit_label", ""),
             "source": "backfill_v4_pdf",
             "segment_name_norm": _normalize_segment_name_conservative(seg_name),
