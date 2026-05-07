@@ -559,8 +559,8 @@ def _try_xbrl_source(
         seg_name = row.normalized_segment_name or row.raw_segment_name
         records.append({
             "ticker": filing.ticker,
-            "period": period,
-            "quarter": quarter,
+            "period": row.period or period,   # prior rows は xbrl_rows 側の前期 period を優先
+            "quarter": row.quarter or quarter,
             "segment_name": seg_name,
             "segment_order": idx + 1,
             "segment_sales": row.sales,

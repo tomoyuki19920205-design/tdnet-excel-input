@@ -387,13 +387,32 @@ def _try_pdf_source_v4(
     records = []
     _TRACE_TICKERS = {"2901", "2936"}
 
+    # ── ローカルヘルパー: previous ブロックの period を1年前に計算 ──
+    def _derive_period_for_block(base_period: str, period_type: str) -> str:
+        """period_type が "previous" のとき base_period の年を -1 する。"""
+        if period_type != "previous" or not base_period or len(base_period) < 4:
+            return base_period
+        try:
+            prev_year = int(base_period[:4]) - 1
+            return f"{prev_year}{base_period[4:]}"
+        except ValueError:
+            return base_period
+
     # PDF全体から単位を検出（セグメント側の unit_raw が全て None の場合のfallback）
+    # unit 判定のため、全セグを集める（extracted_periods / segments 両方に対応）
+    _all_segs_for_unit = []
+    if v4_result.extracted_periods:
+        for _ep in v4_result.extracted_periods:
+            _all_segs_for_unit.extend(getattr(_ep, "segments", []))
+    else:
+        _all_segs_for_unit = list(v4_result.segments)
+
     _pdf_unit_raw: str | None = None
     _pdf_unit_mult: int | None = None
     _all_units_missing = all(
         getattr(s, "unit_raw", None) is None
         and getattr(s, "unit_multiplier", None) is None
-        for s in v4_result.segments
+        for s in _all_segs_for_unit
     )
     if _all_units_missing:
         _pdf_unit_raw, _pdf_unit_mult = _detect_pdf_unit(doc_path)
@@ -408,45 +427,94 @@ def _try_pdf_source_v4(
                 filing.ticker,
             )
 
-    for seg in v4_result.segments:
-        seg_name = getattr(seg, "segment_name", "") or ""
-        # seg 自体が持つ unit を優先、なければ PDF テキスト検出値を fallback
-        _unit_raw = getattr(seg, "unit_raw", None) or _pdf_unit_raw
-        _unit_mult = getattr(seg, "unit_multiplier", None) or _pdf_unit_mult
+    # ── extracted_periods があればそれを全件 records 化（current + previous） ──
+    if v4_result.extracted_periods:
+        _n_curr = sum(1 for ep in v4_result.extracted_periods if getattr(ep, "period_type", "") == "current")
+        _n_prev = sum(1 for ep in v4_result.extracted_periods if getattr(ep, "period_type", "") == "previous")
+        _n_unk  = sum(1 for ep in v4_result.extracted_periods if getattr(ep, "period_type", "") == "unknown")
+        logger.info(
+            "[V4] extracted_periods used: ticker=%s current=%d previous=%d unknown=%d",
+            filing.ticker, _n_curr, _n_prev, _n_unk,
+        )
+        for ep in v4_result.extracted_periods:
+            ep_period_type = getattr(ep, "period_type", "unknown")
+            ep_period = _derive_period_for_block(period, ep_period_type)
+            for seg in getattr(ep, "segments", []):
+                seg_name = getattr(seg, "segment_name", "") or ""
+                _unit_raw  = getattr(seg, "unit_raw", None) or _pdf_unit_raw
+                _unit_mult = getattr(seg, "unit_multiplier", None) or _pdf_unit_mult
 
-        # unit 不明時はログに出す（変換は migration_db._to_millions に委ねる）
-        if _unit_raw is None and _unit_mult is None:
-            logger.warning(
-                "[SEG_UNIT_TRACE] unit missing: ticker=%s seg=%s sales=%s",
-                filing.ticker, seg_name, getattr(seg, "segment_sales", None),
-            )
-        elif str(filing.ticker) in _TRACE_TICKERS:
-            logger.info(
-                "[SEG_UNIT_TRACE] ticker=%s segment=%s unit_raw=%r "
-                "unit_multiplier=%s sales_before=%s",
-                filing.ticker, seg_name, _unit_raw, _unit_mult,
-                getattr(seg, "segment_sales", None),
-            )
+                if _unit_raw is None and _unit_mult is None:
+                    logger.warning(
+                        "[SEG_UNIT_TRACE] unit missing: ticker=%s seg=%s sales=%s period_type=%s",
+                        filing.ticker, seg_name, getattr(seg, "segment_sales", None), ep_period_type,
+                    )
+                elif str(filing.ticker) in _TRACE_TICKERS:
+                    logger.info(
+                        "[SEG_UNIT_TRACE] ticker=%s segment=%s unit_raw=%r "
+                        "unit_multiplier=%s sales_before=%s period_type=%s",
+                        filing.ticker, seg_name, _unit_raw, _unit_mult,
+                        getattr(seg, "segment_sales", None), ep_period_type,
+                    )
 
-        records.append({
-            "ticker": filing.ticker,
-            "period": period,
-            "quarter": quarter,
-            "segment_name": seg_name,
-            "segment_order": getattr(seg, "segment_order", 0),
-            "segment_sales": getattr(seg, "segment_sales", None),
-            "segment_profit": getattr(seg, "segment_profit", None),
-            "unit_raw": _unit_raw,
-            "unit_multiplier": _unit_mult,
-            "raw_profit_label": getattr(seg, "raw_profit_label", ""),
-            "source": "backfill_v4_pdf",
-            "segment_name_norm": _normalize_segment_name_conservative(seg_name),
-            "extractor_route": f"v4_{getattr(seg, 'extraction_engine', 'pdf')}",
-            "source_doc_type": "earnings_summary",
-            "disclosure_date": filing.disclosure_date,
-            "tdnet_doc_id": fid,
-            "row_type": _classify_row_type(seg_name),
-        })
+                records.append({
+                    "ticker":           filing.ticker,
+                    "period":           ep_period,
+                    "quarter":          quarter,
+                    "segment_name":     seg_name,
+                    "segment_order":    getattr(seg, "segment_order", 0),
+                    "segment_sales":    getattr(seg, "segment_sales", None),
+                    "segment_profit":   getattr(seg, "segment_profit", None),
+                    "unit_raw":         _unit_raw,
+                    "unit_multiplier":  _unit_mult,
+                    "raw_profit_label": getattr(seg, "raw_profit_label", ""),
+                    "source":           "backfill_v4_pdf",
+                    "segment_name_norm": _normalize_segment_name_conservative(seg_name),
+                    "extractor_route":  f"v4_{getattr(seg, 'extraction_engine', 'pdf')}",
+                    "source_doc_type":  "earnings_summary",
+                    "disclosure_date":  filing.disclosure_date,
+                    "tdnet_doc_id":     fid,
+                    "row_type":         _classify_row_type(seg_name),
+                })
+    else:
+        # extracted_periods が空の場合は従来通り v4_result.segments を使う
+        for seg in v4_result.segments:
+            seg_name = getattr(seg, "segment_name", "") or ""
+            _unit_raw  = getattr(seg, "unit_raw", None) or _pdf_unit_raw
+            _unit_mult = getattr(seg, "unit_multiplier", None) or _pdf_unit_mult
+
+            if _unit_raw is None and _unit_mult is None:
+                logger.warning(
+                    "[SEG_UNIT_TRACE] unit missing: ticker=%s seg=%s sales=%s",
+                    filing.ticker, seg_name, getattr(seg, "segment_sales", None),
+                )
+            elif str(filing.ticker) in _TRACE_TICKERS:
+                logger.info(
+                    "[SEG_UNIT_TRACE] ticker=%s segment=%s unit_raw=%r "
+                    "unit_multiplier=%s sales_before=%s",
+                    filing.ticker, seg_name, _unit_raw, _unit_mult,
+                    getattr(seg, "segment_sales", None),
+                )
+
+            records.append({
+                "ticker":           filing.ticker,
+                "period":           period,
+                "quarter":          quarter,
+                "segment_name":     seg_name,
+                "segment_order":    getattr(seg, "segment_order", 0),
+                "segment_sales":    getattr(seg, "segment_sales", None),
+                "segment_profit":   getattr(seg, "segment_profit", None),
+                "unit_raw":         _unit_raw,
+                "unit_multiplier":  _unit_mult,
+                "raw_profit_label": getattr(seg, "raw_profit_label", ""),
+                "source":           "backfill_v4_pdf",
+                "segment_name_norm": _normalize_segment_name_conservative(seg_name),
+                "extractor_route":  f"v4_{getattr(seg, 'extraction_engine', 'pdf')}",
+                "source_doc_type":  "earnings_summary",
+                "disclosure_date":  filing.disclosure_date,
+                "tdnet_doc_id":     fid,
+                "row_type":         _classify_row_type(seg_name),
+            })
 
     if not records:
         return SourceCandidate(
@@ -461,6 +529,7 @@ def _try_pdf_source_v4(
         segment_records=records, validation=validation,
         rule_trace=getattr(v4_result, "rule_trace", []),
     )
+
 
 
 # ============================================================

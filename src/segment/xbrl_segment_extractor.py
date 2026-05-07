@@ -184,23 +184,29 @@ def _round_to_month_end(date_str: str) -> str:
     return f"{year:04d}-{month:02d}-{last_day:02d}"
 
 
-def _is_current_period(context_ref: str) -> bool:
-    """context が当期データかどうか判定。
+def _classify_period_type(context_ref: str) -> str:
+    """context_ref を "current" / "previous" / "unknown" に分類する。
 
-    当期パターン:
-    - CurrentYearDuration / CurrentYTDDuration  (通期/YTD)
-    - CurrentQuarterDuration                    (四半期)
-    - InterimDuration                           (半期)  ※ Prior1InterimDuration は前期
+    - "prior" を含む → "previous" (前期・前年同期)
+    - currentyear / currentytd / currentquarter / interimduration を含む → "current"
+    - それ以外 → "unknown"
     """
     ctx = context_ref.lower()
     if "prior" in ctx:
-        return False
-    return (
+        return "previous"
+    if (
         "currentyear" in ctx
         or "currentytd" in ctx
         or "currentquarter" in ctx
         or "interimduration" in ctx
-    )
+    ):
+        return "current"
+    return "unknown"
+
+
+def _is_current_period(context_ref: str) -> bool:
+    """context が当期データかどうか判定。後方互換のため残す。"""
+    return _classify_period_type(context_ref) == "current"
 
 
 def _is_duration_context(context_ref: str) -> bool:
@@ -371,32 +377,55 @@ def extract_segments_from_xbrl_zip(
                     continue
                 
                 # SegmentRawRow に変換
+                # _extract_ixbrl_segment_data の key は (member_name, period_type)
+                # period_type: "current" | "previous"
                 ticker = None
+
+                # ticker 抽出: 全タグから1件取れれば十分
+                for tag in soup.find_all("ix:nonfraction")[:20]:
+                    _ctx = tag.get("contextref", "")
+                    if _ctx:
+                        ticker = _extract_ticker_from_context(_ctx)
+                        if ticker:
+                            break
+
+                # previous rows 用に前期 period を計算
+                _prev_period: Optional[str] = None
+                if estimated_period and len(estimated_period) >= 4:
+                    try:
+                        _prev_year = int(estimated_period[:4]) - 1
+                        _prev_period = f"{_prev_year}{estimated_period[4:]}"
+                    except ValueError:
+                        _prev_period = None
+
                 for key, data in rows.items():
-                    member_name, ctx_ref = key
-                    
-                    if not ticker and ctx_ref:
-                        ticker = _extract_ticker_from_context(ctx_ref)
-                    
+                    member_name, period_type = key
+
                     raw_name = _camel_to_readable(member_name)
                     normalized = normalize_segment_name(raw_name)
                     special = classify_special_row(normalized or raw_name)
-                    
+
                     sales = data.get("sales")
                     profit = data.get("profit")
-                    
+
                     if sales is not None:
                         sales = _to_million_yen(sales, unit)
                     if profit is not None:
                         profit = _to_million_yen(profit, unit)
-                    
+
+                    # previous row は period を1年前にする
+                    if period_type == "previous" and _prev_period:
+                        row_period = _prev_period
+                    else:
+                        row_period = estimated_period or ""
+
                     row = SegmentRawRow(
                         source="xbrl",
                         source_document_id=basename,
                         doc_hash=doc_hash,
                         raw_ticker=ticker or "",
                         normalized_ticker=ticker or "",
-                        period=estimated_period or "",
+                        period=row_period,
                         quarter=estimated_quarter or "",
                         raw_segment_name=raw_name,
                         normalized_segment_name=normalized,
@@ -447,12 +476,16 @@ def _extract_ixbrl_segment_data(
 ) -> dict[tuple[str, str], dict]:
     """iXBRL タグからセグメント別の売上/利益を抽出。
 
+    当期 (current) と前期 (previous) の両方を収集する。
+    unknown context および Instant context は除外する。
+
     Returns:
-        {(member_name, context_ref): {"sales": int, "profit": int}}
+        {(member_name, period_type): {"sales": int, "profit": int}}
+        period_type は "current" | "previous"
     """
     sales_tags = ALL_SALES_TAGS
     profit_tags = ALL_PROFIT_TAGS
-    
+
     # 優先: 外部顧客への売上高 > その他売上タグ
     _PRIMARY_SALES_NAMES = {
         "jpcrp_cor:revenuesfromexternalcustomers",
@@ -460,38 +493,41 @@ def _extract_ixbrl_segment_data(
         "jpigp_cor:revenuefromexternalcustomers2ifrs",
         "jpigp_cor:salestoexternalcustomersifrs",
     }
-    
+
+    # 集約キー: (member, period_type) で current/previous を分離
     result: dict[tuple[str, str], dict] = {}
-    
+
     # ix:nonfraction タグを収集
     for tag in soup.find_all("ix:nonfraction"):
         name = (tag.get("name") or "").lower()
         ctx = tag.get("contextref", "")
         sign = tag.get("sign")
         text = tag.get_text(strip=True)
-        
-        # 当期 + Duration のみ
-        if not _is_current_period(ctx) or not _is_duration_context(ctx):
+
+        # unknown context と Instant は除外。current / previous は両方通す。
+        period_type = _classify_period_type(ctx)
+        if period_type == "unknown" or not _is_duration_context(ctx):
             continue
-        
+
         # セグメント member 抽出
         member = _extract_segment_member(ctx)
         if not member:
             continue
-        
-        key = (member, ctx)
+
+        # キーに period_type を含めることで current と previous を分離
+        key = (member, period_type)
         if key not in result:
             result[key] = {}
-        
+
         value = _parse_ixbrl_number(text, sign)
         if value is None:
             continue
-        
+
         # 会社固有 namespace を含む element の判定
         is_sales = name in sales_tags
         is_profit = name in profit_tags
         is_primary_sales = name in _PRIMARY_SALES_NAMES
-        
+
         if not is_sales and not is_profit:
             # 会社固有 namespace (tse-xxx:yyy) を suffix で判定
             local_name = name.split(":")[-1] if ":" in name else name
@@ -508,33 +544,18 @@ def _extract_ixbrl_segment_data(
                     is_primary_sales = True
             elif any(local_name.endswith(s) for s in _COMPANY_PROFIT_SUFFIXES):
                 is_profit = True
-        
+
         if is_sales:
             if is_primary_sales or "sales" not in result[key]:
                 result[key]["sales"] = value
         elif is_profit:
             if "profit" not in result[key]:
                 result[key]["profit"] = value
-    
-    # context_ref を正規化して member 単位に集約
-    aggregated: dict[tuple[str, str], dict] = {}
-    for (member, ctx), data in result.items():
-        if not data:
-            continue
-        # 同じ member は1つに
-        existing_key = None
-        for k in aggregated:
-            if k[0] == member:
-                existing_key = k
-                break
-        if existing_key:
-            # 既存データにマージ（sales/profit どちらかが欠損していれば補完）
-            for field in ("sales", "profit"):
-                if field in data and field not in aggregated[existing_key]:
-                    aggregated[existing_key][field] = data[field]
-        else:
-            aggregated[(member, ctx)] = dict(data)
-    
+
+    # (member, period_type) 単位に集約済みのためそのまま返す
+    aggregated: dict[tuple[str, str], dict] = {
+        k: v for k, v in result.items() if v
+    }
     return aggregated
 
 

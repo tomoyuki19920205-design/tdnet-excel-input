@@ -25,10 +25,108 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _PROJECT_ROOT)
 
 from src.segment.xbrl_segment_extractor import extract_segments_from_xbrl_zip
-from src.segment.normalize import classify_special_row
+from src.segment.normalize import (
+    classify_special_row,
+    normalize_segment_key,
+    resolve_segment_key_with_jp,
+    is_english_dominant,
+)
 
 logger = logging.getLogger("sync_seg")
 JST = timezone(timedelta(hours=9))
+
+
+# ============================================================
+# 過去EDINET日本語候補取得
+# ============================================================
+def get_jp_segment_names(
+    rest_url: str,
+    headers: dict,
+    ticker: str,
+    *,
+    target_period: str | None = None,
+    max_periods: int = 5,
+    limit: int = 200,
+) -> list[str]:
+    """canonical_segments から同一 ticker の過去EDINET日本語セグメント名を取得する。
+
+    設計方针:
+      - period 完全一致は必須にしない。
+        最新TDNET FYに対する同期 EDINETは未存在のため。
+      - target_period があれば period <= target_period の過去候補を取得。
+      - source = 'edinet_xbrl' を優先、なければ全 source から取得。
+      - period desc で新しい順、最大 max_periods 期にわたる重複排除済み日本語名を返す。
+      - ASCII比率 > 0.5 の行（英語優勢）は除外。
+
+    Args:
+        rest_url: Supabase REST URL
+        headers: 認証ヘッダー
+        ticker: 4桁銘柄コード
+        target_period: TDNET同期対象 YYYY-MM-DD。None の場合は制限なし。
+        max_periods: 参照する最大期数（デフォルト 5）
+        limit: Supabase リクエスト最大件数（デフォルト 200）
+
+    Returns:
+        日本語セグメント名のリスト（重複排除済み）
+    """
+    import requests as _req
+    try:
+        # source='edinet_xbrl' 先行、なければ全 source
+        for source_filter in ["edinet_xbrl", None]:
+            params: dict = {
+                "ticker": f"eq.{ticker}",
+                "select": "segment_name,period,quarter,source",
+                "order": "period.desc,quarter.desc",
+                "limit": str(limit),
+            }
+            if target_period:
+                params["period"] = f"lte.{target_period}"
+            if source_filter:
+                params["source"] = f"eq.{source_filter}"
+
+            r = _req.get(
+                f"{rest_url}/canonical_segments",
+                headers=headers,
+                params=params,
+                timeout=15,
+            )
+            rows = r.json() if r.status_code == 200 else []
+
+            # 日本語優勢（ASCII比率 <= 0.5）のみ重複排除して収集
+            seen_names: set[str] = set()
+            period_count: dict[str, int] = {}
+            result_names: list[str] = []
+            for row in rows:
+                seg = (row.get("segment_name") or "").strip()
+                period_val = row.get("period") or ""
+                if not seg or seg in seen_names:
+                    continue
+                alpha = sum(1 for c in seg if c.isascii() and c.isalpha())
+                if alpha / max(len(seg), 1) > 0.5:
+                    continue  # 英語優勢は除外
+                seen_names.add(seg)
+                cnt = period_count.get(period_val, 0)
+                if cnt == 0 and len(period_count) >= max_periods:
+                    continue  # max_periods 期履歴を超えたら打ち切り
+                period_count[period_val] = cnt + 1
+                result_names.append(seg)
+
+            if not result_names:
+                continue  # edinet_xbrl なし → 全 source で再試行
+
+            logger.debug(
+                f"[sync_seg] jp_candidates ticker={ticker}"
+                f" target_period={target_period} source={source_filter or 'any'}"
+                f" found={len(result_names)} names={result_names[:4]}"
+            )
+            return result_names
+
+        return []
+
+    except Exception as e:
+        logger.debug(f"[sync_seg] get_jp_segment_names error ticker={ticker}: {e}")
+        return []
+
 
 # ============================================================
 # canonical 条件 (conservative)
@@ -93,15 +191,86 @@ def _upsert_segment_raw(row, rest_url: str, headers: dict, dry_run: bool) -> str
         return "error"
 
 
-def _upsert_segment_canonical(row, rest_url: str, headers: dict, dry_run: bool) -> str:
-    """segment_canonical に upsert (PK: ticker, period, quarter, segment_name)。"""
+def _upsert_segment_canonical(
+    row,
+    rest_url: str,
+    headers: dict,
+    dry_run: bool,
+    *,
+    jp_segment_names: list[str] | None = None,
+    match_stats: dict | None = None,
+) -> str:
+    """segment_canonical に upsert (PK: ticker, period, quarter, segment_name)。
+
+    segment_key 決定ロジック:
+      - 英語値加（ASCII比率 > 0.5）かつ jp_segment_names があれば過去EDINETマッチングを試みる。
+        score >= 2 → マッチ日本語の segment_key
+        score < 2  → normalize_segment_key(en_name) でフォールバック
+      - 日本語値加または候補ゼロ: normalize_segment_key(segment_name)
+    """
     import requests
+    seg_name = row.normalized_segment_name or ""
+
+    # segment_key 決定
+    matched_jp = ""
+    best_score = 0
+    if jp_segment_names is not None and is_english_dominant(seg_name):
+        if jp_segment_names:
+            # EDINET 候補あり: マッチング実行
+            if match_stats is not None:
+                match_stats["jp_candidate_hit"] = match_stats.get("jp_candidate_hit", 0) + 1
+
+            seg_key, matched_jp, best_score = resolve_segment_key_with_jp(
+                seg_name, jp_segment_names
+            )
+
+            if matched_jp:
+                # score >= 2 マッチ成功
+                if match_stats is not None:
+                    match_stats["jp_match_success"] = match_stats.get("jp_match_success", 0) + 1
+                logger.debug(
+                    f"[sync_seg] jp_match ticker={row.normalized_ticker}"
+                    f" period={row.period} en={seg_name!r}"
+                    f" jp={matched_jp!r} score={best_score} key={seg_key!r}"
+                )
+            else:
+                # score < 2 または候補にマッチなし
+                if best_score > 0:
+                    if match_stats is not None:
+                        match_stats["jp_match_low_score"] = match_stats.get("jp_match_low_score", 0) + 1
+                    logger.debug(
+                        f"[sync_seg] jp_low_score ticker={row.normalized_ticker}"
+                        f" period={row.period} en={seg_name!r}"
+                        f" best_score={best_score} fallback_key={seg_key!r}"
+                    )
+                else:
+                    if match_stats is not None:
+                        match_stats["jp_match_fallback"] = match_stats.get("jp_match_fallback", 0) + 1
+                    logger.debug(
+                        f"[sync_seg] jp_no_match ticker={row.normalized_ticker}"
+                        f" period={row.period} en={seg_name!r} key={seg_key!r}"
+                    )
+        else:
+            # EDINET 候補ゼロ: フォールバック
+            if match_stats is not None:
+                match_stats["jp_candidate_empty"] = match_stats.get("jp_candidate_empty", 0) + 1
+                match_stats["jp_match_fallback"] = match_stats.get("jp_match_fallback", 0) + 1
+            seg_key = normalize_segment_key(seg_name)
+            logger.debug(
+                f"[sync_seg] jp_no_candidates ticker={row.normalized_ticker}"
+                f" period={row.period} en={seg_name!r} fallback_key={seg_key!r}"
+            )
+    else:
+        # 日本語セグメント: 直接 normalize
+        seg_key = normalize_segment_key(seg_name)
+
     # デプロイ仕様 DDL に準拠したカラムのみ
     payload = {
         "ticker": row.normalized_ticker,
         "period": row.period,
         "quarter": row.quarter,
-        "segment_name": row.normalized_segment_name,
+        "segment_name": seg_name,
+        "segment_key": seg_key,
         "sales": row.sales,
         "profit": row.profit,
         "source": row.source,
@@ -110,7 +279,7 @@ def _upsert_segment_canonical(row, rest_url: str, headers: dict, dry_run: bool) 
     }
     if dry_run:
         return "dry_run"
-    
+
     r = requests.post(
         f"{rest_url}/segment_canonical",
         json=payload,
@@ -443,6 +612,10 @@ def main(args: list[str] | None = None) -> int:
         "xbrl_cs_written": 0,
         "xbrl_cs_errors": 0,
     }
+    # JPマッチング統計
+    match_stats: dict = {}
+    # ticker 単位の日本語候補キャッシュ {ticker: list[str]}
+    jp_cache: dict[str, list[str]] = {}
 
     # canonical 通過済み xbrl 行を蓄積 (dual-write 用)
     _xbrl_canonical_rows: list = []
@@ -456,17 +629,36 @@ def main(args: list[str] | None = None) -> int:
         
         stats["zips_with_segments"] += 1
         ticker = rows[0].normalized_ticker if rows else "?"
-        
+        period = max((r.period for r in rows), default="") if rows else ""  # prior rows が先頭でも current period を使う
+
+        # JP 候補取得（ticker 単位キャッシュ）
+        # target_period 以前の過去EDINET候補を利用。period完全一致は要求しない。
+        if ticker not in jp_cache:
+            jp_names_fetched = get_jp_segment_names(
+                rest_url, headers, ticker, target_period=period
+            )
+            jp_cache[ticker] = jp_names_fetched
+            if jp_names_fetched:
+                logger.debug(
+                    f"[sync_seg] jp_cache ticker={ticker} target_period={period}"
+                    f" candidates={jp_names_fetched[:4]}"
+                )
+            else:
+                logger.debug(
+                    f"[sync_seg] jp_cache_empty ticker={ticker} target_period={period}"
+                )
+        jp_names = jp_cache[ticker]
+
         for row in rows:
             stats["xbrl_raw_total"] += 1
-            
+
             # raw upsert
             result = _upsert_segment_raw(row, rest_url, headers, dry_run)
             if result == "upserted":
                 stats["xbrl_raw_upserted"] += 1
             elif result == "error":
                 stats["xbrl_errors"] += 1
-            
+
             # canonical 判定
             ok, reason = _is_canonical_candidate(row)
             if not ok:
@@ -477,9 +669,13 @@ def main(args: list[str] | None = None) -> int:
                 else:
                     stats["xbrl_skipped_no_data"] += 1
                 continue
-            
+
             stats["xbrl_canonical_total"] += 1
-            result = _upsert_segment_canonical(row, rest_url, headers, dry_run)
+            result = _upsert_segment_canonical(
+                row, rest_url, headers, dry_run,
+                jp_segment_names=jp_names,
+                match_stats=match_stats,
+            )
             if result == "upserted":
                 stats["xbrl_canonical_upserted"] += 1
             elif result == "error":
@@ -579,6 +775,24 @@ def main(args: list[str] | None = None) -> int:
     else:
         print("  [SQLite excel_legacy]")
         print("    ** NOT SYNCED (--xbrl-only) **")
+
+    # JP マッチング統計
+    if match_stats:
+        print("  [JP Segment Matching]")
+        hit     = match_stats.get("jp_candidate_hit", 0)
+        empty   = match_stats.get("jp_candidate_empty", 0)
+        success = match_stats.get("jp_match_success", 0)
+        low     = match_stats.get("jp_match_low_score", 0)
+        fall    = match_stats.get("jp_match_fallback", 0)
+        total_en = success + low + fall
+        print(f"    jp_candidate_hit         : {hit}")
+        print(f"    jp_candidate_empty       : {empty}")
+        print(f"    jp_match_success         : {success}")
+        print(f"    jp_match_low_score       : {low}")
+        print(f"    jp_match_fallback        : {fall}")
+        if total_en > 0:
+            jp_match_rate = success / total_en * 100
+            print(f"    jp_match_rate            : {jp_match_rate:.1f}%")
 
     print()
     return 0
