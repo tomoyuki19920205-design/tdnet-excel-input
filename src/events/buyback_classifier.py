@@ -16,6 +16,90 @@ from .buyback_models import (
 )
 
 # ============================================================
+# buyback_event_subtype 判定
+# 値: "new_program" | "tostnet" | "ignore"
+# ============================================================
+
+# ToSTNeT系パターン（タイトルに含まれる場合は tostnet）
+_TOSTNET_PATTERNS = [
+    "ToSTNeT",
+    "tostnet",
+    "立会外買付取引",
+]
+
+# new_program 確定パターン（取得枠決議系）
+_NEW_PROGRAM_PATTERNS = [
+    "取得に係る事項の決定",
+    "取得に係る事項",
+    "取得枠設定",
+    "取得枠の設定",
+    "自己株式取得に係る事項",
+    "自己株式の取得及び自己株式の消却",
+    "自己株式取得に係る事項の決定及び自己株式の消却",
+    "自己株式の取得の決定",
+]
+
+# 強除外パターン（タイトルにあれば ignore）
+# ※ ToSTNeT が含まれる場合は除外しない（tostnet 判定優先）
+_IGNORE_TITLE_PATTERNS = [
+    "取得状況",
+    "取得結果",
+    "取得終了",
+    "消却完了",
+    "自己株式の処分",
+    "自己株式処分",
+    "譲渡制限付株式",
+    "ストックオプション",
+    "新株予約権",
+    "役職員向け株式報酬",
+    "持株会",
+    "決算短信",
+    "決算説明資料",
+    "補足資料",
+    "四半期報告",
+]
+
+
+def classify_buyback_subtype(title: str) -> str:
+    """タイトルから自社株買い通知サブタイプを判定する。
+
+    Parameters
+    ----------
+    title : str
+        開示タイトル
+
+    Returns
+    -------
+    str
+        "new_program" | "tostnet" | "ignore"
+    """
+    if not title:
+        return "ignore"
+
+    # 1. ToSTNeT 判定（最優先 — 取得状況/結果/終了でも ToSTNeT なら通知対象）
+    for pat in _TOSTNET_PATTERNS:
+        if pat.lower() in title.lower():
+            return "tostnet"
+
+    # 2. 強除外パターン（ToSTNeT ではない場合）
+    for pat in _IGNORE_TITLE_PATTERNS:
+        if pat in title:
+            return "ignore"
+
+    # 3. new_program 判定
+    for pat in _NEW_PROGRAM_PATTERNS:
+        if pat in title:
+            return "new_program"
+
+    # 4. 「自己株式取得」を含む汎用パターン（取得方針決定等）
+    #    ただし「取得状況/結果/終了」は既に除外済み
+    if "自己株式取得" in title or "自己株式の取得" in title:
+        return "new_program"
+
+    # 5. 判定できない場合は ignore
+    return "ignore"
+
+# ============================================================
 # 強除外パターン（これが含まれると buyback ではない）
 # ============================================================
 _STRONG_EXCLUDE = [

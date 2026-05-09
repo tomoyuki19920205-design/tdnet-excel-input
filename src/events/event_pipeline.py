@@ -23,9 +23,10 @@ from .common_models import (
 from .common_normalizers import compute_fingerprint, compute_text_hash
 from .common_storage import ensure_events_table, upsert_event, get_unnotified_events, mark_notified
 from .common_notify import send_event_discord
+from .notify_rules import should_notify_event
 
 # classifiers
-from .buyback_classifier import classify_buyback
+from .buyback_classifier import classify_buyback, classify_buyback_subtype
 from .forecast_classifier import classify_forecast
 from .dividend_classifier import classify_dividend
 
@@ -397,35 +398,61 @@ def _process_single_document(
     # ---- buyback ----
     if EventType.BUYBACK in allowed:
         try:
-            cls_result = classify_buyback(title, text[:2000])
-            if cls_result.is_buyback_related and cls_result.event_type_candidate:
-                event_type_raw = cls_result.event_type_candidate
-                subtype = _BUYBACK_SUBTYPE_MAP.get(event_type_raw, event_type_raw)
-                buyback_ev = extract_buyback_event(
-                    text=text,
-                    event_type=event_type_raw,
-                    ticker=doc.ticker,
-                    disclosure_date=doc.disclosure_datetime,
-                    title=title,
-                    source_doc_id=doc.doc_id,
-                    source_url=doc.doc_url,
+            # [A] 入口ガード: タイトルから buyback_event_subtype を判定
+            #     new_program / tostnet のみ処理。ignore は完全スキップ。
+            buyback_event_subtype = classify_buyback_subtype(title)
+            logger.info(
+                f"[EVENT] buyback_subtype={buyback_event_subtype!r} "
+                f"ticker={doc.ticker} title={title[:60]!r}"
+            )
+            if buyback_event_subtype == "ignore":
+                logger.debug(
+                    f"[EVENT] buyback subtype-guard skip (ignore): "
+                    f"ticker={doc.ticker} title={title[:60]!r}"
                 )
-                record = _buyback_to_event_record(doc, buyback_ev, subtype)
-                if dry_run:
-                    results.append({
-                        "event_type": EventType.BUYBACK, "subtype": subtype,
-                        "action": "dry_run", "event_id": record.event_id,
-                        "summary": record.summary_text,
-                    })
+            else:
+                # [B] 既存の classify_buyback で event_type を推定
+                cls_result = classify_buyback(title, text[:2000])
+                # [C] 中間ガード: confidence < 0.50 は除外
+                _cls_conf = getattr(cls_result, "confidence", 0.0) or 0.0
+                if cls_result.is_buyback_related and cls_result.event_type_candidate \
+                        and _cls_conf >= 0.50:
+                    event_type_raw = cls_result.event_type_candidate
+                    # サブタイプは buyback_event_subtype (new_program/tostnet) を優先
+                    subtype = buyback_event_subtype
+                    buyback_ev = extract_buyback_event(
+                        text=text,
+                        event_type=event_type_raw,
+                        ticker=doc.ticker,
+                        disclosure_date=doc.disclosure_datetime,
+                        title=title,
+                        source_doc_id=doc.doc_id,
+                        source_url=doc.doc_url,
+                    )
+                    record = _buyback_to_event_record(doc, buyback_ev, subtype)
+                    if dry_run:
+                        results.append({
+                            "event_type": EventType.BUYBACK, "subtype": subtype,
+                            "action": "dry_run", "event_id": record.event_id,
+                            "summary": record.summary_text,
+                            "buyback_event_subtype": buyback_event_subtype,
+                        })
+                    else:
+                        action, eid = upsert_event(conn, record)
+                        results.append({
+                            "event_type": EventType.BUYBACK, "subtype": subtype,
+                            "action": action, "event_id": eid,
+                            "buyback_event_subtype": buyback_event_subtype,
+                        })
                 else:
-                    action, eid = upsert_event(conn, record)
-                    results.append({
-                        "event_type": EventType.BUYBACK, "subtype": subtype,
-                        "action": action, "event_id": eid,
-                    })
+                    logger.debug(
+                        f"[EVENT] buyback conf-guard skip: ticker={doc.ticker} "
+                        f"conf={_cls_conf:.2f} related={cls_result.is_buyback_related}"
+                    )
         except Exception as e:
             logger.warning(f"[EVENT] buyback failed doc_id={doc.doc_id[:16]} ticker={doc.ticker}: {e}")
             results.append({"event_type": EventType.BUYBACK, "action": "error", "error": str(e)})
+
 
     # ---- forecast_revision ----
     if EventType.FORECAST_REVISION in allowed:
@@ -587,6 +614,12 @@ def process_documents(
             try:
                 unnotified = get_unnotified_events(conn)
                 for ev in unnotified:
+                    if not should_notify_event(ev):
+                        logger.info(
+                            "[EVENT_NOTIFY] filtered event_id=%s event_type=%s ticker=%s",
+                            ev.event_id[:12], ev.event_type, ev.ticker,
+                        )
+                        continue
                     logger.info(f"notify_start_at: {datetime.now(timezone(timedelta(hours=9))).isoformat()}")
                     if send_event_discord(webhook_url, ev, dry_run=False):
                         mark_notified(conn, ev.event_id)
@@ -594,10 +627,16 @@ def process_documents(
             except Exception as e:
                 logger.error(f"[EVENT] notification failed: {e}")
         elif dry_run and conn:
-            # dry-run: 検知されたイベントをログ出力
+            # dry-run: 検知されたイベントをログ出力 (should_notify_event=False は表示のみスキップ)
             try:
                 unnotified = get_unnotified_events(conn)
                 for ev in unnotified:
+                    if not should_notify_event(ev):
+                        logger.info(
+                            "[EVENT_NOTIFY] dry-run filtered event_id=%s event_type=%s ticker=%s",
+                            ev.event_id[:12], ev.event_type, ev.ticker,
+                        )
+                        continue
                     send_event_discord("", ev, dry_run=True)
                     result.notified += 1
             except Exception as e:

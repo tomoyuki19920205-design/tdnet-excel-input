@@ -192,6 +192,7 @@ def _run_event_notify(dry_run: bool) -> StepResult:
     try:
         from src.events.common_storage import ensure_events_table, get_unnotified_events, mark_notified
         from src.events.common_notify import send_event_discord
+        from src.events.notify_rules import should_notify_event  # [C] 出口ガード
         import sqlite3
 
         db_path = os.path.join(_PROJECT_ROOT, "decision_db.db")
@@ -203,14 +204,23 @@ def _run_event_notify(dry_run: bool) -> StepResult:
             ensure_events_table(conn)
             events = get_unnotified_events(conn)
             sent = 0
+            skipped = 0
             for ev in events:
+                # [C] 出口ガード: notify_rules で通知対象外は送信しない
+                if not should_notify_event(ev):
+                    skipped += 1
+                    logger.debug(
+                        f"[EVENT] notify-guard skip: event_type={ev.event_type} "
+                        f"ticker={ev.ticker} event_id={ev.event_id[:12]}"
+                    )
+                    continue
                 ok = send_event_discord(webhook_url, ev, dry_run=dry_run)
                 if ok and not dry_run:
                     mark_notified(conn, ev.event_id)
                     sent += 1
                 elif ok:
                     sent += 1
-            step.detail = {"total_unnotified": len(events), "sent": sent}
+            step.detail = {"total_unnotified": len(events), "sent": sent, "skipped_by_rules": skipped}
             step.status = "success"
         finally:
             conn.close()
@@ -220,6 +230,7 @@ def _run_event_notify(dry_run: bool) -> StepResult:
         logger.warning(f"[PIPELINE] events WARNING: {e}")
     step.elapsed = time.monotonic() - st
     return step
+
 
 
 # ============================================================

@@ -84,8 +84,112 @@ def _format_eps_change(prev: float | None, revised: float | None) -> str | None:
     return f"EPS: {prev_str}→{rev_str}({sign}{pct:.1f}%)"
 
 
+def _fmt_amount_yen(val_million: float | None) -> str:
+    """百万円 → 円単位整数表示（例: 2,000,000,000円）"""
+    if val_million is None:
+        return "---"
+    if abs(val_million) >= 1_000_000_000:
+        return "---"
+    yen = int(val_million * 1_000_000)
+    return f"{yen:,}円"
+
+
+def _fmt_shares_exact(val: int | None) -> str:
+    """株数 → カンマ区切り株表示（例: 1,000,000株）"""
+    if val is None:
+        return "---"
+    return f"{val:,}株"
+
+
+def _fmt_date_ja(date_str: str | None) -> str:
+    """YYYY-MM-DD → YYYY年M月D日"""
+    if not date_str:
+        return "---"
+    try:
+        parts = date_str.split("-")
+        if len(parts) == 3:
+            y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
+            return f"{y}年{m}月{d}日"
+    except Exception:
+        pass
+    return date_str
+
+
+def _format_buyback_new_program(payload: dict, disp: str) -> str:
+    """NEW_PROGRAM 通知文（取得枠決議）"""
+    lines = [f"📊【自社株買い - 取得枠決議】{disp}"]
+
+    shares = payload.get("shares_limit")
+    if shares is not None:
+        lines.append(f"株数上限: {_fmt_shares_exact(shares)}")
+
+    amt = payload.get("amount_limit_million_yen")
+    if amt is not None:
+        lines.append(f"金額上限: {_fmt_amount_yen(amt)}")
+
+    ratio = payload.get("ratio_to_outstanding")
+    if ratio is not None:
+        lines.append(f"割合: {ratio:.2f}%")
+
+    start = payload.get("start_date")
+    end = payload.get("end_date")
+    if start and end:
+        lines.append(f"取得期間: {_fmt_date_ja(start)}〜{_fmt_date_ja(end)}")
+    elif start:
+        lines.append(f"取得開始: {_fmt_date_ja(start)}")
+
+    method = payload.get("acquisition_method")
+    if method:
+        method_ja = {
+            "market_purchase": "市場買付",
+            "tostnet": "ToSTNeT",
+            "off_auction": "立会外取引",
+        }.get(method, method)
+        lines.append(f"取得方法: {method_ja}")
+
+    cancelled = payload.get("shares_cancelled")
+    if cancelled is not None:
+        lines.append(f"消却: {_fmt_shares_exact(cancelled)}")
+
+    return "\n".join(lines)
+
+
+def _format_buyback_tostnet(payload: dict, disp: str) -> str:
+    """TOSTNET 通知文（立会外買付取引）"""
+    lines = [f"📊【自社株買い - ToSTNeT】{disp}"]
+
+    shares = payload.get("shares_limit")
+    if shares is not None:
+        lines.append(f"株数上限: {_fmt_shares_exact(shares)}")
+
+    amt = payload.get("amount_limit_million_yen")
+    if amt is not None:
+        lines.append(f"金額上限: {_fmt_amount_yen(amt)}")
+
+    ratio = payload.get("ratio_to_outstanding")
+    if ratio is not None:
+        lines.append(f"割合: {ratio:.2f}%")
+
+    start = payload.get("start_date")
+    if start:
+        lines.append(f"買付日時: {_fmt_date_ja(start)}")
+
+    # ToSTNeT は単価情報があれば表示（amount / shares から算出）
+    # 現在 BuybackEvent に price フィールドがないため、
+    # extracted_json の raw_amount_text から価格を参照する代わりに
+    # amount / shares で推算（あれば表示）
+    if shares and amt and shares > 0:
+        price_per_share = int(amt * 1_000_000 / shares)
+        lines.append(f"買付価格(概算): {price_per_share:,}円")
+
+    return "\n".join(lines)
+
+
 def format_buyback_msg(event: EventRecord) -> str:
-    """自社株買いイベントの通知メッセージ（1行コンパクト形式）"""
+    """自社株買いイベントの通知メッセージ
+
+    subtype が new_program / tostnet に応じて別フォーマットを使用。
+    """
     payload = {}
     if event.extracted_payload_json:
         try:
@@ -94,32 +198,15 @@ def format_buyback_msg(event: EventRecord) -> str:
             pass
 
     disp = f"{event.company_name}（{event.ticker}）" if event.company_name else event.ticker
-    subtype_ja = {
-        "resolution": "決議", "completion": "完了", "result": "結果",
-        "cancellation": "消却", "status": "状況",
-    }.get(event.subtype, event.subtype)
+    subtype = event.subtype or ""
 
-    ratio = payload.get("ratio_to_outstanding")
-    fire = ""
-    if ratio is not None and ratio >= 8.0:
-        fire = "🔥🔥 "
-    elif ratio is not None and ratio >= 4.0:
-        fire = "🔥 "
+    if subtype == "tostnet":
+        body = _format_buyback_tostnet(payload, disp)
+    else:
+        # new_program またはその他
+        body = _format_buyback_new_program(payload, disp)
 
-    # 1行: ヘッダー + 発行済% + 金額 + 期間
-    parts = [f"{fire}📊【自社株買い - {subtype_ja}】{disp}"]
-
-    if ratio is not None:
-        parts.append(f"発行済{ratio:.1f}%")
-    amount_limit = payload.get("amount_limit_million_yen")
-    if amount_limit:
-        parts.append(f"{_fmt_amount_billion(amount_limit)}")
-    start_date = payload.get("start_date")
-    end_date = payload.get("end_date")
-    if start_date and end_date:
-        parts.append(f"{start_date}~{end_date}")
-
-    return _truncate("\u3000\u3000".join(parts)) + _TAIL
+    return _truncate(body) + _TAIL
 
 
 def format_forecast_msg(event: EventRecord) -> str:
@@ -235,7 +322,7 @@ def format_dividend_msg(event: EventRecord) -> str:
 
     # 配当額修正行: {区分}配当: {前回}円→{今回}円({増減率})
     if rev is not None:
-        basis_label = basis if basis else "配当"
+        basis_label = basis if basis else ""
         prev_str = _fmt_div_amount(prev) if prev is not None else "---"
 
         # 増減率の算出

@@ -54,15 +54,89 @@ def should_notify_event(event: EventRecord) -> bool:
 
 
 def _should_notify_buyback(event: EventRecord) -> bool:
-    """自社株買い: ratio_to_outstanding >= 4.0% のみ通知"""
+    """自社株買い通知判定（最終防衛線）
+
+    [D-0] subtype ガード: new_program または tostnet のみ通知。
+          それ以外（resolution/status/result/cancellation 等の旧 subtype）は
+          classify_buyback_subtype() で "ignore" になったものが到達しないはずだが
+          万一到達しても遮断する。
+
+    [D-1] extraction_confidence >= 0.50
+
+    [D-2] new_program:
+          株数上限 / 金額上限 / 比率 / 取得期間 のうち 2項目以上取れていること
+    [D-3] tostnet:
+          (株数上限 or 金額上限) かつ 買付日(start_date) が取れていること
+    """
     payload = _get_payload(event)
-    ratio = payload.get("ratio_to_outstanding")
-    if ratio is None:
+
+    # [D-0] subtype ガード
+    subtype = event.subtype or ""
+    if subtype not in ("new_program", "tostnet"):
+        logger.debug(
+            f"[NOTIFY] buyback subtype-guard blocked: "
+            f"subtype={subtype!r} ticker={event.ticker}"
+        )
         return False
+
+    # [D-1] confidence ガード
+    conf = payload.get("extraction_confidence")
     try:
-        return float(ratio) >= 4.0
+        if conf is None or float(conf) < 0.50:
+            return False
     except (ValueError, TypeError):
         return False
+
+    # [D-1.5] 発行済株式数比 >= 4.0% ガード (new_program / tostnet 共通)
+    #   ratio_to_outstanding: 既存 BuybackEvent フィールド（% 単位）
+    #   None の場合も通知しない（PDF未記載 & 補完なし）
+    _ratio = payload.get("ratio_to_outstanding")
+    try:
+        _ratio_f = float(_ratio) if _ratio is not None else None
+    except (ValueError, TypeError):
+        _ratio_f = None
+    if _ratio_f is None or _ratio_f < 4.0:
+        logger.debug(
+            f"[NOTIFY] buyback ratio-guard blocked: "
+            f"ratio={_ratio_f} subtype={subtype} ticker={event.ticker}"
+        )
+        return False
+
+    if subtype == "new_program":
+        # [D-2] new_program: 株数上限/金額上限/比率/期間 のうち 2項目以上
+        _NP_FIELDS = (
+            "shares_limit",
+            "amount_limit_million_yen",
+            "ratio_to_outstanding",
+            "start_date",
+            "end_date",
+        )
+        filled = sum(1 for f in _NP_FIELDS if payload.get(f) is not None)
+        if filled < 2:
+            logger.debug(
+                f"[NOTIFY] new_program field-guard blocked: "
+                f"filled={filled} ticker={event.ticker}"
+            )
+            return False
+        return True
+
+    elif subtype == "tostnet":
+        # [D-3] tostnet: (株数 or 金額) + 買付日
+        has_amount = (
+            payload.get("shares_limit") is not None
+            or payload.get("amount_limit_million_yen") is not None
+        )
+        has_date = payload.get("start_date") is not None
+        if not (has_amount and has_date):
+            logger.debug(
+                f"[NOTIFY] tostnet field-guard blocked: "
+                f"has_amount={has_amount} has_date={has_date} ticker={event.ticker}"
+            )
+            return False
+        return True
+
+    return False
+
 
 
 def _should_notify_forecast(event: EventRecord) -> bool:
