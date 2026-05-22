@@ -118,6 +118,7 @@ _SEG_HEADER_CATEGORY_EXCLUDE: frozenset[str] = frozenset([
     "計算書計上額",
     "財務諸表計上額",
     "セグメント間",
+    "連結財務諸表",
 ])
 
 # Phase 6: 売上行 優先キーワード（最高優先）
@@ -2510,8 +2511,8 @@ def _run_v4_inner(
     ticker = log.get("ticker", "")
     # 期間別かつ成功ブロック数（複数 unknown の判別用）
     period_counts: dict[str, int] = {}   # {"previous": 1, "current": 0, "unknown": 1, ...}
-    # unknown ブロック全件を記録 (block_id, PeriodResultV4) — fill2 用
-    unknown_blocks_list: list[tuple[str, PeriodResultV4]] = []
+    # unknown ブロック全件を記録 (block_id, PeriodResultV4, page_period_labels) — fill2/fill3 用
+    unknown_blocks_list: list[tuple] = []
 
     # ── 単一セグメント省略スキャン（candidate_pages 確定直後・表ループ前） ──
     # candidate_pages の前後1ページを含めてスキャンし、省略表記が見つかれば即打ち切り
@@ -2823,7 +2824,8 @@ def _run_v4_inner(
                 period_counts[period_type] = period_counts.get(period_type, 0) + 1
                 if period_type == "unknown":
                     _uid = f"pg{page_idx + 1}_tbl{tbl_idx}_blk{block_idx}"
-                    unknown_blocks_list.append((_uid, pr))
+                    # page_period_labels をスナップショットとして一緒に保存
+                    unknown_blocks_list.append((_uid, pr, list(page_period_labels)))
 
     # ------------------------------------------------------------------
     # 単独 unknown 補完後処理（最小安全正規化）
@@ -2889,7 +2891,7 @@ def _run_v4_inner(
             nums = _re.findall(r'\d+', uid)
             return tuple(int(n) for n in nums) if len(nums) >= 3 else (0, 0, 0)
 
-        (uid_a, blk_a), (uid_b, blk_b) = sorted(
+        (uid_a, blk_a, *_), (uid_b, blk_b, *_) = sorted(
             unknown_blocks_list, key=lambda x: _blk_sort_key(x[0])
         )
         segs_a = {s.segment_name for s in blk_a.segments}
@@ -2934,36 +2936,94 @@ def _run_v4_inner(
             )
 
     # ------------------------------------------------------------------
-    # fill3: 完全単独 unknown (prev=0, curr=0, unk=1) → current に補完
-    #        「どちらの期間か不明だが抽出は正常」なブロックを当期として扱う
-    #        安全条件: seg >= 2 のみ
+    # fill3: 完全単独 unknown (prev=0, curr=0, unk=1)
+    #        → period_label / page_period_labels から期間を推定して分類。
+    #          "previous" と判明した場合、または不明な場合は current に昇格しない。
+    #          "current" と判明した場合のみ昇格する。
     # ------------------------------------------------------------------
     _n_prev3 = period_counts.get("previous", 0)
     _n_curr3 = period_counts.get("current",  0)
     _n_unk3  = period_counts.get("unknown",   0)
 
     if _n_prev3 == 0 and _n_curr3 == 0 and _n_unk3 == 1 and unknown_blocks_list:
-        _uid3, _blk3 = unknown_blocks_list[0]
-        _seg3 = len(_blk3.segments)
-        if _seg3 >= 2:
-            _blk3.period_type = "current"
-            period_best.pop("unknown", None)
-            period_best["current"] = _blk3
-            logger.info(
-                "[v4-period-fill3] ticker=%s fill=current "
-                "reason=single_unknown_only_block "
-                "prev=%d curr=%d unk=%d seg_count=%d block=%s",
-                ticker, _n_prev3, _n_curr3, _n_unk3, _seg3, _uid3,
-            )
-            trace.append(
-                f"[v4-period-fill3] fill=current block={_uid3} seg={_seg3}"
-            )
-        else:
+        _uid3_entry = unknown_blocks_list[0]
+        _uid3  = _uid3_entry[0]
+        _blk3  = _uid3_entry[1]
+        _ppl3: list[tuple[str, str]] = _uid3_entry[2] if len(_uid3_entry) > 2 else []
+        _seg3  = len(_blk3.segments)
+
+        if _seg3 < 2:
             logger.info(
                 "[v4-period-fill3-skip] ticker=%s reason=segment_count_too_small "
                 "prev=%d curr=%d unk=%d seg_count=%d",
                 ticker, _n_prev3, _n_curr3, _n_unk3, _seg3,
             )
+        else:
+            # ── 期間推定: period_label → page_period_labels の順で判断 ──
+            _fill3_inferred: str = "unknown"  # "current" | "previous" | "unknown"
+            _fill3_evidence: str = ""
+
+            # 1) PeriodResultV4.period_label に「前/当...」があれば直接判定
+            _pl3 = getattr(_blk3, "period_label", "") or ""
+            if _pl3:
+                from src.analysis.segment_detection_v4 import _classify_period_type as _cpt3
+                _inferred_from_label = _cpt3(_pl3)
+                if _inferred_from_label != "unknown":
+                    _fill3_inferred = _inferred_from_label
+                    _fill3_evidence = f"period_label:{_pl3[:40]}"
+
+            # 2) page_period_labels から推定
+            if _fill3_inferred == "unknown" and _ppl3:
+                _ppl3_types = {pt for pt, _ in _ppl3}
+                if "previous" in _ppl3_types and "current" not in _ppl3_types:
+                    _fill3_inferred = "previous"
+                    _fill3_evidence = f"page_text:only_previous labels={_ppl3[:2]}"
+                elif "current" in _ppl3_types and "previous" not in _ppl3_types:
+                    _fill3_inferred = "current"
+                    _fill3_evidence = f"page_text:only_current labels={_ppl3[:2]}"
+                # 両方または不明 → unknown のまま
+
+            # ── 昇格判定 ──
+            if _fill3_inferred == "current":
+                # current と確定できた場合のみ昇格
+                _blk3.period_type = "current"
+                period_best.pop("unknown", None)
+                period_best["current"] = _blk3
+                logger.info(
+                    "[v4-period-fill3] ticker=%s fill=current "
+                    "reason=single_unknown_inferred_current "
+                    "prev=%d curr=%d unk=%d seg_count=%d block=%s evidence=%s",
+                    ticker, _n_prev3, _n_curr3, _n_unk3, _seg3, _uid3, _fill3_evidence,
+                )
+                trace.append(
+                    f"[v4-period-fill3] fill=current block={_uid3} seg={_seg3} "
+                    f"evidence={_fill3_evidence}"
+                )
+            elif _fill3_inferred == "previous":
+                # previous と判明 → current 昇格禁止、previous として登録
+                _blk3.period_type = "previous"
+                period_best.pop("unknown", None)
+                period_best["previous"] = _blk3
+                logger.info(
+                    "[v4-period-fill3-skip] ticker=%s reason=inferred_previous_not_current "
+                    "prev=%d curr=%d unk=%d seg_count=%d block=%s evidence=%s",
+                    ticker, _n_prev3, _n_curr3, _n_unk3, _seg3, _uid3, _fill3_evidence,
+                )
+                trace.append(
+                    f"[v4-period-fill3-skip] block={_uid3} inferred=previous "
+                    f"evidence={_fill3_evidence}"
+                )
+            else:
+                # 期間不明 → current 昇格禁止、unknown のまま放置
+                logger.info(
+                    "[v4-period-fill3-skip] ticker=%s reason=period_unknown_no_evidence "
+                    "prev=%d curr=%d unk=%d seg_count=%d block=%s",
+                    ticker, _n_prev3, _n_curr3, _n_unk3, _seg3, _uid3,
+                )
+                trace.append(
+                    f"[v4-period-fill3-skip] block={_uid3} inferred=unknown "
+                    f"page_labels={_ppl3[:2]}"
+                )
 
     # ------------------------------------------------------------------
     # 最終結果組立

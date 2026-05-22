@@ -219,3 +219,384 @@ class TestSummaryMode:
         opts = parser.parse_args(["--apply", "--xbrl-only"])
         sync_mode = "XBRL + SQLite" if not opts.xbrl_only else "XBRL ONLY"
         assert sync_mode == "XBRL ONLY"
+
+
+# ============================================================
+# 再発防止テスト: backfill_v4_pdf source 引き継ぎ
+# ============================================================
+# 問題の経緯:
+#   sync_segments.py の canonical dual-write で source="excel_legacy" が
+#   ハードコードされており、SQLite の data_source='backfill_v4_pdf' が
+#   Supabase canonical_segments では source='excel_legacy' (priority=5) に
+#   格下げされ、xbrl:Other (priority=1) に敗北していた。
+#
+# 修正内容:
+#   sync_sqlite_segments() の canonical dual-write で
+#   source = rdict.get("data_source") or "excel_legacy" を使うよう変更。
+#
+# このテストはその修正が正しく動作することを保証する。
+# ============================================================
+
+import sqlite3
+import sys
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
+from unittest.mock import patch, MagicMock, call
+
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+
+
+def _create_segment_db_with_datasource(path: str, rows: list[dict]) -> None:
+    """指定された data_source を持つ segment_financials DB を作成。"""
+    JST = timezone(timedelta(hours=9))
+    now_iso = datetime.now(JST).isoformat()
+
+    conn = sqlite3.connect(path)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS segment_financials (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_code TEXT NOT NULL,
+            fiscal_year_end TEXT NOT NULL,
+            quarter TEXT NOT NULL,
+            segment_name TEXT NOT NULL,
+            segment_order INTEGER NOT NULL DEFAULT 0,
+            segment_sales REAL,
+            segment_profit REAL,
+            data_source TEXT,
+            tdnet_doc_id TEXT,
+            updated_at TEXT,
+            UNIQUE(company_code, fiscal_year_end, quarter, segment_name)
+        )
+    """)
+    for r in rows:
+        conn.execute(
+            "INSERT OR IGNORE INTO segment_financials "
+            "(company_code, fiscal_year_end, quarter, segment_name, segment_order, "
+            "segment_sales, segment_profit, data_source, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                r["company_code"], r["fiscal_year_end"], r["quarter"],
+                r["segment_name"], r.get("segment_order", 0),
+                r.get("segment_sales", 1000.0), r.get("segment_profit", 100.0),
+                r.get("data_source"),
+                r.get("updated_at", now_iso),
+            ),
+        )
+    conn.commit()
+    conn.close()
+
+
+_MOCK_CANONICAL_CONFIG = {
+    "url": "http://test",
+    "key": "test-service-role-key",
+    "rest_url": "http://test/rest/v1",
+    "anon_key": "test-service-role-key",
+    "headers": {
+        "apikey": "test-service-role-key",
+        "Authorization": "Bearer test-service-role-key",
+        "Content-Type": "application/json",
+    },
+}
+
+
+class TestBackfillV4PdfSourcePassthrough:
+    """backfill_v4_pdf の data_source が canonical dual-write で
+    正しく source='backfill_v4_pdf' として渡されることを確認する再発防止テスト。"""
+
+    def test_backfill_v4_pdf_source_not_excel_legacy(self, tmp_path):
+        """data_source='backfill_v4_pdf' の行が canonical に
+        source='excel_legacy' ではなく source='backfill_v4_pdf' で渡されること。"""
+        db_path = str(tmp_path / "test.db")
+        _create_segment_db_with_datasource(db_path, [
+            {"company_code": "8918", "fiscal_year_end": "2026-02-28",
+             "quarter": "FY", "segment_name": "不動産事業",
+             "segment_sales": 5061.0, "segment_profit": 1491.0,
+             "data_source": "backfill_v4_pdf"},
+            {"company_code": "8918", "fiscal_year_end": "2026-02-28",
+             "quarter": "FY", "segment_name": "再生可能エネルギー関連投資",
+             "segment_sales": 19.0, "segment_profit": -135.0,
+             "data_source": "backfill_v4_pdf"},
+            {"company_code": "8918", "fiscal_year_end": "2026-02-28",
+             "quarter": "FY", "segment_name": "その他（注）１",
+             "segment_sales": 10.0, "segment_profit": -83.0,
+             "data_source": "backfill_v4_pdf"},
+        ])
+
+        captured_calls: list[dict] = []
+
+        def _mock_write_canonical(**kwargs):
+            captured_calls.append(kwargs)
+            return {"written": len(kwargs.get("segments", [])) * 2, "skipped": 0, "errors": 0}
+
+        with patch("lib.pipeline.canonical_writer.write_segments_canonical", side_effect=_mock_write_canonical), \
+             patch("lib.pipeline.db.load_env"), \
+             patch("lib.pipeline.db.get_supabase_write_config",
+                   return_value=_MOCK_CANONICAL_CONFIG), \
+             patch("tools.sync_segments.requests") as mock_req:
+
+            # requests.get/delete のモック（xbrl cleanup 用）
+            mock_resp = MagicMock()
+            mock_resp.ok = True
+            mock_resp.json.return_value = []  # xbrl rows なし
+            mock_req.get.return_value = mock_resp
+            mock_req.delete.return_value = mock_resp
+
+            from tools.sync_segments import sync_sqlite_segments
+            rest_url = "http://test/rest/v1"
+            headers = {"apikey": "test", "Authorization": "Bearer test"}
+
+            # segment_canonical への push もモック
+            mock_req.post.return_value = MagicMock(status_code=201)
+
+            stats = sync_sqlite_segments(
+                db_path=db_path, rest_url=rest_url, headers=headers, dry_run=False,
+            )
+
+        # write_segments_canonical が呼ばれたことを確認
+        assert len(captured_calls) > 0, "write_segments_canonical should have been called"
+
+        # source が必ず 'backfill_v4_pdf' であること（'excel_legacy' ではない）
+        for c in captured_calls:
+            src = c.get("source", "")
+            assert src == "backfill_v4_pdf", (
+                f"source must be 'backfill_v4_pdf', got '{src}'. "
+                f"Regression: data_source is being overwritten with 'excel_legacy'."
+            )
+
+    def test_excel_legacy_source_remains_excel_legacy(self, tmp_path):
+        """data_source='excel_legacy' の行は source='excel_legacy' のまま渡されること。"""
+        db_path = str(tmp_path / "test.db")
+        _create_segment_db_with_datasource(db_path, [
+            {"company_code": "1234", "fiscal_year_end": "2025-03-31",
+             "quarter": "FY", "segment_name": "国内事業",
+             "segment_sales": 1000.0, "segment_profit": 100.0,
+             "data_source": "excel_legacy"},
+        ])
+
+        captured_calls: list[dict] = []
+
+        def _mock_write_canonical(**kwargs):
+            captured_calls.append(kwargs)
+            return {"written": 2, "skipped": 0, "errors": 0}
+
+        with patch("lib.pipeline.canonical_writer.write_segments_canonical", side_effect=_mock_write_canonical), \
+             patch("lib.pipeline.db.load_env"), \
+             patch("lib.pipeline.db.get_supabase_write_config",
+                   return_value=_MOCK_CANONICAL_CONFIG), \
+             patch("tools.sync_segments.requests") as mock_req:
+
+            mock_resp = MagicMock()
+            mock_resp.ok = True
+            mock_resp.json.return_value = []
+            mock_req.get.return_value = mock_resp
+            mock_req.post.return_value = MagicMock(status_code=201)
+
+            from tools.sync_segments import sync_sqlite_segments
+            sync_sqlite_segments(
+                db_path=db_path, rest_url="http://test/rest/v1",
+                headers={"apikey": "test"}, dry_run=False,
+            )
+
+        assert any(c.get("source") == "excel_legacy" for c in captured_calls), (
+            "excel_legacy rows should still be written as source='excel_legacy'"
+        )
+
+    def test_none_data_source_falls_back_to_excel_legacy(self, tmp_path):
+        """data_source=NULL の行は source='excel_legacy' にフォールバックすること。"""
+        db_path = str(tmp_path / "test.db")
+        _create_segment_db_with_datasource(db_path, [
+            {"company_code": "5678", "fiscal_year_end": "2025-03-31",
+             "quarter": "FY", "segment_name": "海外事業",
+             "segment_sales": 2000.0, "segment_profit": 200.0,
+             "data_source": None},  # NULL
+        ])
+
+        captured_calls: list[dict] = []
+
+        def _mock_write_canonical(**kwargs):
+            captured_calls.append(kwargs)
+            return {"written": 2, "skipped": 0, "errors": 0}
+
+        with patch("lib.pipeline.canonical_writer.write_segments_canonical", side_effect=_mock_write_canonical), \
+             patch("lib.pipeline.db.load_env"), \
+             patch("lib.pipeline.db.get_supabase_write_config",
+                   return_value=_MOCK_CANONICAL_CONFIG), \
+             patch("tools.sync_segments.requests") as mock_req:
+
+            mock_resp = MagicMock()
+            mock_resp.ok = True
+            mock_resp.json.return_value = []
+            mock_req.get.return_value = mock_resp
+            mock_req.post.return_value = MagicMock(status_code=201)
+
+            from tools.sync_segments import sync_sqlite_segments
+            sync_sqlite_segments(
+                db_path=db_path, rest_url="http://test/rest/v1",
+                headers={"apikey": "test"}, dry_run=False,
+            )
+
+        assert any(c.get("source") == "excel_legacy" for c in captured_calls), (
+            "NULL data_source should fall back to 'excel_legacy'"
+        )
+
+    def test_backfill_v4_pdf_source_priority_is_zero(self, tmp_path):
+        """expand_segments_rows が backfill_v4_pdf を source_priority=0 で展開すること。
+        
+        これは write_segments_canonical が内部で呼び出す expand_segments_rows の
+        source_priority 設定を検証する。
+        """
+        sys.path.insert(0, _PROJECT_ROOT)
+        from lib.pipeline.canonical_writer import expand_segments_rows
+
+        rows, skipped = expand_segments_rows(
+            ticker="8918",
+            period="2026-02-28",
+            quarter="FY",
+            segments=[
+                {"segment_name": "不動産事業", "sales": 5061, "profit": 1491},
+                {"segment_name": "再生可能エネルギー関連投資", "sales": 19, "profit": -135},
+            ],
+            source="backfill_v4_pdf",
+        )
+
+        assert len(rows) > 0, "expand_segments_rows should produce rows"
+        assert skipped == 0
+
+        for row in rows:
+            assert row["source"] == "backfill_v4_pdf", (
+                f"source should be 'backfill_v4_pdf', got '{row['source']}'"
+            )
+            assert row["source_priority"] == 0, (
+                f"backfill_v4_pdf source_priority must be 0, got {row['source_priority']}. "
+                "Check lib/pipeline/source_priority.py: SOURCE_PRIORITY['backfill_v4_pdf'] should be 0."
+            )
+
+    def test_backfill_v4_pdf_higher_priority_than_xbrl(self, tmp_path):
+        """backfill_v4_pdf (priority=0) が xbrl (priority=1) より高優先であること。"""
+        sys.path.insert(0, _PROJECT_ROOT)
+        from lib.pipeline.source_priority import get_priority
+
+        v4_priority = get_priority("backfill_v4_pdf")
+        xbrl_priority = get_priority("xbrl")
+        excel_priority = get_priority("excel_legacy")
+
+        assert v4_priority == 0, (
+            f"backfill_v4_pdf must have priority=0, got {v4_priority}"
+        )
+        assert v4_priority < xbrl_priority, (
+            f"backfill_v4_pdf ({v4_priority}) must be higher priority than "
+            f"xbrl ({xbrl_priority})"
+        )
+        assert xbrl_priority < excel_priority, (
+            f"xbrl ({xbrl_priority}) must be higher priority than "
+            f"excel_legacy ({excel_priority})"
+        )
+
+    def test_xbrl_other_only_cleanup_triggers_for_v4pdf_2plus_segs(self, tmp_path):
+        """backfill_v4_pdf が 2件以上のとき xbrl:Other only cleanup が発火すること。"""
+        db_path = str(tmp_path / "test.db")
+        _create_segment_db_with_datasource(db_path, [
+            {"company_code": "8918", "fiscal_year_end": "2026-02-28",
+             "quarter": "FY", "segment_name": "不動産事業",
+             "segment_sales": 5061.0, "segment_profit": 1491.0,
+             "data_source": "backfill_v4_pdf"},
+            {"company_code": "8918", "fiscal_year_end": "2026-02-28",
+             "quarter": "FY", "segment_name": "再生可能エネルギー関連投資",
+             "segment_sales": 19.0, "segment_profit": -135.0,
+             "data_source": "backfill_v4_pdf"},
+        ])
+
+        delete_calls: list[dict] = []
+        get_calls: list[dict] = []
+
+        def _mock_write_canonical(**kwargs):
+            return {"written": 4, "skipped": 0, "errors": 0}
+
+        def _mock_requests_get(url, **kwargs):
+            get_calls.append({"url": url, "params": kwargs.get("params", {})})
+            resp = MagicMock()
+            resp.ok = True
+            # xbrl source に Other のみが存在する状況をシミュレート
+            params = kwargs.get("params", {})
+            if params.get("source", "") in ("eq.xbrl", "eq.backfill_xbrl"):
+                resp.json.return_value = [{"segment_name": "Other"}]
+            else:
+                resp.json.return_value = []
+            return resp
+
+        def _mock_requests_delete(url, **kwargs):
+            delete_calls.append({"url": url, "params": kwargs.get("params", {})})
+            resp = MagicMock()
+            resp.ok = True
+            return resp
+
+        with patch("lib.pipeline.canonical_writer.write_segments_canonical", side_effect=_mock_write_canonical), \
+             patch("lib.pipeline.db.load_env"), \
+             patch("lib.pipeline.db.get_supabase_write_config",
+                   return_value=_MOCK_CANONICAL_CONFIG), \
+             patch("tools.sync_segments.requests") as mock_req:
+
+            mock_req.get.side_effect = _mock_requests_get
+            mock_req.delete.side_effect = _mock_requests_delete
+            mock_req.post.return_value = MagicMock(status_code=201)
+
+            from tools.sync_segments import sync_sqlite_segments
+            sync_sqlite_segments(
+                db_path=db_path, rest_url="http://test/rest/v1",
+                headers={"apikey": "test"}, dry_run=False,
+            )
+
+        # GET が canonical_segments に対して呼ばれたこと（xbrl Other 確認）
+        canonical_get_calls = [
+            c for c in get_calls if "canonical_segments" in c.get("url", "")
+        ]
+        assert len(canonical_get_calls) > 0, (
+            "Should have called GET canonical_segments to check for xbrl:Other only rows"
+        )
+
+        # DELETE が呼ばれたこと（xbrl Other only の削除）
+        assert len(delete_calls) > 0, (
+            "Should have called DELETE to remove xbrl:Other-only rows "
+            "when backfill_v4_pdf has 2+ segments"
+        )
+
+    def test_backfill_v4_pdf_single_seg_no_cleanup(self, tmp_path):
+        """backfill_v4_pdf が 1件のみの場合は xbrl:Other cleanup が発火しないこと。"""
+        db_path = str(tmp_path / "test.db")
+        _create_segment_db_with_datasource(db_path, [
+            {"company_code": "9999", "fiscal_year_end": "2025-03-31",
+             "quarter": "FY", "segment_name": "事業A",
+             "segment_sales": 1000.0, "segment_profit": 100.0,
+             "data_source": "backfill_v4_pdf"},  # 1件のみ
+        ])
+
+        delete_calls: list[dict] = []
+
+        def _mock_write_canonical(**kwargs):
+            return {"written": 2, "skipped": 0, "errors": 0}
+
+        def _mock_requests_delete(url, **kwargs):
+            delete_calls.append({"url": url})
+            return MagicMock(ok=True)
+
+        with patch("lib.pipeline.canonical_writer.write_segments_canonical", side_effect=_mock_write_canonical), \
+             patch("lib.pipeline.db.load_env"), \
+             patch("lib.pipeline.db.get_supabase_write_config",
+                   return_value=_MOCK_CANONICAL_CONFIG), \
+             patch("tools.sync_segments.requests") as mock_req:
+
+            mock_req.get.return_value = MagicMock(ok=True, json=lambda: [])
+            mock_req.delete.side_effect = _mock_requests_delete
+            mock_req.post.return_value = MagicMock(status_code=201)
+
+            from tools.sync_segments import sync_sqlite_segments
+            sync_sqlite_segments(
+                db_path=db_path, rest_url="http://test/rest/v1",
+                headers={"apikey": "test"}, dry_run=False,
+            )
+
+        # 1件のみの場合は DELETE が呼ばれないこと
+        assert len(delete_calls) == 0, (
+            f"Should NOT delete xbrl rows when backfill_v4_pdf has only 1 segment, "
+            f"but delete was called {len(delete_calls)} times"
+        )

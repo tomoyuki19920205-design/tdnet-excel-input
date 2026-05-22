@@ -16,6 +16,7 @@ import glob
 import logging
 import os
 import re
+import requests
 import sqlite3
 import sys
 import zipfile
@@ -203,66 +204,22 @@ def _upsert_segment_canonical(
     """segment_canonical に upsert (PK: ticker, period, quarter, segment_name)。
 
     segment_key 決定ロジック:
-      - 英語値加（ASCII比率 > 0.5）かつ jp_segment_names があれば過去EDINETマッチングを試みる。
-        score >= 2 → マッチ日本語の segment_key
-        score < 2  → normalize_segment_key(en_name) でフォールバック
-      - 日本語値加または候補ゼロ: normalize_segment_key(segment_name)
+      - 日英統合なし方針（2026-05以降）:
+        英語名・日本語名ともに normalize_segment_key(segment_name) のみで segment_key を生成する。
+        過去 EDINET 日本語名への寄せ処理（resolve_segment_key_with_jp）は無効。
+        英語名は英語セグメントとして、日本語名は日本語セグメントとして独立して格納する。
+
+    NOTE: jp_segment_names / match_stats 引数は互換性のため残しているが使用しない。
     """
     import requests
     seg_name = row.normalized_segment_name or ""
 
-    # segment_key 決定
-    matched_jp = ""
-    best_score = 0
-    if jp_segment_names is not None and is_english_dominant(seg_name):
-        if jp_segment_names:
-            # EDINET 候補あり: マッチング実行
-            if match_stats is not None:
-                match_stats["jp_candidate_hit"] = match_stats.get("jp_candidate_hit", 0) + 1
-
-            seg_key, matched_jp, best_score = resolve_segment_key_with_jp(
-                seg_name, jp_segment_names
-            )
-
-            if matched_jp:
-                # score >= 2 マッチ成功
-                if match_stats is not None:
-                    match_stats["jp_match_success"] = match_stats.get("jp_match_success", 0) + 1
-                logger.debug(
-                    f"[sync_seg] jp_match ticker={row.normalized_ticker}"
-                    f" period={row.period} en={seg_name!r}"
-                    f" jp={matched_jp!r} score={best_score} key={seg_key!r}"
-                )
-            else:
-                # score < 2 または候補にマッチなし
-                if best_score > 0:
-                    if match_stats is not None:
-                        match_stats["jp_match_low_score"] = match_stats.get("jp_match_low_score", 0) + 1
-                    logger.debug(
-                        f"[sync_seg] jp_low_score ticker={row.normalized_ticker}"
-                        f" period={row.period} en={seg_name!r}"
-                        f" best_score={best_score} fallback_key={seg_key!r}"
-                    )
-                else:
-                    if match_stats is not None:
-                        match_stats["jp_match_fallback"] = match_stats.get("jp_match_fallback", 0) + 1
-                    logger.debug(
-                        f"[sync_seg] jp_no_match ticker={row.normalized_ticker}"
-                        f" period={row.period} en={seg_name!r} key={seg_key!r}"
-                    )
-        else:
-            # EDINET 候補ゼロ: フォールバック
-            if match_stats is not None:
-                match_stats["jp_candidate_empty"] = match_stats.get("jp_candidate_empty", 0) + 1
-                match_stats["jp_match_fallback"] = match_stats.get("jp_match_fallback", 0) + 1
-            seg_key = normalize_segment_key(seg_name)
-            logger.debug(
-                f"[sync_seg] jp_no_candidates ticker={row.normalized_ticker}"
-                f" period={row.period} en={seg_name!r} fallback_key={seg_key!r}"
-            )
-    else:
-        # 日本語セグメント: 直接 normalize
-        seg_key = normalize_segment_key(seg_name)
+    # segment_key: 日英統合なし — segment_name を直接 normalize するのみ
+    seg_key = normalize_segment_key(seg_name)
+    logger.debug(
+        f"[sync_seg] seg_key ticker={row.normalized_ticker}"
+        f" period={row.period} name={seg_name!r} key={seg_key!r}"
+    )
 
     # デプロイ仕様 DDL に準拠したカラムのみ
     payload = {
@@ -294,8 +251,170 @@ def _upsert_segment_canonical(
 
 
 # ============================================================
-# SQLite segment_financials -> segment_canonical sync
+# Supabase canonical_segments 集計行クリーンアップ
 # ============================================================
+
+# aggregate 判定: Supabase 側で削除する segment_name パターン
+_SUPABASE_AGG_EXACT: tuple[str, ...] = (
+    "連結", "合計", "計", "調整額",
+    "consolidated", "total", "adjustment", "eliminations",
+)
+_SUPABASE_AGG_CONTAINS: tuple[str, ...] = (
+    "調整額", "セグメント利益調整", "その他調整",
+    "adjustment", "eliminations",
+)
+_SUPABASE_AGG_ENDSWITH: tuple[str, ...] = ("合計", "計", "total")
+# ホワイトリスト: これで始まる名前は前宛条件を除いて保護
+_SUPABASE_AGG_WHITELIST: tuple[str, ...] = ("その他", "other")
+
+
+def _is_aggregate_name(name: str) -> bool:
+    """segment_name が集計行属性か判定。「その他」系は調整系ワードを含む場合のみ True。"""
+    if not name:
+        return False
+    import unicodedata
+    n = unicodedata.normalize("NFKC", name.strip()).lower()
+
+    # ホワイトリスト優先: 「その他」「other」で始まる場合は保護
+    for prefix in _SUPABASE_AGG_WHITELIST:
+        if n.startswith(prefix.lower()):
+            # 調整系ワードを含む場合は保護解除
+            if any(kw.lower() in n for kw in ("調整", "adjustment", "eliminations")):
+                break
+            return False
+
+    if n in {k.lower() for k in _SUPABASE_AGG_EXACT}:
+        return True
+    for kw in _SUPABASE_AGG_CONTAINS:
+        if kw.lower() in n:
+            return True
+    for kw in _SUPABASE_AGG_ENDSWITH:
+        kw_l = kw.lower()
+        if n.endswith(kw_l) and len(n) > len(kw_l):
+            is_whitelisted = any(
+                n.startswith(p.lower()) and
+                not any(adj.lower() in n for adj in ("調整", "adjustment", "eliminations"))
+                for p in _SUPABASE_AGG_WHITELIST
+            )
+            if not is_whitelisted:
+                return True
+    return False
+
+
+def cleanup_supabase_aggregate_orphans(
+    rest_url: str,
+    headers: dict,
+    *,
+    sources: tuple[str, ...] = (
+        "backfill_v4_pdf", "v4_pdf",
+        "excel_legacy", "legacy_excel",
+    ),
+    page_size: int = 1000,
+    dry_run: bool = False,
+) -> int:
+    """Supabase canonical_segments から aggregate 属性の orphan 行を一括削除する。
+
+    起点: Supabase 側の canonical_segments を直接検索（SQLite 不要）。
+    これにより、ローカル側から削除済みの excel_legacy 等の連結行も正しく捕捉できる。
+
+    フロー:
+      1. canonical_segments から source 別に全件をページング GET
+      2. Python 側で aggregate 判定して対象行 ID を収集
+      3. ID をまとめて DELETE
+
+    Returns:
+        削除件数
+    """
+    import requests
+
+    deleted_total = 0
+
+    for source in sources:
+        offset = 0
+        source_targets: list[dict] = []  # {"id": ..., "label": "ticker|period|quarter|name"}
+
+        # ── Step 1: 全件をページング取得 ──
+        while True:
+            params = {
+                "source": f"eq.{source}",
+                "select": "id,ticker,period,quarter,segment_name",
+                "limit": str(page_size),
+                "offset": str(offset),
+                "order": "id.asc",
+            }
+            r = requests.get(
+                f"{rest_url}/canonical_segments",
+                headers=headers, params=params, timeout=30,
+            )
+            if r.status_code != 200:
+                logger.warning(
+                    "[sync_segments] orphan GET failed source=%s status=%d body=%s",
+                    source, r.status_code, r.text[:200],
+                )
+                break
+            page = r.json()
+            if not isinstance(page, list) or not page:
+                break  # 空 や 最後ページ
+
+            # ── Step 2: aggregate 判定 ──
+            for row in page:
+                name = row.get("segment_name") or ""
+                if _is_aggregate_name(name):
+                    label = "|".join([
+                        str(row.get("ticker") or ""),
+                        str(row.get("period") or ""),
+                        str(row.get("quarter") or ""),
+                        name,
+                    ])
+                    source_targets.append({"id": row["id"], "label": label})
+
+            if len(page) < page_size:
+                break  # 最後ページ
+            offset += page_size
+
+        if not source_targets:
+            logger.debug(
+                "[sync_segments] orphan cleanup: no aggregates found source=%s", source
+            )
+            continue
+
+        target_ids   = [t["id"]    for t in source_targets]
+        target_labels = [t["label"] for t in source_targets]
+
+        if dry_run:
+            logger.info(
+                "[sync_segments] [DRY-RUN] cleanup_supabase_aggregate_orphans "
+                "source=%s would_delete=%d names=%s",
+                source, len(target_ids), target_labels,
+            )
+            deleted_total += len(target_ids)
+            continue
+
+        # ── Step 3: まとめて DELETE ──
+        del_params = {"id": "in.(" + ",".join(str(i) for i in target_ids) + ")"}
+        dr = requests.delete(
+            f"{rest_url}/canonical_segments",
+            headers={**headers, "Prefer": "return=minimal"},
+            params=del_params,
+            timeout=30,
+        )
+        if dr.status_code in (200, 204):
+            deleted_total += len(target_ids)
+            logger.info(
+                "[sync_segments] cleanup_supabase_aggregate_orphans "
+                "source=%s deleted=%d names=%s",
+                source, len(target_ids), target_labels,
+            )
+        else:
+            logger.warning(
+                "[sync_segments] cleanup_supabase_aggregate_orphans DELETE failed "
+                "source=%s status=%d body=%s",
+                source, dr.status_code, dr.text[:200],
+            )
+
+    return deleted_total
+
+
 
 # segment_name としてスキップする値（ヘッダー行や無効行）
 _SKIP_SEGMENT_NAMES = {
@@ -351,7 +470,12 @@ def count_sqlite_valid_rows(db_path: str) -> int:
 def sync_sqlite_segments(
     db_path: str, rest_url: str, headers: dict, dry_run: bool,
 ) -> dict:
-    """SQLite segment_financials (excel_legacy) -> segment_canonical に push."""
+    """SQLite segment_financials -> segment_canonical / canonical_segments に push.
+
+    segment_financials.data_source の値をそのまま source として使う。
+    data_source が None の場合は 'excel_legacy' にフォールバック。
+    backfill_v4_pdf 等の高優先 source は source_priority=0 で canonical_segments に登録される。
+    """
     stats = {
         "sqlite_total": 0,
         "sqlite_valid": 0,
@@ -369,7 +493,6 @@ def sync_sqlite_segments(
         logger.warning(f"[SQLITE] DB not found: {db_path}")
         return stats
 
-    import requests
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
 
@@ -437,7 +560,8 @@ def sync_sqlite_segments(
             load_env()
             canonical_config = get_supabase_write_config()
             if canonical_config:
-                # per-ticker batch に再構成
+                # per-(ticker, period, quarter, data_source) batch に再構成
+                # data_source ごとに分けることで source が正しく引き継がれる
                 ticker_batches: dict[tuple, list[dict]] = {}
                 conn2 = sqlite3.connect(db_path)
                 conn2.row_factory = sqlite3.Row
@@ -450,7 +574,9 @@ def sync_sqlite_segments(
                     if _classify_skip_reason(rdict):
                         continue
                     quarter = _QUARTER_MAP.get(rdict["quarter"], rdict["quarter"])
-                    key = (rdict["company_code"], rdict["fiscal_year_end"], quarter)
+                    # data_source を引き継ぐ (なければ excel_legacy)
+                    ds = rdict.get("data_source") or "excel_legacy"
+                    key = (rdict["company_code"], rdict["fiscal_year_end"], quarter, ds)
                     if key not in ticker_batches:
                         ticker_batches[key] = []
                     raw_sales = rdict["segment_sales"]
@@ -464,21 +590,82 @@ def sync_sqlite_segments(
 
                 canonical_total = 0
                 canonical_errors = 0
-                for (ticker, period, quarter), segs in ticker_batches.items():
+                # backfill_v4_pdf を含む (ticker, period, quarter) を記録
+                # → 後で xbrl:Other only 行を削除するために使用
+                _v4pdf_keys: set[tuple] = set()
+                for (ticker, period, quarter, ds), segs in ticker_batches.items():
                     cw_result = write_segments_canonical(
                         ticker=ticker,
                         period=period,
                         quarter=quarter,
                         segments=segs,
-                        source="excel_legacy",
+                        source=ds,  # SQLite の data_source をそのまま使う
                         config=canonical_config,
                     )
                     canonical_total += cw_result["written"]
                     canonical_errors += cw_result["errors"]
+                    if ds == "backfill_v4_pdf" and len(segs) >= 2:
+                        _v4pdf_keys.add((ticker, period, quarter))
                 logger.info(
                     f"[CANONICAL] segments dual-write: "
                     f"written={canonical_total} errors={canonical_errors}"
                 )
+
+                # ── backfill_v4_pdf 採用済みキーの xbrl:Other only 行を削除 ──
+                # canonical_segments に xbrl source で segment_name = 'Other'/'other' のみの
+                # 行が残存している場合、backfill_v4_pdf の方が信頼性が高いため削除する。
+                if _v4pdf_keys:
+                    _rest = canonical_config.get("rest_url", "")
+                    _key = canonical_config.get("anon_key") or canonical_config.get("service_role_key", "")
+                    _ch = {
+                        "apikey": _key,
+                        "Authorization": f"Bearer {_key}",
+                        "Content-Type": "application/json",
+                    }
+                    _other_names = ("Other", "other", "その他", "others")
+                    for (t, p, q) in _v4pdf_keys:
+                        # xbrl / backfill_xbrl source の segment_name が Other 系のみか確認してから削除
+                        # （仕様: source IN ('xbrl', 'backfill_xbrl') かつ Other only）
+                        for _xbrl_src in ("xbrl", "backfill_xbrl"):
+                            _r = requests.get(
+                                f"{_rest}/canonical_segments",
+                                headers=_ch,
+                                params={
+                                    "ticker": f"eq.{t}", "period": f"eq.{p}",
+                                    "quarter": f"eq.{q}", "source": f"eq.{_xbrl_src}",
+                                    "select": "segment_name",
+                                },
+                                timeout=15,
+                            )
+                            if not _r.ok:
+                                continue
+                            xbrl_rows = _r.json()
+                            xbrl_names = {row["segment_name"] for row in xbrl_rows if row.get("segment_name")}
+                            # Other 系のみの場合に削除
+                            if xbrl_names and all(
+                                n.strip().lower() in {x.lower() for x in _other_names}
+                                for n in xbrl_names
+                            ):
+                                _dr = requests.delete(
+                                    f"{_rest}/canonical_segments",
+                                    headers={**_ch, "Prefer": "return=minimal"},
+                                    params={
+                                        "ticker": f"eq.{t}", "period": f"eq.{p}",
+                                        "quarter": f"eq.{q}", "source": f"eq.{_xbrl_src}",
+                                    },
+                                    timeout=15,
+                                )
+                                if _dr.ok:
+                                    logger.info(
+                                        "[CANONICAL] deleted %s:Other-only rows for "
+                                        "backfill_v4_pdf ticker=%s period=%s quarter=%s",
+                                        _xbrl_src, t, p, q,
+                                    )
+                                else:
+                                    logger.warning(
+                                        "[CANONICAL] xbrl delete failed src=%s ticker=%s p=%s q=%s: %s",
+                                        _xbrl_src, t, p, q, _dr.text[:200],
+                                    )
             else:
                 logger.warning(
                     "[CANONICAL] segments dual-write skipped: no write config"
@@ -631,23 +818,10 @@ def main(args: list[str] | None = None) -> int:
         ticker = rows[0].normalized_ticker if rows else "?"
         period = max((r.period for r in rows), default="") if rows else ""  # prior rows が先頭でも current period を使う
 
-        # JP 候補取得（ticker 単位キャッシュ）
-        # target_period 以前の過去EDINET候補を利用。period完全一致は要求しない。
-        if ticker not in jp_cache:
-            jp_names_fetched = get_jp_segment_names(
-                rest_url, headers, ticker, target_period=period
-            )
-            jp_cache[ticker] = jp_names_fetched
-            if jp_names_fetched:
-                logger.debug(
-                    f"[sync_seg] jp_cache ticker={ticker} target_period={period}"
-                    f" candidates={jp_names_fetched[:4]}"
-                )
-            else:
-                logger.debug(
-                    f"[sync_seg] jp_cache_empty ticker={ticker} target_period={period}"
-                )
-        jp_names = jp_cache[ticker]
+        # JP 候補取得 — 日英統合なし方針により無効化（2026-05以降）
+        # get_jp_segment_names() は互換性のため残すが呼び出さない。
+        # 英語セグメントは英語名のまま segment_key を生成する。
+        jp_names: list[str] = []  # 常に空 → jp マッチングは _upsert_segment_canonical で行われない
 
         for row in rows:
             stats["xbrl_raw_total"] += 1
@@ -738,6 +912,24 @@ def main(args: list[str] | None = None) -> int:
         logger.info(f"[SYNC] SQLite sync: {db_path}")
         sq_stats = sync_sqlite_segments(db_path, rest_url, headers, dry_run)
         stats.update(sq_stats)
+
+        # ── Supabase aggregate orphan クリーンアップ ──
+        # Supabase 側を直接検索して、ローカル側から削除済みの集計行を削除する。
+        # excel_legacy / backfill_v4_pdf 等 あらゆる source に対応。
+        try:
+            agg_deleted_total = cleanup_supabase_aggregate_orphans(
+                rest_url, headers, dry_run=dry_run,
+            )
+            stats["supabase_aggregate_deleted"] = agg_deleted_total
+            if agg_deleted_total > 0 or dry_run:
+                logger.info(
+                    "[sync_segments] supabase aggregate orphan cleanup total deleted=%d",
+                    agg_deleted_total,
+                )
+        except Exception as _e:
+            logger.warning(
+                "[sync_segments] supabase aggregate orphan cleanup failed (best-effort): %s", _e
+            )
 
     # サマリ
     print()

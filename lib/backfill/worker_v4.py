@@ -41,6 +41,87 @@ from lib.backfill.segment_ai_fallback import (
 logger = logging.getLogger("backfill.worker_v4")
 
 # ============================================================
+# PDF V4 集計行フィルタ
+# ============================================================
+
+# segment_name を正規化した文字列がこれらのキーワードに完全一致する場合に除外
+_AGGREGATE_EXACT: frozenset[str] = frozenset([
+    "連結", "合計", "計", "調整額",
+    "consolidated", "total", "adjustment", "eliminations",
+])
+
+# segment_name を正規化した文字列がこれらを「含む」場合に除外
+# ただし「その他」を誤って除外しないよう末尾の「計」や「合計」に限定する
+_AGGREGATE_CONTAINS: tuple[str, ...] = (
+    "調整額",
+    "セグメント利益調整",
+    "その他調整",
+    "adjustment",
+    "eliminations",
+    "連結財務諸表",
+)
+
+# 「計」で終わる名前を除外（ただし「その他」などを除外しない安全弁付き）
+_AGGREGATE_ENDSWITH: tuple[str, ...] = (
+    "合計",
+    "計",
+    "total",
+)
+
+# 「その他」系は有効セグメント — 誤除外防止のためにホワイトリスト
+_AGGREGATE_WHITELIST_PREFIX: tuple[str, ...] = (
+    "その他",
+    "other",
+)
+
+
+def _is_aggregate_segment(seg_name: str) -> bool:
+    """PDF V4 segment_name が集計行・調整行に該当するか判定する。
+
+    「連結」「合計」「調整額」等を True (除外) と判定。
+    「その他（注３）」等は False (有効) と判定。
+    """
+    if not seg_name:
+        return False
+    import unicodedata
+    n = unicodedata.normalize("NFKC", seg_name.strip()).lower()
+
+    # ── ホワイトリスト優先 ──
+    # 「その他」「other」で始まる場合は原則 KEEP
+    # ただし「その他調整」のように調整系ワードを含む場合は除外対象として続行
+    for prefix in _AGGREGATE_WHITELIST_PREFIX:
+        if n.startswith(prefix.lower()):
+            # 調整系ワードを含む場合はホワイトリストを無効化
+            if any(kw.lower() in n for kw in ("調整", "adjustment", "eliminations")):
+                break  # ホワイトリスト保護を外してフィルタ判定へ進む
+            return False  # 純粋な「その他」系 → 有効セグメント
+
+    # ── 完全一致 ──
+    if n in {k.lower() for k in _AGGREGATE_EXACT}:
+        return True
+
+    # ── 部分一致 (含む) ──
+    for kw in _AGGREGATE_CONTAINS:
+        if kw.lower() in n:
+            return True
+
+    # ── 末尾一致 ──
+    for kw in _AGGREGATE_ENDSWITH:
+        kw_l = kw.lower()
+        if n.endswith(kw_l) and len(n) > len(kw_l):
+            # 「その他計」は whitelist で既に保護済みだが念のため再確認
+            is_whitelisted = any(
+                n.startswith(p.lower()) and
+                not any(adj.lower() in n for adj in ("調整", "adjustment", "eliminations"))
+                for p in _AGGREGATE_WHITELIST_PREFIX
+            )
+            if not is_whitelisted:
+                return True
+
+    return False
+
+
+# ============================================================
 # 正常スキップ判定
 # ============================================================
 
@@ -383,20 +464,70 @@ def _try_pdf_source_v4(
             rule_trace=getattr(v4_result, "rule_trace", []),
         )
 
-    # SegmentRecordV4 → dict レコードに変換
+    # SegmentRecordV4 -> dict レコードに変換
     records = []
     _TRACE_TICKERS = {"2901", "2936"}
 
-    # ── ローカルヘルパー: previous ブロックの period を1年前に計算 ──
-    def _derive_period_for_block(base_period: str, period_type: str) -> str:
-        """period_type が "previous" のとき base_period の年を -1 する。"""
-        if period_type != "previous" or not base_period or len(base_period) < 4:
-            return base_period
+    # ── ローカルヘルパー: period_label の「至 YYYY年M月D日」を ISO 形式でパース ──
+    _PERIOD_END_DATE_RE = __import__("re").compile(
+        r"至\s*([0-9０-９]{4})年\s*([0-9０-９]{1,2})月\s*([0-9０-９]{1,2})日"
+    )
+
+    def _parse_period_end_from_label(label: str) -> str | None:
+        """period_label 内の「至 YYYY年M月D日」を YYYY-MM-DD 形式で返す。
+
+        例:
+          「自 2024年4月1日 至 2025年3月31日」  → "2025-03-31"
+          "自 2025年4月1日 至 2026年3月31日"    → "2026-03-31"
+          見つからなければ None
+        """
+        if not label:
+            return None
+        m = _PERIOD_END_DATE_RE.search(label)
+        if not m:
+            return None
+        import unicodedata
+        def _to_ascii_int(s: str) -> int:
+            return int(unicodedata.normalize("NFKC", s))
         try:
-            prev_year = int(base_period[:4]) - 1
-            return f"{prev_year}{base_period[4:]}"
-        except ValueError:
-            return base_period
+            y = _to_ascii_int(m.group(1))
+            mo = _to_ascii_int(m.group(2))
+            d = _to_ascii_int(m.group(3))
+            return f"{y:04d}-{mo:02d}-{d:02d}"
+        except (ValueError, TypeError):
+            return None
+
+    def _derive_period_for_block(
+        base_period: str,
+        period_type: str,
+        period_label: str = "",
+    ) -> str:
+        """ブロックの period を決定する。
+
+        優先順位:
+          1. period_label 内の「至 YYYY年M月D日」が直接読み取れる場合はそれを使用
+             → 「前連結会計年度」ブロックを誤って当期 FY にしない
+          2. フォールバック: period_type=="previous" なら base_period の年を -1
+          3. それ以外は base_period のまま
+        """
+        # Priority 1: period_label 内の終了日を直接パース
+        parsed = _parse_period_end_from_label(period_label)
+        if parsed:
+            logger.debug(
+                "[v4-period] derive from label: ticker=%s label=%r -> %s",
+                filing.ticker, period_label[:60], parsed,
+            )
+            return parsed
+
+        # Priority 2: previous ブロックは年を -1
+        if period_type == "previous" and base_period and len(base_period) >= 4:
+            try:
+                prev_year = int(base_period[:4]) - 1
+                return f"{prev_year}{base_period[4:]}"
+            except ValueError:
+                pass
+
+        return base_period
 
     # PDF全体から単位を検出（セグメント側の unit_raw が全て None の場合のfallback）
     # unit 判定のため、全セグを集める（extracted_periods / segments 両方に対応）
@@ -438,7 +569,25 @@ def _try_pdf_source_v4(
         )
         for ep in v4_result.extracted_periods:
             ep_period_type = getattr(ep, "period_type", "unknown")
-            ep_period = _derive_period_for_block(period, ep_period_type)
+            ep_period_label = getattr(ep, "period_label", "") or ""
+
+            # ── unknown ブロックは保存しない ──
+            # period_type=unknown のブロックを base_period/current に丸めて
+            # 誤ったFY行として保存しないよう除外する。
+            if ep_period_type == "unknown":
+                logger.info(
+                    "[V4] skip_unknown_block: ticker=%s period_label=%r seg_count=%d "
+                    "reason=period_type_unresolved",
+                    filing.ticker, ep_period_label[:60],
+                    len(getattr(ep, "segments", [])),
+                )
+                continue
+
+            ep_period = _derive_period_for_block(period, ep_period_type, ep_period_label)
+            logger.info(
+                "[V4] ep_period: ticker=%s period_type=%s period_label=%r -> ep_period=%s",
+                filing.ticker, ep_period_type, ep_period_label[:60], ep_period,
+            )
             for seg in getattr(ep, "segments", []):
                 seg_name = getattr(seg, "segment_name", "") or ""
                 _unit_raw  = getattr(seg, "unit_raw", None) or _pdf_unit_raw
@@ -456,6 +605,14 @@ def _try_pdf_source_v4(
                         filing.ticker, seg_name, _unit_raw, _unit_mult,
                         getattr(seg, "segment_sales", None), ep_period_type,
                     )
+
+                # ── 集計行フィルタ (「連結」「合計」「調整額」等を除外) ──
+                if _is_aggregate_segment(seg_name):
+                    logger.info(
+                        "[v4_filter] drop_aggregate_segment ticker=%s name=%r reason=aggregate_row",
+                        filing.ticker, seg_name,
+                    )
+                    continue
 
                 records.append({
                     "ticker":           filing.ticker,
@@ -476,6 +633,27 @@ def _try_pdf_source_v4(
                     "tdnet_doc_id":     fid,
                     "row_type":         _classify_row_type(seg_name),
                 })
+
+        # ── resolved ブロックが1件もない場合は保存しない ──
+        # 全ブロックが unknown のまま（例: fill3-skip された場合）は
+        # records を空にして quarantine 扱いとする。
+        _n_resolved = sum(
+            1 for ep in v4_result.extracted_periods
+            if getattr(ep, "period_type", "unknown") in ("current", "previous")
+        )
+        if _n_resolved == 0 and records:
+            logger.warning(
+                "[V4] no_resolved_period: ticker=%s all_periods_unknown "
+                "dropping %d records to prevent unknown-period save",
+                filing.ticker, len(records),
+            )
+            records = []
+        elif _n_resolved == 0:
+            logger.info(
+                "[V4] no_resolved_period: ticker=%s all_periods_unknown "
+                "quarantine_reason=no_resolved_period_segments",
+                filing.ticker,
+            )
     else:
         # extracted_periods が空の場合は従来通り v4_result.segments を使う
         for seg in v4_result.segments:
@@ -495,6 +673,14 @@ def _try_pdf_source_v4(
                     filing.ticker, seg_name, _unit_raw, _unit_mult,
                     getattr(seg, "segment_sales", None),
                 )
+
+            # ── 集計行フィルタ (「連結」「合計」「調整額」等を除外) ──
+            if _is_aggregate_segment(seg_name):
+                logger.info(
+                    "[v4_filter] drop_aggregate_segment ticker=%s name=%r reason=aggregate_row",
+                    filing.ticker, seg_name,
+                )
+                continue
 
             records.append({
                 "ticker":           filing.ticker,
@@ -617,12 +803,109 @@ def process_one_filing_v4(
 
     if xbrl_ok:
         best = xbrl_candidate
-        pdf_candidate = SourceCandidate(
-            source="pdf", attempted=False, available=bool(doc_path),
-            skip_reason="xbrl_succeeded",
-        )
-        candidates.append(pdf_candidate)
         logger.debug(f"[v4] XBRL succeeded: fid={fid} n={len(best.segment_records)}")
+
+        # ── Partial-success チェック: suspicious な場合は PDF V4 fallback を試みる ──
+        from lib.backfill.segment_partial_check import (
+            check_xbrl_partial_segments,
+            decide_fallback_adoption,
+        )
+        _xbrl_period = (financials_data or {}).get("period", "") or ""
+        if not _xbrl_period and xbrl_candidate.segment_records:
+            _xbrl_period = xbrl_candidate.segment_records[0].get("period", "")
+        _suspicious, _partial_reason, _partial_detail = check_xbrl_partial_segments(
+            xbrl_records=xbrl_candidate.segment_records,
+            ticker=filing.ticker,
+            fiscal_year_end=_xbrl_period,
+            financials_data=financials_data,
+            db=None,   # decision_db は worker内では未接続（flush時のみ接続）
+            db_path=None,
+        )
+        logger.info(
+            "[segment_partial_check] ticker=%s fy=%s xbrl_count=%d "
+            "edinet_hist_count=%s other_ratio=%.2f reason=%s fallback=%s",
+            filing.ticker,
+            _xbrl_period,
+            _partial_detail.get("xbrl_count", 0),
+            _partial_detail.get("edinet_hist_count"),
+            _partial_detail.get("other_ratio", 0.0),
+            _partial_reason or "none",
+            "pdf_v4" if _suspicious else "none",
+        )
+        metrics["xbrl_partial_suspicious"] = _suspicious
+        metrics["xbrl_partial_reason"] = _partial_reason
+
+        if _suspicious and doc_path:
+            logger.info(
+                "[v4] XBRL partial suspicious: ticker=%s fid=%s reason=%s → try PDF V4",
+                filing.ticker, fid, _partial_reason,
+            )
+            _partial_pdf_candidate = _try_pdf_source_v4(
+                doc_path, filing, financials_data, fid, metrics,
+            )
+            _pdf_records = _partial_pdf_candidate.segment_records or []
+            _use_pdf, _decision = decide_fallback_adoption(
+                xbrl_records=xbrl_candidate.segment_records,
+                pdf_records=_pdf_records,
+                detail=_partial_detail,
+            )
+            logger.info(
+                "[segment_partial_check] pdf_v4_count=%d decision=%s ticker=%s fy=%s",
+                _partial_detail.get("pdf_v4_count", 0),
+                _decision,
+                filing.ticker,
+                _xbrl_period,
+            )
+            append_filing_log(paths, {
+                "event": "segment_partial_check",
+                "ticker": filing.ticker,
+                "fid": fid,
+                "xbrl_count": _partial_detail.get("xbrl_count"),
+                "pdf_v4_count": _partial_detail.get("pdf_v4_count"),
+                "edinet_hist_count": _partial_detail.get("edinet_hist_count"),
+                "other_ratio": _partial_detail.get("other_ratio"),
+                "reason": _partial_reason,
+                "decision": _decision,
+                "pipeline": "v4",
+            })
+            if _use_pdf and _partial_pdf_candidate.segment_records:
+                # PDF V4 を採用
+                best = _partial_pdf_candidate
+                fallback_used = True
+                fallback_reason = f"xbrl_partial:{_partial_reason}"
+                candidates.append(_partial_pdf_candidate)
+                metrics["xbrl_partial_fallback_decision"] = "use_pdf_v4"
+
+                # ── 旧 XBRL 行削除メタを PDF V4 records に付与 ──
+                # batch_upsert 側でこのキーを検出し、DELETE → INSERT の順で処理する
+                _cleanup_quarter = (
+                    _partial_pdf_candidate.segment_records[0].get("quarter", "")
+                    if _partial_pdf_candidate.segment_records else ""
+                )
+                _cleanup_meta = {
+                    "ticker": filing.ticker,
+                    "fiscal_year_end": _xbrl_period,
+                    "quarter": _cleanup_quarter,
+                    "tdnet_doc_id": fid,
+                }
+                for _r in _partial_pdf_candidate.segment_records:
+                    _r["_xbrl_cleanup_meta"] = _cleanup_meta
+            else:
+                # XBRL を維持
+                pdf_candidate = SourceCandidate(
+                    source="pdf", attempted=_partial_pdf_candidate.attempted,
+                    available=bool(doc_path),
+                    skip_reason="partial_check_kept_xbrl",
+                    error=_partial_pdf_candidate.error,
+                )
+                candidates.append(pdf_candidate)
+                metrics["xbrl_partial_fallback_decision"] = "keep_xbrl"
+        else:
+            pdf_candidate = SourceCandidate(
+                source="pdf", attempted=False, available=bool(doc_path),
+                skip_reason="xbrl_succeeded",
+            )
+            candidates.append(pdf_candidate)
     else:
         # XBRL 失敗 or なし → V4 PDF fallback
         fallback_used = True
@@ -1046,7 +1329,8 @@ def process_one_filing_v4(
         save_quarantine(paths, quarantine_dict)
 
     route_mode = (
-        "xbrl_v2" if xbrl_ok
+        "v4_pdf_partial_fallback" if (xbrl_ok and metrics.get("xbrl_partial_fallback_decision") == "use_pdf_v4")
+        else "xbrl_v2" if xbrl_ok
         else "v4_ai_text" if metrics.get("ai_reason") == "ai_ok"
         else "v4_pdf"
     )
