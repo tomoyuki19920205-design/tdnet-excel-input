@@ -2307,6 +2307,46 @@ def _try_merge_page_tables(
 # 縦持ちフォーマット救済
 # ==============================================================
 
+# Fix B: VertRescue ページ除外キーワード（株主資本等変動計算書の特徴的語彙）
+# これらが一定数含まれるページは縦型セグメント表ではないと判断してスキップする。
+# 「利益」単体はセグメント表にも出現するため、組み合わせで判定する。
+_VERT_RESCUE_EQUITY_STMT_KEYWORDS: frozenset[str] = frozenset([
+    "株主資本等変動計算書",
+    "その他の包括利益累計額",
+    "当期首残高",
+    "当期変動額",
+    "当期変動額合計",
+    "当期末残高",
+    "資本剰余金",
+    "利益剰余金",
+    "自己株式",
+    "新株予約権",
+    "非支配株主持分",
+    "剰余金の配当",
+])
+# これらが1語でも含まれれば即 skip（単独で十分な識別力を持つ語）
+_VERT_RESCUE_EQUITY_SINGLE_KEYWORDS: frozenset[str] = frozenset([
+    "株主資本等変動計算書",
+])
+# ページテキストに含まれる _VERT_RESCUE_EQUITY_STMT_KEYWORDS の数がこの閾値以上なら skip
+_VERT_RESCUE_EQUITY_THRESHOLD: int = 3
+
+
+def _is_equity_statement_page(page_text: str) -> bool:
+    """ページテキストが株主資本等変動計算書ページらしいかを判定する。
+
+    Fix B: VertRescue の二重防御フィルタ。
+    - 単独で識別力の強い語が1語でも含まれる → True
+    - 特徴的な語が閾値以上含まれる → True
+    """
+    # 単独で即判定できる語（株主資本等変動計算書など）
+    if any(kw in page_text for kw in _VERT_RESCUE_EQUITY_SINGLE_KEYWORDS):
+        return True
+    # 複合条件: 閾値以上のキーワードが同一ページに出現
+    hit_count = sum(1 for kw in _VERT_RESCUE_EQUITY_STMT_KEYWORDS if kw in page_text)
+    return hit_count >= _VERT_RESCUE_EQUITY_THRESHOLD
+
+
 def _try_vertical_format_rescue(
     pdf: pdfplumber.PDF,
     candidate_pages: list[int],
@@ -2314,21 +2354,58 @@ def _try_vertical_format_rescue(
     result: V4DetectionResult,
     log: dict[str, Any],
     trace: list[str],
+    *,
+    passed_pages: list[int] | None = None,
 ) -> V4DetectionResult | None:
     """
     横型判定（Phase4）で全テーブルが落ちた後の縦持ちフォーマット救済（1回限り）。
+
+    Fix A: passed_pages が指定された場合はそのページのみをスキャンする。
+           Phase2 を通過したページのみを対象とすることで、
+           株主資本等変動計算書など Phase2 で REJECT されたページが
+           縦型セグメント表として誤採用されるのを防ぐ。
+    Fix B: 各ページのテキストに株主資本等変動計算書の特徴的な語彙が
+           含まれる場合はスキップする（二重防御）。
 
     縦持ちフォーマット: 行=セグメント名、列=指標（売上高/利益）
     ─ ヘッダー行に指標語があり、Col 0 にセグメント名が並ぶ表を対象とする。
     既存の Phase 0-8 / vision fallback ロジックには一切触れない。
     """
-    for page_idx in candidate_pages:
+    # Fix A: スキャン対象ページを決定
+    # passed_pages が空リストの場合はスキャン対象なし（None との区別あり）
+    if passed_pages is not None:
+        scan_pages = passed_pages
+    else:
+        # 後方互換: passed_pages 未指定時は従来通り candidate_pages 全体
+        scan_pages = candidate_pages
+
+    if not scan_pages:
+        trace.append("VertRescue: skipped (no Phase2-passed pages)")
+        return None
+
+    for page_idx in scan_pages:
         if page_idx >= len(pdf.pages):
             continue
         page = pdf.pages[page_idx]
         tables, _, _ = _extract_tables_with_retry(page)
         if not tables:
             continue
+
+        # Fix B: ページテキストで株主資本等変動計算書を除外（二重防御）
+        try:
+            _page_text_vr = page.extract_text() or ""
+        except Exception:
+            _page_text_vr = ""
+        if _is_equity_statement_page(_page_text_vr):
+            trace.append(
+                f"VertRescue: page={page_idx} SKIP reason=equity_statement_detected"
+            )
+            logger.debug(
+                "[v4-vert] SKIP ticker=%s page=%d reason=equity_statement_detected",
+                ticker, page_idx + 1,
+            )
+            continue
+
         for tbl_idx, raw_table in enumerate(tables):
             if not raw_table or len(raw_table) < 3:
                 continue
@@ -2513,6 +2590,8 @@ def _run_v4_inner(
     period_counts: dict[str, int] = {}   # {"previous": 1, "current": 0, "unknown": 1, ...}
     # unknown ブロック全件を記録 (block_id, PeriodResultV4, page_period_labels) — fill2/fill3 用
     unknown_blocks_list: list[tuple] = []
+    # Fix A: Phase2 を通過したページを記録 → VertRescue のスキャン対象を限定するために使用
+    _phase2_passed_pages: list[int] = []
 
     # ── 単一セグメント省略スキャン（candidate_pages 確定直後・表ループ前） ──
     # candidate_pages の前後1ページを含めてスキャンし、省略表記が見つかれば即打ち切り
@@ -2585,6 +2664,8 @@ def _run_v4_inner(
             f"Phase2: page_index_0based={page_idx} "
             f"page_index_1based={page_idx + 1} PASSED"
         )
+        # Fix A: Phase2 通過ページとして記録
+        _phase2_passed_pages.append(page_idx)
         # ── [v4-5713-pages] word_filter PASSED 詳細 ───────────────────────────
         if _debug_5713:
             _wf_log_p = log["page_word_filter"][-1] if log["page_word_filter"] else {}
@@ -3040,8 +3121,10 @@ def _run_v4_inner(
             log.get("pdf_path"), result.quarantine_reason,
         )
         # 縦持ち / 段組み 簡易再構成（横表判定で落ちた後の1回限り救済）
+        # Fix A: Phase2 を通過したページのみを VertRescue の対象とする
         _vert_result = _try_vertical_format_rescue(
             pdf, candidate_pages, ticker, result, log, trace,
+            passed_pages=_phase2_passed_pages,
         )
         if _vert_result is not None:
             return _vert_result
