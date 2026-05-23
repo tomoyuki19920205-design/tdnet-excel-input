@@ -1040,8 +1040,11 @@ def _phase6_find_profit_row(
 
     for idx, (row_i, row) in enumerate(data_rows_indexed):
         left_cell = _cell_str(row[0])
+        # pdfplumber が改行を含む複合セル（'セグメント利\n益又は損失' など）を
+        # 返すことがあるため、キーワード照合は改行除去後の文字列で行う
+        left_cell_norm = left_cell.replace("\n", "")
         for kw in _PROFIT_ROW_KEYWORDS:
-            if kw not in left_cell:
+            if kw not in left_cell_norm:
                 continue
 
             # 利益ラベル行が見つかった
@@ -1090,8 +1093,130 @@ def _phase6_find_profit_row(
 
 
 # ==============================================================
-# Phase 7: record組立
+# Phase 6b: 同一ページ内後続テーブルから profit 行を補完（Fix C）
 # ==============================================================
+
+# 補完対象の profit 候補キーワードリスト（列ヘッダーまたは行ラベル）
+_SPLIT_PROFIT_KEYWORDS: tuple[str, ...] = (
+    "セグメント利益又は損失",
+    "セグメント利益",
+    "セグメント損失",
+    "営業利益",
+    "事業利益",
+    "profit",
+    "loss",
+)
+# 補完先テーブルの列データを上限行数の制限（表が小さいことを考慮）
+_SPLIT_PROFIT_MAX_ROWS: int = 6
+
+# Phase6 の集計列除外キーワード（公確があるものを除外する）
+_SPLIT_PROFIT_COL_EXCLUDE: frozenset[str] = frozenset([
+    "調整額",
+    "消去",
+    "連結財務諸表計上額",
+    "計上額",
+    "合計",
+    "報告セグメント計",
+    "全社",
+])
+
+
+def _phase6_find_profit_from_sibling_table(
+    seg_cols: list[tuple[int, str]],
+    sibling_tables: list[list[list[Any]]],
+    ticker: str,
+    page_idx: int,
+    base_tbl_idx: int,
+    trace: list[str],
+) -> tuple[list[Any] | None, str, int]:
+    """
+    Fix C: 同一ページ内の後続テーブルから利益行を補完する。
+
+    条件:
+    - seg_cols が 2 以上ある（セグメント名が確定している）
+    - profit 候補キーワードを含む行が後続テーブルに存在する
+    - 補完先列数がセグメント数と近い（集計列を除外して）
+    - profit 行に数値が 2 以上存在する
+
+    戻り値: (profit_row, profit_label, sibling_tbl_idx)
+    補完できない場合は (None, "", -1)
+    """
+    n_segs = len(seg_cols)
+    if n_segs < 2:
+        return None, "", -1
+
+    for sib_offset, sib_table in enumerate(sibling_tables):
+        sib_tbl_idx = base_tbl_idx + 1 + sib_offset
+
+        if not sib_table or len(sib_table) < 2:
+            continue
+
+        # テーブル内の全行を親査して profit 候補行を探す
+        for row_i, row in enumerate(sib_table[:_SPLIT_PROFIT_MAX_ROWS]):
+            if not row:
+                continue
+            left_label = _cell_str(row[0])
+
+            # profit キーワードと照合
+            matched_kw = next(
+                (kw for kw in _SPLIT_PROFIT_KEYWORDS if kw in left_label),
+                None,
+            )
+            if matched_kw is None:
+                continue
+
+            # 集計列を除外した値列を持つ profit 行候補を作成
+            # 元テーブルの seg_cols[*][0]（col_idx）でインデックスして値を取る
+            profit_vals = []
+            for col_idx, seg_name in seg_cols:
+                val = _parse_num(row[col_idx]) if col_idx < len(row) else None
+                profit_vals.append(val)
+
+            n_numeric = sum(1 for v in profit_vals if v is not None)
+            if n_numeric < 2:
+                # 列インデックスで取れない場合は内容順ベースで再試行
+                # 後続テーブルは列構造が元テーブルと異なる可能性があるため
+                # row[1:] の先頭から n_segs 個分を取ることを試みる
+                raw_vals = row[1:n_segs + 1]
+                n_numeric2 = sum(1 for c in raw_vals if _parse_num(c) is not None)
+                if n_numeric2 < 2:
+                    continue
+                # 内容順ベースで補完するため profit_row をそのまま返す
+                # _phase7_build_records では col_idx ベースで値を取るが、
+                # 内容順は col_idx と列番号が対応しない可能性があるため
+                # 内容順マッピング用に幺何行を返す
+                trace.append(
+                    f"[v4_split_profit] ticker={ticker} page={page_idx} "
+                    f"base_tbl={base_tbl_idx} profit_tbl={sib_tbl_idx} "
+                    f"row={row_i} kw={matched_kw!r} "
+                    f"mode=content_order n_numeric={n_numeric2}"
+                )
+                logger.info(
+                    "[v4_split_profit] FOUND ticker=%s page=%d base_tbl=%d "
+                    "profit_tbl=%d row=%d kw=%r mode=content_order matched_segments=%d",
+                    ticker, page_idx + 1, base_tbl_idx,
+                    sib_tbl_idx, row_i, matched_kw, n_numeric2,
+                )
+                return row, left_label, sib_tbl_idx
+
+            # col_idx ベースで n_numeric >= 2 の場合
+            trace.append(
+                f"[v4_split_profit] ticker={ticker} page={page_idx} "
+                f"base_tbl={base_tbl_idx} profit_tbl={sib_tbl_idx} "
+                f"row={row_i} kw={matched_kw!r} "
+                f"mode=col_index n_numeric={n_numeric}"
+            )
+            logger.info(
+                "[v4_split_profit] FOUND ticker=%s page=%d base_tbl=%d "
+                "profit_tbl=%d row=%d kw=%r mode=col_index matched_segments=%d",
+                ticker, page_idx + 1, base_tbl_idx,
+                sib_tbl_idx, row_i, matched_kw, n_numeric,
+            )
+            return row, left_label, sib_tbl_idx
+
+    return None, "", -1
+
+
 
 def _phase7_build_records(
     seg_cols: list[tuple[int, str]],
@@ -1175,10 +1300,15 @@ def _process_one_block(
     log: dict[str, Any],
     trace: list[str],
     ticker: str = "",          # [v3-period] ログ用
+    *,
+    sibling_tables: list[list[list[Any]]] | None = None,  # Fix C: 後続テーブル（分割 profit 補完用）
 ) -> PeriodResultV4 | None:
     """
     1期間ブロック（sub_table）を Phase4〜8 で処理する。
     成功すれば PeriodResultV4 を返す。失敗すれば None。
+
+    Fix C: sibling_tables が指定された場合、Phase6 で profit 行が取れなかったときに
+    後続テーブルから補完を試みる。
     """
     prefix = f"page={page_idx} tbl={tbl_idx} blk={block_idx} [{period_type}]"
 
@@ -1214,6 +1344,31 @@ def _process_one_block(
         f"sales={p6_log.get('chosen_sales_row')!r}({p6_log.get('sales_row_priority')}) "
         f"profit={p6_log.get('chosen_profit_row')!r}"
     )
+
+    # Fix C: profit が取れなかったが sales はある → 後続テーブルから補完を試みる
+    if (
+        profit_row is None
+        and sales_row is not None
+        and len(seg_cols) >= 2
+        and sibling_tables
+    ):
+        sp_row, sp_label, sp_tbl_idx = _phase6_find_profit_from_sibling_table(
+            seg_cols=seg_cols,
+            sibling_tables=sibling_tables,
+            ticker=ticker,
+            page_idx=page_idx,
+            base_tbl_idx=tbl_idx,
+            trace=trace,
+        )
+        if sp_row is not None:
+            profit_row   = sp_row
+            profit_label = sp_label
+            p6_log["chosen_profit_row"] = sp_label + "(split_table_rescue)"
+            p6_log["split_profit_tbl"]  = sp_tbl_idx
+            trace.append(
+                f"Phase6b: {prefix} split_profit_rescue profit_tbl={sp_tbl_idx} "
+                f"label={sp_label!r}"
+            )
 
     if sales_row is None and profit_row is None:
         trace.append(f"Phase6: {prefix} both missing → skip")
@@ -2889,6 +3044,8 @@ def _run_v4_inner(
                     sub_table, period_type, period_label,
                     page_idx, tbl_idx, block_idx, log, trace,
                     ticker=ticker,
+                    # Fix C: 後続テーブルを sibling として渡す（分割 profit 補完用）
+                    sibling_tables=raw_tables[tbl_idx + 1:] if tbl_idx + 1 < len(raw_tables) else None,
                 )
                 if pr is None:
                     continue
