@@ -1179,10 +1179,35 @@ def push_sqlite_to_supabase(
             unique_tickers = sorted(
                 set(r["company_code"] for r in rows)
             )
-            payloads = [
-                {"ticker_code": t, "is_active": True}
-                for t in unique_tickers
-            ]
+            # ローカル SQLite の companies テーブルから name_ja を取得
+            ticker_name_map: dict[str, str | None] = {}
+            try:
+                name_conn = sqlite3.connect(db_path)
+                name_conn.row_factory = sqlite3.Row
+                for nr in name_conn.execute(
+                    "SELECT ticker_code, name_ja FROM companies"
+                ).fetchall():
+                    tc = nr["ticker_code"]
+                    nj = nr["name_ja"]
+                    if tc and nj:
+                        ticker_name_map[tc] = nj
+                name_conn.close()
+                logger.info(
+                    f"[push] companies name_ja: "
+                    f"{len(ticker_name_map)} 件取得"
+                )
+            except Exception as _name_err:
+                logger.warning(
+                    f"[push] companies name_ja 取得失敗 "
+                    f"(best-effort): {_name_err}"
+                )
+            payloads = []
+            for t in unique_tickers:
+                p: dict = {"ticker_code": t, "is_active": True}
+                name = ticker_name_map.get(t)
+                if name:
+                    p["name_ja"] = name
+                payloads.append(p)
             logger.info(
                 f"[push] phase=build_companies END "
                 f"elapsed={time.time()-t_phase:.1f}s "
@@ -1921,7 +1946,28 @@ def push_sqlite_to_supabase_targeted(
     try:
         # Phase 1: companies
         unique_tickers = sorted(set(r["company_code"] for r in rows))
-        payloads = [{"ticker_code": t, "is_active": True} for t in unique_tickers]
+        # ローカル SQLite の companies テーブルから name_ja を取得
+        ticker_name_map_tp: dict[str, str | None] = {}
+        try:
+            name_conn_tp = sqlite3.connect(db_path)
+            name_conn_tp.row_factory = sqlite3.Row
+            for nr in name_conn_tp.execute(
+                "SELECT ticker_code, name_ja FROM companies"
+            ).fetchall():
+                tc = nr["ticker_code"]
+                nj = nr["name_ja"]
+                if tc and nj:
+                    ticker_name_map_tp[tc] = nj
+            name_conn_tp.close()
+        except Exception:
+            pass
+        payloads = []
+        for t in unique_tickers:
+            p: dict = {"ticker_code": t, "is_active": True}
+            name = ticker_name_map_tp.get(t)
+            if name:
+                p["name_ja"] = name
+            payloads.append(p)
         ticker_to_cid: dict[str, int] = {}
         for chunk in _chunks(payloads, _MASTER_BATCH):
             result = api.upsert_batch("companies", chunk, on_conflict="ticker_code")
