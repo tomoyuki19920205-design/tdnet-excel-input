@@ -531,3 +531,64 @@ def save_events_batch(
     )
     counts["category_breakdown"] = category_counts
     return counts
+
+
+# ============================================================
+# Discord送信済み通知: discord_sent_at を Supabase へ書き戻す
+# ============================================================
+def update_discord_sent_at_supabase(
+    event: EventRecord,
+    *,
+    dry_run: bool = False,
+) -> bool:
+    """Discord送信成功後に Supabase tdnet_events.discord_sent_at を更新する（best-effort）。
+
+    照合キー: dedupe_key (build_dedupe_key で再計算)
+    更新カラム: discord_sent_at のみ（notify_to_discord / status は変更しない）
+
+    Returns:
+        True: 更新成功 (または dry_run), False: 失敗またはレコード未発見
+    """
+    try:
+        dedupe_key = build_dedupe_key(event)
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        if dry_run:
+            logger.info(
+                f"[STORE DRY-RUN] discord_sent_at update skipped: "
+                f"ticker={event.ticker} dedupe={dedupe_key[:12]}..."
+            )
+            return True
+
+        client = _get_supabase()
+        if client is None:
+            logger.warning("[STORE] Supabase client not available — discord_sent_at not updated")
+            return False
+
+        resp = (
+            client.table("tdnet_events")
+            .update({"discord_sent_at": now_iso})
+            .eq("dedupe_key", dedupe_key)
+            .execute()
+        )
+
+        if resp.data and len(resp.data) > 0:
+            logger.info(
+                f"[STORE] discord_sent_at updated: ticker={event.ticker} "
+                f"dedupe={dedupe_key[:12]}... at={now_iso[:19]}"
+            )
+            return True
+        else:
+            # dedupe_key が見つからない = Supabase未登録 or disclosure_datetimeが不正
+            logger.warning(
+                f"[STORE] discord_sent_at: no row found for dedupe_key={dedupe_key[:12]}... "
+                f"ticker={event.ticker} type={event.event_type}"
+            )
+            return False
+
+    except Exception as e:
+        logger.error(
+            f"[STORE] update_discord_sent_at_supabase FAILED (best-effort): "
+            f"ticker={event.ticker} error={e}"
+        )
+        return False
