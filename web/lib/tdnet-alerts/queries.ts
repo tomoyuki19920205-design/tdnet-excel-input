@@ -17,14 +17,15 @@ export async function fetchEvents(
     showArchived?: boolean;
   }
 ): Promise<EnrichedEvent[]> {
-  const limit = opts.limit ?? 100;
+  const limit = opts.limit ?? 500;
 
   // イベント取得
+  // ソート: detected_at DESC（最新優先） → priority_rank ASC（重要度順）
   let query = supabase
     .from("tdnet_events")
     .select("*")
-    .order("priority_rank", { ascending: true })
     .order("detected_at", { ascending: false })
+    .order("priority_rank", { ascending: true })
     .limit(limit);
 
   if (!opts.showArchived) {
@@ -50,6 +51,12 @@ export async function fetchEvents(
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     query = query.gte("detected_at", today.toISOString());
+  } else if (!opts.search) {
+    // 通常モード: 直近30日のみ取得（全期間だと古いデータが大量混入するため）
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    thirtyDaysAgo.setHours(0, 0, 0, 0);
+    query = query.gte("detected_at", thirtyDaysAgo.toISOString());
   }
 
   const { data: events, error } = await query;
