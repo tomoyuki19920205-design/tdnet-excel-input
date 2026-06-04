@@ -56,6 +56,7 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
       else if (filter === "starred") opts.starredOnly = true;
       else if (filter === "buyback") opts.eventType = "buyback";
       else if (filter === "forecast_up") opts.eventType = "forecast_up";
+      else if (filter === "forecast") opts.eventType = "forecast";
       else if (filter === "dividend") opts.eventType = "dividend";
       else if (filter === "earnings") opts.eventType = "earnings";
       else if (filter === "today") opts.selectedDate = "today";
@@ -234,6 +235,7 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
     { key: "starred", label: "⭐ スター" },
     { key: "buyback", label: "📊 自社株買" },
     { key: "forecast_up", label: "📈 上方修正" },
+    { key: "forecast", label: "📉 業績修正" },
     { key: "dividend", label: "💰 配当" },
     { key: "earnings", label: "📋 決算" },
   ];

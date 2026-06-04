@@ -69,6 +69,7 @@ export type FilterType =
   | "starred"
   | "buyback"
   | "forecast_up"
+  | "forecast"
   | "dividend"
   | "earnings"
   | "today";

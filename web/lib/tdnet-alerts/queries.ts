@@ -37,6 +37,8 @@ export async function fetchEvents(
   if (opts.eventType) {
     if (opts.eventType === "forecast_up") {
       query = query.eq("event_type", "forecast").eq("event_subtype", "upward");
+    } else if (opts.eventType === "forecast") {
+      query = query.eq("event_type", "forecast");
     } else if (opts.eventType === "dividend") {
       query = query.eq("event_type", "dividend");
     } else {
