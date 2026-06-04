@@ -53,9 +53,8 @@ export async function fetchEvents(
   // JST の YYYY-MM-DD を UTC に変換: JST 00:00 = UTC -09:00 (前日 15:00)
   const _jstDateToUtcRange = (dateStr: string): { gte: string; lt: string } => {
     const [y, m, d] = dateStr.split("-").map(Number);
-    // JST 00:00:00 → UTC (= JST - 9h)
-    const startJst = new Date(y, m - 1, d, 0, 0, 0, 0); // ローカルタイム
-    const startUtc = new Date(startJst.getTime() - 9 * 60 * 60 * 1000);
+    // JST 00:00:00 → UTC: Date.UTC() でタイムゾーン非依存に計算
+    const startUtc = new Date(Date.UTC(y, m - 1, d, 0, 0, 0) - 9 * 60 * 60 * 1000);
     const endUtc   = new Date(startUtc.getTime() + 24 * 60 * 60 * 1000);
     return { gte: startUtc.toISOString(), lt: endUtc.toISOString() };
   };
