@@ -17,7 +17,7 @@ export async function fetchEvents(
     showArchived?: boolean;
   }
 ): Promise<EnrichedEvent[]> {
-  const limit = opts.limit ?? 500;
+  const limit = opts.limit ?? 1000;
 
   // イベント取得
   // ソート: detected_at DESC（最新優先） → priority_rank ASC（重要度順）
