@@ -49,7 +49,7 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
     try {
       const opts: Parameters<typeof fetchEvents>[1] = {
         userId,
-        limit: 200,
+        limit: 1000,
       };
 
       if (filter === "unread") opts.unreadOnly = true;
