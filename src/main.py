@@ -191,6 +191,70 @@ def _process_financial_statement(
 
 
 # ------------------------------------------------------------------
+# DB書き込み: 自社株買い
+# ------------------------------------------------------------------
+def _process_buyback(
+    item,
+    doc_path: str,
+    config: Config,
+    state_db: StateDB,
+    run_id: str,
+) -> None:
+    """自社株買い開示の処理 → event_pipeline に委譲"""
+    disclosure_id = item.disclosure_id
+    code = item.ticker
+
+    try:
+        from src.events.common_models import DocumentMeta
+        from src.events.event_pipeline import process_documents
+
+        doc_meta = DocumentMeta(
+            doc_id=disclosure_id,
+            ticker=code,
+            company_name=item.company_name,
+            title=item.title,
+            disclosure_datetime=item.published_at,
+            doc_url=item.doc_url,
+            pdf_path=doc_path,
+        )
+
+        webhook_url = getattr(config, "discord_webhook_url", "") or ""
+        db_path = config.decision_db_path
+
+        result = process_documents(
+            docs=[doc_meta],
+            db_path=db_path,
+            dry_run=False,
+            event_types={"buyback"},
+            webhook_url=webhook_url,
+        )
+
+        logger.info(
+            f"[処理] buyback pipeline: "
+            f"detected={result.detected} saved={result.saved} "
+            f"notified={result.notified} errors={result.errors} "
+            f"supabase_saved={result.supabase_saved}"
+        )
+
+        final_status = Status.SUCCESS if result.saved > 0 else Status.PARSE_FAILED
+        state_db.record(
+            disclosure_id=disclosure_id, code=code,
+            year="", quarter="",
+            status=final_status,
+            error_detail=f"buyback: detected={result.detected} saved={result.saved}",
+        )
+
+    except Exception as e:
+        logger.error(f"[処理] buyback pipeline failed ({code}): {e}", exc_info=True)
+        state_db.record(
+            disclosure_id=disclosure_id, code=code,
+            year="", quarter="",
+            status=Status.PARSE_FAILED,
+            error_detail=f"buyback exception: {e}",
+        )
+
+
+# ------------------------------------------------------------------
 # DB書き込み: 予想修正
 # ------------------------------------------------------------------
 def _process_forecast_revision(
@@ -355,6 +419,9 @@ def process_disclosure(
         if item.xbrl_url:
             xbrl_path = download_document(item.xbrl_url, docs_dir)
         _process_financial_statement(item, doc_path, xbrl_path, config, state_db, decision_db, run_id)
+    elif item.disclosure_type == DisclosureType.BUYBACK:
+        # buyback は event_pipeline に委譲する
+        _process_buyback(item, doc_path, config, state_db, run_id)
     else:
         logger.warning(f"[処理] 不明な開示タイプ: {item.disclosure_type}")
         state_db.record(

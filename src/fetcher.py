@@ -21,7 +21,9 @@ from lib.backfill.xbrl_url_inference import infer_xbrl_url_from_pdf
 logger = logging.getLogger("tdnet")
 
 # 除外キーワード（「配当」は予想修正内に含まれるため除外しない）
-EXCLUDE_KEYWORDS = ["自己株式", "人事", "訴訟", "資本業務提携", "株式分割", "新株予約権"]
+# 注: 「自己株式」は buyback 系開示を通過させるため除外しない。
+#     buyback_classifier.py 側で「自己株式の処分」「取得状況/結果」等の除外を行う。
+EXCLUDE_KEYWORDS = ["人事", "訴訟", "資本業務提携", "株式分割", "新株予約権"]
 
 # ETF/投信/ファンド除外キーワード（正規化後で判定）
 INSTRUMENT_EXCLUDE_KEYWORDS = [
@@ -83,6 +85,27 @@ def classify_disclosure(title: str) -> str | None:
     # 「配当」+修正系キーワードを含むが「予想」を含まないケースもカバー
     if "配当" in n and has_revision:
         return DisclosureType.DIVIDEND_REVISION
+
+    # ── buyback 判定 ──
+    # 自己株式取得系（取得枠決議・ToSTNeT等）を通過させる。
+    # 以下の強除外パターンが含まれる場合は通さない。
+    _BUYBACK_MUST_PASS = [
+        "自己株式取得",
+        "自己株式の取得",
+        "自己株式立会外",
+        "tostnet",  # 正規化後は小文字
+    ]
+    _BUYBACK_HARD_EXCLUDE = [
+        "自己株式の処分",
+        "自己株式処分",
+        "ストックオプション",
+        "譲渡制限付株式",
+        "持株会",
+    ]
+    _has_buyback_kw = any(kw in n or kw in title for kw in _BUYBACK_MUST_PASS)
+    _has_buyback_excl = any(kw in title for kw in _BUYBACK_HARD_EXCLUDE)
+    if _has_buyback_kw and not _has_buyback_excl:
+        return DisclosureType.BUYBACK
 
     # ── financial_statement 判定 ──
     if any(kw in n for kw in FINANCIAL_STATEMENT_KEYWORDS):

@@ -11,6 +11,7 @@ class DisclosureType:
     FORECAST_REVISION = "forecast_revision"
     FINANCIAL_STATEMENT = "financial_statement"
     DIVIDEND_REVISION = "dividend_revision"
+    BUYBACK = "buyback"
 
 
 @dataclass
