@@ -68,24 +68,37 @@ export async function fetchEvents(
             .toLocaleDateString("sv") // "YYYY-MM-DD" (sv locale)
         : opts.selectedDate;
     const { gte, lt } = _jstDateToUtcRange(dateStr);
+    console.log("[TDNET fetchEvents]", {
+      selectedDate: opts.selectedDate,
+      resolvedDateStr: dateStr,
+      utcGte: gte,
+      utcLt: lt,
+      filterColumn: "detected_at",
+    });
     query = query.gte("detected_at", gte).lt("detected_at", lt);
   } else if (opts.todayOnly) {
     // 後方互換
     const todayJst = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }))
       .toLocaleDateString("sv");
     const { gte, lt } = _jstDateToUtcRange(todayJst);
+    console.log("[TDNET fetchEvents] todayOnly", { utcGte: gte, utcLt: lt, filterColumn: "detected_at" });
     query = query.gte("detected_at", gte).lt("detected_at", lt);
   } else if (!opts.search) {
     // 通常モード: 直近30日のみ取得（全期間だと古いデータが大量混入するため）
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     thirtyDaysAgo.setHours(0, 0, 0, 0);
+    console.log("[TDNET fetchEvents] 30-day window", { utcGte: thirtyDaysAgo.toISOString(), filterColumn: "detected_at" });
     query = query.gte("detected_at", thirtyDaysAgo.toISOString());
   }
 
   const { data: events, error } = await query;
   if (error) throw error;
-  if (!events || events.length === 0) return [];
+  if (!events || events.length === 0) {
+    console.log("[TDNET fetchEvents] DB取得: 0件");
+    return [];
+  }
+  console.log("[TDNET fetchEvents] DB取得件数:", events.length, "| limit:", limit);
 
   // 既読情報を一括取得
   const eventIds = events.map((e: TdnetEvent) => e.id);
@@ -140,6 +153,11 @@ export async function fetchEvents(
     return new Date(b.detected_at).getTime() - new Date(a.detected_at).getTime();
   });
 
+  console.log("[TDNET fetchEvents] フィルター後件数:", enriched.length, "|",
+    opts.unreadOnly ? "unreadOnly" : "",
+    opts.starredOnly ? "starredOnly" : "",
+    "(DB:", events.length, "-> 表示:", enriched.length, ")"
+  );
   return enriched;
 }
 
