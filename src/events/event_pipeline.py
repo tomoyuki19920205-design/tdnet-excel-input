@@ -443,6 +443,7 @@ def _process_single_document(
                             "event_type": EventType.BUYBACK, "subtype": subtype,
                             "action": action, "event_id": eid,
                             "buyback_event_subtype": buyback_event_subtype,
+                            "_event_record": record if action in ("inserted", "updated") else None,
                         })
                 else:
                     logger.debug(
@@ -458,6 +459,12 @@ def _process_single_document(
     if EventType.FORECAST_REVISION in allowed:
         try:
             cls_result = classify_forecast(title, text[:2000])
+            logger.info(
+                f"[EVENT] forecast_classify ticker={doc.ticker} "
+                f"is_target={cls_result.is_target} "
+                f"subtype_hint={getattr(cls_result, 'subtype_hint', '?')!r} "
+                f"title={title[:50]!r}"
+            )
             if cls_result.is_target:
                 is_diff = cls_result.subtype_hint == "difference"
                 forecast_ev = extract_forecast_revision(
@@ -468,7 +475,15 @@ def _process_single_document(
                 if not _has_forecast_change(forecast_ev):
                     logger.info(
                         f"[EVENT] forecast skipped (no_change_detected) "
-                        f"ticker={doc.ticker} subtype={forecast_ev.subtype}"
+                        f"ticker={doc.ticker} subtype={forecast_ev.subtype} "
+                        f"prev_sales={getattr(forecast_ev,'previous_sales',None)} "
+                        f"rev_sales={getattr(forecast_ev,'revised_sales',None)} "
+                        f"prev_op={getattr(forecast_ev,'previous_op',None)} "
+                        f"rev_op={getattr(forecast_ev,'revised_op',None)} "
+                        f"prev_ni={getattr(forecast_ev,'previous_net_income',None)} "
+                        f"rev_ni={getattr(forecast_ev,'revised_net_income',None)} "
+                        f"prev_eps={getattr(forecast_ev,'previous_eps',None)} "
+                        f"rev_eps={getattr(forecast_ev,'revised_eps',None)}"
                     )
                     results.append({
                         "event_type": EventType.FORECAST_REVISION, "subtype": forecast_ev.subtype,
@@ -500,12 +515,14 @@ def _process_single_document(
                             "event_type": EventType.FORECAST_REVISION, "subtype": forecast_ev.subtype,
                             "action": "dry_run", "event_id": record.event_id,
                             "summary": record.summary_text,
+                            "_event_record": record,
                         })
                     else:
                         action, eid = upsert_event(conn, record)
                         results.append({
                             "event_type": EventType.FORECAST_REVISION, "subtype": forecast_ev.subtype,
                             "action": action, "event_id": eid,
+                            "_event_record": record if action in ("inserted", "updated") else None,
                         })
         except Exception as e:
             logger.warning(f"[EVENT] forecast failed doc_id={doc.doc_id[:16]} ticker={doc.ticker}: {e}")
@@ -515,6 +532,11 @@ def _process_single_document(
     if EventType.DIVIDEND_REVISION in allowed:
         try:
             cls_result = classify_dividend(title, text[:2000])
+            logger.info(
+                f"[EVENT] dividend_classify ticker={doc.ticker} "
+                f"is_target={cls_result.is_target} "
+                f"title={title[:50]!r}"
+            )
             if cls_result.is_target:
                 _div_pdf = doc.pdf_path or _pdf_path or ""
                 logger.info(
@@ -537,12 +559,74 @@ def _process_single_document(
                     results.append({
                         "event_type": EventType.DIVIDEND_REVISION, "subtype": dividend_ev.subtype,
                         "action": action, "event_id": eid,
+                        "_event_record": record if action in ("inserted", "updated") else None,
                     })
         except Exception as e:
             logger.warning(f"[EVENT] dividend failed doc_id={doc.doc_id[:16]} ticker={doc.ticker}: {e}")
             results.append({"event_type": EventType.DIVIDEND_REVISION, "action": "error", "error": str(e)})
 
     return results
+
+
+# ============================================================
+# should_notify_event reject理由診断ヘルパー
+# ============================================================
+def _classify_reject_reason(ev: "EventRecord") -> str:
+    """should_notify_event が False を返した理由を簡潔な文字列で返す（ログ用）。"""
+    import json as _json
+    try:
+        payload = _json.loads(ev.extracted_payload_json or "{}")
+    except Exception:
+        payload = {}
+
+    if ev.event_type == "buyback":
+        subtype = ev.subtype or ""
+        if subtype not in ("new_program", "tostnet"):
+            return f"buyback_subtype_not_allowed({subtype!r})"
+        conf = payload.get("extraction_confidence")
+        try:
+            if conf is None or float(conf) < 0.50:
+                return f"buyback_low_conf({conf})"
+        except Exception:
+            return f"buyback_conf_parse_error({conf})"
+        ratio = payload.get("ratio_to_outstanding")
+        try:
+            ratio_f = float(ratio) if ratio is not None else None
+        except Exception:
+            ratio_f = None
+        if ratio_f is None or ratio_f < 4.0:
+            return f"buyback_ratio_too_low({ratio_f})"
+        return "buyback_field_insufficient"
+
+    elif ev.event_type == "forecast_revision":
+        subtype = ev.subtype or ""
+        if subtype != "upward":
+            return f"forecast_not_upward(subtype={subtype!r})"
+        return "forecast_other"
+
+    elif ev.event_type == "dividend_revision":
+        prev = payload.get("previous_dividend_per_share")
+        rev = payload.get("revised_dividend_per_share")
+        if prev in (None, "", "---"):
+            return f"dividend_prev_null({prev!r})"
+        if rev in (None, "", "---"):
+            return f"dividend_rev_null({rev!r})"
+        try:
+            prev_f, rev_f = float(prev), float(rev)
+        except Exception:
+            return "dividend_parse_error"
+        if prev_f <= 0:
+            return f"dividend_prev_zero({prev_f})"
+        if rev_f <= 0:
+            return f"dividend_rev_zero({rev_f})"
+        if rev_f <= prev_f:
+            return f"dividend_no_increase(prev={prev_f},rev={rev_f})"
+        pct = (rev_f - prev_f) / prev_f * 100
+        if pct < 20.0:
+            return f"dividend_pct_too_low({pct:.1f}%)"
+        return "dividend_other"
+
+    return f"unknown_event_type({ev.event_type!r})"
 
 
 # ============================================================
@@ -613,13 +697,22 @@ def process_documents(
         if webhook_url and not dry_run and conn:
             try:
                 unnotified = get_unnotified_events(conn)
+                logger.info(f"[EVENT_NOTIFY] unnotified_events={len(unnotified)}")
                 for ev in unnotified:
-                    if not should_notify_event(ev):
+                    _notify_ok = should_notify_event(ev)
+                    if not _notify_ok:
+                        # reject 理由を INFO で出す
+                        _rej = _classify_reject_reason(ev)
                         logger.info(
-                            "[EVENT_NOTIFY] filtered event_id=%s event_type=%s ticker=%s",
-                            ev.event_id[:12], ev.event_type, ev.ticker,
+                            "[EVENT_NOTIFY] SKIP event_id=%s event_type=%s subtype=%s "
+                            "ticker=%s reject=%s",
+                            ev.event_id[:12], ev.event_type, ev.subtype, ev.ticker, _rej,
                         )
                         continue
+                    logger.info(
+                        "[EVENT_NOTIFY] SEND event_id=%s event_type=%s subtype=%s ticker=%s",
+                        ev.event_id[:12], ev.event_type, ev.subtype, ev.ticker,
+                    )
                     logger.info(f"notify_start_at: {datetime.now(timezone(timedelta(hours=9))).isoformat()}")
                     if send_event_discord(webhook_url, ev, dry_run=False):
                         mark_notified(conn, ev.event_id)
@@ -630,17 +723,78 @@ def process_documents(
             # dry-run: 検知されたイベントをログ出力 (should_notify_event=False は表示のみスキップ)
             try:
                 unnotified = get_unnotified_events(conn)
+                logger.info(f"[EVENT_NOTIFY] dry-run unnotified_events={len(unnotified)}")
                 for ev in unnotified:
-                    if not should_notify_event(ev):
+                    _notify_ok = should_notify_event(ev)
+                    if not _notify_ok:
+                        _rej = _classify_reject_reason(ev)
                         logger.info(
-                            "[EVENT_NOTIFY] dry-run filtered event_id=%s event_type=%s ticker=%s",
-                            ev.event_id[:12], ev.event_type, ev.ticker,
+                            "[EVENT_NOTIFY] dry-run SKIP event_id=%s event_type=%s subtype=%s "
+                            "ticker=%s reject=%s",
+                            ev.event_id[:12], ev.event_type, ev.subtype, ev.ticker, _rej,
                         )
                         continue
                     send_event_discord("", ev, dry_run=True)
                     result.notified += 1
             except Exception as e:
                 logger.warning(f"[EVENT] dry-run notification preview failed: {e}")
+
+        # ── Supabase 同期 (best-effort) ──
+        # dry_run時はSkip。エラーはログのみ、メイン処理は止めない。
+        if not dry_run:
+            try:
+                from .tdnet_event_store import save_event_to_supabase as _save_to_sb
+                # 今回処理で inserted / updated になった EventRecord を収集
+                _records_to_sync: list[EventRecord] = []
+                for dr in result.details:
+                    rec = dr.get("_event_record")
+                    if rec is not None:
+                        _records_to_sync.append(rec)
+
+                if _records_to_sync:
+                    logger.info(
+                        f"[EVENT_SUPABASE] syncing {len(_records_to_sync)} new/updated events "
+                        f"to Supabase tdnet_events ..."
+                    )
+                    for _rec in _records_to_sync:
+                        try:
+                            _sb_result = _save_to_sb(_rec, dry_run=False)
+                            _action = _sb_result.get("action", "error")
+                            if _action == "inserted":
+                                result.supabase_saved += 1
+                                logger.info(
+                                    f"[EVENT_SUPABASE] INSERTED ticker={_rec.ticker} "
+                                    f"type={_rec.event_type} "
+                                    f"-> {_sb_result.get('display_category')}"
+                                )
+                            elif _action == "dedup_skipped":
+                                result.supabase_dedup_skipped += 1
+                                logger.debug(
+                                    f"[EVENT_SUPABASE] DEDUP_SKIP ticker={_rec.ticker} "
+                                    f"type={_rec.event_type}"
+                                )
+                            else:
+                                result.supabase_errors += 1
+                                logger.warning(
+                                    f"[EVENT_SUPABASE] ERROR ticker={_rec.ticker} "
+                                    f"type={_rec.event_type} "
+                                    f"error={_sb_result.get('error', 'unknown')}"
+                                )
+                        except Exception as _sb_ev_e:
+                            result.supabase_errors += 1
+                            logger.warning(
+                                f"[EVENT_SUPABASE] EXCEPTION ticker={_rec.ticker} "
+                                f"type={_rec.event_type}: {_sb_ev_e}"
+                            )
+
+                    logger.info(
+                        f"[EVENT_SUPABASE] sync done: "
+                        f"inserted={result.supabase_saved} "
+                        f"dedup={result.supabase_dedup_skipped} "
+                        f"errors={result.supabase_errors}"
+                    )
+            except Exception as _sb_e:
+                logger.warning(f"[EVENT_SUPABASE] sync block failed (non-fatal): {_sb_e}")
 
     finally:
         if conn:
@@ -649,6 +803,7 @@ def process_documents(
     logger.info(
         f"[EVENT] pipeline done: "
         f"processed={result.processed} detected={result.detected} "
-        f"saved={result.saved} notified={result.notified} errors={result.errors}"
+        f"saved={result.saved} notified={result.notified} errors={result.errors} "
+        f"supabase_saved={result.supabase_saved} supabase_dedup={result.supabase_dedup_skipped}"
     )
     return result
