@@ -101,8 +101,18 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
       setFilter("today");
       setSelectedDate(null);
     }
-    // date input を表示してクリック
-    setTimeout(() => dateInputRef.current?.showPicker?.(), 50);
+    // date input を開く（showPicker 未対応ブラウザは focus/click にフォールバック）
+    setTimeout(() => {
+      const input = dateInputRef.current;
+      if (input) {
+        if (typeof input.showPicker === "function") {
+          input.showPicker();
+        } else {
+          input.focus();
+          input.click();
+        }
+      }
+    }, 50);
   };
 
   // date input の変更 (YYYY-MM-DD)
