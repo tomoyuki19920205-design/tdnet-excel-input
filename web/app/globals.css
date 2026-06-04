@@ -256,6 +256,25 @@ html, body {
   color: var(--accent-red);
 }
 
+/* サイト間相互リンク */
+.site-link {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  transition: color 0.15s, background 0.15s;
+}
+
+.site-link:hover {
+  color: var(--text-primary);
+  background: var(--bg-card-hover);
+}
+
+
 /* ============================================================
    Filter Bar
    ============================================================ */

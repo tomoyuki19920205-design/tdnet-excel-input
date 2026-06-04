@@ -198,6 +198,12 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
       {/* Header */}
       <header className="alerts-header">
         <div className="alerts-header-left">
+          <a
+            href={process.env.NEXT_PUBLIC_COMPANY_VIEWER_URL ?? "http://localhost:3000/"}
+            className="site-link"
+          >
+            🏢 Company Viewer
+          </a>
           <h1 className="alerts-header-title">TDNET Alerts</h1>
           <span className="stat-badge unread">未読 {unreadCount}</span>
           <span className="stat-badge total">全 {events.length}件</span>
