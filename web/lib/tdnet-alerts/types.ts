@@ -72,6 +72,7 @@ export type FilterType =
   | "forecast"
   | "dividend"
   | "earnings"
+  | "discord"
   | "today";
 
 export interface AlertsFilter {

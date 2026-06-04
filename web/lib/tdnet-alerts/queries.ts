@@ -13,6 +13,7 @@ export async function fetchEvents(
     search?: string;
     unreadOnly?: boolean;
     starredOnly?: boolean;
+    discordOnly?: boolean;
     todayOnly?: boolean;
     selectedDate?: string | null; // YYYY-MM-DD (JST)
     showArchived?: boolean;
@@ -32,6 +33,10 @@ export async function fetchEvents(
 
   if (!opts.showArchived) {
     query = query.eq("status", "active");
+  }
+
+  if (opts.discordOnly) {
+    query = query.eq("notify_to_discord", true);
   }
 
   if (opts.eventType) {

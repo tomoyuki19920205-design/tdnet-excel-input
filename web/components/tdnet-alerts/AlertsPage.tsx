@@ -59,6 +59,7 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
       else if (filter === "forecast") opts.eventType = "forecast";
       else if (filter === "dividend") opts.eventType = "dividend";
       else if (filter === "earnings") opts.eventType = "earnings";
+      else if (filter === "discord") opts.discordOnly = true;
       else if (filter === "today") opts.selectedDate = "today";
 
       // 日付フィルタ（today フィルタより selectedDate が優先）
@@ -238,6 +239,7 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
     { key: "forecast", label: "📉 業績修正" },
     { key: "dividend", label: "💰 配当" },
     { key: "earnings", label: "📋 決算" },
+    { key: "discord", label: "🔔 Discord対象" },
   ];
 
   // selectedDate の表示ラベル (YYYY-MM-DD → MM/DD)
