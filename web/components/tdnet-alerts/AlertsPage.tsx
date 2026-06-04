@@ -18,11 +18,13 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
   const [events, setEvents] = useState<EnrichedEvent[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterType>("all");
+  const [selectedDate, setSelectedDate] = useState<string | null>(null); // YYYY-MM-DD (JST)
   const [search, setSearch] = useState("");
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const supabaseRef = useRef(createClient());
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dateInputRef = useRef<HTMLInputElement | null>(null);
 
   // Realtime 接続
   const { status: connectionStatus } = useRealtimeAlerts({
@@ -56,7 +58,10 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
       else if (filter === "forecast_up") opts.eventType = "forecast_up";
       else if (filter === "dividend") opts.eventType = "dividend";
       else if (filter === "earnings") opts.eventType = "earnings";
-      else if (filter === "today") opts.todayOnly = true;
+      else if (filter === "today") opts.selectedDate = "today";
+
+      // 日付フィルタ（today フィルタより selectedDate が優先）
+      if (selectedDate) opts.selectedDate = selectedDate;
 
       if (search.trim()) opts.search = search.trim();
 
@@ -67,7 +72,7 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
     } finally {
       setLoading(false);
     }
-  }, [userId, filter, search]);
+  }, [userId, filter, search, selectedDate]);
 
   useEffect(() => {
     loadEvents();
@@ -86,6 +91,36 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
 
   const handleFilterChange = (f: FilterType) => {
     setFilter(f);
+    // 「今日」以外のフィルタに切り替えた場合は日付選択を解除
+    if (f !== "today") setSelectedDate(null);
+  };
+
+  // 「今日」ボタンクリック → date input を開く
+  const handleTodayClick = () => {
+    if (filter !== "today") {
+      setFilter("today");
+      setSelectedDate(null);
+    }
+    // date input を表示してクリック
+    setTimeout(() => dateInputRef.current?.showPicker?.(), 50);
+  };
+
+  // date input の変更 (YYYY-MM-DD)
+  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value; // "YYYY-MM-DD" or ""
+    if (val) {
+      setSelectedDate(val);
+      setFilter("today"); // today フィルタとして扱う
+    } else {
+      setSelectedDate(null);
+    }
+  };
+
+  // 日付フィルタ解除
+  const handleClearDate = () => {
+    setSelectedDate(null);
+    setFilter("all");
+    if (dateInputRef.current) dateInputRef.current.value = "";
   };
 
   const handleSearchChange = (value: string) => {
@@ -182,16 +217,25 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
     return "";
   };
 
+  // "today" は別途JSXで日付ピッカー付きボタンとして実装するため除外
   const filters: { key: FilterType; label: string }[] = [
     { key: "all", label: `全件 (${events.length})` },
     { key: "unread", label: `未読 (${unreadCount})` },
     { key: "starred", label: "⭐ スター" },
-    { key: "today", label: "📅 今日" },
     { key: "buyback", label: "📊 自社株買" },
     { key: "forecast_up", label: "📈 上方修正" },
     { key: "dividend", label: "💰 配当" },
     { key: "earnings", label: "📋 決算" },
   ];
+
+  // selectedDate の表示ラベル (YYYY-MM-DD → MM/DD)
+  const todayBtnLabel = (() => {
+    if (selectedDate) {
+      const [, m, d] = selectedDate.split("-");
+      return `📅 ${m}/${d}`;
+    }
+    return "📅 今日";
+  })();
 
   return (
     <div className="alerts-layout">
@@ -236,12 +280,44 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
         {filters.map((f) => (
           <button
             key={f.key}
-            className={`filter-chip ${filter === f.key ? "active" : ""}`}
+            className={`filter-chip ${filter === f.key && !selectedDate ? "active" : ""}`}
             onClick={() => handleFilterChange(f.key)}
           >
             {f.label}
           </button>
         ))}
+
+        {/* 日付ピッカー付き「今日」ボタン */}
+        <div className="date-filter-wrap">
+          <button
+            className={`filter-chip ${filter === "today" ? "active" : ""}`}
+            onClick={handleTodayClick}
+            title="クリックで日付を選択"
+          >
+            {todayBtnLabel}
+          </button>
+          {selectedDate && (
+            <button
+              className="date-clear-btn"
+              onClick={handleClearDate}
+              title="日付フィルタを解除"
+              aria-label="日付フィルタを解除"
+            >
+              ×
+            </button>
+          )}
+          {/* hidden date input: showPicker() で開く */}
+          <input
+            ref={dateInputRef}
+            type="date"
+            className="date-picker-hidden"
+            value={selectedDate ?? ""}
+            onChange={handleDateChange}
+            tabIndex={-1}
+            aria-hidden="true"
+          />
+        </div>
+
         <input
           type="text"
           className="filter-search"

@@ -328,6 +328,56 @@ html, body {
   font-family: var(--font-sans);
 }
 
+/* ============================================================
+   Date Filter (カレンダー付き「今日」ボタン)
+   ============================================================ */
+.date-filter-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+/* × 解除ボタン */
+.date-clear-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.15s;
+  font-family: var(--font-sans);
+}
+
+.date-clear-btn:hover {
+  background: var(--accent-red, #ef4444);
+  border-color: var(--accent-red, #ef4444);
+  color: white;
+}
+
+/* hidden date input: ボタンの背後に重ねて showPicker() で開く */
+.date-picker-hidden {
+  position: absolute;
+  left: 0;
+  top: 100%;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+
 .filter-search:focus {
   border-color: var(--accent-blue);
 }
