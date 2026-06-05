@@ -763,12 +763,28 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
                 const cvBase = process.env.NEXT_PUBLIC_COMPANY_VIEWER_URL || "http://localhost:3000/";
                 const cvUrl = `${cvBase}?ticker=${encodeURIComponent(selectedEvent.ticker)}`;
                 return (
-                  <iframe
-                    key={selectedEvent.ticker}
-                    src={cvUrl}
-                    className="company-viewer-frame"
-                    title={`Company Viewer: ${selectedEvent.ticker}`}
-                  />
+                  <>
+                    {/* 別タブ導線バー（ログイン未済・全画面表示用）*/}
+                    <div className="cv-open-bar">
+                      <span className="cv-open-label">
+                        {selectedEvent.ticker} {selectedEvent.company_name ?? ""}
+                      </span>
+                      <a
+                        href={cvUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="cv-open-btn"
+                      >
+                        🔗 別タブで開く
+                      </a>
+                    </div>
+                    <iframe
+                      key={selectedEvent.ticker}
+                      src={cvUrl}
+                      className="company-viewer-frame"
+                      title={`Company Viewer: ${selectedEvent.ticker}`}
+                    />
+                  </>
                 );
               })() : (
                 <AlertDetailPanel
