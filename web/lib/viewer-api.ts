@@ -106,7 +106,7 @@ export async function loadFinancials(
       .eq("ticker", t)
       .order("period", { ascending: false })
       .order("quarter", { ascending: false })
-      .limit(20);
+      .limit(50);
 
     if (error) {
       const msg = `[api_latest_financials] ${error.message} (code: ${error.code})`;

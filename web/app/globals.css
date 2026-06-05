@@ -632,57 +632,127 @@ html, body {
 
 /* セクションタイトル */
 .cvp-section-title {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   font-weight: 700;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  padding: 0.6rem 1rem 0.3rem;
+  padding: 0.5rem 0.75rem 0.25rem;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .cvp-empty {
   font-size: 0.8rem;
   color: var(--text-muted);
-  padding: 0.5rem 1rem 1rem;
+  padding: 1.5rem 1rem;
+  text-align: center;
 }
 
-/* PLテーブル */
-.cvp-table {
-  width: 100%;
+/* ============================================================
+   PL 比較テーブル（横スクロール対応）
+   ============================================================ */
+.cvp-table-wrap {
+  flex: 1;
+  overflow: auto; /* 縦・横ともスクロール可 */
+  min-height: 0;
+}
+
+.cvp-pl-table {
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
 }
-.cvp-table th {
-  text-align: right;
-  padding: 0.3rem 0.75rem;
-  font-size: 0.7rem;
-  font-weight: 600;
+
+/* ヘッダー（縦スクロール時に固定） */
+.cvp-pl-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.cvp-pl-table th {
+  background: var(--bg-secondary);
+  border-bottom: 2px solid var(--border);
+  padding: 0.3rem 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 700;
   color: var(--text-muted);
+  text-align: right;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
+.cvp-th-left {
+  text-align: left !important;
+}
+
+.cvp-pl-table td {
+  padding: 0.22rem 0.55rem;
   border-bottom: 1px solid var(--border);
-}
-.cvp-table th:first-child {
-  text-align: left;
-}
-.cvp-table td {
-  padding: 0.3rem 0.75rem;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-primary);
-}
-.cvp-table tr:last-child td {
-  border-bottom: none;
-}
-.cvp-td-period {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
   white-space: nowrap;
 }
+
+/* 期ラベル列 */
+.cvp-td-period {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  min-width: 4.5rem;
+  text-align: left;
+}
+
+/* 四半期列 */
+.cvp-td-q {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  text-align: left;
+  min-width: 2.5rem;
+}
+
+/* 数値列 */
 .cvp-td-num {
   text-align: right;
   font-family: var(--font-mono);
-  font-size: 0.82rem;
+  color: var(--text-primary);
+  min-width: 5rem;
 }
-.cvp-negative { color: #ef4444; }
-.cvp-positive { color: #22c55e; }
+
+/* 比率列 */
+.cvp-td-pct {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  min-width: 4.5rem;
+}
+
+/* 色 */
+.cvp-pos { color: #22c55e; }
+.cvp-neg { color: #ef4444; }
+
+/* 通期行 */
+.cvp-row-fy {
+  background: var(--bg-secondary);
+}
+.cvp-row-fy td {
+  font-weight: 600;
+  border-bottom: 2px solid var(--border);
+}
+.cvp-row-fy .cvp-td-q {
+  color: var(--text-muted);
+}
+
+/* 各期の最初の行（4Q か直近Q）の上に仕切り */
+.cvp-first-in-period td {
+  border-top: 1px solid var(--border);
+}
+
+/* 通常Q行 hover */
+.cvp-row-q:hover td {
+  background: color-mix(in srgb, var(--accent-blue) 6%, transparent);
+}
 
 /* 業績修正 */
 .cvp-forecast-list {
@@ -690,6 +760,7 @@ html, body {
   flex-direction: column;
   gap: 0.15rem;
   padding: 0 0.75rem 0.75rem;
+  flex-shrink: 0;
 }
 .cvp-forecast-row {
   display: flex;
@@ -701,7 +772,7 @@ html, body {
 .cvp-fc-date {
   font-family: var(--font-mono);
   color: var(--text-muted);
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   flex-shrink: 0;
 }
 .cvp-fc-metric {
@@ -714,11 +785,11 @@ html, body {
 .cvp-fc-delta {
   font-family: var(--font-mono);
   font-weight: 700;
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   flex-shrink: 0;
 }
 .cvp-fc-more {
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   color: var(--text-muted);
   padding-top: 0.2rem;
 }
