@@ -140,53 +140,104 @@ def _should_notify_buyback(event: EventRecord) -> bool:
 
 
 def _should_notify_forecast(event: EventRecord) -> bool:
-    """上方修正: subtype == 'upward' のみ通知"""
-    return event.subtype == "upward"
+    """上方修正・差異通知フィルタ
+
+    - upward: 無条件で True
+    - difference: 営業利益差異率 (change_op_pct) の絶対値 >= 20.0% のみ True
+                  change_op_pct が欠損の場合は安全側で True（数値未抽出で重要案件を落とさない）
+    - downward / neutral / undecided: False
+    """
+    subtype = event.subtype or ""
+    if subtype == "upward":
+        return True
+    if subtype == "difference":
+        payload = _get_payload(event)
+        op_pct = payload.get("change_op_pct")
+        if op_pct is None:
+            # 欠損時は安全側で通知する
+            logger.debug(
+                f"[NOTIFY] forecast difference: change_op_pct missing → notify True "
+                f"ticker={event.ticker}"
+            )
+            return True
+        try:
+            if abs(float(op_pct)) >= 20.0:
+                return True
+            logger.debug(
+                f"[NOTIFY] forecast difference: abs(change_op_pct)={abs(float(op_pct)):.1f}% < 20% → skip "
+                f"ticker={event.ticker}"
+            )
+            return False
+        except (ValueError, TypeError):
+            return True  # 変換失敗も安全側
+    return False
 
 
 def _should_notify_dividend(event: EventRecord) -> bool:
-    """増配通知判定:
-    - special_dividend / commemorative_dividend → 常に通知
-    - 無配→有配 (previous == 0, revised > 0) → 通知
-    - 通常増配: previous > 0 かつ increase_ratio >= 0.20 → 通知
-    - 金額未抽出 (rev is None): subtype が 'decrease' 以外なら通知
-      (配当修正PDFが検知されたが金額抽出できなかった場合の簡易通知)
-    - 減配 (decrease) → 非通知
+    """増配通知判定（厳格版）:
+
+    通知条件: 以下をすべて満たす場合のみ True
+      1. prev_dividend が正の数値 (>0)
+      2. revised_dividend が正の数値 (>0)
+      3. revised_dividend > prev_dividend
+      4. 増加率 >= 20.0%
+
+    非通知:
+      - 減配 / 据え置き
+      - prev=None / rev=None / "---" / 空文字 / 0
+      - 無配→有配 (prev=0 → rev>0): 今回は通知しない。将来の別イベントで対応。
+      - 未定→有配: 同上
+      - +20%未満の小幅増配
+
+    将来拡張:
+      - special_dividend / commemorative_dividend: 今回は数値なしブロックと同条件
     """
-    # 減配は通知しない
-    if event.subtype == "decrease":
-        return False
-
-    # 特別配当・記念配当は subtype で判定
-    if event.subtype in ("special_dividend", "commemorative_dividend"):
-        return True
-
-    # increase / その他の subtype は金額ベースで判定
     payload = _get_payload(event)
     prev = payload.get("previous_dividend_per_share")
-    rev = payload.get("revised_dividend_per_share")
+    rev  = payload.get("revised_dividend_per_share")
 
-    if rev is None:
-        # 金額未抽出: 配当修正タイトルが検知されたこと自体を通知
-        # (decrease は上で除外済み)
-        return True
+    # [G1] prev / rev が None / 空 / "---" → ブロック
+    _INVALID = (None, "", "---")
+    if prev in _INVALID or rev in _INVALID:
+        logger.debug(
+            "[NOTIFY] dividend null-guard: prev=%r rev=%r subtype=%s ticker=%s",
+            prev, rev, event.subtype, event.ticker,
+        )
+        return False
 
+    # [G2] float 変換
     try:
-        prev_f = float(prev) if prev is not None else None
-        rev_f = float(rev)
+        prev_f = float(prev)
+        rev_f  = float(rev)
     except (ValueError, TypeError):
         return False
 
-    # 無配→有配
-    if (prev_f is None or prev_f == 0) and rev_f > 0:
-        return True
+    # [G3] prev が 0 以下 → 無配・未定は今回は通知対象外
+    if prev_f <= 0:
+        logger.debug(
+            "[NOTIFY] dividend prev<=0 blocked: prev=%s ticker=%s",
+            prev_f, event.ticker,
+        )
+        return False
 
-    # 通常増配: +20%以上
-    if prev_f is not None and prev_f > 0 and rev_f > prev_f:
-        increase_ratio = (rev_f - prev_f) / prev_f
-        return increase_ratio >= 0.20
+    # [G4] rev が 0 以下
+    if rev_f <= 0:
+        return False
 
-    return False
+    # [G5] rev <= prev → 据え置き / 減配
+    if rev_f <= prev_f:
+        return False
+
+    # [G6] 増加率 >= 20.0%
+    increase_pct = (rev_f - prev_f) / prev_f * 100
+    if increase_pct < 20.0:
+        logger.debug(
+            "[NOTIFY] dividend pct-guard: pct=%.1f%% ticker=%s",
+            increase_pct, event.ticker,
+        )
+        return False
+
+    return True
 
 
 # ============================================================
