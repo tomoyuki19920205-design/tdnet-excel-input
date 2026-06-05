@@ -494,13 +494,48 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
               </div>
             </div>
           ) : (
-            events.map((event, _idx) => {
+            (() => {
+            const isDiscordTab = filter === "discord";
+            return events.map((event, _idx) => {
               const badge = getBadgeConfig(event.event_type, event.headline);
               const strength = getStrengthDisplay(event);
               const priorityClass = !event.is_read ? getPriorityClass(event.priority_rank) : "";
               const subtypeLabel = event.event_subtype
                 ? (EVENT_SUBTYPE_LABELS[event.event_subtype] ?? event.event_subtype)
                 : "";
+
+              // ─── カード本文を決定 ────────────────────────────────
+              let cardBody: string;
+              if (isDiscordTab) {
+                cardBody = formatDiscordStyleBody(event);
+              } else {
+                const fm = event.formatted_message?.trim() || "";
+                let mainText = fm
+                  || [event.display_title, event.display_summary]
+                      .filter((s) => s?.trim())
+                      .join("\n")
+                  || event.headline
+                  || "";
+                const isShort = !mainText.includes("\n");
+                if (
+                  isShort &&
+                  event.headline?.trim() &&
+                  !mainText.includes(event.headline.trim())
+                ) {
+                  mainText = mainText + "\n" + event.headline;
+                }
+                cardBody = mainText;
+              }
+              // DEBUG LOG
+              console.log("[TDNET card render]", {
+                filter,
+                isDiscordTab,
+                ticker: event.ticker,
+                eventType: event.event_type,
+                subtype: event.event_subtype,
+                cardBody: cardBody.slice(0, 80),
+              });
+              // ─────────────────────────────────────────────────────
 
               return (
                 <div
@@ -541,52 +576,12 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
                     </span>
                   </div>
 
-                  {/* Main content: Discord対象タブは専用フォーマット、それ以外は formatted_message 最優先 */}
-                  {(() => {
-                    // 【Discord対象タブ専用】raw_payload から Discord相当の表示
-                    if (filter === "discord") {
-                      const discordText = formatDiscordStyleBody(event);
-                      return (
-                        <div className="alert-card-body">{discordText}</div>
-                      );
-                    }
-
-                    // 【既存ロジック】formatted_message 最優先
-                    const fm = event.formatted_message?.trim() || "";
-                    let mainText = fm
-                      || [event.display_title, event.display_summary]
-                          .filter((s) => s?.trim())
-                          .join("\n")
-                      || event.headline
-                      || "";
-                    // 指標行なし(改行なし) → headline をメイン本文に統合
-                    const isShort = !mainText.includes("\n");
-                    if (
-                      isShort &&
-                      event.headline?.trim() &&
-                      !mainText.includes(event.headline.trim())
-                    ) {
-                      mainText = mainText + "\n" + event.headline;
-                    }
-
-                    // DEBUG
-                    if (_idx < 3) {
-                      console.log("[TDNET ALERT render]", {
-                        id: event.id,
-                        ticker: event.ticker,
-                        formatted_message: event.formatted_message,
-                        headline: event.headline,
-                        renderedMainText: mainText,
-                      });
-                    }
-
-                    return (
-                      <div className="alert-card-body">{mainText}</div>
-                    );
-                  })()}
+                  {/* Main content */}
+                  <div className="alert-card-body">{cardBody}</div>
                 </div>
               );
-            })
+            });
+            })()
           )}
         </div>
 
