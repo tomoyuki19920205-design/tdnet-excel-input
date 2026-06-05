@@ -229,6 +229,133 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
     return "";
   };
 
+  // ============================================================
+  // Discord対象タブ専用フォーマッタ
+  // raw_payload.extracted から Discord通知相当の表示文字列を生成
+  // ============================================================
+  const formatDiscordStyleBody = (event: EnrichedEvent): string => {
+    const rp = event.raw_payload as Record<string, unknown> | null;
+    const ext = (
+      rp && typeof rp === "object" && rp.extracted && typeof rp.extracted === "object"
+        ? rp.extracted
+        : {}
+    ) as Record<string, unknown>;
+
+    const fmtPct = (v: unknown): string => {
+      const n = Number(v);
+      if (isNaN(n)) return "?%";
+      const sign = n > 0 ? "+" : "";
+      return `${sign}${n.toFixed(1)}%`;
+    };
+    const fmtBillion = (v: unknown): string => {
+      const n = Number(v);
+      if (isNaN(n)) return "---";
+      if (Math.abs(n) >= 100) return `${(n / 100).toFixed(1)}億円`;
+      return `${n.toFixed(0)}百万円`;
+    };
+    const fmtShares = (v: unknown): string => {
+      const n = Number(v);
+      if (isNaN(n)) return "---";
+      if (n >= 10000) return `${(n / 10000).toFixed(1)}万株`;
+      return `${n.toLocaleString()}株`;
+    };
+    const fmtDiv = (v: unknown): string => {
+      const n = Number(v);
+      if (isNaN(n)) return "---";
+      return n === Math.floor(n) ? `${Math.floor(n)}円` : `${n}円`;
+    };
+
+    const lines: string[] = [];
+
+    if (event.event_type === "forecast") {
+      // ヘッダー行（headline を 1 行目に）
+      if (event.headline) lines.push(event.headline);
+      // 差異率行
+      const opPct = ext.change_op_pct;
+      const ordPct = ext.change_ordinary_pct;
+      const netPct = ext.change_net_income_pct;
+      const metrics: string[] = [];
+      if (opPct != null) metrics.push(`営業利益 ${fmtPct(opPct)}`);
+      if (ordPct != null) metrics.push(`経常利益 ${fmtPct(ordPct)}`);
+      if (netPct != null) metrics.push(`純利益 ${fmtPct(netPct)}`);
+      if (metrics.length > 0) lines.push(metrics.join("  "));
+      // EPS
+      const epsPrev = ext.previous_eps;
+      const epsRev  = ext.revised_eps;
+      if (epsPrev != null && epsRev != null) {
+        const p = Number(epsPrev), r = Number(epsRev);
+        if (!isNaN(p) && !isNaN(r) && Math.abs(p) <= 10000 && Math.abs(r) <= 10000) {
+          if (p !== 0) {
+            const pct = (r - p) / Math.abs(p) * 100;
+            lines.push(`EPS: ${fmtDiv(p)}→${fmtDiv(r)}(${fmtPct(pct)})`);
+          } else {
+            lines.push(`EPS: ${fmtDiv(p)}→${fmtDiv(r)}`);
+          }
+        }
+      }
+
+    } else if (event.event_type === "buyback") {
+      if (event.headline) lines.push(event.headline);
+      const ratio  = ext.ratio_to_outstanding;
+      const shares = ext.shares_limit;
+      const amount = ext.amount_limit_million_yen;
+      const start  = ext.start_date;
+      const end    = ext.end_date;
+      const specs: string[] = [];
+      if (ratio  != null) specs.push(`比率 ${Number(ratio).toFixed(2)}%`);
+      if (shares != null) specs.push(`株数 ${fmtShares(shares)}`);
+      if (amount != null) specs.push(`金額 ${fmtBillion(amount)}`);
+      if (specs.length > 0) lines.push(specs.join("  "));
+      if (event.event_subtype === "tostnet" && start) {
+        lines.push(`買付日: ${String(start)}`);
+      } else if (start && end) {
+        lines.push(`取得期間: ${String(start)}〜${String(end)}`);
+      } else if (start) {
+        lines.push(`取得開始: ${String(start)}`);
+      }
+
+    } else if (event.event_type === "dividend") {
+      if (event.headline) lines.push(event.headline);
+      const prev = ext.previous_dividend_per_share;
+      const rev  = ext.revised_dividend_per_share;
+      if (rev != null) {
+        const r = Number(rev);
+        const p = prev != null ? Number(prev) : null;
+        if (!isNaN(r)) {
+          if (p !== null && !isNaN(p) && p !== 0) {
+            const pct = (r - p) / Math.abs(p) * 100;
+            lines.push(`配当: ${fmtDiv(p)}→${fmtDiv(r)}(${fmtPct(pct)})`);
+          } else {
+            lines.push(`配当: ${fmtDiv(r)}`);
+          }
+        }
+      }
+      const period = ext.fiscal_period;
+      if (period) lines.push(String(period));
+
+    } else {
+      // fallback
+      if (event.headline) lines.push(event.headline);
+    }
+
+    // 開示URL
+    const url = event.source_url ||
+      (rp && typeof rp.doc_url === "string" ? rp.doc_url : "");
+    if (url) lines.push(`開示: ${url}`);
+
+    // Discord送信済み
+    if (event.discord_sent_at) {
+      const d = new Date(event.discord_sent_at);
+      const mm  = String(d.getMonth() + 1).padStart(2, "0");
+      const dd  = String(d.getDate()).padStart(2, "0");
+      const hh  = String(d.getHours()).padStart(2, "0");
+      const min = String(d.getMinutes()).padStart(2, "0");
+      lines.push(`🔔 Discord送信済み: ${d.getFullYear()}-${mm}-${dd} ${hh}:${min}`);
+    }
+
+    return lines.filter((s) => s.trim()).join("\n") || event.headline || "";
+  };
+
   // "today" は別途JSXで日付ピッカー付きボタンとして実装するため除外
   const filters: { key: FilterType; label: string }[] = [
     { key: "all", label: `全件 (${events.length})` },
@@ -403,8 +530,17 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
                     </span>
                   </div>
 
-                  {/* Main content: formatted_message 最優先 */}
+                  {/* Main content: Discord対象タブは専用フォーマット、それ以外は formatted_message 最優先 */}
                   {(() => {
+                    // 【Discord対象タブ専用】raw_payload から Discord相当の表示
+                    if (filter === "discord") {
+                      const discordText = formatDiscordStyleBody(event);
+                      return (
+                        <div className="alert-card-body">{discordText}</div>
+                      );
+                    }
+
+                    // 【既存ロジック】formatted_message 最優先
                     const fm = event.formatted_message?.trim() || "";
                     let mainText = fm
                       || [event.display_title, event.display_summary]
