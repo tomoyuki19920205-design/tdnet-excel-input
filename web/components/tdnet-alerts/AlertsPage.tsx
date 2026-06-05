@@ -758,14 +758,19 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
               </div>
 
               {/* タブコンテンツ */}
-              {rightPaneTab === "company" ? (
-                <iframe
-                  key={selectedEvent.ticker}
-                  src={`${process.env.NEXT_PUBLIC_COMPANY_VIEWER_URL ?? "http://localhost:3000/"}${selectedEvent.ticker}`}
-                  className="company-viewer-frame"
-                  title={`Company Viewer: ${selectedEvent.ticker}`}
-                />
-              ) : (
+              {rightPaneTab === "company" ? (() => {
+                // || で空文字も fallback（?? は null/undefined のみ）
+                const cvBase = process.env.NEXT_PUBLIC_COMPANY_VIEWER_URL || "http://localhost:3000/";
+                const cvUrl = `${cvBase}?ticker=${encodeURIComponent(selectedEvent.ticker)}`;
+                return (
+                  <iframe
+                    key={selectedEvent.ticker}
+                    src={cvUrl}
+                    className="company-viewer-frame"
+                    title={`Company Viewer: ${selectedEvent.ticker}`}
+                  />
+                );
+              })() : (
                 <AlertDetailPanel
                   event={selectedEvent}
                   userId={userId}
