@@ -8,7 +8,7 @@ import { audioManager } from "@/lib/tdnet-alerts/audio";
 import type { EnrichedEvent, TdnetEvent, FilterType } from "@/lib/tdnet-alerts/types";
 import { EVENT_TYPE_CONFIG, EVENT_SUBTYPE_LABELS, getDisplayCategory } from "@/lib/tdnet-alerts/types";
 import AlertDetailPanel from "./AlertDetailPanel";
-import CompanyViewerPanel from "./CompanyViewerPanel";
+import CompanyViewerFull from "@/components/company-viewer/CompanyViewerFull";
 
 interface AlertsPageProps {
   userId: string;
@@ -760,11 +760,11 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
 
               {/* タブコンテンツ */}
               {rightPaneTab === "company" ? (
-                <CompanyViewerPanel
+                <CompanyViewerFull
                   ticker={selectedEvent.ticker}
                   supabase={supabaseRef.current}
                   companyViewerBaseUrl={
-                    process.env.NEXT_PUBLIC_COMPANY_VIEWER_URL || "http://localhost:3000/"
+                    process.env.NEXT_PUBLIC_COMPANY_VIEWER_URL || "https://company-memo-app.vercel.app/"
                   }
                 />
               ) : (

@@ -31,6 +31,12 @@ function normalizeTicker(ticker: string): string {
   return trimmed.toUpperCase();
 }
 
+/** period 文字列 ("2025-03-31") から西暦年を整数で返す */
+export function extractFiscalYear(period: string): number {
+  const m = period.match(/^(\d{4})/);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
 const QUARTER_ORDER: Record<string, number> = {
   "1Q": 0, "2Q": 1, "3Q": 2, "4Q": 3, "FY": 4,
 };

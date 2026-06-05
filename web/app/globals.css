@@ -1284,3 +1284,496 @@ html, body {
 .segment-table tbody tr:hover td {
   background: var(--bg-card-hover);
 }
+
+/* ============================================================
+   CompanyViewerFull (cvf-*) — FinancialsTable 本体移植
+   ============================================================ */
+
+/* --- レイアウト --- */
+.cvf-root {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  /* company-memo-app の CSS 変数を cvf スコープで定義 */
+  --card-bg: #111820;
+  --border-cv: #253041;
+  --border-light: #1e2d3d;
+  --border-focus: #3b82f6;
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --primary-light: #1a2a45;
+  --danger: #f87171;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --text: #f1f5f9;
+  --header-bg: #1f3b73;
+  --header-text: #e5e7eb;
+  --row-alt: #0f151d;
+  --row-hover: #1a2535;
+  --row-selected: #1e3a5f;
+  --mono: 'Consolas', 'SF Mono', monospace;
+  --pl-font: 'Yu Gothic UI', 'Yu Gothic', 'Meiryo', 'Hiragino Kaku Gothic ProN', sans-serif;
+  --pl-bg: #050505;
+  --pl-bg-alt: #080808;
+  --pl-bg-header: #0a0a0a;
+  --pl-bg-label: #0d0d0d;
+  --pl-bg-memo: #080808;
+  --pl-bg-hover: #141414;
+  --pl-bg-selected: #0f1a2e;
+  --pl-bg-fy: #0a0a0a;
+  --pl-bg-manual: #030303;
+  --radius-cv: 8px;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.4);
+}
+
+/* --- ヘッダー --- */
+.cvf-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+  gap: 0.5rem;
+}
+
+.cvf-ticker-info {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.cvf-ticker {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+.cvf-company-name {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cvf-open-btn {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--accent-blue);
+  text-decoration: none;
+  border: 1px solid var(--accent-blue);
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.cvf-open-btn:hover {
+  background: var(--accent-blue);
+  color: white;
+}
+
+/* --- エラー --- */
+.cvf-error {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+}
+.cvf-error-title {
+  font-size: 0.83rem;
+  font-weight: 700;
+  color: #ef4444;
+}
+.cvf-error-msg {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+/* --- FinancialsTable 本体を入れる body --- */
+.cvf-body {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  background: #050505;
+}
+
+/* ============================================================
+   FinancialsTable 移植 CSS (company-memo-app/app/globals.css より)
+   クラス名は company-memo-app と同一のまま使用
+   ============================================================ */
+
+/* --- Data Section wrapper --- */
+.cvf-body .data-section {
+  background: var(--card-bg);
+  border: 1px solid var(--border-cv);
+  border-radius: var(--radius-cv);
+  overflow-x: visible;
+  overflow-y: hidden;
+  box-shadow: var(--shadow-sm);
+  outline: none;
+}
+
+.cvf-body .section-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text);
+  padding: 8px 12px;
+  background: #0f141b;
+  border-bottom: 1px solid var(--border-light);
+  margin: 0;
+}
+
+.cvf-body .loading-message,
+.cvf-body .no-data-message {
+  padding: 24px 16px;
+  text-align: center;
+  color: #cbd5e1;
+  font-size: 0.9rem;
+}
+
+/* --- Data Table (generic) --- */
+.cvf-body .data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.83rem;
+  table-layout: fixed;
+}
+
+.cvf-body .data-table thead th {
+  text-align: left;
+  padding: 8px 10px;
+  background: #1f3b73;
+  color: #e5e7eb;
+  font-weight: 600;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  border-bottom: 2px solid #3461b0;
+  position: relative;
+}
+
+.cvf-body .th-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.cvf-body .th-content span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.cvf-body .resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 2;
+  transition: background 0.15s;
+}
+.cvf-body .resize-handle:hover { background: rgba(255,255,255,0.4); }
+.cvf-body .resize-handle:active { background: rgba(255,255,255,0.6); }
+
+.cvf-body .data-table tbody tr {
+  border-bottom: 1px solid #1e2d3d;
+  transition: background 0.1s;
+}
+.cvf-body .data-table tbody tr:nth-child(even) { background: #0f151d; }
+.cvf-body .data-table tbody tr:hover { background: #1a2535; }
+
+.cvf-body .data-table tbody td {
+  padding: 6px 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cvf-body .num-col {
+  text-align: right !important;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  font-feature-settings: "tnum";
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* --- PL table --- */
+.cvf-body .pl-section { overflow: hidden; }
+
+.cvf-body .pl-scroll-area {
+  overflow-x: auto;
+  overflow-y: visible;
+  border: 1px solid #1e2d3d;
+  border-radius: 0 0 6px 6px;
+}
+
+.cvf-body .pl-dual-tables {
+  display: flex;
+  gap: 12px;
+  width: max-content;
+}
+
+.cvf-body .pl-table-block { flex-shrink: 0; }
+
+.cvf-body .pl-table-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #3b82f6;
+  padding: 4px 8px;
+  background: #0d0d0d;
+  border-bottom: 1px solid #1e2d3d;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cvf-body .pl-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.83rem;
+  font-family: var(--pl-font);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.cvf-body .pl-table thead {
+  position: sticky;
+  top: 27px;
+  z-index: 3;
+}
+
+.cvf-body .pl-table thead th {
+  text-align: left;
+  padding: 8px 10px;
+  background: #0a0a0a;
+  color: #e5e7eb;
+  font-weight: 700;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  border-bottom: 2px solid rgba(255,255,255,0.25);
+  position: relative;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cvf-body .pl-table tbody td {
+  padding: 6px 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--pl-font);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  background: #050505;
+}
+
+.cvf-body .pl-table tbody tr { border-bottom: 1px solid rgba(255,255,255,0.08); }
+
+/* --- PL row types --- */
+.cvf-body .pl-row { cursor: pointer; transition: background 0.1s; }
+.cvf-body .pl-row:hover { background: #1a2535 !important; }
+.cvf-body .pl-row-selected {
+  background: #1e3a5f !important;
+  box-shadow: inset 3px 0 0 #3b82f6;
+}
+.cvf-body .pl-row-fy { font-weight: 600; }
+
+/* --- Memo cells --- */
+.cvf-body .memo-cell {
+  font-size: 0.78rem;
+  font-family: var(--pl-font);
+  color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: #080808;
+  cursor: cell;
+}
+.cvf-body .memo-cell-active {
+  background: #0f1a2e !important;
+  outline: 2px solid #3b82f6 !important;
+  outline-offset: -2px;
+}
+.cvf-body .memo-inline-input {
+  width: 100%;
+  height: 100%;
+  min-height: 28px;
+  border: none;
+  outline: none;
+  padding: 4px 6px;
+  font-size: 0.82rem;
+  background: #030303;
+  color: #f1f5f9;
+  box-sizing: border-box;
+}
+
+/* --- Segment tabs --- */
+.cvf-body .seg-source-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid #1e2d3d;
+  background: #0a0a0a;
+}
+.cvf-body .seg-source-tab {
+  padding: 3px 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  color: #94a3b8;
+  background: transparent;
+  transition: all 0.1s;
+}
+.cvf-body .seg-source-tab:hover { color: #e2e8f0; border-color: #253041; }
+.cvf-body .seg-source-tab-active {
+  background: #1f3b73;
+  color: #fff;
+  border-color: #3b82f6;
+}
+
+/* --- Segment headers --- */
+.cvf-body .seg-header-cell { position: relative; }
+.cvf-body .seg-header-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  white-space: nowrap;
+}
+.cvf-body .seg-sales-col { border-left: 2px solid rgba(255,255,255,0.1); }
+.cvf-body .seg-profit-col {}
+
+/* --- KPI headers --- */
+.cvf-body .kpi-header-cell { position: relative; background: #0d1220; }
+.cvf-body .kpi-header-label { cursor: default; }
+.cvf-body .kpi-header-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: 1px solid #3b82f6;
+  color: #f1f5f9;
+  font-size: 0.75rem;
+  padding: 2px 4px;
+}
+
+/* --- GP/OP margin columns --- */
+.cvf-body .gp-margin-col { color: #94a3b8; }
+.cvf-body .op-margin-col { color: #94a3b8; }
+
+/* --- Formula bar (read-only in cvf) --- */
+.cvf-body .formula-bar {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid #1e2d3d;
+  background: #030303;
+}
+.cvf-body .formula-bar-label {
+  display: flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-right: 1px solid #1e2d3d;
+  background: #0d0d0d;
+  min-width: 180px;
+}
+.cvf-body .cell-ref {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #3b82f6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cvf-body .formula-bar-input {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  border: none;
+  outline: none;
+  background: #0a0a0a;
+  color: #f1f5f9;
+  line-height: 1.4;
+}
+
+/* --- Source badge --- */
+.cvf-body .source-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 4px;
+  vertical-align: middle;
+  background: #1f3b73;
+  color: #93c5fd;
+}
+
+/* --- PL resize handle (hidden in right pane) --- */
+.cvf-body .pl-resize-handle { display: none; }
+.cvf-body .pl-resize-grip { display: none; }
+.cvf-body .formula-bar-resize-handle { display: none; }
+
+/* --- Table wrapper for company-viewer --- */
+.cvf-body .table-wrapper {
+  overflow-x: auto;
+}
+
+/* --- PL summary bar --- */
+.cvf-body .pl-summary-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 12px;
+  background: #080808;
+  border: 1px solid #1e2d3d;
+  font-size: 0.8rem;
+}
+
+/* --- Forecast bar within FinancialsTable --- */
+.cvf-body .forecast-bar { display: none; }
+
+/* --- Seg label badge --- */
+.cvf-body .seg-label-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #fff;
+  background: #8b5cf6;
+  padding: 1px 8px;
+  border-radius: 10px;
+}
+
+/* --- Manual row --- */
+.cvf-body .pl-manual-row td {
+  background: #030303;
+  color: #64748b;
+  font-style: italic;
+}
+
