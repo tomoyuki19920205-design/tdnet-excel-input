@@ -515,52 +515,69 @@ html, body {
 }
 
 /* ============================================================
-   Company Viewer iframe
+   Company Viewer ランチャーペイン（別タブ方式）
    ============================================================ */
-.company-viewer-frame {
+.cv-launch-pane {
   flex: 1;
-  width: 100%;
-  border: none;
-  background: white;
-}
-
-/* 別タブ導線バー */
-.cv-open-bar {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  padding: 0.3rem 0.75rem;
+  justify-content: center;
+  gap: 1.25rem;
+  padding: 2rem 1.5rem;
   background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-  gap: 0.5rem;
 }
 
-.cv-open-label {
+.cv-launch-ticker {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.cv-launch-company {
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+}
+
+.cv-launch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.75rem;
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+  color: white;
+  font-size: 0.95rem;
+  font-weight: 700;
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  transition: opacity 0.15s, transform 0.1s;
+  box-shadow: 0 2px 12px rgba(99, 102, 241, 0.35);
+  font-family: var(--font-sans);
+}
+
+.cv-launch-btn:hover {
+  opacity: 0.88;
+  transform: translateY(-1px);
+}
+
+.cv-launch-btn:active {
+  transform: translateY(0);
+}
+
+.cv-launch-note {
   font-size: 0.78rem;
   color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  text-align: center;
+  line-height: 1.7;
+  margin: 0;
 }
 
-.cv-open-btn {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--accent-blue);
-  text-decoration: none;
-  white-space: nowrap;
-  padding: 0.2rem 0.5rem;
-  border: 1px solid var(--accent-blue);
-  border-radius: var(--radius-sm);
-  transition: all 0.15s;
-  flex-shrink: 0;
-}
-
-.cv-open-btn:hover {
-  background: var(--accent-blue);
-  color: white;
-}
 
 /* ============================================================
    Alert Card (multi-line card layout)

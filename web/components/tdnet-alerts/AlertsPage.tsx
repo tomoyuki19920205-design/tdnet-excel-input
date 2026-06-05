@@ -759,32 +759,29 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
 
               {/* タブコンテンツ */}
               {rightPaneTab === "company" ? (() => {
-                // || で空文字も fallback（?? は null/undefined のみ）
                 const cvBase = process.env.NEXT_PUBLIC_COMPANY_VIEWER_URL || "http://localhost:3000/";
                 const cvUrl = `${cvBase}?ticker=${encodeURIComponent(selectedEvent.ticker)}`;
                 return (
-                  <>
-                    {/* 別タブ導線バー（ログイン未済・全画面表示用）*/}
-                    <div className="cv-open-bar">
-                      <span className="cv-open-label">
-                        {selectedEvent.ticker} {selectedEvent.company_name ?? ""}
-                      </span>
-                      <a
-                        href={cvUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="cv-open-btn"
-                      >
-                        🔗 別タブで開く
-                      </a>
+                  <div className="cv-launch-pane">
+                    <div className="cv-launch-ticker">
+                      {selectedEvent.ticker}
+                      {selectedEvent.company_name && (
+                        <span className="cv-launch-company">{selectedEvent.company_name}</span>
+                      )}
                     </div>
-                    <iframe
-                      key={selectedEvent.ticker}
-                      src={cvUrl}
-                      className="company-viewer-frame"
-                      title={`Company Viewer: ${selectedEvent.ticker}`}
-                    />
-                  </>
+                    <a
+                      href={cvUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="cv-launch-btn"
+                    >
+                      🏢 Company Viewerを別タブで開く
+                    </a>
+                    <p className="cv-launch-note">
+                      ログイン済みの場合はそのまま表示されます。<br />
+                      未ログインの場合はログイン後に自動表示されます。
+                    </p>
+                  </div>
                 );
               })() : (
                 <AlertDetailPanel
