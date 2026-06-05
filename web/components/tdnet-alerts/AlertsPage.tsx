@@ -234,7 +234,18 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
   // raw_payload.extracted から Discord通知相当の表示文字列を生成
   // ============================================================
   const formatDiscordStyleBody = (event: EnrichedEvent): string => {
-    const rp = event.raw_payload as Record<string, unknown> | null;
+    const rawVal = event.raw_payload;
+    const rp: Record<string, unknown> | null =
+      typeof rawVal === "string"
+        ? (() => {
+            try {
+              return JSON.parse(rawVal) as Record<string, unknown>;
+            } catch {
+              return null;
+            }
+          })()
+        : (rawVal as Record<string, unknown> | null) ?? null;
+
     const ext = (
       rp && typeof rp === "object" && rp.extracted && typeof rp.extracted === "object"
         ? rp.extracted
