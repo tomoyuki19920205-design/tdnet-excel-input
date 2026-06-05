@@ -514,68 +514,213 @@ html, body {
   font-weight: 600;
 }
 
+
 /* ============================================================
-   Company Viewer ランチャーペイン（別タブ方式）
+   CompanyViewerPanel (cvp-*)
    ============================================================ */
-.cv-launch-pane {
+.cvp-root {
   flex: 1;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1.25rem;
-  padding: 2rem 1.5rem;
-  background: var(--bg-secondary);
+  overflow-y: auto;
+  background: var(--bg-primary);
+  min-height: 0;
 }
 
-.cv-launch-ticker {
+/* ヘッダー */
+.cvp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+  gap: 0.5rem;
+}
+
+.cvp-ticker-info {
   display: flex;
   align-items: baseline;
-  gap: 0.6rem;
-  font-size: 1.5rem;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.cvp-ticker {
+  font-size: 1.05rem;
   font-weight: 700;
   color: var(--text-primary);
   font-family: var(--font-mono);
+  flex-shrink: 0;
 }
 
-.cv-launch-company {
-  font-size: 1rem;
-  font-weight: 500;
+.cvp-company-name {
+  font-size: 0.85rem;
   color: var(--text-secondary);
-  font-family: var(--font-sans);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.cv-launch-btn {
-  display: inline-flex;
+.cvp-open-btn {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--accent-blue);
+  text-decoration: none;
+  border: 1px solid var(--accent-blue);
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.cvp-open-btn:hover {
+  background: var(--accent-blue);
+  color: white;
+}
+
+/* ローディング */
+.cvp-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 2rem 1rem;
+  font-size: 0.83rem;
+  color: var(--text-muted);
+  justify-content: center;
+}
+
+@keyframes cvp-spin {
+  to { transform: rotate(360deg); }
+}
+
+.cvp-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent-blue);
+  border-radius: 50%;
+  animation: cvp-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+/* エラー */
+.cvp-error {
+  margin: 1rem;
+  padding: 0.75rem 1rem;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-md);
+}
+.cvp-error-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #ef4444;
+  margin-bottom: 0.3rem;
+}
+.cvp-error-msg {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  word-break: break-all;
+  margin-bottom: 0.3rem;
+}
+.cvp-error-hint {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+/* セクションタイトル */
+.cvp-section-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.6rem 1rem 0.3rem;
+}
+
+.cvp-empty {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  padding: 0.5rem 1rem 1rem;
+}
+
+/* PLテーブル */
+.cvp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.cvp-table th {
+  text-align: right;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+.cvp-table th:first-child {
+  text-align: left;
+}
+.cvp-table td {
+  padding: 0.3rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+}
+.cvp-table tr:last-child td {
+  border-bottom: none;
+}
+.cvp-td-period {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.cvp-td-num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
+.cvp-negative { color: #ef4444; }
+.cvp-positive { color: #22c55e; }
+
+/* 業績修正 */
+.cvp-forecast-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0 0.75rem 0.75rem;
+}
+.cvp-forecast-row {
+  display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.75rem 1.75rem;
-  background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
-  color: white;
-  font-size: 0.95rem;
-  font-weight: 700;
-  border-radius: var(--radius-md);
-  text-decoration: none;
-  transition: opacity 0.15s, transform 0.1s;
-  box-shadow: 0 2px 12px rgba(99, 102, 241, 0.35);
-  font-family: var(--font-sans);
-}
-
-.cv-launch-btn:hover {
-  opacity: 0.88;
-  transform: translateY(-1px);
-}
-
-.cv-launch-btn:active {
-  transform: translateY(0);
-}
-
-.cv-launch-note {
   font-size: 0.78rem;
+  padding: 0.2rem 0.25rem;
+}
+.cvp-fc-date {
+  font-family: var(--font-mono);
   color: var(--text-muted);
-  text-align: center;
-  line-height: 1.7;
-  margin: 0;
+  font-size: 0.72rem;
+  flex-shrink: 0;
+}
+.cvp-fc-metric {
+  color: var(--text-secondary);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cvp-fc-delta {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.78rem;
+  flex-shrink: 0;
+}
+.cvp-fc-more {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  padding-top: 0.2rem;
 }
 
 

@@ -8,6 +8,7 @@ import { audioManager } from "@/lib/tdnet-alerts/audio";
 import type { EnrichedEvent, TdnetEvent, FilterType } from "@/lib/tdnet-alerts/types";
 import { EVENT_TYPE_CONFIG, EVENT_SUBTYPE_LABELS, getDisplayCategory } from "@/lib/tdnet-alerts/types";
 import AlertDetailPanel from "./AlertDetailPanel";
+import CompanyViewerPanel from "./CompanyViewerPanel";
 
 interface AlertsPageProps {
   userId: string;
@@ -758,32 +759,15 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
               </div>
 
               {/* タブコンテンツ */}
-              {rightPaneTab === "company" ? (() => {
-                const cvBase = process.env.NEXT_PUBLIC_COMPANY_VIEWER_URL || "http://localhost:3000/";
-                const cvUrl = `${cvBase}?ticker=${encodeURIComponent(selectedEvent.ticker)}`;
-                return (
-                  <div className="cv-launch-pane">
-                    <div className="cv-launch-ticker">
-                      {selectedEvent.ticker}
-                      {selectedEvent.company_name && (
-                        <span className="cv-launch-company">{selectedEvent.company_name}</span>
-                      )}
-                    </div>
-                    <a
-                      href={cvUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="cv-launch-btn"
-                    >
-                      🏢 Company Viewerを別タブで開く
-                    </a>
-                    <p className="cv-launch-note">
-                      ログイン済みの場合はそのまま表示されます。<br />
-                      未ログインの場合はログイン後に自動表示されます。
-                    </p>
-                  </div>
-                );
-              })() : (
+              {rightPaneTab === "company" ? (
+                <CompanyViewerPanel
+                  ticker={selectedEvent.ticker}
+                  supabase={supabaseRef.current}
+                  companyViewerBaseUrl={
+                    process.env.NEXT_PUBLIC_COMPANY_VIEWER_URL || "http://localhost:3000/"
+                  }
+                />
+              ) : (
                 <AlertDetailPanel
                   event={selectedEvent}
                   userId={userId}
