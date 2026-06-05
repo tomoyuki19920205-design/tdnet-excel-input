@@ -329,6 +329,53 @@ html, body {
 }
 
 /* ============================================================
+   Discord ソートバー（Discord対象タブ選択時のみ表示）
+   ============================================================ */
+.discord-sort-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 1rem;
+  background: rgba(99, 102, 241, 0.06);
+  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.discord-sort-label {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-right: 0.2rem;
+  font-family: var(--font-sans);
+}
+
+.discord-sort-btn {
+  padding: 0.2rem 0.7rem;
+  border-radius: var(--radius-md);
+  font-size: 0.78rem;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: var(--font-sans);
+  white-space: nowrap;
+}
+
+.discord-sort-btn:hover {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.discord-sort-btn.active {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: white;
+  font-weight: 600;
+}
+
+/* ============================================================
    Date Filter (カレンダー付き「今日」ボタン)
    ============================================================ */
 .date-filter-wrap {

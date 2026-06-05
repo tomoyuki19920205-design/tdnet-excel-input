@@ -22,6 +22,17 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
   const [search, setSearch] = useState("");
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [discordSortMode, setDiscordSortModeState] = useState<"timeline" | "category">(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("tdnet_discord_sort");
+      if (saved === "category") return "category";
+    }
+    return "timeline";
+  });
+  const setDiscordSortMode = (mode: "timeline" | "category") => {
+    setDiscordSortModeState(mode);
+    if (typeof window !== "undefined") localStorage.setItem("tdnet_discord_sort", mode);
+  };
   const supabaseRef = useRef(createClient());
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dateInputRef = useRef<HTMLInputElement | null>(null);
@@ -511,6 +522,26 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
           onChange={(e) => handleSearchChange(e.target.value)}
         />
       </div>
+      {/* Discord対象タブのソートボタン（Discord選択時のみ表示）*/}
+      {filter === "discord" && (
+        <div className="discord-sort-bar">
+          <span className="discord-sort-label">⇅ 並び順:</span>
+          <button
+            id="discord-sort-timeline"
+            className={`discord-sort-btn ${discordSortMode === "timeline" ? "active" : ""}`}
+            onClick={() => setDiscordSortMode("timeline")}
+          >
+            時系列
+          </button>
+          <button
+            id="discord-sort-category"
+            className={`discord-sort-btn ${discordSortMode === "category" ? "active" : ""}`}
+            onClick={() => setDiscordSortMode("category")}
+          >
+            カテゴリー別
+          </button>
+        </div>
+      )}
 
       {/* Main Content */}
       <div className="alerts-content">
@@ -529,7 +560,33 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
           ) : (
             (() => {
             const isDiscordTab = filter === "discord";
-            return events.map((event, _idx) => {
+
+            // Discordタブ: ソート順をクライアントサイドで切り替え
+            const displayEvents = isDiscordTab
+              ? [...events].sort((a, b) => {
+                  // 未読を常に上
+                  if (a.is_read !== b.is_read) return a.is_read ? 1 : -1;
+                  if (discordSortMode === "timeline") {
+                    // 時系列: disclosed_at DESC NULLS LAST → detected_at DESC → created_at DESC
+                    const da = a.disclosed_at ? new Date(a.disclosed_at).getTime() : 0;
+                    const db = b.disclosed_at ? new Date(b.disclosed_at).getTime() : 0;
+                    if (da !== db) return db - da;
+                    const dda = new Date(a.detected_at).getTime();
+                    const ddb = new Date(b.detected_at).getTime();
+                    if (dda !== ddb) return ddb - dda;
+                    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+                  } else {
+                    // カテゴリー別: priority_rank → disclosed_at DESC → detected_at DESC
+                    if (a.priority_rank !== b.priority_rank) return a.priority_rank - b.priority_rank;
+                    const da = a.disclosed_at ? new Date(a.disclosed_at).getTime() : 0;
+                    const db = b.disclosed_at ? new Date(b.disclosed_at).getTime() : 0;
+                    if (da !== db) return db - da;
+                    return new Date(b.detected_at).getTime() - new Date(a.detected_at).getTime();
+                  }
+                })
+              : events;
+
+            return displayEvents.map((event, _idx) => {
               const badge = getBadgeConfig(event.event_type, event.headline);
               const strength = getStrengthDisplay(event);
               const priorityClass = !event.is_read ? getPriorityClass(event.priority_rank) : "";
