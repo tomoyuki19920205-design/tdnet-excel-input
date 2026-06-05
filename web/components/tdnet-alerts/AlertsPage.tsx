@@ -278,19 +278,29 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
 
     const lines: string[] = [];
 
+    // ─── 1. 会社名（ティッカー）─── 必ず最上段
+    const companyLabel = event.company_name
+      ? `${event.company_name}（${event.ticker}）`
+      : event.ticker;
+    lines.push(companyLabel);
+
+    // ─── 2. イベント種別ラベル + 主要数値 ───
     if (event.event_type === "forecast") {
-      // ヘッダー行（headline を 1 行目に）
-      if (event.headline) lines.push(event.headline);
-      // 差異率行
-      const opPct = ext.change_op_pct;
+      const subtypeLabel = event.event_subtype === "upward" ? "🔺 上方修正"
+        : event.event_subtype === "difference" ? "📋 差異開示"
+        : event.event_subtype === "downward" ? "🔻 下方修正"
+        : "📊 業績修正";
+      lines.push(subtypeLabel);
+
+      const opPct  = ext.change_op_pct;
       const ordPct = ext.change_ordinary_pct;
       const netPct = ext.change_net_income_pct;
       const metrics: string[] = [];
-      if (opPct != null) metrics.push(`営業利益 ${fmtPct(opPct)}`);
+      if (opPct  != null) metrics.push(`営業利益 ${fmtPct(opPct)}`);
       if (ordPct != null) metrics.push(`経常利益 ${fmtPct(ordPct)}`);
       if (netPct != null) metrics.push(`純利益 ${fmtPct(netPct)}`);
       if (metrics.length > 0) lines.push(metrics.join("  "));
-      // EPS
+
       const epsPrev = ext.previous_eps;
       const epsRev  = ext.revised_eps;
       if (epsPrev != null && epsRev != null) {
@@ -306,7 +316,9 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
       }
 
     } else if (event.event_type === "buyback") {
-      if (event.headline) lines.push(event.headline);
+      const subtypeLabel = event.event_subtype === "tostnet" ? "📊 自社株買い（ToSTNeT）" : "📊 自社株買い（取得枠決議）";
+      lines.push(subtypeLabel);
+
       const ratio  = ext.ratio_to_outstanding;
       const shares = ext.shares_limit;
       const amount = ext.amount_limit_million_yen;
@@ -326,7 +338,11 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
       }
 
     } else if (event.event_type === "dividend") {
-      if (event.headline) lines.push(event.headline);
+      const subtypeLabel = event.event_subtype === "increase" ? "💰 増配"
+        : event.event_subtype === "decrease" ? "📉 減配"
+        : "💰 配当修正";
+      lines.push(subtypeLabel);
+
       const prev = ext.previous_dividend_per_share;
       const rev  = ext.revised_dividend_per_share;
       if (rev != null) {
@@ -345,16 +361,19 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
       if (period) lines.push(String(period));
 
     } else {
-      // fallback
-      if (event.headline) lines.push(event.headline);
+      // fallback: subtype があれば表示
+      if (event.event_subtype) lines.push(event.event_subtype);
     }
 
-    // 開示URL
+    // ─── 3. ヘッドライン（開示タイトル）───
+    if (event.headline) lines.push(event.headline);
+
+    // ─── 4. 開示URL ───
     const url = event.source_url ||
       (rp && typeof rp.doc_url === "string" ? rp.doc_url : "");
     if (url) lines.push(`開示: ${url}`);
 
-    // Discord送信済み
+    // ─── 5. Discord送信済み ───
     if (event.discord_sent_at) {
       const d = new Date(event.discord_sent_at);
       const mm  = String(d.getMonth() + 1).padStart(2, "0");
