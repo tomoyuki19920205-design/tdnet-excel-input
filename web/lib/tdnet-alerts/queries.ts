@@ -22,12 +22,12 @@ export async function fetchEvents(
   const limit = opts.limit ?? 1000;
 
   // イベント取得
-  // ソート: detected_at DESC（最新優先） → priority_rank ASC（重要度順） → created_at DESC（安定ソート）
+  // ソート: disclosed_at DESC NULLS LAST（実開示日時優先）→ detected_at DESC → created_at DESC
   let query = supabase
     .from("tdnet_events")
     .select("*")
+    .order("disclosed_at", { ascending: false, nullsFirst: false })
     .order("detected_at", { ascending: false })
-    .order("priority_rank", { ascending: true })
     .order("created_at", { ascending: false })
     .limit(limit);
 

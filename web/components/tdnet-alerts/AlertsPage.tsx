@@ -278,57 +278,73 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
 
     const lines: string[] = [];
 
-    // ─── 1. 会社名（ティッカー）─── 必ず最上段
+    // ─── 1. ticker 会社名 ───
     const companyLabel = event.company_name
-      ? `${event.company_name}（${event.ticker}）`
+      ? `${event.ticker} ${event.company_name}`
       : event.ticker;
     lines.push(companyLabel);
 
-    // ─── 2. イベント種別ラベル + 主要数値 ───
+    // ─── 2. イベント種別 + サマリ数値（1行で一目判断）───
     if (event.event_type === "forecast") {
-      const subtypeLabel = event.event_subtype === "upward" ? "🔺 上方修正"
+      const typeEmoji = event.event_subtype === "upward" ? "🔺 上方修正"
         : event.event_subtype === "difference" ? "📋 差異開示"
         : event.event_subtype === "downward" ? "🔻 下方修正"
         : "📊 業績修正";
-      lines.push(subtypeLabel);
-
+      // サマリ: 最初に見つかった差異率を1行に添える
       const opPct  = ext.change_op_pct;
       const ordPct = ext.change_ordinary_pct;
       const netPct = ext.change_net_income_pct;
+      const summaryPct = opPct ?? ordPct ?? netPct;
+      const summaryPctLabel = opPct != null ? "営業利益"
+        : ordPct != null ? "経常利益"
+        : netPct != null ? "純利益"
+        : null;
+      const summaryStr = summaryPctLabel != null
+        ? `${summaryPctLabel} ${fmtPct(summaryPct)}`
+        : "";
+      lines.push(summaryStr ? `${typeEmoji}  ${summaryStr}` : typeEmoji);
+
+      // ─── 3. 詳細数値 ───
       const metrics: string[] = [];
       if (opPct  != null) metrics.push(`営業利益 ${fmtPct(opPct)}`);
       if (ordPct != null) metrics.push(`経常利益 ${fmtPct(ordPct)}`);
       if (netPct != null) metrics.push(`純利益 ${fmtPct(netPct)}`);
-      if (metrics.length > 0) lines.push(metrics.join("  "));
-
+      // サマリで使った指標と同じだが、全指標を並べる（1項目なら重複するが可読性優先）
+      if (metrics.length > 1) lines.push(metrics.join("  "));
+      // EPS
       const epsPrev = ext.previous_eps;
       const epsRev  = ext.revised_eps;
       if (epsPrev != null && epsRev != null) {
         const p = Number(epsPrev), r = Number(epsRev);
         if (!isNaN(p) && !isNaN(r) && Math.abs(p) <= 10000 && Math.abs(r) <= 10000) {
-          if (p !== 0) {
-            const pct = (r - p) / Math.abs(p) * 100;
-            lines.push(`EPS: ${fmtDiv(p)}→${fmtDiv(r)}(${fmtPct(pct)})`);
-          } else {
-            lines.push(`EPS: ${fmtDiv(p)}→${fmtDiv(r)}`);
-          }
+          const ePct = p !== 0 ? (r - p) / Math.abs(p) * 100 : null;
+          lines.push(`EPS: ${fmtDiv(p)}→${fmtDiv(r)}${ePct !== null ? `(${fmtPct(ePct)})` : ""}`);
         }
       }
+      // ─── 4. 対象期 ───
+      const periodLabel = ext.period_label;
+      if (periodLabel) lines.push(String(periodLabel));
 
     } else if (event.event_type === "buyback") {
-      const subtypeLabel = event.event_subtype === "tostnet" ? "📊 自社株買い（ToSTNeT）" : "📊 自社株買い（取得枠決議）";
-      lines.push(subtypeLabel);
+      const typeLabel = event.event_subtype === "tostnet"
+        ? "📊 自社株買い（ToSTNeT）"
+        : "📊 自社株買い（取得枠決議）";
+      const ratio = ext.ratio_to_outstanding;
+      // サマリ: 比率を添える
+      const ratioStr = ratio != null ? `${Number(ratio).toFixed(2)}%` : "";
+      lines.push(ratioStr ? `${typeLabel}  ${ratioStr}` : typeLabel);
 
-      const ratio  = ext.ratio_to_outstanding;
+      // ─── 3. 詳細数値 ───
       const shares = ext.shares_limit;
       const amount = ext.amount_limit_million_yen;
-      const start  = ext.start_date;
-      const end    = ext.end_date;
       const specs: string[] = [];
-      if (ratio  != null) specs.push(`比率 ${Number(ratio).toFixed(2)}%`);
+      if (ratio  != null) specs.push(`割合 ${Number(ratio).toFixed(2)}%`);
       if (shares != null) specs.push(`株数 ${fmtShares(shares)}`);
       if (amount != null) specs.push(`金額 ${fmtBillion(amount)}`);
       if (specs.length > 0) lines.push(specs.join("  "));
+      // ─── 4. 期間 ───
+      const start = ext.start_date;
+      const end   = ext.end_date;
       if (event.event_subtype === "tostnet" && start) {
         lines.push(`買付日: ${String(start)}`);
       } else if (start && end) {
@@ -338,42 +354,43 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
       }
 
     } else if (event.event_type === "dividend") {
-      const subtypeLabel = event.event_subtype === "increase" ? "💰 増配"
+      const typeLabel = event.event_subtype === "increase" ? "💰 増配"
         : event.event_subtype === "decrease" ? "📉 減配"
         : "💰 配当修正";
-      lines.push(subtypeLabel);
-
+      // サマリ: 増配率を添える
       const prev = ext.previous_dividend_per_share;
       const rev  = ext.revised_dividend_per_share;
-      if (rev != null) {
-        const r = Number(rev);
-        const p = prev != null ? Number(prev) : null;
-        if (!isNaN(r)) {
-          if (p !== null && !isNaN(p) && p !== 0) {
-            const pct = (r - p) / Math.abs(p) * 100;
-            lines.push(`配当: ${fmtDiv(p)}→${fmtDiv(r)}(${fmtPct(pct)})`);
-          } else {
-            lines.push(`配当: ${fmtDiv(r)}`);
-          }
+      let pctStr = "";
+      let pv: number | null = null, rv: number | null = null;
+      if (prev != null && rev != null) {
+        pv = Number(prev); rv = Number(rev);
+        if (!isNaN(pv) && !isNaN(rv) && pv !== 0) {
+          pctStr = fmtPct((rv - pv) / Math.abs(pv) * 100);
         }
       }
+      lines.push(pctStr ? `${typeLabel}  ${pctStr}` : typeLabel);
+
+      // ─── 3. 詳細数値 ───
+      if (rv != null && !isNaN(rv)) {
+        if (pv !== null && !isNaN(pv) && pv !== 0) {
+          lines.push(`配当: ${fmtDiv(pv)}→${fmtDiv(rv)}(${fmtPct((rv - pv) / Math.abs(pv) * 100)})`);
+        } else {
+          lines.push(`配当: ${fmtDiv(rv)}`);
+        }
+      }
+      // ─── 4. 対象期 ───
       const period = ext.fiscal_period;
       if (period) lines.push(String(period));
 
     } else {
-      // fallback: subtype があれば表示
+      // fallback
       if (event.event_subtype) lines.push(event.event_subtype);
     }
 
-    // ─── 3. ヘッドライン（開示タイトル）───
+    // ─── 5. ヘッドライン原文 ───
     if (event.headline) lines.push(event.headline);
 
-    // ─── 4. 開示URL ───
-    const url = event.source_url ||
-      (rp && typeof rp.doc_url === "string" ? rp.doc_url : "");
-    if (url) lines.push(`開示: ${url}`);
-
-    // ─── 5. Discord送信済み ───
+    // ─── 6. Discord送信済み（最下部）───
     if (event.discord_sent_at) {
       const d = new Date(event.discord_sent_at);
       const mm  = String(d.getMonth() + 1).padStart(2, "0");
