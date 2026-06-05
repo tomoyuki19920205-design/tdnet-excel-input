@@ -387,9 +387,6 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
       if (event.event_subtype) lines.push(event.event_subtype);
     }
 
-    // ─── 5. ヘッドライン原文 ───
-    if (event.headline) lines.push(event.headline);
-
     // ─── 6. Discord送信済み（最下部）───
     if (event.discord_sent_at) {
       const d = new Date(event.discord_sent_at);
