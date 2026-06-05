@@ -443,17 +443,85 @@ html, body {
 }
 
 .alerts-list-pane {
-  flex: 1;
+  /* width は AlertsPage.tsx の leftPaneWidth state で inline style 制御 */
+  flex-shrink: 0;
   overflow-y: auto;
-  min-width: 0;
+  min-width: 360px;
 }
 
 .alerts-detail-pane {
-  width: 420px;
-  flex-shrink: 0;
-  border-left: 1px solid var(--border);
-  overflow-y: auto;
+  flex: 1;
+  min-width: 420px;
+  border-left: none; /* divider で代替 */
+  overflow: hidden;  /* 内部タブ/iframe で管理 */
+  display: flex;
+  flex-direction: column;
   background: var(--bg-secondary);
+}
+
+/* ============================================================
+   Pane Divider (ドラッグリサイズ境界線)
+   ============================================================ */
+.pane-divider {
+  width: 5px;
+  flex-shrink: 0;
+  background: var(--border);
+  cursor: col-resize;
+  transition: background 0.15s;
+  position: relative;
+}
+
+.pane-divider:hover,
+.pane-divider:active {
+  background: var(--accent-blue);
+}
+
+/* ============================================================
+   Right Pane Tabs（Company Viewer / イベント詳細）
+   ============================================================ */
+.right-pane-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+}
+
+.right-pane-tab-btn {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: var(--font-sans);
+  white-space: nowrap;
+}
+
+.right-pane-tab-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-card-hover);
+}
+
+.right-pane-tab-btn.active {
+  color: var(--accent-blue);
+  border-bottom-color: var(--accent-blue);
+  background: var(--bg-card);
+  font-weight: 600;
+}
+
+/* ============================================================
+   Company Viewer iframe
+   ============================================================ */
+.company-viewer-frame {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: white;
 }
 
 /* ============================================================

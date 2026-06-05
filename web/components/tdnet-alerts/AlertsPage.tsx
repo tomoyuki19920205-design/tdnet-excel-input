@@ -33,9 +33,26 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
     setDiscordSortModeState(mode);
     if (typeof window !== "undefined") localStorage.setItem("tdnet_discord_sort", mode);
   };
+
+  // 左ペイン幅（localStorage永続化）
+  const [leftPaneWidth, setLeftPaneWidthState] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("tdnet_left_pane_width");
+      const n = saved ? parseInt(saved, 10) : 0;
+      if (n >= 360) return n;
+    }
+    return 400;
+  });
+  // 右ペインタブ（"detail" | "company"）
+  const [rightPaneTab, setRightPaneTab] = useState<"detail" | "company">("company");
+
   const supabaseRef = useRef(createClient());
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dateInputRef = useRef<HTMLInputElement | null>(null);
+  // ドラッグ用 ref
+  const isDraggingRef = useRef(false);
+  const dragStartXRef = useRef(0);
+  const dragStartWidthRef = useRef(0);
 
   // Realtime 接続
   const { status: connectionStatus } = useRealtimeAlerts({
@@ -97,6 +114,32 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
     setAudioEnabled(audioManager.isEnabled);
   }, []);
 
+  // ペインリサイズ：drag イベント
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDraggingRef.current) return;
+      const delta = e.clientX - dragStartXRef.current;
+      const newW = Math.max(360, dragStartWidthRef.current + delta);
+      setLeftPaneWidthState(newW);
+    };
+    const handleMouseUp = (e: MouseEvent) => {
+      if (!isDraggingRef.current) return;
+      isDraggingRef.current = false;
+      const delta = e.clientX - dragStartXRef.current;
+      const newW = Math.max(360, dragStartWidthRef.current + delta);
+      setLeftPaneWidthState(newW);
+      localStorage.setItem("tdnet_left_pane_width", String(newW));
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, []);
+
   const handleToggleAudio = () => {
     const enabled = audioManager.toggle();
     setAudioEnabled(enabled);
@@ -156,6 +199,7 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
 
   const handleSelectEvent = async (event: EnrichedEvent) => {
     setSelectedId(event.id);
+    setRightPaneTab("company"); // 開示クリック時は Company Viewer をデフォルト表示
     if (!event.is_read) {
       try {
         await markAsRead(supabaseRef.current, event.id, userId);
@@ -546,7 +590,10 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
       {/* Main Content */}
       <div className="alerts-content">
         {/* List Pane */}
-        <div className="alerts-list-pane">
+        <div
+          className="alerts-list-pane"
+          style={{ width: leftPaneWidth, flexShrink: 0 }}
+        >
           {loading ? (
             <div className="loading-spinner">読み込み中...</div>
           ) : events.length === 0 ? (
@@ -675,21 +722,64 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
           )}
         </div>
 
+        {/* リサイズドラッガー */}
+        <div
+          className="pane-divider"
+          onMouseDown={(e) => {
+            isDraggingRef.current = true;
+            dragStartXRef.current = e.clientX;
+            dragStartWidthRef.current = leftPaneWidth;
+            document.body.style.cursor = "col-resize";
+            document.body.style.userSelect = "none";
+            e.preventDefault();
+          }}
+        />
+
         {/* Detail Pane */}
         <div className="alerts-detail-pane">
           {selectedEvent ? (
-            <AlertDetailPanel
-              event={selectedEvent}
-              userId={userId}
-              onUpdate={(updated) => {
-                setEvents((prev) =>
-                  prev.map((e) => (e.id === updated.id ? updated : e))
-                );
-              }}
-            />
+            <>
+              {/* 右ペインタブ */}
+              <div className="right-pane-tabs">
+                <button
+                  id="right-tab-company"
+                  className={`right-pane-tab-btn ${rightPaneTab === "company" ? "active" : ""}`}
+                  onClick={() => setRightPaneTab("company")}
+                >
+                  🏢 Company Viewer
+                </button>
+                <button
+                  id="right-tab-detail"
+                  className={`right-pane-tab-btn ${rightPaneTab === "detail" ? "active" : ""}`}
+                  onClick={() => setRightPaneTab("detail")}
+                >
+                  📋 イベント詳細
+                </button>
+              </div>
+
+              {/* タブコンテンツ */}
+              {rightPaneTab === "company" ? (
+                <iframe
+                  key={selectedEvent.ticker}
+                  src={`${process.env.NEXT_PUBLIC_COMPANY_VIEWER_URL ?? "http://localhost:3000/"}${selectedEvent.ticker}`}
+                  className="company-viewer-frame"
+                  title={`Company Viewer: ${selectedEvent.ticker}`}
+                />
+              ) : (
+                <AlertDetailPanel
+                  event={selectedEvent}
+                  userId={userId}
+                  onUpdate={(updated) => {
+                    setEvents((prev) =>
+                      prev.map((e) => (e.id === updated.id ? updated : e))
+                    );
+                  }}
+                />
+              )}
+            </>
           ) : (
             <div className="detail-empty">
-              イベントを選択してください
+              開示をクリックすると右側に Company Viewer が表示されます
             </div>
           )}
         </div>
