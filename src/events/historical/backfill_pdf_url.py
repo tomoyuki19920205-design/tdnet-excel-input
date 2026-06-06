@@ -82,8 +82,11 @@ def main():
     candidates = {}
     try:
         # Fetch latest 2000 events to avoid timeout
-        res = supabase.table("tdnet_events").select("id, event_type, pdf_url, ticker, headline, detected_at, raw_payload->>fingerprint, raw_payload->>source_doc_id").order("detected_at", desc=True).limit(2000).execute()
+        res = supabase.table("tdnet_events").select("id, event_type, pdf_url, ticker, headline, disclosed_at, detected_at, raw_payload").order("detected_at", desc=True).limit(2000).execute()
         for r in res.data:
+            event_type = r.get("event_type")
+            if event_type not in ("earnings", "forecast"):
+                continue
             if r.get("pdf_url") is None or str(r.get("pdf_url")).endswith(".zip"):
                 candidates[r["id"]] = r
     except Exception as e:
@@ -98,11 +101,22 @@ def main():
 
     for rec_id, rec in candidates.items():
         pdf_url = rec["pdf_url"]
-        fingerprint = rec.get("fingerprint")
-        source_doc_id = rec.get("source_doc_id")
+        
+        raw_payload_str = rec.get("raw_payload")
+        fingerprint = None
+        source_doc_id = None
+        if raw_payload_str:
+            try:
+                rp = json.loads(raw_payload_str)
+                fingerprint = rp.get("fingerprint")
+                source_doc_id = rp.get("source_doc_id")
+            except Exception:
+                pass
+                
         ticker = rec.get("ticker")
         title = rec.get("headline") or rec.get("source_title")
         detected_at = rec.get("detected_at")
+        disclosed_at = rec.get("disclosed_at") or detected_at
         
         doc_url = None
         
@@ -127,9 +141,11 @@ def main():
             pass
             
         # 2. If null, fetch from TDNET Yanoshin API
-        if not doc_url and detected_at and ticker and title:
+        if not doc_url and disclosed_at and ticker and title:
             try:
-                dt = parser.parse(detected_at)
+                from datetime import timezone, timedelta
+                JST = timezone(timedelta(hours=9))
+                dt = parser.parse(disclosed_at).astimezone(JST)
                 date_str = dt.strftime("%Y%m%d")
                 
                 items = fetch_yanoshin_date(date_str, api_cache)
@@ -151,7 +167,11 @@ def main():
             except Exception as e:
                 print(f"Error matching API for {ticker}: {e}")
             
-        # 3. Final verification
+        # 3. Fallback: reconstruct URL from source_doc_id
+        if not doc_url and source_doc_id and isinstance(source_doc_id, str) and source_doc_id.isdigit():
+            doc_url = f"https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/{source_doc_id}.pdf"
+            
+        # 4. Final verification
         if not doc_url:
             if ticker == "7800" or ticker == "6309" or ticker == "9824" or ticker == "3172" or rec["event_type"] == "earnings":
                 print(f"Failed to find doc_url for {ticker} - {title} on {detected_at}")
@@ -173,6 +193,15 @@ def main():
 
     print(f"Updates prepared: {len(updates)}")
     print(f"Skipped (could not reconstruct): {skipped_count}")
+
+    # Category-wise planned updates
+    category_counts = {}
+    for u in updates:
+        category_counts[u['event_type']] = category_counts.get(u['event_type'], 0) + 1
+    
+    print("\n--- Updates by Category ---")
+    for cat, count in category_counts.items():
+        print(f"  {cat}: {count}")
 
     if updates:
         print("\n--- Sample Updates ---")

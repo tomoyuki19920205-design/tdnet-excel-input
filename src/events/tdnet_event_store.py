@@ -405,7 +405,7 @@ def save_event_to_supabase(
             "headline": event.title or "",
             "summary": event.summary_text or "",
             "source_url": event.doc_url or None,
-            "pdf_url": event.doc_url or None,
+            "pdf_url": event.doc_url if event.event_type in ("earnings", "forecast") else None,
             "raw_payload": json.dumps(raw_payload, ensure_ascii=False, default=str),
             "strength_score": strength,
             "priority_rank": priority_rank,
