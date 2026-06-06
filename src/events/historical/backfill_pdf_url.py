@@ -58,6 +58,7 @@ def main():
     argparser = argparse.ArgumentParser(description="Backfill pdf_url in Supabase from SQLite and TDNET API")
     argparser.add_argument("--apply", action="store_true", help="Apply updates to Supabase (default is dry-run)")
     argparser.add_argument("--clear-unwanted", action="store_true", help="Clear pdf_url for dividend and buyback events")
+    argparser.add_argument("--fix-earnings-zip", action="store_true", help="Mechanically convert .zip to .pdf for earnings events")
     args = argparser.parse_args()
 
     # Load environment
@@ -105,6 +106,63 @@ def main():
                         success_count += 1
                     except Exception as e:
                         print(f"Failed to clear {c['id']}: {e}")
+                        error_count += 1
+                print(f"Applied: {success_count} success, {error_count} errors.")
+            else:
+                print("\n[DRY-RUN] No changes applied to Supabase. Run with --apply to execute.")
+                
+        except Exception as e:
+            print(f"Error fetching from Supabase: {e}")
+            sys.exit(1)
+            
+        return
+
+    if args.fix_earnings_zip:
+        print("Running in FIX EARNINGS ZIP mode: mechanically converting .zip to .pdf for earnings...")
+        import re
+        try:
+            # Query earnings with .zip (doing it on client side to avoid Cloudflare 500)
+            res = supabase.table("tdnet_events").select("id, event_type, pdf_url, ticker").eq("event_type", "earnings").order("detected_at", desc=True).limit(5000).execute()
+            candidates = [r for r in res.data if r.get("pdf_url") and str(r["pdf_url"]).endswith(".zip")]
+            print(f"Found {len(candidates)} records to process.")
+            
+            updates = []
+            for c in candidates:
+                old_url = c["pdf_url"]
+                if old_url:
+                    # Convert 0812...zip to 1401...pdf
+                    # Use regex to find the file name part: 0812(\d{14})\.zip -> 1401\1.pdf
+                    new_url = re.sub(r'0812(\d{14})\.zip$', r'1401\1.pdf', old_url)
+                    if new_url != old_url and new_url.endswith(".pdf"):
+                        updates.append({
+                            "id": c["id"],
+                            "ticker": c["ticker"],
+                            "old_pdf_url": old_url,
+                            "new_pdf_url": new_url
+                        })
+            
+            print(f"Updates prepared: {len(updates)}")
+            
+            if updates:
+                print("\n--- Sample Conversions ---")
+                for u in updates[:10]:
+                    print(f"ID: {u['id']} | Ticker: {u['ticker']}")
+                    print(f"  Old: {u['old_pdf_url']}")
+                    print(f"  New: {u['new_pdf_url']}")
+            
+            if args.apply:
+                print("\nApplying updates to Supabase...")
+                success_count = 0
+                error_count = 0
+                for u in updates:
+                    try:
+                        supabase.table("tdnet_events").update({
+                            "pdf_url": u["new_pdf_url"],
+                            "source_url": u["new_pdf_url"]
+                        }).eq("id", u["id"]).execute()
+                        success_count += 1
+                    except Exception as e:
+                        print(f"Failed to convert {u['id']}: {e}")
                         error_count += 1
                 print(f"Applied: {success_count} success, {error_count} errors.")
             else:
