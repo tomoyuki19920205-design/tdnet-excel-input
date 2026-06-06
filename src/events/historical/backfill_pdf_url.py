@@ -57,6 +57,7 @@ def fetch_yanoshin_date(date_str: str, cache: dict) -> list:
 def main():
     argparser = argparse.ArgumentParser(description="Backfill pdf_url in Supabase from SQLite and TDNET API")
     argparser.add_argument("--apply", action="store_true", help="Apply updates to Supabase (default is dry-run)")
+    argparser.add_argument("--clear-unwanted", action="store_true", help="Clear pdf_url for dividend and buyback events")
     args = argparser.parse_args()
 
     # Load environment
@@ -79,6 +80,42 @@ def main():
 
     print("Fetching candidate events from Supabase...")
     
+    if args.clear_unwanted:
+        print("Running in CLEAR UNWANTED mode: removing pdf_url for dividend and buyback...")
+        try:
+            # We can use in_ operation if supported or fetch by type
+            res1 = supabase.table("tdnet_events").select("id, event_type, pdf_url, ticker").eq("event_type", "dividend").not_.is_("pdf_url", "null").execute()
+            res2 = supabase.table("tdnet_events").select("id, event_type, pdf_url, ticker").eq("event_type", "buyback").not_.is_("pdf_url", "null").execute()
+            
+            candidates = res1.data + res2.data
+            print(f"Found {len(candidates)} records to clear.")
+            
+            if candidates:
+                print("\n--- Sample Clear Operations ---")
+                for c in candidates[:10]:
+                    print(f"ID: {c['id']} | Ticker: {c['ticker']} | Type: {c['event_type']} | Current pdf_url: {c['pdf_url']}")
+            
+            if args.apply:
+                print("\nApplying updates to Supabase...")
+                success_count = 0
+                error_count = 0
+                for c in candidates:
+                    try:
+                        supabase.table("tdnet_events").update({"pdf_url": None}).eq("id", c["id"]).execute()
+                        success_count += 1
+                    except Exception as e:
+                        print(f"Failed to clear {c['id']}: {e}")
+                        error_count += 1
+                print(f"Applied: {success_count} success, {error_count} errors.")
+            else:
+                print("\n[DRY-RUN] No changes applied to Supabase. Run with --apply to execute.")
+                
+        except Exception as e:
+            print(f"Error fetching from Supabase: {e}")
+            sys.exit(1)
+            
+        return
+
     candidates = {}
     try:
         # Fetch latest 2000 events to avoid timeout
