@@ -277,7 +277,7 @@ def run_earnings_production(
                 parse_failed += 1
                 continue
 
-            if earnings is None or not earnings.has_yoy:
+            if earnings is None:
                 result.no_yoy_count += 1
                 continue
 

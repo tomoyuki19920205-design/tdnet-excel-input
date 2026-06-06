@@ -728,7 +728,8 @@ def extract_earnings_data(
     # ---- YOY 計算可能チェック ----
     if not result.has_yoy:
         logger.info(f"[FINANCIALS] YOY calculation not possible for {ticker}")
-        return None
+        # YOYが計算できない場合でも、保存処理を継続するために None は返さず結果を返す
+        # return None
 
     return result
 
