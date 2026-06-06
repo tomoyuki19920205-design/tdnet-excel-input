@@ -217,6 +217,7 @@ def _buyback_to_event_record(
         raw_payload_json=json.dumps({"title": doc.title}, ensure_ascii=False),
         extracted_payload_json=json.dumps(payload, ensure_ascii=False, default=str),
         fingerprint=fingerprint,
+        doc_url=doc.doc_url or "",
     )
 
 
@@ -365,6 +366,7 @@ def _dividend_to_event_record(
         raw_payload_json=json.dumps({"title": doc.title}, ensure_ascii=False),
         extracted_payload_json=json.dumps(payload, ensure_ascii=False, default=str),
         fingerprint=fingerprint,
+        doc_url=doc.doc_url or "",
     )
 
 

@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS events (
     last_seen_at TEXT NOT NULL,
     notified_at TEXT,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    doc_url TEXT
 );
 """
 
@@ -61,6 +62,14 @@ def ensure_events_table(conn: sqlite3.Connection) -> None:
     for idx_sql in _CREATE_INDEXES:
         conn.execute(idx_sql)
     conn.commit()
+    
+    # Existing DB migration: safely add doc_url if it doesn't exist
+    try:
+        conn.execute("ALTER TABLE events ADD COLUMN doc_url TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+        
     logger.debug("events テーブル確認/作成完了")
 
 
@@ -73,7 +82,7 @@ _INSERT_COLS = [
     "importance", "summary_text", "raw_payload_json",
     "extracted_payload_json", "fingerprint", "status",
     "first_seen_at", "last_seen_at", "notified_at",
-    "created_at", "updated_at",
+    "created_at", "updated_at", "doc_url",
 ]
 
 
@@ -114,14 +123,14 @@ def upsert_event(
                 source_doc_id=?, ticker=?, company_name=?,
                 disclosure_datetime=?, title=?, event_type=?, subtype=?,
                 importance=?, summary_text=?, raw_payload_json=?,
-                extracted_payload_json=?,
+                extracted_payload_json=?, doc_url=?,
                 last_seen_at=?, updated_at=?
             WHERE id = ?""",
             (
                 event.source_doc_id, event.ticker, event.company_name,
                 event.disclosure_datetime, event.title, event.event_type, event.subtype,
                 event.importance, event.summary_text, event.raw_payload_json,
-                event.extracted_payload_json,
+                event.extracted_payload_json, event.doc_url,
                 now, now, existing_id,
             ),
         )

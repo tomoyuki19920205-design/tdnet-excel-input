@@ -428,7 +428,7 @@ def run_earnings_production(
                     "summary_short": summary_short,
                     "summary_full": full_message,
                     "fingerprint": fp,
-                    "source_url": getattr(doc, "xbrl_url", "") or getattr(doc, "doc_url", ""),
+                    "source_url": getattr(doc, "doc_url", "") or "",
                     "archive_path": xbrl_path,
                 }
                 # 4Qガイダンスカラム
@@ -556,7 +556,7 @@ def _build_earnings_event_record(
             {"name": s.name, "sales": s.sales_current, "profit": s.profit_current}
             for s in (earnings.segments or [])
         ],
-        "source_url": getattr(doc, "xbrl_url", "") or getattr(doc, "doc_url", ""),
+        "source_url": getattr(doc, "doc_url", "") or "",
         "xbrl_path": xbrl_path,
     }
     if guidance and guidance.has_guidance:
@@ -588,7 +588,7 @@ def _build_earnings_event_record(
         company_name=company_name,
         disclosure_datetime=disclosure_dt,
         title=getattr(doc, "title", ""),
-        doc_url=getattr(doc, "xbrl_url", "") or getattr(doc, "doc_url", ""),
+        doc_url=getattr(doc, "doc_url", "") or "",
         event_type="earnings",
         subtype=quarter,                    # "FY" / "1Q" / "2Q" / "3Q"
         importance=60,

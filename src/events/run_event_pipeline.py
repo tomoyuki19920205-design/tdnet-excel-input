@@ -91,6 +91,7 @@ def _fetch_single_doc(doc_id: str) -> list[DocumentMeta]:
                 company_name=row["company_name"] or "",
                 title=row["title"] or "",
                 disclosure_datetime=row["disclosure_datetime"] or "",
+                doc_url=dict(row).get("doc_url", "") or "",
             )]
     except Exception:
         pass
