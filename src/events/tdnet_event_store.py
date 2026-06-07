@@ -388,17 +388,19 @@ def _calculate_notification_compare(ticker: str, extracted: dict) -> dict | None
 
     if quarter == "1Q":
         # 1Q: use current guidance (FY予)
+        guidance = extracted.get("guidance", {})
         compare_data = {
             "label": "FY予",
-            "sales_yoy": extracted.get("guidance_sales_yoy"),
-            "op_yoy": extracted.get("guidance_op_yoy")
+            "sales_yoy": guidance.get("sales_yoy"),
+            "op_yoy": guidance.get("op_yoy")
         }
     elif quarter in ("4Q", "FY"):
         # 4Q/FY: use next year forecast
+        guidance = extracted.get("guidance", {})
         compare_data = {
             "label": "FY予",
-            "sales_yoy": extracted.get("guidance_sales_yoy"),
-            "op_yoy": extracted.get("guidance_op_yoy")
+            "sales_yoy": guidance.get("sales_yoy"),
+            "op_yoy": guidance.get("op_yoy")
         }
     elif quarter in ("2Q", "3Q"):
         # 2Q/3Q: fetch previous quarter from SQLite
