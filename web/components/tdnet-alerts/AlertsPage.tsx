@@ -10,10 +10,19 @@ import { EVENT_TYPE_CONFIG, EVENT_SUBTYPE_LABELS, getDisplayCategory } from "@/l
 import AlertDetailPanel from "./AlertDetailPanel";
 import CompanyViewerFull from "@/components/company-viewer/CompanyViewerFull";
 
-const YOY_REGEX = /((?:売上|営利|営業利益|経常利益|純利益|売上高|sales_yoy|operating_profit_yoy)(?:高前年比|前年比|\s*YOY|\s*:)?\s*[+-]?[\d.]+%)/gi;
+const YOY_REGEX = /((?:YOY|前年比|sales_yoy|operating_profit_yoy)\s*:?\s*[+-]?[\d.]+%|(?:営業利益|経常利益|純利益)\s*[+-]?[\d.]+%)/gi;
 
-const renderHighlightedCardBody = (text: string) => {
+const renderHighlightedCardBody = (text: string, eventType: string) => {
   if (!text) return null;
+  if (eventType !== "earnings" && eventType !== "forecast") {
+    return text.split("\n").map((line, j, arr) => (
+      <React.Fragment key={j}>
+        {line}
+        {j < arr.length - 1 && <br />}
+      </React.Fragment>
+    ));
+  }
+  
   const parts = text.split(YOY_REGEX);
   return (
     <>
@@ -746,7 +755,7 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
                   </div>
 
                   {/* Main content */}
-                  <div className="alert-card-body">{renderHighlightedCardBody(cardBody)}</div>
+                  <div className="alert-card-body">{renderHighlightedCardBody(cardBody, event.event_type)}</div>
                 </div>
               );
             });
