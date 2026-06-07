@@ -402,7 +402,7 @@ def _calculate_notification_compare(ticker: str, extracted: dict, client=None) -
         target_quarter = "1Q" if quarter == "2Q" else "2Q"
         if client is not None:
             try:
-                res = client.table('tdnet_events').select('raw_payload').eq('ticker', ticker).eq('event_type', 'earnings').order('disclosed_at', desc=True).limit(5).execute()
+                res = client.table('tdnet_events').select('raw_payload').eq('ticker', ticker).eq('event_type', 'earnings').order('disclosed_at', desc=True).limit(20).execute()
                 if res.data:
                     for r in res.data:
                         rp = r.get('raw_payload')
