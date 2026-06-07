@@ -258,6 +258,30 @@ def _extract_primary_metric(event: EventRecord) -> tuple[Optional[str], Optional
             return "配当", f"{rev}円", yoy
         return None, None, None
 
+    elif event.event_type == "earnings" or event.event_type == DISPLAY_EARNINGS:
+        op_current = payload.get("op_current")
+        op_yoy = payload.get("op_yoy")
+        sales_current = payload.get("sales_current")
+        sales_yoy = payload.get("sales_yoy")
+
+        if op_current is not None:
+            val_str = f"{int(op_current / 1000000):,}百万円"
+            yoy_str = None
+            if op_yoy is not None:
+                sign = "+" if op_yoy > 0 else ""
+                yoy_str = f"{sign}{op_yoy * 100:.1f}%"
+            return "営業利益", val_str, yoy_str
+
+        elif sales_current is not None:
+            val_str = f"{int(sales_current / 1000000):,}百万円"
+            yoy_str = None
+            if sales_yoy is not None:
+                sign = "+" if sales_yoy > 0 else ""
+                yoy_str = f"{sign}{sales_yoy * 100:.1f}%"
+            return "売上高", val_str, yoy_str
+
+        return None, None, None
+
     return None, None, None
 
 
