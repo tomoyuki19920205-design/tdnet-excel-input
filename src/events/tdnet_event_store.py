@@ -400,10 +400,17 @@ def _calculate_notification_compare(ticker: str, extracted: dict, client=None) -
     elif quarter in ("2Q", "3Q"):
         # 2Q/3Q: fetch previous quarter from Supabase
         target_quarter = "1Q" if quarter == "2Q" else "2Q"
+        current_fy = extracted.get("fiscal_year")
+
         if client is not None:
             try:
-                res = client.table('tdnet_events').select('raw_payload').eq('ticker', ticker).eq('event_type', 'earnings').order('disclosed_at', desc=True).limit(20).execute()
+                # 取得上限20件は、現行DB制約下での実用的な上限
+                limit_count = 20
+                res = client.table('tdnet_events').select('raw_payload').eq('ticker', ticker).eq('event_type', 'earnings').order('disclosed_at', desc=True).limit(limit_count).execute()
+                
+                fetched_count = 0
                 if res.data:
+                    fetched_count = len(res.data)
                     for r in res.data:
                         rp = r.get('raw_payload')
                         if isinstance(rp, str):
@@ -412,14 +419,34 @@ def _calculate_notification_compare(ticker: str, extracted: dict, client=None) -
                             except:
                                 continue
                         if isinstance(rp, dict):
+                            # 1. 決算短信系であること
+                            evt_type = rp.get('original_event_type') or rp.get('event_type')
+                            if evt_type != 'earnings':
+                                continue
+                            
                             ext = rp.get('extracted', {})
-                            if isinstance(ext, dict) and ext.get('quarter') == target_quarter:
-                                compare_data = {
-                                    "label": "前Q",
-                                    "sales_yoy": ext.get('sales_yoy'),
-                                    "op_yoy": ext.get('op_yoy')
-                                }
-                                break
+                            if isinstance(ext, dict):
+                                # 2. fiscal_year が現在処理中の対象年度と一致するか（異なる場合はスキップ）
+                                prev_fy = ext.get('fiscal_year')
+                                if current_fy and prev_fy and str(current_fy).strip() != str(prev_fy).strip():
+                                    continue
+                                
+                                # 3. quarter が target_quarter と一致するか
+                                if ext.get('quarter') == target_quarter:
+                                    compare_data = {
+                                        "label": "前Q",
+                                        "sales_yoy": ext.get('sales_yoy'),
+                                        "op_yoy": ext.get('op_yoy')
+                                    }
+                                    break
+                
+                if compare_data is None:
+                    logger.info(
+                        f"[STORE] Previous quarter not found. "
+                        f"ticker={ticker}, target_quarter={target_quarter}, "
+                        f"fetched_count={fetched_count} (現行DB制約下での実用的な上限={limit_count})"
+                    )
+
             except Exception as e:
                 logger.warning(f"[STORE] Failed to fetch previous quarter from Supabase: {e}")
 
