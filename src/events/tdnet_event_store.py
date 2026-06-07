@@ -468,24 +468,27 @@ def save_event_to_supabase(
         # YOY protection: Prevent overwriting existing YOY data with null
         if display_category == DISPLAY_EARNINGS and metric_yoy is None:
             try:
-                exist_res = (
-                    client.table("tdnet_events")
-                    .select("id, primary_metric_yoy")
-                    .eq("ticker", event.ticker or "")
-                    .eq("event_type", display_category)
-                    .eq("disclosed_at", row["disclosed_at"])
-                    .execute()
-                )
-                if exist_res.data:
-                    for ext_row in exist_res.data:
-                        if ext_row.get("primary_metric_yoy") is not None:
-                            logger.info(
-                                f"[STORE] DEDUP_SKIPPED (YOY protect) ticker={event.ticker} "
-                                f"Existing YOY={ext_row.get('primary_metric_yoy')} vs New=None"
-                            )
-                            result["action"] = "dedup_skipped"
-                            result["display_category"] = display_category
-                            return result
+                date_str = row["disclosed_at"][:10] if row["disclosed_at"] else ""
+                if date_str:
+                    exist_res = (
+                        client.table("tdnet_events")
+                        .select("id, primary_metric_yoy")
+                        .eq("ticker", event.ticker or "")
+                        .eq("event_type", display_category)
+                        .gte("disclosed_at", f"{date_str}T00:00:00Z")
+                        .lte("disclosed_at", f"{date_str}T23:59:59Z")
+                        .execute()
+                    )
+                    if exist_res.data:
+                        for ext_row in exist_res.data:
+                            if ext_row.get("primary_metric_yoy") is not None:
+                                logger.info(
+                                    f"[STORE] DEDUP_SKIPPED (YOY protect) ticker={event.ticker} "
+                                    f"Existing YOY={ext_row.get('primary_metric_yoy')} vs New=None"
+                                )
+                                result["action"] = "dedup_skipped"
+                                result["display_category"] = display_category
+                                return result
             except Exception as check_e:
                 logger.warning(f"[STORE] Failed to check existing record for YOY protection: {check_e}")
 
