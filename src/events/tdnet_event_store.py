@@ -16,7 +16,6 @@ import json
 import logging
 import os
 import re
-import sqlite3
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
@@ -374,11 +373,7 @@ def _sanitize_disclosed_at(dt_str: str | None) -> str | None:
     except ValueError:
         return s
 
-def _get_decision_db_path() -> str:
-    # C:\Users\takuy\OneDrive\tdnet-excel-input\decision_db.db
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "decision_db.db")
-
-def _calculate_notification_compare(ticker: str, extracted: dict) -> dict | None:
+def _calculate_notification_compare(ticker: str, extracted: dict, client=None) -> dict | None:
     """決算通知の2行目（比較YOY）用JSONを計算する"""
     quarter = extracted.get("quarter")
     if not quarter:
@@ -403,24 +398,30 @@ def _calculate_notification_compare(ticker: str, extracted: dict) -> dict | None
             "op_yoy": guidance.get("op_yoy")
         }
     elif quarter in ("2Q", "3Q"):
-        # 2Q/3Q: fetch previous quarter from SQLite
+        # 2Q/3Q: fetch previous quarter from Supabase
         target_quarter = "1Q" if quarter == "2Q" else "2Q"
-        db_path = _get_decision_db_path()
-        if os.path.exists(db_path):
+        if client is not None:
             try:
-                with sqlite3.connect(db_path) as conn:
-                    res = conn.execute(
-                        "SELECT sales_yoy, op_yoy FROM earnings_summaries WHERE ticker=? AND quarter=? ORDER BY disclosure_date DESC, id DESC LIMIT 1",
-                        (ticker, target_quarter)
-                    ).fetchone()
-                    if res:
-                        compare_data = {
-                            "label": "前Q",
-                            "sales_yoy": res[0],
-                            "op_yoy": res[1]
-                        }
+                res = client.table('tdnet_events').select('raw_payload').eq('ticker', ticker).eq('event_type', 'earnings').order('disclosed_at', desc=True).limit(5).execute()
+                if res.data:
+                    for r in res.data:
+                        rp = r.get('raw_payload')
+                        if isinstance(rp, str):
+                            try:
+                                rp = json.loads(rp)
+                            except:
+                                continue
+                        if isinstance(rp, dict):
+                            ext = rp.get('extracted', {})
+                            if isinstance(ext, dict) and ext.get('quarter') == target_quarter:
+                                compare_data = {
+                                    "label": "前Q",
+                                    "sales_yoy": ext.get('sales_yoy'),
+                                    "op_yoy": ext.get('op_yoy')
+                                }
+                                break
             except Exception as e:
-                logger.warning(f"[STORE] Failed to fetch previous quarter from SQLite: {e}")
+                logger.warning(f"[STORE] Failed to fetch previous quarter from Supabase: {e}")
 
     # nullの場合は "compare": null とする
     return {
@@ -504,7 +505,7 @@ def save_event_to_supabase(
                 
         # 追加: notification_compare_json の生成と埋め込み
         if display_category == "earnings" and isinstance(extracted, dict):
-            comp_json = _calculate_notification_compare(event.ticker or "", extracted)
+            comp_json = _calculate_notification_compare(event.ticker or "", extracted, client=client)
             if comp_json:
                 raw_payload["notification_compare_json"] = comp_json
 
