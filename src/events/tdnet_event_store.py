@@ -347,6 +347,32 @@ def _sanitize_timestamp(dt_str: str | None, fallback: str) -> str:
         return s
     return fallback
 
+def _sanitize_disclosed_at(dt_str: str | None) -> str | None:
+    """disclosed_at 用の正規化。タイムゾーンなしのJST文字列をUTCのISO文字列に変換する。"""
+    if not dt_str:
+        return None
+    s = dt_str.strip()
+    if len(s) <= 5:
+        return None
+
+    # 既にタイムゾーン（+ または Z）が含まれていればそのまま
+    if "+" in s or "Z" in s or "z" in s:
+        return s
+
+    try:
+        s_clean = s.replace("T", " ")
+        if len(s_clean) == 16:
+            dt = datetime.strptime(s_clean, "%Y-%m-%d %H:%M")
+        elif len(s_clean) >= 19:
+            dt = datetime.strptime(s_clean[:19], "%Y-%m-%d %H:%M:%S")
+        else:
+            return s
+            
+        dt_jst = dt.replace(tzinfo=JST)
+        return dt_jst.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return s
+
 
 # ============================================================
 # メイン: Supabase へ保存
@@ -421,7 +447,7 @@ def save_event_to_supabase(
 
         row = {
             "detected_at": detected_at,
-            "disclosed_at": _sanitize_timestamp(event.disclosure_datetime, None),
+            "disclosed_at": _sanitize_disclosed_at(event.disclosure_datetime),
             "ticker": event.ticker or "",
             "company_name": event.company_name or "",
             "event_type": display_category,
@@ -468,7 +494,7 @@ def save_event_to_supabase(
         # YOY protection: Prevent overwriting existing YOY data with null
         if display_category == DISPLAY_EARNINGS and metric_yoy is None:
             try:
-                date_str = row["disclosed_at"][:10] if row["disclosed_at"] else ""
+                date_str = event.disclosure_datetime[:10] if event.disclosure_datetime else ""
                 if date_str:
                     dt_jst = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=JST)
                     start_utc = dt_jst.astimezone(timezone.utc)
