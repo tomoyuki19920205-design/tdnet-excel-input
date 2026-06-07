@@ -470,13 +470,19 @@ def save_event_to_supabase(
             try:
                 date_str = row["disclosed_at"][:10] if row["disclosed_at"] else ""
                 if date_str:
+                    dt_jst = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=JST)
+                    start_utc = dt_jst.astimezone(timezone.utc)
+                    end_utc = (dt_jst + timedelta(days=1)).astimezone(timezone.utc)
+                    start_iso = start_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+                    end_iso = end_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+
                     exist_res = (
                         client.table("tdnet_events")
                         .select("id, primary_metric_yoy")
                         .eq("ticker", event.ticker or "")
                         .eq("event_type", display_category)
-                        .gte("disclosed_at", f"{date_str}T00:00:00Z")
-                        .lte("disclosed_at", f"{date_str}T23:59:59Z")
+                        .gte("disclosed_at", start_iso)
+                        .lt("disclosed_at", end_iso)
                         .execute()
                     )
                     if exist_res.data:
