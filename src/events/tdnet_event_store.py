@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
@@ -373,6 +374,62 @@ def _sanitize_disclosed_at(dt_str: str | None) -> str | None:
     except ValueError:
         return s
 
+def _get_decision_db_path() -> str:
+    # C:\Users\takuy\OneDrive\tdnet-excel-input\decision_db.db
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "decision_db.db")
+
+def _calculate_notification_compare(ticker: str, extracted: dict) -> dict | None:
+    """決算通知の2行目（比較YOY）用JSONを計算する"""
+    quarter = extracted.get("quarter")
+    if not quarter:
+        return None
+
+    compare_data = None
+
+    if quarter == "1Q":
+        # 1Q: use current guidance (FY予)
+        compare_data = {
+            "label": "FY予",
+            "sales_yoy": extracted.get("guidance_sales_yoy"),
+            "op_yoy": extracted.get("guidance_op_yoy")
+        }
+    elif quarter in ("4Q", "FY"):
+        # 4Q/FY: use next year forecast
+        compare_data = {
+            "label": "FY予",
+            "sales_yoy": extracted.get("guidance_sales_yoy"),
+            "op_yoy": extracted.get("guidance_op_yoy")
+        }
+    elif quarter in ("2Q", "3Q"):
+        # 2Q/3Q: fetch previous quarter from SQLite
+        target_quarter = "1Q" if quarter == "2Q" else "2Q"
+        db_path = _get_decision_db_path()
+        if os.path.exists(db_path):
+            try:
+                with sqlite3.connect(db_path) as conn:
+                    res = conn.execute(
+                        "SELECT sales_yoy, op_yoy FROM earnings_summaries WHERE ticker=? AND quarter=? ORDER BY disclosure_date DESC, id DESC LIMIT 1",
+                        (ticker, target_quarter)
+                    ).fetchone()
+                    if res:
+                        compare_data = {
+                            "label": "前Q",
+                            "sales_yoy": res[0],
+                            "op_yoy": res[1]
+                        }
+            except Exception as e:
+                logger.warning(f"[STORE] Failed to fetch previous quarter from SQLite: {e}")
+
+    # nullの場合は "compare": null とする
+    return {
+        "current": {
+            "label": quarter,
+            "sales_yoy": extracted.get("sales_yoy"),
+            "op_yoy": extracted.get("op_yoy")
+        },
+        "compare": compare_data
+    }
+
 
 # ============================================================
 # メイン: Supabase へ保存
@@ -442,6 +499,12 @@ def save_event_to_supabase(
             else:
                 raw_payload["text_extract_status"] = "ok"
                 raw_payload["text_empty"] = False
+                
+        # 追加: notification_compare_json の生成と埋め込み
+        if display_category == "earnings" and isinstance(extracted, dict):
+            comp_json = _calculate_notification_compare(event.ticker or "", extracted)
+            if comp_json:
+                raw_payload["notification_compare_json"] = comp_json
 
         sort_key = _build_sort_key(priority_rank, detected_at, event.ticker or "")
 
