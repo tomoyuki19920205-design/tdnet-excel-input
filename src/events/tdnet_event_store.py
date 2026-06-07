@@ -426,9 +426,16 @@ def _calculate_notification_compare(ticker: str, extracted: dict, client=None) -
                             
                             ext = rp.get('extracted', {})
                             if isinstance(ext, dict):
-                                # 2. fiscal_year が現在処理中の対象年度と一致するか（異なる場合はスキップ）
+                                # 2. fiscal_year が現在処理中の対象年度と一致するか
                                 prev_fy = ext.get('fiscal_year')
-                                if current_fy and prev_fy and str(current_fy).strip() != str(prev_fy).strip():
+                                
+                                # 候補の fiscal_year が欠落している場合は即採用せずスキップ（ログ記録）
+                                if not prev_fy or str(prev_fy).strip() == "":
+                                    logger.info(f"[STORE] Candidate excluded due to fiscal_year_missing. ticker={ticker}, target_quarter={target_quarter}")
+                                    continue
+
+                                # 現在の fiscal_year と候補の fiscal_year が異なる場合はスキップ
+                                if current_fy and str(current_fy).strip() != str(prev_fy).strip():
                                     continue
                                 
                                 # 3. quarter が target_quarter と一致するか
