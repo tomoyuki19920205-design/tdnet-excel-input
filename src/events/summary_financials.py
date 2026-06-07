@@ -272,7 +272,7 @@ _ZIP_SIGNATURE = b"PK\x03\x04"
 # 当期累計 (YTD)
 _CURRENT_YTD_KEYWORDS = ("CurrentYearDuration", "CurrentYTDDuration", "CurrentAccumulatedQ")
 # 前年同期累計
-_PRIOR_YTD_KEYWORDS = ("Prior1YearDuration", "PriorYearDuration", "Prior1YTDDuration")
+_PRIOR_YTD_KEYWORDS = ("Prior1YearDuration", "PriorYearDuration", "Prior1YTDDuration", "PriorAccumulatedQ")
 # 当四半期 (単体)
 _CURRENT_Q_KEYWORDS = ("CurrentQuarterDuration",)
 # 前年同四半期 (単体)
