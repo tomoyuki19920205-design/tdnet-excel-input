@@ -474,7 +474,6 @@ def save_event_to_supabase(
                     .eq("ticker", event.ticker or "")
                     .eq("event_type", display_category)
                     .eq("disclosed_at", row["disclosed_at"])
-                    .eq("headline", event.title or "")
                     .execute()
                 )
                 if exist_res.data:
