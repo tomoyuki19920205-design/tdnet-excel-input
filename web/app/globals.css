@@ -1777,3 +1777,6 @@ html, body {
   font-style: italic;
 }
 
+
+/* TDNET Alerts YOY Highlight */
+.yoy-highlight { color: var(--accent-red); font-weight: 600; }

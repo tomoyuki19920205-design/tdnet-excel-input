@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { fetchEvents, markAsRead, markAsUnread, toggleStar } from "@/lib/tdnet-alerts/queries";
 import { useRealtimeAlerts } from "@/lib/tdnet-alerts/realtime";
@@ -9,6 +9,37 @@ import type { EnrichedEvent, TdnetEvent, FilterType } from "@/lib/tdnet-alerts/t
 import { EVENT_TYPE_CONFIG, EVENT_SUBTYPE_LABELS, getDisplayCategory } from "@/lib/tdnet-alerts/types";
 import AlertDetailPanel from "./AlertDetailPanel";
 import CompanyViewerFull from "@/components/company-viewer/CompanyViewerFull";
+
+const YOY_REGEX = /((?:売上|営利|営業利益|経常利益|純利益|売上高|sales_yoy|operating_profit_yoy)(?:高前年比|前年比|\s*YOY|\s*:)?\s*[+-]?[\d.]+%)/gi;
+
+const renderHighlightedCardBody = (text: string) => {
+  if (!text) return null;
+  const parts = text.split(YOY_REGEX);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (part.match(YOY_REGEX)) {
+          return (
+            <span key={i} className="yoy-highlight">
+              {part}
+            </span>
+          );
+        }
+        return (
+          <span key={i}>
+            {part.split("\n").map((line, j, arr) => (
+              <React.Fragment key={j}>
+                {line}
+                {j < arr.length - 1 && <br />}
+              </React.Fragment>
+            ))}
+          </span>
+        );
+      })}
+    </>
+  );
+};
+
 
 interface AlertsPageProps {
   userId: string;
@@ -715,7 +746,7 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
                   </div>
 
                   {/* Main content */}
-                  <div className="alert-card-body">{cardBody}</div>
+                  <div className="alert-card-body">{renderHighlightedCardBody(cardBody)}</div>
                 </div>
               );
             });
