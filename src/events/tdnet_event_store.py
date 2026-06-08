@@ -403,60 +403,59 @@ def _calculate_notification_compare(ticker: str, extracted: dict, client=None) -
         target_quarter = "1Q" if quarter == "2Q" else "2Q"
         current_fy = extracted.get("fiscal_year")
 
-        if client is not None:
+        if client is not None and current_fy:
             try:
-                # 取得上限20件は、現行DB制約下での実用的な上限
-                limit_count = 20
-                res = client.table('tdnet_events').select('raw_payload').eq('ticker', ticker).eq('event_type', 'earnings').order('disclosed_at', desc=True).limit(limit_count).execute()
+                prev_fy = str(int(current_fy) - 1)
+                # Fetch data from canonical_financials for the target_quarter
+                res = client.table('canonical_financials') \
+                    .select('period, metric, value') \
+                    .eq('ticker', ticker) \
+                    .eq('quarter', target_quarter) \
+                    .in_('metric', ['sales', 'operating_profit']) \
+                    .execute()
                 
-                fetched_count = 0
+                curr_sales = None
+                curr_op = None
+                prev_sales = None
+                prev_op = None
+                
                 if res.data:
-                    fetched_count = len(res.data)
-                    for r in res.data:
-                        rp = r.get('raw_payload')
-                        if isinstance(rp, str):
-                            try:
-                                rp = json.loads(rp)
-                            except:
-                                continue
-                        if isinstance(rp, dict):
-                            # 1. 決算短信系であること
-                            evt_type = rp.get('original_event_type') or rp.get('event_type')
-                            if evt_type != 'earnings':
-                                continue
-                            
-                            ext = rp.get('extracted', {})
-                            if isinstance(ext, dict):
-                                # 2. fiscal_year が現在処理中の対象年度と一致するか
-                                prev_fy = ext.get('fiscal_year')
-                                
-                                # 候補の fiscal_year が欠落している場合は即採用せずスキップ（ログ記録）
-                                if not prev_fy or str(prev_fy).strip() == "":
-                                    logger.info(f"[STORE] Candidate excluded due to fiscal_year_missing. ticker={ticker}, target_quarter={target_quarter}")
-                                    continue
-
-                                # 現在の fiscal_year と候補の fiscal_year が異なる場合はスキップ
-                                if current_fy and str(current_fy).strip() != str(prev_fy).strip():
-                                    continue
-                                
-                                # 3. quarter が target_quarter と一致するか
-                                if ext.get('quarter') == target_quarter:
-                                    compare_data = {
-                                        "label": "前Q",
-                                        "sales_yoy": ext.get('sales_yoy'),
-                                        "op_yoy": ext.get('op_yoy')
-                                    }
-                                    break
+                    for row in res.data:
+                        period = str(row.get('period', ''))
+                        metric = row.get('metric')
+                        val = row.get('value')
+                        
+                        if period.startswith(str(current_fy)):
+                            if metric == 'sales': curr_sales = val
+                            elif metric == 'operating_profit': curr_op = val
+                        elif period.startswith(str(prev_fy)):
+                            if metric == 'sales': prev_sales = val
+                            elif metric == 'operating_profit': prev_op = val
                 
-                if compare_data is None:
+                s_yoy = None
+                if curr_sales is not None and prev_sales and prev_sales > 0:
+                    s_yoy = (curr_sales / prev_sales) - 1.0
+                
+                o_yoy = None
+                if curr_op is not None and prev_op and prev_op > 0:
+                    o_yoy = (curr_op / prev_op) - 1.0
+                    
+                if curr_sales is not None or curr_op is not None:
+                    compare_data = {
+                        "label": "前Q",
+                        "sales_yoy": s_yoy,
+                        "op_yoy": o_yoy,
+                        "source": "jquants_canonical_financials"
+                    }
+                else:
                     logger.info(
-                        f"[STORE] Previous quarter not found. "
+                        f"[STORE] Previous quarter not found in canonical_financials. "
                         f"ticker={ticker}, current_quarter={quarter}, target_quarter={target_quarter}, "
-                        f"fiscal_year={current_fy}, fetched_count={fetched_count} (現行DB制約下での実用的な上限={limit_count})"
+                        f"fiscal_year={current_fy}, source_checked=canonical_financials"
                     )
 
             except Exception as e:
-                logger.warning(f"[STORE] Failed to fetch previous quarter from Supabase: {e}")
+                logger.warning(f"[STORE] Failed to fetch previous quarter from Supabase canonical_financials: {e}")
 
     # nullの場合は "compare": null とする
     return {
@@ -467,6 +466,60 @@ def _calculate_notification_compare(ticker: str, extracted: dict, client=None) -
         },
         "compare": compare_data
     }
+
+def _supplement_current_yoy(ticker: str, extracted: dict, client) -> None:
+    """TDNETでYOYが取れなかった場合、canonical_financialsから取得して補完する"""
+    if not extracted or not client or not ticker:
+        return
+        
+    quarter = extracted.get("quarter")
+    current_fy = extracted.get("fiscal_year")
+    if not quarter or not current_fy or quarter in ("1Q", "4Q", "FY"):
+        return
+
+    s_yoy = extracted.get("sales_yoy")
+    o_yoy = extracted.get("op_yoy")
+    s_curr = extracted.get("sales_current")
+    o_curr = extracted.get("op_current")
+    
+    if (s_yoy is not None and o_yoy is not None) or (s_curr is None and o_curr is None):
+        return
+
+    try:
+        prev_fy = str(int(current_fy) - 1)
+        res = client.table("canonical_financials") \
+            .select("period, metric, value") \
+            .eq("ticker", ticker) \
+            .eq("quarter", quarter) \
+            .in_("metric", ["sales", "operating_profit"]) \
+            .execute()
+            
+        prev_s = None
+        prev_o = None
+        
+        if res.data:
+            for row in res.data:
+                period = str(row.get("period", ""))
+                metric = row.get("metric")
+                val = row.get("value")
+                
+                if period.startswith(prev_fy) and val is not None:
+                    if metric == "sales": prev_s = val
+                    elif metric == "operating_profit": prev_o = val
+                    
+        # 単位合わせ: TDNET(extracted)は円単位、canonical_financialsは百万円単位
+        if s_yoy is None and s_curr is not None and prev_s is not None and prev_s > 0:
+            calc_s_yoy = (s_curr / 1_000_000 - prev_s) / prev_s
+            extracted["sales_yoy"] = calc_s_yoy
+            extracted["primary_metric_yoy_source"] = "jquants_canonical_financials"
+            
+        if o_yoy is None and o_curr is not None and prev_o is not None and prev_o > 0:
+            calc_o_yoy = (o_curr / 1_000_000 - prev_o) / prev_o
+            extracted["op_yoy"] = calc_o_yoy
+            extracted["primary_metric_yoy_source"] = "jquants_canonical_financials"
+            
+    except Exception as e:
+        logger.warning(f"[STORE] Failed to supplement current YOY: {e}")
 
 
 # ============================================================
@@ -488,6 +541,23 @@ def save_event_to_supabase(
         dedupe_key = build_dedupe_key(event)
         result["dedupe_key"] = dedupe_key
 
+        # 表示カテゴリ正規化
+        display_category = _normalize_display_category(event)
+        
+        # --- 抽出ペイロードの事前準備・補完 ---
+        client = _get_supabase()
+        extracted = {}
+        if event.extracted_payload_json:
+            try:
+                extracted = json.loads(event.extracted_payload_json)
+            except (json.JSONDecodeError, TypeError):
+                pass
+                
+        if display_category == "earnings" and client and isinstance(extracted, dict):
+            _supplement_current_yoy(event.ticker or "", extracted, client)
+            event.extracted_payload_json = json.dumps(extracted, ensure_ascii=False)
+        # ------------------------------------
+
         priority_rank = compute_priority_rank(event)
         # display_title / display_summary / formatted_message:
         # EventRecord のフィールドを直接使う（event_type ごとの整形は呼び出し側の責務）
@@ -498,8 +568,6 @@ def save_event_to_supabase(
         strength = _compute_strength_score(event)
         notify_discord = should_notify_event(event)
 
-        # 表示カテゴリ正規化 (元 event_type は raw_payload に保持)
-        display_category = _normalize_display_category(event)
         original_event_type = event.event_type or ""
 
         now_iso = datetime.now(JST).isoformat()
@@ -511,16 +579,17 @@ def save_event_to_supabase(
                 raw_payload["raw"] = json.loads(event.raw_payload_json)
             except (json.JSONDecodeError, TypeError):
                 raw_payload["raw_text"] = event.raw_payload_json
+                
         if event.extracted_payload_json:
-            try:
-                raw_payload["extracted"] = json.loads(event.extracted_payload_json)
-            except (json.JSONDecodeError, TypeError):
+            if extracted:
+                raw_payload["extracted"] = extracted
+            else:
                 raw_payload["extracted_text"] = event.extracted_payload_json
+                
         # 元の event_type を raw_payload に保存
         raw_payload["original_event_type"] = original_event_type
 
         # text_extract_status: extracted 全数値が null なら "empty" フラグ付与
-        extracted = raw_payload.get("extracted", {})
         if isinstance(extracted, dict):
             numeric_fields = [
                 "revised_sales", "revised_op", "revised_ordinary", "revised_net_income",
@@ -538,6 +607,12 @@ def save_event_to_supabase(
                 raw_payload["text_extract_status"] = "ok"
                 raw_payload["text_empty"] = False
                 
+        if client is None:
+            logger.warning("[STORE] Supabase client not available — skipping save")
+            result["action"] = "error"
+            result["error"] = "supabase_not_available"
+            return result
+
         # 追加: notification_compare_json の生成と埋め込み
         if display_category == "earnings" and isinstance(extracted, dict):
             comp_json = _calculate_notification_compare(event.ticker or "", extracted, client=client)
@@ -583,13 +658,6 @@ def save_event_to_supabase(
             result["display_title"] = display_title
             result["display_category"] = display_category
             result["priority_rank"] = priority_rank
-            return result
-
-        client = _get_supabase()
-        if client is None:
-            logger.warning("[STORE] Supabase client not available — skipping save")
-            result["action"] = "error"
-            result["error"] = "supabase_not_available"
             return result
 
         # YOY protection: Prevent overwriting existing YOY data with null
