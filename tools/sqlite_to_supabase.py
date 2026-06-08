@@ -1064,6 +1064,7 @@ def push_sqlite_to_supabase(
     resume: bool = False,
     batch_size: int = _BATCH_SIZE,
     checkpoint_path: str = "",
+    target_tickers: list[str] | None = None,
 ) -> dict:
     # --- 接続情報 ---
     if not supabase_url or not supabase_key:
@@ -1120,8 +1121,16 @@ def push_sqlite_to_supabase(
     resume_phase = ckpt.get("phase", 0)
     resume_offset = ckpt.get("offset", 0)
 
-    query = "SELECT * FROM quarterly_results ORDER BY id"
+    query = "SELECT * FROM quarterly_results"
     params: list = []
+    
+    if target_tickers:
+        placeholders = ",".join("?" for _ in target_tickers)
+        query += f" WHERE company_code IN ({placeholders})"
+        params.extend(target_tickers)
+
+    query += " ORDER BY id"
+    
     if limit > 0:
         query += " LIMIT ?"
         params.append(limit)

@@ -9,10 +9,15 @@ cd /d "C:\Users\takuy\OneDrive\tdnet-excel-input"
 
 REM -- Date calculation via PowerShell --
 for /f %%i in ('powershell -NoProfile -Command "(Get-Date).AddDays(-14).ToString('yyyy-MM-dd')"') do set DATE_FROM=%%i
+for /f %%i in ('powershell -NoProfile -Command "(Get-Date).ToString('yyyy-MM-dd')"') do set DATE_TO=%%i
 for /f %%i in ('powershell -NoProfile -Command "(Get-Date).ToString('yyyyMMdd')"') do set LOG_DATE=%%i
 
 if not defined DATE_FROM (
     echo [ERROR] DATE_FROM calculation failed >> logs\v4_backfill_recent_error.log
+    exit /b 1
+)
+if not defined DATE_TO (
+    echo [ERROR] DATE_TO calculation failed >> logs\v4_backfill_recent_error.log
     exit /b 1
 )
 
@@ -21,11 +26,12 @@ if not exist logs mkdir logs
 set LOGFILE=logs\v4_backfill_recent_%LOG_DATE%.log
 set PYTHON=.venv\Scripts\python.exe
 
-echo ===BAT_START=== [%date% %time%] date_from=%DATE_FROM% >> %LOGFILE%
+echo ===BAT_START=== [%date% %time%] date_from=%DATE_FROM% date_to=%DATE_TO% >> %LOGFILE%
 
 %PYTHON% tools\backfill_segments_tdnet.py ^
     --reset-target ^
     --date-from %DATE_FROM% ^
+    --date-to %DATE_TO% ^
     --worker-version v4 ^
     --decision-db .\decision_db.db >> %LOGFILE% 2>&1
 

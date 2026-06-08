@@ -218,6 +218,33 @@ def main() -> int:
         ], timeout_sec=300)
         steps.append(step)
 
+        # ── Step 5a: extract_per_share_from_raw（jquants.db raw_json → per_share_data） ──
+        logger.info("[PER_SHARE] extract start")
+        step = run_step("per-share-extract", [
+            PYTHON, "-X", "utf8",
+            "tools/extract_per_share_from_raw.py",
+            "--db", "data/jquants.db",
+            *([] if args.dry_run else ["--apply"]),
+        ], timeout_sec=300)
+        steps.append(step)
+        if step.rc == 0:
+            logger.info(f"[PER_SHARE] extract done rc={step.rc}")
+        else:
+            logger.warning(f"[PER_SHARE] extract done rc={step.rc} status={step.status}")
+
+        # ── Step 5b: sync_per_share_data（per_share_data → Supabase） ──
+        logger.info("[PER_SHARE] sync start")
+        step = run_step("per-share-sync", [
+            PYTHON, "-X", "utf8",
+            "tools/sync_per_share_data.py",
+            *([] if args.dry_run else ["--apply"]),
+        ], timeout_sec=300)
+        steps.append(step)
+        if step.rc == 0:
+            logger.info(f"[PER_SHARE] sync done rc={step.rc}")
+        else:
+            logger.error(f"[PER_SHARE] sync done rc={step.rc} status={step.status} (Supabase sync FAILED)")
+
         # ── Step 6: rebuild ──
         step = run_step("rebuild", [
             PYTHON, "tools/pipeline_run.py", "rebuild",

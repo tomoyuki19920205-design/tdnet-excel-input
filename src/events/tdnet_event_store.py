@@ -386,18 +386,19 @@ def _calculate_notification_compare(ticker: str, extracted: dict, client=None) -
         s_yoy = guidance.get("sales_yoy")
         o_yoy = guidance.get("op_yoy")
 
-        if s_yoy is None or o_yoy is None:
+        if s_yoy is None and o_yoy is None:
             s_f = guidance.get("sales_forecast")
             o_f = guidance.get("op_forecast")
-            reason_sales = "ok" if s_yoy is not None else ("forecast_missing" if s_f is None else "prev_actual_missing")
-            reason_op = "ok" if o_yoy is not None else ("forecast_missing" if o_f is None else "prev_actual_missing")
+            reason_sales = "forecast_missing" if s_f is None else "prev_actual_missing"
+            reason_op = "forecast_missing" if o_f is None else "prev_actual_missing"
             logger.info(f"[STORE] Missing guidance YOY. ticker={ticker}, quarter={quarter}, sales_reason={reason_sales}, op_reason={reason_op}")
-
-        compare_data = {
-            "label": "FY予",
-            "sales_yoy": s_yoy,
-            "op_yoy": o_yoy
-        }
+            compare_data = None
+        else:
+            compare_data = {
+                "label": "FY予",
+                "sales_yoy": s_yoy,
+                "op_yoy": o_yoy
+            }
     elif quarter in ("2Q", "3Q"):
         # 2Q/3Q: fetch previous quarter from Supabase
         target_quarter = "1Q" if quarter == "2Q" else "2Q"
@@ -475,6 +476,7 @@ def _supplement_current_yoy(ticker: str, extracted: dict, client) -> None:
     quarter = extracted.get("quarter")
     current_fy = extracted.get("fiscal_year")
     if not quarter or not current_fy or quarter in ("1Q", "4Q", "FY"):
+        print(f"[_supplement_current_yoy] SKIPPED {ticker} reason=invalid_quarter_or_fy: quarter={quarter}, fy={current_fy}")
         return
 
     s_yoy = extracted.get("sales_yoy")
@@ -483,7 +485,9 @@ def _supplement_current_yoy(ticker: str, extracted: dict, client) -> None:
     o_curr = extracted.get("op_current")
     
     if (s_yoy is not None and o_yoy is not None) or (s_curr is None and o_curr is None):
+        print(f"[_supplement_current_yoy] SKIPPED {ticker} reason=no_need: s_yoy={s_yoy}, o_yoy={o_yoy}, s_curr={s_curr}, o_curr={o_curr}")
         return
+    print(f"[_supplement_current_yoy] EXECUTED {ticker} quarter={quarter} fy={current_fy}")
 
     try:
         prev_fy = str(int(current_fy) - 1)
@@ -525,6 +529,21 @@ def _supplement_current_yoy(ticker: str, extracted: dict, client) -> None:
 # ============================================================
 # メイン: Supabase へ保存
 # ============================================================
+def _merge_compare_json(new_row_dict: dict, existing_payload_str: str) -> None:
+    if not existing_payload_str:
+        return
+    try:
+        new_payload = json.loads(new_row_dict["raw_payload"])
+        if new_payload.get("notification_compare_json"):
+            return # Already has it, do not overwrite
+
+        old_payload = json.loads(existing_payload_str)
+        if isinstance(old_payload, dict) and "notification_compare_json" in old_payload:
+            new_payload["notification_compare_json"] = old_payload["notification_compare_json"]
+            new_row_dict["raw_payload"] = json.dumps(new_payload, ensure_ascii=False, default=str)
+    except Exception:
+        pass
+
 def save_event_to_supabase(
     event: EventRecord,
     *,
@@ -696,7 +715,7 @@ def save_event_to_supabase(
         # --- 厳密な重複チェック（テスト実行等の事故防止） ---
         # 同一ticker・同一disclosed_at・同一event_type・同一event_subtype のレコードがあればUPDATE
         try:
-            q = client.table("tdnet_events").select("id").eq("ticker", row["ticker"]).eq("disclosed_at", row["disclosed_at"]).eq("event_type", row["event_type"])
+            q = client.table("tdnet_events").select("id, raw_payload").eq("ticker", row["ticker"]).eq("disclosed_at", row["disclosed_at"]).eq("event_type", row["event_type"])
             if row.get("event_subtype"):
                 q = q.eq("event_subtype", row["event_subtype"])
             else:
@@ -716,6 +735,7 @@ def save_event_to_supabase(
                         result["display_category"] = display_category
                         return result
 
+                _merge_compare_json(row, existing_payload_str)
                 resp = client.table("tdnet_events").update(row).eq("id", existing_id).execute()
                 if resp.data and len(resp.data) > 0:
                     result["action"] = "updated"

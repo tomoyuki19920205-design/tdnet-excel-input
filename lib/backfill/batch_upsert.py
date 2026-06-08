@@ -32,13 +32,17 @@ def batch_upsert_segments(
     batch_size: int = 200,
     source: str = "backfill",
     actor: str = "backfill",
+    xbrl_cleanup_keys: dict | None = None,
 ) -> BatchUpsertStats:
     """segment_records を batch 単位で explicit transaction upsert する。
 
     Args:
-        records: worker が返した segment_records の集約
-        decision_db: MigrationDB インスタンス
-        batch_size: 1 transaction あたりの最大レコード数
+        records:           worker が返した segment_records の集約
+        decision_db:       MigrationDB インスタンス
+        batch_size:        1 transaction あたりの最大レコード数
+        xbrl_cleanup_keys: PDF V4 採用時に旧 XBRL 行を削除するためのキー辞書。
+                           {ticker, fiscal_year_end, quarter, tdnet_doc_id} を含む。
+                           None の場合は削除しない。
 
     Returns:
         BatchUpsertStats
@@ -48,17 +52,66 @@ def batch_upsert_segments(
     if not records:
         return stats
 
+    # ── _xbrl_cleanup_meta の自動検出 ──
+    # worker_v4 が PDF V4 採用時に segment_records の各レコードに付与するメタ。
+    # xbrl_cleanup_keys 引数より records 埋め込みメタを優先する。
+    _auto_cleanup = xbrl_cleanup_keys
+    for _r in records:
+        _meta = _r.get("_xbrl_cleanup_meta")
+        if _meta:
+            _auto_cleanup = _meta
+            break  # 全レコードで同一メタなので最初の1件で十分
+
     chunks = [records[i:i + batch_size] for i in range(0, len(records), batch_size)]
     stats.total_batches = len(chunks)
+
+    # ── PDF V4 採用時の旧 XBRL 行削除（最初の batch の BEGIN 直後に実行）──
+    _cleanup_done = False
 
     for batch_idx, chunk in enumerate(chunks):
         try:
             decision_db._conn.execute("BEGIN")
+
+            # 旧 XBRL 行 + PDF V4 集計行の削除（初回 batch のみ、同一トランザクション内）
+            if _auto_cleanup and not _cleanup_done:
+                from lib.backfill.segment_partial_check import (
+                    cleanup_old_xbrl_rows,
+                    cleanup_aggregate_pdf_rows,
+                )
+                _deleted_xbrl = cleanup_old_xbrl_rows(
+                    decision_db._conn,
+                    ticker=_auto_cleanup["ticker"],
+                    fiscal_year_end=_auto_cleanup["fiscal_year_end"],
+                    quarter=_auto_cleanup["quarter"],
+                    tdnet_doc_id=_auto_cleanup["tdnet_doc_id"],
+                    reason="pdf_v4_adopted",
+                )
+                _deleted_agg = cleanup_aggregate_pdf_rows(
+                    decision_db._conn,
+                    ticker=_auto_cleanup["ticker"],
+                    fiscal_year_end=_auto_cleanup["fiscal_year_end"],
+                    quarter=_auto_cleanup["quarter"],
+                    tdnet_doc_id=_auto_cleanup["tdnet_doc_id"],
+                )
+                _cleanup_done = True
+                logger.info(
+                    "[upsert] cleanup: ticker=%s fy=%s quarter=%s tdnet_doc_id=%s "
+                    "xbrl_deleted=%d aggregate_deleted=%d",
+                    _auto_cleanup["ticker"],
+                    _auto_cleanup["fiscal_year_end"],
+                    _auto_cleanup["quarter"],
+                    _auto_cleanup["tdnet_doc_id"],
+                    _deleted_xbrl,
+                    _deleted_agg,
+                )
+
             batch_inserted = 0
             batch_updated = 0
             batch_no_change = 0
 
             for rec in chunk:
+                # _xbrl_cleanup_meta は DB スキーマ外のサイドバンドキー → 除去
+                rec.pop("_xbrl_cleanup_meta", None)
                 result = decision_db.upsert_segment(
                     company_code=rec["ticker"],
                     fiscal_year_end=rec["period"],

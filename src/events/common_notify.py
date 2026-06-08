@@ -295,7 +295,13 @@ def _fmt_div_amount(val: float) -> str:
 
 
 def format_dividend_msg(event: EventRecord) -> str:
-    """配当修正イベントの通知メッセージ（1行コンパクト形式）"""
+    """配当修正イベントの通知メッセージ（多行形式）
+
+    一行目: 💰【増配】会社名（ticker）
+    二行目: {basis}配当: {prev}円→{rev}円(+XX.X%)
+              ※ basis が空の場合は "配当: " のみ
+    三行目: {fiscal_period} {basis}  ›対象期
+    """
     payload = {}
     if event.extracted_payload_json:
         try:
@@ -305,57 +311,69 @@ def format_dividend_msg(event: EventRecord) -> str:
 
     disp = f"{event.company_name}（{event.ticker}）" if event.company_name else event.ticker
     subtype_ja = {
-        "increase": "増配", "decrease": "減配",
-        "special_dividend": "特別配当", "commemorative_dividend": "記念配当",
-        "maintain": "据え置き", "undecided": "配当予想修正",
+        "increase":              "増配",
+        "decrease":              "減配",
+        "special_dividend":      "特別配当",
+        "commemorative_dividend":"記念配当",
+        "maintain":              "据え置き",
+        "undecided":             "配当予想修正",
     }.get(event.subtype, "配当予想修正")
-    emoji = {"increase": "💰", "decrease": "📉", "special_dividend": "🎁",
-             "commemorative_dividend": "🎉"}.get(event.subtype, "💵")
+    emoji = {
+        "increase":              "💰",
+        "decrease":              "📉",
+        "special_dividend":      "🎁",
+        "commemorative_dividend":"🎉",
+    }.get(event.subtype, "💵")
 
-    # 1行: ヘッダー + 配当額 + 利回り + 対象期(末尾)
     period = payload.get("fiscal_period", "")
-    basis = payload.get("dividend_basis", "")
-    parts = [f"{emoji}【{subtype_ja}】{disp}"]
+    basis  = (payload.get("dividend_basis") or "").strip()
 
     prev = payload.get("previous_dividend_per_share")
-    rev = payload.get("revised_dividend_per_share")
+    rev  = payload.get("revised_dividend_per_share")
 
-    # 配当額修正行: {区分}配当: {前回}円→{今回}円({増減率})
+    lines = [f"{emoji}【{subtype_ja}】{disp}"]
+
+    # 配当額修正行
+    # basis_label: "期末" → "期末配当: ..."
+    #              ""    → "配当: ..."  ("配当配当" にはしない)
     if rev is not None:
-        basis_label = basis if basis else ""
-        prev_str = _fmt_div_amount(prev) if prev is not None else "---"
+        try:
+            rev_f  = float(rev)
+            prev_f = float(prev) if prev is not None else None
 
-        # 増減率の算出
-        pct_str = ""
-        if prev is not None and prev != 0:
-            delta = payload.get("delta_dividend_per_share")
-            if delta is not None:
-                pct = delta / abs(prev) * 100
+            # 増減率算出
+            pct_str = ""
+            if prev_f is not None and prev_f != 0:
+                pct = (rev_f - prev_f) / abs(prev_f) * 100
+                sign = "+" if pct > 0 else ""
+                pct_str = f"({sign}{pct:.1f}%)"
+
+            prev_str = _fmt_div_amount(prev_f) if prev_f is not None else "---"
+            # basis が "配当" で終わる場合はそのまま、それ以外は basis+"配当"
+            if basis.endswith("配当"):
+                amount_label = basis  # "期末配当" → "期末配当"
+            elif basis:
+                amount_label = f"{basis}配当"  # "期末" → "期末配当"
             else:
-                pct = (rev - prev) / abs(prev) * 100
-            sign = "+" if pct > 0 else ""
-            pct_str = f"({sign}{pct:.1f}%)"
+                amount_label = "配当"           # "" → "配当"
+            lines.append(f"{amount_label}: {prev_str}→{_fmt_div_amount(rev_f)}{pct_str}")
+        except (ValueError, TypeError):
+            pass
 
-        parts.append(f"{basis_label}配当: {prev_str}→{_fmt_div_amount(rev)}{pct_str}")
-    # rev が None の場合は配当額行なし（タイトルのみにフォールバック）
-
+    # 特別配当 / 記念配当行
     special = payload.get("special_dividend_per_share")
     if special:
-        parts.append(f"特別配当{special}円")
+        lines.append(f"特別配当: {_fmt_div_amount(special)}")
     commemorative = payload.get("commemorative_dividend_per_share")
     if commemorative:
-        parts.append(f"記念配当{commemorative}円")
+        lines.append(f"記念配当: {_fmt_div_amount(commemorative)}")
 
-    closing_price = payload.get("closing_price")
-    annual_div = payload.get("annual_total_revised")
-    if closing_price and annual_div and closing_price > 0:
-        div_yield = annual_div / closing_price * 100
-        parts.append(f"利回り{div_yield:.2f}%（終値{closing_price:,.0f}円）")
-
+    # 対象期
     if period:
-        parts.append(f"{period} {basis}".rstrip())
+        period_line = f"{period} {basis}".rstrip()
+        lines.append(period_line)
 
-    return _truncate("\u3000\u3000".join(parts)) + _TAIL
+    return "\n".join(lines) + _TAIL
 
 
 # ============================================================
@@ -383,11 +401,17 @@ def send_event_discord(
 ) -> bool:
     """Discord にイベント通知を送信する。
 
+    Rate-limit 対策:
+    - 送信前に 0.7秒 sleep（バースト防止）
+    - 429 検知時は Retry-After を読んで待機し、1回リトライ
+
     Returns
     -------
     bool
         送信成功 or dry-run
     """
+    import time
+
     msg = format_event_message(event)
 
     if dry_run:
@@ -395,8 +419,30 @@ def send_event_discord(
         print(f"[DRY-RUN] Discord通知:\n{msg}")
         return True
 
+    # 送信前 sleep（連続送信によるバースト防止）
+    time.sleep(0.7)
+
+    def _do_post() -> "requests.Response":
+        return requests.post(webhook_url, json={"content": msg}, timeout=10)
+
     try:
-        r = requests.post(webhook_url, json={"content": msg}, timeout=10)
+        r = _do_post()
+
+        # 429 Rate Limited → Retry-After 待機後 1回リトライ
+        if r.status_code == 429:
+            retry_after = 2.0
+            try:
+                retry_after = float(r.headers.get("Retry-After", 2.0))
+            except (ValueError, TypeError):
+                retry_after = 2.0
+            logger.info(
+                f"[NOTIFY] rate_limited event_id={event.event_id[:12]} "
+                f"ticker={event.ticker} retry_after={retry_after:.1f}s"
+            )
+            time.sleep(retry_after)
+            logger.info(f"[NOTIFY] retry_send event_id={event.event_id[:12]}")
+            r = _do_post()
+
         r.raise_for_status()
         sent_at = datetime.now(timezone(timedelta(hours=9)))
         logger.info(f"discord_sent_at: {sent_at.isoformat()}")

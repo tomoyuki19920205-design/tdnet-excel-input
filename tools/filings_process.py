@@ -295,6 +295,7 @@ def _run_batch_inner(
             push_kwargs: dict = {
                 "db_path": _db,
                 "dry_run": dry_run,
+                "target_tickers": target_tickers,
             }
             if limit_filings > 0:
                 push_kwargs["limit"] = limit_filings

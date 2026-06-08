@@ -378,34 +378,54 @@ def _extract_dividend_annual_total_via_fitz(pdf_path: str) -> dict | None:
 
     業績予想修正PDFに同居する配当予想修正テーブルも対象。
     抽出対象は annual_total_previous / annual_total_revised のみ。
+
+    改善点:
+      - 表タイプ判定（配当予想修正型/剰余金配当決定型）でラベル切替
+      - ヘッダー行スコアに本文ペナルティ・列token数ボーナスを追加
+      - >= 比較で後出し優先（テーブル直前ヘッダーが勝つ）
+      - 合計 > 年間 > 期末 の列優先順位
+      - rightmost fallback でゼロ値(abs<0.5)を除外
     """
     # 配当キーワード事前チェック用
     _DIV_TRIGGER = [
         "配当予想", "1株当たり配当金", "年間配当金", "期末配当", "配当金", "配当の修正",
     ]
-    # ヘッダー行スコアリング
-    _DIV_HDR_SCORE_WORDS = {
-        "annual":   ["年間", "合計", "年間合計", "年間配当金", "合計配当金", "1株当たり年間配当金"],
-        "term_end": ["期末", "期末配当"],
-        "row_hint": ["前回", "今回", "修正前", "修正後"],
-    }
-    # 年間/合計列ラベル
-    _DIV_ANNUAL_LABELS   = ["年間", "合計", "年間合計", "年間配当金", "合計配当金", "1株当たり年間配当金"]
-    _DIV_TERM_END_LABELS = ["期末", "期末配当"]
-    # 前回/今回行ラベル
-    _DIV_PREV_LABELS = [
+    # ── 表タイプ別ラベル定義 ──────────────────────────────────
+    # A. 配当予想修正型
+    _PREV_LABELS_A = [
         "前回発表予想", "前回予想", "前回公表予想", "修正前",
         "前回(a)", "前回（a）", "(a)", "（a）",
     ]
-    _DIV_REV_LABELS = [
+    _REV_LABELS_A = [
         "今回修正予想", "今回予想", "修正後", "今回公表予想",
         "公表予想", "修正予想", "今回(b)", "今回（b）", "(b)", "（b）",
     ]
+    # B. 剰余金配当決定型
+    _PREV_LABELS_B = ["直近の配当予想", "直近配当予想"]
+    _REV_LABELS_B  = ["決定額", "今回決定額"]
+
+    # ── 年間/合計/期末列ラベル（優先順位順）──────────────────
+    _DIV_TOTAL_LABELS    = ["合計", "年間合計", "合計配当金", "1株当たり年間配当金"]
+    _DIV_ANNUAL_LABELS   = ["年間", "年間配当金"]
+    _DIV_TERM_END_LABELS = ["期末", "期末配当"]
+
+    # ── ヘッダー行スコアリング ───────────────────────────────
+    # 加点: 配当テーブルのヘッダーらしいKW
+    _HDR_POSITIVE = [
+        "第1四半期末", "第2四半期末", "第3四半期末",
+        "中間", "期末", "合計", "年間", "円", "銭",
+    ]
+    # 減点: 本文説明文らしいKW
+    _HDR_NEGATIVE = [
+        "ため", "いたし", "見込み", "上方修正", "下方修正",
+        "株主還元", "剰余金", "につき", "ことにより", "となり",
+        "お知らせ", "します", "まし",
+    ]
 
     # forecast_extractor に依存せずローカルヘルパーを使用
-    _group_rows      = _div_group_rows
-    _row_to_tokens   = _div_row_to_tokens
-    _fitz_compact    = _div_fitz_compact
+    _group_rows       = _div_group_rows
+    _row_to_tokens    = _div_row_to_tokens
+    _fitz_compact     = _div_fitz_compact
     _parse_cell_value = _div_parse_cell_value
 
     best_prev: float | None = None
@@ -421,6 +441,22 @@ def _extract_dividend_annual_total_via_fitz(pdf_path: str) -> dict | None:
                 logger.debug("[dividend_fitz] no dividend keyword found, skip")
                 return None
 
+            # ── Step 1: 表タイプ判定（全文から）──────────────
+            ft_compact = _fitz_compact(full_text)
+            if any(_fitz_compact(lbl) in ft_compact for lbl in _REV_LABELS_A + _PREV_LABELS_A):
+                _table_type      = "A"  # 配当予想修正型
+                _DIV_PREV_LABELS = _PREV_LABELS_A
+                _DIV_REV_LABELS  = _REV_LABELS_A
+            elif any(_fitz_compact(lbl) in ft_compact for lbl in _REV_LABELS_B + _PREV_LABELS_B):
+                _table_type      = "B"  # 剰余金配当決定型
+                _DIV_PREV_LABELS = _PREV_LABELS_B
+                _DIV_REV_LABELS  = _REV_LABELS_B
+            else:
+                _table_type      = "A"  # デフォルト
+                _DIV_PREV_LABELS = _PREV_LABELS_A
+                _DIV_REV_LABELS  = _REV_LABELS_A
+            logger.debug(f"[dividend_fitz] table_type={_table_type}")
+
             for page in pdf.pages[:5]:
                 raw_words = page.extract_words(x_tolerance=3, y_tolerance=3)
                 if not raw_words:
@@ -428,31 +464,34 @@ def _extract_dividend_annual_total_via_fitz(pdf_path: str) -> dict | None:
 
                 grouped_rows = _group_rows(raw_words)
 
-                # Step 2: スコアベースでヘッダー行を検出
-                def _score_div_row(rw: list) -> int:
+                # ── Step 2: スコアベースでヘッダー行を検出 ────
+                # スコア = 正KW数 + token数ボーナス - 負KW数×2
+                # >= 比較で同スコア時は後出し優先（テーブル直前ヘッダーが勝つ）
+                def _score_div_row(rw: list) -> float:
                     rc = _fitz_compact("".join(w["text"] for w in rw))
-                    return sum(
-                        1 for lbls in _DIV_HDR_SCORE_WORDS.values()
-                        if any(_fitz_compact(lbl) in rc for lbl in lbls)
-                    )
+                    pos = sum(1 for kw in _HDR_POSITIVE if _fitz_compact(kw) in rc)
+                    neg = sum(1 for kw in _HDR_NEGATIVE if _fitz_compact(kw) in rc)
+                    tok_bonus = min(len(rw) / 10.0, 1.0)
+                    return pos - neg * 2 + tok_bonus
 
-                hdr_idx   = -1
-                best_score = 0
+                hdr_idx    = -1
+                best_score = -999.0
                 hdr_tokens: list = []
-                for ri, rw in enumerate(grouped_rows[:30]):
+                for ri, rw in enumerate(grouped_rows[:35]):
                     s = _score_div_row(rw)
-                    if s > best_score:
+                    if s >= best_score:  # >= で後出し優先
                         best_score = s
                         hdr_idx    = ri
                         hdr_tokens = _row_to_tokens(rw)
 
-                if hdr_idx == -1 or best_score == 0:
+                if hdr_idx == -1 or best_score <= 0:
                     continue
-                print(f"[dividend_fitz_sort] header_row_idx={hdr_idx} score={best_score}")
+                print(f"[dividend_fitz_sort] header_row_idx={hdr_idx} score={best_score:.2f}")
 
-                # Step 3: 年間/合計 / 期末列のX座標取得
-                annual_x:   float | None = None
-                term_end_x: float | None = None
+                # ── Step 3: 列X座標取得（合計 > 年間 > 期末 優先）──
+                total_x:    float | None = None  # 合計列
+                annual_x:   float | None = None  # 年間列
+                term_end_x: float | None = None  # 期末列
 
                 below_tokens: list = []
                 if hdr_idx + 1 < len(grouped_rows):
@@ -474,19 +513,23 @@ def _extract_dividend_annual_total_via_fitz(pdf_path: str) -> dict | None:
                             below_text = bt["text"]
                             break
                     combined = _fitz_compact(tok["text"] + below_text)
-                    if annual_x is None and any(_fitz_compact(lbl) in combined for lbl in _DIV_ANNUAL_LABELS):
+                    # 優先順位1: 合計列
+                    if total_x is None and any(_fitz_compact(lbl) in combined for lbl in _DIV_TOTAL_LABELS):
+                        total_x = tok_cx
+                        print(f"[dividend_fitz_colmap] total_x={tok_cx:.1f} header_text={tok['text']!r}")
+                    # 優先順位2: 年間列
+                    elif annual_x is None and any(_fitz_compact(lbl) in combined for lbl in _DIV_ANNUAL_LABELS):
                         annual_x = tok_cx
                         print(f"[dividend_fitz_colmap] annual_x={tok_cx:.1f} header_text={tok['text']!r}")
+                    # 優先順位3: 期末列
                     elif term_end_x is None and any(_fitz_compact(lbl) in combined for lbl in _DIV_TERM_END_LABELS):
                         term_end_x = tok_cx
                         print(f"[dividend_fitz_colmap] term_end_x={tok_cx:.1f} header_text={tok['text']!r}")
 
-                # 年間列も期末列もなければ次ページへ
-                if annual_x is None and term_end_x is None:
+                # 列もなければ次ページへ（合計 > 年間 > 期末 優先）
+                target_x: float | None = total_x or annual_x or term_end_x
+                if target_x is None:
                     continue
-
-                # 年間優先、なければ期末
-                target_x: float | None = annual_x if annual_x is not None else term_end_x
 
                 # Step 4: 前回行 / 今回行を検出
                 prev_tokens: list | None = None
@@ -581,12 +624,16 @@ def _extract_dividend_annual_total_via_fitz(pdf_path: str) -> dict | None:
                         if dist <= col_tol:
                             return closest[1]
                         print(f"[dividend_fitz_assign] kind={kind} → rightmost_fallback")
-                    # フォールバック: 最右値（日本の配当表は右端が年間合計）
-                    rightmost = nums_cx[-1]
+                    # フォールバック: ゼロ値(abs<0.5)を除外した最右値
+                    # （「00銭」が最右になるのを防ぐ）
+                    non_zero = [(cx, v) for cx, v in nums_cx if abs(v) > 0.5]
+                    if not non_zero:
+                        return None
+                    rightmost = non_zero[-1]
                     print(
                         f"[dividend_fitz_assign] kind={kind} "
                         f"value={rightmost[1]} num_x={rightmost[0]:.1f} "
-                        f"annual_x={target_x:.1f if target_x is not None else 'N/A'} "
+                        f"target_x={target_x:.1f if target_x is not None else 'N/A'} "
                         f"reason=rightmost_fallback"
                     )
                     return rightmost[1]

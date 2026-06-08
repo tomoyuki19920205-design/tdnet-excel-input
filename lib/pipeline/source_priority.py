@@ -11,7 +11,14 @@ from __future__ import annotations
 #   sales / operating_profit 等の PL 主要値は高信頼性。
 #   gross_profit / sga 等の補完値は jquants に存在しないことが多く
 #   その場合は tdnet 等が自動採用される（競合なし）。
-#   summary_xbrl(1) < jquants(2) = attachment_xbrl(2) < html/tdnet(3) < pdf(4) < legacy(5)
+#
+# priority 一覧 (昇順 = 高優先):
+#   0: backfill_v4_pdf / v4_pdf  ← XBRL partial 判定で PDF V4 採用済み (XBRL より信頼)
+#   1: summary_xbrl / xbrl
+#   2: attachment_xbrl / backfill_xbrl / jquants / edinet_xbrl / edinet
+#   3: html / html_table / tdnet
+#   4: pdf / pdf_table
+#   5: excel_legacy / legacy_excel
 
 SOURCE_PRIORITY: dict[str, int] = {
     # ── financials source ──
@@ -25,7 +32,19 @@ SOURCE_PRIORITY: dict[str, int] = {
     # SegmentRawRow.source: 'xbrl' | 'html' | 'pdf' | 'tdnet'
     # xbrl は summary_xbrl 相当、html/pdf はそれぞれ html_table/pdf_table 相当
     # aliases / backward compat
+    #
+    # ── XBRL partial fallback 採用済み PDF V4 (priority=0) ──
+    # XBRL が partial success と判定され、PDF V4 が xbrl より多くのセグメントを
+    # 抽出した場合に採用される。「XBRL より信頼できる」と自動判定済みなので
+    # xbrl(1) より高優先の 0 とする。
+    # 通常の PDF 抽出一般 ("pdf": 4) は変更しない。
+    "backfill_v4_pdf": 0,
+    "v4_pdf": 0,
     "xbrl": 1,
+    # ── Backfill / historical XBRL source ──
+    # backfill_xbrl: XBRL ZIP から後処理抽出したデータ (attachment_xbrl 相当)
+    # excel_legacy(5) より高優先、summary_xbrl(1) より低優先
+    "backfill_xbrl": 2,
     # ── EDINET source ──
     # EDINET XBRL は TDnet XBRL (priority=1) の次、HTML/PDF より上
     "edinet_xbrl": 2,

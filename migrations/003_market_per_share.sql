@@ -50,7 +50,8 @@ CREATE TABLE IF NOT EXISTS per_share_data (
   dividend_annual          REAL,            -- 年間配当実績合計
   payout_ratio             REAL,            -- 配当性向実績
   -- 予想
-  forecast_eps             REAL,            -- EPS予想（期末）
+  forecast_eps             REAL,            -- EPS予想（最新。期中修正で更新される）
+  initial_forecast_eps     REAL,            -- EPS予想（期初。本決算発表時のNxFEPS。原則不変）
   forecast_dividend_annual REAL,            -- 年間配当予想合計
   forecast_payout_ratio    REAL,            -- 配当性向予想
   -- 株式数

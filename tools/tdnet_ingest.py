@@ -56,8 +56,12 @@ JST = timezone(timedelta(hours=9))
 # ユーティリティ
 # ============================================================
 
+import re
+
 def _reiwa_to_fiscal_year_end(r_str: str) -> str | None:
-    """R表記 → fiscal_year_end (YYYY-MM-DD)"""
+    """R表記 -> fiscal_year_end (YYYY-MM-DD), または既に YYYY-MM-DD ならそのまま返す"""
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", r_str):
+        return r_str
     parsed = parse_reiwa(r_str)
     if parsed is None:
         return None
@@ -308,58 +312,78 @@ def _process_single(
     )
     decision_db.commit()
 
-    # ── 受注メトリクス抽出（失敗しても全体を止めない） ──
-    try:
-        order_result, order_reason = extract_order_metrics(
-            pdf_path=doc_path,
-            title=item.title,
-        )
-        if order_result and order_result.metrics:
-            for m in order_result.metrics:
-                om_result = decision_db.upsert_order_metric(
-                    company_code=code,
-                    fiscal_year_end=fiscal_year_end,
-                    quarter=financials.quarter,
-                    metric_name=m.metric_name,
-                    value=m.value,
-                    raw_value=m.raw_value,
-                    unit=m.unit,
-                    confidence=m.confidence,
-                    raw_text=m.raw_text,
-                    source_doc_id=disclosure_id,
-                )
-                logger.info(
-                    f"[ORDER] {code} {fiscal_year_end} {financials.quarter} "
-                    f"{m.metric_name}={m.value} ({om_result})"
-                )
-            decision_db.commit()
-        elif order_reason and order_reason != "no_order_keywords":
-            # 受注キーワードはあるが合計行なし等 → quarantine
-            decision_db.quarantine_record(
-                company_code=code,
-                reason=order_reason,
-                fiscal_year_end=fiscal_year_end,
-                quarter=financials.quarter,
-                metric_type="order_metrics",
-                detail=f"title={item.title[:60]}",
-                source_doc_id=disclosure_id,
-            )
-            decision_db.commit()
-            logger.info(f"[ORDER] {code} quarantine: {order_reason[:80]}")
-    except Exception as e:
-        logger.warning(f"[ORDER] {code} extraction error (non-fatal): {e}")
-        try:
-            decision_db.quarantine_record(
-                company_code=code,
-                reason=f"extraction_error: {e}",
-                fiscal_year_end=fiscal_year_end,
-                quarter=financials.quarter,
-                metric_type="order_metrics",
-                source_doc_id=disclosure_id,
-            )
-            decision_db.commit()
-        except Exception:
-            pass
+    # ── 受注メトリクス抽出 ── [一時停止中]
+    # 停止理由:
+    #   受注系PDF抽出は、現状では以下の精度問題があるため本番ingestから一時停止。
+    #   - 単位誤認: _detect_scale が全文先頭マッチのみのため、受注ページの千円が
+    #     表紙の百万円に上書きされ、17,455,472千円→17,455,472百万円として保存される。
+    #   - backlog/carryover 重複: BACKLOG_KEYWORDS と CARRYOVER_KEYWORDS が完全重複しており
+    #     「次期繰越工事高」から backlog_total と carryover_construction_total が
+    #     同じ値で二重生成される。
+    #   - 本文誤爆: 同一行に複数KPI（「受注高A及び受注残高B」）がある場合、
+    #     backlog_total が受注高側の値を拾う。
+    #
+    # 再開条件:
+    #   受注系V2抽出ロジック（ページ別単位検出・KPI分離・合計行必須化）の実装後に
+    #   このブロックのコメントアウトを解除して再開する。
+    #
+    # 実装・DBは保持: src/extractor.py の extract_order_metrics()、
+    #   MigrationDB.upsert_order_metric()、order_metrics テーブルは削除しない。
+    #
+    # [DISABLED ORDER EXTRACTION BEGIN]
+    # try:
+    #     order_result, order_reason = extract_order_metrics(
+    #         pdf_path=doc_path,
+    #         title=item.title,
+    #     )
+    #     if order_result and order_result.metrics:
+    #         for m in order_result.metrics:
+    #             om_result = decision_db.upsert_order_metric(
+    #                 company_code=code,
+    #                 fiscal_year_end=fiscal_year_end,
+    #                 quarter=financials.quarter,
+    #                 metric_name=m.metric_name,
+    #                 value=m.value,
+    #                 raw_value=m.raw_value,
+    #                 unit=m.unit,
+    #                 confidence=m.confidence,
+    #                 raw_text=m.raw_text,
+    #                 source_doc_id=disclosure_id,
+    #             )
+    #             logger.info(
+    #                 f"[ORDER] {code} {fiscal_year_end} {financials.quarter} "
+    #                 f"{m.metric_name}={m.value} ({om_result})"
+    #             )
+    #         decision_db.commit()
+    #     elif order_reason and order_reason != "no_order_keywords":
+    #         # 受注キーワードはあるが合計行なし等 → quarantine
+    #         decision_db.quarantine_record(
+    #             company_code=code,
+    #             reason=order_reason,
+    #             fiscal_year_end=fiscal_year_end,
+    #             quarter=financials.quarter,
+    #             metric_type="order_metrics",
+    #             detail=f"title={item.title[:60]}",
+    #             source_doc_id=disclosure_id,
+    #         )
+    #         decision_db.commit()
+    #         logger.info(f"[ORDER] {code} quarantine: {order_reason[:80]}")
+    # except Exception as e:
+    #     logger.warning(f"[ORDER] {code} extraction error (non-fatal): {e}")
+    #     try:
+    #         decision_db.quarantine_record(
+    #             company_code=code,
+    #             reason=f"extraction_error: {e}",
+    #             fiscal_year_end=fiscal_year_end,
+    #             quarter=financials.quarter,
+    #             metric_type="order_metrics",
+    #             source_doc_id=disclosure_id,
+    #         )
+    #         decision_db.commit()
+    #     except Exception:
+    #         pass
+    # [DISABLED ORDER EXTRACTION END]
+    logger.debug(f"[ORDER] {code} skipped (order extraction disabled)")
 
     # ── セグメント別売上・利益抽出（V4専用） ──
     # extract_segment_financials (旧V1/V2/V3) は停止済み。V4のみ使用。
@@ -741,6 +765,13 @@ def run_ingest(
         # items(全取得文書)をevent_pipelineに渡す。
         # 失敗してもingest全体は成功扱い。
         try:
+            # フールプルーフ: run_ingest() を直接 import 経由で呼んだ場合も .env を確実に読む
+            try:
+                from lib.pipeline.db import load_env as _load_env
+                _load_env(_PROJECT_ROOT)
+            except Exception:
+                pass
+
             from src.events.common_models import DocumentMeta
             from src.events.event_pipeline import process_documents
 
@@ -757,22 +788,42 @@ def run_ingest(
             ]
 
             webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "") if not dry_run else ""
+
+            # 診断ログ（webhook URL の中身は出力しない）
+            logger.info(
+                f"[INGEST] event_pipeline START "
+                f"event_docs={len(event_docs)} "
+                f"webhook_url_present={bool(webhook_url)} "
+                f"dry_run={dry_run} "
+                f"db_path={decision_db_path}"
+            )
+
             event_result = process_documents(
                 docs=event_docs,
                 db_path=decision_db_path,
                 dry_run=dry_run,
                 webhook_url=webhook_url,
             )
+
+            _ep_skipped = (
+                getattr(event_result, "skipped", None)
+                or (event_result.processed - event_result.detected)
+            )
             summary["event_pipeline"] = {
                 "processed": event_result.processed,
                 "detected": event_result.detected,
                 "saved": event_result.saved,
                 "notified": event_result.notified,
+                "skipped": _ep_skipped,
                 "errors": event_result.errors,
             }
             logger.info(
-                f"[INGEST] event_pipeline: detected={event_result.detected} "
-                f"saved={event_result.saved} notified={event_result.notified} "
+                f"[INGEST] event_pipeline DONE "
+                f"processed={event_result.processed} "
+                f"detected={event_result.detected} "
+                f"saved={event_result.saved} "
+                f"notified={event_result.notified} "
+                f"skipped={_ep_skipped} "
                 f"errors={event_result.errors}"
             )
         except Exception as e:

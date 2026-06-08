@@ -103,20 +103,46 @@ def _normalize_title(title: str) -> str:
     return unicodedata.normalize("NFKC", title)
 
 
-def _parse_fiscal_info(title: str, earnings: EarningsSummaryData) -> tuple[str, str]:
-    """タイトルとEarnings情報からfiscal_year, quarterを推定。
+def _parse_fiscal_info(title: str, earnings: EarningsSummaryData, pdf_text: str = "", disclosed_at: str = "") -> tuple[str, str]:
+    """タイトルとEarnings情報などからfiscal_year, quarterを推定。
 
     Returns: (fiscal_year, quarter)
-        fiscal_year: "2026-03-31" 形式
+        fiscal_year: "2026" (YYYY) のような年文字列
         quarter: "1Q"/"2Q"/"3Q"/"4Q"/"FY"
     """
-    # EarningsSummaryData に period/quarter がある場合はそれを使う
-    if earnings.period and earnings.quarter:
-        return earnings.period, earnings.quarter
+    # 1. XBRL/抽出済み
+    fiscal_year_raw = earnings.period or ""
 
-    # タイトルから推定
+    # 2. PDF/本文
+    if not fiscal_year_raw and pdf_text:
+        from src.year_parser import extract_fiscal_year_from_text
+        fy = extract_fiscal_year_from_text(pdf_text)
+        if fy:
+            fiscal_year_raw = fy
+
+    # 3. title
+    if not fiscal_year_raw and title:
+        from src.year_parser import extract_fiscal_year_from_title
+        fy = extract_fiscal_year_from_title(title)
+        if fy:
+            fiscal_year_raw = fy
+
+    # fiscal_year を YYYY に整形
+    fiscal_year = ""
+    if fiscal_year_raw:
+        from src.year_parser import _era_period_to_iso
+        iso = _era_period_to_iso(fiscal_year_raw)
+        if len(iso) >= 4 and iso[:4].isdigit():
+            fiscal_year = iso[:4]
+
+    # 4. disclosed_at からの推定
+    if not fiscal_year and disclosed_at:
+        m = re.match(r"^(\d{4})", disclosed_at)
+        if m:
+            fiscal_year = m.group(1)
+
+    # ---- quarter 推定 ----
     quarter = ""
-    fiscal_year = earnings.period or ""
     normalized = _normalize_title(title)
 
     # "第3四半期" → "3Q"
@@ -327,25 +353,64 @@ def run_earnings_production(
                 title=doc.title,
             )
 
+            # ---- PDF取得・テキスト抽出 (フォールバック用) ----
+            pdf_text = ""
+            pdf_path_downloaded = None
+            if getattr(doc, 'doc_url', None):
+                pdf_path_downloaded = download_document(doc.doc_url, xbrl_dir)
+                if pdf_path_downloaded and Path(pdf_path_downloaded).exists():
+                    try:
+                        import pdfplumber
+                        with pdfplumber.open(pdf_path_downloaded) as pdf:
+                            for page in pdf.pages[:3]:
+                                text = page.extract_text()
+                                if text:
+                                    pdf_text += text + "\n"
+                    except Exception as e:
+                        logger.warning(f"[EARNINGS] PDF read failed {ticker}: {e}")
+
             # ---- 4Q専用: 来期ガイダンス + 見通し ----
             guidance: GuidanceData | None = None
             is_4q, fy_reason = _is_fy_or_4q(earnings, doc.title)
             # quarter を is_4q と同タイミングで確定（ログ・DB保存で一致させる）
-            fiscal_year, quarter = _parse_fiscal_info(doc.title, earnings)
+            # 1. doc 側を最優先
+            fiscal_year = getattr(doc, "fiscal_year", "") or ""
+            quarter = getattr(doc, "quarter", "") or ""
+
+            # 2. 欠損時のみ _parse_fiscal_info で補完
+            if not fiscal_year or not quarter:
+                fy_p, q_p = _parse_fiscal_info(
+                    doc.title, earnings, pdf_text=pdf_text, 
+                    disclosed_at=getattr(doc, "published_at", "")
+                )
+                if not fiscal_year and fy_p:
+                    fiscal_year = fy_p
+                if not quarter and q_p:
+                    quarter = q_p
+
             if is_4q and quarter not in ("FY", "4Q", "1Q", "2Q", "3Q"):
                 quarter = "FY"
             logger.info(
                 f"[EARNINGS] {ticker} is_fy_or_4q={is_4q} "
                 f"reason={fy_reason} "
-                f"quarter={quarter!r} title={doc.title[:40]!r}"
+                f"quarter={quarter!r} title={doc.title[:40]!r} fiscal_year={fiscal_year!r}"
             )
 
-            if is_4q:
+            if is_4q or quarter == "1Q":
                 try:
+                    # 1Qのガイダンス抽出は前年実績ではなく通期予想なので、FYのYOY計算のためにはactual_salesに前期実績を渡す必要があるが、
+                    # 1Q時点での sales_current は 1Qの実績であり、通期実績ではない。
+                    # しかし extractor がPDFから % を直接抽出するので、それをそのまま利用する。
+                    # actual_sales を None にしておけば YOYは計算されず抽出値が使われる。
+                    actual_sales = earnings.sales_current if is_4q else None
+                    actual_op = earnings.op_current if is_4q else None
+
                     guidance = extract_guidance_from_zip(
                         xbrl_path=xbrl_path,
-                        actual_sales=earnings.sales_current,
-                        actual_op=earnings.op_current,
+                        actual_sales=actual_sales,
+                        actual_op=actual_op,
+                        pdf_path=pdf_path_downloaded,
+                        pdf_text=pdf_text,
                     )
 
                     guidance_extracted = guidance is not None and guidance.has_guidance

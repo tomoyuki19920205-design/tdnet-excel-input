@@ -3,6 +3,7 @@
 # ============================================================
 from __future__ import annotations
 
+import calendar
 import logging
 import re
 
@@ -35,6 +36,20 @@ def parse_reiwa(r_str: str) -> tuple[int, int] | None:
     month = int(m.group(2))
     ad_year = reiwa_year + _REIWA_BASE
     return (ad_year, month)
+
+
+def _era_period_to_iso(period: str) -> str:
+    """
+    R表記 → ISO日付文字列に変換する。
+    例: "R8/3" → "2026-03-31"、"R7/3" → "2025-03-31"
+    変換不能な形式はそのまま返す。
+    """
+    parsed = parse_reiwa(period)
+    if parsed is None:
+        return period
+    ad_year, month = parsed
+    last_day = calendar.monthrange(ad_year, month)[1]
+    return f"{ad_year}-{month:02d}-{last_day:02d}"
 
 
 def detect_quarter(title: str) -> str | None:
@@ -240,5 +255,9 @@ def extract_fiscal_info(
         fiscal_year = extract_fiscal_year_from_text(text)
 
     # 3. 推定不能 → Noneのまま
+
+    # R表記 → ISO日付に変換 ("R8/3" → "2026-03-31")
+    if fiscal_year is not None:
+        fiscal_year = _era_period_to_iso(fiscal_year)
 
     return (fiscal_year, quarter)

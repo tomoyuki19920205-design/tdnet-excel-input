@@ -44,6 +44,17 @@ _EXCLUDE_PATTERNS = [
     "配当落ち日",
 ]
 
+# 補足資料・説明資料タイトルは配当修正対象外（誤検知防止）
+_SUPPLEMENT_PATTERNS = [
+    "補足説明資料",
+    "決算説明資料",
+    "決算補足資料",
+    "factbook",
+    "presentation",
+    "investor meeting",
+    "investor relations",
+]
+
 
 # ============================================================
 # メイン分類関数
@@ -65,6 +76,15 @@ def classify_dividend(title: str, body_head: str = "") -> ClassificationResult:
                 is_target=False,
                 event_type=EventType.DIVIDEND_REVISION,
                 matched_keywords=[f"EXCLUDED:{excl}"],
+            )
+
+    # 1b. 補足資料・説明資料タイトルは無条件で除外（誤検知防止）
+    for excl in _SUPPLEMENT_PATTERNS:
+        if excl in n:
+            return ClassificationResult(
+                is_target=False,
+                event_type=EventType.DIVIDEND_REVISION,
+                matched_keywords=[f"EXCLUDED_SUPPLEMENT:{excl}"],
             )
 
     # 「業績予想及び配当予想の修正」→ 配当としても検知

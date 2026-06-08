@@ -16,6 +16,7 @@
 | source 値 | 解決先 priority | 用途 |
 |:---|:---|:---|
 | `xbrl` | 1 | segment source (summary_xbrl 相当) |
+| `backfill_xbrl` | 2 | XBRL ZIP 後処理抽出 (attachment_xbrl 相当) |
 | `html` | 3 | segment source (html_table 相当) |
 | `pdf` | 4 | segment source (pdf_table 相当) |
 | `tdnet` | 3 | financials source (html_table 相当) |

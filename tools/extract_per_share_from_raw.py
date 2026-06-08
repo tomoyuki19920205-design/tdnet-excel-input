@@ -11,12 +11,13 @@ per_share_data テーブルへ EPS/BPS/配当/株式数をバックフィル。
   python tools/extract_per_share_from_raw.py --apply --limit 100
 """
 import argparse
+import calendar
 import json
 import logging
 import os
 import sqlite3
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
@@ -36,7 +37,7 @@ _LOG_DIR = os.path.join(_PROJECT_ROOT, "logs")
 _SCHEMA_SQL = Path(_PROJECT_ROOT) / "migrations" / "003_market_per_share.sql"
 
 def _ensure_table(conn: sqlite3.Connection):
-    """per_share_data テーブルが無ければ作成。"""
+    """per_share_data テーブルが無ければ作成。既存テーブルへのカラム追加 migration も実行。"""
     tables = {r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'"
     ).fetchall()}
@@ -48,6 +49,18 @@ def _ensure_table(conn: sqlite3.Connection):
         else:
             logger.error(f"[SCHEMA] マイグレーションファイルが見つかりません: {_SCHEMA_SQL}")
             sys.exit(1)
+    else:
+        # 既存テーブルへのカラム追加 migration（冪等: 失敗しても続行）
+        _migrations = [
+            "ALTER TABLE per_share_data ADD COLUMN initial_forecast_eps REAL",
+        ]
+        for sql in _migrations:
+            try:
+                conn.execute(sql)
+                conn.commit()
+                logger.info(f"[SCHEMA] migration 適用: {sql[:60]}")
+            except Exception:
+                pass  # カラム既存の場合は無視
 
 
 # ============================================================
@@ -69,6 +82,22 @@ def safe_int(val) -> int | None:
     try:
         return int(float(val))
     except (ValueError, TypeError):
+        return None
+
+
+def _next_fiscal_year_end(period_str: str) -> str | None:
+    """当期末日 → 翌期末日を計算する。閏年・月末ズレを考慮。
+
+    例: 2026-03-31 → 2027-03-31
+        2024-02-29 → 2025-02-28 (翌年は閏年でない)
+        2026-12-31 → 2027-12-31
+    """
+    try:
+        d = date.fromisoformat(period_str)
+        next_year = d.year + 1
+        last_day = calendar.monthrange(next_year, d.month)[1]
+        return date(next_year, d.month, min(d.day, last_day)).isoformat()
+    except Exception:
         return None
 
 
@@ -147,10 +176,67 @@ def extract_per_share(raw: dict) -> dict | None:
 
 
 # ============================================================
+# 翌期予想行 (NxFEPS) 生成
+# ============================================================
+_NXF_SOURCE = "jquants_nxf"  # 翌期予想行を識別するソースタグ
+
+
+def _extract_next_year_forecast(raw: dict, fy_record: dict) -> dict | None:
+    """FY確定行から翌期予想専用行を生成する。
+
+    条件:
+      - quarter == "FY"  (FY行のみ対象)
+      - NxFEPS に値がある
+    生成行:
+      - period = 翌期末日, quarter = "FY"
+      - eps = None (実績未確定)
+      - forecast_eps = NxFEPS
+      - source = "jquants_nxf"
+    """
+    if fy_record.get("quarter") != "FY":
+        return None
+
+    nx_feps = safe_float(raw.get("NxFEPS"))
+    if nx_feps is None:
+        return None
+
+    next_period = _next_fiscal_year_end(fy_record.get("period", ""))
+    if not next_period:
+        return None
+
+    return {
+        "ticker":                   fy_record["ticker"],
+        "period":                   next_period,
+        "quarter":                  "FY",
+        "disclosed_date":           fy_record.get("disclosed_date"),
+        "eps":                      None,
+        "diluted_eps":              None,
+        "bps":                      None,
+        "dividend_q1":              None,
+        "dividend_q2":              None,
+        "dividend_q3":              None,
+        "dividend_fy_end":          None,
+        "dividend_annual":          None,
+        "payout_ratio":             None,
+        "forecast_eps":             nx_feps,
+        "initial_forecast_eps":     nx_feps,   # 本決算発表時のNxFEPS = 期初予想。原則不変。
+        "forecast_dividend_annual": safe_float(raw.get("NxFDivAnn")),
+        "forecast_payout_ratio":    safe_float(raw.get("NxFPayoutRatioAnn")),
+        "shares_outstanding":       None,
+        "treasury_stock":           None,
+        "avg_shares":               None,
+        "total_assets":             None,
+        "equity":                   None,
+        "equity_ratio":             None,
+        "source":                   _NXF_SOURCE,
+    }
+
+
+# ============================================================
 # メイン処理
 # ============================================================
 def run(db_path: str, dry_run: bool = True, limit: int = 0) -> dict:
-    stats = {"total_raw": 0, "extracted": 0, "upserted": 0, "skipped": 0, "errors": 0}
+    stats = {"total_raw": 0, "extracted": 0, "upserted": 0, "nxf_upserted": 0, "skipped": 0, "errors": 0}
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -199,10 +285,40 @@ def run(db_path: str, dry_run: bool = True, limit: int = 0) -> dict:
                 for field in record:
                     if record[field] is not None:
                         existing[field] = record[field]
+                # FY確定行: FEPS=空の場合でも forecast_eps を明示的に上書きして
+                # Supabase の旧予想値（通期予想修正値）残留を防ぐ。
+                # 条件: FY行 かつ 実績EPS存在（決算確定済み） かつ FEPS が空
+                if (
+                    record.get("quarter") == "FY"
+                    and record.get("eps") is not None
+                    and record.get("forecast_eps") is None
+                ):
+                    existing["forecast_eps"] = None
             else:
                 for field in record:
                     if existing[field] is None and record[field] is not None:
                         existing[field] = record[field]
+
+        # ---- 翌期予想行 (NxFEPS) の生成 ----
+        next_row = _extract_next_year_forecast(raw, record)
+        if next_row:
+            nkey = (next_row["ticker"], next_row["period"], next_row["quarter"])
+            nexisting = best.get(nkey)
+            if nexisting is None:
+                best[nkey] = next_row
+            elif nexisting.get("eps") is not None:
+                # 既にその期の実績データあり → forecast_eps が未設定の場合のみ補完
+                if nexisting.get("forecast_eps") is None:
+                    nexisting["forecast_eps"] = next_row["forecast_eps"]
+                    nexisting["forecast_dividend_annual"] = next_row.get("forecast_dividend_annual")
+                    nexisting["forecast_payout_ratio"] = next_row.get("forecast_payout_ratio")
+            else:
+                # まだ実績なし → より新しい開示日の NxFEPS で上書き
+                if (next_row.get("disclosed_date") or "") >= (nexisting.get("disclosed_date") or ""):
+                    nexisting["forecast_eps"] = next_row["forecast_eps"]
+                    nexisting["forecast_dividend_annual"] = next_row.get("forecast_dividend_annual")
+                    nexisting["forecast_payout_ratio"] = next_row.get("forecast_payout_ratio")
+                    nexisting["disclosed_date"] = next_row["disclosed_date"]
 
     logger.info(f"[DEDUP] 重複排除後: {len(best):,} レコード")
 
@@ -222,40 +338,97 @@ def run(db_path: str, dry_run: bool = True, limit: int = 0) -> dict:
         conn.close()
         return stats
 
-    # UPSERT
+    # ============================================================
+    # UPSERT — 通常行 と 翌期予想行 (NxF) を分けて処理
+    # ============================================================
+    # 通常行: 全カラム上書き。ただし initial_forecast_eps は COALESCE 保護
+    # (main 行は initial_forecast_eps=None なので既存値を消さない)
     cols = [
         "ticker", "period", "quarter", "disclosed_date",
         "eps", "diluted_eps", "bps",
         "dividend_q1", "dividend_q2", "dividend_q3", "dividend_fy_end",
         "dividend_annual", "payout_ratio",
-        "forecast_eps", "forecast_dividend_annual", "forecast_payout_ratio",
+        "forecast_eps", "initial_forecast_eps",
+        "forecast_dividend_annual", "forecast_payout_ratio",
         "shares_outstanding", "treasury_stock", "avg_shares",
         "total_assets", "equity", "equity_ratio",
         "source", "updated_at",
     ]
     placeholders = ", ".join(["?"] * len(cols))
     updates = ", ".join(
-        f"{c} = excluded.{c}" for c in cols
+        # initial_forecast_eps は COALESCE: NULLで既存値を消さない
+        (
+            "initial_forecast_eps = COALESCE(excluded.initial_forecast_eps, "
+            "per_share_data.initial_forecast_eps)"
+            if c == "initial_forecast_eps"
+            else f"{c} = excluded.{c}"
+        )
+        for c in cols
         if c not in ("ticker", "period", "quarter")
     )
-    sql = f"""
+    sql_main = f"""
         INSERT INTO per_share_data ({', '.join(cols)})
         VALUES ({placeholders})
         ON CONFLICT(ticker, period, quarter)
         DO UPDATE SET {updates}
     """
 
+    # 翌期予想行 (source=jquants_nxf): forecast_eps / initial_forecast_eps のみ更新
+    # 実績EPS (eps) がある行は絶対に上書きしない。
+    # initial_forecast_eps は「期初予想」なので一度書いたら原則上書きしない (COALESCE)。
+    _NXF_COLS = [
+        "ticker", "period", "quarter", "disclosed_date",
+        "forecast_eps", "initial_forecast_eps",
+        "forecast_dividend_annual", "forecast_payout_ratio",
+        "source", "updated_at",
+    ]
+    sql_nxf = """
+        INSERT INTO per_share_data (ticker, period, quarter, disclosed_date,
+            forecast_eps, initial_forecast_eps,
+            forecast_dividend_annual, forecast_payout_ratio,
+            source, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(ticker, period, quarter)
+        DO UPDATE SET
+            forecast_eps = CASE
+                WHEN per_share_data.eps IS NOT NULL THEN per_share_data.forecast_eps
+                ELSE excluded.forecast_eps
+            END,
+            initial_forecast_eps = COALESCE(
+                per_share_data.initial_forecast_eps,
+                excluded.initial_forecast_eps
+            ),
+            forecast_dividend_annual = CASE
+                WHEN per_share_data.eps IS NOT NULL THEN per_share_data.forecast_dividend_annual
+                ELSE excluded.forecast_dividend_annual
+            END,
+            forecast_payout_ratio = CASE
+                WHEN per_share_data.eps IS NOT NULL THEN per_share_data.forecast_payout_ratio
+                ELSE excluded.forecast_payout_ratio
+            END,
+            updated_at = excluded.updated_at
+    """
+
     now_iso = datetime.now(JST).isoformat()
-    batch = []
+    main_batch: list[tuple] = []
+    nxf_batch: list[tuple] = []
+
     for rec in best.values():
         rec["updated_at"] = now_iso
-        batch.append(tuple(rec.get(c) for c in cols))
+        if rec.get("source") == _NXF_SOURCE:
+            nxf_batch.append(tuple(rec.get(c) for c in _NXF_COLS))
+        else:
+            main_batch.append(tuple(rec.get(c) for c in cols))
 
     try:
-        conn.executemany(sql, batch)
+        if main_batch:
+            conn.executemany(sql_main, main_batch)
+        if nxf_batch:
+            conn.executemany(sql_nxf, nxf_batch)
         conn.commit()
-        stats["upserted"] = len(batch)
-        logger.info(f"[UPSERT] {len(batch):,} レコードを per_share_data に書き込み")
+        stats["upserted"] = len(main_batch)
+        stats["nxf_upserted"] = len(nxf_batch)
+        logger.info(f"[UPSERT] 通常行={len(main_batch):,}  翌期予想行={len(nxf_batch):,}")
     except Exception as e:
         logger.error(f"[UPSERT] 書き込みエラー: {e}")
         stats["errors"] += 1
@@ -302,7 +475,8 @@ def main():
     logger.info(f"  完了")
     logger.info(f"  raw行数     : {stats['total_raw']:,}")
     logger.info(f"  抽出成功    : {stats['extracted']:,}")
-    logger.info(f"  UPSERT      : {stats['upserted']:,}")
+    logger.info(f"  UPSERT(通常): {stats['upserted']:,}")
+    logger.info(f"  UPSERT(NxF) : {stats['nxf_upserted']:,}")
     logger.info(f"  スキップ    : {stats['skipped']:,}")
     logger.info(f"  エラー      : {stats['errors']}")
     logger.info(f"{'='*60}")

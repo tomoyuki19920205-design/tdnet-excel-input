@@ -6,6 +6,7 @@ from __future__ import annotations
 import calendar
 import logging
 import os
+import re
 import sys
 import time
 import uuid
@@ -41,10 +42,9 @@ JST = timezone(timedelta(hours=9))
 # R表記 → YYYY-MM-DD 変換
 # ------------------------------------------------------------------
 def _reiwa_to_fiscal_year_end(r_str: str) -> str | None:
-    """
-    R表記 → fiscal_year_end (YYYY-MM-DD)
-    例: "R8/3" → "2026-03-31"
-    """
+    """R表記 → fiscal_year_end (YYYY-MM-DD), または既に YYYY-MM-DD ならそのまま返す"""
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", r_str):
+        return r_str
     parsed = parse_reiwa(r_str)
     if parsed is None:
         return None

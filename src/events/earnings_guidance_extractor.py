@@ -61,6 +61,7 @@ _EPS_BASIC_TAGS = {
 _EPS_DILUTED_TAGS = {
     "DilutedEarningsPerShare",
     "DilutedEarningsLossPerShare",
+    "DilutedNetIncomePerShare",
 }
 _EPS_ALL_TAGS = _EPS_BASIC_TAGS | _EPS_DILUTED_TAGS
 
@@ -100,10 +101,16 @@ class GuidanceData:
     outlook_summary: str = ""
     outlook_factors: dict = field(default_factory=dict)
 
+    # extracted yoy from text/PDF
+    sales_yoy_extracted: float | None = None
+    op_yoy_extracted: float | None = None
+    eps_yoy_extracted: float | None = None
+
     @property
     def has_guidance(self) -> bool:
         return any(v is not None for v in [
             self.sales_forecast, self.op_forecast, self.eps_forecast,
+            self.sales_yoy_extracted, self.op_yoy_extracted
         ])
 
     @property
@@ -113,21 +120,21 @@ class GuidanceData:
 
     @property
     def sales_yoy(self) -> Optional[float]:
-        if self.sales_forecast is None or self.sales_actual is None or self.sales_actual == 0:
-            return None
-        return (self.sales_forecast / self.sales_actual) - 1.0
+        if self.sales_forecast is not None and self.sales_actual is not None and self.sales_actual != 0:
+            return (self.sales_forecast / self.sales_actual) - 1.0
+        return self.sales_yoy_extracted
 
     @property
     def op_yoy(self) -> Optional[float]:
-        if self.op_forecast is None or self.op_actual is None or self.op_actual == 0:
-            return None
-        return (self.op_forecast / self.op_actual) - 1.0
+        if self.op_forecast is not None and self.op_actual is not None and self.op_actual != 0:
+            return (self.op_forecast / self.op_actual) - 1.0
+        return self.op_yoy_extracted
 
     @property
     def eps_yoy(self) -> Optional[float]:
-        if self.eps_forecast is None or self.eps_actual is None or self.eps_actual == 0:
-            return None
-        return (self.eps_forecast / self.eps_actual) - 1.0
+        if self.eps_forecast is not None and self.eps_actual is not None and self.eps_actual != 0:
+            return (self.eps_forecast / self.eps_actual) - 1.0
+        return self.eps_yoy_extracted
 
 
 # ============================================================
@@ -299,6 +306,56 @@ _DIVIDEND_CONTEXT_RE = re.compile(
 _TABLE_HEADER_INDICATORS = re.compile(
     r"売上|営業利益|経常利益|当期純利益|百万円|千円"
 )
+
+
+def _extract_guidance_from_forecast_table(plain_text: str) -> dict:
+    """業績予想テーブルのプレーンテキストからガイダンスを抽出する"""
+    lines = plain_text.strip().split("\n")
+    header_idx = None
+    import unicodedata
+    for i, line in enumerate(lines):
+        norm = unicodedata.normalize("NFKC", line)
+        if "業績予想" in norm or "予想" in norm or "見通し" in norm:
+            for j in range(i, min(i+10, len(lines))):
+                sub_norm = unicodedata.normalize("NFKC", lines[j])
+                if "売上高" in sub_norm and ("営業利益" in sub_norm or "利益" in sub_norm):
+                    header_idx = j
+                    break
+        if header_idx is not None:
+            break
+            
+    if header_idx is None:
+        return {}
+        
+    for i in range(header_idx + 1, min(header_idx + 10, len(lines))):
+        line = lines[i].strip()
+        norm = unicodedata.normalize("NFKC", line)
+        
+        # 1Qでも「通期」という文字が含まれる場合がある
+        if "通期" in norm or "累計" in norm or "年" in norm or "第" in norm:
+            nums_raw = re.findall(r"[-−△▲]?\s*[\d,]+\.?\d*", norm)
+            nums = []
+            for raw in nums_raw:
+                v = _normalize_eps_text(raw)
+                if v is not None:
+                    nums.append(v)
+            
+            if ("通期" in norm or "年" in norm) and len(nums) >= 5:
+                # 単位は百万円を想定
+                sales = nums[0] * 1000000
+                sales_yoy = nums[1] / 100.0 if len(nums) > 1 else None
+                op = nums[2] * 1000000 if len(nums) > 2 else None
+                op_yoy = nums[3] / 100.0 if len(nums) > 3 else None
+                eps = nums[-1] if len(nums) > 4 else None
+                
+                return {
+                    "sales_forecast": sales,
+                    "sales_yoy_extracted": sales_yoy,
+                    "op_forecast": op,
+                    "op_yoy_extracted": op_yoy,
+                    "eps_forecast": eps
+                }
+    return {}
 
 
 def _extract_eps_from_forecast_table(plain_text: str) -> list[dict]:
@@ -1070,6 +1127,8 @@ def extract_guidance_from_zip(
     xbrl_path: str,
     actual_sales: int | None = None,
     actual_op: int | None = None,
+    pdf_path: str | None = None,
+    pdf_text: str = "",
 ) -> GuidanceData:
     """XBRL ZIP から来期ガイダンスデータを抽出する。"""
     guidance = GuidanceData(
@@ -1135,21 +1194,6 @@ def extract_guidance_from_zip(
         c["metric"] == "eps" and c.get("source") in ("xbrl", "ixbrl")
         for c in all_candidates
     )
-    if plain_text and not has_xbrl_eps:
-        text_eps = _extract_eps_from_forecast_table(plain_text)
-        # suspicious 値（> 1000）は除外
-        clean_text_eps = [c for c in text_eps if not c.get("suspicious")]
-        if clean_text_eps:
-            all_candidates.extend(clean_text_eps)
-            logger.info(
-                f"[GUIDANCE] text fallback EPS: {len(clean_text_eps)} candidates "
-                f"(filtered {len(text_eps) - len(clean_text_eps)} suspicious)"
-            )
-        elif text_eps:
-            logger.warning(
-                f"[GUIDANCE] text fallback EPS: all {len(text_eps)} candidates "
-                f"were suspicious (> {_EPS_SUSPICIOUS_THRESHOLD}), dropped"
-            )
 
     # ---- ベスト候補選択 ----
     if all_candidates:
@@ -1159,6 +1203,30 @@ def extract_guidance_from_zip(
         guidance.ordinary_forecast = best.get("ordinary_profit")
         guidance.net_income_forecast = best.get("net_income")
         guidance.eps_forecast = best.get("eps")
+        
+    # ---- プレーンテキスト/PDFからのフル抽出フォールバック ----
+    # もしXBRLから売上や営利の予想が取れなかった場合、PDFやテキストから直接抽出を試みる
+    if (guidance.sales_forecast is None or guidance.op_forecast is None) and (plain_text or pdf_text):
+        combined_text = pdf_text + "\n" + plain_text
+        text_guidance = _extract_guidance_from_forecast_table(combined_text)
+        if text_guidance:
+            if guidance.sales_forecast is None:
+                guidance.sales_forecast = text_guidance.get("sales_forecast")
+                guidance.sales_yoy_extracted = text_guidance.get("sales_yoy_extracted")
+            if guidance.op_forecast is None:
+                guidance.op_forecast = text_guidance.get("op_forecast")
+                guidance.op_yoy_extracted = text_guidance.get("op_yoy_extracted")
+            if guidance.eps_forecast is None:
+                guidance.eps_forecast = text_guidance.get("eps_forecast")
+            logger.info(f"[GUIDANCE] text/PDF fallback used: sales={guidance.sales_forecast}, op={guidance.op_forecast}")
+
+    # それでもEPSがない場合は従来のEPSテキスト抽出を試行
+    if guidance.eps_forecast is None and (plain_text or pdf_text):
+        combined_text = pdf_text + "\n" + plain_text
+        text_eps = _extract_eps_from_forecast_table(combined_text)
+        clean_text_eps = [c for c in text_eps if not c.get("suspicious")]
+        if clean_text_eps:
+            guidance.eps_forecast = clean_text_eps[-1].get("value")
 
     # ---- Outlook 抽出は無効化済み ----
     # outlook_text / outlook_summary / outlook_factors は互換用に空値を維持
