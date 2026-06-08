@@ -381,21 +381,22 @@ def _calculate_notification_compare(ticker: str, extracted: dict, client=None) -
 
     compare_data = None
 
-    if quarter == "1Q":
-        # 1Q: use current guidance (FY予)
+    if quarter in ("1Q", "4Q", "FY"):
         guidance = extracted.get("guidance", {})
+        s_yoy = guidance.get("sales_yoy")
+        o_yoy = guidance.get("op_yoy")
+
+        if s_yoy is None or o_yoy is None:
+            s_f = guidance.get("sales_forecast")
+            o_f = guidance.get("op_forecast")
+            reason_sales = "ok" if s_yoy is not None else ("forecast_missing" if s_f is None else "prev_actual_missing")
+            reason_op = "ok" if o_yoy is not None else ("forecast_missing" if o_f is None else "prev_actual_missing")
+            logger.info(f"[STORE] Missing guidance YOY. ticker={ticker}, quarter={quarter}, sales_reason={reason_sales}, op_reason={reason_op}")
+
         compare_data = {
             "label": "FY予",
-            "sales_yoy": guidance.get("sales_yoy"),
-            "op_yoy": guidance.get("op_yoy")
-        }
-    elif quarter in ("4Q", "FY"):
-        # 4Q/FY: use next year forecast
-        guidance = extracted.get("guidance", {})
-        compare_data = {
-            "label": "FY予",
-            "sales_yoy": guidance.get("sales_yoy"),
-            "op_yoy": guidance.get("op_yoy")
+            "sales_yoy": s_yoy,
+            "op_yoy": o_yoy
         }
     elif quarter in ("2Q", "3Q"):
         # 2Q/3Q: fetch previous quarter from Supabase
@@ -450,8 +451,8 @@ def _calculate_notification_compare(ticker: str, extracted: dict, client=None) -
                 if compare_data is None:
                     logger.info(
                         f"[STORE] Previous quarter not found. "
-                        f"ticker={ticker}, target_quarter={target_quarter}, "
-                        f"fetched_count={fetched_count} (現行DB制約下での実用的な上限={limit_count})"
+                        f"ticker={ticker}, current_quarter={quarter}, target_quarter={target_quarter}, "
+                        f"fiscal_year={current_fy}, fetched_count={fetched_count} (現行DB制約下での実用的な上限={limit_count})"
                     )
 
             except Exception as e:
