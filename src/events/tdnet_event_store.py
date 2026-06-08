@@ -693,6 +693,40 @@ def save_event_to_supabase(
             except Exception as check_e:
                 logger.warning(f"[STORE] Failed to check existing record for YOY protection: {check_e}")
 
+        # --- 厳密な重複チェック（テスト実行等の事故防止） ---
+        # 同一ticker・同一disclosed_at・同一event_type・同一event_subtype のレコードがあればUPDATE
+        try:
+            q = client.table("tdnet_events").select("id").eq("ticker", row["ticker"]).eq("disclosed_at", row["disclosed_at"]).eq("event_type", row["event_type"])
+            if row.get("event_subtype"):
+                q = q.eq("event_subtype", row["event_subtype"])
+            else:
+                q = q.is_("event_subtype", "null")
+            
+            strict_match_res = q.execute()
+            if strict_match_res.data:
+                existing_id = strict_match_res.data[0]["id"]
+                
+                # YOY保護のロジック: 上書き時、新しいYOYがnullで既存にYOYがあれば維持
+                if display_category == DISPLAY_EARNINGS and metric_yoy is None:
+                    # check existing YOY from another query, or we can just fetch it now
+                    exist_yoy_res = client.table("tdnet_events").select("primary_metric_yoy").eq("id", existing_id).execute()
+                    if exist_yoy_res.data and exist_yoy_res.data[0].get("primary_metric_yoy") is not None:
+                        logger.info(f"[STORE] DEDUP_SKIPPED (YOY protect strict) ticker={event.ticker}")
+                        result["action"] = "dedup_skipped"
+                        result["display_category"] = display_category
+                        return result
+
+                resp = client.table("tdnet_events").update(row).eq("id", existing_id).execute()
+                if resp.data and len(resp.data) > 0:
+                    result["action"] = "updated"
+                    result["id"] = existing_id
+                    result["display_category"] = display_category
+                    logger.info(f"[STORE] UPDATED existing record ticker={event.ticker} id={existing_id[:8]}")
+                    return result
+        except Exception as check_e:
+            logger.warning(f"[STORE] Failed to check strict existing record: {check_e}")
+        # ----------------------------------------------------
+
         # INSERT with ON CONFLICT DO NOTHING (dedupe_key unique)
         # supabase-py uses upsert with ignoreDuplicates
         resp = (
