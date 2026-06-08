@@ -879,3 +879,428 @@ apply 実行後は必ず以下を確認する：
 - 普段は狭く読む
 - 詰まった時だけ広げる
 - 原因が分かったらまた狭く戻す
+
+---
+
+# Known Gotchas / Monitoring Pitfalls
+
+## segment_financials_clean ビューの対象範囲
+
+### 事実
+
+`segment_financials_clean` ビューは以下の定義を持つ:
+
+```sql
+CREATE VIEW segment_financials_clean AS
+    SELECT * FROM segment_financials
+    WHERE data_source = 'tdnet'
+      AND segment_name IS NOT NULL
+      AND segment_name != ''
+      AND (segment_sales IS NOT NULL OR segment_profit IS NOT NULL)
+```
+
+### 問題
+
+V4 backfill（`backfill_segments_tdnet.py`）が XBRL 経由で抽出したセグメントは
+`data_source = 'backfill_xbrl'` として書き込まれる。
+
+このため、V4 backfill が正常完了しても `segment_financials_clean` には **一切反映されない**。
+
+### 影響範囲
+
+| 処理 | 参照元 | 影響 |
+|------|--------|------|
+| `process_batch` の canonical sync | `segment_financials`（全件） | **影響なし** — backfill_xbrl も対象に含まれる |
+| Supabase `canonical_segments` 反映 | `segment_financials`（全件） | **影響なし** |
+| 監視・検証 SQL で `segment_financials_clean` を使う場合 | `segment_financials_clean` | **⚠️ 要注意** — backfill_xbrl 成功分が0件に見える |
+
+### ✅ 正しい監視 SQL
+
+```sql
+-- backfill_xbrl を含む全セグメントの確認
+SELECT company_code, fiscal_year_end, quarter, data_source, COUNT(*) as cnt
+FROM segment_financials
+WHERE company_code IN ('4674', '7987')
+GROUP BY company_code, fiscal_year_end, quarter, data_source
+ORDER BY fiscal_year_end DESC;
+```
+
+### ❌ 誤った監視 SQL（backfill_xbrl を見落とす）
+
+```sql
+-- segment_financials_clean は data_source='tdnet' のみ → backfill_xbrl が見えない
+SELECT * FROM segment_financials_clean WHERE company_code IN ('4674', '7987');
+```
+
+### 発生日時・経緯
+
+* 2026-05-08: `run_backfill_segments_v4_recent.bat` が `--date-to` 未指定により1年分 listing を試みてクラッシュ
+* 4674（クレスコ）/ 7987（ナカバヤシ）の FY2026-03-31 セグメントが未抽出
+* 翌日に手動再処理（`--date-from 2026-05-08 --date-to 2026-05-08 --tickers 4674,7987`）で復旧
+* `segment_financials_clean` が 0件にもかかわらず Supabase への反映は成功していたため、ビューの定義が実際の push 経路と一致していないことが判明
+
+### 対処方針
+
+* 監視・検証スクリプトでは `segment_financials_clean` ではなく `segment_financials` を直接参照する
+* `data_source` 列でフィルタする場合は `IN ('tdnet', 'backfill_xbrl')` を明示する
+* `segment_financials_clean` ビューは legacy 互換のため維持するが、新規スクリプトでの使用を禁止する
+
+---
+
+# Segment Source Priority Rules
+
+## canonical_segments source_priority
+
+| source | priority |
+|--------|----------|
+| backfill_v4_pdf | 0 |
+| edinet_xbrl | 0（既存ロジックに準拠） |
+| xbrl / backfill_xbrl | 1 |
+| excel_legacy | 5 以上 |
+
+### 重要
+
+`backfill_v4_pdf` は viewer 側で `xbrl:Other only` に負けてはならない。
+
+### 禁止
+
+* `backfill_v4_pdf` を default priority（5以上）に落とすこと
+* `sync_segments.py` で `source="excel_legacy"` を固定ハードコードすること
+
+---
+
+## sync_segments.py source passthrough
+
+SQLite `segment_financials.data_source` を `canonical_segments.source` へそのまま引き継ぐこと。
+
+`data_source='backfill_v4_pdf'` の行は Supabase 側でも `source='backfill_v4_pdf'` になること。
+
+---
+
+# Partial XBRL Other Cleanup
+
+## 条件
+
+同一 `ticker / period / quarter` に `backfill_v4_pdf` の有効セグメントが **2件以上** 存在する場合、以下は cleanup 対象とする。
+
+* `source IN ('xbrl', 'backfill_xbrl')`
+* `segment_key = 'other'` または `segment_name = 'Other'`
+
+## 目的
+
+partial XBRL の Other only が viewer で優先表示される事故を防ぐ。
+
+### 禁止
+
+* `backfill_v4_pdf` が1件以下のケースへの適用
+* `edinet_xbrl` の削除
+
+---
+
+# VertRescue Safety Rules
+
+`_try_vertical_format_rescue()` は **Phase2 PASSED page のみ** を対象とする。
+
+Phase2 で reject されたページは VertRescue の再スキャン対象から除外すること（`passed_pages` 引数で管理）。
+
+## 理由
+
+株主資本等変動計算書ページが「利益」「株主資本等」キーワードに反応してセグメント表として誤採用される事故を防ぐ。
+
+## 禁止
+
+Phase2 reject 済みページの VertRescue 再スキャン。
+
+---
+
+# Equity Statement Exclude Rules
+
+以下を含むページは `_is_equity_statement_page()` によりセグメント候補から除外する。
+
+| 判定種別 | キーワード |
+|--------|----------|
+| 単独一致で即除外 | 株主資本等変動計算書 |
+| 複数（3語以上）で除外 | 当期首残高、当期末残高、当期変動額、剰余金の配当、自己株式、株主資本、資本剰余金、利益剰余金、新株予約権、非支配株主持分、その他の包括利益累計額 |
+
+## 目的
+
+連結株主資本等変動計算書ページを縦型セグメント表として誤抽出することを防ぐ。
+
+---
+
+# Profit Row Keyword Matching
+
+`_phase6_find_profit_row()` でのキーワード照合は、**改行除去後の文字列**に対して行うこと。
+
+```python
+left_cell_norm = left_cell.replace("\n", "")
+if kw in left_cell_norm:  # 改行除去後で判定
+```
+
+## 理由
+
+pdfplumber が `'セグメント利\n益又は損失\n（△）'` のように改行入りセルを返すため、`'利益'` 等のキーワードが部分一致しない。
+
+---
+
+# Cleanup Tool: cleanup_bad_segment_names.py
+
+## ファイル
+
+`tools/cleanup_bad_segment_names.py`
+
+## 用途
+
+過去に保存済みの株主資本等変動計算書由来ゴミセグメントを `canonical_segments` から一括削除する。
+
+## 対象 source
+
+* `backfill_v4_pdf`
+* `excel_legacy`
+
+## 削除対象キーワード
+
+`segment_name` に以下を含む行が削除対象。
+
+当期首残高、当期末残高、当期変動額、当期変動額合計、剰余金の配当、自己株式、株主資本、資本剰余金、利益剰余金、新株予約権、非支配株主持分、その他の包括利益累計額、親会社株主に帰属する当期純利益
+
+## 運用ルール
+
+必ず `--dry-run` → `--apply` の順で実行すること。
+
+```bash
+python tools/cleanup_bad_segment_names.py --dry-run
+python tools/cleanup_bad_segment_names.py --apply --yes
+- 普段は狭く読む
+- 詰まった時だけ広げる
+- 原因が分かったらまた狭く戻す
+
+---
+
+# Known Gotchas / Monitoring Pitfalls
+
+## segment_financials_clean ビューの対象範囲
+
+### 事実
+
+`segment_financials_clean` ビューは以下の定義を持つ:
+
+```sql
+CREATE VIEW segment_financials_clean AS
+    SELECT * FROM segment_financials
+    WHERE data_source = 'tdnet'
+      AND segment_name IS NOT NULL
+      AND segment_name != ''
+      AND (segment_sales IS NOT NULL OR segment_profit IS NOT NULL)
+```
+
+### 問題
+
+V4 backfill（`backfill_segments_tdnet.py`）が XBRL 経由で抽出したセグメントは
+`data_source = 'backfill_xbrl'` として書き込まれる。
+
+このため、V4 backfill が正常完了しても `segment_financials_clean` には **一切反映されない**。
+
+### 影響範囲
+
+| 処理 | 参照元 | 影響 |
+|------|--------|------|
+| `process_batch` の canonical sync | `segment_financials`（全件） | **影響なし** — backfill_xbrl も対象に含まれる |
+| Supabase `canonical_segments` 反映 | `segment_financials`（全件） | **影響なし** |
+| 監視・検証 SQL で `segment_financials_clean` を使う場合 | `segment_financials_clean` | **⚠️ 要注意** — backfill_xbrl 成功分が0件に見える |
+
+### ✅ 正しい監視 SQL
+
+```sql
+-- backfill_xbrl を含む全セグメントの確認
+SELECT company_code, fiscal_year_end, quarter, data_source, COUNT(*) as cnt
+FROM segment_financials
+WHERE company_code IN ('4674', '7987')
+GROUP BY company_code, fiscal_year_end, quarter, data_source
+ORDER BY fiscal_year_end DESC;
+```
+
+### ❌ 誤った監視 SQL（backfill_xbrl を見落とす）
+
+```sql
+-- segment_financials_clean は data_source='tdnet' のみ → backfill_xbrl が見えない
+SELECT * FROM segment_financials_clean WHERE company_code IN ('4674', '7987');
+```
+
+### 発生日時・経緯
+
+* 2026-05-08: `run_backfill_segments_v4_recent.bat` が `--date-to` 未指定により1年分 listing を試みてクラッシュ
+* 4674（クレスコ）/ 7987（ナカバヤシ）の FY2026-03-31 セグメントが未抽出
+* 翌日に手動再処理（`--date-from 2026-05-08 --date-to 2026-05-08 --tickers 4674,7987`）で復旧
+* `segment_financials_clean` が 0件にもかかわらず Supabase への反映は成功していたため、ビューの定義が実際の push 経路と一致していないことが判明
+
+### 対処方針
+
+* 監視・検証スクリプトでは `segment_financials_clean` ではなく `segment_financials` を直接参照する
+* `data_source` 列でフィルタする場合は `IN ('tdnet', 'backfill_xbrl')` を明示する
+* `segment_financials_clean` ビューは legacy 互換のため維持するが、新規スクリプトでの使用を禁止する
+
+---
+
+# Segment Source Priority Rules
+
+## canonical_segments source_priority
+
+| source | priority |
+|--------|----------|
+| backfill_v4_pdf | 0 |
+| edinet_xbrl | 0（既存ロジックに準拠） |
+| xbrl / backfill_xbrl | 1 |
+| excel_legacy | 5 以上 |
+
+### 重要
+
+`backfill_v4_pdf` は viewer 側で `xbrl:Other only` に負けてはならない。
+
+### 禁止
+
+* `backfill_v4_pdf` を default priority（5以上）に落とすこと
+* `sync_segments.py` で `source="excel_legacy"` を固定ハードコードすること
+
+---
+
+## sync_segments.py source passthrough
+
+SQLite `segment_financials.data_source` を `canonical_segments.source` へそのまま引き継ぐこと。
+
+`data_source='backfill_v4_pdf'` の行は Supabase 側でも `source='backfill_v4_pdf'` になること。
+
+---
+
+# Partial XBRL Other Cleanup
+
+## 条件
+
+同一 `ticker / period / quarter` に `backfill_v4_pdf` の有効セグメントが **2件以上** 存在する場合、以下は cleanup 対象とする。
+
+* `source IN ('xbrl', 'backfill_xbrl')`
+* `segment_key = 'other'` または `segment_name = 'Other'`
+
+## 目的
+
+partial XBRL の Other only が viewer で優先表示される事故を防ぐ。
+
+### 禁止
+
+* `backfill_v4_pdf` が1件以下のケースへの適用
+* `edinet_xbrl` の削除
+
+---
+
+# VertRescue Safety Rules
+
+`_try_vertical_format_rescue()` は **Phase2 PASSED page のみ** を対象とする。
+
+Phase2 で reject されたページは VertRescue の再スキャン対象から除外すること（`passed_pages` 引数で管理）。
+
+## 理由
+
+株主資本等変動計算書ページが「利益」「株主資本等」キーワードに反応してセグメント表として誤採用される事故を防ぐ。
+
+## 禁止
+
+Phase2 reject 済みページの VertRescue 再スキャン。
+
+---
+
+# Equity Statement Exclude Rules
+
+以下を含むページは `_is_equity_statement_page()` によりセグメント候補から除外する。
+
+| 判定種別 | キーワード |
+|--------|----------|
+| 単独一致で即除外 | 株主資本等変動計算書 |
+| 複数（3語以上）で除外 | 当期首残高、当期末残高、当期変動額、剰余金の配当、自己株式、株主資本、資本剰余金、利益剰余金、新株予約権、非支配株主持分、その他の包括利益累計額 |
+
+## 目的
+
+連結株主資本等変動計算書ページを縦型セグメント表として誤抽出することを防ぐ。
+
+---
+
+# Profit Row Keyword Matching
+
+`_phase6_find_profit_row()` でのキーワード照合は、**改行除去後の文字列**に対して行うこと。
+
+```python
+left_cell_norm = left_cell.replace("\n", "")
+if kw in left_cell_norm:  # 改行除去後で判定
+```
+
+## 理由
+
+pdfplumber が `'セグメント利\n益又は損失\n（△）'` のように改行入りセルを返すため、`'利益'` 等のキーワードが部分一致しない。
+
+---
+
+# Cleanup Tool: cleanup_bad_segment_names.py
+
+## ファイル
+
+`tools/cleanup_bad_segment_names.py`
+
+## 用途
+
+過去に保存済みの株主資本等変動計算書由来ゴミセグメントを `canonical_segments` から一括削除する。
+
+## 対象 source
+
+* `backfill_v4_pdf`
+* `excel_legacy`
+
+## 削除対象キーワード
+
+`segment_name` に以下を含む行が削除対象。
+
+当期首残高、当期末残高、当期変動額、当期変動額合計、剰余金の配当、自己株式、株主資本、資本剰余金、利益剰余金、新株予約権、非支配株主持分、その他の包括利益累計額、親会社株主に帰属する当期純利益
+
+## 運用ルール
+
+必ず `--dry-run` → `--apply` の順で実行すること。
+
+```bash
+python tools/cleanup_bad_segment_names.py --dry-run
+python tools/cleanup_bad_segment_names.py --apply --yes
+```
+
+## 禁止
+
+* `--apply` を dry-run なしで実行すること
+* `edinet_xbrl` / `xbrl` / `backfill_xbrl` の削除
+* 正規セグメント（事業セグメント名）の削除
+
+---
+
+# UI / Frontend Modification Rules
+
+【重要】
+
+AlertsPage.tsx を含む通知サイトの修正を行う場合、
+作業開始前に必ず以下を報告すること。
+
+1. 修正対象GitHubリポジトリ名
+2. 修正対象Vercelプロジェクト名
+3. Production URL
+4. 修正対象画面のURL
+5. 修正対象ファイルのフルパス
+
+特に company viewer と notification site を混同しないこと。
+
+修正完了報告時は必ず以下を添付すること。
+
+- Commit hash
+- GitHub push完了確認
+- Vercel Production Ready確認
+- 修正対象URL
+- 修正対象画面のスクリーンショットまたは確認方法
+
+「ローカルで修正した」「tscが通った」は完了条件にならない。
+
+完了条件は
+『ユーザーが実際に見ている本番画面で変更が確認できること』
+である。
