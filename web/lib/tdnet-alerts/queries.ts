@@ -17,6 +17,7 @@ export async function fetchEvents(
     todayOnly?: boolean;
     selectedDate?: string | null; // YYYY-MM-DD (JST)
     showArchived?: boolean;
+    allPeriodTickerSearch?: boolean;
   }
 ): Promise<EnrichedEvent[]> {
   const limit = opts.limit ?? 1000;
@@ -66,6 +67,8 @@ export async function fetchEvents(
     return { gte: startUtc.toISOString(), lt: endUtc.toISOString() };
   };
 
+  const skipDateFilter = opts.allPeriodTickerSearch && Boolean(opts.search?.trim());
+
   if (opts.selectedDate) {
     // 特定日付フィルタ (selectedDate = "today" or "YYYY-MM-DD")
     const dateStr =
@@ -80,15 +83,20 @@ export async function fetchEvents(
       utcGte: gte,
       utcLt: lt,
       filterColumn: "detected_at",
+      skipDateFilter,
     });
-    query = query.gte("detected_at", gte).lt("detected_at", lt);
+    if (!skipDateFilter) {
+      query = query.gte("detected_at", gte).lt("detected_at", lt);
+    }
   } else if (opts.todayOnly) {
     // 後方互換
     const todayJst = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }))
       .toLocaleDateString("sv");
     const { gte, lt } = _jstDateToUtcRange(todayJst);
-    console.log("[TDNET fetchEvents] todayOnly", { utcGte: gte, utcLt: lt, filterColumn: "detected_at" });
-    query = query.gte("detected_at", gte).lt("detected_at", lt);
+    console.log("[TDNET fetchEvents] todayOnly", { utcGte: gte, utcLt: lt, filterColumn: "detected_at", skipDateFilter });
+    if (!skipDateFilter) {
+      query = query.gte("detected_at", gte).lt("detected_at", lt);
+    }
   } else if (!opts.search) {
     // 通常モード: 直近30日のみ取得（全期間だと古いデータが大量混入するため）
     const thirtyDaysAgo = new Date();

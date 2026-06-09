@@ -61,6 +61,7 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
   const [filter, setFilter] = useState<FilterType>("all");
   const [selectedDate, setSelectedDate] = useState<string | null>(null); // YYYY-MM-DD (JST)
   const [search, setSearch] = useState("");
+  const [allPeriodTickerSearch, setAllPeriodTickerSearch] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [discordSortMode, setDiscordSortModeState] = useState<"timeline" | "category">(() => {
@@ -119,6 +120,7 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
       const opts: Parameters<typeof fetchEvents>[1] = {
         userId,
         limit: 1000,
+        allPeriodTickerSearch,
       };
 
       if (filter === "unread") opts.unreadOnly = true;
@@ -143,7 +145,7 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
     } finally {
       setLoading(false);
     }
-  }, [userId, filter, search, selectedDate]);
+  }, [userId, filter, search, selectedDate, allPeriodTickerSearch]);
 
   useEffect(() => {
     loadEvents();
@@ -599,13 +601,23 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
           />
         </div>
 
-        <input
-          type="text"
-          className="filter-search"
-          placeholder="🔍 ティッカー / 会社名 / ヘッドライン"
-          value={search}
-          onChange={(e) => handleSearchChange(e.target.value)}
-        />
+        <div style={{ display: "flex", alignItems: "center", gap: "4px", marginLeft: "auto" }}>
+          <button
+            className={`filter-chip ${allPeriodTickerSearch ? "active" : ""}`}
+            onClick={() => setAllPeriodTickerSearch(!allPeriodTickerSearch)}
+            title="ティッカー検索時に日付指定を無視して全期間から検索します"
+            style={{ padding: "0.25rem 0.5rem", fontSize: "0.85rem", height: "30px" }}
+          >
+            全期間
+          </button>
+          <input
+            type="text"
+            className="filter-search"
+            placeholder="🔍 ティッカー / 会社名 / ヘッドライン"
+            value={search}
+            onChange={(e) => handleSearchChange(e.target.value)}
+          />
+        </div>
       </div>
       {/* Discord対象タブのソートボタン（Discord選択時のみ表示）*/}
       {filter === "discord" && (
