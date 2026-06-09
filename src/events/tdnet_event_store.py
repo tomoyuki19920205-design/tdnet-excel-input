@@ -534,13 +534,18 @@ def _merge_compare_json(new_row_dict: dict, existing_payload_str: str) -> None:
         return
     try:
         new_payload = json.loads(new_row_dict["raw_payload"])
-        if new_payload.get("notification_compare_json"):
-            return # Already has it, do not overwrite
-
         old_payload = json.loads(existing_payload_str)
-        if isinstance(old_payload, dict) and "notification_compare_json" in old_payload:
-            new_payload["notification_compare_json"] = old_payload["notification_compare_json"]
-            new_row_dict["raw_payload"] = json.dumps(new_payload, ensure_ascii=False, default=str)
+
+        new_comp = new_payload.get("notification_compare_json")
+        old_comp = old_payload.get("notification_compare_json") if isinstance(old_payload, dict) else None
+
+        if old_comp and isinstance(old_comp, dict) and old_comp.get("compare"):
+            if not new_comp or not isinstance(new_comp, dict) or not new_comp.get("compare"):
+                if not isinstance(new_comp, dict):
+                    new_comp = {}
+                    new_payload["notification_compare_json"] = new_comp
+                new_comp["compare"] = old_comp["compare"]
+                new_row_dict["raw_payload"] = json.dumps(new_payload, ensure_ascii=False, default=str)
     except Exception:
         pass
 

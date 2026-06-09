@@ -692,6 +692,7 @@ def run_ingest(
         items = fetch_new_disclosures(
             watch_tickers=watch_tickers,
             is_processed_fn=state_db.is_processed if not dry_run else None,
+            target_date=getattr(config, "start_date", None),
         )
 
         # 決算短信のみフィルタ（予想修正は別処理）

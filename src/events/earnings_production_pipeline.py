@@ -381,7 +381,7 @@ def run_earnings_production(
             if not fiscal_year or not quarter:
                 fy_p, q_p = _parse_fiscal_info(
                     doc.title, earnings, pdf_text=pdf_text, 
-                    disclosed_at=getattr(doc, "published_at", "")
+                    disclosed_at=getattr(doc, "disclosure_datetime", getattr(doc, "published_at", ""))
                 )
                 if not fiscal_year and fy_p:
                     fiscal_year = fy_p

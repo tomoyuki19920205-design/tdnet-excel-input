@@ -49,6 +49,7 @@ def run_ingest_for_date(date_str: str, *, dry_run: bool = False) -> dict:
     この関数は将来の拡張ポイントとして用意する。
     """
     config = Config()
+    config.start_date = date_str
     try:
         result = run_ingest(config, dry_run=dry_run)
         return {
