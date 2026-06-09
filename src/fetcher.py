@@ -391,6 +391,16 @@ def _fetch_via_html(target_date: str | date_type | None = None) -> list[Disclosu
                     continue
 
                 pub_time = tds[0].get_text(strip=True)
+                
+                if len(date_str) == 8 and ":" in pub_time:
+                    yyyy = date_str[0:4]
+                    mm = date_str[4:6]
+                    dd = date_str[6:8]
+                    # Ensure pub_time has hours and minutes
+                    if pub_time.count(":") >= 1:
+                        # Convert e.g., "15:00" to "2026-06-05 15:00"
+                        pub_time_only = pub_time[:5]
+                        pub_time = f"{yyyy}-{mm}-{dd} {pub_time_only}"
                 ticker = strip_tdnet_trailing_zero(tds[1].get_text(strip=True))
                 company_name = tds[2].get_text(strip=True)
                 title = tds[3].get_text(strip=True)
