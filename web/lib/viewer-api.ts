@@ -107,7 +107,7 @@ export async function loadFinancials(
 
   try {
     const { data, error } = await supabase
-      .from("api_latest_financials")
+      .from("api_latest_financials_canonical")
       .select("ticker,period,quarter,sales,gross_profit,operating_profit,source,updated_at")
       .eq("ticker", t)
       .order("period", { ascending: false })
