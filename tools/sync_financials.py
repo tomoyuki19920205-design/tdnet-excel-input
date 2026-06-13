@@ -267,7 +267,7 @@ FROM jquants_financials_normalized
 
 
 def read_sqlite(
-    db_path: str, limit: int = 0, recent_days: int = 0
+    db_path: str, limit: int = 0, recent_days: int = 0, ticker: str = ""
 ) -> tuple[list[dict], dict]:
     """SQLite から重複排除済みデータを読み取る。"""
     if not os.path.exists(db_path):
@@ -284,15 +284,21 @@ def read_sqlite(
     )
 
     # WHERE句構築（差分同期）
-    where_clause = ""
+    where_conditions = []
     params: list = []
     if recent_days > 0:
         since = (datetime.now(JST) - timedelta(days=recent_days)).strftime(
             "%Y-%m-%d %H:%M:%S"
         )
-        where_clause = "WHERE fetched_at >= ?"
+        where_conditions.append("fetched_at >= ?")
         params.append(since)
         logger.info(f"[SQLite] 差分モード: fetched_at >= {since} (直近{recent_days}日)")
+    if ticker:
+        where_conditions.append("local_code LIKE ?")
+        params.append(f"{ticker}%")
+        logger.info(f"[SQLite] ticker絞り込み: {ticker}")
+        
+    where_clause = "WHERE " + " AND ".join(where_conditions) if where_conditions else ""
 
     # 重複排除済みクエリ
     query = _QUERY_BASE.format(where_clause=where_clause)
@@ -769,6 +775,7 @@ def sync(
     limit: int = 0,
     batch_size: int = _BATCH_SIZE,
     recent_days: int = 0,
+    ticker: str = "",
 ) -> dict:
     """SQLite → Supabase 同期。"""
 
@@ -784,7 +791,7 @@ def sync(
     }
 
     # ---- SQLite 読み取り ----
-    data, raw_stats = read_sqlite(db_path, limit=limit, recent_days=recent_days)
+    data, raw_stats = read_sqlite(db_path, limit=limit, recent_days=recent_days, ticker=ticker)
     stats["sqlite_raw_rows"] = raw_stats["total_raw"]
     stats["sqlite_codes"] = raw_stats["codes"]
     stats["deduped_rows"] = len(data)
@@ -1093,6 +1100,12 @@ def main():
         default=_BATCH_SIZE,
         help=f"1バッチあたりの行数 (default: {_BATCH_SIZE})",
     )
+    parser.add_argument(
+        "--ticker",
+        type=str,
+        default="",
+        help="同期対象の銘柄コード (例: 2353)",
+    )
     args = parser.parse_args()
 
     # apply が指定されなければ常に dry-run
@@ -1154,6 +1167,7 @@ def main():
             limit=args.limit,
             batch_size=args.batch_size,
             recent_days=recent_days,
+            ticker=args.ticker,
         )
     except Exception as e:
         logger.error(f"FATAL: {e}", exc_info=True)
