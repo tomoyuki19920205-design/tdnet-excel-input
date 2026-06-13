@@ -110,6 +110,7 @@ export async function loadFinancials(
       .from("api_latest_financials_canonical")
       .select("ticker,period,quarter,sales,gross_profit,operating_profit,source,updated_at")
       .eq("ticker", t)
+      .neq("source", "legacy_excel")
       .order("period", { ascending: false })
       .order("quarter", { ascending: false })
       .limit(50);
