@@ -813,7 +813,7 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
           {/* タブコンテンツ */}
           {rightPaneTab === "company" ? (
             <CompanyViewerFull
-              ticker={selectedEvent?.ticker || ""}
+              ticker={selectedEvent?.ticker}
               supabase={supabaseRef.current}
               companyViewerBaseUrl={
                 process.env.NEXT_PUBLIC_COMPANY_VIEWER_URL || "https://company-memo-app.vercel.app/"
