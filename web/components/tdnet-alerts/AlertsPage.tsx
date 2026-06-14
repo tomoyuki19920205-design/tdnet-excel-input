@@ -790,48 +790,50 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
 
         {/* Detail Pane */}
         <div className="alerts-detail-pane">
-          {/* 右ペインタブ */}
-          <div className="right-pane-tabs">
-            <button
-              id="right-tab-company"
-              className={`right-pane-tab-btn ${rightPaneTab === "company" ? "active" : ""}`}
-              onClick={() => setRightPaneTab("company")}
-            >
-              🏢 Company Viewer
-            </button>
-            <button
-              id="right-tab-detail"
-              className={`right-pane-tab-btn ${rightPaneTab === "detail" ? "active" : ""}`}
-              onClick={() => setRightPaneTab("detail")}
-              disabled={!selectedEvent}
-              style={!selectedEvent ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
-            >
-              📋 イベント詳細
-            </button>
-          </div>
+          {selectedEvent ? (
+            <>
+              {/* 右ペインタブ */}
+              <div className="right-pane-tabs">
+                <button
+                  id="right-tab-company"
+                  className={`right-pane-tab-btn ${rightPaneTab === "company" ? "active" : ""}`}
+                  onClick={() => setRightPaneTab("company")}
+                >
+                  🏢 Company Viewer
+                </button>
+                <button
+                  id="right-tab-detail"
+                  className={`right-pane-tab-btn ${rightPaneTab === "detail" ? "active" : ""}`}
+                  onClick={() => setRightPaneTab("detail")}
+                >
+                  📋 イベント詳細
+                </button>
+              </div>
 
-          {/* タブコンテンツ */}
-          {rightPaneTab === "company" ? (
-            <CompanyViewerFull
-              ticker={selectedEvent?.ticker}
-              supabase={supabaseRef.current}
-              companyViewerBaseUrl={
-                process.env.NEXT_PUBLIC_COMPANY_VIEWER_URL || "https://company-memo-app.vercel.app/"
-              }
-            />
-          ) : selectedEvent ? (
-            <AlertDetailPanel
-              event={selectedEvent}
-              userId={userId}
-              onUpdate={(updated) => {
-                setEvents((prev) =>
-                  prev.map((e) => (e.id === updated.id ? updated : e))
-                );
-              }}
-            />
+              {/* タブコンテンツ */}
+              {rightPaneTab === "company" ? (
+                <CompanyViewerFull
+                  ticker={selectedEvent.ticker}
+                  supabase={supabaseRef.current}
+                  companyViewerBaseUrl={
+                    process.env.NEXT_PUBLIC_COMPANY_VIEWER_URL || "https://company-memo-app.vercel.app/"
+                  }
+                />
+              ) : (
+                <AlertDetailPanel
+                  event={selectedEvent}
+                  userId={userId}
+                  onUpdate={(updated) => {
+                    setEvents((prev) =>
+                      prev.map((e) => (e.id === updated.id ? updated : e))
+                    );
+                  }}
+                />
+              )}
+            </>
           ) : (
             <div className="detail-empty">
-              左側から開示イベントを選択してください
+              開示をクリックすると右側に Company Viewer が表示されます
             </div>
           )}
         </div>
