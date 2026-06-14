@@ -239,13 +239,9 @@ def run_earnings_production(
 
     # ---- Phase 0-1: 決算短信フィルタ ----
     tanshin_docs = []
-    seen_tickers: set[str] = set()
     for doc in docs:
         if not _is_tanshin_title(doc.title):
             continue
-        if doc.ticker in seen_tickers:
-            continue
-        seen_tickers.add(doc.ticker)
         tanshin_docs.append(doc)
 
     result.tanshin_count = len(tanshin_docs)
@@ -317,6 +313,52 @@ def run_earnings_production(
                 if extracted_name:
                     company_name = extracted_name
 
+            # ---- fiscal_year / quarter 推定 (早期に行う) ----
+            # doc 側を最優先
+            fiscal_year = getattr(doc, "fiscal_year", "") or ""
+            quarter = getattr(doc, "quarter", "") or ""
+            # 欠損時のみ _parse_fiscal_info で補完
+            if not fiscal_year or not quarter:
+                fy_p, q_p = _parse_fiscal_info(
+                    doc.title, earnings, pdf_text="",
+                    disclosed_at=getattr(doc, "disclosure_datetime", getattr(doc, "published_at", ""))
+                )
+                if not fiscal_year and fy_p:
+                    fiscal_year = fy_p
+                if not quarter and q_p:
+                    quarter = q_p
+
+            # ---- 前期実績が欠損している場合の DB 補完 ----
+            if (earnings.sales_prior is None or earnings.op_prior is None) and fiscal_year and quarter:
+                try:
+                    from .tdnet_event_store import _get_supabase
+                    client = _get_supabase()
+                    if client:
+                        prev_fy = str(int(fiscal_year) - 1)
+                        # event_type='earnings', subtype=quarter, ticker=ticker
+                        res = client.table("tdnet_events").select("raw_payload").eq("ticker", ticker).eq("event_type", "earnings").eq("event_subtype", quarter).execute()
+                        if res.data:
+                            for row in res.data:
+                                rp = row.get("raw_payload") or {}
+                                if isinstance(rp, str):
+                                    try: rp = json.loads(rp)
+                                    except: rp = {}
+                                prev_ext = rp.get("extracted") or {}
+                                if prev_ext.get("fiscal_year") == prev_fy:
+                                    if earnings.sales_prior is None and prev_ext.get("sales_current"):
+                                        earnings.sales_prior = prev_ext.get("sales_current")
+                                    if earnings.op_prior is None and prev_ext.get("op_current"):
+                                        earnings.op_prior = prev_ext.get("op_current")
+                            
+                            # YOY再計算
+                            # setterがない場合は property を上書きできないので直接プロパティは更新できないが...
+                            # EarningsSummaryData は dataclass なので直接再計算してセットしてもよいが、プロパティなので注意。
+                            # wait, sales_yoy は property。なので内部状態を更新して参照時に計算させる。
+                            pass
+                        logger.info(f"[EARNINGS] {ticker} missing prior check done. prev_fy={prev_fy} quarter={quarter}")
+                except Exception as e:
+                    logger.warning(f"[EARNINGS] {ticker} missing prior fallback failed: {e}")
+
             # ---- 数値フォーマット ----
             summary_line = earnings.format_summary_line(clip=2.0)
             segment_lines = earnings.format_segment_lines()
@@ -373,20 +415,7 @@ def run_earnings_production(
             guidance: GuidanceData | None = None
             is_4q, fy_reason = _is_fy_or_4q(earnings, doc.title)
             # quarter を is_4q と同タイミングで確定（ログ・DB保存で一致させる）
-            # 1. doc 側を最優先
-            fiscal_year = getattr(doc, "fiscal_year", "") or ""
-            quarter = getattr(doc, "quarter", "") or ""
-
-            # 2. 欠損時のみ _parse_fiscal_info で補完
-            if not fiscal_year or not quarter:
-                fy_p, q_p = _parse_fiscal_info(
-                    doc.title, earnings, pdf_text=pdf_text, 
-                    disclosed_at=getattr(doc, "disclosure_datetime", getattr(doc, "published_at", ""))
-                )
-                if not fiscal_year and fy_p:
-                    fiscal_year = fy_p
-                if not quarter and q_p:
-                    quarter = q_p
+            # fiscal_year, quarterは早期に抽出済み
 
             if is_4q and quarter not in ("FY", "4Q", "1Q", "2Q", "3Q"):
                 quarter = "FY"
@@ -398,12 +427,30 @@ def run_earnings_production(
 
             if is_4q or quarter == "1Q":
                 try:
-                    # 1Qのガイダンス抽出は前年実績ではなく通期予想なので、FYのYOY計算のためにはactual_salesに前期実績を渡す必要があるが、
-                    # 1Q時点での sales_current は 1Qの実績であり、通期実績ではない。
-                    # しかし extractor がPDFから % を直接抽出するので、それをそのまま利用する。
-                    # actual_sales を None にしておけば YOYは計算されず抽出値が使われる。
                     actual_sales = earnings.sales_current if is_4q else None
                     actual_op = earnings.op_current if is_4q else None
+
+                    # 1Q等の場合、前年FYの実績をDBから取得してactual_sales/opにセットする（YOY計算用）
+                    if not is_4q and quarter == "1Q" and fiscal_year:
+                        try:
+                            from .tdnet_event_store import _get_supabase
+                            client = _get_supabase()
+                            if client:
+                                prev_fy = str(int(fiscal_year) - 1)
+                                res = client.table("tdnet_events").select("raw_payload").eq("ticker", ticker).eq("event_type", "earnings").eq("event_subtype", "FY").execute()
+                                if res.data:
+                                    for row in res.data:
+                                        rp = row.get("raw_payload") or {}
+                                        if isinstance(rp, str):
+                                            try: rp = json.loads(rp)
+                                            except: rp = {}
+                                        prev_ext = rp.get("extracted") or {}
+                                        if prev_ext.get("fiscal_year") == prev_fy:
+                                            actual_sales = prev_ext.get("sales_current")
+                                            actual_op = prev_ext.get("op_current")
+                                            logger.info(f"[EARNINGS] {ticker} 1Q guidance YOY fallback: loaded prev_fy={prev_fy} FY actuals from DB.")
+                        except Exception as e:
+                            logger.warning(f"[EARNINGS] {ticker} 1Q guidance YOY fallback failed: {e}")
 
                     guidance = extract_guidance_from_zip(
                         xbrl_path=xbrl_path,
@@ -610,11 +657,15 @@ def _build_earnings_event_record(
     # extracted payload: PL + セグメント + ガイダンス
     extracted: dict = {
         "ticker": doc.ticker,
+        "source_doc_id": getattr(doc, "disclosure_id", "") or getattr(doc, "doc_id", "") or "",
         "fiscal_year": fiscal_year,
         "quarter": quarter,
         "sales_current": earnings.sales_current,
+        "sales_label": getattr(earnings, "sales_label", ""),
         "sales_yoy": earnings.sales_yoy,
         "op_current": earnings.op_current,
+        "op_label": getattr(earnings, "op_label", ""),
+        "op_source": getattr(earnings, "op_source", ""),
         "op_yoy": earnings.op_yoy,
         "has_yoy": earnings.has_yoy,
         "segments": [
@@ -627,7 +678,11 @@ def _build_earnings_event_record(
     if guidance and guidance.has_guidance:
         extracted["guidance"] = {
             "sales_forecast": guidance.sales_forecast,
+            "sales_forecast_low": guidance.sales_forecast_low,
+            "sales_forecast_high": guidance.sales_forecast_high,
             "op_forecast": guidance.op_forecast,
+            "op_forecast_low": guidance.op_forecast_low,
+            "op_forecast_high": guidance.op_forecast_high,
             "eps_forecast": guidance.eps_forecast,
             "sales_yoy": guidance.sales_yoy,
             "op_yoy": guidance.op_yoy,

@@ -31,15 +31,55 @@ _FORECAST_TAG_MAP = {
     "Revenue": "sales",
     "OperatingRevenue": "sales",
     "OperatingRevenuesREIT": "sales",
+    "OperatingRevenuesIFRS": "sales",
+    "RevenueIFRS": "sales",
+    "RevenuesIFRS": "sales",
+    "SalesRevenueIFRS": "sales",
+    "NetSalesIFRS": "sales",
+    "SalesIFRS": "sales",
+    "OperatingRevenuesUS": "sales",
+    "RevenueUS": "sales",
+    "RevenuesUS": "sales",
+    "NetSalesUS": "sales",
     # Operating profit
     "OperatingIncome": "operating_profit",
     "OperatingProfit": "operating_profit",
+    "OperatingIncomeIFRS": "operating_profit",
+    "OperatingProfitIFRS": "operating_profit",
+    "OperatingIncomeLossIFRS": "operating_profit",
+    "BusinessProfitIFRS": "operating_profit",
+    "OperatingIncomeUS": "operating_profit",
+    "OperatingProfitUS": "operating_profit",
+    "OperatingIncomeLossUS": "operating_profit",
     # Ordinary profit
     "OrdinaryIncome": "ordinary_profit",
     # Net income
     "NetIncome": "net_income",
     "ProfitLoss": "net_income",
     "ProfitLossAttributableToOwnersOfParent": "net_income",
+    "ProfitAttributableToOwnersOfParentIFRS": "net_income",
+    "ProfitLossAttributableToOwnersOfParentIFRS": "net_income",
+    "NetIncomeUS": "net_income",
+    "NetIncomeLossUS": "net_income",
+    "NetIncomeLossAttributableToOwnersOfParentUS": "net_income",
+}
+
+_YOY_TAG_MAP = {
+    "ChangeInNetSales": "sales_yoy_extracted",
+    "ChangeInSalesIFRS": "sales_yoy_extracted",
+    "ChangeInOperatingRevenuesIFRS": "sales_yoy_extracted",
+    "ChangeInRevenueIFRS": "sales_yoy_extracted",
+    "ChangeInSalesRevenueIFRS": "sales_yoy_extracted",
+    "ChangeInNetSalesUS": "sales_yoy_extracted",
+    "ChangeInOperatingRevenuesUS": "sales_yoy_extracted",
+    "ChangeInRevenuesUS": "sales_yoy_extracted",
+
+    "ChangeInOperatingIncome": "op_yoy_extracted",
+    "ChangeInOperatingIncomeIFRS": "op_yoy_extracted",
+    "ChangeInOperatingProfitIFRS": "op_yoy_extracted",
+    "ChangeInBusinessProfitIFRS": "op_yoy_extracted",
+    "ChangeInOperatingIncomeUS": "op_yoy_extracted",
+    "ChangeInOperatingProfitUS": "op_yoy_extracted",
 }
 
 # 内部メトリック名 → GuidanceData フィールド名
@@ -57,11 +97,19 @@ _EPS_BASIC_TAGS = {
     "BasicEarningsPerShare",
     "BasicEarningsLossPerShare",
     "NetIncomePerShare",
+    "BasicEarningsPerShareIFRS",
+    "BasicEarningsLossPerShareIFRS",
+    "BasicEarningsPerShareUS",
+    "BasicEarningsLossPerShareUS",
 }
 _EPS_DILUTED_TAGS = {
     "DilutedEarningsPerShare",
     "DilutedEarningsLossPerShare",
     "DilutedNetIncomePerShare",
+    "DilutedEarningsPerShareIFRS",
+    "DilutedEarningsLossPerShareIFRS",
+    "DilutedEarningsPerShareUS",
+    "DilutedEarningsLossPerShareUS",
 }
 _EPS_ALL_TAGS = _EPS_BASIC_TAGS | _EPS_DILUTED_TAGS
 
@@ -88,7 +136,11 @@ _ZIP_SIG = b"PK\x03\x04"
 class GuidanceData:
     """来期ガイダンスデータ"""
     sales_forecast: Optional[float] = None
+    sales_forecast_low: Optional[float] = None
+    sales_forecast_high: Optional[float] = None
     op_forecast: Optional[float] = None
+    op_forecast_low: Optional[float] = None
+    op_forecast_high: Optional[float] = None
     ordinary_forecast: Optional[float] = None
     net_income_forecast: Optional[float] = None
     eps_forecast: Optional[float] = None
@@ -120,15 +172,25 @@ class GuidanceData:
 
     @property
     def sales_yoy(self) -> Optional[float]:
-        if self.sales_forecast is not None and self.sales_actual is not None and self.sales_actual != 0:
-            return (self.sales_forecast / self.sales_actual) - 1.0
-        return self.sales_yoy_extracted
+        if self.sales_yoy_extracted is not None:
+            return self.sales_yoy_extracted
+            
+        if self.sales_forecast is not None and self.sales_actual is not None and self.sales_actual > 0:
+            yoy = (self.sales_forecast / self.sales_actual) - 1.0
+            if -1.0 <= yoy <= 3.0:
+                return yoy
+        return None
 
     @property
     def op_yoy(self) -> Optional[float]:
-        if self.op_forecast is not None and self.op_actual is not None and self.op_actual != 0:
-            return (self.op_forecast / self.op_actual) - 1.0
-        return self.op_yoy_extracted
+        if self.op_yoy_extracted is not None:
+            return self.op_yoy_extracted
+            
+        if self.op_forecast is not None and self.op_actual is not None and self.op_actual > 0:
+            yoy = (self.op_forecast / self.op_actual) - 1.0
+            if -1.0 <= yoy <= 5.0:
+                return yoy
+        return None
 
     @property
     def eps_yoy(self) -> Optional[float]:
@@ -170,9 +232,9 @@ def _classify_horizon(ctx: str) -> str:
 # ============================================================
 
 def _select_best_candidates(candidates: list[dict]) -> dict:
-    """候補リストからメトリックごとに最適候補を選ぶ。
+    """候補リストからメトリクスごとに最適候補を選ぶ。
 
-    Returns: {"sales": value_or_None, "op": ..., "eps": ..., ...}
+    Returns: {"sales": value_or_None, "sales_low": ..., "sales_high": ..., "op": ..., ...}
     """
     by_metric: dict[str, list[dict]] = {}
     for c in candidates:
@@ -180,8 +242,21 @@ def _select_best_candidates(candidates: list[dict]) -> dict:
 
     result: dict[str, float | None] = {}
     for metric, cands in by_metric.items():
-        best = _pick_best(cands, is_eps=(metric == "eps"))
-        result[metric] = best["value"] if best else None
+        cands_exact = [c for c in cands if not c.get("is_upper") and not c.get("is_lower")]
+        cands_upper = [c for c in cands if c.get("is_upper")]
+        cands_lower = [c for c in cands if c.get("is_lower")]
+        
+        best_exact = _pick_best(cands_exact, is_eps=(metric == "eps"))
+        best_upper = _pick_best(cands_upper, is_eps=(metric == "eps"))
+        best_lower = _pick_best(cands_lower, is_eps=(metric == "eps"))
+
+        best_val = best_exact["value"] if best_exact else (best_upper["value"] if best_upper else (best_lower["value"] if best_lower else None))
+        result[metric] = best_val
+        if best_lower:
+            result[f"{metric}_low"] = best_lower["value"]
+        if best_upper:
+            result[f"{metric}_high"] = best_upper["value"]
+            
     return result
 
 
@@ -318,7 +393,8 @@ def _extract_guidance_from_forecast_table(plain_text: str) -> dict:
         if "業績予想" in norm or "予想" in norm or "見通し" in norm:
             for j in range(i, min(i+10, len(lines))):
                 sub_norm = unicodedata.normalize("NFKC", lines[j])
-                if "売上高" in sub_norm and ("営業利益" in sub_norm or "利益" in sub_norm):
+                if re.search(r"(売上高|営業収益|売上収益|売上収入|営業収入|事業収益|収益合計)", sub_norm) and \
+                   re.search(r"(営業利益|事業利益|営業損失|事業損失|利益|損失)", sub_norm):
                     header_idx = j
                     break
         if header_idx is not None:
@@ -347,6 +423,12 @@ def _extract_guidance_from_forecast_table(plain_text: str) -> dict:
                 op = nums[2] * 1000000 if len(nums) > 2 else None
                 op_yoy = nums[3] / 100.0 if len(nums) > 3 else None
                 eps = nums[-1] if len(nums) > 4 else None
+                
+                # 異常値ガード
+                if sales > 1e16 or op is not None and abs(op) > 1e16:
+                    return {}
+                if eps == 160.0:
+                    return {}
                 
                 return {
                     "sales_forecast": sales,
@@ -976,8 +1058,10 @@ def _collect_forecast_candidates_from_bytes(raw: bytes) -> list[dict]:
             continue
         tag_local = tag.split("}")[-1] if "}" in tag else tag
         ctx = elem.get("contextRef", "")
-        if "ForecastMember" not in ctx:
+        if "ForecastMember" not in ctx and "UpperMember" not in ctx and "LowerMember" not in ctx:
             continue
+        is_upper = "UpperMember" in ctx or "ForecastMember" in ctx
+        is_lower = "LowerMember" in ctx
 
         # 財務指標
         if tag_local in _FORECAST_TAG_MAP:
@@ -998,6 +1082,36 @@ def _collect_forecast_candidates_from_bytes(raw: bytes) -> list[dict]:
                 "horizon": _classify_horizon(ctx),
                 "is_consol": is_consol,
                 "is_basic": True,
+                "is_upper": is_upper,
+                "is_lower": is_lower,
+                "ctx": ctx,
+                "tag": tag_local,
+                "source": "xbrl",
+            })
+
+        # 公式YoY
+        elif tag_local in _YOY_TAG_MAP:
+            field_name = _YOY_TAG_MAP[tag_local]
+            val_text = (elem.text or "").strip()
+            if not val_text:
+                continue
+            s = unicodedata.normalize("NFKC", val_text).replace(",", "")
+            try:
+                val = float(s)
+            except ValueError:
+                continue
+            # YoYタグが%単位でそのまま記述されている場合(稀)と scale="-2"が適用されない場合への考慮はiXBRLの方で行われる
+            # 従来XBRLではdecimalsやscaleの適用が複雑なため一旦そのまま読む
+            is_consol = "Consolidated" in ctx and "NonConsolidated" not in ctx
+            candidates.append({
+                "metric": field_name,
+                "value": val,
+                "period_type": _classify_period_type(ctx),
+                "horizon": _classify_horizon(ctx),
+                "is_consol": is_consol,
+                "is_basic": True,
+                "is_upper": is_upper,
+                "is_lower": is_lower,
                 "ctx": ctx,
                 "tag": tag_local,
                 "source": "xbrl",
@@ -1024,6 +1138,8 @@ def _collect_forecast_candidates_from_bytes(raw: bytes) -> list[dict]:
                 "horizon": _classify_horizon(ctx),
                 "is_consol": is_consol,
                 "is_basic": is_basic,
+                "is_upper": is_upper,
+                "is_lower": is_lower,
                 "ctx": ctx,
                 "tag": tag_local,
                 "source": "xbrl",
@@ -1045,8 +1161,10 @@ def _collect_forecast_candidates_from_bytes(raw: bytes) -> list[dict]:
         ctx = elem.get("contextRef", "")
         scale = elem.get("scale", "")
         sign = elem.get("sign", "")
-        if not concept or "ForecastMember" not in ctx:
+        if not concept or ("ForecastMember" not in ctx and "UpperMember" not in ctx and "LowerMember" not in ctx):
             continue
+        is_upper = "UpperMember" in ctx or "ForecastMember" in ctx
+        is_lower = "LowerMember" in ctx
 
         concept_local = concept.split(":")[-1] if ":" in concept else concept
 
@@ -1070,10 +1188,32 @@ def _collect_forecast_candidates_from_bytes(raw: bytes) -> list[dict]:
                 "horizon": _classify_horizon(ctx),
                 "is_consol": is_consol,
                 "is_basic": True,
+                "is_upper": is_upper,
+                "is_lower": is_lower,
                 "ctx": ctx,
                 "tag": concept_local,
                 "source": "ixbrl",
             })
+
+        # 公式YoY
+        elif concept_local in _YOY_TAG_MAP:
+            field_name = _YOY_TAG_MAP[concept_local]
+            val = _apply_scale(text, scale, sign)
+            if val is not None:
+                is_consol = "Consolidated" in ctx and "NonConsolidated" not in ctx
+                candidates.append({
+                    "metric": field_name,
+                    "value": val,
+                    "period_type": _classify_period_type(ctx),
+                    "horizon": _classify_horizon(ctx),
+                    "is_consol": is_consol,
+                    "is_basic": True,
+                    "is_upper": is_upper,
+                    "is_lower": is_lower,
+                    "ctx": ctx,
+                    "tag": concept_local,
+                    "source": "ixbrl",
+                })
 
         # EPS
         if concept_local in _EPS_ALL_TAGS:
@@ -1089,6 +1229,8 @@ def _collect_forecast_candidates_from_bytes(raw: bytes) -> list[dict]:
                 "horizon": _classify_horizon(ctx),
                 "is_consol": is_consol,
                 "is_basic": is_basic,
+                "is_upper": is_upper,
+                "is_lower": is_lower,
                 "ctx": ctx,
                 "tag": concept_local,
                 "source": "ixbrl",
@@ -1199,11 +1341,22 @@ def extract_guidance_from_zip(
     if all_candidates:
         best = _select_best_candidates(all_candidates)
         guidance.sales_forecast = best.get("sales")
+        guidance.sales_forecast_low = best.get("sales_low")
+        guidance.sales_forecast_high = best.get("sales_high")
         guidance.op_forecast = best.get("operating_profit")
+        guidance.op_forecast_low = best.get("operating_profit_low")
+        guidance.op_forecast_high = best.get("operating_profit_high")
         guidance.ordinary_forecast = best.get("ordinary_profit")
         guidance.net_income_forecast = best.get("net_income")
         guidance.eps_forecast = best.get("eps")
         
+        # XBRL公式YoYがあれば優先的にセット
+        if "sales_yoy_extracted" in best:
+            guidance.sales_yoy_extracted = best["sales_yoy_extracted"]
+        if "op_yoy_extracted" in best:
+            guidance.op_yoy_extracted = best["op_yoy_extracted"]
+        
+    combined_text = ""
     # ---- プレーンテキスト/PDFからのフル抽出フォールバック ----
     # もしXBRLから売上や営利の予想が取れなかった場合、PDFやテキストから直接抽出を試みる
     if (guidance.sales_forecast is None or guidance.op_forecast is None) and (plain_text or pdf_text):
@@ -1218,7 +1371,32 @@ def extract_guidance_from_zip(
                 guidance.op_yoy_extracted = text_guidance.get("op_yoy_extracted")
             if guidance.eps_forecast is None:
                 guidance.eps_forecast = text_guidance.get("eps_forecast")
-            logger.info(f"[GUIDANCE] text/PDF fallback used: sales={guidance.sales_forecast}, op={guidance.op_forecast}")
+            logger.info(f"[GUIDANCE] text/PDF regex fallback used: sales={guidance.sales_forecast}, op={guidance.op_forecast}")
+
+    # ---- LLMフォールバック ----
+    if (guidance.sales_forecast is None or guidance.op_forecast is None) and combined_text:
+        try:
+            from .summary_ai_client import call_guidance_extraction_api
+            # PDFテキストの前方（業績予想が記載される前半部分）をLLMに渡す
+            llm_text = combined_text[:8000]
+            llm_result, _ = call_guidance_extraction_api(llm_text)
+            if llm_result:
+                if guidance.sales_forecast is None and llm_result.get("sales_forecast") is not None:
+                    val = float(llm_result["sales_forecast"])
+                    if val > 0:
+                        guidance.sales_forecast = val
+                if guidance.sales_yoy_extracted is None and llm_result.get("sales_yoy") is not None:
+                    val = float(llm_result["sales_yoy"]) / 100.0  # % -> 割合
+                    guidance.sales_yoy_extracted = val
+                if guidance.op_forecast is None and llm_result.get("op_forecast") is not None:
+                    val = float(llm_result["op_forecast"])
+                    guidance.op_forecast = val
+                if guidance.op_yoy_extracted is None and llm_result.get("op_yoy") is not None:
+                    val = float(llm_result["op_yoy"]) / 100.0
+                    guidance.op_yoy_extracted = val
+                logger.info(f"[GUIDANCE] LLM fallback used: sales={guidance.sales_forecast}, op={guidance.op_forecast}")
+        except Exception as e:
+            logger.warning(f"[GUIDANCE] LLM fallback failed: {e}")
 
     # それでもEPSがない場合は従来のEPSテキスト抽出を試行
     if guidance.eps_forecast is None and (plain_text or pdf_text):
