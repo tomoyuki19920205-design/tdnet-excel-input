@@ -72,123 +72,169 @@ def extract_from_company(target):
                     table_count = 0
                     for table in tables:
                         ttext = norm(table.get_text())
-                        if '受注高' in ttext or '当期受注高' in ttext or '受注額' in ttext or '繰越工事高' in ttext or '受注実績' in ttext or '受注工事高' in ttext:
+                        if any(x in ttext for x in ['受注高', '当期受注高', '受注額', '繰越工事高', '受注実績', '受注工事高']):
                             table_count += 1
                             rows = table.find_all('tr')
                             if not rows: continue
                             
-                            col_map = {}
-                            unit_str = None
-                            header_row_idx = -1
-                            header_cols_count = 0
-                            
-                            for i, row in enumerate(rows[:5]):
-                                row_text = norm(row.get_text())
-                                if '千円' in row_text: unit_str = '千円'
-                                elif '百万円' in row_text: unit_str = '百万円'
-                                elif '億円' in row_text: unit_str = '億円'
-                                
+                            # 軽量グリッドパーサー
+                            grid = {}
+                            max_col = 0
+                            for r_idx, row in enumerate(rows):
                                 cells = row.find_all(['td', 'th'])
-                                has_order_col_in_this_row = False
-                                col_idx = 0
-                                
-                                current_row_cols_count = 0
+                                c_idx = 0
                                 for cell in cells:
+                                    while grid.get((r_idx, c_idx)) is not None:
+                                        c_idx += 1
+                                    rowspan = int(cell.get('rowspan', 1))
                                     colspan = int(cell.get('colspan', 1))
-                                    current_row_cols_count += colspan
                                     ctext = norm(cell.get_text())
-                                    
-                                    # パーセント表記や比率列は絶対に金額カラムとして採用しない
-                                    if any(x in ctext for x in ['%', '％', '比', '率', '増減']):
-                                        pass
-                                    elif '受注工事高' in ctext or ctext.startswith('受注高') or ctext.startswith('当期受注高') or ctext.startswith('受注額'):
-                                        col_map['orders_received'] = col_idx
-                                        has_order_col_in_this_row = True
-                                    elif '受注残高' in ctext or '受注残' in ctext or '次期繰越工事高' in ctext or '当期受注残高' in ctext:
-                                        col_map['order_backlog'] = col_idx
-                                        has_order_col_in_this_row = True
-                                    elif '繰越工事高' in ctext or '期末繰越' in ctext:
-                                        if '前期' not in ctext and '期首' not in ctext:
-                                            col_map['construction_carryover'] = col_idx
-                                            has_order_col_in_this_row = True
-                                    elif ('当期売上高' in ctext or '完成工事高' in ctext):
-                                        col_map['completed_construction'] = col_idx
-                                        
-                                    col_idx += colspan
-                                        
-                                # ヘッダー行は一度見つけたら上書きしない
-                                if has_order_col_in_this_row and header_row_idx == -1:
-                                    header_row_idx = i
-                                    header_cols_count = current_row_cols_count
+                                    for r in range(rowspan):
+                                        for c in range(colspan):
+                                            grid[(r_idx + r, c_idx + c)] = ctext
+                                    c_idx += colspan
+                                    if c_idx > max_col:
+                                        max_col = c_idx
                             
-                            if not col_map or header_row_idx == -1:
+                            # ヘッダー領域の特定
+                            start_row_idx = -1
+                            for r_idx in range(min(15, len(rows))):
+                                row_text = "".join([grid.get((r_idx, c), "") for c in range(max_col)])
+                                if any(x in row_text for x in ['受注', '繰越', '完成']):
+                                    start_row_idx = r_idx
+                                    break
+                                    
+                            if start_row_idx == -1:
+                                continue
+                                
+                            header_depth = 1
+                            for cell in rows[start_row_idx].find_all(['td', 'th']):
+                                rs = int(cell.get('rowspan', 1))
+                                if rs > header_depth:
+                                    header_depth = rs
+                                    
+                            end_header_idx = start_row_idx + header_depth - 1
+                            
+                            # カラムマッピング
+                            col_map = {}
+                            for c in range(max_col):
+                                col_text = " ".join([grid.get((r, c), "") for r in range(start_row_idx, end_header_idx + 1)])
+                                
+                                if any(x in col_text for x in ['%', '％', '比', '率', '増減']):
+                                    continue
+                                    
+                                if any(x in col_text for x in ['受注残高', '受注残', '期末受注残高', '当期受注残高']):
+                                    col_map['order_backlog'] = c
+                                elif any(x in col_text for x in ['次期繰越工事高', '次期繰越高', '期末繰越高', '繰越工事高']):
+                                    if '前期' not in col_text and '期首' not in col_text:
+                                        col_map['construction_carryover'] = c
+                                elif any(x in col_text for x in ['受注工事高', '受注高', '当期受注高', '受注実績', '受注額']):
+                                    col_map['orders_received'] = c
+                                elif any(x in col_text for x in ['完成工事高', '当期完成工事高', '当期売上高']):
+                                    col_map['completed_construction'] = c
+                                    
+                            if not col_map:
                                 continue
                                 
                             result['source_tag'] = name_attr
                             result['source_type'] = 'table'
-                            if unit_str: result['unit'] = unit_str
-                            elif '千円' in ttext: result['unit'] = '千円'
+                            
+                            # 単位取得
+                            if '千円' in ttext: result['unit'] = '千円'
                             elif '百万円' in ttext: result['unit'] = '百万円'
                             elif '億円' in ttext: result['unit'] = '億円'
                             
-                            found_valid_row = False
-                            for row in rows[header_row_idx+1:]:
-                                cells = row.find_all(['td', 'th'])
-                                if not cells: continue
-                                first_cell = norm(cells[0].get_text())
+                            # 単位フォールバック (IHI対応)
+                            if not result['unit']:
+                                etext = norm(elem.get_text())
+                                u_match = re.search(r'単位[:：]?\s*(千円|百万円|億円)', etext)
+                                if u_match:
+                                    result['unit'] = u_match.group(1)
+                                else:
+                                    units_found = [u for u in ['千円', '百万円', '億円'] if u in etext]
+                                    if len(units_found) == 1:
+                                        result['unit'] = units_found[0]
+                            
+                            best_score = -1
+                            best_row_idx = -1
+                            
+                            for r_idx in range(end_header_idx + 1, len(rows)):
+                                # Ensure row has at least one valid number in mapped columns
+                                has_num = False
+                                for mapped_c in col_map.values():
+                                    if parse_number(grid.get((r_idx, mapped_c), "")) is not None:
+                                        has_num = True
+                                        break
+                                if not has_num:
+                                    continue
                                 
-                                is_target_row = False
-                                if '合計' in first_cell or first_cell == '計' or '受注実績' in first_cell or '全社' in first_cell:
-                                    is_target_row = True
+                                row_header = ""
+                                for c in range(max_col):
+                                    val = norm(grid.get((r_idx, c), ""))
+                                    if c in col_map.values():
+                                        if parse_number(val) is not None and not any(x in val for x in ['期', '年', '月', '日']):
+                                            break
+                                    row_header += val
                                     
-                                if company == '鹿島建設' and '合計' in first_cell:
-                                    is_target_row = False
+                                if any(x in row_header for x in ['前年', '前期', '前第', '増減', '構成', '比', '%', '％']):
+                                    continue
+                                
+                                # 鹿島対応：数値をクリーンアップして純粋なテキストで判定
+                                clean_header = re.sub(r'[\d,\.\s△▲\+\-]', '', row_header)
+                                
+                                score = 0
+                                if '合計' in clean_header:
+                                    if company == '鹿島建設':
+                                        score = 0
+                                    else:
+                                        score = 100
+                                elif clean_header == '計' or clean_header.endswith('計'):
+                                    score = 90
+                                elif '全社' in clean_header:
+                                    score = 80
+                                elif '当連結会計年度' in clean_header:
+                                    score = 70
+                                elif '当事業年度' in clean_header:
+                                    score = 60
+                                elif re.search(r'第\d+期', row_header): # clean_headerは数字が消えるのでrow_headerを使う
+                                    score = 50
+                                elif '当期' in clean_header:
+                                    score = 40
+                                else:
+                                    score = 10
                                     
-                                if is_target_row:
-                                    col_vals = []
-                                    for c in cells:
-                                        colspan = int(c.get('colspan', 1))
-                                        col_vals.extend([norm(c.get_text())] * colspan)
-                                        
-                                    shift = 0
-                                    if len(col_vals) > header_cols_count:
-                                        shift = len(col_vals) - header_cols_count
-                                    elif len(col_vals) < header_cols_count:
-                                        pad = header_cols_count - len(col_vals)
-                                        col_vals = [''] * pad + col_vals
-                                        
-                                    try:
-                                        temp_res = {}
-                                        
-                                        def safe_parse(idx):
-                                            actual_idx = idx + shift
-                                            if 0 <= actual_idx < len(col_vals):
-                                                val_str = col_vals[actual_idx]
-                                                if any(x in val_str for x in ['%', '％']):
-                                                    return None
-                                                return parse_number(val_str)
+                                if score >= best_score and score > 0:
+                                    best_score = score
+                                    best_row_idx = r_idx
+                                    
+                            if best_row_idx != -1:
+                                try:
+                                    temp_res = {}
+                                    def safe_parse(c_idx):
+                                        val_str = grid.get((best_row_idx, c_idx), "")
+                                        if any(x in val_str for x in ['%', '％']):
                                             return None
+                                        return parse_number(val_str)
 
-                                        if 'orders_received' in col_map:
-                                            temp_res['orders_received'] = safe_parse(col_map['orders_received'])
-                                        if 'order_backlog' in col_map:
-                                            temp_res['order_backlog'] = safe_parse(col_map['order_backlog'])
-                                        if 'construction_carryover' in col_map:
-                                            temp_res['construction_carryover'] = safe_parse(col_map['construction_carryover'])
-                                        if 'completed_construction' in col_map:
-                                            temp_res['completed_construction'] = safe_parse(col_map['completed_construction'])
-                                        
-                                        if any(v is not None for v in temp_res.values()):
-                                            result.update(temp_res)
-                                            found_valid_row = True
-                                            header_strs = [norm(td.get_text())[:10] for td in rows[header_row_idx].find_all(['td','th'])]
-                                            row_strs = [v[:15] for v in col_vals]
-                                            result['snippet'] = f"Header: {'|'.join(header_strs)}\nRow: {'|'.join(row_strs)}"
-                                    except Exception as e:
-                                        pass
-                                        
-                            if found_valid_row:
-                                found_order = True
+                                    if 'orders_received' in col_map:
+                                        temp_res['orders_received'] = safe_parse(col_map['orders_received'])
+                                    if 'order_backlog' in col_map:
+                                        temp_res['order_backlog'] = safe_parse(col_map['order_backlog'])
+                                    if 'construction_carryover' in col_map:
+                                        temp_res['construction_carryover'] = safe_parse(col_map['construction_carryover'])
+                                    if 'completed_construction' in col_map:
+                                        temp_res['completed_construction'] = safe_parse(col_map['completed_construction'])
+                                    
+                                    if any(v is not None for v in temp_res.values()):
+                                        result.update(temp_res)
+                                        found_order = True
+                                        header_strs = [norm(grid.get((start_row_idx, c), "")) for c in range(max_col)]
+                                        row_strs = [norm(grid.get((best_row_idx, c), ""))[:15] for c in range(max_col)]
+                                        result['snippet'] = f"Header: {'|'.join(header_strs)}\nRow: {'|'.join(row_strs)}"
+                                except Exception as e:
+                                    pass
+                                    
+                            if found_order:
                                 if result['unit'] is None:
                                     result['confidence'] = 'low'
                                     result['notes'] += "Unit not found. "
@@ -197,6 +243,7 @@ def extract_from_company(target):
                                     result['notes'] += f"Multiple tables found ({table_count}), picked last. "
                                 else:
                                     result['confidence'] = 'high'
+                                break
                                     
                 # RPO 自然言語解析
                 if not found_order and ('NotesRevenue' in name_attr or 'Revenue' in name_attr or 'jpcrp_cor' in name_attr):
@@ -272,8 +319,8 @@ if __name__ == '__main__':
         res = extract_from_company(t)
         results.append(res)
     
-    out_json = r'C:\Users\takuy\.gemini\antigravity\brain\8ceab1ef-6c13-410f-9a78-5f3b53e47b74\scratch\orders_extracted_30_v2.json'
-    out_md = r'C:\Users\takuy\.gemini\antigravity\brain\8ceab1ef-6c13-410f-9a78-5f3b53e47b74\scratch\orders_extracted_30_v2_summary.md'
+    out_json = r'C:\Users\takuy\.gemini\antigravity\brain\8ceab1ef-6c13-410f-9a78-5f3b53e47b74\scratch\orders_extracted_30_v4.json'
+    out_md = r'C:\Users\takuy\.gemini\antigravity\brain\8ceab1ef-6c13-410f-9a78-5f3b53e47b74\scratch\orders_extracted_30_v4_summary.md'
     
     with open(out_json, 'w', encoding='utf-8') as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
@@ -299,7 +346,7 @@ if __name__ == '__main__':
             manual_check.append(f"{r['ticker']} {r['company']}")
             
     with open(out_md, 'w', encoding='utf-8') as f:
-        f.write("# 30社 DRY RUN 抽出結果サマリー (v2)\n\n")
+        f.write("# 30社 DRY RUN 抽出結果サマリー (v4)\n\n")
         f.write(f"- **実行対象社数**: {len(targets)}社\n")
         f.write(f"- **成功社数**: {success_count}社\n")
         f.write(f"- **失敗社数**: {fail_count}社\n\n")
