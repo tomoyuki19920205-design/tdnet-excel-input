@@ -37,8 +37,13 @@ def _parse_number(s: str | None) -> int | None:
     return None
 
 
-def _detect_unit(header_texts: list[str]) -> str | None:
-    """ヘッダーテキストから単位を検出"""
+def _detect_unit(header_texts: list[str], extra_texts: list[str] | None = None) -> str | None:
+    """ヘッダーテキスト（+ オプションで追加テキスト）から単位を検出。
+
+    検出優先順位: 百万円 > 千円 > 億円 > 円
+    extra_texts にはデータ行の行ラベルなど補助テキストを渡せる。
+    """
+    # まずヘッダー行だけで検出（精度優先）
     combined = " ".join(header_texts)
     combined_n = _norm(combined)
     if "百万円" in combined_n:
@@ -49,6 +54,19 @@ def _detect_unit(header_texts: list[str]) -> str | None:
         return "億円"
     if "円" in combined_n:
         return "円"
+
+    # ヘッダーで検出できない場合はデータ行ラベルも確認
+    if extra_texts:
+        extra_combined = " ".join(extra_texts)
+        extra_n = _norm(extra_combined)
+        if "百万円" in extra_n:
+            return "百万円"
+        if "千円" in extra_n:
+            return "千円"
+        if "億円" in extra_n:
+            return "億円"
+        if "円" in extra_n:
+            return "円"
     return None
 
 
@@ -131,7 +149,14 @@ def extract_from_company(
                     continue
 
                 header_texts = [_norm(c.get_text()) for c in rows[0].find_all(["th", "td"])]
-                unit = _detect_unit(header_texts)
+
+                # 行ラベル（0列目のテキスト）を補助として単位検出
+                row_labels = [
+                    _norm(row.find_all(["th", "td"])[0].get_text())
+                    for row in rows[1:]
+                    if row.find_all(["th", "td"])
+                ]
+                unit = _detect_unit(header_texts, extra_texts=row_labels)
 
                 # 受注関連カラムを検出
                 has_order_kw = any(any(kw in h for kw in _SECTION_KW) for h in header_texts)
@@ -183,7 +208,9 @@ def extract_from_company(
                                 result["construction_carryover"] = cc_v
                             if comp_v is not None:
                                 result["completed_construction"] = comp_v
-                            result["unit"] = unit
+                            # unit は None で上書きしない（別テーブルで検出済みの unit を保護）
+                            if unit is not None:
+                                result["unit"] = unit
                             result["source_type"] = "table"
 
                             # snippet
