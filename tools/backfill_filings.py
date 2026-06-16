@@ -40,7 +40,7 @@ def backfill_dates(start: str, end: str) -> list[str]:
     return dates
 
 
-def run_ingest_for_date(date_str: str, *, dry_run: bool = False) -> dict:
+def run_ingest_for_date(date_str: str, *, dry_run: bool = False, skip_notify: bool = False) -> dict:
     """
     単日の ingest を実行。
 
@@ -51,7 +51,7 @@ def run_ingest_for_date(date_str: str, *, dry_run: bool = False) -> dict:
     config = Config()
     config.start_date = date_str
     try:
-        result = run_ingest(config, dry_run=dry_run)
+        result = run_ingest(config, dry_run=dry_run, skip_notify=skip_notify)
         return {
             "date": date_str,
             "status": "success",
@@ -70,6 +70,7 @@ def run(
     start: str,
     end: str,
     dry_run: bool = False,
+    skip_notify: bool = False,
 ) -> dict:
     """
     バックフィル実行。
@@ -89,7 +90,7 @@ def run(
 
     for i, date_str in enumerate(dates, 1):
         logger.info(f"[backfill] [{i}/{len(dates)}] {date_str}")
-        result = run_ingest_for_date(date_str, dry_run=dry_run)
+        result = run_ingest_for_date(date_str, dry_run=dry_run, skip_notify=skip_notify)
 
         if result["status"] == "success":
             succeeded += 1
@@ -134,6 +135,7 @@ def main():
         help="終了日 (YYYY-MM-DD)",
     )
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--skip-notify", action="store_true", help="Discord通知スキップ")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -142,7 +144,7 @@ def main():
         datefmt="%H:%M:%S",
     )
 
-    result = run(start=args.start, end=args.end, dry_run=args.dry_run)
+    result = run(start=args.start, end=args.end, dry_run=args.dry_run, skip_notify=args.skip_notify)
     sys.exit(1 if result["failed"] > 0 else 0)
 
 

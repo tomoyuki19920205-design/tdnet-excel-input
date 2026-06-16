@@ -667,6 +667,7 @@ def run_ingest(
     dry_run: bool = False,
     db_path: str | None = None,
     dump_dir: str | None = None,
+    skip_notify: bool = False,
 ) -> dict:
     """
     ワンショットingest実行。
@@ -788,7 +789,7 @@ def run_ingest(
                 for item in items  # 全文書（決算短信+予想修正+その他）
             ]
 
-            webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "") if not dry_run else ""
+            webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "") if not (dry_run or skip_notify) else ""
 
             # 診断ログ（webhook URL の中身は出力しない）
             logger.info(

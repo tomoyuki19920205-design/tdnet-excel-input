@@ -607,6 +607,8 @@ def main():
                 sys.argv += ["--to", args.to_date]
             if args.dry_run:
                 sys.argv += ["--dry-run"]
+            if args.skip_notify:
+                sys.argv += ["--skip-notify"]
             backfill_main()
 
     elif cmd == "events":
