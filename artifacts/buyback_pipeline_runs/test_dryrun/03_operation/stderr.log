@@ -1,5 +1,0 @@
-16:36:41 [INFO] review rows: 3
-16:36:41 [INFO] save candidates: 1, manual review: 2, skipped: 0
-16:36:41 [INFO] CSV èoóÕ: c:\Users\takuy\OneDrive\tdnet-excel-input\artifacts\buyback_pipeline_runs\test_dryrun\03_operation\review_save_candidates.csv (1 rows)
-16:36:41 [INFO] CSV èoóÕ: c:\Users\takuy\OneDrive\tdnet-excel-input\artifacts\buyback_pipeline_runs\test_dryrun\03_operation\review_manual_review_queue.csv (2 rows)
-16:36:41 [INFO] summary: c:\Users\takuy\OneDrive\tdnet-excel-input\artifacts\buyback_pipeline_runs\test_dryrun\03_operation\review_operation_summary.md
