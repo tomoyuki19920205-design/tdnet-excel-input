@@ -45,7 +45,7 @@ PYTHON = os.path.join(_PROJECT_ROOT, ".venv", "Scripts", "python.exe")
 
 # ── step 定義 ──────────────────────────────────────────────
 TASK_NAME = "TDNET_Realtime"
-DEADLINE_MINUTES = 8
+DEADLINE_MINUTES = 120
 STARTUP_DELAY_SEC = 15
 GLOBAL_LOCK_MAX_AGE = 60  # 分
 JOB_LOCK_MAX_AGE = 15     # 分
@@ -170,6 +170,8 @@ def main() -> int:
     logger.info(f"{'=' * 55}")
     logger.info(f"  {TASK_NAME} START run_id={run_id}")
     logger.info(f"  dry_run={args.dry_run} skip_delay={args.skip_delay}")
+    logger.info(f"  [TIMEOUT] ingest timeout_sec=7200")
+    logger.info(f"  [TIMEOUT] realtime max runtime=120min")
     logger.info(f"{'=' * 55}")
 
     t_start = time.monotonic()
@@ -210,7 +212,7 @@ def main() -> int:
             step = run_step("ingest", [
                 PYTHON, "tools/pipeline_run.py", "ingest",
                 "--trigger", "scheduler", *dry_flag,
-            ], timeout_sec=300)
+            ], timeout_sec=7200)
             steps.append(step)
             logger.info(f"[TIMING] ingest_end_at={datetime.now(JST).isoformat(timespec='seconds')} ingest_sec={step.duration:.1f}")
         else:

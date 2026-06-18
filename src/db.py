@@ -32,6 +32,22 @@ CREATE TABLE IF NOT EXISTS processing_log (
 );
 """
 
+_CREATE_LOCK_TABLE = """
+CREATE TABLE IF NOT EXISTS process_locks (
+    lock_id TEXT PRIMARY KEY,
+    process_name TEXT UNIQUE NOT NULL,
+    pid INTEGER,
+    status TEXT NOT NULL,
+    started_at TEXT,
+    heartbeat_at TEXT,
+    released_at TEXT,
+    stale_after_sec INTEGER,
+    current_step TEXT,
+    processed_count INTEGER DEFAULT 0,
+    total_candidates INTEGER DEFAULT 0
+);
+"""
+
 
 class StateDB:
     """SQLiteによる処理状態管理（冪等性保証）"""
@@ -42,6 +58,7 @@ class StateDB:
         self._conn = sqlite3.connect(db_path)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute(_CREATE_TABLE)
+        self.ensure_process_locks_table()
         self._conn.commit()
 
     # retryable skip ステータス一覧
@@ -119,6 +136,72 @@ class StateDB:
             return None
         cols = [desc[0] for desc in cur.description]
         return dict(zip(cols, row))
+
+    # --- Lock management ---
+    def ensure_process_locks_table(self) -> None:
+        self._conn.execute(_CREATE_LOCK_TABLE)
+        self._conn.commit()
+
+    def get_active_process_lock(self, process_name: str) -> dict | None:
+        cur = self._conn.execute(
+            "SELECT * FROM process_locks WHERE process_name = ? AND status = 'running'",
+            (process_name,)
+        )
+        row = cur.fetchone()
+        if row:
+            cols = [desc[0] for desc in cur.description]
+            return dict(zip(cols, row))
+        return None
+
+    def acquire_process_lock(self, lock_id: str, process_name: str, pid: int, stale_after_sec: int, total_candidates: int = 0) -> bool:
+        now = now_jst_str()
+        try:
+            self._conn.execute(
+                """
+                INSERT OR REPLACE INTO process_locks
+                (lock_id, process_name, pid, status, started_at, heartbeat_at, released_at, stale_after_sec, current_step, processed_count, total_candidates)
+                VALUES (?, ?, ?, 'running', ?, ?, NULL, ?, '', 0, ?)
+                """,
+                (lock_id, process_name, pid, now, now, stale_after_sec, total_candidates)
+            )
+            self._conn.commit()
+            return True
+        except Exception:
+            return False
+
+    def update_process_lock_heartbeat(self, process_name: str, processed_count: int = 0, current_step: str = "", total_candidates: int | None = None) -> None:
+        now = now_jst_str()
+        if total_candidates is not None:
+            self._conn.execute(
+                """
+                UPDATE process_locks
+                SET heartbeat_at = ?, processed_count = ?, current_step = ?, total_candidates = ?
+                WHERE process_name = ? AND status = 'running'
+                """,
+                (now, processed_count, current_step, total_candidates, process_name)
+            )
+        else:
+            self._conn.execute(
+                """
+                UPDATE process_locks
+                SET heartbeat_at = ?, processed_count = ?, current_step = ?
+                WHERE process_name = ? AND status = 'running'
+                """,
+                (now, processed_count, current_step, process_name)
+            )
+        self._conn.commit()
+
+    def release_process_lock(self, process_name: str, status: str = "completed") -> None:
+        now = now_jst_str()
+        self._conn.execute(
+            """
+            UPDATE process_locks
+            SET status = ?, released_at = ?
+            WHERE process_name = ? AND status = 'running'
+            """,
+            (status, now, process_name)
+        )
+        self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()

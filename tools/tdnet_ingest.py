@@ -678,6 +678,17 @@ def run_ingest(
     """
     t0 = time.monotonic()
     run_id = f"ingest-{uuid.uuid4().hex[:8]}"
+    start_iso = datetime.now(JST).isoformat(timespec='seconds')
+
+    # 進捗カウンタ初期化
+    total_candidates = 0
+    processed_count = 0
+    success_count = 0
+    skipped_count = 0
+    failed_count = 0
+    last_ticker = ""
+    last_step = "init"
+
 
     # DB 初期化
     state_db_path = config.state_db_path
@@ -685,6 +696,36 @@ def run_ingest(
 
     state_db = StateDB(state_db_path)
     decision_db = MigrationDB(decision_db_path)
+
+    # === Phase 4-1B: Lock management ===
+    process_name = "TDNET_Realtime"
+    stale_after_sec = 180
+    lock_id = uuid.uuid4().hex
+
+    active_lock = state_db.get_active_process_lock(process_name)
+    if active_lock:
+        hb_str = active_lock.get("heartbeat_at", "")
+        if hb_str:
+            try:
+                from src.utils import now_jst_str
+                from datetime import datetime as dt
+                hb_time = dt.strptime(hb_str, "%Y-%m-%d %H:%M:%S")
+                now_time = dt.strptime(now_jst_str(), "%Y-%m-%d %H:%M:%S")
+                if (now_time - hb_time).total_seconds() <= stale_after_sec:
+                    logger.info("[LOCK] already running, skip this scheduler tick")
+                    return {"total": 0, "results": [], "summary": {"status": "skipped_by_lock"}}
+                else:
+                    logger.warning("[LOCK] stale lock detected")
+            except Exception as e:
+                logger.warning(f"Failed to parse heartbeat_at: {e}")
+
+    lock_acquired = state_db.acquire_process_lock(lock_id, process_name, os.getpid(), stale_after_sec)
+    if not lock_acquired:
+        logger.info("[LOCK] already running, skip this scheduler tick")
+        return {"total": 0, "results": [], "summary": {"status": "skipped_by_lock"}}
+
+    logger.info("[LOCK] acquire success")
+    # ===================================
 
     try:
         # ウォッチリスト設定
@@ -707,12 +748,16 @@ def run_ingest(
             1 for i in items
             if i.disclosure_type == DisclosureType.FORECAST_REVISION
         )
+        total_candidates = len(target_items)
+        
         logger.info(
-            f"[INGEST] run={run_id} new_items={len(items)} "
-            f"target_statements={len(target_items)} "
-            f"non_target={non_target} "
-            f"(forecast_revision={forecast_in_new}, other={non_target - forecast_in_new})"
+            f"[RUN] run_id={run_id} target_date={getattr(config, 'start_date', 'today') or 'today'} "
+            f"mode={'dry_run' if dry_run else 'realtime'} "
+            f"total_disclosures={len(items)} tanshin_candidates={total_candidates} "
+            f"already_success=unknown pending={total_candidates} "
+            f"started_at={start_iso}"
         )
+
 
         # V2 takeover 対象の事前計算
         enable_v2 = os.environ.get("ENABLE_EARNINGS_V2_PIPELINE", "0") == "1"
@@ -723,7 +768,35 @@ def run_ingest(
         v2_takeover_active = enable_v2 and use_subprocess and real_save
 
         results = []
-        for item in target_items:
+        last_heartbeat_time = time.monotonic()
+        last_progress_time = time.monotonic()
+
+        for i, item in enumerate(target_items):
+            current_time = time.monotonic()
+            last_ticker = item.ticker
+            last_step = "ingest"
+
+            if current_time - last_heartbeat_time >= 30:
+                try:
+                    state_db.update_process_lock_heartbeat(process_name, processed_count=processed_count, current_step=last_step, total_candidates=total_candidates)
+                except Exception as e:
+                    logger.warning(f"[LOCK] heartbeat update failed (non-fatal): {e}")
+                last_heartbeat_time = current_time
+                logger.info("[LOCK] heartbeat updated")
+
+            if processed_count > 0 and (processed_count % 10 == 0 or current_time - last_progress_time >= 30):
+                elapsed_sec = current_time - t0
+                avg_sec = elapsed_sec / max(processed_count, 1)
+                rem_count = total_candidates - processed_count
+                eta_sec = avg_sec * rem_count
+                logger.info(
+                    f"[PROGRESS] run_id={run_id} processed={processed_count}/{total_candidates} "
+                    f"success={success_count} skipped={skipped_count} failed={failed_count} "
+                    f"remaining={rem_count} elapsed_sec={int(elapsed_sec)} avg_sec_per_item={avg_sec:.2f} "
+                    f"eta_sec={int(eta_sec)} current_ticker={last_ticker} current_step={last_step}"
+                )
+                last_progress_time = current_time
+
             # ── 旧ルートからの V2 takeover 対象除外 ──
             if v2_takeover_active and item.ticker in v2_allowlist and item.disclosure_id:
                 results.append({
@@ -733,6 +806,8 @@ def run_ingest(
                     "source_type": "pdf",
                     "disclosure_id": item.disclosure_id,
                 })
+                skipped_count += 1
+                processed_count += 1
                 continue
 
             try:
@@ -741,17 +816,33 @@ def run_ingest(
                     dry_run=dry_run, dump_dir=dump_dir,
                 )
                 results.append(result)
+                if result.get("status") in ("inserted", "updated", "no_change", "dry_run"):
+                    success_count += 1
+                elif result.get("status") == "skipped":
+                    skipped_count += 1
+                else:
+                    failed_count += 1
             except Exception as e:
                 results.append({
                     "status": "error",
                     "detail": f"予期しないエラー: {e}",
                     "code": item.ticker,
                 })
+                failed_count += 1
+            
+            processed_count += 1
 
         elapsed = time.monotonic() - t0
+        avg_sec = elapsed / max(processed_count, 1)
+        rem_count = total_candidates - processed_count
+        logger.info(
+            f"[SUMMARY] run_id={run_id} final_status=completed total={total_candidates} "
+            f"processed={processed_count} success={success_count} skipped={skipped_count} "
+            f"failed={failed_count} remaining={rem_count} elapsed_sec={int(elapsed)} "
+            f"avg_sec_per_item={avg_sec:.2f} completed_at={datetime.now(JST).isoformat(timespec='seconds')}"
+        )
 
         # サマリ
-        success_count = sum(1 for r in results if r["status"] in ("inserted", "updated", "no_change", "dry_run"))
         summary = build_ingest_summary(results, items, target_items, success_count, run_id, elapsed)
 
         # skip理由カウント
@@ -897,6 +988,28 @@ def run_ingest(
 
         return {"total": len(results), "results": results, "summary": summary}
     finally:
+        import sys
+        exc_type, exc_value, _ = sys.exc_info()
+        status = "failed" if exc_type is not None else "completed"
+
+        if status == "failed":
+            elapsed = time.monotonic() - t0
+            rem_count = total_candidates - processed_count
+            logger.error(
+                f"[SUMMARY] run_id={run_id} final_status=failed total={total_candidates} "
+                f"processed={processed_count} success={success_count} skipped={skipped_count} "
+                f"failed={failed_count} remaining={rem_count} elapsed_sec={int(elapsed)} "
+                f"last_ticker={last_ticker} last_step={last_step} last_error=\"{exc_type.__name__}: {exc_value}\""
+            )
+
+        try:
+            state_db.release_process_lock(process_name, status=status)
+            if status == "completed":
+                logger.info("[LOCK] release success")
+            else:
+                logger.info("[LOCK] release success (failed status)")
+        except Exception as e:
+            logger.warning(f"[LOCK] release failed: {e}")
         decision_db.close()
         state_db.close()
 
