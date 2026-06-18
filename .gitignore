@@ -1,4 +1,4 @@
-﻿__pycache__/
+__pycache__/
 *.pyc
 *.pyo
 *.pyd
@@ -24,6 +24,7 @@ state/locks/
 
 data/*.db
 *.db
+*.db
 
 data/
 logs/
@@ -32,4 +33,9 @@ tmp/
 *.zip
 *.pdf
 .vercel
-src/cache/cache/
+
+cache/pdf/*
+cache/xbrl/*
+cache/html/*
+cache/parsed/*
+cache/**/*.tmp
