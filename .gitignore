@@ -31,3 +31,5 @@ tmp/
 *.db
 *.zip
 *.pdf
+.vercel
+src/cache/cache/

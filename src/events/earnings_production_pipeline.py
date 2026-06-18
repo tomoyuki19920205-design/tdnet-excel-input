@@ -21,6 +21,10 @@ import logging
 import re
 import sqlite3
 import time
+from src.cache.cache_manager import make_cache_key, load_json, save_json
+import dataclasses
+from .summary_financials import EarningsSummaryData
+from .earnings_guidance_extractor import GuidanceData
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -242,6 +246,7 @@ def run_earnings_production(
     ensure_earnings_summary_table(conn)
 
     xbrl_dir = str(get_project_root() / "data" / "xbrl_archive")
+    docs_dir = str(get_project_root() / "data" / "docs")
 
     # ---- Phase 0-1: 決算短信フィルタ ----
     tanshin_docs = []
@@ -312,7 +317,7 @@ def run_earnings_production(
                 _xbrl_url = getattr(d, "xbrl_url", "") or ""
                 _zip_path = ""
                 if _xbrl_url:
-                    _zip_path = download_document(_xbrl_url, xbrl_dir, session=session) or ""
+                    _zip_path = download_document(_xbrl_url, xbrl_dir, session=session, alternate_paths=[docs_dir]) or ""
 
                 target_docs_j.append({
                     "ticker":        _t,
@@ -466,7 +471,7 @@ def run_earnings_production(
             # ---- XBRL取得 ----
             xbrl_path = None
             if getattr(doc, 'xbrl_url', None):
-                xbrl_path = download_document(doc.xbrl_url, xbrl_dir, session=session)
+                xbrl_path = download_document(doc.xbrl_url, xbrl_dir, session=session, alternate_paths=[docs_dir])
                 if xbrl_path:
                     logger.info(f"[EARNINGS] {ticker} ZIP downloaded: {Path(xbrl_path).name}")
                 else:
@@ -483,226 +488,294 @@ def run_earnings_production(
                 parse_failed += 1
                 continue
 
-            # ---- 数値抽出 ----
-            try:
-                earnings = extract_earnings_data(
-                    xbrl_path=xbrl_path, title=doc.title, ticker=ticker,
-                )
-            except Exception as e:
-                logger.error(f"[EARNINGS] {ticker} parse error: {e}")
-                logger.error(f"[EARNINGS] {ticker} xbrl_path={xbrl_path}")
-                # ZIP内ファイル一覧を出力
+            # ---- キャッシュ確認 (parsed) ----
+            parser_version = "v4_2c_001"
+            tdnet_id_str = str(getattr(doc, "tdnet_id", "")) or str(getattr(doc, "doc_id", ""))
+            doc_url_str = str(getattr(doc, "doc_url", "")) or str(getattr(doc, "xbrl_url", ""))
+            
+            parsed_key = make_cache_key(f"tdnet_parsed:{parser_version}", doc_id=tdnet_id_str, url=doc_url_str)
+            cached_parsed = load_json(parsed_key, conn) if conn else load_json(parsed_key)
+            
+            if cached_parsed:
+                earnings_dict = cached_parsed.get("earnings")
+                if earnings_dict:
+                    # Restore nested dataclass for segments if present
+                    if "segments" in earnings_dict and earnings_dict["segments"]:
+                        from .summary_financials import SegmentFinancials
+                        segs = []
+                        for s in earnings_dict["segments"]:
+                            segs.append(SegmentFinancials(**s))
+                        earnings_dict["segments"] = segs
+                    earnings = EarningsSummaryData(**earnings_dict)
+                else:
+                    earnings = None
+                    
+                company_name = cached_parsed.get("company_name", "")
+                fiscal_year = cached_parsed.get("fiscal_year", "")
+                quarter = cached_parsed.get("quarter", "")
+                summary_line = cached_parsed.get("summary_line", "")
+                segment_lines = cached_parsed.get("segment_lines", [])
+                company_reasons = cached_parsed.get("company_reasons", [])
+                segment_reasons = cached_parsed.get("segment_reasons", [])
+                full_message = cached_parsed.get("full_message", "")
+                
+                guidance_dict = cached_parsed.get("guidance")
+                guidance = GuidanceData(**guidance_dict) if guidance_dict else None
+                
+                is_4q = cached_parsed.get("is_4q", False)
+                fy_reason = cached_parsed.get("fy_reason", "")
+                
+                if earnings is None:
+                    result.no_yoy_count += 1
+                    continue
+                    
+                parse_success += 1
+                result.validated_count += 1
+                logger.info(f"[EARNINGS] {ticker} parsed cache hit! Bypassing heavy extraction.")
+                
+            else:
+                # ---- 数値抽出 ----
                 try:
-                    import zipfile
-                    with zipfile.ZipFile(xbrl_path) as zf:
-                        logger.error(f"[EARNINGS] {ticker} ZIP contents: {zf.namelist()[:10]}")
-                except Exception:
-                    logger.error(f"[EARNINGS] {ticker} not a valid ZIP file")
-                result.errors.append(f"{ticker}: parse error: {str(e)[:80]}")
-                parse_failed += 1
-                continue
-
-            if earnings is None:
-                result.no_yoy_count += 1
-                continue
-
-            parse_success += 1
-            result.validated_count += 1
-
-            # ---- 企業名フォールバック ----
-            company_name = doc.company_name
-            if not company_name:
-                extracted_name, _ = extract_company_info_from_zip(xbrl_path)
-                if extracted_name:
-                    company_name = extracted_name
-
-            # ---- fiscal_year / quarter 推定 (早期に行う) ----
-            # doc 側を最優先
-            fiscal_year = getattr(doc, "fiscal_year", "") or ""
-            quarter = getattr(doc, "quarter", "") or ""
-            # 欠損時のみ _parse_fiscal_info で補完
-            if not fiscal_year or not quarter:
-                fy_p, q_p = _parse_fiscal_info(
-                    doc.title, earnings, pdf_text="",
-                    disclosed_at=getattr(doc, "disclosure_datetime", getattr(doc, "published_at", ""))
-                )
-                if not fiscal_year and fy_p:
-                    fiscal_year = fy_p
-                if not quarter and q_p:
-                    quarter = q_p
-
-            # ---- 前期実績が欠損している場合の DB 補完 ----
-            if (earnings.sales_prior is None or earnings.op_prior is None) and fiscal_year and quarter:
-                try:
-                    from .tdnet_event_store import _get_supabase
-                    client = _get_supabase()
-                    if client:
-                        prev_fy = str(int(fiscal_year) - 1)
-                        # event_type='earnings', subtype=quarter, ticker=ticker
-                        res = client.table("tdnet_events").select("raw_payload").eq("ticker", ticker).eq("event_type", "earnings").eq("event_subtype", quarter).execute()
-                        if res.data:
-                            for row in res.data:
-                                rp = row.get("raw_payload") or {}
-                                if isinstance(rp, str):
-                                    try: rp = json.loads(rp)
-                                    except: rp = {}
-                                prev_ext = rp.get("extracted") or {}
-                                if prev_ext.get("fiscal_year") == prev_fy:
-                                    if earnings.sales_prior is None and prev_ext.get("sales_current"):
-                                        earnings.sales_prior = prev_ext.get("sales_current")
-                                    if earnings.op_prior is None and prev_ext.get("op_current"):
-                                        earnings.op_prior = prev_ext.get("op_current")
-                            
-                            # YOY再計算
-                            # setterがない場合は property を上書きできないので直接プロパティは更新できないが...
-                            # EarningsSummaryData は dataclass なので直接再計算してセットしてもよいが、プロパティなので注意。
-                            # wait, sales_yoy は property。なので内部状態を更新して参照時に計算させる。
-                            pass
-                        logger.info(f"[EARNINGS] {ticker} missing prior check done. prev_fy={prev_fy} quarter={quarter}")
+                    earnings = extract_earnings_data(
+                        xbrl_path=xbrl_path, title=doc.title, ticker=ticker,
+                    )
                 except Exception as e:
-                    logger.warning(f"[EARNINGS] {ticker} missing prior fallback failed: {e}")
-
-            # ---- 数値フォーマット ----
-            summary_line = earnings.format_summary_line(clip=2.0)
-            segment_lines = earnings.format_segment_lines()
-
-            # ---- テキスト抽出・理由抽出 ----
-            company_reasons: list[str] = []
-            segment_reasons: list[dict] = []
-
-            if not dry_run:
-                narrative_text = extract_narrative_from_xbrl_zip(xbrl_path)
-                if narrative_text:
-                    narrative = extract_narrative(narrative_text, title=doc.title)
-                    if narrative.has_reason:
-                        try:
-                            ai_result = _format_reasons_with_ai(narrative, model=model)
-                            company_reasons = ai_result.get("company_reasons", [])
-                            segment_reasons = ai_result.get("segment_reasons", [])
-                        except Exception as e:
-                            logger.warning(f"[EARNINGS] {ticker} AI formatting failed: {e}")
-                            if narrative.company_reason:
-                                company_reasons = [
-                                    s.strip() for s in narrative.company_reason.split("。")
-                                    if s.strip()
-                                ][:3]
-
-            # ---- 通知メッセージ生成 ----
-            full_message = format_earnings_message(
-                ticker=ticker,
-                company_name=company_name,
-                summary_line=summary_line,
-                segment_lines=segment_lines,
-                company_reasons=company_reasons,
-                segment_reasons=segment_reasons,
-                title=doc.title,
-            )
-
-            # ---- PDF取得・テキスト抽出 (フォールバック用) ----
-            pdf_text = ""
-            pdf_path_downloaded = None
-            if getattr(doc, 'doc_url', None):
-                pdf_path_downloaded = download_document(doc.doc_url, xbrl_dir, session=session)
-                if pdf_path_downloaded and Path(pdf_path_downloaded).exists():
+                    logger.error(f"[EARNINGS] {ticker} parse error: {e}")
+                    logger.error(f"[EARNINGS] {ticker} xbrl_path={xbrl_path}")
+                    # ZIP内ファイル一覧を出力
                     try:
-                        import pdfplumber
-                        with pdfplumber.open(pdf_path_downloaded) as pdf:
-                            for page in pdf.pages[:3]:
-                                text = page.extract_text()
-                                if text:
-                                    pdf_text += text + "\n"
+                        import zipfile
+                        with zipfile.ZipFile(xbrl_path) as zf:
+                            logger.error(f"[EARNINGS] {ticker} ZIP contents: {zf.namelist()[:10]}")
+                    except Exception:
+                        logger.error(f"[EARNINGS] {ticker} not a valid ZIP file")
+                    result.errors.append(f"{ticker}: parse error: {str(e)[:80]}")
+                    parse_failed += 1
+                    continue
+
+                if earnings is None:
+                    result.no_yoy_count += 1
+                    continue
+
+                parse_success += 1
+                result.validated_count += 1
+
+                # ---- 企業名フォールバック ----
+                company_name = doc.company_name
+                if not company_name:
+                    extracted_name, _ = extract_company_info_from_zip(xbrl_path)
+                    if extracted_name:
+                        company_name = extracted_name
+
+                # ---- fiscal_year / quarter 推定 (早期に行う) ----
+                # doc 側を最優先
+                fiscal_year = getattr(doc, "fiscal_year", "") or ""
+                quarter = getattr(doc, "quarter", "") or ""
+                # 欠損時のみ _parse_fiscal_info で補完
+                if not fiscal_year or not quarter:
+                    fy_p, q_p = _parse_fiscal_info(
+                        doc.title, earnings, pdf_text="",
+                        disclosed_at=getattr(doc, "disclosure_datetime", getattr(doc, "published_at", ""))
+                    )
+                    if not fiscal_year and fy_p:
+                        fiscal_year = fy_p
+                    if not quarter and q_p:
+                        quarter = q_p
+
+                # ---- 前期実績が欠損している場合の DB 補完 ----
+                if (earnings.sales_prior is None or earnings.op_prior is None) and fiscal_year and quarter:
+                    try:
+                        from .tdnet_event_store import _get_supabase
+                        client = _get_supabase()
+                        if client:
+                            prev_fy = str(int(fiscal_year) - 1)
+                            # event_type='earnings', subtype=quarter, ticker=ticker
+                            res = client.table("tdnet_events").select("raw_payload").eq("ticker", ticker).eq("event_type", "earnings").eq("event_subtype", quarter).execute()
+                            if res.data:
+                                for row in res.data:
+                                    rp = row.get("raw_payload") or {}
+                                    if isinstance(rp, str):
+                                        try: rp = json.loads(rp)
+                                        except: rp = {}
+                                    prev_ext = rp.get("extracted") or {}
+                                    if prev_ext.get("fiscal_year") == prev_fy:
+                                        if earnings.sales_prior is None and prev_ext.get("sales_current"):
+                                            earnings.sales_prior = prev_ext.get("sales_current")
+                                        if earnings.op_prior is None and prev_ext.get("op_current"):
+                                            earnings.op_prior = prev_ext.get("op_current")
+                                
+                                # YOY再計算
+                                # setterがない場合は property を上書きできないので直接プロパティは更新できないが...
+                                # EarningsSummaryData は dataclass なので直接再計算してセットしてもよいが、プロパティなので注意。
+                                # wait, sales_yoy は property。なので内部状態を更新して参照時に計算させる。
+                                pass
+                            logger.info(f"[EARNINGS] {ticker} missing prior check done. prev_fy={prev_fy} quarter={quarter}")
                     except Exception as e:
-                        logger.warning(f"[EARNINGS] PDF read failed {ticker}: {e}")
+                        logger.warning(f"[EARNINGS] {ticker} missing prior fallback failed: {e}")
 
-            # ---- 4Q専用: 来期ガイダンス + 見通し ----
-            guidance: GuidanceData | None = None
-            is_4q, fy_reason = _is_fy_or_4q(earnings, doc.title)
-            # quarter を is_4q と同タイミングで確定（ログ・DB保存で一致させる）
-            # fiscal_year, quarterは早期に抽出済み
+                # ---- 数値フォーマット ----
+                summary_line = earnings.format_summary_line(clip=2.0)
+                segment_lines = earnings.format_segment_lines()
 
-            if is_4q and quarter not in ("FY", "4Q", "1Q", "2Q", "3Q"):
-                quarter = "FY"
-            logger.info(
-                f"[EARNINGS] {ticker} is_fy_or_4q={is_4q} "
-                f"reason={fy_reason} "
-                f"quarter={quarter!r} title={doc.title[:40]!r} fiscal_year={fiscal_year!r}"
-            )
+                # ---- テキスト抽出・理由抽出 ----
+                company_reasons: list[str] = []
+                segment_reasons: list[dict] = []
 
-            if is_4q or quarter == "1Q":
-                try:
-                    actual_sales = earnings.sales_current if is_4q else None
-                    actual_op = earnings.op_current if is_4q else None
+                if not dry_run:
+                    narrative_text = extract_narrative_from_xbrl_zip(xbrl_path)
+                    if narrative_text:
+                        narrative = extract_narrative(narrative_text, title=doc.title)
+                        if narrative.has_reason:
+                            try:
+                                ai_result = _format_reasons_with_ai(narrative, model=model)
+                                company_reasons = ai_result.get("company_reasons", [])
+                                segment_reasons = ai_result.get("segment_reasons", [])
+                            except Exception as e:
+                                logger.warning(f"[EARNINGS] {ticker} AI formatting failed: {e}")
+                                if narrative.company_reason:
+                                    company_reasons = [
+                                        s.strip() for s in narrative.company_reason.split("。")
+                                        if s.strip()
+                                    ][:3]
 
-                    # 1Q等の場合、前年FYの実績をDBから取得してactual_sales/opにセットする（YOY計算用）
-                    if not is_4q and quarter == "1Q" and fiscal_year:
+                # ---- 通知メッセージ生成 ----
+                full_message = format_earnings_message(
+                    ticker=ticker,
+                    company_name=company_name,
+                    summary_line=summary_line,
+                    segment_lines=segment_lines,
+                    company_reasons=company_reasons,
+                    segment_reasons=segment_reasons,
+                    title=doc.title,
+                )
+
+                # ---- PDF取得・テキスト抽出 (フォールバック用) ----
+                pdf_text = ""
+                pdf_path_downloaded = None
+                if getattr(doc, 'doc_url', None):
+                    pdf_path_downloaded = download_document(doc.doc_url, xbrl_dir, session=session, alternate_paths=[docs_dir])
+                    if pdf_path_downloaded and Path(pdf_path_downloaded).exists():
                         try:
-                            from .tdnet_event_store import _get_supabase
-                            client = _get_supabase()
-                            if client:
-                                prev_fy = str(int(fiscal_year) - 1)
-                                res = client.table("tdnet_events").select("raw_payload").eq("ticker", ticker).eq("event_type", "earnings").eq("event_subtype", "FY").execute()
-                                if res.data:
-                                    for row in res.data:
-                                        rp = row.get("raw_payload") or {}
-                                        if isinstance(rp, str):
-                                            try: rp = json.loads(rp)
-                                            except: rp = {}
-                                        prev_ext = rp.get("extracted") or {}
-                                        if prev_ext.get("fiscal_year") == prev_fy:
-                                            actual_sales = prev_ext.get("sales_current")
-                                            actual_op = prev_ext.get("op_current")
-                                            logger.info(f"[EARNINGS] {ticker} 1Q guidance YOY fallback: loaded prev_fy={prev_fy} FY actuals from DB.")
+                            import pdfplumber
+                            with pdfplumber.open(pdf_path_downloaded) as pdf:
+                                for page in pdf.pages[:3]:
+                                    text = page.extract_text()
+                                    if text:
+                                        pdf_text += text + "\n"
                         except Exception as e:
-                            logger.warning(f"[EARNINGS] {ticker} 1Q guidance YOY fallback failed: {e}")
+                            logger.warning(f"[EARNINGS] PDF read failed {ticker}: {e}")
 
-                    guidance = extract_guidance_from_zip(
-                        xbrl_path=xbrl_path,
-                        actual_sales=actual_sales,
-                        actual_op=actual_op,
-                        pdf_path=pdf_path_downloaded,
-                        pdf_text=pdf_text,
-                    )
+                # ---- 4Q専用: 来期ガイダンス + 見通し ----
+                guidance: GuidanceData | None = None
+                is_4q, fy_reason = _is_fy_or_4q(earnings, doc.title)
+                # quarter を is_4q と同タイミングで確定（ログ・DB保存で一致させる）
+                # fiscal_year, quarterは早期に抽出済み
 
-                    guidance_extracted = guidance is not None and guidance.has_guidance
-                    logger.info(
-                        f"[EARNINGS] {ticker} guidance_extracted={guidance_extracted}"
-                    )
+                if is_4q and quarter not in ("FY", "4Q", "1Q", "2Q", "3Q"):
+                    quarter = "FY"
+                logger.info(
+                    f"[EARNINGS] {ticker} is_fy_or_4q={is_4q} "
+                    f"reason={fy_reason} "
+                    f"quarter={quarter!r} title={doc.title[:40]!r} fiscal_year={fiscal_year!r}"
+                )
 
-                    if guidance:
-                        logger.info(
-                            f"[EARNINGS] {ticker} guidance_fields: "
-                            f"sales={guidance.sales_forecast} "
-                            f"op={guidance.op_forecast} "
-                            f"eps={guidance.eps_forecast} "
-                            f"sales_yoy={guidance.sales_yoy} "
-                            f"op_yoy={guidance.op_yoy} "
-                            f"eps_yoy={guidance.eps_yoy}"
+                if is_4q or quarter == "1Q":
+                    try:
+                        actual_sales = earnings.sales_current if is_4q else None
+                        actual_op = earnings.op_current if is_4q else None
+
+                        # 1Q等の場合、前年FYの実績をDBから取得してactual_sales/opにセットする（YOY計算用）
+                        if not is_4q and quarter == "1Q" and fiscal_year:
+                            try:
+                                from .tdnet_event_store import _get_supabase
+                                client = _get_supabase()
+                                if client:
+                                    prev_fy = str(int(fiscal_year) - 1)
+                                    res = client.table("tdnet_events").select("raw_payload").eq("ticker", ticker).eq("event_type", "earnings").eq("event_subtype", "FY").execute()
+                                    if res.data:
+                                        for row in res.data:
+                                            rp = row.get("raw_payload") or {}
+                                            if isinstance(rp, str):
+                                                try: rp = json.loads(rp)
+                                                except: rp = {}
+                                            prev_ext = rp.get("extracted") or {}
+                                            if prev_ext.get("fiscal_year") == prev_fy:
+                                                actual_sales = prev_ext.get("sales_current")
+                                                actual_op = prev_ext.get("op_current")
+                                                logger.info(f"[EARNINGS] {ticker} 1Q guidance YOY fallback: loaded prev_fy={prev_fy} FY actuals from DB.")
+                            except Exception as e:
+                                logger.warning(f"[EARNINGS] {ticker} 1Q guidance YOY fallback failed: {e}")
+
+                        guidance = extract_guidance_from_zip(
+                            xbrl_path=xbrl_path,
+                            actual_sales=actual_sales,
+                            actual_op=actual_op,
+                            pdf_path=pdf_path_downloaded,
+                            pdf_text=pdf_text,
                         )
 
-                    # ---- 通知にガイダンスセクションを追加 ----
-                    if guidance:
-                        guidance_section = format_guidance_section(guidance)
-                        if guidance_section:
-                            full_message += "\n\n" + guidance_section
+                        guidance_extracted = guidance is not None and guidance.has_guidance
+                        logger.info(
+                            f"[EARNINGS] {ticker} guidance_extracted={guidance_extracted}"
+                        )
+
+                        if guidance:
                             logger.info(
-                                f"[EARNINGS] {ticker} notification_sections_added=True "
-                                f"section_len={len(guidance_section)}"
-                            )
-                        else:
-                            logger.info(
-                                f"[EARNINGS] {ticker} notification_sections_added=False "
-                                f"(no guidance to display)"
+                                f"[EARNINGS] {ticker} guidance_fields: "
+                                f"sales={guidance.sales_forecast} "
+                                f"op={guidance.op_forecast} "
+                                f"eps={guidance.eps_forecast} "
+                                f"sales_yoy={guidance.sales_yoy} "
+                                f"op_yoy={guidance.op_yoy} "
+                                f"eps_yoy={guidance.eps_yoy}"
                             )
 
-                except Exception as e:
-                    logger.warning(f"[EARNINGS] {ticker} guidance extraction failed: {e}")
-                    # ガイダンス失敗でも本体の通知は続行
-            else:
-                # is_4q=False: ガイダンス対象外
-                logger.info(
-                    f"[EARNINGS] {ticker} guidance_extracted=N/A "
-                    f"(not FY/4Q, reason={fy_reason})"
-                )
+                        # ---- 通知にガイダンスセクションを追加 ----
+                        if guidance:
+                            guidance_section = format_guidance_section(guidance)
+                            if guidance_section:
+                                full_message += "\n\n" + guidance_section
+                                logger.info(
+                                    f"[EARNINGS] {ticker} notification_sections_added=True "
+                                    f"section_len={len(guidance_section)}"
+                                )
+                            else:
+                                logger.info(
+                                    f"[EARNINGS] {ticker} notification_sections_added=False "
+                                    f"(no guidance to display)"
+                                )
+
+                    except Exception as e:
+                        logger.warning(f"[EARNINGS] {ticker} guidance extraction failed: {e}")
+                        # ガイダンス失敗でも本体の通知は続行
+                else:
+                    # is_4q=False: ガイダンス対象外
+                    logger.info(
+                        f"[EARNINGS] {ticker} guidance_extracted=N/A "
+                        f"(not FY/4Q, reason={fy_reason})"
+                    )
+
+
+                # ---- キャッシュ保存 (parsed) ----
+                if earnings is not None:
+                    cache_payload = {
+                        "earnings": dataclasses.asdict(earnings) if earnings else None,
+                        "company_name": company_name,
+                        "fiscal_year": fiscal_year,
+                        "quarter": quarter,
+                        "summary_line": summary_line,
+                        "segment_lines": segment_lines,
+                        "company_reasons": company_reasons,
+                        "segment_reasons": segment_reasons,
+                        "full_message": full_message,
+                        "guidance": dataclasses.asdict(guidance) if guidance else None,
+                        "is_4q": is_4q,
+                        "fy_reason": fy_reason,
+                    }
+                    if conn:
+                        save_json(parsed_key, cache_payload, conn)
+                    else:
+                        save_json(parsed_key, cache_payload)
 
             # ---- summary_short 生成 ----
             summary_short = summary_line
