@@ -15,6 +15,7 @@ sample_test とは完全分離。本番用の全件保存・条件付き通知�
 """
 from __future__ import annotations
 
+import os
 import json
 import logging
 import re
@@ -214,6 +215,7 @@ def run_earnings_production(
     webhook_url: str = "",
     model: str = "",
     dry_run: bool = False,
+    state_db=None,
 ) -> EarningsProductionResult:
     """決算短信V2 本番パイプラインを実行する。
 
@@ -229,6 +231,9 @@ def run_earnings_production(
     """
     from src.downloader import download_document
     from src.events.env_loader import get_project_root
+
+    if not webhook_url:
+        webhook_url = os.getenv("DISCORD_WEBHOOK_URL", "")
 
     result = EarningsProductionResult()
     result.total_disclosures = len(docs)
@@ -251,6 +256,203 @@ def run_earnings_production(
 
     if not tanshin_docs:
         return result
+
+    # ---- Phase 0-1.5: Feature Flag による新方式ルーティング ----
+    use_subprocess = os.getenv("USE_SUBPROCESS_WORKER", "0")
+    if use_subprocess == "1":
+        # ── Phase 3-2j: 多重ゲート付き実保存ルート ────────────────────────────────
+        # ゲート: EARNINGS_SUBPROCESS_ENABLE_REAL_SAVE=1
+        enable_real_save = os.getenv("EARNINGS_SUBPROCESS_ENABLE_REAL_SAVE", "0") == "1"
+        # ゲート: allowlist が設定されており空でないこと
+        allowlist_env_j = os.getenv("EARNINGS_SUBPROCESS_ALLOWLIST", "")
+        allowlist_j = [t.strip() for t in allowlist_env_j.split(",") if t.strip()] if allowlist_env_j else []
+        # ゲート: Discord / state_db 無効フラグ
+        enable_discord = os.getenv("EARNINGS_SUBPROCESS_ENABLE_DISCORD", "0") == "1"
+        enable_state_update = os.getenv("EARNINGS_SUBPROCESS_ENABLE_STATE_UPDATE", "0") == "1"
+
+        if enable_real_save and allowlist_j:
+            logger.info(
+                "[EARNINGS] USE_SUBPROCESS_WORKER=1 dry_run=False ENABLE_REAL_SAVE=1 "
+                "allowlist=%s discord=%s state_update=%s → 新方式実保存ルート",
+                allowlist_j, enable_discord, enable_state_update,
+            )
+            from src.events.earnings_subprocess_runner import (
+                run_earnings_subprocess_dry_run,
+                build_save_ready_payload,
+                validate_save_ready_payload,
+                build_save_call_plan,
+                build_discord_call_plan,
+                validate_save_call_plan,
+                find_semantic_duplicate,
+            )
+            from src.events.earnings_summary_storage import save_earnings_summary
+            from src.events.common_models import EventRecord
+            from src.events.tdnet_event_store import save_event_to_supabase
+            import uuid as _uuid
+            from datetime import datetime as _dt, timezone as _tz, timedelta as _tdelta
+            _JST = _tz(_tdelta(hours=9))
+
+            # ── allowlist と state_db でフィルタ ──────────────────────────────
+            target_docs_j = []
+            for d in tanshin_docs:
+                _t = getattr(d, "ticker", "")
+                _did = getattr(d, "disclosure_id", "") or getattr(d, "doc_id", "") or getattr(d, "source_doc_id", "") or ""
+                
+                print(f"[DEBUG] _t={_t}, allowlist_j={allowlist_j}, _did={_did}, is_processed={state_db.is_processed(_did) if state_db else 'No state_db'}")
+                
+                if _t not in allowlist_j:
+                    logger.debug("[EARNINGS] ticker=%s not in allowlist. skip.", _t)
+                    continue
+                if state_db and state_db.is_processed(_did):
+                    logger.info("[EARNINGS] ticker=%s disclosure_id=%s is already processed in state_db. skip.", _t, _did)
+                    continue
+                
+                # ZIPダウンロード追加
+                _xbrl_url = getattr(d, "xbrl_url", "") or ""
+                _zip_path = ""
+                if _xbrl_url:
+                    _zip_path = download_document(_xbrl_url, xbrl_dir) or ""
+
+                target_docs_j.append({
+                    "ticker":        _t,
+                    "company_name":  getattr(d, "company_name", ""),
+                    "title":         getattr(d, "title", ""),
+                    "source_title":  getattr(d, "title", ""),
+                    "disclosed_at":  getattr(d, "disclosure_datetime", "") or getattr(d, "published_at", ""),
+                    "source_url":    getattr(d, "doc_url", "") or "",
+                    "pdf_url":       getattr(d, "doc_url", "") or "",
+                    "doc_url":       getattr(d, "doc_url", "") or "",
+                    "xbrl_url":      _xbrl_url,
+                    "zip_path":      _zip_path,
+                    "source_doc_id": getattr(d, "disclosure_id", "") or getattr(d, "doc_id", "") or "",
+                })
+
+            if not target_docs_j:
+                logger.info("[EARNINGS] target_docs_j is empty after allowlist filter. returning early.")
+                return result
+
+            # ── worker 実行 ────────────────────────────────────────────────
+            runner_summary_j = run_earnings_subprocess_dry_run(target_docs_j, worker_count=4, timeout_sec=60)
+            results_by_ticker_j = {r.get("ticker"): r for r in runner_summary_j.get("results", [])}
+
+            for doc_j in target_docs_j:
+                _ticker = doc_j.get("ticker")
+                _wr = results_by_ticker_j.get(_ticker)
+                if not _wr or _wr.get("status") != "ok":
+                    # worker失敗の場合も、手動でのリトライ等に備えて payload を生成・validate しておく
+                    pass
+
+                try:
+                    # ── payload 生成 / validation ───────────────────────────────
+                    _payload = build_save_ready_payload(_wr, doc_j)
+                    _valid_p, _reason_p = validate_save_ready_payload(_payload)
+                    if not _valid_p:
+                        logger.error("[EARNINGS][REAL] %s payload invalid: %s. skip this item.", _ticker, _reason_p)
+                        result.errors.append(f"{_ticker}: payload_invalid={_reason_p}")
+                        continue
+
+                    # ── call plan 生成 / validation ──────────────────────────────
+                    _save_plan = build_save_call_plan(_payload)
+                    _discord_plan = build_discord_call_plan(_payload)
+                    # save_plan に discord_plan をマージして渡す（discord_ready 診断のため）
+                    _merged_plan = {**_save_plan, "discord_plan": _discord_plan}
+                    _cp_valid, _cp_reason = validate_save_call_plan(
+                        _merged_plan,
+                        require_discord=enable_discord,  # Discord 無効時は discord_ready を必須にしない
+                    )
+                    if not _cp_valid:
+                        logger.error("[EARNINGS][REAL] %s call_plan invalid: %s. STOP.", _ticker, _cp_reason)
+                        result.errors.append(f"{_ticker}: call_plan_invalid={_cp_reason}")
+                        return result
+
+                    # ── SQLite 保存前: semantic duplicate ガード ───────────────────
+                    # fingerprint の一致有無に関わらず、意味的な重複を検知してスキップ
+                    _args = _merged_plan["earnings_summary_args"]
+                    _dup_rec = find_semantic_duplicate(
+                        conn=conn,
+                        ticker=_args.get("ticker", ""),
+                        fiscal_year=_args.get("fiscal_year", ""),
+                        quarter=_args.get("quarter", ""),
+                        disclosure_date=_args.get("disclosure_date", ""),
+                        title=_args.get("title", ""),
+                    )
+                    if _dup_rec:
+                        logger.info("[EARNINGS][REAL] %s semantic duplicate. skip.", _ticker)
+                        result.already_exists_count += 1
+                        continue
+
+                    # ── SQLite 保存実行 ──────────────────────────────────────────
+                    logger.info("[EARNINGS][REAL] ✁ SQLite保存: %s", _ticker)
+                    save_earnings_summary(conn, _merged_plan["earnings_summary_args"])
+                    result.saved_count += 1
+
+                    # ── Supabase 保存実行 ────────────────────────────────────────
+                    logger.info("[EARNINGS][REAL] ✁ Supabase保存: %s", _ticker)
+                    _ev_dict = _merged_plan["tdnet_event_payload"]
+                    
+                    # ── Supabase ID の復元 ──
+                    if state_db:
+                        # state_db から元の Supabase ID があれば拾う (既存レコードの UPDATE 防止)
+                        # 今回は新規レコードとして挿入するため、UUIDは新規生成する。
+                        pass
+
+                    _ev_rec = EventRecord(**_ev_dict)
+                    _sup_res = save_event_to_supabase(_ev_rec)
+                    _sup_ok = _sup_res.get("action") != "error"
+                    _sup_err = _sup_res.get("error", "")
+                    if not _sup_ok:
+                        logger.error("[EARNINGS][REAL] %s Supabase 保存失敗: %s", _ticker, _sup_err)
+                        result.errors.append(f"{_ticker}: supabase_error={_sup_err}")
+                        return result
+
+                    # ── Discord 送信 ────────────────────────────────────────────
+                    _discord_sent = False
+                    if enable_discord:
+                        logger.info("[EARNINGS][REAL] ✁ 通知送信: %s", _ticker)
+                        from src.events.summary_notify import send_earnings_discord
+                        _discord_msg = _merged_plan["discord_plan"]["discord_message"]
+                        _d_ok = send_earnings_discord(webhook_url, _discord_msg)
+                        if _d_ok:
+                            result.notified_count += 1
+                            _discord_sent = True
+                        else:
+                            logger.error("[EARNINGS][REAL] %s Discord 送信失敗.", _ticker)
+                            result.errors.append(f"{_ticker}: discord_failed")
+                            return result
+                    else:
+                        logger.info("[EARNINGS][REAL] ✁ 通知送信スキップ(ENABLE_DISCORD=0): %s", _ticker)
+
+                    # ── state_db success 記録 ────────────────────────────────────
+                    if enable_state_update:
+                        if enable_discord and not _discord_sent:
+                            logger.warning("[EARNINGS][REAL] %s Discord未送信のためstate_db更新をスキップ", _ticker)
+                        elif not enable_discord:
+                            logger.warning("[EARNINGS][REAL] %s ENABLE_DISCORD=0 のためstate_db更新をスキップ", _ticker)
+                        else:
+                            if state_db:
+                                _did2 = doc_j.get("source_doc_id", "")
+                                _fy = _merged_plan["earnings_summary_args"].get("fiscal_year", "")
+                                _q = _merged_plan["earnings_summary_args"].get("quarter", "")
+                                logger.info("[EARNINGS][REAL] ✁ state_db success 記録: %s", _ticker)
+                                state_db.record(_did2, code=_ticker, year=_fy, quarter=_q, status='success')
+                    else:
+                        logger.info("[EARNINGS][REAL] ✁ state_db 更新スキップ(ENABLE_STATE_UPDATE=0): %s", _ticker)
+
+                except Exception as e:
+                    logger.exception("[EARNINGS][REAL] %s 予期せぬエラー: %s", _ticker, e)
+                    result.errors.append(f"{_ticker}: runtime_error={str(e)[:80]}")
+                    return result
+            
+            return result
+        else:
+            # ENABLE_REAL_SAVE=0 または allowlist 未設定 ➡️ 旧方式 fallback
+            logger.warning(
+                "[EARNINGS] USE_SUBPROCESS_WORKER=1 dry_run=False but ENABLE_REAL_SAVE=%s allowlist=%s. "
+                "Falling back to sequential mode for safety.",
+                os.getenv("EARNINGS_SUBPROCESS_ENABLE_REAL_SAVE", "0"), allowlist_j,
+            )
+    else:
+        pass # sequential
 
     parse_success = 0
     parse_failed = 0

@@ -380,34 +380,88 @@ def _calculate_notification_compare(ticker: str, extracted: dict, client=None) -
         return None
 
     compare_data = None
+    reason_code = None
 
     if quarter in ("1Q", "4Q", "FY"):
         guidance = extracted.get("guidance", {})
         s_yoy = guidance.get("sales_yoy")
         o_yoy = guidance.get("op_yoy")
+        s_f = guidance.get("sales_forecast")
+        o_f = guidance.get("op_forecast")
+        s_curr = extracted.get("sales_current")
+        o_curr = extracted.get("op_current")
+        calc_source = "llm_extracted"
 
-        if s_yoy is None and o_yoy is None:
-            s_f = guidance.get("sales_forecast")
-            o_f = guidance.get("op_forecast")
-            reason_sales = "forecast_missing" if s_f is None else "prev_actual_missing"
-            reason_op = "forecast_missing" if o_f is None else "prev_actual_missing"
-            logger.info(f"[STORE] Missing guidance YOY. ticker={ticker}, quarter={quarter}, sales_reason={reason_sales}, op_reason={reason_op}")
-            compare_data = None
-        else:
+        if s_yoy is None or o_yoy is None:
+            if s_f is None and o_f is None:
+                reason_code = "forecast_missing"
+            else:
+                if quarter in ("FY", "4Q"):
+                    if s_yoy is None and s_f is not None and s_curr is not None and s_curr > 0:
+                        s_yoy = (s_f / s_curr) - 1.0
+                        calc_source = "calculated_from_current"
+                    if o_yoy is None and o_f is not None and o_curr is not None and o_curr > 0:
+                        o_yoy = (o_f / o_curr) - 1.0
+                        calc_source = "calculated_from_current"
+                elif quarter == "1Q":
+                    current_fy = extracted.get("fiscal_year")
+                    if client is not None and current_fy:
+                        try:
+                            prev_fy = str(int(current_fy) - 1)
+                            res = client.table('canonical_financials') \
+                                .select('period, metric, value') \
+                                .eq('ticker', ticker) \
+                                .eq('quarter', 'FY') \
+                                .in_('metric', ['sales', 'operating_profit']) \
+                                .execute()
+                            prev_sales = None
+                            prev_op = None
+                            if res.data:
+                                for row in res.data:
+                                    period = str(row.get('period', ''))
+                                    metric = row.get('metric')
+                                    val = row.get('value')
+                                    if period.startswith(prev_fy) and val is not None:
+                                        if metric == 'sales': prev_sales = val
+                                        elif metric == 'operating_profit': prev_op = val
+                            
+                            if s_yoy is None and s_f is not None and prev_sales is not None and prev_sales > 0:
+                                s_yoy = (s_f / 1_000_000) / prev_sales - 1.0
+                                calc_source = "calculated_from_db_prev_fy"
+                            if o_yoy is None and o_f is not None and prev_op is not None and prev_op > 0:
+                                o_yoy = (o_f / 1_000_000) / prev_op - 1.0
+                                calc_source = "calculated_from_db_prev_fy"
+                            if prev_sales is None and prev_op is None:
+                                reason_code = "prev_actual_missing"
+                        except Exception as e:
+                            logger.warning(f"[STORE] Failed to fetch previous FY for 1Q YoY fallback: {e}")
+                            reason_code = "db_error"
+
+                if s_yoy is None and o_yoy is None and not reason_code:
+                    reason_code = "calculation_failed_or_missing_inputs"
+
+        if s_yoy is not None or o_yoy is not None:
             compare_data = {
-                "label": "FY予",
+                "label": "通期予" if quarter == "1Q" else "来期FY予",
                 "sales_yoy": s_yoy,
-                "op_yoy": o_yoy
+                "op_yoy": o_yoy,
+                "source": calc_source
             }
+            if reason_code:
+                compare_data["reason"] = reason_code
+        else:
+            logger.info(f"[STORE] Missing guidance YOY. ticker={ticker}, quarter={quarter}, reason={reason_code}")
+            compare_data = {"reason": reason_code}
+
     elif quarter in ("2Q", "3Q"):
         # 2Q/3Q: fetch previous quarter from Supabase
         target_quarter = "1Q" if quarter == "2Q" else "2Q"
         current_fy = extracted.get("fiscal_year")
+        reason_code = "prev_actual_missing_db"
 
         if client is not None and current_fy:
             try:
                 prev_fy = str(int(current_fy) - 1)
-                # Fetch data from canonical_financials for the target_quarter
                 res = client.table('canonical_financials') \
                     .select('period, metric, value') \
                     .eq('ticker', ticker) \
@@ -426,19 +480,19 @@ def _calculate_notification_compare(ticker: str, extracted: dict, client=None) -
                         metric = row.get('metric')
                         val = row.get('value')
                         
-                        if period.startswith(str(current_fy)):
+                        if period.startswith(str(current_fy)) and val is not None:
                             if metric == 'sales': curr_sales = val
                             elif metric == 'operating_profit': curr_op = val
-                        elif period.startswith(str(prev_fy)):
+                        elif period.startswith(str(prev_fy)) and val is not None:
                             if metric == 'sales': prev_sales = val
                             elif metric == 'operating_profit': prev_op = val
                 
                 s_yoy = None
-                if curr_sales is not None and prev_sales and prev_sales > 0:
+                if curr_sales is not None and prev_sales is not None and prev_sales > 0:
                     s_yoy = (curr_sales / prev_sales) - 1.0
                 
                 o_yoy = None
-                if curr_op is not None and prev_op and prev_op > 0:
+                if curr_op is not None and prev_op is not None and prev_op > 0:
                     o_yoy = (curr_op / prev_op) - 1.0
                     
                 if curr_sales is not None or curr_op is not None:
@@ -449,6 +503,7 @@ def _calculate_notification_compare(ticker: str, extracted: dict, client=None) -
                         "source": "jquants_canonical_financials"
                     }
                 else:
+                    compare_data = {"reason": "prev_actual_missing_db"}
                     logger.info(
                         f"[STORE] Previous quarter not found in canonical_financials. "
                         f"ticker={ticker}, current_quarter={quarter}, target_quarter={target_quarter}, "
@@ -456,9 +511,9 @@ def _calculate_notification_compare(ticker: str, extracted: dict, client=None) -
                     )
 
             except Exception as e:
+                compare_data = {"reason": "db_error"}
                 logger.warning(f"[STORE] Failed to fetch previous quarter from Supabase canonical_financials: {e}")
 
-    # nullの場合は "compare": null とする
     return {
         "current": {
             "label": quarter,
@@ -529,6 +584,47 @@ def _supplement_current_yoy(ticker: str, extracted: dict, client) -> None:
 # ============================================================
 # メイン: Supabase へ保存
 # ============================================================
+def _safe_json(value):
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return json.loads(value)
+        except Exception:
+            return {}
+    return {}
+
+def _nested_get(d, *path):
+    cur = d
+    for key in path:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(key)
+    return cur
+
+def _payload_contains_doc_id(payload, source_doc_id, xbrl_doc_id):
+    candidates = [
+        payload.get("source_doc_id"),
+        _nested_get(payload, "raw", "source_doc_id"),
+        _nested_get(payload, "extracted", "source_doc_id"),
+        _nested_get(payload, "raw", "xbrl_doc_id"),
+        _nested_get(payload, "extracted", "xbrl_doc_id"),
+        _nested_get(payload, "raw", "source_url"),
+        _nested_get(payload, "raw", "pdf_url"),
+        _nested_get(payload, "extracted", "source_url"),
+        _nested_get(payload, "extracted", "pdf_url"),
+    ]
+
+    joined = " ".join(str(x or "") for x in candidates)
+
+    if source_doc_id and source_doc_id in joined:
+        return True, "source_doc_id_in_raw_payload"
+
+    if xbrl_doc_id and xbrl_doc_id in joined:
+        return True, "xbrl_doc_id_in_raw_payload"
+
+    return False, ""
+
 def _merge_compare_json(new_row_dict: dict, existing_payload_str: str) -> None:
     if not existing_payload_str:
         return
@@ -672,17 +768,6 @@ def save_event_to_supabase(
             "schema_version": 1,
         }
 
-        if dry_run:
-            logger.info(
-                f"[STORE DRY-RUN] would insert: ticker={event.ticker} "
-                f"type={original_event_type} -> {display_category} "
-                f"title={display_title[:60]}"
-            )
-            result["action"] = "dry_run"
-            result["display_title"] = display_title
-            result["display_category"] = display_category
-            result["priority_rank"] = priority_rank
-            return result
 
         # YOY protection: Prevent overwriting existing YOY data with null
         if display_category == DISPLAY_EARNINGS and metric_yoy is None:
@@ -718,42 +803,102 @@ def save_event_to_supabase(
                 logger.warning(f"[STORE] Failed to check existing record for YOY protection: {check_e}")
 
         # --- 厳密な重複チェック（テスト実行等の事故防止） ---
-        # 同一ticker・同一disclosed_at・同一event_type・同一event_subtype のレコードがあればUPDATE
         try:
-            q = client.table("tdnet_events").select("id, raw_payload").eq("ticker", row["ticker"]).eq("disclosed_at", row["disclosed_at"]).eq("event_type", row["event_type"])
-            if row.get("event_subtype"):
-                q = q.eq("event_subtype", row["event_subtype"])
-            else:
-                q = q.is_("event_subtype", "null")
-            
-            strict_match_res = q.execute()
-            if strict_match_res.data:
-                existing_id = strict_match_res.data[0]["id"]
+            date_str = event.disclosure_datetime[:10] if event.disclosure_datetime else ""
+            if date_str:
+                dt_jst = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=JST)
+                start_utc = dt_jst.astimezone(timezone.utc)
+                end_utc = (dt_jst + timedelta(days=1)).astimezone(timezone.utc)
+                day_start_iso = start_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+                next_day_iso = end_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
                 
-                # YOY保護のロジック: 上書き時、新しいYOYがnullで既存にYOYがあれば維持
-                if display_category == DISPLAY_EARNINGS and metric_yoy is None:
-                    # check existing YOY from another query, or we can just fetch it now
-                    exist_yoy_res = client.table("tdnet_events").select("primary_metric_yoy").eq("id", existing_id).execute()
-                    if exist_yoy_res.data and exist_yoy_res.data[0].get("primary_metric_yoy") is not None:
-                        logger.info(f"[STORE] DEDUP_SKIPPED (YOY protect strict) ticker={event.ticker}")
-                        result["action"] = "dedup_skipped"
-                        result["display_category"] = display_category
-                        return result
+                q = (
+                    client.table("tdnet_events")
+                    .select("id, raw_payload, ticker, event_type, event_subtype, headline, disclosed_at, source_url, pdf_url")
+                    .eq("ticker", event.ticker or "")
+                    .order("created_at", desc=True)
+                )
 
-                _merge_compare_json(row, existing_payload_str)
-                resp = client.table("tdnet_events").update(row).eq("id", existing_id).execute()
-                if resp.data and len(resp.data) > 0:
-                    result["action"] = "updated"
-                    result["id"] = existing_id
-                    result["display_category"] = display_category
-                    logger.info(f"[STORE] UPDATED existing record ticker={event.ticker} id={existing_id[:8]}")
-                    return result
+                q = q.limit(20)
+                strict_match_res = q.execute()
+
+                matched_row = None
+                match_reason = ""
+                
+                if strict_match_res.data:
+                    norm_title = _normalize_headline(event.title)
+                    xbrl_doc_id = _nested_get(raw_payload, "raw", "xbrl_doc_id") or _nested_get(raw_payload, "extracted", "xbrl_doc_id")
+                    
+                    for r in strict_match_res.data:
+                        raw_p = _safe_json(r.get("raw_payload"))
+                        has_doc, reason = _payload_contains_doc_id(raw_p, event.source_doc_id, xbrl_doc_id)
+                        if has_doc:
+                            matched_row = r
+                            match_reason = reason
+                            break
+                        
+                        r_source_url = str(r.get("source_url") or "")
+                        r_pdf_url = str(r.get("pdf_url") or "")
+                        if event.source_doc_id and (event.source_doc_id in r_source_url or event.source_doc_id in r_pdf_url):
+                            matched_row = r
+                            match_reason = "source_url_contains_source_doc_id"
+                            break
+                            
+                        r_headline = str(r.get("headline") or "")
+                        if norm_title and _normalize_headline(r_headline) == norm_title:
+                            matched_row = r
+                            match_reason = "semantic_title_match"
+                            break
+                            
+                if matched_row:
+                    existing_id = matched_row["id"]
+                    
+                    # YOY保護のロジック: 上書き時、新しいYOYがnullで既存にYOYがあれば維持
+                    if display_category == DISPLAY_EARNINGS and metric_yoy is None:
+                        # check existing YOY from another query, or we can just fetch it now
+                        exist_yoy_res = client.table("tdnet_events").select("primary_metric_yoy").eq("id", existing_id).execute()
+                        if exist_yoy_res.data and exist_yoy_res.data[0].get("primary_metric_yoy") is not None:
+                            logger.info(f"[STORE] DEDUP_SKIPPED (YOY protect strict) ticker={event.ticker}")
+                            result["action"] = "dedup_skipped"
+                            result["display_category"] = display_category
+                            return result
+
+                    existing_payload_str = matched_row.get("raw_payload", "{}")
+                    if isinstance(existing_payload_str, dict):
+                        existing_payload_str = json.dumps(existing_payload_str)
+                    if dry_run:
+                        result["action"] = "updated"
+                        result["id"] = existing_id
+                        result["display_category"] = display_category
+                        logger.info(f"[STORE DRY-RUN] WOULD UPDATE existing record ticker={event.ticker} id={existing_id[:8]} (reason: {match_reason})")
+                        return result
+                        
+                    _merge_compare_json(row, existing_payload_str)
+                    resp = client.table("tdnet_events").update(row).eq("id", existing_id).execute()
+                    if resp.data and len(resp.data) > 0:
+                        result["action"] = "updated"
+                        result["id"] = existing_id
+                        result["display_category"] = display_category
+                        logger.info(f"[STORE] UPDATED existing record ticker={event.ticker} id={existing_id[:8]} (reason: {match_reason})")
+                        return result
         except Exception as check_e:
             logger.warning(f"[STORE] Failed to check strict existing record: {check_e}")
         # ----------------------------------------------------
 
         # INSERT with ON CONFLICT DO NOTHING (dedupe_key unique)
         # supabase-py uses upsert with ignoreDuplicates
+        if dry_run:
+            logger.info(
+                f"[STORE DRY-RUN] WOULD INSERT ticker={event.ticker} "
+                f"type={original_event_type} -> {display_category} "
+                f"title={display_title[:60]}"
+            )
+            result["action"] = "dry_run"
+            result["display_title"] = display_title
+            result["display_category"] = display_category
+            result["priority_rank"] = priority_rank
+            return result
+            
         resp = (
             client.table("tdnet_events")
             .upsert(row, on_conflict="dedupe_key", ignore_duplicates=True)

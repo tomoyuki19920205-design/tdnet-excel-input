@@ -666,6 +666,7 @@ def run_ingest(
     company_code: str | None = None,
     dry_run: bool = False,
     db_path: str | None = None,
+    earnings_db_path: str | None = None,
     dump_dir: str | None = None,
     skip_notify: bool = False,
 ) -> dict:
@@ -713,8 +714,27 @@ def run_ingest(
             f"(forecast_revision={forecast_in_new}, other={non_target - forecast_in_new})"
         )
 
+        # V2 takeover 対象の事前計算
+        enable_v2 = os.environ.get("ENABLE_EARNINGS_V2_PIPELINE", "0") == "1"
+        use_subprocess = os.environ.get("USE_SUBPROCESS_WORKER", "0") == "1"
+        real_save = os.environ.get("EARNINGS_SUBPROCESS_ENABLE_REAL_SAVE", "0") == "1"
+        allowlist_str = os.environ.get("EARNINGS_SUBPROCESS_ALLOWLIST", "")
+        v2_allowlist = [t.strip() for t in allowlist_str.split(",") if t.strip()] if allowlist_str else []
+        v2_takeover_active = enable_v2 and use_subprocess and real_save
+
         results = []
         for item in target_items:
+            # ── 旧ルートからの V2 takeover 対象除外 ──
+            if v2_takeover_active and item.ticker in v2_allowlist and item.disclosure_id:
+                results.append({
+                    "status": "skipped",
+                    "detail": "V2_TAKEOVER_ACTIVE",
+                    "code": item.ticker,
+                    "source_type": "pdf",
+                    "disclosure_id": item.disclosure_id,
+                })
+                continue
+
             try:
                 result = _process_single(
                     item, config, state_db, decision_db, run_id,
@@ -836,18 +856,22 @@ def run_ingest(
         # earnings_summaries 保存 + Supabase tdnet_events 反映。
         # webhook_url="" 固定: Discord通知・time.sleep(1.5) を完全回避。
         # 失敗してもingest全体は成功扱い。
-        if os.environ.get("ENABLE_EARNINGS_V2_PIPELINE", "") == "1":
-            _ev2_conn = None
+        if os.environ.get("ENABLE_EARNINGS_V2_PIPELINE", "0") == "1":
+            import sqlite3 as _sqlite3
+            from src.events.earnings_production_pipeline import run_earnings_production
+            logger.info("[EARNINGS_V2] enabled: running earnings_production_pipeline")
+            
+            earnings_db_path = earnings_db_path if earnings_db_path else decision_db_path
+            logger.info(f"[EARNINGS_V2] resolved_db_path={earnings_db_path}")
+            
+            _ev2_conn = _sqlite3.connect(earnings_db_path)
             try:
-                import sqlite3 as _sqlite3
-                from src.events.earnings_production_pipeline import run_earnings_production
-                logger.info("[EARNINGS_V2] enabled: running earnings_production_pipeline")
-                _ev2_conn = _sqlite3.connect(decision_db_path)
                 _ev2_result = run_earnings_production(
                     docs=items,          # 全取得文書（内部で決算短信のみフィルタ）
                     conn=_ev2_conn,
                     webhook_url="",      # Discord通知・sleep を回避
                     dry_run=dry_run,
+                    state_db=state_db,
                 )
                 summary["earnings_v2"] = {
                     "tanshin": _ev2_result.tanshin_count,
@@ -898,6 +922,10 @@ def main():
     parser.add_argument(
         "--db", type=str, default=None,
         help="DBファイルパス（省略時はconfig.yamlのdecision_db_pathを使用）",
+    )
+    parser.add_argument(
+        "--earnings-db", type=str, default=None,
+        help="earnings_summaries保存先（省略時はdecision_db_pathを使用）",
     )
     parser.add_argument(
         "--dry-run", action="store_true",
@@ -957,6 +985,7 @@ def main():
             company_code=args.company_code,
             dry_run=args.dry_run,
             db_path=args.db,
+            earnings_db_path=args.earnings_db,
             dump_dir=args.dump_on_error,
         )
     except Exception as e:
