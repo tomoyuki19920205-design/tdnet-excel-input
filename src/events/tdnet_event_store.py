@@ -645,6 +645,118 @@ def _merge_compare_json(new_row_dict: dict, existing_payload_str: str) -> None:
     except Exception:
         pass
 
+def build_supabase_row(event: EventRecord, client=None) -> tuple[dict, dict, str, str, str | None]:
+    """
+    EventRecordからSupabaseのtdnet_eventsテーブルに保存するrowを生成する。
+    
+    Returns:
+        row (dict): tdnet_eventsにinsertする辞書
+        raw_payload (dict): JSONシリアライズ前のraw_payload辞書
+        dedupe_key (str): 生成されたdedupe_key
+        display_category (str): 表示カテゴリ
+        metric_yoy (str | None): YOY値
+    """
+    dedupe_key = build_dedupe_key(event)
+    display_category = _normalize_display_category(event)
+    
+    # --- 抽出ペイロードの事前準備・補完 ---
+    extracted = {}
+    if event.extracted_payload_json:
+        try:
+            extracted = json.loads(event.extracted_payload_json)
+        except (json.JSONDecodeError, TypeError):
+            pass
+            
+    if display_category == "earnings" and client and isinstance(extracted, dict):
+        _supplement_current_yoy(event.ticker or "", extracted, client)
+        event.extracted_payload_json = json.dumps(extracted, ensure_ascii=False)
+    # ------------------------------------
+
+    priority_rank = compute_priority_rank(event)
+    display_title = event.title or ""
+    display_summary = event.summary_text or ""
+    formatted_message = event.summary_text or ""
+    metric_name, metric_value, metric_yoy = _extract_primary_metric(event)
+    strength = _compute_strength_score(event)
+    notify_discord = should_notify_event(event)
+
+    original_event_type = event.event_type or ""
+
+    now_iso = datetime.now(JST).isoformat()
+    detected_at = _sanitize_timestamp(event.disclosure_datetime, now_iso)
+
+    raw_payload = {}
+    if event.raw_payload_json:
+        try:
+            raw_payload["raw"] = json.loads(event.raw_payload_json)
+        except (json.JSONDecodeError, TypeError):
+            raw_payload["raw_text"] = event.raw_payload_json
+            
+    if event.extracted_payload_json:
+        if extracted:
+            raw_payload["extracted"] = extracted
+        else:
+            raw_payload["extracted_text"] = event.extracted_payload_json
+            
+    # 元の event_type を raw_payload に保存
+    raw_payload["original_event_type"] = original_event_type
+
+    # text_extract_status: extracted 全数値が null なら "empty" フラグ付与
+    if isinstance(extracted, dict):
+        numeric_fields = [
+            "revised_sales", "revised_op", "revised_ordinary", "revised_net_income",
+            "previous_sales", "previous_op", "previous_ordinary", "previous_net_income",
+            "total_amount", "share_count", "ratio_to_issued",
+            "previous_dividend", "revised_dividend",
+            "revised_dividend_per_share", "previous_dividend_per_share",
+            "shares_limit", "amount_limit_million_yen",
+        ]
+        has_any_number = any(extracted.get(f) is not None for f in numeric_fields)
+        if not has_any_number:
+            raw_payload["text_extract_status"] = "empty"
+            raw_payload["text_empty"] = True
+        else:
+            raw_payload["text_extract_status"] = "ok"
+            raw_payload["text_empty"] = False
+            
+    # 追加: notification_compare_json の生成と埋め込み
+    if display_category == "earnings" and isinstance(extracted, dict):
+        comp_json = _calculate_notification_compare(event.ticker or "", extracted, client=client)
+        if comp_json:
+            raw_payload["notification_compare_json"] = comp_json
+
+    sort_key = _build_sort_key(priority_rank, detected_at, event.ticker or "")
+
+    row = {
+        "detected_at": detected_at,
+        "disclosed_at": _sanitize_disclosed_at(event.disclosure_datetime),
+        "ticker": event.ticker or "",
+        "company_name": event.company_name or "",
+        "event_type": display_category,
+        "event_subtype": event.subtype or None,
+        "headline": event.title or "",
+        "summary": event.summary_text or "",
+        "source_url": event.doc_url or None,
+        "pdf_url": event.doc_url if event.event_type in ("earnings", "forecast") else None,
+        "raw_payload": json.dumps(raw_payload, ensure_ascii=False, default=str),
+        "strength_score": strength,
+        "priority_rank": priority_rank,
+        "primary_metric_name": metric_name,
+        "primary_metric_value": metric_value,
+        "primary_metric_yoy": metric_yoy,
+        "display_title": display_title,
+        "display_summary": display_summary,
+        "formatted_message": formatted_message,
+        "sort_key": sort_key,
+        "dedupe_key": dedupe_key,
+        "notify_to_discord": notify_discord,
+        "status": "active",
+        "schema_version": 1,
+    }
+    
+    return row, raw_payload, dedupe_key, display_category, metric_yoy
+
+
 def save_event_to_supabase(
     event: EventRecord,
     *,
@@ -658,115 +770,16 @@ def save_event_to_supabase(
     result = {"action": "error", "dedupe_key": ""}
 
     try:
-        dedupe_key = build_dedupe_key(event)
-        result["dedupe_key"] = dedupe_key
-
-        # 表示カテゴリ正規化
-        display_category = _normalize_display_category(event)
-        
-        # --- 抽出ペイロードの事前準備・補完 ---
         client = _get_supabase()
-        extracted = {}
-        if event.extracted_payload_json:
-            try:
-                extracted = json.loads(event.extracted_payload_json)
-            except (json.JSONDecodeError, TypeError):
-                pass
-                
-        if display_category == "earnings" and client and isinstance(extracted, dict):
-            _supplement_current_yoy(event.ticker or "", extracted, client)
-            event.extracted_payload_json = json.dumps(extracted, ensure_ascii=False)
-        # ------------------------------------
-
-        priority_rank = compute_priority_rank(event)
-        # display_title / display_summary / formatted_message:
-        # EventRecord のフィールドを直接使う（event_type ごとの整形は呼び出し側の責務）
-        display_title = event.title or ""
-        display_summary = event.summary_text or ""
-        formatted_message = event.summary_text or ""
-        metric_name, metric_value, metric_yoy = _extract_primary_metric(event)
-        strength = _compute_strength_score(event)
-        notify_discord = should_notify_event(event)
-
-        original_event_type = event.event_type or ""
-
-        now_iso = datetime.now(JST).isoformat()
-        detected_at = _sanitize_timestamp(event.disclosure_datetime, now_iso)
-
-        raw_payload = {}
-        if event.raw_payload_json:
-            try:
-                raw_payload["raw"] = json.loads(event.raw_payload_json)
-            except (json.JSONDecodeError, TypeError):
-                raw_payload["raw_text"] = event.raw_payload_json
-                
-        if event.extracted_payload_json:
-            if extracted:
-                raw_payload["extracted"] = extracted
-            else:
-                raw_payload["extracted_text"] = event.extracted_payload_json
-                
-        # 元の event_type を raw_payload に保存
-        raw_payload["original_event_type"] = original_event_type
-
-        # text_extract_status: extracted 全数値が null なら "empty" フラグ付与
-        if isinstance(extracted, dict):
-            numeric_fields = [
-                "revised_sales", "revised_op", "revised_ordinary", "revised_net_income",
-                "previous_sales", "previous_op", "previous_ordinary", "previous_net_income",
-                "total_amount", "share_count", "ratio_to_issued",
-                "previous_dividend", "revised_dividend",
-                "revised_dividend_per_share", "previous_dividend_per_share",
-                "shares_limit", "amount_limit_million_yen",
-            ]
-            has_any_number = any(extracted.get(f) is not None for f in numeric_fields)
-            if not has_any_number:
-                raw_payload["text_extract_status"] = "empty"
-                raw_payload["text_empty"] = True
-            else:
-                raw_payload["text_extract_status"] = "ok"
-                raw_payload["text_empty"] = False
-                
         if client is None:
             logger.warning("[STORE] Supabase client not available — skipping save")
-            result["action"] = "error"
             result["error"] = "supabase_not_available"
             return result
 
-        # 追加: notification_compare_json の生成と埋め込み
-        if display_category == "earnings" and isinstance(extracted, dict):
-            comp_json = _calculate_notification_compare(event.ticker or "", extracted, client=client)
-            if comp_json:
-                raw_payload["notification_compare_json"] = comp_json
-
-        sort_key = _build_sort_key(priority_rank, detected_at, event.ticker or "")
-
-        row = {
-            "detected_at": detected_at,
-            "disclosed_at": _sanitize_disclosed_at(event.disclosure_datetime),
-            "ticker": event.ticker or "",
-            "company_name": event.company_name or "",
-            "event_type": display_category,
-            "event_subtype": event.subtype or None,
-            "headline": event.title or "",
-            "summary": event.summary_text or "",
-            "source_url": event.doc_url or None,
-            "pdf_url": event.doc_url if event.event_type in ("earnings", "forecast") else None,
-            "raw_payload": json.dumps(raw_payload, ensure_ascii=False, default=str),
-            "strength_score": strength,
-            "priority_rank": priority_rank,
-            "primary_metric_name": metric_name,
-            "primary_metric_value": metric_value,
-            "primary_metric_yoy": metric_yoy,
-            "display_title": display_title,
-            "display_summary": display_summary,
-            "formatted_message": formatted_message,
-            "sort_key": sort_key,
-            "dedupe_key": dedupe_key,
-            "notify_to_discord": notify_discord,
-            "status": "active",
-            "schema_version": 1,
-        }
+        row, raw_payload, dedupe_key, display_category, metric_yoy = build_supabase_row(event, client)
+        result["dedupe_key"] = dedupe_key
+        original_event_type = event.event_type or ""
+        display_title = row.get("display_title", "")
 
 
         # YOY protection: Prevent overwriting existing YOY data with null
@@ -987,6 +1000,77 @@ def save_events_batch(
     )
     counts["category_breakdown"] = category_counts
     return counts
+
+
+def save_events_to_supabase_batch(
+    events: list[EventRecord],
+    *,
+    dry_run: bool = True,
+    batch_size: int = 50
+) -> dict:
+    """
+    複数イベントをSupabaseのtdnet_eventsへbatch upsertする。
+    
+    本番write時 (dry_run=False):
+      - Chunk upsert成功時: chunk内rowを保存成功扱いにできる
+      - Chunk upsert失敗時: chunk内rowを個別fallback対象にする
+      - 個別fallback成功時: そのitemのみ保存成功
+      - 個別fallback失敗時: そのitemのみ保存失敗
+      - 保存失敗itemはDiscord通知とstate更新に進めない
+      - 保存成功itemのみ次段へ進める
+      - (ただし今回のdry-runでは実writeもfallbackも実行しない)
+    
+    Returns:
+        dict: dry-runの統計情報
+    """
+    if not dry_run:
+        raise NotImplementedError("Production write for batch upsert is not implemented yet.")
+        
+    client = _get_supabase()
+    rows = []
+    missing_dedupe = 0
+    duplicate_dedupe = 0
+    seen_dedupes = set()
+    payload_bytes_total = 0
+    
+    for ev in events:
+        try:
+            row, raw_payload, dedupe_key, display_category, metric_yoy = build_supabase_row(ev, client)
+            if not dedupe_key:
+                missing_dedupe += 1
+            elif dedupe_key in seen_dedupes:
+                duplicate_dedupe += 1
+            else:
+                seen_dedupes.add(dedupe_key)
+            
+            rows.append(row)
+            row_bytes = len(json.dumps(row, ensure_ascii=False).encode('utf-8'))
+            payload_bytes_total += row_bytes
+        except Exception as e:
+            logger.error(f"[STORE] Error building row for {ev.ticker}: {e}")
+            
+    # Chunking
+    chunks = [rows[i:i + batch_size] for i in range(0, len(rows), batch_size)]
+    chunk_count = len(chunks)
+    
+    payload_bytes_max_chunk = 0
+    for chunk in chunks:
+        chunk_bytes = len(json.dumps(chunk, ensure_ascii=False).encode('utf-8'))
+        payload_bytes_max_chunk = max(payload_bytes_max_chunk, chunk_bytes)
+        
+    return {
+        "total_events": len(events),
+        "total_rows": len(rows),
+        "batch_size": batch_size,
+        "chunk_count": chunk_count,
+        "rows_per_chunk": [len(c) for c in chunks],
+        "missing_dedupe_key_count": missing_dedupe,
+        "duplicate_dedupe_key_count": duplicate_dedupe,
+        "payload_bytes_total": payload_bytes_total,
+        "payload_bytes_max_chunk": payload_bytes_max_chunk,
+        "would_write": False,
+        "skipped_write": True
+    }
 
 
 # ============================================================
