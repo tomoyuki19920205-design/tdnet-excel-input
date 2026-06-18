@@ -43,22 +43,23 @@ def _classify_http_error(status_code: int) -> str:
     return f"http_{status_code}"
 
 
-def download_document(url: str, save_dir: str) -> str | None:
+def download_document(url: str, save_dir: str, session: requests.Session | None = None) -> str | None:
     """
     PDFまたはXBRLファイルをダウンロードしてローカルに保存する。
 
     Args:
         url: ダウンロードURL
         save_dir: 保存先ディレクトリ
+        session: 再利用可能な requests.Session (オプショナル)
 
     Returns:
         保存先パス（成功時）、None（失敗時）
     """
-    result = download_document_ex(url, save_dir)
+    result = download_document_ex(url, save_dir, session=session)
     return result.path if result.success else None
 
 
-def download_document_ex(url: str, save_dir: str) -> DownloadResult:
+def download_document_ex(url: str, save_dir: str, session: requests.Session | None = None) -> DownloadResult:
     """ダウンロードの詳細結果を返すバージョン。
 
     HTTP エラーを分類して DownloadResult に記録する。
@@ -80,7 +81,8 @@ def download_document_ex(url: str, save_dir: str) -> DownloadResult:
             return DownloadResult(success=True, path=str(local_path))
 
         logger.info(f"[DL] ダウンロード中: {url}")
-        resp = requests.get(
+        client = session or requests
+        resp = client.get(
             url,
             headers={"User-Agent": _USER_AGENT},
             timeout=60,

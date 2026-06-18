@@ -140,6 +140,7 @@ def _process_single(
     run_id: str,
     dry_run: bool = False,
     dump_dir: str | None = None,
+    session=None,
 ) -> dict:
     """
     単一開示を処理する。
@@ -156,7 +157,7 @@ def _process_single(
 
     # ダウンロード
     docs_dir = str(Path(config.state_db_path).parent / "docs")
-    doc_path = download_document(item.doc_url, docs_dir)
+    doc_path = download_document(item.doc_url, docs_dir, session=session)
 
     if doc_path is None:
         if not dry_run:
@@ -178,7 +179,7 @@ def _process_single(
     # XBRL取得 + ZIP永続化
     xbrl_path = None
     if item.xbrl_url:
-        xbrl_path = download_document(item.xbrl_url, docs_dir)
+        xbrl_path = download_document(item.xbrl_url, docs_dir, session=session)
         # XBRL ZIP を永続化（再調査用）
         if xbrl_path and os.path.isfile(xbrl_path):
             try:
@@ -727,7 +728,11 @@ def run_ingest(
     logger.info("[LOCK] acquire success")
     # ===================================
 
+    session = None
     try:
+        import requests
+        session = requests.Session()
+
         # ウォッチリスト設定
         watch_tickers = [company_code] if company_code else config.watch_tickers or None
 
@@ -736,6 +741,7 @@ def run_ingest(
             watch_tickers=watch_tickers,
             is_processed_fn=state_db.is_processed if not dry_run else None,
             target_date=getattr(config, "start_date", None),
+            session=session,
         )
 
         # 決算短信のみフィルタ（予想修正は別処理）
@@ -813,7 +819,7 @@ def run_ingest(
             try:
                 result = _process_single(
                     item, config, state_db, decision_db, run_id,
-                    dry_run=dry_run, dump_dir=dump_dir,
+                    dry_run=dry_run, dump_dir=dump_dir, session=session,
                 )
                 results.append(result)
                 if result.get("status") in ("inserted", "updated", "no_change", "dry_run"):
@@ -963,6 +969,7 @@ def run_ingest(
                     webhook_url="",      # Discord通知・sleep を回避
                     dry_run=dry_run,
                     state_db=state_db,
+                    session=session,
                 )
                 summary["earnings_v2"] = {
                     "tanshin": _ev2_result.tanshin_count,
@@ -988,6 +995,12 @@ def run_ingest(
 
         return {"total": len(results), "results": results, "summary": summary}
     finally:
+        if session:
+            try:
+                session.close()
+            except Exception:
+                pass
+        
         import sys
         exc_type, exc_value, _ = sys.exc_info()
         status = "failed" if exc_type is not None else "completed"

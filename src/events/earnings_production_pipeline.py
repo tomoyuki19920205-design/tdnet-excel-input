@@ -216,6 +216,7 @@ def run_earnings_production(
     model: str = "",
     dry_run: bool = False,
     state_db=None,
+    session=None,
 ) -> EarningsProductionResult:
     """決算短信V2 本番パイプラインを実行する。
 
@@ -311,7 +312,7 @@ def run_earnings_production(
                 _xbrl_url = getattr(d, "xbrl_url", "") or ""
                 _zip_path = ""
                 if _xbrl_url:
-                    _zip_path = download_document(_xbrl_url, xbrl_dir) or ""
+                    _zip_path = download_document(_xbrl_url, xbrl_dir, session=session) or ""
 
                 target_docs_j.append({
                     "ticker":        _t,
@@ -465,7 +466,7 @@ def run_earnings_production(
             # ---- XBRL取得 ----
             xbrl_path = None
             if getattr(doc, 'xbrl_url', None):
-                xbrl_path = download_document(doc.xbrl_url, xbrl_dir)
+                xbrl_path = download_document(doc.xbrl_url, xbrl_dir, session=session)
                 if xbrl_path:
                     logger.info(f"[EARNINGS] {ticker} ZIP downloaded: {Path(xbrl_path).name}")
                 else:
@@ -601,7 +602,7 @@ def run_earnings_production(
             pdf_text = ""
             pdf_path_downloaded = None
             if getattr(doc, 'doc_url', None):
-                pdf_path_downloaded = download_document(doc.doc_url, xbrl_dir)
+                pdf_path_downloaded = download_document(doc.doc_url, xbrl_dir, session=session)
                 if pdf_path_downloaded and Path(pdf_path_downloaded).exists():
                     try:
                         import pdfplumber

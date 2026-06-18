@@ -174,12 +174,13 @@ def _matches_watchlist(ticker: str, watch_tickers: list[str]) -> bool:
 # ルート1: yanoshin.jp 非公式API（優先）
 # ============================================================
 
-def _fetch_via_api() -> list[DisclosureItem]:
+def _fetch_via_api(session: requests.Session | None = None) -> list[DisclosureItem]:
     """yanoshin.jp APIから開示一覧を取得"""
     url = "https://webapi.yanoshin.jp/webapi/tdnet/list/today.json"
     logger.info(f"[API] yanoshin.jp APIから取得中: {url}")
 
-    resp = requests.get(url, headers={"User-Agent": _USER_AGENT}, timeout=15)
+    client = session or requests
+    resp = client.get(url, headers={"User-Agent": _USER_AGENT}, timeout=15)
     resp.raise_for_status()
 
     content_type = resp.headers.get("Content-Type", "")
@@ -354,11 +355,12 @@ def _parse_target_date(target_date: str | date_type | None) -> str:
     return s
 
 
-def _fetch_via_html(target_date: str | date_type | None = None) -> list[DisclosureItem]:
+def _fetch_via_html(target_date: str | date_type | None = None, session: requests.Session | None = None) -> list[DisclosureItem]:
     """TDnet HTMLページから開示一覧を取得。
 
     Args:
         target_date: 取得対象日付。None=今日。YYYY-MM-DD / YYYYMMDD / date 型対応。
+        session: 再利用可能な requests.Session (オプショナル)
     """
     date_str = _parse_target_date(target_date)
     is_backfill = (date_str != today_yyyymmdd())
@@ -374,7 +376,8 @@ def _fetch_via_html(target_date: str | date_type | None = None) -> list[Disclosu
 
         page_item_count = 0
         try:
-            resp = requests.get(url, headers={"User-Agent": _USER_AGENT}, timeout=15)
+            client = session or requests
+            resp = client.get(url, headers={"User-Agent": _USER_AGENT}, timeout=15)
             if resp.status_code == 404:
                 logger.info(f"[HTML] page={page} → 404 (ページ終端)")
                 break  # ページ終端
@@ -457,6 +460,7 @@ def fetch_new_disclosures(
     watch_tickers: list[str] | None = None,
     is_processed_fn=None,
     target_date: str | date_type | None = None,
+    session: requests.Session | None = None,
 ) -> list[DisclosureItem]:
     """
     新着開示を取得（API優先 + HTML FB）。新規のみを返す。
@@ -466,6 +470,7 @@ def fetch_new_disclosures(
         is_processed_fn: disclosure_id → bool の冪等性チェック関数
         target_date: 取得対象日付。None=今日（API優先）。
                      過去日付指定時は HTML スクレイピングのみ使用。
+        session: 再利用可能な requests.Session (オプショナル)
     """
     watch = watch_tickers or []
     fetched_items: list[DisclosureItem] = []
@@ -476,7 +481,7 @@ def fetch_new_disclosures(
         # 過去日付: HTML スクレイピングのみ（yanoshin API は当日限定）
         logger.info(f"[BACKFILL] 過去日付モード: target_date={target_date}")
         try:
-            fetched_items = _fetch_via_html(target_date)
+            fetched_items = _fetch_via_html(target_date, session=session)
             source = "HTML_BACKFILL"
             logger.info(f"[{source}] fetched_count={len(fetched_items)}")
         except Exception as html_err:
@@ -485,14 +490,14 @@ def fetch_new_disclosures(
     else:
         # 当日: API 優先 + HTML フォールバック
         try:
-            fetched_items = _fetch_via_api()
+            fetched_items = _fetch_via_api(session=session)
             source = "API"
             logger.info(f"[{source}] fetched_count={len(fetched_items)}")
         except Exception as api_err:
             logger.warning(f"[API] 取得失敗、HTMLフォールバックへ: {api_err}")
 
             try:
-                fetched_items = _fetch_via_html(target_date)
+                fetched_items = _fetch_via_html(target_date, session=session)
                 source = "HTML"
                 logger.info(f"[{source}] fetched_count={len(fetched_items)}")
             except Exception as html_err:
