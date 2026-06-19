@@ -719,21 +719,27 @@ def process_documents(
                     logger.error(f"[GLOBAL_OUTBOX_GUARD_ERROR] Failed to check outbox blockers: {e}")
                 # -----------------------------------
                 
-                # --- D4-1C: Discord Aggregation Pipeline Guard ---
+                # --- D4-1C / Phase 4-5 Small Batch Prod Hook ---
                 enable_discord_agg_pipeline = os.getenv("ENABLE_DISCORD_AGG_PIPELINE") == "1"
                 
                 if enable_discord_agg_pipeline:
                     logger.info("[DISCORD_D4_GUARD_CHECK] Aggregation pipeline explicitly enabled. Checking conditions...")
                     blocked_reasons = []
                     if os.getenv("ENABLE_DISCORD_AGG_SEND") != "1": blocked_reasons.append("ENABLE_DISCORD_AGG_SEND != 1")
-                    if os.getenv("BATCH_NOTIFY_MODE") != "explicit_pipeline_canary": blocked_reasons.append("batch_notify_mode mismatch")
-                    if os.getenv("CANARY_MODE") != "discord_d4_pipeline_state": blocked_reasons.append("canary_mode mismatch")
+                    if os.getenv("BATCH_NOTIFY_MODE") != "explicit_small_batch_prod_canary": blocked_reasons.append("batch_notify_mode mismatch")
+                    if os.getenv("CANARY_MODE") != "discord_d4_pipeline_state_small_batch": blocked_reasons.append("canary_mode mismatch")
                     if os.getenv("OUTBOX_ENABLED") != "1": blocked_reasons.append("outbox_enabled != 1")
+                    
+                    max_items = int(os.getenv("DISCORD_AGG_MAX_ITEMS", "0"))
+                    if max_items <= 0 or max_items > 5:
+                        blocked_reasons.append(f"invalid max_items: {max_items}")
+
                     if not outbox_db_path: blocked_reasons.append("outbox_db_path missing")
                     
                     if outbox_db_path:
                         try:
                             # We already verified schema and blockers in Global Guard, but doing it again specifically for D4 guard logging
+                            from .discord_outbox import verify_outbox_schema, scan_outbox_blockers
                             if not verify_outbox_schema(outbox_db_path):
                                 blocked_reasons.append("schema missing")
                             else:
@@ -743,16 +749,93 @@ def process_documents(
                         except Exception as e:
                             blocked_reasons.append(f"outbox check failed: {e}")
 
+                    if not unnotified:
+                        blocked_reasons.append("no unnotified events")
+
                     if blocked_reasons:
-                        logger.warning(f"[DISCORD_D4_GUARD_BLOCKED] Pipeline aggregation blocked: {blocked_reasons}")
-                        logger.error("[DISCORD_D4_GUARD_HOLD] Aggregation explicitly requested but blockers exist. HOLDING to prevent double notification.")
-                        logger.info("[DISCORD_D4_LEGACY_FALLBACK_DENIED] Denying fallback to traditional 1-by-1 notification.")
+                        if "no unnotified events" in blocked_reasons and len(blocked_reasons) == 1:
+                            logger.info("[DISCORD_D4_SMALL_BATCH] Pipeline explicitly enabled but 0 targets. Safe exit.")
+                        else:
+                            logger.warning(f"[DISCORD_D4_GUARD_BLOCKED] Pipeline aggregation blocked: {blocked_reasons}")
+                            logger.error("[DISCORD_D4_GUARD_HOLD] Aggregation explicitly requested but conditions not met. HOLDING to prevent double notification.")
+                            logger.info("[DISCORD_D4_LEGACY_FALLBACK_DENIED] Denying fallback to traditional 1-by-1 notification.")
                         unnotified = [] # Prevent 1-by-1 notification
                     else:
-                        logger.info("[DISCORD_D4_GUARD_OK] Preflight OK.")
-                        logger.info("[DISCORD_D4_PIPELINE_PREVIEW] Preflight OK. (Execution stopped at preflight in D4-1C)")
-                        # When fully valid for aggregation, we bypass the old 1-by-1 notification entirely.
+                        logger.info(f"[DISCORD_D4_SMALL_BATCH] Preflight OK. Proceeding with small batch of up to {max_items} items.")
+                        target_events = unnotified[:max_items]
+                        logger.info(f"[DISCORD_D4_SMALL_BATCH] Selected {len(target_events)} events out of {len(unnotified)} total.")
+                        
+                        try:
+                            from .discord_aggregator import build_discord_chunks, render_discord_chunk
+                            from .discord_outbox import (
+                                create_prepared_chunk, mark_posting, mark_sent_http_204, 
+                                mark_state_update_started, mark_state_update_completed, mark_manual_review_required
+                            )
+                            from .common_storage import mark_notified
+                            import src.db as core_db
+                            import requests
+                            import hashlib
+                            import json
+
+                            # 1. Chunk creation
+                            chunks = build_discord_chunks(target_events)
+                            if len(chunks) > 1:
+                                raise ValueError(f"Expected 1 chunk, got {len(chunks)}")
+                            chunk = chunks[0]
+                            payload = render_discord_chunk(chunk)
+
+                            payload_json = json.dumps(payload, ensure_ascii=False)
+                            payload_hash = hashlib.sha256(payload_json.encode('utf-8')).hexdigest()
+                            
+                            dedupe_keys = [ev.event_id for ev in chunk.events]
+                            webhook_hash = hashlib.sha256(webhook_url.encode('utf-8')).hexdigest()
+
+                            # 2. Outbox Prepared
+                            chunk_id = create_prepared_chunk(outbox_db_path, payload, dedupe_keys, webhook_hash)
+                            logger.info(f"[DISCORD_D4_SMALL_BATCH] Prepared chunk {chunk_id}")
+
+                            # 3. Posting
+                            mark_posting(outbox_db_path, chunk_id)
+                            logger.info(f"[DISCORD_D4_SMALL_BATCH] Posting chunk {chunk_id}")
+
+                            # 4. Discord POST
+                            resp = requests.post(webhook_url, json=payload, timeout=10)
+                            if resp.status_code == 204:
+                                mark_sent_http_204(outbox_db_path, chunk_id)
+                                logger.info(f"[DISCORD_D4_SMALL_BATCH] HTTP 204 received. sent_http_204 for chunk {chunk_id}")
+                            else:
+                                mark_manual_review_required(outbox_db_path, chunk_id, f"HTTP {resp.status_code}")
+                                raise RuntimeError(f"Discord POST failed with HTTP {resp.status_code}: {resp.text}")
+
+                            # 5. State update started
+                            mark_state_update_started(outbox_db_path, chunk_id)
+                            
+                            # 6. Update processing_log and decision_db.db
+                            updated_decision = 0
+                            updated_processing = 0
+                            
+                            state_db = core_db.StateDB(outbox_db_path)
+                            for ev in chunk.events:
+                                mark_notified(conn, ev.event_id)
+                                updated_decision += 1
+                                state_db.record(ev.source_doc_id, ev.ticker, "success")
+                                updated_processing += 1
+                            state_db.close()
+
+                            if updated_decision != len(chunk.events) or updated_processing != len(chunk.events):
+                                raise RuntimeError(f"State update count mismatch. expected={len(chunk.events)}, decision={updated_decision}, processing={updated_processing}")
+
+                            # 7. State update completed
+                            mark_state_update_completed(outbox_db_path, chunk_id)
+                            logger.info(f"[DISCORD_D4_SMALL_BATCH] Successfully completed chunk {chunk_id}")
+                            
+                        except Exception as e:
+                            logger.error(f"[DISCORD_D4_SMALL_BATCH_ERROR] Exception during small batch prod: {e}")
+                            raise
+                        
+                        # Clear unnotified so we don't process remaining via legacy
                         unnotified = []
+
                 else:
                     logger.info("[DISCORD_D4_LEGACY_FALLBACK_ALLOWED] Aggregation not explicitly requested. Proceeding with traditional 1-by-1 notification.")
                 # -------------------------------------------------
