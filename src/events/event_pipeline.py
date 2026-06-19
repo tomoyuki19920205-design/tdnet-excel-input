@@ -23,6 +23,7 @@ from .common_models import (
 from .common_normalizers import compute_fingerprint, compute_text_hash
 from .common_storage import ensure_events_table, upsert_event, get_unnotified_events, mark_notified
 from .common_notify import send_event_discord
+from .discord_aggregator import dry_run_aggregate_discord_notifications
 from .notify_rules import should_notify_event
 
 # classifiers
@@ -724,20 +725,36 @@ def process_documents(
         elif dry_run and conn:
             # dry-run: 検知されたイベントをログ出力 (should_notify_event=False は表示のみスキップ)
             try:
+                import os
                 unnotified = get_unnotified_events(conn)
                 logger.info(f"[EVENT_NOTIFY] dry-run unnotified_events={len(unnotified)}")
-                for ev in unnotified:
-                    _notify_ok = should_notify_event(ev)
-                    if not _notify_ok:
-                        _rej = _classify_reject_reason(ev)
-                        logger.info(
-                            "[EVENT_NOTIFY] dry-run SKIP event_id=%s event_type=%s subtype=%s "
-                            "ticker=%s reject=%s",
-                            ev.event_id[:12], ev.event_type, ev.subtype, ev.ticker, _rej,
-                        )
-                        continue
-                    send_event_discord("", ev, dry_run=True)
-                    result.notified += 1
+
+                if os.getenv("ENABLE_DISCORD_AGG_DRY_RUN") == "1":
+                    # [Step D1] 明示フラグON時のみdry-run集約previewへ分岐
+                    filtered_unnotified = []
+                    for ev in unnotified:
+                        if should_notify_event(ev):
+                            filtered_unnotified.append(ev)
+                        else:
+                            _rej = _classify_reject_reason(ev)
+                            logger.info(f"[EVENT_NOTIFY] dry-run SKIP event_id={ev.event_id[:12]} reject={_rej}")
+                    
+                    if filtered_unnotified:
+                        stats, chunks, raw_strings = dry_run_aggregate_discord_notifications(filtered_unnotified)
+                        # dry-run時はsuccess扱いしない、state更新しない
+                else:
+                    for ev in unnotified:
+                        _notify_ok = should_notify_event(ev)
+                        if not _notify_ok:
+                            _rej = _classify_reject_reason(ev)
+                            logger.info(
+                                "[EVENT_NOTIFY] dry-run SKIP event_id=%s event_type=%s subtype=%s "
+                                "ticker=%s reject=%s",
+                                ev.event_id[:12], ev.event_type, ev.subtype, ev.ticker, _rej,
+                            )
+                            continue
+                        send_event_discord("", ev, dry_run=True)
+                        result.notified += 1
             except Exception as e:
                 logger.warning(f"[EVENT] dry-run notification preview failed: {e}")
 
