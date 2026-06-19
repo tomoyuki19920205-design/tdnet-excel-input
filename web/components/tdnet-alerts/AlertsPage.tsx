@@ -12,41 +12,102 @@ import CompanyViewerFull from "@/components/company-viewer/CompanyViewerFull";
 
 const YOY_REGEX = /((?:YOY|前年比|sales_yoy|operating_profit_yoy)\s*:?\s*[+-]?[\d.]+%|(?:営業利益|経常利益|純利益)\s*[+-]?[\d.]+%)/gi;
 
+const BUYBACK_REGEX = /((\d+(?:\.\d+)?)%)/g;
+const EPS_REGEX = /(EPS[:：\s]*[0-9.,]+(?:円)?\s*(?:->|[→＞>x\-])\s*[0-9.,]+(?:円)?(?:\([+-]?[0-9.]+(?:%|％)\))?)/gi;
+const DIV_REGEX = /((?:増配|配当|DPS)[:：\s]*(?:予想)?[:：\s]*[0-9.,]+(?:円)?\s*(?:->|[→＞>x\-])\s*[0-9.,]+(?:円)?(?:\([+-]?[0-9.]+(?:%|％)\))?)/gi;
+
 const renderHighlightedCardBody = (text: string, eventType: string) => {
   if (!text) return null;
-  if (eventType !== "earnings" && eventType !== "forecast") {
-    return text.split("\n").map((line, j, arr) => (
+
+  const renderLines = (str: string) => {
+    return str.split("\n").map((line, j, arr) => (
       <React.Fragment key={j}>
         {line}
         {j < arr.length - 1 && <br />}
       </React.Fragment>
     ));
+  };
+
+  if (eventType === "buyback" || eventType === "buyback_resolution") {
+    const parts = text.split(BUYBACK_REGEX);
+    return (
+      <>
+        {parts.map((part, i) => {
+          if (part.match(BUYBACK_REGEX)) {
+            const val = parseFloat(part);
+            if (!isNaN(val)) {
+              if (val >= 6.0) {
+                return <span key={i} style={{ color: "var(--accent-amber)", fontWeight: 600 }}>{part}</span>;
+              } else if (val >= 4.0) {
+                return <span key={i} style={{ color: "var(--accent-green)", fontWeight: 600 }}>{part}</span>;
+              }
+            }
+          }
+          return <span key={i}>{renderLines(part)}</span>;
+        })}
+      </>
+    );
   }
-  
-  const parts = text.split(YOY_REGEX);
-  return (
-    <>
-      {parts.map((part, i) => {
-        if (part.match(YOY_REGEX)) {
+
+  if (eventType === "dividend" || eventType === "dividend_revision") {
+    const parts = text.split(DIV_REGEX);
+    return (
+      <>
+        {parts.map((part, i) => {
+          if (part.match(DIV_REGEX)) {
+            const match = part.match(/(?:増配|配当|DPS)[:：\s]*(?:予想)?[:：\s]*([0-9.,]+)(?:円)?\s*(?:->|[→＞>x\-])\s*([0-9.,]+)/i);
+            if (match) {
+              const oldVal = parseFloat(match[1].replace(/,/g, ''));
+              const newVal = parseFloat(match[2].replace(/,/g, ''));
+              if (oldVal > 0 && newVal > oldVal && (newVal - oldVal) / oldVal >= 0.20) {
+                return <span key={i} style={{ color: "var(--accent-green)", fontWeight: 600 }}>{part}</span>;
+              }
+            }
+          }
+          return <span key={i}>{renderLines(part)}</span>;
+        })}
+      </>
+    );
+  }
+
+  if (eventType === "earnings" || eventType === "forecast" || eventType === "forecast_revision") {
+    const partsEps = text.split(EPS_REGEX);
+    return (
+      <>
+        {partsEps.map((partEps, i) => {
+          if (partEps.match(EPS_REGEX)) {
+            const match = partEps.match(/EPS[:：\s]*([0-9.,]+)(?:円)?\s*(?:->|[→＞>x\-])\s*([0-9.,]+)/i);
+            if (match) {
+              const oldVal = parseFloat(match[1].replace(/,/g, ''));
+              const newVal = parseFloat(match[2].replace(/,/g, ''));
+              if (oldVal > 0 && newVal > oldVal && (newVal - oldVal) / oldVal >= 0.10) {
+                return <span key={`eps-${i}`} style={{ color: "var(--accent-green)", fontWeight: 600 }}>{partEps}</span>;
+              }
+            }
+            return <span key={`eps-${i}`}>{renderLines(partEps)}</span>;
+          }
+
+          const partsYoy = partEps.split(YOY_REGEX);
           return (
-            <span key={i} className="yoy-highlight">
-              {part}
+            <span key={`yoy-wrap-${i}`}>
+              {partsYoy.map((partYoy, k) => {
+                if (partYoy.match(YOY_REGEX)) {
+                  return (
+                    <span key={`yoy-${k}`} className="yoy-highlight">
+                      {partYoy}
+                    </span>
+                  );
+                }
+                return <span key={`text-${k}`}>{renderLines(partYoy)}</span>;
+              })}
             </span>
           );
-        }
-        return (
-          <span key={i}>
-            {part.split("\n").map((line, j, arr) => (
-              <React.Fragment key={j}>
-                {line}
-                {j < arr.length - 1 && <br />}
-              </React.Fragment>
-            ))}
-          </span>
-        );
-      })}
-    </>
-  );
+        })}
+      </>
+    );
+  }
+
+  return <>{renderLines(text)}</>;
 };
 
 
