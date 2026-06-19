@@ -701,6 +701,40 @@ def process_documents(
             try:
                 unnotified = get_unnotified_events(conn)
                 logger.info(f"[EVENT_NOTIFY] unnotified_events={len(unnotified)}")
+                
+                # --- D4-1B: Discord Aggregation Pipeline Guard ---
+                import os
+                enable_discord_agg_pipeline = os.getenv("ENABLE_DISCORD_AGG_PIPELINE") == "1"
+                if enable_discord_agg_pipeline:
+                    blocked_reasons = []
+                    if os.getenv("ENABLE_DISCORD_AGG_SEND") != "1": blocked_reasons.append("ENABLE_DISCORD_AGG_SEND != 1")
+                    if os.getenv("BATCH_NOTIFY_MODE") != "explicit_pipeline_canary": blocked_reasons.append("batch_notify_mode mismatch")
+                    if os.getenv("CANARY_MODE") != "discord_d4_pipeline_state": blocked_reasons.append("canary_mode mismatch")
+                    if os.getenv("OUTBOX_ENABLED") != "1": blocked_reasons.append("outbox_enabled != 1")
+                    outbox_db_path = os.getenv("OUTBOX_DB_PATH", "")
+                    if not outbox_db_path: blocked_reasons.append("outbox_db_path missing")
+                    
+                    if outbox_db_path:
+                        try:
+                            from .discord_outbox import verify_outbox_schema, scan_outbox_blockers
+                            if not verify_outbox_schema(outbox_db_path):
+                                blocked_reasons.append("schema missing")
+                            else:
+                                blockers = scan_outbox_blockers(outbox_db_path)
+                                if blockers:
+                                    blocked_reasons.append(f"blockers found: {[b['chunk_id'] for b in blockers]}")
+                        except Exception as e:
+                            blocked_reasons.append(f"outbox check failed: {e}")
+
+                    if blocked_reasons:
+                        logger.warning(f"[DISCORD_D4_GUARD_BLOCKED] Pipeline aggregation blocked: {blocked_reasons}")
+                        logger.info("[DISCORD_D4_FALLBACK] Falling back to traditional 1-by-1 notification pipeline.")
+                    else:
+                        logger.info("[DISCORD_D4_PIPELINE_PREVIEW] Preflight OK. (Execution stopped at preflight in D4-1B)")
+                        # When fully valid for aggregation, we bypass the old 1-by-1 notification entirely.
+                        unnotified = []
+                # -------------------------------------------------
+
                 for ev in unnotified:
                     _notify_ok = should_notify_event(ev)
                     if not _notify_ok:
