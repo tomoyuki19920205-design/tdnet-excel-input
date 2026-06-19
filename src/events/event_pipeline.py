@@ -702,10 +702,12 @@ def process_documents(
                 unnotified = get_unnotified_events(conn)
                 logger.info(f"[EVENT_NOTIFY] unnotified_events={len(unnotified)}")
                 
-                # --- D4-1B: Discord Aggregation Pipeline Guard ---
+                # --- D4-1C: Discord Aggregation Pipeline Guard ---
                 import os
                 enable_discord_agg_pipeline = os.getenv("ENABLE_DISCORD_AGG_PIPELINE") == "1"
+                
                 if enable_discord_agg_pipeline:
+                    logger.info("[DISCORD_D4_GUARD_CHECK] Aggregation pipeline explicitly enabled. Checking conditions...")
                     blocked_reasons = []
                     if os.getenv("ENABLE_DISCORD_AGG_SEND") != "1": blocked_reasons.append("ENABLE_DISCORD_AGG_SEND != 1")
                     if os.getenv("BATCH_NOTIFY_MODE") != "explicit_pipeline_canary": blocked_reasons.append("batch_notify_mode mismatch")
@@ -728,11 +730,16 @@ def process_documents(
 
                     if blocked_reasons:
                         logger.warning(f"[DISCORD_D4_GUARD_BLOCKED] Pipeline aggregation blocked: {blocked_reasons}")
-                        logger.info("[DISCORD_D4_FALLBACK] Falling back to traditional 1-by-1 notification pipeline.")
+                        logger.error("[DISCORD_D4_GUARD_HOLD] Aggregation explicitly requested but blockers exist. HOLDING to prevent double notification.")
+                        logger.info("[DISCORD_D4_LEGACY_FALLBACK_DENIED] Denying fallback to traditional 1-by-1 notification.")
+                        unnotified = [] # Prevent 1-by-1 notification
                     else:
-                        logger.info("[DISCORD_D4_PIPELINE_PREVIEW] Preflight OK. (Execution stopped at preflight in D4-1B)")
+                        logger.info("[DISCORD_D4_GUARD_OK] Preflight OK.")
+                        logger.info("[DISCORD_D4_PIPELINE_PREVIEW] Preflight OK. (Execution stopped at preflight in D4-1C)")
                         # When fully valid for aggregation, we bypass the old 1-by-1 notification entirely.
                         unnotified = []
+                else:
+                    logger.info("[DISCORD_D4_LEGACY_FALLBACK_ALLOWED] Aggregation not explicitly requested. Proceeding with traditional 1-by-1 notification.")
                 # -------------------------------------------------
 
                 for ev in unnotified:

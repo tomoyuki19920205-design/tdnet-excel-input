@@ -139,7 +139,7 @@ def scan_outbox_blockers(db_path: str) -> List[sqlite3.Row]:
     """Returns chunks that block further aggregation pipeline execution."""
     with get_connection(db_path) as conn:
         rows = conn.execute(
-            "SELECT * FROM discord_chunk_outbox WHERE status IN ('posting', 'manual_review_required')"
+            "SELECT * FROM discord_chunk_outbox WHERE status IN ('posting', 'manual_review_required', 'sent_http_204', 'state_update_started')"
         ).fetchall()
         return rows
 
