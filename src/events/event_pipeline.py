@@ -702,8 +702,24 @@ def process_documents(
                 unnotified = get_unnotified_events(conn)
                 logger.info(f"[EVENT_NOTIFY] unnotified_events={len(unnotified)}")
                 
-                # --- D4-1C: Discord Aggregation Pipeline Guard ---
+                # --- GLOBAL OUTBOX BLOCKER GUARD ---
                 import os
+                outbox_db_path = os.getenv("OUTBOX_DB_PATH", "data/state.db")
+                try:
+                    from .discord_outbox import verify_outbox_schema, scan_outbox_blockers
+                    if verify_outbox_schema(outbox_db_path):
+                        blockers = scan_outbox_blockers(outbox_db_path)
+                        if blockers:
+                            statuses = [b['status'] for b in blockers]
+                            chunk_ids = [b['chunk_id'] for b in blockers]
+                            logger.error(f"[GLOBAL_OUTBOX_GUARD_HOLD] blocker_count={len(blockers)} statuses={statuses} chunk_ids={chunk_ids}")
+                            logger.error("[GLOBAL_OUTBOX_GUARD_HOLD] Outbox blockers exist. HOLDING all notifications to prevent double-sends.")
+                            unnotified = []
+                except Exception as e:
+                    logger.error(f"[GLOBAL_OUTBOX_GUARD_ERROR] Failed to check outbox blockers: {e}")
+                # -----------------------------------
+                
+                # --- D4-1C: Discord Aggregation Pipeline Guard ---
                 enable_discord_agg_pipeline = os.getenv("ENABLE_DISCORD_AGG_PIPELINE") == "1"
                 
                 if enable_discord_agg_pipeline:
@@ -713,12 +729,11 @@ def process_documents(
                     if os.getenv("BATCH_NOTIFY_MODE") != "explicit_pipeline_canary": blocked_reasons.append("batch_notify_mode mismatch")
                     if os.getenv("CANARY_MODE") != "discord_d4_pipeline_state": blocked_reasons.append("canary_mode mismatch")
                     if os.getenv("OUTBOX_ENABLED") != "1": blocked_reasons.append("outbox_enabled != 1")
-                    outbox_db_path = os.getenv("OUTBOX_DB_PATH", "")
                     if not outbox_db_path: blocked_reasons.append("outbox_db_path missing")
                     
                     if outbox_db_path:
                         try:
-                            from .discord_outbox import verify_outbox_schema, scan_outbox_blockers
+                            # We already verified schema and blockers in Global Guard, but doing it again specifically for D4 guard logging
                             if not verify_outbox_schema(outbox_db_path):
                                 blocked_reasons.append("schema missing")
                             else:
