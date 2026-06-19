@@ -12,36 +12,82 @@ import CompanyViewerFull from "@/components/company-viewer/CompanyViewerFull";
 
 const YOY_REGEX = /((?:YOY|前年比|sales_yoy|operating_profit_yoy)\s*:?\s*[+-]?[\d.]+%|(?:営業利益|経常利益|純利益)\s*[+-]?[\d.]+%)/gi;
 
-const renderHighlightedCardBody = (text: string, eventType: string) => {
+const processLines = (str: string) => str.split("\n").map((line, j, arr) => (
+  <React.Fragment key={j}>
+    {line}
+    {j < arr.length - 1 && <br />}
+  </React.Fragment>
+));
+
+const renderHighlightedCardBody = (text: string, event: EnrichedEvent) => {
   if (!text) return null;
+  const eventType = event.event_type;
+  const ext = (event.raw_payload && typeof event.raw_payload === "object" && event.raw_payload.extracted)
+    ? (event.raw_payload.extracted as Record<string, any>)
+    : {};
+
+  if (eventType === "buyback") {
+    const ratio = Number(ext.ratio_to_outstanding);
+    if (!isNaN(ratio) && ratio >= 4) {
+      const color = ratio >= 6 ? "var(--accent-amber)" : "var(--accent-green)";
+      const regex = /([\d.]+%)/;
+      return text.split(regex).map((part, i) => {
+        if (part.match(regex)) {
+           const num = parseFloat(part);
+           if (!isNaN(num) && Math.abs(num - ratio) < 0.1) {
+             return <span key={i} style={{ color }}>{processLines(part)}</span>;
+           }
+        }
+        return <span key={i}>{processLines(part)}</span>;
+      });
+    }
+  }
+
+  if (eventType === "dividend") {
+    const prev = Number(ext.previous_dividend_per_share);
+    const rev = Number(ext.revised_dividend_per_share);
+    if (!isNaN(prev) && !isNaN(rev) && prev > 0 && rev > prev && (rev - prev) / prev >= 0.2) {
+      const regex = /((?:増配|配当|DPS|期末配当|中間配当|記念配当|特別配当)\s*[:：]?\s*[\d,.]+(?:円|銭)\s*[→＞]\s*[\d,.]+(?:円|銭)(?:\([+-][\d.]+\%\))?)/i;
+      return text.split(regex).map((part, i) => {
+        if (part.match(regex)) {
+          return <span key={i} style={{ color: "var(--accent-green)" }}>{processLines(part)}</span>;
+        }
+        return <span key={i}>{processLines(part)}</span>;
+      });
+    }
+  }
+
   if (eventType !== "earnings" && eventType !== "forecast") {
-    return text.split("\n").map((line, j, arr) => (
-      <React.Fragment key={j}>
-        {line}
-        {j < arr.length - 1 && <br />}
-      </React.Fragment>
-    ));
+    return processLines(text);
   }
   
-  const parts = text.split(YOY_REGEX);
+  let isEpsHighlight = false;
+  const prevEps = Number(ext.previous_eps);
+  const revEps = Number(ext.revised_eps);
+  if (eventType === "forecast" && !isNaN(prevEps) && !isNaN(revEps) && prevEps > 0 && revEps > prevEps) {
+    if ((revEps - prevEps) / prevEps >= 0.1) {
+      isEpsHighlight = true;
+    }
+  }
+  const EPS_REGEX = /(EPS\s*[:：]?\s*[\d,.]+円\s*[→＞]\s*[\d,.]+円(?:\([+-][\d.]+\%\))?)/i;
+
+  const mainParts = isEpsHighlight ? text.split(EPS_REGEX) : [text];
+
   return (
     <>
-      {parts.map((part, i) => {
-        if (part.match(YOY_REGEX)) {
-          return (
-            <span key={i} className="yoy-highlight">
-              {part}
-            </span>
-          );
+      {mainParts.map((mPart, mIdx) => {
+        if (isEpsHighlight && mPart.match(EPS_REGEX)) {
+          return <span key={mIdx} style={{ color: "var(--accent-green)" }}>{processLines(mPart)}</span>;
         }
+        const yoyParts = mPart.split(YOY_REGEX);
         return (
-          <span key={i}>
-            {part.split("\n").map((line, j, arr) => (
-              <React.Fragment key={j}>
-                {line}
-                {j < arr.length - 1 && <br />}
-              </React.Fragment>
-            ))}
+          <span key={mIdx}>
+            {yoyParts.map((part, i) => {
+              if (part.match(YOY_REGEX)) {
+                return <span key={i} className="yoy-highlight">{part}</span>;
+              }
+              return <span key={i}>{processLines(part)}</span>;
+            })}
           </span>
         );
       })}
@@ -767,7 +813,7 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
                   </div>
 
                   {/* Main content */}
-                  <div className="alert-card-body">{renderHighlightedCardBody(cardBody, event.event_type)}</div>
+                  <div className="alert-card-body">{renderHighlightedCardBody(cardBody, event)}</div>
                 </div>
               );
             });
