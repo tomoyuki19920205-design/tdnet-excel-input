@@ -87,7 +87,8 @@ def run_step(
         result = subprocess.run(
             cmd,
             cwd=cwd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
             encoding="utf-8",
             errors="replace",
@@ -97,12 +98,14 @@ def run_step(
         step.rc = result.returncode
         step.duration = time.monotonic() - t0
         step.status = "success" if result.returncode == 0 else "warning"
-        step.stdout_tail = _tail(result.stdout, 500)
-        step.stderr_tail = _tail(result.stderr, 300)
+        
+        out_text = result.stdout or ""
+        step.stdout_tail = _tail(out_text, 500)
+        step.stderr_tail = ""
 
-        if result.stdout:
-            for line in result.stdout.strip().split("\n")[-5:]:
-                logger.info(f"  [{name}] {line.strip()}")
+        if out_text:
+            for line in out_text.strip().split("\n"):
+                logger.info(f"  [{name}] {line.rstrip()}")
 
     except subprocess.TimeoutExpired:
         step.duration = time.monotonic() - t0
