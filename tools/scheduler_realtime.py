@@ -12,7 +12,7 @@
     3. ingest（増分のみ）
     4. process（realtimeモード）
     5. notify
-    6. light reconcile（当日分のみ）
+    6. (reconcile は nightly に委譲)
     7. ログ出力 → lock解放
 
 Usage:
@@ -247,16 +247,13 @@ def main() -> int:
             logger.info(f"[{TASK_NAME}] deadline exceeded, skipping notify")
 
         # ── Step 4: light reconcile (当日分のみ) ──
-        if time.monotonic() < deadline:
-            logger.info(f"[TIMING] reconcile_start_at={datetime.now(JST).isoformat(timespec='seconds')}")
-            step = run_step("reconcile", [
-                PYTHON, "tools/pipeline_run.py", "reconcile",
-                "--trigger", "scheduler", *dry_flag,
-            ], timeout_sec=60)
-            steps.append(step)
-            logger.info(f"[TIMING] reconcile_end_at={datetime.now(JST).isoformat(timespec='seconds')} reconcile_sec={step.duration:.1f}")
-        else:
-            logger.info(f"[{TASK_NAME}] deadline exceeded, skipping reconcile")
+        # リアルタイムでの実行は不要なため nightly バッチに委譲しスキップする
+        logger.info(f"[{TASK_NAME}] step=reconcile SKIPPED reason=nightly_only")
+        step_rec = StepResult("reconcile")
+        step_rec.status = "skipped(nightly_only)"
+        step_rec.rc = 0
+        step_rec.duration = 0.0
+        steps.append(step_rec)
 
         elapsed = time.monotonic() - t_start
         deadline_exceeded = elapsed > (DEADLINE_MINUTES * 60)
@@ -291,6 +288,7 @@ def _print_summary(
             icon = {
                 "success": "[OK]", "warning": "[WARN]", "error": "[FAIL]",
                 "timeout": "[TOUT]", "pending": "[...]",
+                "skipped(nightly_only)": "[SKIP]",
             }.get(s.status, "[?]")
             print(f"  {s.name:20s}: {icon} rc={s.rc} ({s.duration:.1f}s)")
 
