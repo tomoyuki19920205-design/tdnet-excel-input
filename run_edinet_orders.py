@@ -7,8 +7,12 @@ EDINET受注データ 抽出→DB保存 エントリーポイント
     # 抽出 + DB保存（31社）
     python run_edinet_orders.py
 
-    # DRY RUN（DB保存なし）
+    # DRY RUN（DB保存なし、デフォルト）
+    python run_edinet_orders.py
     python run_edinet_orders.py --dry-run
+
+    # DBに保存する（本番実行）
+    python run_edinet_orders.py --apply
 
     # 特定企業のみ
     python run_edinet_orders.py --tickers 1812 6141 6834
@@ -57,15 +61,22 @@ def _build_fiscal_end_map(survey_data: list[dict]) -> dict[str, str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="EDINET受注データ 抽出→DB保存")
-    parser.add_argument("--dry-run", action="store_true", help="DB保存をスキップ")
+    parser.add_argument("--dry-run", action="store_true", help="DB保存をスキップ（デフォルト）")
+    parser.add_argument("--apply", action="store_true", help="DBに保存する（指定しない場合はDRY RUN）")
     parser.add_argument("--tickers", nargs="+", help="対象銘柄コードを指定（省略時は全社）")
     parser.add_argument("--from-json", type=Path, help="既存JSONから保存（再抽出しない）")
     parser.add_argument("--save-json", type=Path, help="抽出結果JSONの保存先（省略時は scratch/edinet_orders_YYYYMMDD.json）")
     args = parser.parse_args()
 
+    if args.dry_run and args.apply:
+        print("[ERROR] --dry-run と --apply は同時に指定できません")
+        sys.exit(1)
+
+    is_dry_run = not args.apply
+
     print("=" * 60)
     print("EDINET受注データ保存パイプライン")
-    print(f"  mode    : {'DRY RUN' if args.dry_run else 'LIVE'}")
+    print(f"  mode    : {'DRY RUN' if is_dry_run else 'APPLY'}")
     print(f"  tickers : {args.tickers or 'ALL'}")
     print("=" * 60)
 
@@ -163,11 +174,15 @@ def main() -> None:
         )
 
     # ── 6. DB 保存 ──
-    print(f"\n[SAVE] dry_run={args.dry_run}")
-    stats = save_to_db(db_rows, dry_run=args.dry_run)
+    print(f"\n[SAVE] mode={'DRY RUN' if is_dry_run else 'APPLY'}")
+    if is_dry_run:
+        print(f"  [DRY RUN] Skipping save_to_db. Would save {len(db_rows)} records to edinet_order_data.")
+        stats = {"upserted": 0, "skipped": 0, "errors": []}
+    else:
+        stats = save_to_db(db_rows, dry_run=False)
 
     # ── 7. AFTER サンプル5件（LIVE時のみ確認） ──
-    if not args.dry_run and not stats["errors"]:
+    if not is_dry_run and not stats["errors"]:
         try:
             from src.edinet_orders.saver import _get_client
             sb = _get_client()

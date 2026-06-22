@@ -135,6 +135,7 @@ def main() -> int:
 
     parser = argparse.ArgumentParser(description="TDNET Nightly Orchestrator")
     parser.add_argument("--dry-run", action="store_true", help="書き込みをスキップ")
+    parser.add_argument("--enable-edinet-orders", action="store_true", help="EDINET受注データの抽出・保存を有効化する")
     args = parser.parse_args()
 
     # ── ログ設定 ──
@@ -244,6 +245,25 @@ def main() -> int:
             logger.info(f"[PER_SHARE] sync done rc={step.rc}")
         else:
             logger.error(f"[PER_SHARE] sync done rc={step.rc} status={step.status} (Supabase sync FAILED)")
+
+        # ── Step 5c: EDINET受注データ抽出・保存 ──
+        if args.enable_edinet_orders:
+            logger.info("[EDINET_ORDERS] extract & sync start")
+            step = run_step("edinet-orders-sync", [
+                PYTHON, "-X", "utf8",
+                "run_edinet_orders.py",
+                *(["--dry-run"] if args.dry_run else ["--apply"]),
+            ], timeout_sec=600)
+            steps.append(step)
+            if step.rc == 0:
+                logger.info(f"[EDINET_ORDERS] sync done rc={step.rc}")
+            else:
+                logger.error(f"[EDINET_ORDERS] sync done rc={step.rc} status={step.status} (EDINET sync FAILED)")
+        else:
+            logger.info("[EDINET_ORDERS] skipped: --enable-edinet-orders not set")
+            step = StepResult("edinet-orders-sync")
+            step.status = "skipped"
+            steps.append(step)
 
         # ── Step 6: rebuild ──
         step = run_step("rebuild", [
