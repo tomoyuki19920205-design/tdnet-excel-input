@@ -827,7 +827,7 @@ def save_event_to_supabase(
                 
                 q = (
                     client.table("tdnet_events")
-                    .select("id, raw_payload, ticker, event_type, event_subtype, headline, disclosed_at, source_url, pdf_url")
+                    .select("*")
                     .eq("ticker", event.ticker or "")
                     .order("created_at", desc=True)
                 )
@@ -879,6 +879,44 @@ def save_event_to_supabase(
                     existing_payload_str = matched_row.get("raw_payload", "{}")
                     if isinstance(existing_payload_str, dict):
                         existing_payload_str = json.dumps(existing_payload_str)
+                    
+                    _merge_compare_json(row, existing_payload_str)
+                    
+                    # 差分比較 (マージ後)
+                    def _has_substantial_changes(old_row, new_row):
+                        keys = [
+                            "ticker", "company_name", "event_type", "event_subtype",
+                            "headline", "disclosed_at", "source_url", "pdf_url",
+                            "primary_metric_name", "primary_metric_value", "primary_metric_yoy",
+                            "display_title", "display_summary", "formatted_message",
+                            "notify_discord"
+                        ]
+                        for k in keys:
+                            if k in old_row and k in new_row:
+                                val_old = str(old_row[k]) if old_row[k] is not None else ""
+                                val_new = str(new_row[k]) if new_row[k] is not None else ""
+                                if k in ("disclosed_at", "detected_at"):
+                                    val_old = val_old.replace("+00:00", "Z")
+                                    val_new = val_new.replace("+00:00", "Z")
+                                if val_old != val_new:
+                                    return True
+                        
+                        try:
+                            old_p = json.loads(existing_payload_str) if isinstance(existing_payload_str, str) else existing_payload_str
+                            new_p = json.loads(new_row.get("raw_payload", "{}")) if isinstance(new_row.get("raw_payload", "{}"), str) else new_row.get("raw_payload", {})
+                            if old_p != new_p:
+                                return True
+                        except Exception as e:
+                            return True
+                        return False
+
+                    if not _has_substantial_changes(matched_row, row):
+                        result["action"] = "dedup_skipped"
+                        result["id"] = existing_id
+                        result["display_category"] = display_category
+                        logger.info(f"[STORE] UNCHANGED_SKIPPED existing record ticker={event.ticker} id={existing_id[:8]} (reason: {match_reason})")
+                        return result
+
                     if dry_run:
                         result["action"] = "updated"
                         result["id"] = existing_id
@@ -886,7 +924,6 @@ def save_event_to_supabase(
                         logger.info(f"[STORE DRY-RUN] WOULD UPDATE existing record ticker={event.ticker} id={existing_id[:8]} (reason: {match_reason})")
                         return result
                         
-                    _merge_compare_json(row, existing_payload_str)
                     resp = client.table("tdnet_events").update(row).eq("id", existing_id).execute()
                     if resp.data and len(resp.data) > 0:
                         result["action"] = "updated"
@@ -909,7 +946,7 @@ def save_event_to_supabase(
             result["action"] = "dry_run"
             result["display_title"] = display_title
             result["display_category"] = display_category
-            result["priority_rank"] = priority_rank
+            result["priority_rank"] = row.get("priority_rank", 50)
             return result
             
         resp = (

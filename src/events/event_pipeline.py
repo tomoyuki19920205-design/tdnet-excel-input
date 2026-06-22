@@ -939,6 +939,13 @@ def process_documents(
                                     f"[EVENT_SUPABASE] DEDUP_SKIP ticker={_rec.ticker} "
                                     f"type={_rec.event_type}"
                                 )
+                            elif _action == "updated":
+                                result.supabase_saved += 1
+                                logger.info(
+                                    f"[EVENT_SUPABASE] UPDATED ticker={_rec.ticker} "
+                                    f"type={_rec.event_type} "
+                                    f"-> {_sb_result.get('display_category')}"
+                                )
                             else:
                                 result.supabase_errors += 1
                                 logger.warning(
