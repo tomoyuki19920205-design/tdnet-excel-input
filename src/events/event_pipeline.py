@@ -14,6 +14,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
+from src import db as core_db
 from .common_models import (
     DocumentMeta,
     EventRecord,
