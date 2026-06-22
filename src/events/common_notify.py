@@ -458,6 +458,15 @@ def send_event_discord(
             f"type={event.event_type} ticker={event.ticker}"
         )
         return True
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"[NOTIFY] Discord send failed (HTTP error): {e}")
+        return False
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+        logger.warning(
+            f"[DISCORD_SEND_UNCERTAIN_MARK_NOTIFIED] event_id={event.event_id[:12]} "
+            f"ticker={event.ticker} reason={type(e).__name__}"
+        )
+        return True
     except Exception as e:
         logger.error(f"[NOTIFY] Discord send failed: {e}")
         return False
