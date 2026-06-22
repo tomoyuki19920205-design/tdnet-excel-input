@@ -22,7 +22,7 @@ from .common_models import (
     PipelineResult,
 )
 from .common_normalizers import compute_fingerprint, compute_text_hash
-from .common_storage import ensure_events_table, upsert_event, get_unnotified_events, mark_notified
+from .common_storage import ensure_events_table, upsert_event, get_unnotified_events, mark_notified, mark_skipped, mark_discord_send_failed
 from .common_notify import send_event_discord
 from .discord_aggregator import dry_run_aggregate_discord_notifications
 from .notify_rules import should_notify_event
@@ -772,7 +772,7 @@ def process_documents(
                                 create_prepared_chunk, mark_posting, mark_sent_http_204, 
                                 mark_state_update_started, mark_state_update_completed, mark_manual_review_required
                             )
-                            from .common_storage import mark_notified
+                            
                             import src.db as core_db
                             import requests
                             import hashlib
@@ -851,6 +851,7 @@ def process_documents(
                             "ticker=%s reject=%s",
                             ev.event_id[:12], ev.event_type, ev.subtype, ev.ticker, _rej,
                         )
+                        mark_skipped(conn, ev.event_id)
                         continue
                     logger.info(
                         "[EVENT_NOTIFY] SEND event_id=%s event_type=%s subtype=%s ticker=%s",
@@ -860,6 +861,12 @@ def process_documents(
                     if send_event_discord(webhook_url, ev, dry_run=False):
                         mark_notified(conn, ev.event_id)
                         result.notified += 1
+                    else:
+                        logger.warning(
+                            "[EVENT_NOTIFY] FAILED event_id=%s ticker=%s marked as manual_review",
+                            ev.event_id[:12], ev.ticker,
+                        )
+                        mark_discord_send_failed(conn, ev.event_id)
             except Exception as e:
                 logger.error(f"[EVENT] notification failed: {e}")
         elif dry_run and conn:

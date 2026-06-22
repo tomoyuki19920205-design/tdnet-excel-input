@@ -214,6 +214,26 @@ def mark_filtered(conn: sqlite3.Connection, event_id: str) -> None:
     conn.commit()
 
 
+def mark_skipped(conn: sqlite3.Connection, event_id: str) -> None:
+    """通知条件外としてスキップマーク"""
+    now = _now_jst()
+    conn.execute(
+        "UPDATE events SET status = 'skipped', updated_at = ? WHERE event_id = ? AND status != 'notified'",
+        (now, event_id),
+    )
+    conn.commit()
+
+
+def mark_discord_send_failed(conn: sqlite3.Connection, event_id: str) -> None:
+    """Discord送信失敗 (要マニュアルレビュー) マーク"""
+    now = _now_jst()
+    conn.execute(
+        "UPDATE events SET status = 'discord_send_failed_manual_review', updated_at = ? WHERE event_id = ? AND status != 'notified'",
+        (now, event_id),
+    )
+    conn.commit()
+
+
 # ============================================================
 # リスト取得
 # ============================================================
