@@ -737,7 +737,7 @@ def build_supabase_row(event: EventRecord, client=None) -> tuple[dict, dict, str
         "headline": event.title or "",
         "summary": event.summary_text or "",
         "source_url": event.doc_url or None,
-        "pdf_url": event.doc_url if event.event_type in ("earnings", "forecast") else None,
+        "pdf_url": event.doc_url if display_category in ("earnings", "forecast", "dividend", "buyback") else None,
         "raw_payload": json.dumps(raw_payload, ensure_ascii=False, default=str),
         "strength_score": strength,
         "priority_rank": priority_rank,

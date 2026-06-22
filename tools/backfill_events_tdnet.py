@@ -50,7 +50,7 @@ def _sqlite_row_to_event_record(row: dict) -> EventRecord:
         company_name=row.get("company_name", ""),
         disclosure_datetime=row.get("disclosure_datetime", ""),
         title=row.get("title", ""),
-        doc_url="",                              # events テーブルに doc_url なし
+        doc_url=row.get("doc_url", "") or "",
         event_type=row.get("event_type", ""),
         subtype=row.get("subtype", ""),
         importance=row.get("importance", 50) or 50,
