@@ -61,11 +61,16 @@ def _get_edinet_targets_by_date(target_date: str) -> list[dict]:
     targets = []
     seen = set()
     
-    try:
-        from src.common_ticker import normalize_ticker
-    except ImportError:
-        def normalize_ticker(sec_code: str) -> str:
-            return sec_code[:4] if sec_code and len(sec_code) >= 4 else sec_code
+    def normalize_edinet_sec_code(sec_code: str | None) -> str | None:
+        if not sec_code:
+            return None
+        code = str(sec_code).strip()
+        if len(code) == 5 and code.endswith("0"):
+            return code[:4]
+        if len(code) == 4:
+            return code
+        print(f"[WARNING] Unexpected secCode format: {code}")
+        return code
     
     for r in results:
         if r.get("docTypeCode", "") != "120":
@@ -76,7 +81,7 @@ def _get_edinet_targets_by_date(target_date: str) -> list[dict]:
         if not sec_code or len(sec_code) < 4:
             continue
             
-        ticker = normalize_ticker(sec_code)
+        ticker = normalize_edinet_sec_code(sec_code)
         period_end = r.get("periodEnd")
         if not period_end:
             continue
