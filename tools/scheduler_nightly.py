@@ -245,18 +245,31 @@ def main() -> int:
         else:
             logger.error(f"[PER_SHARE] sync done rc={step.rc} status={step.status} (Supabase sync FAILED)")
 
-        # ── Step 6: rebuild ──
-        step = run_step("rebuild", [
-            PYTHON, "tools/pipeline_run.py", "rebuild",
-            "--trigger", "scheduler", *dry_flag,
+        # ── Step 7: EDINET受注 Nightly処理 ──
+        # Realtimeでは実行しない。Nightlyのみで実行する。
+        # notify_to_discord=false は generate_edinet_order_events.py 側で強制されている。
+        # dry-run時はDB書き込みなし、apply時のみtdnet_eventsへINSERT。
+        logger.info(f"[EDINET_ORDER_NIGHTLY] step=edinet-order-nightly START")
+        jst_today = datetime.now(JST).strftime("%Y-%m-%d")
+        edinet_apply_flag = [] if args.dry_run else ["--apply"]
+        step = run_step("edinet-order-nightly", [
+            PYTHON, "-X", "utf8",
+            "tools/generate_edinet_order_events.py",
+            "--date", jst_today,
+            *edinet_apply_flag,
         ], timeout_sec=600)
         steps.append(step)
+        if step.rc == 0:
+            logger.info(f"[EDINET_ORDER_NIGHTLY] done rc={step.rc} status={step.status}")
+        else:
+            logger.warning(f"[EDINET_ORDER_NIGHTLY] done rc={step.rc} status={step.status} (EDINET step failed, other steps unaffected)")
 
         elapsed = time.monotonic() - t_start
         _print_summary(steps, elapsed)
 
         failed = [s for s in steps if s.status in ("error", "timeout")]
         return 1 if failed else 0
+
 
     finally:
         release_dual_lock(global_lock, job_lock)
