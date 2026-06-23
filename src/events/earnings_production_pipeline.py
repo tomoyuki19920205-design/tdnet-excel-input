@@ -291,7 +291,6 @@ def run_earnings_production(
                 validate_save_call_plan,
                 find_semantic_duplicate,
             )
-            from src.events.earnings_summary_storage import save_earnings_summary
             from src.events.common_models import EventRecord
             from src.events.tdnet_event_store import save_event_to_supabase
             import uuid as _uuid
