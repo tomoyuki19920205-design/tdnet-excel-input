@@ -245,24 +245,68 @@ def main() -> int:
         else:
             logger.error(f"[PER_SHARE] sync done rc={step.rc} status={step.status} (Supabase sync FAILED)")
 
-        # ── Step 7: EDINET受注 Nightly処理 ──
-        # Realtimeでは実行しない。Nightlyのみで実行する。
-        # notify_to_discord=false は generate_edinet_order_events.py 側で強制されている。
-        # dry-run時はDB書き込みなし、apply時のみtdnet_eventsへINSERT。
-        logger.info(f"[EDINET_ORDER_NIGHTLY] step=edinet-order-nightly START")
+        # ── Step 7a: EDINET受注抽出・edinet_order_data更新（前段） ──
+        # 当日提出有報のXBRL/HTMLを取得し、受注高・受注残高を抽出してDBに保存する。
+        # dry-run時はDB書き込みなし。apply時のみ edinet_order_data へ保存。
+        # この前段なしに Step 7b を実行すると、古いDBを見るだけになり SKIP_PERIOD_MISMATCH が多発する。
+        logger.info(f"[EDINET_ORDER] step=edinet-order-extract-nightly START")
         jst_today = datetime.now(JST).strftime("%Y-%m-%d")
-        edinet_apply_flag = [] if args.dry_run else ["--apply"]
-        step = run_step("edinet-order-nightly", [
+        edinet_apply_flag_7a = [] if args.dry_run else ["--apply"]
+        step_7a = run_step("edinet-order-extract-nightly", [
             PYTHON, "-X", "utf8",
-            "tools/generate_edinet_order_events.py",
+            "run_edinet_orders.py",
             "--date", jst_today,
-            *edinet_apply_flag,
-        ], timeout_sec=600)
-        steps.append(step)
-        if step.rc == 0:
-            logger.info(f"[EDINET_ORDER_NIGHTLY] done rc={step.rc} status={step.status}")
+            *edinet_apply_flag_7a,
+            "--no-notify",
+        ], timeout_sec=900)
+        steps.append(step_7a)
+
+        if step_7a.rc == 0:
+            logger.info(
+                f"[EDINET_ORDER] extract done rc={step_7a.rc} status={step_7a.status}"
+            )
         else:
-            logger.warning(f"[EDINET_ORDER_NIGHTLY] done rc={step.rc} status={step.status} (EDINET step failed, other steps unaffected)")
+            logger.error(
+                f"[EDINET_ORDER] extract FAILED rc={step_7a.rc} status={step_7a.status} "
+                f"(edinet-order-extract-nightly) \u2014 SKIP Step 7b"
+            )
+
+        # ── Step 7b: EDINET受注イベント生成・tdnet_events保存（後段） ──
+        # edinet_order_data に保存済みの受注データを読み、通知イベントを生成する。
+        # Step 7a が rc != 0 の場合は DBが更新されていないため Step 7b をスキップする。
+        # notify_to_discord=false は generate_edinet_order_events.py 側で強制されている。
+        if step_7a.rc != 0:
+            logger.warning(
+                "[EDINET_ORDER] step=edinet-order-event-nightly SKIPPED "
+                f"(reason: extract_step_failed rc={step_7a.rc})"
+            )
+            # skippedとして記録するダミーStepResultを追加
+            skip_step = StepResult("edinet-order-event-nightly")
+            skip_step.rc = -1
+            skip_step.status = "warning"
+            skip_step.duration = 0.0
+            skip_step.stdout_tail = "SKIPPED: extract step failed"
+            steps.append(skip_step)
+        else:
+            logger.info(f"[EDINET_ORDER] step=edinet-order-event-nightly START")
+            edinet_apply_flag_7b = [] if args.dry_run else ["--apply"]
+            step_7b = run_step("edinet-order-event-nightly", [
+                PYTHON, "-X", "utf8",
+                "tools/generate_edinet_order_events.py",
+                "--date", jst_today,
+                *edinet_apply_flag_7b,
+            ], timeout_sec=600)
+            steps.append(step_7b)
+            if step_7b.rc == 0:
+                logger.info(
+                    f"[EDINET_ORDER] event done rc={step_7b.rc} status={step_7b.status}"
+                )
+            else:
+                logger.warning(
+                    f"[EDINET_ORDER] event FAILED rc={step_7b.rc} status={step_7b.status} "
+                    f"(edinet-order-event-nightly, other steps unaffected)"
+                )
+
 
         elapsed = time.monotonic() - t_start
         _print_summary(steps, elapsed)
