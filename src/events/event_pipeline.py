@@ -384,11 +384,28 @@ def _process_single_document(
 ) -> list[dict]:
     """1文書を分類・抽出・保存する。
 
+    ★ 修正(2026-06-24): 分類前の全件無条件PDF取得を廃止。
+       まずタイトルだけで軽量事前分類し、全カテゴリが対象外なら
+       PDF取得・本文抽出・外部HTTP通信なしで即 return する。
+       各カテゴリ内で必要になった時点のみ _get_text_and_pdf() を呼ぶ（遅延評価）。
+       同一文書内での重複PDF取得は _text_fetched フラグで防ぐ。
+
     Returns: [{event_type, subtype, action, event_id}, ...]
     """
     results = []
-    text, _pdf_path = _get_text_and_pdf(doc)  # PDFをダウンロード保存しdoc.pdf_pathを補完
     title = doc.title
+    allowed = event_types or {EventType.BUYBACK, EventType.FORECAST_REVISION, EventType.DIVIDEND_REVISION}
+
+    # ================================================================
+    # ★ STEP 1: タイトルのみによる軽量事前分類（PDF取得なし）
+    # ================================================================
+    _pre_buyback_subtype = classify_buyback_subtype(title)  # 'ignore' / 'new_program' / 'tostnet' 等
+    _pre_forecast = classify_forecast(title, "")             # title のみで十分判定可能
+    _pre_dividend = classify_dividend(title, "")             # title のみで十分判定可能
+
+    _need_buyback  = (EventType.BUYBACK in allowed) and (_pre_buyback_subtype != "ignore")
+    _need_forecast = (EventType.FORECAST_REVISION in allowed) and _pre_forecast.is_target
+    _need_dividend = (EventType.DIVIDEND_REVISION in allowed) and _pre_dividend.is_target
 
     logger.info(
         f"[FORECAST_CALL] doc_id={doc.doc_id[:16] if doc.doc_id else '?'} "
@@ -396,175 +413,201 @@ def _process_single_document(
         f"pdf_path={doc.pdf_path!r} "
         f"doc_url={doc.doc_url[:60] if doc.doc_url else ''!r}"
     )
+    logger.info(
+        f"[TITLE_PRECLASSIFY] ticker={doc.ticker} "
+        f"buyback_subtype={_pre_buyback_subtype!r} "
+        f"forecast={_pre_forecast.is_target} "
+        f"dividend={_pre_dividend.is_target} "
+        f"title={title[:60]!r}"
+    )
 
-    allowed = event_types or {EventType.BUYBACK, EventType.FORECAST_REVISION, EventType.DIVIDEND_REVISION}
+    # 全カテゴリ対象外 → PDF取得不要で即return
+    if not (_need_buyback or _need_forecast or _need_dividend):
+        logger.info(
+            f"[TITLE_PRECLASSIFY] SKIP_ALL ticker={doc.ticker} "
+            f"(no event category matched, skip PDF fetch)"
+        )
+        return results
+
+    # ================================================================
+    # ★ STEP 2: 必要カテゴリ用に PDF 取得（遅延評価・1回のみ）
+    # ================================================================
+    # text / _fetched_pdf_path は必要になるまで取得しない。
+    # 取得は下記 _ensure_text() 呼び出しで1回だけ行われる。
+    _text_fetched = False
+    _text = ""
+    _fetched_pdf_path = ""
+
+    def _ensure_text() -> tuple[str, str]:
+        """テキストとPDFパスをキャッシュ付きで取得（同一文書内で複数回呼んでも1回だけ取得）。"""
+        nonlocal _text_fetched, _text, _fetched_pdf_path
+        if not _text_fetched:
+            _text, _fetched_pdf_path = _get_text_and_pdf(doc)
+            _text_fetched = True
+        return _text, _fetched_pdf_path
 
     # ---- buyback ----
-    if EventType.BUYBACK in allowed:
+    if _need_buyback:
         try:
-            # [A] 入口ガード: タイトルから buyback_event_subtype を判定
-            #     new_program / tostnet のみ処理。ignore は完全スキップ。
-            buyback_event_subtype = classify_buyback_subtype(title)
+            buyback_event_subtype = _pre_buyback_subtype  # 事前分類済みを再利用
             logger.info(
                 f"[EVENT] buyback_subtype={buyback_event_subtype!r} "
                 f"ticker={doc.ticker} title={title[:60]!r}"
             )
-            if buyback_event_subtype == "ignore":
-                logger.debug(
-                    f"[EVENT] buyback subtype-guard skip (ignore): "
-                    f"ticker={doc.ticker} title={title[:60]!r}"
+            # buyback_event_subtype != 'ignore' はすでに確認済み (_need_buyback)
+            # [B] 既存の classify_buyback で event_type を推定 (本文取得)
+            text, _fetched = _ensure_text()
+            cls_result = classify_buyback(title, text[:2000])
+            # [C] 中間ガード: confidence < 0.50 は除外
+            _cls_conf = getattr(cls_result, "confidence", 0.0) or 0.0
+            if cls_result.is_buyback_related and cls_result.event_type_candidate \
+                    and _cls_conf >= 0.50:
+                event_type_raw = cls_result.event_type_candidate
+                # サブタイプは buyback_event_subtype (new_program/tostnet) を優先
+                subtype = buyback_event_subtype
+                buyback_ev = extract_buyback_event(
+                    text=text,
+                    event_type=event_type_raw,
+                    ticker=doc.ticker,
+                    disclosure_date=doc.disclosure_datetime,
+                    title=title,
+                    source_doc_id=doc.doc_id,
+                    source_url=doc.doc_url,
                 )
-            else:
-                # [B] 既存の classify_buyback で event_type を推定
-                cls_result = classify_buyback(title, text[:2000])
-                # [C] 中間ガード: confidence < 0.50 は除外
-                _cls_conf = getattr(cls_result, "confidence", 0.0) or 0.0
-                if cls_result.is_buyback_related and cls_result.event_type_candidate \
-                        and _cls_conf >= 0.50:
-                    event_type_raw = cls_result.event_type_candidate
-                    # サブタイプは buyback_event_subtype (new_program/tostnet) を優先
-                    subtype = buyback_event_subtype
-                    buyback_ev = extract_buyback_event(
-                        text=text,
-                        event_type=event_type_raw,
-                        ticker=doc.ticker,
-                        disclosure_date=doc.disclosure_datetime,
-                        title=title,
-                        source_doc_id=doc.doc_id,
-                        source_url=doc.doc_url,
-                    )
-                    record = _buyback_to_event_record(doc, buyback_ev, subtype)
-                    if dry_run:
-                        results.append({
-                            "event_type": EventType.BUYBACK, "subtype": subtype,
-                            "action": "dry_run", "event_id": record.event_id,
-                            "summary": record.summary_text,
-                            "buyback_event_subtype": buyback_event_subtype,
-                        })
-                    else:
-                        action, eid = upsert_event(conn, record)
-                        results.append({
-                            "event_type": EventType.BUYBACK, "subtype": subtype,
-                            "action": action, "event_id": eid,
-                            "buyback_event_subtype": buyback_event_subtype,
-                            "_event_record": record if action in ("inserted", "updated") else None,
-                        })
+                record = _buyback_to_event_record(doc, buyback_ev, subtype)
+                if dry_run:
+                    results.append({
+                        "event_type": EventType.BUYBACK, "subtype": subtype,
+                        "action": "dry_run", "event_id": record.event_id,
+                        "summary": record.summary_text,
+                        "buyback_event_subtype": buyback_event_subtype,
+                    })
                 else:
-                    logger.debug(
-                        f"[EVENT] buyback conf-guard skip: ticker={doc.ticker} "
-                        f"conf={_cls_conf:.2f} related={cls_result.is_buyback_related}"
-                    )
+                    action, eid = upsert_event(conn, record)
+                    results.append({
+                        "event_type": EventType.BUYBACK, "subtype": subtype,
+                        "action": action, "event_id": eid,
+                        "buyback_event_subtype": buyback_event_subtype,
+                        "_event_record": record if action in ("inserted", "updated") else None,
+                    })
+            else:
+                logger.debug(
+                    f"[EVENT] buyback conf-guard skip: ticker={doc.ticker} "
+                    f"conf={_cls_conf:.2f} related={cls_result.is_buyback_related}"
+                )
         except Exception as e:
             logger.warning(f"[EVENT] buyback failed doc_id={doc.doc_id[:16]} ticker={doc.ticker}: {e}")
             results.append({"event_type": EventType.BUYBACK, "action": "error", "error": str(e)})
 
 
     # ---- forecast_revision ----
-    if EventType.FORECAST_REVISION in allowed:
+    if _need_forecast:
         try:
-            cls_result = classify_forecast(title, text[:2000])
+            # 事前分類で is_target=True 確認済み。本文が必要なので取得。
+            text, _fetched = _ensure_text()
+            cls_result = _pre_forecast  # タイトルのみ分類結果を再利用
             logger.info(
                 f"[EVENT] forecast_classify ticker={doc.ticker} "
                 f"is_target={cls_result.is_target} "
                 f"subtype_hint={getattr(cls_result, 'subtype_hint', '?')!r} "
                 f"title={title[:50]!r}"
             )
-            if cls_result.is_target:
-                is_diff = cls_result.subtype_hint == "difference"
-                forecast_ev = extract_forecast_revision(
-                    text, title, is_difference=is_diff,
-                    pdf_path=doc.pdf_path, doc_url=doc.doc_url, doc_id=doc.doc_id,
+            is_diff = cls_result.subtype_hint == "difference"
+            forecast_ev = extract_forecast_revision(
+                text, title, is_difference=is_diff,
+                pdf_path=doc.pdf_path, doc_url=doc.doc_url, doc_id=doc.doc_id,
+            )
+            # 変化判定: 実際の数値変化がなければスキップ
+            if not _has_forecast_change(forecast_ev):
+                logger.info(
+                    f"[EVENT] forecast skipped (no_change_detected) "
+                    f"ticker={doc.ticker} subtype={forecast_ev.subtype} "
+                    f"prev_sales={getattr(forecast_ev,'previous_sales',None)} "
+                    f"rev_sales={getattr(forecast_ev,'revised_sales',None)} "
+                    f"prev_op={getattr(forecast_ev,'previous_op',None)} "
+                    f"rev_op={getattr(forecast_ev,'revised_op',None)} "
+                    f"prev_ni={getattr(forecast_ev,'previous_net_income',None)} "
+                    f"rev_ni={getattr(forecast_ev,'revised_net_income',None)} "
+                    f"prev_eps={getattr(forecast_ev,'previous_eps',None)} "
+                    f"rev_eps={getattr(forecast_ev,'revised_eps',None)}"
                 )
-                # 変化判定: 実際の数値変化がなければスキップ
-                if not _has_forecast_change(forecast_ev):
-                    logger.info(
-                        f"[EVENT] forecast skipped (no_change_detected) "
-                        f"ticker={doc.ticker} subtype={forecast_ev.subtype} "
-                        f"prev_sales={getattr(forecast_ev,'previous_sales',None)} "
-                        f"rev_sales={getattr(forecast_ev,'revised_sales',None)} "
-                        f"prev_op={getattr(forecast_ev,'previous_op',None)} "
-                        f"rev_op={getattr(forecast_ev,'revised_op',None)} "
-                        f"prev_ni={getattr(forecast_ev,'previous_net_income',None)} "
-                        f"rev_ni={getattr(forecast_ev,'revised_net_income',None)} "
-                        f"prev_eps={getattr(forecast_ev,'previous_eps',None)} "
-                        f"rev_eps={getattr(forecast_ev,'revised_eps',None)}"
-                    )
+                results.append({
+                    "event_type": EventType.FORECAST_REVISION, "subtype": forecast_ev.subtype,
+                    "action": "no_change_detected", "event_id": "",
+                })
+            else:
+                # ---- 配当年間合計を同一PDFから抽出して付加 ----
+                _fcast_pdf = doc.pdf_path or _fetched_pdf_path or ""
+                if _fcast_pdf:
+                    try:
+                        from .dividend_extractor import _extract_dividend_annual_total_via_fitz
+                        _div_result = _extract_dividend_annual_total_via_fitz(_fcast_pdf)
+                        if _div_result and _div_result.get("annual_total_revised") is not None:
+                            _d_prev = _div_result.get("annual_total_previous")
+                            _d_rev  = _div_result["annual_total_revised"]
+                            forecast_ev.dividend_annual_total_previous = _d_prev
+                            forecast_ev.dividend_annual_total_revised  = _d_rev
+                            if _d_prev is not None:
+                                forecast_ev.dividend_delta = round(_d_rev - _d_prev, 2)
+                                forecast_ev.dividend_change_pct = (
+                                    round((_d_rev - _d_prev) / abs(_d_prev) * 100, 1)
+                                    if _d_prev != 0 else None
+                                )
+                    except Exception as _div_e:
+                        logger.debug(f"[forecast_dividend_fitz] skip: {_div_e}")
+                record = _forecast_to_event_record(doc, forecast_ev)
+                if dry_run:
                     results.append({
                         "event_type": EventType.FORECAST_REVISION, "subtype": forecast_ev.subtype,
-                        "action": "no_change_detected", "event_id": "",
+                        "action": "dry_run", "event_id": record.event_id,
+                        "summary": record.summary_text,
+                        "_event_record": record,
                     })
                 else:
-                    # ---- 配当年間合計を同一PDFから抽出して付加 ----
-                    _fcast_pdf = doc.pdf_path or _pdf_path or ""
-                    if _fcast_pdf:
-                        try:
-                            from .dividend_extractor import _extract_dividend_annual_total_via_fitz
-                            _div_result = _extract_dividend_annual_total_via_fitz(_fcast_pdf)
-                            if _div_result and _div_result.get("annual_total_revised") is not None:
-                                _d_prev = _div_result.get("annual_total_previous")
-                                _d_rev  = _div_result["annual_total_revised"]
-                                forecast_ev.dividend_annual_total_previous = _d_prev
-                                forecast_ev.dividend_annual_total_revised  = _d_rev
-                                if _d_prev is not None:
-                                    forecast_ev.dividend_delta = round(_d_rev - _d_prev, 2)
-                                    forecast_ev.dividend_change_pct = (
-                                        round((_d_rev - _d_prev) / abs(_d_prev) * 100, 1)
-                                        if _d_prev != 0 else None
-                                    )
-                        except Exception as _div_e:
-                            logger.debug(f"[forecast_dividend_fitz] skip: {_div_e}")
-                    record = _forecast_to_event_record(doc, forecast_ev)
-                    if dry_run:
-                        results.append({
-                            "event_type": EventType.FORECAST_REVISION, "subtype": forecast_ev.subtype,
-                            "action": "dry_run", "event_id": record.event_id,
-                            "summary": record.summary_text,
-                            "_event_record": record,
-                        })
-                    else:
-                        action, eid = upsert_event(conn, record)
-                        results.append({
-                            "event_type": EventType.FORECAST_REVISION, "subtype": forecast_ev.subtype,
-                            "action": action, "event_id": eid,
-                            "_event_record": record if action in ("inserted", "updated") else None,
-                        })
+                    action, eid = upsert_event(conn, record)
+                    results.append({
+                        "event_type": EventType.FORECAST_REVISION, "subtype": forecast_ev.subtype,
+                        "action": action, "event_id": eid,
+                        "_event_record": record if action in ("inserted", "updated") else None,
+                    })
         except Exception as e:
             logger.warning(f"[EVENT] forecast failed doc_id={doc.doc_id[:16]} ticker={doc.ticker}: {e}")
             results.append({"event_type": EventType.FORECAST_REVISION, "action": "error", "error": str(e)})
 
     # ---- dividend_revision ----
-    if EventType.DIVIDEND_REVISION in allowed:
+    if _need_dividend:
         try:
-            cls_result = classify_dividend(title, text[:2000])
+            # 事前分類で is_target=True 確認済み。本文が必要なので取得。
+            text, _fetched = _ensure_text()
+            cls_result = _pre_dividend  # タイトルのみ分類結果を再利用
             logger.info(
                 f"[EVENT] dividend_classify ticker={doc.ticker} "
                 f"is_target={cls_result.is_target} "
                 f"title={title[:50]!r}"
             )
-            if cls_result.is_target:
-                _div_pdf = doc.pdf_path or _pdf_path or ""
-                logger.info(
-                    f"[DIVIDEND_CALL] ticker={doc.ticker} pdf_path={_div_pdf!r}"
-                )
-                dividend_ev = extract_dividend_revision(
-                    text,
-                    title,
-                    pdf_path=_div_pdf,
-                )
-                record = _dividend_to_event_record(doc, dividend_ev, db_path=db_path)
-                if dry_run:
-                    results.append({
-                        "event_type": EventType.DIVIDEND_REVISION, "subtype": dividend_ev.subtype,
-                        "action": "dry_run", "event_id": record.event_id,
-                        "summary": record.summary_text,
-                    })
-                else:
-                    action, eid = upsert_event(conn, record)
-                    results.append({
-                        "event_type": EventType.DIVIDEND_REVISION, "subtype": dividend_ev.subtype,
-                        "action": action, "event_id": eid,
-                        "_event_record": record if action in ("inserted", "updated") else None,
-                    })
+            _div_pdf = doc.pdf_path or _fetched_pdf_path or ""
+            logger.info(
+                f"[DIVIDEND_CALL] ticker={doc.ticker} pdf_path={_div_pdf!r}"
+            )
+            dividend_ev = extract_dividend_revision(
+                text,
+                title,
+                pdf_path=_div_pdf,
+            )
+            record = _dividend_to_event_record(doc, dividend_ev, db_path=db_path)
+            if dry_run:
+                results.append({
+                    "event_type": EventType.DIVIDEND_REVISION, "subtype": dividend_ev.subtype,
+                    "action": "dry_run", "event_id": record.event_id,
+                    "summary": record.summary_text,
+                })
+            else:
+                action, eid = upsert_event(conn, record)
+                results.append({
+                    "event_type": EventType.DIVIDEND_REVISION, "subtype": dividend_ev.subtype,
+                    "action": action, "event_id": eid,
+                    "_event_record": record if action in ("inserted", "updated") else None,
+                })
         except Exception as e:
             logger.warning(f"[EVENT] dividend failed doc_id={doc.doc_id[:16]} ticker={doc.ticker}: {e}")
             results.append({"event_type": EventType.DIVIDEND_REVISION, "action": "error", "error": str(e)})
