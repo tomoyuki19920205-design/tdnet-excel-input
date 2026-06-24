@@ -889,15 +889,37 @@ def save_event_to_supabase(
                             "headline", "disclosed_at", "source_url", "pdf_url",
                             "primary_metric_name", "primary_metric_value", "primary_metric_yoy",
                             "display_title", "display_summary", "formatted_message",
-                            "notify_discord"
+                            "notify_to_discord"
                         ]
+                        from dateutil import parser as dt_parser
                         for k in keys:
                             if k in old_row and k in new_row:
-                                val_old = str(old_row[k]) if old_row[k] is not None else ""
-                                val_new = str(new_row[k]) if new_row[k] is not None else ""
+                                if old_row[k] is None and new_row[k] is None:
+                                    continue
+                                if old_row[k] is None or new_row[k] is None:
+                                    return True
+
+                                val_old = str(old_row[k])
+                                val_new = str(new_row[k])
+                                
                                 if k in ("disclosed_at", "detected_at"):
-                                    val_old = val_old.replace("+00:00", "Z")
-                                    val_new = val_new.replace("+00:00", "Z")
+                                    try:
+                                        dt_old = dt_parser.parse(val_old)
+                                        dt_new = dt_parser.parse(val_new)
+                                        if dt_old == dt_new:
+                                            continue
+                                    except Exception:
+                                        pass
+
+                                if k in ("primary_metric_value", "primary_metric_yoy"):
+                                    try:
+                                        f_old = float(val_old)
+                                        f_new = float(val_new)
+                                        if f_old == f_new:
+                                            continue
+                                    except ValueError:
+                                        pass
+
                                 if val_old != val_new:
                                     return True
                         
