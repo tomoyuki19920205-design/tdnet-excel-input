@@ -584,6 +584,24 @@ def _supplement_current_yoy(ticker: str, extracted: dict, client) -> None:
 # ============================================================
 # メイン: Supabase へ保存
 # ============================================================
+def _strip_volatile_keys(obj):
+    """Recursively remove volatile keys like detected_at, updated_at from dict or list."""
+    if isinstance(obj, dict):
+        new_dict = {}
+        for k, v in obj.items():
+            if str(k).lower() in {
+                "detected_at", "updated_at", "checked_at", "generated_at", 
+                "processed_at", "synced_at", "last_seen_at", "last_checked_at", 
+                "raw_fetched_at", "fetched_at", "run_id"
+            }:
+                continue
+            new_dict[k] = _strip_volatile_keys(v)
+        return new_dict
+    elif isinstance(obj, list):
+        return [_strip_volatile_keys(item) for item in obj]
+    else:
+        return obj
+
 def _safe_json(value):
     if isinstance(value, dict):
         return value
@@ -926,7 +944,7 @@ def save_event_to_supabase(
                         try:
                             old_p = json.loads(existing_payload_str) if isinstance(existing_payload_str, str) else existing_payload_str
                             new_p = json.loads(new_row.get("raw_payload", "{}")) if isinstance(new_row.get("raw_payload", "{}"), str) else new_row.get("raw_payload", {})
-                            if old_p != new_p:
+                            if _strip_volatile_keys(old_p) != _strip_volatile_keys(new_p):
                                 return True
                         except Exception as e:
                             return True
