@@ -258,7 +258,8 @@ def main() -> int:
             "--date", jst_today,
             *edinet_apply_flag_7a,
             "--no-notify",
-        ], timeout_sec=900)
+            "--max-docs", "1000",  # デフォルト50件制限を回避（有報+XBRL最大1000件まで処理）
+        ], timeout_sec=1800)
         steps.append(step_7a)
 
         if step_7a.rc == 0:
