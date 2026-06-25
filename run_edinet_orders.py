@@ -369,16 +369,16 @@ def _write_dryrun_report(
         f"- filter_edinet_code: `{filter_edinet_code or 'なし(全件)'}`",
         f"- max_docs: `{max_docs}`",
         "",
-        f"## edinet_order_data 保存候補: {len(db_rows)} 件",
+        f"## edinet_order_data 抽出行 (DB保存判定対象): {len(db_rows)} 件",
         "",
-        "| ticker | edinet_code | company_name | period | orders_received | order_backlog | source_unit | confidence |",
-        "|---|---|---|---|---|---|---|---|",
+        "| ticker | edinet_code | company_name | period | orders_received | order_backlog | source_unit | classification | save_candidate |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for r in db_rows:
         md_lines.append(
             f"| {r.get('ticker')} | {r.get('edinet_code')} | {r.get('company_name')} "
             f"| {r.get('period')} | {r.get('orders_received')} | {r.get('order_backlog')} "
-            f"| {r.get('source_unit')} | {r.get('confidence')} |"
+            f"| {r.get('source_unit')} | {r.get('classification', '')} | {r.get('save_candidate', '')} |"
         )
 
     md_lines += [
@@ -398,7 +398,7 @@ def _write_dryrun_report(
         "",
         "## 後段イベント生成見込み",
         "",
-        "上記 edinet_order_data 保存候補が実際にDBに保存された後、",
+        "上記 edinet_order_data のうち、save_candidate が True (PASS_SAVE_CANDIDATE) の行が実際にDBに保存された後、",
         "`tools/generate_edinet_order_events.py --date {}` を実行することで、".format(target_date),
         "以下のキーが一致する場合に tdnet_events のイベント候補が生成されます:",
         "",

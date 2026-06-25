@@ -91,20 +91,25 @@ def save_to_db(
         "upserted": 0,
         "skipped": 0,
         "errors": [],
+        "quality_rejects": [],
         "dry_run": dry_run,
     }
 
-    # period が None の行はスキップ
+    # period判定と保存前ガード判定
     valid_rows = []
     for row in db_rows:
-        if not row.get("period"):
-            stats["skipped"] += 1
-            stats["errors"].append({
-                "ticker": row.get("ticker"),
-                "reason": "period is None (fiscal_end missing)",
-            })
-        else:
+        # DB重複などは呼び出し側や既存ロジックで対応、ここではRow-levelガードのみチェック
+        save_candidate = row.get("save_candidate")
+        classification = row.get("classification", "OTHER_REVIEW")
+        
+        if save_candidate is True:
             valid_rows.append(row)
+        else:
+            stats["skipped"] += 1
+            stats["quality_rejects"].append({
+                "ticker": row.get("ticker"),
+                "classification": classification,
+            })
 
     if dry_run:
         stats["rows"] = valid_rows

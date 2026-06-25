@@ -106,4 +106,13 @@ def transform_to_db_row(
         "_dryrun_period_error": "fiscal_end_missing" if not fiscal_end else None,
     }
 
+    # 保存前ガードを適用
+    from .guard import apply_pre_save_guard
+    row = apply_pre_save_guard(row)
+
+    # _dryrun_period_error による PERIOD_NULL_REJECT のバックアップ（guard.py内でも判定されるが念のため）
+    if row.get("_dryrun_period_error"):
+        row["save_candidate"] = False
+        row["classification"] = "PERIOD_NULL_REJECT"
+
     return row
