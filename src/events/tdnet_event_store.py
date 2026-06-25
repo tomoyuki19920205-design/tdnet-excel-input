@@ -861,6 +861,8 @@ def save_event_to_supabase(
                     xbrl_doc_id = _nested_get(raw_payload, "raw", "xbrl_doc_id") or _nested_get(raw_payload, "extracted", "xbrl_doc_id")
                     
                     for r in strict_match_res.data:
+                        if r.get("event_type") != display_category:
+                            continue
                         raw_p = _safe_json(r.get("raw_payload"))
                         has_doc, reason = _payload_contains_doc_id(raw_p, event.source_doc_id, xbrl_doc_id)
                         if has_doc:

@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """forecast_extractor.py — 業績予想修正テキストからの値抽出
 
 PDF/HTML/テキストから以下を抽出する:
@@ -2818,19 +2818,24 @@ def _extract_fitz_table_with_extended_labels(pdf_path: str, doc_label: str = "?"
                     prev_sorted = _sorted_nums(prev_tokens) if prev_tokens else []
 
                     if len(rev_sorted) >= 5:
+                        assign_indices = [0, 1, 2, 3, 4] if len(rev_sorted) == 5 else [0, 1, -3, -2, -1]
                         print(
                             f"[forecast_fitz_positional_fallback] "
                             f"fields={','.join(_POSITIONAL_FIELDS)} "
-                            f"nums={[v for _, v in rev_sorted[:5]]}"
+                            f"nums={[rev_sorted[i][1] for i in assign_indices]}"
                         )
-                        for i, field in enumerate(_POSITIONAL_FIELDS):
+                        for i, field in zip(assign_indices, _POSITIONAL_FIELDS):
                             # revised: 未割り当てのみ上書き
-                            if res.get(f"revised_{field}") is None and i < len(rev_sorted):
+                            if res.get(f"revised_{field}") is None:
                                 res[f"revised_{field}"] = rev_sorted[i][1]
                                 res["metrics_count"] += 1
-                            # previous: 未割り当てのみ上書き
-                            if res.get(f"previous_{field}") is None and i < len(prev_sorted):
-                                res[f"previous_{field}"] = prev_sorted[i][1]
+                        
+                        if prev_sorted and len(prev_sorted) >= 5:
+                            prev_indices = [0, 1, 2, 3, 4] if len(prev_sorted) == 5 else [0, 1, -3, -2, -1]
+                            for i, field in zip(prev_indices, _POSITIONAL_FIELDS):
+                                # previous: 未割り当てのみ上書き
+                                if res.get(f"previous_{field}") is None:
+                                    res[f"previous_{field}"] = prev_sorted[i][1]
 
                 # ─── Step 7b: revised_eps > 10000 の場合 EPS 再検証 (修正2) ───
                 # 巨大 EPS は列割り当てミスの可能性が高い。

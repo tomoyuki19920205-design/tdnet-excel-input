@@ -201,6 +201,7 @@ def extract_dividend_revision(
     table_vals = _find_dividend_table_values(text)
     prev_vals = table_vals.get("previous_values", [])
     revised_vals = table_vals.get("revised_values", [])
+    print(f"[DEBUG_TEXT_EXTRACT] prev_vals={prev_vals} revised_vals={revised_vals}")
 
     # 期末/年間を優先（配列の後ろの方）
     if prev_vals and revised_vals:
@@ -630,10 +631,11 @@ def _extract_dividend_annual_total_via_fitz(pdf_path: str) -> dict | None:
                     if not non_zero:
                         return None
                     rightmost = non_zero[-1]
+                    target_str = f"{target_x:.1f}" if target_x is not None else "N/A"
                     print(
                         f"[dividend_fitz_assign] kind={kind} "
                         f"value={rightmost[1]} num_x={rightmost[0]:.1f} "
-                        f"target_x={target_x:.1f if target_x is not None else 'N/A'} "
+                        f"target_x={target_str} "
                         f"reason=rightmost_fallback"
                     )
                     return rightmost[1]
@@ -647,7 +649,9 @@ def _extract_dividend_annual_total_via_fitz(pdf_path: str) -> dict | None:
                     break  # 最初に取れたページで確定
 
     except Exception as e:
+        import traceback
         logger.debug(f"[dividend_fitz] pdfplumber extract failed: {e}")
+        print(f"[DEBUG_FITZ_ERROR] pdfplumber extract failed: {traceback.format_exc()}")
 
     if best_rev is None:
         return None
