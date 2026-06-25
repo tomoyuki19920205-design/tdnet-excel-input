@@ -212,13 +212,20 @@ def _should_notify_dividend(event: EventRecord) -> bool:
     except (ValueError, TypeError):
         return False
 
-    # [G3] prev が 0 以下 → 無配・未定は今回は通知対象外
+    # [G3] prev が 0 以下 → 復配・初配・有配化(rev > 0)の場合は通知対象とし、それ以外は対象外
     if prev_f <= 0:
-        logger.debug(
-            "[NOTIFY] dividend prev<=0 blocked: prev=%s ticker=%s",
-            prev_f, event.ticker,
-        )
-        return False
+        if rev_f > 0:
+            logger.info(
+                "[NOTIFY] dividend restoration/initial dividend: prev=%s rev=%s ticker=%s",
+                prev_f, rev_f, event.ticker,
+            )
+            return True
+        else:
+            logger.debug(
+                "[NOTIFY] dividend prev<=0 blocked: prev=%s rev=%s ticker=%s",
+                prev_f, rev_f, event.ticker,
+            )
+            return False
 
     # [G4] rev が 0 以下
     if rev_f <= 0:
