@@ -280,9 +280,9 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
             try:
                 s = int(scale)
                 if s >= 6:
-                    detected_unit = "百万円"
+                    detected_unit = "円"
                 elif s >= 3:
-                    detected_unit = "千円"
+                    detected_unit = "円"
             except ValueError:
                 pass
 
