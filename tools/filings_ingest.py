@@ -29,6 +29,7 @@ def run(
     dry_run: bool = False,
     company_code: str | None = None,
     db_path: str | None = None,
+    yanoshin_timeout_sec: float | None = None,
 ) -> dict:
     """
     filings ingest を実行し結果 dict を返す。
@@ -50,6 +51,7 @@ def run(
         company_code=company_code,
         dry_run=dry_run,
         db_path=db_path,
+        yanoshin_timeout_sec=yanoshin_timeout_sec,
     )
 
     summary = result.get("summary", {})

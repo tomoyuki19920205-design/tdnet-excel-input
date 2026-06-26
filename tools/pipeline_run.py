@@ -64,12 +64,12 @@ class StepResult:
 # ============================================================
 # 個別ステップ実行
 # ============================================================
-def _run_ingest(dry_run: bool) -> StepResult:
+def _run_ingest(dry_run: bool, yanoshin_timeout_sec: float | None = None) -> StepResult:
     step = StepResult("ingest")
     st = time.monotonic()
     try:
         from tools.filings_ingest import run as ingest_run
-        result = ingest_run(dry_run=dry_run)
+        result = ingest_run(dry_run=dry_run, yanoshin_timeout_sec=yanoshin_timeout_sec)
         step.detail = result
         step.status = "success"
     except Exception as e:
@@ -380,6 +380,9 @@ def main():
     parser.add_argument("--mode", type=str, default="nightly",
                         choices=["realtime", "nightly"],
                         help="process 実行モード (default: nightly)")
+    parser.add_argument("--ingest-mode", type=str, default="default",
+                        choices=["realtime", "default", "standard"],
+                        help="ingest 実行モード (default: default)")
     parser.add_argument("--from", dest="from_date", type=str, help="開始日 (backfill)")
     parser.add_argument("--to", dest="to_date", type=str, help="終了日 (backfill)")
     parser.add_argument("--target-id", type=str, help="retry対象 target_id")
@@ -537,8 +540,9 @@ def main():
     trigger = args.trigger
 
     if cmd == "ingest":
+        yanoshin_timeout = 5 if args.ingest_mode == "realtime" else 15
         step = _run_subcommand_with_logging(
-            "ingest", lambda: _run_ingest(args.dry_run), trigger_type=trigger,
+            "ingest", lambda: _run_ingest(args.dry_run, yanoshin_timeout_sec=yanoshin_timeout), trigger_type=trigger,
         )
         exit_code = EXIT_OK if step.status == "success" else EXIT_INGEST_FAIL
         logger.info(f"===PYTHON_END=== pid={os.getpid()} cmd={cmd} exit={exit_code}")

@@ -174,13 +174,16 @@ def _matches_watchlist(ticker: str, watch_tickers: list[str]) -> bool:
 # ルート1: yanoshin.jp 非公式API（優先）
 # ============================================================
 
-def _fetch_via_api(session: requests.Session | None = None) -> list[DisclosureItem]:
+DEFAULT_YANOSHIN_API_TIMEOUT_SEC = 15
+
+def _fetch_via_api(session: requests.Session | None = None, timeout_sec: float | None = None) -> list[DisclosureItem]:
     """yanoshin.jp APIから開示一覧を取得"""
     url = "https://webapi.yanoshin.jp/webapi/tdnet/list/today.json"
     logger.info(f"[API] yanoshin.jp APIから取得中: {url}")
 
     client = session or requests
-    resp = client.get(url, headers={"User-Agent": _USER_AGENT}, timeout=15)
+    actual_timeout = timeout_sec if timeout_sec is not None else DEFAULT_YANOSHIN_API_TIMEOUT_SEC
+    resp = client.get(url, headers={"User-Agent": _USER_AGENT}, timeout=actual_timeout)
     resp.raise_for_status()
 
     content_type = resp.headers.get("Content-Type", "")
@@ -461,6 +464,7 @@ def fetch_new_disclosures(
     is_processed_fn=None,
     target_date: str | date_type | None = None,
     session: requests.Session | None = None,
+    yanoshin_timeout_sec: float | None = None,
 ) -> list[DisclosureItem]:
     """
     新着開示を取得（API優先 + HTML FB）。新規のみを返す。
@@ -490,7 +494,7 @@ def fetch_new_disclosures(
     else:
         # 当日: API 優先 + HTML フォールバック
         try:
-            fetched_items = _fetch_via_api(session=session)
+            fetched_items = _fetch_via_api(session=session, timeout_sec=yanoshin_timeout_sec)
             source = "API"
             logger.info(f"[{source}] fetched_count={len(fetched_items)}")
         except Exception as api_err:

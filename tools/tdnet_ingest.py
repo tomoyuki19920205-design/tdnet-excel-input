@@ -706,6 +706,7 @@ def run_ingest(
     earnings_db_path: str | None = None,
     dump_dir: str | None = None,
     skip_notify: bool = False,
+    yanoshin_timeout_sec: float | None = None,
 ) -> dict:
     """
     ワンショットingest実行。
@@ -778,6 +779,7 @@ def run_ingest(
             is_processed_fn=state_db.is_processed if not dry_run else None,
             target_date=getattr(config, "start_date", None),
             session=session,
+            yanoshin_timeout_sec=yanoshin_timeout_sec,
         )
 
         # 決算短信のみフィルタ（予想修正は別処理）
