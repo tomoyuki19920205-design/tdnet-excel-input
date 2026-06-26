@@ -1377,26 +1377,33 @@ def extract_guidance_from_zip(
     if (guidance.sales_forecast is None or guidance.op_forecast is None) and combined_text:
         try:
             from .summary_ai_client import call_guidance_extraction_api
-            # PDFテキストの前方（業績予想が記載される前半部分）をLLMに渡す
-            llm_text = combined_text[:8000]
-            llm_result, _ = call_guidance_extraction_api(llm_text)
-            if llm_result:
-                if guidance.sales_forecast is None and llm_result.get("sales_forecast") is not None:
-                    val = float(llm_result["sales_forecast"])
-                    if val > 0:
-                        guidance.sales_forecast = val
-                if guidance.sales_yoy_extracted is None and llm_result.get("sales_yoy") is not None:
-                    val = float(llm_result["sales_yoy"]) / 100.0  # % -> 割合
-                    guidance.sales_yoy_extracted = val
-                if guidance.op_forecast is None and llm_result.get("op_forecast") is not None:
-                    val = float(llm_result["op_forecast"])
-                    guidance.op_forecast = val
-                if guidance.op_yoy_extracted is None and llm_result.get("op_yoy") is not None:
-                    val = float(llm_result["op_yoy"]) / 100.0
-                    guidance.op_yoy_extracted = val
-                logger.info(f"[GUIDANCE] LLM fallback used: sales={guidance.sales_forecast}, op={guidance.op_forecast}")
-        except Exception as e:
-            logger.warning(f"[GUIDANCE] LLM fallback failed: {e}")
+        except ImportError:
+            call_guidance_extraction_api = None
+
+        if call_guidance_extraction_api is None:
+            logger.info("[GUIDANCE] LLM fallback skipped: call_guidance_extraction_api is not implemented")
+        else:
+            try:
+                # PDFテキストの前方（業績予想が記載される前半部分）をLLMに渡す
+                llm_text = combined_text[:8000]
+                llm_result, _ = call_guidance_extraction_api(llm_text)
+                if llm_result:
+                    if guidance.sales_forecast is None and llm_result.get("sales_forecast") is not None:
+                        val = float(llm_result["sales_forecast"])
+                        if val > 0:
+                            guidance.sales_forecast = val
+                    if guidance.sales_yoy_extracted is None and llm_result.get("sales_yoy") is not None:
+                        val = float(llm_result["sales_yoy"]) / 100.0  # % -> 割合
+                        guidance.sales_yoy_extracted = val
+                    if guidance.op_forecast is None and llm_result.get("op_forecast") is not None:
+                        val = float(llm_result["op_forecast"])
+                        guidance.op_forecast = val
+                    if guidance.op_yoy_extracted is None and llm_result.get("op_yoy") is not None:
+                        val = float(llm_result["op_yoy"]) / 100.0
+                        guidance.op_yoy_extracted = val
+                    logger.info(f"[GUIDANCE] LLM fallback used: sales={guidance.sales_forecast}, op={guidance.op_forecast}")
+            except Exception as e:
+                logger.warning(f"[GUIDANCE] LLM fallback failed: {e}")
 
     # それでもEPSがない場合は従来のEPSテキスト抽出を試行
     if guidance.eps_forecast is None and (plain_text or pdf_text):
