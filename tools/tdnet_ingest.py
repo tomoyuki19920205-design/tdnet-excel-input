@@ -386,16 +386,52 @@ def _process_single(
     # [DISABLED ORDER EXTRACTION END]
     logger.debug(f"[ORDER] {code} skipped (order extraction disabled)")
 
-    # ── セグメント別売上・利益抽出（V4専用） ──
-    # extract_segment_financials (旧V1/V2/V3) は停止済み。V4のみ使用。
+    # ── セグメント別売上・利益抽出（XBRL優先 + V4 PDF fallback） ──
+    # extract_segment_financials (旧V1/V2/V3) は停止済み。
     seg_metrics: dict = {"v4_route": True}
     _V4_NORMAL_SKIP = {"single_segment_omitted", "no_segment_page", "no_segment_table", "skipped_normal"}
     try:
-        from src.analysis.segment_detection_v4 import run_segment_detection_v4
-        _v4r = run_segment_detection_v4(doc_path, ticker=code)
-        _v4_segs_list = getattr(_v4r, "segments", []) or []
-        _v4_ok = bool(_v4r.success or _v4_segs_list)
-        _v4_reason = getattr(_v4r, "quarantine_reason", None) or "none"
+        _v4_segs_list = []
+        _v4_ok = False
+        _v4_reason = "none"
+
+        # 1. XBRL抽出を試行
+        if xbrl_path and os.path.isfile(xbrl_path):
+            try:
+                from src.segment.xbrl_segment_extractor import extract_segments_from_xbrl_zip
+                xbrl_raw_rows = extract_segments_from_xbrl_zip(
+                    zip_path=xbrl_path,
+                    period=fiscal_year_end,
+                    quarter=financials.quarter
+                )
+                if xbrl_raw_rows:
+                    # 当期分のみフィルタ
+                    current_xbrl = [r for r in xbrl_raw_rows if r.period == fiscal_year_end]
+                    for i, r in enumerate(current_xbrl):
+                        _v4_segs_list.append({
+                            "segment_name": r.raw_segment_name or r.normalized_segment_name,
+                            "segment_order": i + 1,
+                            "segment_sales": r.sales,
+                            "segment_profit": r.profit,
+                            "unit_raw": None,       # 既に百万円単位化済み
+                            "unit_multiplier": None,
+                            "raw_profit_label": "xbrl",
+                        })
+                    if _v4_segs_list:
+                        _v4_ok = True
+                        seg_metrics["xbrl_used"] = True
+                        logger.info(f"[SEGMENT_XBRL] {code} XBRL extraction success: {len(_v4_segs_list)} segments")
+            except Exception as e:
+                logger.warning(f"[SEGMENT_XBRL] {code} exception: {e}")
+
+        # 2. XBRL抽出が0件または失敗した場合はPDFフォールバック
+        if not _v4_segs_list:
+            from src.analysis.segment_detection_v4 import run_segment_detection_v4
+            _v4r = run_segment_detection_v4(doc_path, ticker=code)
+            _v4_segs_list = getattr(_v4r, "segments", []) or []
+            _v4_ok = bool(_v4r.success or _v4_segs_list)
+            _v4_reason = getattr(_v4r, "quarantine_reason", None) or "none"
+            seg_metrics["xbrl_used"] = False
 
         if _v4_ok and _v4_segs_list:
             # ── V4成功：保存 ──

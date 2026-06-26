@@ -796,6 +796,7 @@ def sync_canonical(
                         segments=seg_dicts,
                         source=source,
                         filing_id=filing_id,
+                        unit="millions_jpy",
                     )
                     all_seg_long_rows.extend(expanded)
                     seg_stats["skipped"] += skipped
