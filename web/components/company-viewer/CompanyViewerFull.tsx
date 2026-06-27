@@ -52,30 +52,88 @@ async function loadSegments(
       : ticker.trim().toUpperCase();
 
     const { data, error } = await supabase
-      .from("api_latest_segments")
+      .from("canonical_segments")
       .select(
-        "ticker,period,quarter,segment_name,segment_sales,segment_profit,source,source_priority",
+        "id,ticker,period,quarter,segment_name,segment_key,metric,value,source,source_priority,data_basis,source_disclosure_date,source_doc_id,flags"
       )
       .eq("ticker", t)
       .order("period", { ascending: false })
       .order("quarter", { ascending: false })
-      .limit(200);
+      .limit(2000);
 
     if (error) {
       console.warn("[CompanyViewerFull] segments:", error.message);
       return [];
     }
+
+    const rows = (data || []);
+    
+    // Group by period + quarter + segment_key + metric to pick highest priority row
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return ((data as any[]) ?? []).map((r) => ({
-      ticker: r.ticker,
-      period: r.period ?? "",
-      quarter: r.quarter ?? "",
-      segment_name: r.segment_name ?? "",
-      segment_sales: r.segment_sales ?? null,
-      segment_profit: r.segment_profit ?? null,
-      source: r.source ?? undefined,
-      source_priority: r.source_priority ?? null,
-    })) as SegmentRecord[];
+    const grouped = new Map<string, any[]>();
+    for (const r of rows) {
+      const key = `${r.period}_${r.quarter}_${r.segment_key || r.segment_name}_${r.metric}`;
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key)!.push(r);
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const selectedRows: any[] = [];
+    for (const group of grouped.values()) {
+      if (group.length === 1) {
+        selectedRows.push(group[0]);
+        continue;
+      }
+      
+      // Sort to find the winner
+      group.sort((a, b) => {
+        // 1. data_basis = prior_comparative 優先
+        const aPrior = a.data_basis === 'prior_comparative' ? 1 : 0;
+        const bPrior = b.data_basis === 'prior_comparative' ? 1 : 0;
+        if (aPrior !== bPrior) return bPrior - aPrior;
+        
+        // 2. source_disclosure_date 降順
+        const aDate = a.source_disclosure_date || "";
+        const bDate = b.source_disclosure_date || "";
+        if (aDate !== bDate) return bDate.localeCompare(aDate);
+        
+        // 3. data_basis = official_current (or null)
+        const aOff = (a.data_basis === 'official_current' || !a.data_basis) ? 1 : 0;
+        const bOff = (b.data_basis === 'official_current' || !b.data_basis) ? 1 : 0;
+        if (aOff !== bOff) return bOff - aOff;
+        
+        // 4. source_priority (小さい方が優先)
+        const aPrio = a.source_priority ?? 999;
+        const bPrio = b.source_priority ?? 999;
+        return aPrio - bPrio;
+      });
+      selectedRows.push(group[0]);
+    }
+
+    // Now pivot the selected rows back to SegmentRecord (sales & profit combined)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const segmentMap = new Map<string, any>();
+    for (const r of selectedRows) {
+      const key = `${r.period}_${r.quarter}_${r.segment_key || r.segment_name}`;
+      if (!segmentMap.has(key)) {
+        segmentMap.set(key, {
+          ticker: r.ticker,
+          period: r.period || "",
+          quarter: r.quarter || "",
+          segment_name: r.segment_name || "",
+          segment_sales: null,
+          segment_profit: null,
+          source: r.source,
+          source_priority: r.source_priority,
+        });
+      }
+      const seg = segmentMap.get(key);
+      if (r.metric === "sales") seg.segment_sales = r.value;
+      if (r.metric === "profit") seg.segment_profit = r.value;
+      seg.source = r.source;
+    }
+
+    return Array.from(segmentMap.values()) as SegmentRecord[];
   } catch (e) {
     console.warn("[CompanyViewerFull] segments exception:", e);
     return [];
