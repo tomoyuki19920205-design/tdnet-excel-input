@@ -74,6 +74,24 @@ def _extract_meta_from_pdf(pdf_path: str) -> dict | None:
     }
 
 
+
+_PL_PERIODS_CACHE = {}
+
+def get_true_fiscal_year_end(ticker: str, extracted_date: str) -> str | None:
+    if not extracted_date or not ticker: return extracted_date
+    if ticker not in _PL_PERIODS_CACHE:
+        from lib.pipeline.db import get_supabase_read_config, supabase_select, load_env
+        load_env()
+        cr = get_supabase_read_config()
+        res = supabase_select("canonical_financials", params={"ticker": f"eq.{ticker}", "select": "period"}, config=cr)
+        _PL_PERIODS_CACHE[ticker] = sorted(list(set(r["period"] for r in (res or []))))
+        
+    periods = _PL_PERIODS_CACHE[ticker]
+    valid = [p for p in periods if p >= extracted_date]
+    if valid:
+        return min(valid)
+    return None
+
 def _fiscal_year_end(r_str: str) -> str | None:
     """R表記 → fiscal_year_end (YYYY-MM-DD)"""
     parsed = parse_reiwa(r_str)
@@ -153,7 +171,13 @@ def main():
         code = meta["ticker"]
         quarter = meta["quarter"] or "?Q"
         fye = _fiscal_year_end(meta["fiscal_year"]) if meta["fiscal_year"] else None
-        fiscal_year_end = fye or meta["fiscal_year"] or "unknown"
+        raw_fye = fye or meta["fiscal_year"] or "unknown"
+        fiscal_year_end = get_true_fiscal_year_end(code, raw_fye)
+        if not fiscal_year_end:
+            logger.warning(f"[NEEDS_REVIEW] Cannot map fiscal_year_end for {code} {quarter} {raw_fye}")
+            stats["quarantined"] += 1
+            processed_ids.add(doc_id)
+            continue
 
         if ticker_filter and code not in ticker_filter:
             stats["skipped_ticker_filter"] += 1

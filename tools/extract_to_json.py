@@ -119,6 +119,24 @@ def _extract_ticker_from_xbrl(file_path: str) -> tuple[str | None, str]:
     return ticker, source
 
 
+
+_PL_PERIODS_CACHE = {}
+
+def get_true_fiscal_year_end(ticker: str, extracted_date: str) -> str | None:
+    if not extracted_date or not ticker: return extracted_date
+    if ticker not in _PL_PERIODS_CACHE:
+        from lib.pipeline.db import get_supabase_read_config, supabase_select, load_env
+        load_env()
+        cr = get_supabase_read_config()
+        res = supabase_select("canonical_financials", params={"ticker": f"eq.{ticker}", "select": "period"}, config=cr)
+        _PL_PERIODS_CACHE[ticker] = sorted(list(set(r["period"] for r in (res or []))))
+        
+    periods = _PL_PERIODS_CACHE[ticker]
+    valid = [p for p in periods if p >= extracted_date]
+    if valid:
+        return min(valid)
+    return None
+
 def _reiwa_to_fiscal_year_end(r_str: str) -> str | None:
     """R表記 → fiscal_year_end (YYYY-MM-DD)"""
     parsed = parse_reiwa(r_str)
