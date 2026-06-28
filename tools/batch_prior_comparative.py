@@ -32,18 +32,31 @@ def get_real_write_config():
 
 def chunked_supabase_select(table, column, values, params=None):
     if not values: return []
-    chunk_size = 300
+    chunk_size = 50
     all_results = []
     values = list(set(values))
     for i in range(0, len(values), chunk_size):
         chunk = values[i:i+chunk_size]
         val_str = "(" + ",".join(str(v) for v in chunk) + ")"
-        query_params = {column: f"in.{val_str}"}
+        base_params = {column: f"in.{val_str}"}
         if params:
-            query_params.update(params)
-        res = supabase_select(table, params=query_params)
-        if res:
-            all_results.extend(res)
+            base_params.update(params)
+        
+        offset = 0
+        page_size = 1000
+        while True:
+            query_params = base_params.copy()
+            query_params["limit"] = page_size
+            query_params["offset"] = offset
+            
+            res = supabase_select(table, params=query_params)
+            if res:
+                all_results.extend(res)
+                if len(res) < page_size:
+                    break
+                offset += page_size
+            else:
+                break
     return all_results
 
 def main():
@@ -69,7 +82,7 @@ def main():
     load_env()
     
     zip_files = sorted(glob.glob(os.path.join(_PROJECT_ROOT, "data", "xbrl_archive", "*.zip")), reverse=True)
-    exclude_tickers = {"6905", "2796", "7886", "9993"}
+    exclude_tickers = {"9993"}
     
     candidates_info = []
     ready_payloads = {}
@@ -197,8 +210,8 @@ def main():
             candidates_info.append({"ticker": ticker, "classification": "BLOCKED_CURRENT_MISMATCH", "doc_id": doc_id, "blocker": "Could not map to official keys"})
             continue
             
-        # Check existing
-        prior_existing = [r for r in official if r.get("period") == prior_period and r.get("quarter") == quarter and r.get("data_basis") == "prior_comparative"]
+        # Check existing (use year prefix to handle minor period shifts like 2025-05-20 vs 2025-05-31)
+        prior_existing = [r for r in official if r.get("period", "").startswith(prior_period[:4]) and r.get("quarter") == quarter and r.get("data_basis") == "prior_comparative"]
         if prior_existing:
             candidates_info.append({"ticker": ticker, "classification": "BLOCKED_ALREADY_EXISTS", "doc_id": doc_id})
             continue
