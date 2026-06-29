@@ -88,6 +88,8 @@ def save_prior_comparative_from_event(
         "skipped_9993": 0,
         "skipped_no_prior": 0,
         "skipped_no_official": 0,
+        "skipped_duplicate_payload": 0,
+        "duplicate_source_row_key_count": 0,
         "errors": 0,
         "would_insert_rows": 0,
         "save_mode": save_mode,
@@ -237,6 +239,24 @@ def save_prior_comparative_from_event(
             for pr in planned_rows:
                 if not pr.get("source_disclosure_date"):
                     raise RuntimeError(f"STOP: generator produced NULL source_disclosure_date for doc_id={doc_id}")
+
+            # --- 安全弁: payload内の source_row_key 重複チェック ---
+            from collections import Counter
+            source_row_keys = [pr.get("source_row_key") for pr in planned_rows if pr.get("source_row_key")]
+            if len(source_row_keys) != len(planned_rows):
+                raise RuntimeError(f"STOP: Some rows are missing source_row_key for doc_id={doc_id}")
+            
+            key_counts = Counter(source_row_keys)
+            duplicates = {k: v for k, v in key_counts.items() if v > 1}
+            
+            if duplicates:
+                logger.info(f"[PRIOR_COMP_SAVER] doc_id={doc_id} ticker={ticker} SKIP_DUPLICATE_PAYLOAD: duplicate source_row_key in planned_rows")
+                for k, v in duplicates.items():
+                    logger.info(f"[PRIOR_COMP_SAVER] duplicate source_row_key={k} count={v}")
+                
+                stats["skipped_duplicate_payload"] += 1
+                stats["duplicate_source_row_key_count"] += len(duplicates)
+                continue
 
             stats["processed"] += 1
             stats["would_insert_rows"] += len(planned_rows)
