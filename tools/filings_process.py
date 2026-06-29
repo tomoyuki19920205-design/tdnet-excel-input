@@ -184,6 +184,8 @@ def run_batch(
     phase: str | None = None,
     limit_filings: int = 0,
     target_tickers: list[str] | None = None,
+    enable_prior_comparative: bool = False,
+    prior_comparative_canary_tickers: list[str] | None = None,
 ) -> dict:
     """
     filings process (batch) を実行。
@@ -224,6 +226,8 @@ def run_batch(
             target_tickers=target_tickers,
             run_id=run_id,
             t0_batch=t0_batch,
+            enable_prior_comparative=enable_prior_comparative,
+            prior_comparative_canary_tickers=prior_comparative_canary_tickers,
         )
     finally:
         _remove_batch_log_handler(batch_handler)
@@ -242,6 +246,8 @@ def _run_batch_inner(
     target_tickers: list[str] | None,
     run_id: str,
     t0_batch: float,
+    enable_prior_comparative: bool,
+    prior_comparative_canary_tickers: list[str] | None,
 ) -> dict:
     """run_batch の内部実装。"""
     _is_realtime = mode == "realtime"
@@ -401,6 +407,34 @@ def _run_batch_inner(
                 f"financials_written={canonical_stats.get('financials', {}).get('written', 0)} "
                 f"segments_written={canonical_stats.get('segments', {}).get('written', 0)}"
             )
+            
+            # ── 改修: prior_comparative save ──
+            if enable_prior_comparative:
+                try:
+                    from lib.pipeline.prior_comparative_saver import save_prior_comparative_from_event
+                    
+                    target_doc_ids = []
+                    if push_stats and "results" in push_stats:
+                        for row in push_stats["results"]:
+                            if row.get("status") == "success":
+                                did = str(row["doc_id"])
+                                if did and did not in target_doc_ids:
+                                    target_doc_ids.append(did)
+                    
+                    logger.info(f"[PRIOR_COMP_SAVER] ENABLED dry_run=True targets={len(target_doc_ids)} canary_tickers={prior_comparative_canary_tickers}")
+                    if target_doc_ids:
+                        prior_stats = save_prior_comparative_from_event(
+                            target_doc_ids,
+                            dry_run=True, # STRICTLY ENFORCED FOR DRY RUN
+                            canary_tickers=prior_comparative_canary_tickers,
+                        )
+                        result["prior_comparative"] = prior_stats
+                        logger.info(f"[PRIOR_COMP_SAVER] DONE stats={prior_stats}")
+                except Exception as e:
+                    logger.error(f"[PRIOR_COMP_SAVER] FAILED: {e}")
+            else:
+                logger.info("[PRIOR_COMP_SAVER] SKIPPED: not enabled")
+
         except Exception as e:
             elapsed_can = time.monotonic() - t_canonical
             logger.error(
@@ -450,6 +484,8 @@ def run_realtime(
     dry_run: bool = False,
     db_path: str | None = None,
     max_jobs: int = 50,
+    enable_prior_comparative: bool = False,
+    prior_comparative_canary_tickers: list[str] | None = None,
 ) -> dict:
     """queue 駆動の realtime process。
 
@@ -613,6 +649,33 @@ def run_realtime(
         f"canonical_financials_written={result.get('canonical', {}).get('financials', {}).get('written', 0)} "
         f"canonical_segments_written={result.get('canonical', {}).get('segments', {}).get('written', 0)}"
     )
+
+    # ── 改修: prior_comparative save ──
+    if enable_prior_comparative and canonical_ok:
+        try:
+            from lib.pipeline.prior_comparative_saver import save_prior_comparative_from_event
+            target_doc_ids = []
+            for did in job_id_map.keys():
+                did_str = str(did)
+                if did_str and did_str not in target_doc_ids:
+                    target_doc_ids.append(did_str)
+            
+            logger.info(f"[PRIOR_COMP_SAVER] ENABLED dry_run=True targets={len(target_doc_ids)} canary_tickers={prior_comparative_canary_tickers}")
+            if target_doc_ids:
+                prior_stats = save_prior_comparative_from_event(
+                    target_doc_ids,
+                    dry_run=True, # STRICTLY ENFORCED FOR DRY RUN
+                    canary_tickers=prior_comparative_canary_tickers,
+                )
+                result["prior_comparative"] = prior_stats
+                logger.info(f"[PRIOR_COMP_SAVER] DONE stats={prior_stats}")
+        except Exception as e:
+            logger.error(f"[PRIOR_COMP_SAVER] FAILED: {e}")
+    else:
+        if enable_prior_comparative:
+            logger.info("[PRIOR_COMP_SAVER] SKIPPED: canonical phase was not ok")
+        else:
+            logger.info("[PRIOR_COMP_SAVER] SKIPPED: not enabled")
 
     # ── Step 5: queue 完了更新 ──
     t_complete = time.monotonic()

@@ -83,7 +83,9 @@ def _run_ingest(dry_run: bool, yanoshin_timeout_sec: float | None = None) -> Ste
 def _run_process(dry_run: bool, skip_jquants: bool, mode: str = "nightly",
                  phase: str | None = None, limit_filings: int = 0,
                  target_tickers: list[str] | None = None,
-                 canonical_lookback_days: int = 7) -> StepResult:
+                 canonical_lookback_days: int = 7,
+                 enable_prior_comparative: bool = False,
+                 prior_comparative_canary_tickers: list[str] | None = None) -> StepResult:
     step = StepResult("process")
     st = time.monotonic()
     try:
@@ -93,6 +95,8 @@ def _run_process(dry_run: bool, skip_jquants: bool, mode: str = "nightly",
             phase=phase, limit_filings=limit_filings,
             target_tickers=target_tickers,
             canonical_lookback_days=canonical_lookback_days,
+            enable_prior_comparative=enable_prior_comparative,
+            prior_comparative_canary_tickers=prior_comparative_canary_tickers,
         )
         step.detail = result
         push_errors = result.get("push", {}).get("errors", 0)
@@ -105,13 +109,20 @@ def _run_process(dry_run: bool, skip_jquants: bool, mode: str = "nightly",
     return step
 
 
-def _run_process_realtime(dry_run: bool, max_jobs: int = 50) -> StepResult:
+def _run_process_realtime(dry_run: bool, max_jobs: int = 50,
+                          enable_prior_comparative: bool = False,
+                          prior_comparative_canary_tickers: list[str] | None = None) -> StepResult:
     """queue 駆動の realtime process ステップ。"""
     step = StepResult("process-realtime")
     st = time.monotonic()
     try:
         from tools.filings_process import run_realtime
-        result = run_realtime(dry_run=dry_run, max_jobs=max_jobs)
+        result = run_realtime(
+            dry_run=dry_run, 
+            max_jobs=max_jobs,
+            enable_prior_comparative=enable_prior_comparative,
+            prior_comparative_canary_tickers=prior_comparative_canary_tickers,
+        )
         step.detail = result
         step.status = "success" if result.get("errors", 0) == 0 else "warning"
     except Exception as e:
@@ -398,6 +409,11 @@ def main():
                         help="特定 ticker のみ処理")
     parser.add_argument("--lookback-days", type=int, default=7,
                         help="canonical lookback 日数 (default: 7)")
+    # ── prior_comparative 関連 ──
+    parser.add_argument("--enable-prior-comparative", action="store_true",
+                        help="prior_comparative の保存処理を有効化する (default: False)")
+    parser.add_argument("--prior-comparative-canary-tickers", type=str, nargs="*",
+                        help="特定の ticker のみ prior_comparative を保存する (カンマ区切りも可)")
     args = parser.parse_args()
 
     # --verbose が指定されたら DEBUG レベルに
@@ -549,6 +565,12 @@ def main():
         sys.exit(exit_code)
 
     elif cmd == "process" or cmd == "process-batch":
+        canary_tickers = None
+        if args.prior_comparative_canary_tickers:
+            canary_tickers = []
+            for t in args.prior_comparative_canary_tickers:
+                canary_tickers.extend([x.strip() for x in t.split(",") if x.strip()])
+                
         step = _run_subcommand_with_logging(
             "process", lambda: _run_process(
                 args.dry_run, args.skip_jquants, mode=args.mode,
@@ -556,6 +578,8 @@ def main():
                 limit_filings=getattr(args, 'limit_filings', 0),
                 target_tickers=getattr(args, 'target_tickers', None),
                 canonical_lookback_days=getattr(args, 'lookback_days', 7),
+                enable_prior_comparative=args.enable_prior_comparative,
+                prior_comparative_canary_tickers=canary_tickers,
             ),
             trigger_type=trigger,
         )
@@ -564,8 +588,18 @@ def main():
         sys.exit(exit_code)
 
     elif cmd == "process-realtime":
+        canary_tickers = None
+        if getattr(args, 'prior_comparative_canary_tickers', None):
+            canary_tickers = []
+            for t in args.prior_comparative_canary_tickers:
+                canary_tickers.extend([x.strip() for x in t.split(",") if x.strip()])
+                
         step = _run_subcommand_with_logging(
-            "process-realtime", lambda: _run_process_realtime(args.dry_run),
+            "process-realtime", lambda: _run_process_realtime(
+                args.dry_run,
+                enable_prior_comparative=args.enable_prior_comparative,
+                prior_comparative_canary_tickers=canary_tickers,
+            ),
             trigger_type=trigger,
         )
         exit_code = EXIT_OK if step.status in ("success", "warning") else EXIT_INGEST_FAIL
