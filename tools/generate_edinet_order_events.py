@@ -73,7 +73,7 @@ def _get_edinet_targets_by_date(target_date: str) -> list[dict]:
         return code
     
     for r in results:
-        if r.get("docTypeCode", "") != "120":
+        if r.get("docTypeCode", "") not in ("120", "130", "140", "150"):
             continue
         if r.get("xbrlFlag", "0") != "1":
             continue

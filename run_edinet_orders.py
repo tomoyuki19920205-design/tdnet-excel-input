@@ -109,12 +109,12 @@ def _fetch_docs_for_date(target_date: str) -> list[dict]:
 
 
 def _filter_yuho_xbrl(docs: list[dict]) -> list[dict]:
-    """有価証券報告書(docTypeCode=120) かつ xbrlFlag=1 のみ抽出。"""
+    """有価証券報告書/四半期報告書 かつ xbrlFlag=1 のみ抽出。"""
     filtered = []
     for r in docs:
         code = r.get("docTypeCode", "")
-        # 120 = 有報、130 = 訂正有報（両方対象）
-        if code not in ("120", "130"):
+        # 120 = 有報、130 = 訂正有報、140 = 四半期報告書、150 = 訂正四半期報告書
+        if code not in ("120", "130", "140", "150"):
             continue
         if r.get("xbrlFlag", "0") != "1":
             continue
