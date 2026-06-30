@@ -1031,6 +1031,18 @@ def run_ingest(
                 if _ev2_conn is not None:
                     _ev2_conn.close()
 
+        # ── prior_comparative realtime hook ──
+        if os.environ.get("PRIOR_COMPARATIVE_REALTIME_ENABLED", "0") == "1":
+            try:
+                from lib.pipeline.prior_comparative_realtime import run_prior_comparative_realtime_hook
+                logger.info("[PRIOR_COMPARATIVE_REALTIME] enabled, calling hook")
+                max_docs = int(os.environ.get("PRIOR_COMPARATIVE_REALTIME_MAX_DOCS_PER_RUN", "10"))
+                pc_summary = run_prior_comparative_realtime_hook(target_items, max_docs)
+                summary["prior_comparative"] = pc_summary
+            except Exception as e:
+                logger.error(f"[PRIOR_COMPARATIVE_REALTIME] hook outer exception: {e}", exc_info=True)
+                summary["prior_comparative"] = {"error": str(e)}
+
         return {"total": len(results), "results": results, "summary": summary}
     finally:
         if session:
