@@ -40,14 +40,28 @@ def generate_prior_comparative_payload(
     prior_rows = [r for r in xbrl_rows if r.period == prior_period]
     current_rows = [r for r in xbrl_rows if r.period == current_period]
     
+    seg_key_to_names = {}
+    for r in prior_rows:
+        s_name = r.normalized_segment_name or r.raw_segment_name
+        s_key = normalize_segment_key(s_name)
+        if s_key not in seg_key_to_names:
+            seg_key_to_names[s_key] = set()
+        seg_key_to_names[s_key].add(s_name)
+    
     planned_rows = []
     
     for r in prior_rows:
         seg_name = r.normalized_segment_name or r.raw_segment_name
-        seg_key = normalize_segment_key(seg_name)
+        base_seg_key = normalize_segment_key(seg_name)
+        
+        if len(seg_key_to_names.get(base_seg_key, set())) > 1:
+            safe_name = seg_name.replace('|', '_')
+            seg_key = f"{base_seg_key}_{safe_name}"
+        else:
+            seg_key = base_seg_key
         
         cur_row = next((c for c in current_rows if (c.normalized_segment_name or c.raw_segment_name) == seg_name), None)
-        matching_official = [o for o in official_priors if o.get("segment_key") == seg_key]
+        matching_official = [o for o in official_priors if o.get("segment_key") == base_seg_key]
         
         for metric, value in [("sales", r.sales), ("profit", r.profit)]:
             if value is None:
