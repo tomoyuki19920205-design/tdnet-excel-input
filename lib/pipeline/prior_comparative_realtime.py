@@ -8,6 +8,33 @@ from lib.pipeline.prior_comparative_saver import save_prior_comparative_from_eve
 
 logger = logging.getLogger("prior_comparative_realtime")
 
+import re
+
+def resolve_tdnet_doc_id_for_prior_comparative(item) -> str | None:
+    candidates = set()
+    
+    fields_to_check = ["tdnet_doc_id", "document_id", "doc_id", "disclosure_id"]
+    for field in fields_to_check:
+        val = getattr(item, field, None)
+        if val and isinstance(val, str):
+            for match in re.finditer(r'(140120\d{10,})', val):
+                candidates.add(match.group(1))
+                
+    urls_to_check = ["doc_url", "xbrl_url", "pdf_url", "archive_url"]
+    for url_field in urls_to_check:
+        url = getattr(item, url_field, None)
+        if url and isinstance(url, str):
+            for match in re.finditer(r'(140120\d{10,})', url):
+                candidates.add(match.group(1))
+                
+    if not candidates:
+        return None
+        
+    if len(candidates) > 1:
+        return None
+        
+    return candidates.pop()
+
 def run_prior_comparative_realtime_hook(target_items: List[Any], max_docs: int) -> Dict[str, Any]:
     """
     TDNET realtime pipeline から呼ばれる prior_comparative 抽出の hook.
@@ -39,10 +66,17 @@ def run_prior_comparative_realtime_hook(target_items: List[Any], max_docs: int) 
     }
     
     for item in items_to_process:
-        doc_id = item.disclosure_id
-        ticker = item.ticker
-        title = item.title
+        raw_disclosure_id = getattr(item, "disclosure_id", "unknown")
+        ticker = getattr(item, "ticker", "unknown")
+        title = getattr(item, "title", "unknown")
         disclosure_date = getattr(item, "published_at", None) or getattr(item, "disclosure_datetime", "unknown")
+        
+        resolved_doc_id = resolve_tdnet_doc_id_for_prior_comparative(item)
+        if not resolved_doc_id:
+            logger.info(f"[PRIOR_COMPARATIVE_REALTIME_SKIP] reason=doc_id_unresolved raw_disclosure_id={raw_disclosure_id} ticker={ticker} title=\"{title[:30]}\"")
+            continue
+            
+        logger.info(f"[PRIOR_COMPARATIVE_REALTIME] raw_disclosure_id={raw_disclosure_id} resolved_doc_id={resolved_doc_id}")
         
         start_time = time.monotonic()
         
@@ -56,7 +90,7 @@ def run_prior_comparative_realtime_hook(target_items: List[Any], max_docs: int) 
         try:
             # save_prior_comparative_from_event に1件だけ渡して詳細な統計を取る
             stats = save_prior_comparative_from_event(
-                disclosure_ids=[doc_id],
+                disclosure_ids=[resolved_doc_id],
                 dry_run=forced_dry_run,
                 save_mode=save_mode,
                 canary_tickers=pc_canaries if pc_canaries else None,
@@ -87,13 +121,13 @@ def run_prior_comparative_realtime_hook(target_items: List[Any], max_docs: int) 
         except Exception as e:
             error_msg = str(e)
             summary["errors"] += 1
-            logger.error(f"[PRIOR_COMPARATIVE_REALTIME] Exception doc_id={doc_id}: {e}\n{traceback.format_exc()}")
+            logger.error(f"[PRIOR_COMPARATIVE_REALTIME] Exception resolved_doc_id={resolved_doc_id}: {e}\n{traceback.format_exc()}")
             
         elapsed_ms = int((time.monotonic() - start_time) * 1000)
         
         log_msg = (
             f"[PRIOR_COMPARATIVE_REALTIME_DRY_RUN] "
-            f"ticker={ticker} doc_id={doc_id} date={disclosure_date} title=\"{title[:30]}\" "
+            f"ticker={ticker} doc_id={resolved_doc_id} date={disclosure_date} title=\"{title[:30]}\" "
             f"generated_rows={generated_rows} would_insert_rows={would_insert_rows} "
             f"duplicate_source_row_key_count={duplicate_count} "
             f"skip_reason={skip_reason} elapsed_ms={elapsed_ms} error={error_msg is not None}"
@@ -101,6 +135,6 @@ def run_prior_comparative_realtime_hook(target_items: List[Any], max_docs: int) 
         logger.info(log_msg)
         
         if duplicate_count > 0:
-            logger.warning(f"[PRIOR_COMPARATIVE_REALTIME_DRY_RUN] BLOCKED doc_id={doc_id}: duplicate_source_row_key_count={duplicate_count}")
+            logger.warning(f"[PRIOR_COMPARATIVE_REALTIME_DRY_RUN] BLOCKED doc_id={resolved_doc_id}: duplicate_source_row_key_count={duplicate_count}")
             
     return summary
