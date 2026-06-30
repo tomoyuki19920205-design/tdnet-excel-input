@@ -140,6 +140,16 @@ def _get_table_context(table_soup) -> str:
             count += 1
         prev = prev.find_previous_sibling()
 
+    # もし兄弟要素からテキストが取れなかった場合、親要素（divラッパー等）の兄弟を探す
+    if count == 0 and table_soup.parent:
+        prev = table_soup.parent.find_previous_sibling()
+        while prev and count < 5:
+            t = _norm(prev.get_text())
+            if t:
+                title_text = t + " " + title_text
+                count += 1
+            prev = prev.find_previous_sibling()
+
     # 兄弟要素に単位キーワードがなければ祖先要素も探す（中電工のように列ヘッダに単位がない場合）
     _UNIT_KW = ["百万円", "千円", "億円", "（円）", "単位：円", "単位：百万円", "単位：千円", "単位：億円"]
     if not any(kw in title_text for kw in _UNIT_KW):
@@ -413,10 +423,13 @@ def extract_from_company(
                             matches.append(i)
                     if matches:
                         return matches[-1]  # 後ろ（当期側）を優先
-                    # フォールバック：is_order_titleの場合「当連結会計年度」列を採用
-                    # ただしflat_headerに受注KWがない場合はコンテキスト文言だけでは受注表と判断できないため無効化
-                    has_order_in_header = any(any(kw in h for kw in _ORDER_KW + _BACKLOG_KW) for h in flat_header)
-                    if (is_order_title or is_backlog_only_title) and has_order_in_header:
+                    # フォールバック：「受注実績」等のコンテキストがある場合は「当期」列を採用する。
+                    # ただし受注高を探しているときは is_order_title、受注残高を探しているときは is_backlog_only_title の場合に限る。
+                    # (これを行わないと、1つの表の「当期」列が受注高・受注残高の両方にフォールバック採用されてしまう)
+                    is_target_order = (kws == _ORDER_KW and is_order_title)
+                    is_target_backlog = (kws == _BACKLOG_KW and is_backlog_only_title)
+                    
+                    if is_target_order or is_target_backlog:
                         for i, h in enumerate(flat_header):
                             if i == 0:
                                 continue
