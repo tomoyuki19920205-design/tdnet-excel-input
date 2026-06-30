@@ -169,7 +169,9 @@ def _get_table_context(table_soup) -> str:
 
 def _is_total_row_label(label: str) -> bool:
     """テキストが「合計」「計」「報告セグメント計」などを示すか"""
-    return any(kw == label or label.endswith(kw) for kw in _TOTAL_ROW_KW)
+    import re
+    cleaned = re.sub(r"[(（].*?[)）]$", "", label).strip()
+    return any(kw == cleaned or cleaned.endswith(kw) for kw in _TOTAL_ROW_KW)
 
 
 def _row_total_label(row: list[str]) -> str:
@@ -627,11 +629,49 @@ def extract_from_company(
                             target_row = row
                             target_confidence = "medium"
 
+
+                # Pass 6: セグメント合算フォールバック (合計行なし・複数行)
+                if target_row is None and len(non_prev_rows) >= 2:
+                    valid_to_sum = True
+                    sum_or = 0 if idx_or is not None else None
+                    sum_ob = 0 if idx_ob is not None else None
+                    
+                    for row in non_prev_rows:
+                        or_v, ob_v = try_extract_from_row(row)
+                        if sum_or is not None:
+                            if or_v is not None:
+                                sum_or += or_v
+                            else:
+                                valid_to_sum = False
+                        if sum_ob is not None:
+                            if ob_v is not None:
+                                sum_ob += ob_v
+                            else:
+                                valid_to_sum = False
+                    
+                    if valid_to_sum and (sum_or is not None or sum_ob is not None):
+                        target_row_pseudo = ["SEGMENT_SUM_FALLBACK"] * max((idx_or or 0) + 1, (idx_ob or 0) + 1, 10)
+                        if idx_or is not None: target_row_pseudo[idx_or] = str(sum_or)
+                        if idx_ob is not None: target_row_pseudo[idx_ob] = str(sum_ob)
+                        target_row = target_row_pseudo
+                        target_confidence = "low"
+                        result["notes"] += f"SEGMENT_SUM_FALLBACK applied (OR={sum_or}, OB={sum_ob}). "
                 # ── 抽出 ──
                 if target_row is not None:
                     or_v, ob_v = try_extract_from_row(target_row)
-                    if not unit:
-                        unit = _detect_unit(target_row)
+                    
+                    target_unit = _detect_unit(target_row)
+                    if target_unit:
+                        if header_unit:
+                            if header_unit != target_unit:
+                                result["notes"] += f"UNIT_CONFLICT_REVIEW (header={header_unit}, target_row={target_unit}). "
+                                or_v, ob_v = None, None
+                        else:
+                            if unit != target_unit:
+                                result["notes"] += f"UNIT_OVERRIDE_FROM_TARGET_ROW (old={unit}, new={target_unit}). "
+                            unit = target_unit
+                    elif not unit:
+                        pass
 
                     # 完全な結果（OR+OB両方）が不完全な先行結果（ORのみ/OBのみ）を上書きする。
                     # 例: 先行テーブルが比較表からORだけセットし、後続の正しいテーブルが両方提供する場合。
