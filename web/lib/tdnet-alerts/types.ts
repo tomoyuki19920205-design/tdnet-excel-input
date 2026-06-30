@@ -86,13 +86,15 @@ export const EVENT_TYPE_CONFIG: Record<
   string,
   { label: string; emoji: string; color: string }
 > = {
-  // 正規化後の6カテゴリ
+  // 正規化後の6カテゴリ + 受注
   buyback: { label: "自社株買い", emoji: "📊", color: "#6366f1" },
   forecast: { label: "業績予想修正", emoji: "📈", color: "#f59e0b" },
   dividend: { label: "配当修正", emoji: "💰", color: "#10b981" },
   earnings: { label: "決算", emoji: "📋", color: "#3b82f6" },
   shareholder: { label: "大量保有", emoji: "👥", color: "#8b5cf6" },
   other: { label: "その他", emoji: "📄", color: "#94a3b8" },
+  edinet_order: { label: "受注・受注残", emoji: "🏢", color: "#14b8a6" },
+  edinet_order_partial: { label: "受注・受注残", emoji: "🏢", color: "#14b8a6" },
   // 後方互換 (旧キー)
   forecast_revision: { label: "業績予想修正", emoji: "📈", color: "#f59e0b" },
   dividend_revision: { label: "配当修正", emoji: "💰", color: "#10b981" },
@@ -116,6 +118,8 @@ const _EVENT_TYPE_ALIAS: Record<string, string> = {
   earnings: "earnings",
   shareholder: "shareholder",
   other: "other",
+  edinet_order: "edinet_order",
+  edinet_order_partial: "edinet_order_partial",
   // 旧パイプライン名
   forecast_revision: "forecast",
   dividend_revision: "dividend",

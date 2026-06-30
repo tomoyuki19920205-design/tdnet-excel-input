@@ -707,9 +707,24 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
             (() => {
             const isDiscordTab = filter === "discord";
 
+            // ★ Full 優先フィルタの実装 ★
+            const filteredEvents = events.filter(e => {
+              if (e.event_type !== "edinet_order_partial") return true;
+              const eExt = (e.raw_payload && typeof e.raw_payload === "object") ? (e.raw_payload as Record<string, any>).extracted : null;
+              const ePeriod = eExt?.period;
+              if (!ePeriod) return true;
+              
+              const hasFull = events.some(f => 
+                f.event_type === "edinet_order" &&
+                f.ticker === e.ticker &&
+                ((f.raw_payload && typeof f.raw_payload === "object" ? (f.raw_payload as Record<string, any>).extracted : null)?.period === ePeriod)
+              );
+              return !hasFull;
+            });
+
             // Discordタブ: ソート順をクライアントサイドで切り替え
             const displayEvents = isDiscordTab
-              ? [...events].sort((a, b) => {
+              ? [...filteredEvents].sort((a, b) => {
                   // 未読を常に上
                   if (a.is_read !== b.is_read) return a.is_read ? 1 : -1;
                   if (discordSortMode === "timeline") {
@@ -730,7 +745,7 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
                     return new Date(b.detected_at).getTime() - new Date(a.detected_at).getTime();
                   }
                 })
-              : events;
+              : filteredEvents;
 
             return displayEvents.map((event, _idx) => {
               const badge = getBadgeConfig(event.event_type, event.headline);
@@ -789,6 +804,21 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
                     <span className={`alert-badge ${badge.category}`}>
                       {badge.emoji} {subtypeLabel || badge.label}
                     </span>
+                    {event.event_type === "edinet_order_partial" && (
+                      <span className="alert-badge" style={{ backgroundColor: "#fef08a", color: "#854d0e", marginLeft: "4px" }}>
+                        片側のみ
+                      </span>
+                    )}
+                    {event.event_type === "edinet_order_partial" && ((event.raw_payload && typeof event.raw_payload === "object" ? (event.raw_payload as Record<string, any>).extracted?.review_label : null)) && (
+                      <span className="alert-badge" style={{ backgroundColor: "#fef08a", color: "#854d0e", marginLeft: "4px" }}>
+                        {((event.raw_payload as Record<string, any>).extracted?.review_label)}
+                      </span>
+                    )}
+                    {event.event_type === "edinet_order_partial" && ((event.raw_payload && typeof event.raw_payload === "object" ? (event.raw_payload as Record<string, any>).extracted?.classification === "PARTIAL_METRIC_REVIEW_CAUTION" : false)) && (
+                      <span className="alert-badge" style={{ backgroundColor: "#fecaca", color: "#991b1b", marginLeft: "4px" }}>
+                        要確認
+                      </span>
+                    )}
                     <span className="alert-card-actions">
                       <button
                         className={`action-btn ${event.is_starred ? "active" : ""}`}

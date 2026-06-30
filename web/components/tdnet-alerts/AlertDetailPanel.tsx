@@ -270,6 +270,68 @@ export default function AlertDetailPanel({
         );
       })()}
 
+      {/* Order Data */}
+      {(() => {
+        const isOrderEvent = event.event_type === "edinet_order" || event.event_type === "edinet_order_partial";
+        if (!isOrderEvent) return null;
+        
+        const ext = (event.raw_payload as Record<string, unknown>)?.extracted as Record<string, unknown> | undefined;
+        if (!ext) return null;
+
+        const isPartial = event.event_type === "edinet_order_partial";
+        const orRaw = ext.orders_received;
+        const obRaw = ext.order_backlog;
+        
+        const fmtVal = (val: unknown) => {
+          if (val == null) return "未開示";
+          return `${Number(val).toLocaleString()}百万円`;
+        };
+
+        const reviewLabel = ext.review_label as string | undefined;
+
+        return (
+          <div className="segment-section" style={{ marginTop: "16px" }}>
+            <div className="segment-title">🏢 受注実績・受注残高</div>
+            {isPartial && (
+              <div style={{ marginBottom: "8px", display: "flex", gap: "8px" }}>
+                <span className="alert-badge" style={{ backgroundColor: "#fef08a", color: "#854d0e" }}>
+                  片側のみ
+                </span>
+                {reviewLabel && (
+                  <span className="alert-badge" style={{ backgroundColor: "#fef08a", color: "#854d0e" }}>
+                    {reviewLabel}
+                  </span>
+                )}
+                {ext.classification === "PARTIAL_METRIC_REVIEW_CAUTION" && (
+                  <span className="alert-badge" style={{ backgroundColor: "#fecaca", color: "#991b1b" }}>
+                    要確認
+                  </span>
+                )}
+              </div>
+            )}
+            {(ext.classification === "PARTIAL_METRIC_REVIEW_CAUTION" && typeof ext.notes === "string" && ext.notes) ? (
+              <div style={{ fontSize: "0.85rem", color: "#b91c1c", marginBottom: "8px" }}>
+                {ext.notes}
+              </div>
+            ) : null}
+            <table className="segment-table">
+              <thead>
+                <tr>
+                  <th>受注高</th>
+                  <th>受注残高</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>{fmtVal(orRaw)}</td>
+                  <td>{fmtVal(obRaw)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
+
       {/* Comments */}
       <div className="comments-section">
         <div className="comments-title">💬 コメント ({comments.length})</div>
