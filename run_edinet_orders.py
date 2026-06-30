@@ -234,6 +234,11 @@ def _run_dynamic_mode(args: argparse.Namespace) -> None:
 
         if not period_end:
             print(f"  [WARN] period_end が不明。periodEnd フィールドがAPI応答に含まれていない可能性。")
+            import re
+            m = re.search(r"－(\d{4}/\d{2}/\d{2})\)$", doc_description)
+            if m:
+                period_end = m.group(1).replace("/", "-")
+                print(f"  [INFO] タイトルから period_end={period_end} を補完しました。")
 
         # XBRL取得
         dl_ok = _download_xbrl(doc_id, cache_dir=cache_dir)
@@ -244,15 +249,16 @@ def _run_dynamic_mode(args: argparse.Namespace) -> None:
 
         # 受注抽出
         target_spec = {
-            "ticker": ticker or edinet_code,  # tickerがなければedinekCodeで代替
+            "ticker": ticker or edinet_code,
             "company": filer_name,
             "doc_id": doc_id,
+            "docs": [doc]
         }
         extracted = extract_from_company(target_spec, cache_dir=cache_dir)
         extracted["edinet_code"] = edinet_code
         extracted["submit_datetime"] = submit_dt
         extracted["doc_description"] = doc_description
-        extracted["api_period_end"] = period_end  # API由来の期末日を保持
+        extracted["api_period_end"] = period_end  # API由来またはタイトル補完の期末日を保持
         extracted_list.append(extracted)
 
         has_value = (

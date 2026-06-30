@@ -36,7 +36,10 @@ def _has_repeated_orders_header(row: dict[str, Any]) -> bool:
         # 改行で分割して行ごとにチェック
         lines = str(target).split("\n")
         for line in lines:
-            if line.count("受注高") >= 2:
+            # 芝浦機械型などの「受注高(百万円)前年同期比(%)」による誤検知を防ぐため、
+            # 「前年同期比」や「増減率」等の直前にある「受注高」はカウントから除外する
+            line_clean = re.sub(r"受注残?高[^|]*?(?:前年同期|増減|比較|比)", "", line)
+            if line_clean.count("受注高") >= 2:
                 return True
     return False
 
