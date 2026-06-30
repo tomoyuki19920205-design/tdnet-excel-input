@@ -1,0 +1,10 @@
+scratch/
+scratch/**
+logs/
+logs/**
+data/
+data/**
+state/
+state/**
+review/
+review/**
