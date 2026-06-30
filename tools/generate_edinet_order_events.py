@@ -176,9 +176,25 @@ def generate_events(targets: list[dict], target_date_str: str, dry_run: bool = T
         c_name = matched_data.get("company_name", company_name)
         period = matched_data.get("period")
         
+        is_partial = matched_data.get("classification") == "PARTIAL_METRIC_REVIEW"
+        if is_partial:
+            # fullが存在するかチェック
+            has_full = any(d.get("classification") == "PASS_SAVE_CANDIDATE" and d.get("period") == period for d in data_list)
+            if has_full:
+                results_report.append({
+                    "ticker": t, "company_name": c_name, "doc_id": target.get("doc_id"), 
+                    "submitted_at": target.get("submitted_at"), "filing_period_end": filing_period_end, 
+                    "matched_edinet_order_data_period_end": period, "orders_received": matched_data.get("orders_received"), 
+                    "order_backlog": matched_data.get("order_backlog"), "source_unit": matched_data.get("source_unit"),
+                    "event_title": None, "dedupe_key": None, "action": "SKIP", "skip_reason": "SKIP_FULL_EXISTS"
+                })
+                continue
+                
+        event_type = "edinet_order_partial" if is_partial else "edinet_order"
+        
         raw_payload = {
             "source": "edinet",
-            "original_event_type": "edinet_order",
+            "original_event_type": event_type,
             "extracted": {
                 "doc_id": matched_data.get("doc_id") or target.get("doc_id"),
                 "ticker": t,
@@ -193,13 +209,28 @@ def generate_events(targets: list[dict], target_date_str: str, dry_run: bool = T
                 "rpo": matched_data.get("rpo"),
                 "confidence": matched_data.get("confidence"),
                 "null_reason": matched_data.get("null_reason"),
-                "source_unit": matched_data.get("source_unit")
+                "source_unit": matched_data.get("source_unit"),
+                "classification": matched_data.get("classification")
             }
         }
         
-        # dedupe_key に period_end を含める
-        dedupe_key = f"edinet_order_{t}_{period}"
-        event_title = f"{c_name} 受注/有報 FY"
+        if is_partial:
+            partial_type = "orders_received_only" if matched_data.get("orders_received") is not None else "order_backlog_only"
+            raw_payload["extracted"].update({
+                "is_partial": True,
+                "partial_type": partial_type,
+                "missing_metric": "order_backlog" if matched_data.get("orders_received") is not None else "orders_received",
+                "review_label": "受注残未開示" if matched_data.get("orders_received") is not None else "受注高未開示"
+            })
+            dedupe_key = f"edinet_order_partial_{t}_{period}_{partial_type}"
+            event_title = f"{c_name} 受注/有報 FY (部分開示)"
+            display_summary = "EDINET受注データ (部分開示)"
+            notify_discord = False
+        else:
+            dedupe_key = f"edinet_order_{t}_{period}"
+            event_title = f"{c_name} 受注/有報 FY"
+            display_summary = "EDINET受注データ"
+            notify_discord = False # edinet_order itself has its own logic elsewhere, but here we just keep it False as original
         
         # 重複チェック (tdnet_events)
         check_resp = client.table("tdnet_events").select("id").eq("dedupe_key", dedupe_key).execute()
@@ -220,16 +251,16 @@ def generate_events(targets: list[dict], target_date_str: str, dry_run: bool = T
             "disclosed_at": target.get("submitted_at") or jst_now.isoformat(),
             "ticker": t,
             "company_name": c_name,
-            "event_type": "edinet_order",
+            "event_type": event_type,
             "headline": event_title,
-            "summary": "EDINET受注データ抽出",
+            "summary": display_summary,
             "raw_payload": raw_payload,
             "priority_rank": 5,
             "display_title": event_title,
-            "display_summary": "EDINET受注データ",
+            "display_summary": display_summary,
             "formatted_message": "",
             "dedupe_key": dedupe_key,
-            "notify_to_discord": False,
+            "notify_to_discord": notify_discord,
             "status": "active",
             "schema_version": 1
         }

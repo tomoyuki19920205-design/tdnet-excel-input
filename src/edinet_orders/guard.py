@@ -44,7 +44,7 @@ def _has_repeated_orders_header(row: dict[str, Any]) -> bool:
     return False
 
 
-def apply_pre_save_guard(row: dict[str, Any]) -> dict[str, Any]:
+def apply_pre_save_guard(row: dict[str, Any], enable_partial_save: bool = False) -> dict[str, Any]:
     """
     変換済みの db_row に対して安全ルールを適用し、
     `save_candidate` (bool) と `classification` (str) を付与して返す。
@@ -53,6 +53,8 @@ def apply_pre_save_guard(row: dict[str, Any]) -> dict[str, Any]:
     ----------
     row : dict
         transformer.transform_to_db_row() が生成した辞書
+    enable_partial_save : bool
+        Trueの場合、PARTIAL_METRIC_REVIEW を保存候補として扱う（除外ルールを通過したもののみ）
         
     Returns
     -------
@@ -89,9 +91,42 @@ def apply_pre_save_guard(row: dict[str, Any]) -> dict[str, Any]:
         row["classification"] = "BOTH_NULL_REJECT"
         return row
     if not has_orders or not has_backlog:
-        row["save_candidate"] = False
+        # 除外ルールの判定
+        snippet = str(row.get("snippet") or "")
+        
+        # 明らかな誤抽出パターン
+        false_patterns = ["販売実績", "生産実績", "仕入実績", "受注損失引当金", "履行義務", "契約負債", "契約残高"]
+        is_false_positive = False
+        for p in false_patterns:
+            if p in snippet:
+                is_false_positive = True
+                break
+        
+        if is_false_positive:
+            # もし「受注」が含まれていれば要注意だが今回は安全側に倒して全部落としてもよい。
+            # しかし指示では Category C「受注も含まれている要注意」は保存する方針だったので、
+            # 「受注」を含まない場合、または引当金等確定NGワードが含まれる場合を明確なNGとする。
+            is_strict_false = False
+            if "受注" not in snippet:
+                is_strict_false = True
+            elif any(p in snippet for p in ["受注損失引当金", "履行義務", "契約負債", "契約残高"]):
+                is_strict_false = True
+                
+            if is_strict_false:
+                row["save_candidate"] = False
+                row["classification"] = "PARTIAL_METRIC_REVIEW_REJECT"
+                return row
+                
         row["classification"] = "PARTIAL_METRIC_REVIEW"
-        return row
+        if enable_partial_save:
+            row["is_partial"] = True
+            row["partial_type"] = "orders_received_only" if has_orders else "order_backlog_only"
+            row["missing_metric"] = "order_backlog" if has_orders else "orders_received"
+            row["review_label"] = "受注残未開示" if has_orders else "受注高未開示"
+            # save_candidate は最後まで通過すれば True になるためここでは return せず後続のチェックを受けさせる
+        else:
+            row["save_candidate"] = False
+            return row
 
     # 4. Unit の不明チェック (未知単位はPASS禁止)
     source_unit = str(row.get("source_unit") or "").strip().lower()
@@ -114,5 +149,7 @@ def apply_pre_save_guard(row: dict[str, Any]) -> dict[str, Any]:
 
     # すべてのガードを通過した場合は保存候補
     row["save_candidate"] = True
-    row["classification"] = "PASS_SAVE_CANDIDATE"
+    if row.get("classification") != "PARTIAL_METRIC_REVIEW":
+        row["classification"] = "PASS_SAVE_CANDIDATE"
+        
     return row

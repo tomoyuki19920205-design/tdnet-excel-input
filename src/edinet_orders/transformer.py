@@ -42,6 +42,7 @@ def _to_million(value: int | float | None, source_unit: str) -> int | None:
 def transform_to_db_row(
     extracted: dict[str, Any],
     fiscal_end: str | None,
+    enable_partial_save: bool = False
 ) -> dict[str, Any]:
     """
     extract_from_company() の出力を edinet_order_data INSERT形式に変換する。
@@ -53,6 +54,8 @@ def transform_to_db_row(
     fiscal_end : str | None
         決算期末日 "YYYY-MM-DD"。survey_detail.json の fiscal_end。
         None の場合は _dryrun_period_error フラグを立てる。
+    enable_partial_save : bool
+        Trueの場合、PARTIAL_METRIC_REVIEWを保存対象として扱う。
 
     Returns
     -------
@@ -108,7 +111,7 @@ def transform_to_db_row(
 
     # 保存前ガードを適用
     from .guard import apply_pre_save_guard
-    row = apply_pre_save_guard(row)
+    row = apply_pre_save_guard(row, enable_partial_save=enable_partial_save)
 
     # _dryrun_period_error による PERIOD_NULL_REJECT のバックアップ（guard.py内でも判定されるが念のため）
     if row.get("_dryrun_period_error"):
