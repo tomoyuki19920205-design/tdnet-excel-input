@@ -427,7 +427,7 @@ def _process_single_document(
             f"[TITLE_PRECLASSIFY] SKIP_ALL ticker={doc.ticker} "
             f"(no event category matched, skip PDF fetch)"
         )
-        return results
+        return [{"action": "skipped_non_target"}]
 
     # ================================================================
     # ★ STEP 2: 必要カテゴリ用に PDF 取得（遅延評価・1回のみ）
@@ -720,7 +720,10 @@ def process_documents(
             try:
                 doc_results = _process_single_document(doc, conn, event_types, dry_run, db_path=db_path)
                 for dr in doc_results:
-                    if dr.get("action") == "error":
+                    if dr.get("action") == "skipped_non_target":
+                        result.skipped_all_doc_ids.append(doc.doc_id)
+                        continue  # detailsにも入れず、他のカウントも行わない
+                    elif dr.get("action") == "error":
                         result.errors += 1
                     elif dr.get("action") == "inserted":
                         result.detected += 1

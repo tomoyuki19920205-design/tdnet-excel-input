@@ -921,6 +921,7 @@ def run_ingest(
         # ── イベント検知パイプライン統合 ──
         # items(全取得文書)をevent_pipelineに渡す。
         # 失敗してもingest全体は成功扱い。
+        event_result = None
         try:
             # フールプルーフ: run_ingest() を直接 import 経由で呼んだ場合も .env を確実に読む
             try:
@@ -986,6 +987,41 @@ def run_ingest(
         except Exception as e:
             logger.error(f"[INGEST] event_pipeline failed (non-fatal): {e}", exc_info=True)
             summary["event_pipeline"] = {"error": str(e)}
+
+        # ── 非短信イベントの処理済記録（無駄な再評価を抑制） ──
+        if not dry_run and event_result is not None and hasattr(event_result, "skipped_all_doc_ids"):
+            skipped_all_set = set(event_result.skipped_all_doc_ids)
+            target_ids = {i.disclosure_id for i in target_items}
+            
+            logger.info(f"[TDNET_Realtime] non_target_skip_record START count={len(skipped_all_set)}")
+            
+            recorded_count = 0
+            already_skipped_count = 0
+            errors = 0
+            for item in items:
+                if item.disclosure_id in skipped_all_set and item.disclosure_id not in target_ids:
+                    try:
+                        if state_db.is_processed(item.disclosure_id):
+                            already_skipped_count += 1
+                        else:
+                            state_db.record(
+                                disclosure_id=item.disclosure_id,
+                                code=item.ticker,
+                                year="", quarter="",
+                                status="skipped_non_target",
+                            )
+                            recorded_count += 1
+                    except Exception:
+                        errors += 1
+            
+            logger.info(
+                f"[TDNET_Realtime] non_target_skip_record DONE "
+                f"recorded={recorded_count} "
+                f"skipped_already={already_skipped_count} "
+                f"errors={errors}"
+            )
+            if recorded_count > 0 and "event_pipeline" in summary:
+                summary["event_pipeline"]["recorded_skipped_non_target"] = recorded_count
 
         # ── 決算短信V2詳細解析（feature flag: ENABLE_EARNINGS_V2_PIPELINE=1） ──
         # earnings_summaries 保存 + Supabase tdnet_events 反映。

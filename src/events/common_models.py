@@ -104,6 +104,7 @@ class PipelineResult:
     supabase_dedup_skipped: int = 0
     supabase_errors: int = 0
     details: list[dict] = field(default_factory=list)
+    skipped_all_doc_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
