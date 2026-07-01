@@ -75,9 +75,9 @@ def save_prior_comparative_from_event(
         canary_tickers: 指定された場合、この銘柄のみINSERT候補として評価する
         denylist_path: NEEDS_REVIEW除外リストJSONのパス
     """
-    if dry_run and save_mode != "canary_insert":
+    if dry_run and save_mode not in ("canary_insert", "realtime_canary_insert"):
         save_mode = "dry_run"
-    if save_mode not in ("dry_run", "canary_insert"):
+    if save_mode not in ("dry_run", "canary_insert", "realtime_canary_insert"):
         raise RuntimeError(f"STOP: Unknown save_mode={save_mode}")
 
     stats = {
@@ -271,31 +271,36 @@ def save_prior_comparative_from_event(
                         f"source_doc_id={pr.get('source_doc_id')} "
                         f"source_disclosure_period={pr.get('source_disclosure_period')}"
                     )
-            elif save_mode == "canary_insert":
+            elif save_mode in ("canary_insert", "realtime_canary_insert"):
                 import requests
                 import datetime
                 if not canary_tickers or ticker not in canary_tickers:
                     raise RuntimeError(f"STOP: ticker {ticker} not in canary_tickers")
-                if not canary_doc_ids or doc_id not in canary_doc_ids:
-                    raise RuntimeError(f"STOP: doc_id {doc_id} not in canary_doc_ids")
-                if not allowed_source_row_keys:
-                    raise RuntimeError("STOP: allowed_source_row_keys must be provided for canary_insert")
-                if not rollback_preview_dir:
-                    raise RuntimeError("STOP: rollback_preview_dir must be provided for canary_insert")
+                
+                if save_mode == "canary_insert":
+                    if not canary_doc_ids or doc_id not in canary_doc_ids:
+                        raise RuntimeError(f"STOP: doc_id {doc_id} not in canary_doc_ids")
+                    if not allowed_source_row_keys:
+                        raise RuntimeError("STOP: allowed_source_row_keys must be provided for canary_insert")
+                    if not rollback_preview_dir:
+                        raise RuntimeError("STOP: rollback_preview_dir must be provided for canary_insert")
+                
                 if ticker == "9993":
                     raise RuntimeError("STOP: 9993 is blocked")
                 if ticker in needs_review_denylist:
                     raise RuntimeError(f"STOP: ticker {ticker} is in needs_review_denylist")
                 if len(planned_rows) > max_insert_rows:
                     raise RuntimeError(f"STOP: planned rows ({len(planned_rows)}) exceeds max_insert_rows ({max_insert_rows})")
-                if len(planned_rows) != len(allowed_source_row_keys):
-                    raise RuntimeError(f"STOP: planned rows ({len(planned_rows)}) != allowed_source_row_keys ({len(allowed_source_row_keys)})")
                 
                 planned_keys = set(pr["source_row_key"] for pr in planned_rows)
-                if planned_keys != set(allowed_source_row_keys):
-                    raise RuntimeError("STOP: planned source_row_keys mismatch allowed_source_row_keys")
                 if len(planned_keys) != len(planned_rows):
                     raise RuntimeError("STOP: duplicate source_row_key in payload")
+
+                if save_mode == "canary_insert":
+                    if len(planned_rows) != len(allowed_source_row_keys):
+                        raise RuntimeError(f"STOP: planned rows ({len(planned_rows)}) != allowed_source_row_keys ({len(allowed_source_row_keys)})")
+                    if planned_keys != set(allowed_source_row_keys):
+                        raise RuntimeError("STOP: planned source_row_keys mismatch allowed_source_row_keys")
                 
                 for pr in planned_rows:
                     if pr.get("source_doc_id") != doc_id:

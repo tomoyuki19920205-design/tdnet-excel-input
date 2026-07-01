@@ -43,18 +43,8 @@ def run_prior_comparative_realtime_hook(target_items: List[Any], max_docs: int) 
     pc_canaries_str = os.environ.get("PRIOR_COMPARATIVE_REALTIME_CANARY_TICKERS", "")
     pc_canaries = [t.strip() for t in pc_canaries_str.split(",") if t.strip()] if pc_canaries_str else []
     
-    # 【保存ONガード】
-    save_mode = "dry_run"
-    forced_dry_run = True
-    if not pc_dry_run:
-        if not pc_canaries:
-            logger.info("[PRIOR_COMPARATIVE_REALTIME] dry_run=false but no canary_tickers provided. Enforcing save_mode=dry_run.")
-            save_mode = "dry_run"
-        else:
-            # 今回の実装では dry_run=false をサポートしない安全ガード
-            logger.info("[PRIOR_COMPARATIVE_REALTIME] dry_run=false requested, but enforcing dry-run for safety.")
-            save_mode = "dry_run"
-            
+    # 【保存ONガード設定（全体）】
+    # 個別アイテムのループ内で詳細判定を行う
     items_to_process = target_items[:max_docs]
     if not items_to_process:
         logger.info("[PRIOR_COMPARATIVE_REALTIME] No docs to process")
@@ -86,13 +76,29 @@ def run_prior_comparative_realtime_hook(target_items: List[Any], max_docs: int) 
         would_insert_rows = 0
         duplicate_count = 0
         skip_reason = "none"
+
+        # 【個別アイテムの保存許可判定】
+        current_save_mode = "dry_run"
+        current_dry_run = True
+
+        if not pc_dry_run:
+            if not pc_canaries:
+                logger.info(f"[PRIOR_COMPARATIVE_REALTIME_SAFE_SKIP] reason=dry_run_false_without_canary_tickers ticker={ticker} raw_disclosure_id={raw_disclosure_id} resolved_doc_id={resolved_doc_id}")
+                continue
+            elif ticker not in pc_canaries:
+                logger.info(f"[PRIOR_COMPARATIVE_REALTIME_SAFE_SKIP] reason=ticker_not_in_canary_list ticker={ticker} raw_disclosure_id={raw_disclosure_id} resolved_doc_id={resolved_doc_id}")
+                current_save_mode = "dry_run"
+                current_dry_run = True
+            else:
+                current_save_mode = "realtime_canary_insert"
+                current_dry_run = False
         
         try:
             # save_prior_comparative_from_event に1件だけ渡して詳細な統計を取る
             stats = save_prior_comparative_from_event(
                 disclosure_ids=[resolved_doc_id],
-                dry_run=forced_dry_run,
-                save_mode=save_mode,
+                dry_run=current_dry_run,
+                save_mode=current_save_mode,
                 canary_tickers=pc_canaries if pc_canaries else None,
                 max_insert_rows=50,
             )
@@ -125,16 +131,18 @@ def run_prior_comparative_realtime_hook(target_items: List[Any], max_docs: int) 
             
         elapsed_ms = int((time.monotonic() - start_time) * 1000)
         
+        log_prefix = "[PRIOR_COMPARATIVE_REALTIME_CANARY_INSERT]" if not current_dry_run else "[PRIOR_COMPARATIVE_REALTIME_DRY_RUN]"
         log_msg = (
-            f"[PRIOR_COMPARATIVE_REALTIME_DRY_RUN] "
-            f"ticker={ticker} doc_id={resolved_doc_id} date={disclosure_date} title=\"{title[:30]}\" "
-            f"generated_rows={generated_rows} would_insert_rows={would_insert_rows} "
+            f"{log_prefix} "
+            f"ticker={ticker} raw_disclosure_id={raw_disclosure_id} resolved_doc_id={resolved_doc_id} date={disclosure_date} title=\"{title[:30]}\" "
+            f"generated_rows={generated_rows} would_insert_rows={would_insert_rows} inserted_rows={stats.get('inserted_rows', 0)} "
             f"duplicate_source_row_key_count={duplicate_count} "
+            f"save_mode={current_save_mode} canary_tickers={pc_canaries_str} "
             f"skip_reason={skip_reason} elapsed_ms={elapsed_ms} error={error_msg is not None}"
         )
         logger.info(log_msg)
         
         if duplicate_count > 0:
-            logger.warning(f"[PRIOR_COMPARATIVE_REALTIME_DRY_RUN] BLOCKED doc_id={resolved_doc_id}: duplicate_source_row_key_count={duplicate_count}")
+            logger.warning(f"{log_prefix} BLOCKED doc_id={resolved_doc_id}: duplicate_source_row_key_count={duplicate_count}")
             
     return summary
