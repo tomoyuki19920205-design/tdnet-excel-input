@@ -450,6 +450,27 @@ class _SupabaseAPI:
             offset += page
         return all_rows
 
+    def select_in(self, table: str, select: str, field: str, values: list, chunk_size: int = 50) -> list[dict]:
+        clean_values = [v for v in values if v is not None and str(v).strip() != ""]
+        unique_values = list(set(clean_values))
+        if not unique_values:
+            return []
+
+        all_rows: list[dict] = []
+        for i in range(0, len(unique_values), chunk_size):
+            chunk = unique_values[i:i + chunk_size]
+            in_vals = ",".join(str(v) for v in chunk)
+            filter_str = f"in.({in_vals})"
+            r = self._request(
+                "GET", f"{self.rest_url}/{table}",
+                headers={**self.headers, "Prefer": ""},
+                params={"select": select, field: filter_str},
+            )
+            rows = r.json()
+            if rows:
+                all_rows.extend(rows)
+        return all_rows
+
     def upsert_batch(self, table: str, data: list[dict],
                      on_conflict: str = "") -> list[dict]:
         if not data:
@@ -2056,7 +2077,29 @@ def push_sqlite_to_supabase_targeted(
             })
 
         # 既存チェック + 新規のみ insert
-        existing_disc = api.select_all("disclosures", "disclosure_id,sha256")
+        target_sha256s = [d.get("sha256") for d in disc_payloads if d.get("sha256")]
+        target_disclosure_ids = [d.get("disclosure_id") for d in disc_payloads if d.get("disclosure_id")]
+        
+        t_dedupe_start = _time.time()
+        existing_by_sha = api.select_in("disclosures", "disclosure_id,sha256", "sha256", target_sha256s, chunk_size=50)
+        existing_by_id = api.select_in("disclosures", "disclosure_id,sha256", "disclosure_id", target_disclosure_ids, chunk_size=50)
+        
+        # Merge and deduplicate by disclosure_id / sha256
+        existing_disc_map = {}
+        for d in existing_by_sha + existing_by_id:
+            if d.get("disclosure_id"):
+                existing_disc_map[d["disclosure_id"]] = d
+            elif d.get("sha256"):
+                existing_disc_map[d["sha256"]] = d
+        existing_disc = list(existing_disc_map.values())
+        
+        logger.info(
+            f"[TARGETED_PUSH] phase=disclosures dedupe_lookup method=filtered_in targets={len(disc_payloads)} "
+            f"sha_targets={len(set(target_sha256s))} id_targets={len(set(target_disclosure_ids))} "
+            f"sha_chunks={(len(set(target_sha256s)) + 49) // 50} id_chunks={(len(set(target_disclosure_ids)) + 49) // 50} "
+            f"fetched_existing={len(existing_disc)} elapsed={_time.time() - t_dedupe_start:.1f}s"
+        )
+
         existing_sha_map: dict[str, int] = {
             d["sha256"]: d["disclosure_id"]
             for d in existing_disc if d.get("sha256")
