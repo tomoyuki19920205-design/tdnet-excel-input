@@ -181,14 +181,36 @@ def save_prior_comparative_from_event(
             # DBから official_current (前期) を取得
             # prior_comparative (前期の実績) を生成する際、前期の official_current が持つ
             # unit などのメタデータを引き継ぐために prior_period を使用します。
+            official_sources = "in.(edinet_xbrl,backfill_xbrl,xbrl,v4_pdf,backfill_v4_pdf,attachment_xbrl,tdnet)"
+            
             official_current_db = supabase_select(
                 "canonical_segments",
                 params={
                     "ticker": f"eq.{ticker}",
                     "period": f"eq.{prior_period}",
-                    "data_basis": "eq.official_current"
+                    "source": official_sources,
+                    "data_basis": "is.null"
                 }
             )
+            
+            if not official_current_db and quarter:
+                # 四半期決算等の場合、periodが決算期末日に正規化されている可能性があるため、
+                # quarter一致かつ prior_period <= period < current_period を満たす行をフォールバック検索する
+                candidates = supabase_select(
+                    "canonical_segments",
+                    params={
+                        "ticker": f"eq.{ticker}",
+                        "quarter": f"eq.{quarter}",
+                        "source": official_sources,
+                        "data_basis": "is.null"
+                    }
+                )
+                if candidates:
+                    valid = [c for c in candidates if c.get("period") and prior_period <= c["period"] < current_period]
+                    if valid:
+                        best_period = max(c["period"] for c in valid)
+                        official_current_db = [c for c in valid if c["period"] == best_period]
+
             if not official_current_db:
                 official_current_db = supabase_select(
                     "canonical_segments",
