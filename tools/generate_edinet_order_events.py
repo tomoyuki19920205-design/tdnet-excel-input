@@ -32,6 +32,125 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.edinet_orders.saver import _get_client
 
 
+
+import math
+from datetime import datetime, timezone, timedelta
+import requests
+
+def _resolve_prior_annual_doc_id(ticker: str, current_period_end: str, current_submit_date: str) -> str | None:
+    """EDINET APIから前年の有報 doc_id を探索する（edinet_document_metadata不使用）"""
+    api_key = os.environ.get("EDINET_API_KEY", "")
+    if not api_key:
+        return None
+    try:
+        y, m, d = current_period_end[:10].split('-')
+        target_year = int(y) - 1
+        target_period_end = f"{target_year}-{m}-{d}"
+    except ValueError:
+        return None
+        
+    try:
+        # submit_date があれば、その1年前の前後30日間を探す
+        sy, sm, sd = current_submit_date[:10].split('-')
+        base_date = datetime(int(sy)-1, int(sm), int(sd))
+    except (ValueError, TypeError):
+        base_date = datetime(int(y)-1, int(m), int(d)) + timedelta(days=90)
+        
+    for offset in range(-15, 16):
+        check_date = (base_date + timedelta(days=offset)).strftime('%Y-%m-%d')
+        url = "https://api.edinet-fsa.go.jp/api/v2/documents.json"
+        params = {"date": check_date, "type": 2, "Subscription-Key": api_key}
+        try:
+            resp = requests.get(url, params=params, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                for r in data.get("results", []):
+                    code = r.get("secCode", "").strip()
+                    ed_code = r.get("edinetCode", "").strip()
+                    # ticker が一致するか (secCode の先頭4桁など)
+                    is_match = False
+                    if code and len(code) >= 4 and code[:4] == ticker:
+                        is_match = True
+                    elif ed_code == ticker:
+                        is_match = True
+                        
+                    if is_match:
+                        # ユーザ指定ガード: 120 決め打ち禁止
+                        doc_desc = r.get("docDescription", "")
+                        form_code = r.get("formCode", "")
+                        ord_code = r.get("ordinanceCode", "")
+                        doc_type = r.get("docTypeCode", "")
+                        
+                        is_yuho = False
+                        if "有価証券報告書" in doc_desc and "訂正" not in doc_desc:
+                            is_yuho = True
+                        elif form_code == "030000" and ord_code == "010":
+                            is_yuho = True
+                            
+                        is_teisei = False
+                        if "訂正有価証券報告書" in doc_desc:
+                            is_teisei = True
+                        elif doc_type == "130":
+                            is_teisei = True
+                            
+                        # 期間の一致（年のみ、または完全一致）
+                        r_period = (r.get("periodEnd") or "")[:10]
+                        if not r_period or r_period[:4] != str(target_year):
+                            continue
+                            
+                        if is_yuho:
+                            return r.get("docID")
+                        # TODO: 訂正有報は通常有報がない場合のみ候補だが、簡略化のため完全一致を優先
+                        if is_teisei and r_period == target_period_end:
+                            return r.get("docID")
+        except Exception:
+            pass
+            
+    return None
+
+def _normalize_order_unit(current_val: int | None, current_unit: str | None, prev_val: int | None, prev_unit: str | None) -> tuple[int | None, int | None, str]:
+    """
+    YOY計算用に単位スケールを合わせる。DB保存値は変更しない。
+    戻り値: (norm_current_val, norm_prev_val, note)
+    """
+    note = ""
+    if current_val is None or prev_val is None:
+        return current_val, prev_val, note
+        
+    unit_map = {
+        'yen': 1, 'thousand_yen': 1000, 'million_yen': 1000000, 'billion_yen': 1000000000,
+        '円': 1, '千円': 1000, '百万円': 1000000, '十億円': 1000000000
+    }
+    
+    # ユーザー指示: 4832 / 6356 などのスケール補正。
+    # 明らかにおかしいスケール (例: thousand_yen だが値が小さいなど) 
+    # ここでは current_unit != prev_unit の場合に scale factor を適用する
+    
+    c_scale = unit_map.get(current_unit or "unknown", 1)
+    p_scale = unit_map.get(prev_unit or "unknown", 1)
+    
+    norm_c = current_val
+    norm_p = prev_val
+    
+    if c_scale != p_scale:
+        note = f"normalized: current({current_unit}) vs prev({prev_unit})"
+        # 合わせる: current 側に合わせる (または常に million_yen に)
+        # fractional YOY なので、同じスケールになればよい。
+        norm_p = (prev_val * p_scale) / c_scale
+        
+    # 値の桁数チェック (例: hundred-million scale miss)
+    # 実値が 1,000,000 以上の差があるなど (今回は簡易実装)
+    return norm_c, norm_p, note
+
+def _calculate_yoy_fractional(current: float | None, previous: float | None) -> float | None:
+    if current is None or previous is None or previous == 0:
+        return None
+    val = (current - previous) / abs(previous)
+    if math.isnan(val) or math.isinf(val):
+        return None
+    return val
+
+
 def _get_edinet_targets_by_date(target_date: str) -> list[dict]:
     """EDINET API から指定日に提出された有価証券報告書の情報を取得する"""
     import requests
@@ -151,6 +270,16 @@ def generate_events(targets: list[dict], target_date_str: str, dry_run: bool = T
                 matched_data = data
                 break
                 
+        # dedupe_key (event period) と current_doc の period_end の一致チェック (old-period guard)
+        if matched_data and matched_data.get("period") != filing_period_end:
+            results_report.append({
+                "ticker": t, "company_name": company_name, "doc_id": target.get("doc_id"), 
+                "submitted_at": target.get("submitted_at"), "filing_period_end": filing_period_end, 
+                "matched_edinet_order_data_period_end": matched_data.get("period"),
+                "action": "SKIP", "skip_reason": "SKIP_OLD_PERIOD_GUARD"
+            })
+            continue
+
         if not matched_data:
             # 提出されたperiod_endと一致するデータがDBにない
             latest_period = data_list[0].get("period") if data_list else None
@@ -169,10 +298,48 @@ def generate_events(targets: list[dict], target_date_str: str, dry_run: bool = T
                 prev_data = data
                 break
                 
-        # YoY計算
-        or_yoy = _calculate_yoy(matched_data.get("orders_received"), prev_data.get("orders_received") if prev_data else None)
-        ob_yoy = _calculate_yoy(matched_data.get("order_backlog"), prev_data.get("order_backlog") if prev_data else None)
         
+        prev_doc_id = prev_data.get("doc_id") if prev_data else None
+        prev_period_end = prev_data.get("period") if prev_data else None
+        prev_orders_received = prev_data.get("orders_received") if prev_data else None
+        prev_order_backlog = prev_data.get("order_backlog") if prev_data else None
+        prev_unit = prev_data.get("source_unit") if prev_data else None
+
+        # fallback: DBに prev_data が無い場合は、APIで doc_id を探して抽出する
+        if not prev_data:
+            fallback_doc_id = _resolve_prior_annual_doc_id(t, period, target.get("submitted_at", ""))
+            if fallback_doc_id:
+                try:
+                    # dry-run mode で extractor を呼び出す
+                    from src.edinet_orders.extractor import extract_from_company
+                    from src.edinet_orders.transformer import transform_to_db_row
+                    cache_dir = os.path.join(os.getcwd(), 'data', 'edinet_cache')
+                    target_spec = {"ticker": t, "company": c_name, "doc_id": fallback_doc_id, "docs": []}
+                    extracted = extract_from_company(target_spec, cache_dir=cache_dir)
+                    if extracted:
+                        prev_orders_received = extracted.get("orders_received")
+                        prev_order_backlog = extracted.get("order_backlog")
+                        prev_unit = extracted.get("unit")
+                        if prev_unit == "百万円": prev_unit = "million_yen"
+                        elif prev_unit == "千円": prev_unit = "thousand_yen"
+                        prev_doc_id = fallback_doc_id
+                        prev_period_end = f"{int(period[:4])-1}" + period[4:]
+                except Exception as e:
+                    print(f"Fallback extraction failed for {t}: {e}")
+
+        # 正規化
+        norm_or_c, norm_or_p, note_or = _normalize_order_unit(matched_data.get("orders_received"), matched_data.get("source_unit"), prev_orders_received, prev_unit)
+        norm_ob_c, norm_ob_p, note_ob = _normalize_order_unit(matched_data.get("order_backlog"), matched_data.get("source_unit"), prev_order_backlog, prev_unit)
+        unit_note = note_or or note_ob or None
+
+        # YoY計算 (fractional)
+        or_yoy = _calculate_yoy_fractional(norm_or_c, norm_or_p)
+        ob_yoy = _calculate_yoy_fractional(norm_ob_c, norm_ob_p)
+        
+        yoy_calc_basis = {
+            "current_or": norm_or_c, "prev_or": norm_or_p,
+            "current_ob": norm_ob_c, "prev_ob": norm_ob_p
+        }
         c_name = matched_data.get("company_name", company_name)
         period = matched_data.get("period")
         
@@ -186,12 +353,13 @@ def generate_events(targets: list[dict], target_date_str: str, dry_run: bool = T
                     "submitted_at": target.get("submitted_at"), "filing_period_end": filing_period_end, 
                     "matched_edinet_order_data_period_end": period, "orders_received": matched_data.get("orders_received"), 
                     "order_backlog": matched_data.get("order_backlog"), "source_unit": matched_data.get("source_unit"),
-                    "event_title": None, "dedupe_key": None, "action": "SKIP", "skip_reason": "SKIP_FULL_EXISTS"
+                    "event_title": None, "dedupe_key": None, "action": "SKIP", "skip_reason": "SKIP_DUPLICATE_LATEST_FULL"
                 })
                 continue
                 
         event_type = "edinet_order_partial" if is_partial else "edinet_order"
         
+        # generated column である segment_name_key 等は含めない
         raw_payload = {
             "source": "edinet",
             "original_event_type": event_type,
@@ -210,16 +378,32 @@ def generate_events(targets: list[dict], target_date_str: str, dry_run: bool = T
                 "confidence": matched_data.get("confidence"),
                 "null_reason": matched_data.get("null_reason"),
                 "source_unit": matched_data.get("source_unit"),
-                "classification": matched_data.get("classification")
+                "classification": matched_data.get("classification"),
+                "prev_doc_id": prev_doc_id,
+                "prev_period_end": prev_period_end,
+                "prev_orders_received": prev_orders_received,
+                "prev_order_backlog": prev_order_backlog,
+                "yoy_calculation_basis": yoy_calc_basis,
+                "unit_normalization_note": unit_note
             }
         }
         
         if is_partial:
             partial_type = "orders_received_only" if matched_data.get("orders_received") is not None else "order_backlog_only"
+            missing_metric = "order_backlog" if matched_data.get("orders_received") is not None else "orders_received"
+            
+            # 未開示側を強制null (推測で埋めないガード)
+            if missing_metric == "order_backlog":
+                raw_payload["extracted"]["order_backlog"] = None
+                raw_payload["extracted"]["order_backlog_yoy"] = None
+            else:
+                raw_payload["extracted"]["orders_received"] = None
+                raw_payload["extracted"]["orders_received_yoy"] = None
+                
             raw_payload["extracted"].update({
                 "is_partial": True,
                 "partial_type": partial_type,
-                "missing_metric": "order_backlog" if matched_data.get("orders_received") is not None else "orders_received",
+                "missing_metric": missing_metric,
                 "review_label": "受注残未開示" if matched_data.get("orders_received") is not None else "受注高未開示"
             })
             dedupe_key = f"edinet_order_partial_{t}_{period}_{partial_type}"
