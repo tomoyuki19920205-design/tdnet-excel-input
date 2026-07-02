@@ -75,9 +75,9 @@ def save_prior_comparative_from_event(
         canary_tickers: 指定された場合、この銘柄のみINSERT候補として評価する
         denylist_path: NEEDS_REVIEW除外リストJSONのパス
     """
-    if dry_run and save_mode not in ("canary_insert", "realtime_canary_insert"):
+    if dry_run and save_mode not in ("canary_insert", "realtime_canary_insert", "realtime_all_xbrl_insert"):
         save_mode = "dry_run"
-    if save_mode not in ("dry_run", "canary_insert", "realtime_canary_insert"):
+    if save_mode not in ("dry_run", "canary_insert", "realtime_canary_insert", "realtime_all_xbrl_insert"):
         raise RuntimeError(f"STOP: Unknown save_mode={save_mode}")
 
     stats = {
@@ -295,11 +295,12 @@ def save_prior_comparative_from_event(
                         f"source_doc_id={pr.get('source_doc_id')} "
                         f"source_disclosure_period={pr.get('source_disclosure_period')}"
                     )
-            elif save_mode in ("canary_insert", "realtime_canary_insert"):
+            elif save_mode in ("canary_insert", "realtime_canary_insert", "realtime_all_xbrl_insert"):
                 import requests
                 import datetime
-                if not canary_tickers or ticker not in canary_tickers:
-                    raise RuntimeError(f"STOP: ticker {ticker} not in canary_tickers")
+                if save_mode != "realtime_all_xbrl_insert":
+                    if not canary_tickers or ticker not in canary_tickers:
+                        raise RuntimeError(f"STOP: ticker {ticker} not in canary_tickers")
                 
                 if save_mode == "canary_insert":
                     if not canary_doc_ids or doc_id not in canary_doc_ids:

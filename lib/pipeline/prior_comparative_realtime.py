@@ -40,8 +40,9 @@ def run_prior_comparative_realtime_hook(target_items: List[Any], max_docs: int) 
     TDNET realtime pipeline から呼ばれる prior_comparative 抽出の hook.
     """
     pc_dry_run = os.environ.get("PRIOR_COMPARATIVE_REALTIME_DRY_RUN", "1") != "0"
-    pc_canaries_str = os.environ.get("PRIOR_COMPARATIVE_REALTIME_CANARY_TICKERS", "")
-    pc_canaries = [t.strip() for t in pc_canaries_str.split(",") if t.strip()] if pc_canaries_str else []
+    pc_canaries_str = os.environ.get("PRIOR_COMPARATIVE_REALTIME_CANARY_TICKERS", "").strip()
+    is_all_xbrl_mode = pc_canaries_str.upper() == "ALL_XBRL"
+    pc_canaries = [t.strip() for t in pc_canaries_str.split(",") if t.strip()] if pc_canaries_str and not is_all_xbrl_mode else []
     
     # 【保存ONガード設定（全体）】
     # 個別アイテムのループ内で詳細判定を行う
@@ -82,9 +83,12 @@ def run_prior_comparative_realtime_hook(target_items: List[Any], max_docs: int) 
         current_dry_run = True
 
         if not pc_dry_run:
-            if not pc_canaries:
+            if not pc_canaries and not is_all_xbrl_mode:
                 logger.info(f"[PRIOR_COMPARATIVE_REALTIME_SAFE_SKIP] reason=dry_run_false_without_canary_tickers ticker={ticker} raw_disclosure_id={raw_disclosure_id} resolved_doc_id={resolved_doc_id}")
                 continue
+            elif is_all_xbrl_mode:
+                current_save_mode = "realtime_all_xbrl_insert"
+                current_dry_run = False
             elif ticker not in pc_canaries:
                 logger.info(f"[PRIOR_COMPARATIVE_REALTIME_SAFE_SKIP] reason=ticker_not_in_canary_list ticker={ticker} raw_disclosure_id={raw_disclosure_id} resolved_doc_id={resolved_doc_id}")
                 current_save_mode = "dry_run"
