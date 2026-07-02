@@ -94,6 +94,10 @@ def run_prior_comparative_realtime_hook(target_items: List[Any], max_docs: int) 
                 current_dry_run = False
         
         try:
+            # ensure scratch/prior_comparative_rollback exists
+            rollback_dir = "scratch/prior_comparative_rollback"
+            os.makedirs(rollback_dir, exist_ok=True)
+            
             # save_prior_comparative_from_event に1件だけ渡して詳細な統計を取る
             stats = save_prior_comparative_from_event(
                 disclosure_ids=[resolved_doc_id],
@@ -101,6 +105,7 @@ def run_prior_comparative_realtime_hook(target_items: List[Any], max_docs: int) 
                 save_mode=current_save_mode,
                 canary_tickers=pc_canaries if pc_canaries else None,
                 max_insert_rows=50,
+                rollback_preview_dir=rollback_dir,
             )
             
             # saver 側の stats から推測

@@ -178,6 +178,8 @@ def save_prior_comparative_from_event(
                 stats["skipped_already_exists"] += 1
                 continue
 
+            quarter = xbrl_rows[0].quarter if xbrl_rows else ""
+
             # DBから official_current (前期) を取得
             # prior_comparative (前期の実績) を生成する際、前期の official_current が持つ
             # unit などのメタデータを引き継ぐために prior_period を使用します。
@@ -390,14 +392,19 @@ def save_prior_comparative_from_event(
                         raise RuntimeError(f"STOP: Exact source_row_key readback failed for {k}")
                 
                 now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                rb_file = os.path.join(rollback_preview_dir, f"prior_comparative_canary_rollback_preview_{ticker}_{doc_id}_{now_str}.sql")
-                ids_str = ", ".join([f"'{i}'" for i in stats["inserted_ids"]])
-                rb_sql = f"DELETE FROM canonical_segments\nWHERE id IN ({ids_str})\n  AND ticker = '{ticker}'\n  AND data_basis = 'prior_comparative'\n  AND source_doc_id = '{doc_id}';"
                 
-                with open(rb_file, "w", encoding="utf-8") as f:
-                    f.write(rb_sql)
-                stats["rollback_preview_path"] = rb_file
-                logger.info(f"[PRIOR_COMP_SAVER] [CANARY_INSERT] SUCCESS. Inserted {stats['inserted_rows']} rows. Rollback preview saved to {rb_file}")
+                try:
+                    rb_file = os.path.join(rollback_preview_dir, f"prior_comparative_canary_rollback_preview_{ticker}_{doc_id}_{now_str}.sql")
+                    ids_str = ", ".join([f"'{i}'" for i in stats["inserted_ids"]])
+                    rb_sql = f"DELETE FROM canonical_segments\nWHERE id IN ({ids_str})\n  AND ticker = '{ticker}'\n  AND data_basis = 'prior_comparative'\n  AND source_doc_id = '{doc_id}';"
+                    
+                    with open(rb_file, "w", encoding="utf-8") as f:
+                        f.write(rb_sql)
+                    logger.info(f"[PRIOR_COMP_SAVER] [CANARY_INSERT] SUCCESS. Inserted {stats['inserted_rows']} rows. Rollback preview saved to {rb_file}")
+                    stats["rollback_preview_path"] = rb_file
+                except Exception as ex_rb:
+                    logger.error(f"[PRIOR_COMP_SAVER] [CANARY_INSERT] SUCCESS. Inserted {stats['inserted_rows']} rows, but failed to write rollback file: {ex_rb}")
+                    stats["rollback_preview_path"] = None
 
         except Exception as e:
             logger.error(f"[PRIOR_COMP_SAVER] doc_id={doc_id} FAILED: {e}\n{traceback.format_exc()}")

@@ -414,7 +414,6 @@ def run_earnings_production(
                     _discord_sent = False
                     if enable_discord:
                         logger.info("[EARNINGS][REAL] ✁ 通知送信: %s", _ticker)
-                        from src.events.summary_notify import send_earnings_discord
                         _discord_msg = _merged_plan["discord_plan"]["discord_message"]
                         _d_ok = send_earnings_discord(webhook_url, _discord_msg)
                         if _d_ok:
