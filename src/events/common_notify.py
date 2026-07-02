@@ -6,6 +6,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone, timedelta
+from enum import Enum
 from typing import Optional
 
 import requests
@@ -13,6 +14,20 @@ import requests
 from .common_models import EventRecord, EventType
 
 logger = logging.getLogger("event_notify")
+
+
+class SendResult(Enum):
+    """Discord 送信結果の状態値。
+
+    SUCCESS   : HTTP 200/204 など、明確な成功応答を受けた
+    FAILED    : 4xx/5xx などの明確な失敗
+    UNCERTAIN : Timeout/ConnectionError など、届いたか不明な状態
+    SKIPPED   : dry_run など、実送信していない
+    """
+    SUCCESS = "success"
+    FAILED = "failed"
+    UNCERTAIN = "uncertain"
+    SKIPPED = "skipped"
 
 _MAX_DISCORD_LEN = 1950  # 2000文字制限に余裕
 _TAIL = "\n\u200b"  # Discord末尾空行保持用
@@ -398,7 +413,7 @@ def send_event_discord(
     webhook_url: str,
     event: EventRecord,
     dry_run: bool = False,
-) -> bool:
+) -> SendResult:
     """Discord にイベント通知を送信する。
 
     Rate-limit 対策:
@@ -407,8 +422,11 @@ def send_event_discord(
 
     Returns
     -------
-    bool
-        送信成功 or dry-run
+    SendResult
+        SUCCESS   : HTTP 200/204 など、明確な成功応答を受けた
+        FAILED    : 4xx/5xx などの明確な失敗
+        UNCERTAIN : Timeout/ConnectionError など、届いたか不明な状態
+        SKIPPED   : dry_run=True のため実送信していない
     """
     import time
 
@@ -417,7 +435,7 @@ def send_event_discord(
     if dry_run:
         logger.info(f"[DRY-RUN] Discord通知:\n{msg}")
         print(f"[DRY-RUN] Discord通知:\n{msg}")
-        return True
+        return SendResult.SKIPPED
 
     # 送信前 sleep（連続送信によるバースト防止）
     time.sleep(0.7)
@@ -457,16 +475,23 @@ def send_event_discord(
             f"[NOTIFY] sent event_id={event.event_id[:12]} "
             f"type={event.event_type} ticker={event.ticker}"
         )
-        return True
+        return SendResult.SUCCESS
     except requests.exceptions.HTTPError as e:
-        logger.error(f"[NOTIFY] Discord send failed (HTTP error): {e}")
-        return False
+        logger.error(
+            f"[NOTIFY] FAILED event_id={event.event_id[:12]} "
+            f"ticker={event.ticker} reason=HTTPError status={getattr(e.response, 'status_code', '?')} error={e}"
+        )
+        return SendResult.FAILED
     except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
         logger.warning(
-            f"[DISCORD_SEND_UNCERTAIN_MARK_NOTIFIED] event_id={event.event_id[:12]} "
-            f"ticker={event.ticker} reason={type(e).__name__}"
+            f"[DISCORD_SEND_UNCERTAIN] event_id={event.event_id[:12]} "
+            f"ticker={event.ticker} reason={type(e).__name__} "
+            f"(not marking as notified)"
         )
-        return True
+        return SendResult.UNCERTAIN
     except Exception as e:
-        logger.error(f"[NOTIFY] Discord send failed: {e}")
-        return False
+        logger.error(
+            f"[NOTIFY] FAILED event_id={event.event_id[:12]} "
+            f"ticker={event.ticker} reason=Exception error={e}"
+        )
+        return SendResult.FAILED

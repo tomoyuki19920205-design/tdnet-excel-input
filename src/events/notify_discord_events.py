@@ -21,7 +21,7 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from src.events.common_storage import ensure_events_table, get_unnotified_events, mark_notified, mark_filtered
-from src.events.common_notify import send_event_discord
+from src.events.common_notify import send_event_discord, SendResult
 from src.events.notify_rules import filter_and_sort_events
 from src.events.tdnet_event_store import update_discord_sent_at_supabase
 
@@ -85,16 +85,18 @@ def main():
         sent = 0
         supabase_updated = 0
         for ev in notifiable:
-            ok = send_event_discord(webhook_url, ev, dry_run=args.dry_run)
-            if ok and not args.dry_run:
+            send_result = send_event_discord(webhook_url, ev, dry_run=args.dry_run)
+            if send_result == SendResult.SUCCESS:
                 mark_notified(conn, ev.event_id)
                 # Supabase の discord_sent_at も更新 (best-effort)
                 sb_ok = update_discord_sent_at_supabase(ev, dry_run=False)
                 if sb_ok:
                     supabase_updated += 1
                 sent += 1
-            elif ok:
+            elif send_result == SendResult.SKIPPED:
+                # dry_run時
                 sent += 1
+            # UNCERTAIN / FAILED: mark_notified しない
 
         print(f"[NOTIFY] sent={sent} supabase_updated={supabase_updated}")
     finally:

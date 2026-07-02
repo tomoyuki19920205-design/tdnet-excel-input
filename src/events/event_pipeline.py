@@ -23,7 +23,7 @@ from .common_models import (
 )
 from .common_normalizers import compute_fingerprint, compute_text_hash
 from .common_storage import ensure_events_table, upsert_event, get_unnotified_events, mark_notified, mark_skipped, mark_discord_send_failed
-from .common_notify import send_event_discord
+from .common_notify import send_event_discord, SendResult
 from .discord_aggregator import dry_run_aggregate_discord_notifications
 from .notify_rules import should_notify_event
 
@@ -904,17 +904,45 @@ def process_documents(
                         ev.event_id[:12], ev.event_type, ev.subtype, ev.ticker,
                     )
                     logger.info(f"notify_start_at: {datetime.now(timezone(timedelta(hours=9))).isoformat()}")
-                    if send_event_discord(webhook_url, ev, dry_run=False):
+                    _send_result = send_event_discord(webhook_url, ev, dry_run=False)
+
+                    if _send_result == SendResult.SUCCESS:
                         mark_notified(conn, ev.event_id)
+                        # Supabase discord_sent_at も更新 (best-effort)
+                        try:
+                            from .tdnet_event_store import update_discord_sent_at_supabase as _update_sb_sent_at
+                            _update_sb_sent_at(ev, dry_run=False)
+                        except Exception as _sb_err:
+                            logger.warning(
+                                "[EVENT_NOTIFY_SUPABASE_SENT_AT_UPDATE_FAILED] "
+                                "event_id=%s ticker=%s error=%s",
+                                ev.event_id[:12],
+                                ev.ticker,
+                                _sb_err,
+                            )
                         result.notified += 1
-                    else:
+
+                    elif _send_result == SendResult.UNCERTAIN:
+                        logger.warning(
+                            "[EVENT_NOTIFY_UNCERTAIN_MANUAL_REVIEW] "
+                            "event_id=%s ticker=%s "
+                            "(Timeout/ConnectionError: not marked as notified)",
+                            ev.event_id[:12], ev.ticker,
+                        )
+                        mark_discord_send_failed(conn, ev.event_id)
+
+                    elif _send_result == SendResult.FAILED:
                         logger.warning(
                             "[EVENT_NOTIFY] FAILED event_id=%s ticker=%s marked as manual_review",
                             ev.event_id[:12], ev.ticker,
                         )
                         mark_discord_send_failed(conn, ev.event_id)
+
+                    # SendResult.SKIPPED: dry_run時はここには到達しないが安全ガード
+
             except Exception as e:
                 logger.error(f"[EVENT] notification failed: {e}")
+
         elif dry_run and conn:
             # dry-run: 検知されたイベントをログ出力 (should_notify_event=False は表示のみスキップ)
             try:
