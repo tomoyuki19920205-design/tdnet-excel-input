@@ -228,7 +228,7 @@ def main() -> int:
                 PYTHON, "tools/pipeline_run.py", "process-realtime",
                 "--trigger", "scheduler",
                 *dry_flag,
-            ], timeout_sec=180)
+            ], timeout_sec=1200)
             steps.append(step)
             logger.info(f"[TIMING] process_end_at={datetime.now(JST).isoformat(timespec='seconds')} process_sec={step.duration:.1f}")
         else:
