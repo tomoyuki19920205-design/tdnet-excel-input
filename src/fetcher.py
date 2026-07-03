@@ -33,6 +33,10 @@ INSTRUMENT_EXCLUDE_KEYWORDS = [
 
 _USER_AGENT = "TDnetExcelInput/1.0"
 
+# yanoshin.jp API の既知上限件数（実測: 決算集中日に300件固定で返る）
+# この件数に到達した場合、301件目以降を静かに取りこぼすリスクがある。
+TDNET_API_FETCH_LIMIT = 300
+
 
 # ============================================================
 # タイトル正規化 & 分類
@@ -479,6 +483,7 @@ def fetch_new_disclosures(
     watch = watch_tickers or []
     fetched_items: list[DisclosureItem] = []
     source = ""
+    possible_truncation = False
     is_backfill = target_date is not None and _parse_target_date(target_date) != today_yyyymmdd()
 
     if is_backfill:
@@ -496,7 +501,92 @@ def fetch_new_disclosures(
         try:
             fetched_items = _fetch_via_api(session=session, timeout_sec=yanoshin_timeout_sec)
             source = "API"
-            logger.info(f"[{source}] fetched_count={len(fetched_items)}")
+            api_count = len(fetched_items)
+            logger.info(f"[{source}] fetched_count={api_count}")
+
+            # ── 300件上限到達チェック ──
+            # yanoshin.jp API は300件固定上限を持つ。到達した場合は301件目以降を
+            # 取りこぼすリスクがあるため、HTMLクロスチェックで全件をカバーする。
+            if api_count >= TDNET_API_FETCH_LIMIT:
+                logger.warning(
+                    f"[TDNET_FETCH_LIMIT_REACHED] "
+                    f"api_count={api_count} limit={TDNET_API_FETCH_LIMIT} "
+                    f"date={today_yyyymmdd()} "
+                    f"risk=possible_truncation action=html_crosscheck"
+                )
+                # HTML でも取得して doc_id ベースで dedupe
+                html_items: list[DisclosureItem] = []
+                html_ok = False
+                try:
+                    html_items = _fetch_via_html(target_date, session=session)
+                    html_ok = True
+                    logger.info(
+                        f"[TDNET_FETCH_LIMIT_REACHED] "
+                        f"html_crosscheck_count={len(html_items)}"
+                    )
+                    # HTML取得件数がAPI以下の場合はwarning（HTML側も上限の可能性）
+                    if len(html_items) <= api_count:
+                        logger.warning(
+                            f"[TDNET_FETCH_LIMIT_REACHED] "
+                            f"html_count={len(html_items)} <= api_count={api_count} "
+                            f"html_may_also_be_limited=true"
+                        )
+                except Exception as html_xc_err:
+                    logger.warning(
+                        f"[TDNET_FETCH_LIMIT_REACHED] "
+                        f"html_crosscheck_failed: {html_xc_err} "
+                        f"possible_truncation=true"
+                    )
+
+                if html_ok and html_items:
+                    # doc_id ベース dedupe: API + HTML を合算して重複排除
+                    before_count = len(fetched_items) + len(html_items)
+                    seen_ids: set[str] = set()
+                    merged: list[DisclosureItem] = []
+                    for item in fetched_items + html_items:
+                        if item.disclosure_id not in seen_ids:
+                            seen_ids.add(item.disclosure_id)
+                            merged.append(item)
+                    after_count = len(merged)
+                    dup_count = before_count - after_count
+                    logger.info(
+                        f"[TDNET_FETCH_DEDUPED] "
+                        f"before={before_count} "
+                        f"after={after_count} "
+                        f"duplicates={dup_count} "
+                        f"key=disclosure_id "
+                        f"api_count={api_count} html_count={len(html_items)}"
+                    )
+                    fetched_items = merged
+                    source = "API+HTML_MERGED"
+                    # HTML が API より多い件数を取得できていれば取りこぼしなし
+                    if len(html_items) > api_count:
+                        possible_truncation = False
+                        logger.info(
+                            f"[TDNET_FETCH_LIMIT_REACHED] "
+                            f"resolved=true html_exceeded_api "
+                            f"final_count={after_count}"
+                        )
+                    else:
+                        # HTML も同件数以下 → まだリスクあり
+                        possible_truncation = True
+                        logger.warning(
+                            f"[TDNET_FETCH_LIMIT_REACHED] "
+                            f"resolved=false html_did_not_exceed_api "
+                            f"possible_truncation=true "
+                            f"final_count={after_count}"
+                        )
+                else:
+                    # HTML 取得失敗または0件 → API 300件のまま継続するがリスクを明示
+                    possible_truncation = True
+                    logger.warning(
+                        f"[TDNET_FETCH_UNRESOLVED_TRUNCATION_RISK] "
+                        f"api_count={api_count} limit={TDNET_API_FETCH_LIMIT} "
+                        f"html_crosscheck_failed=true "
+                        f"possible_truncation=true "
+                        f"action=continue_with_api_only"
+                    )
+
         except Exception as api_err:
             logger.warning(f"[API] 取得失敗、HTMLフォールバックへ: {api_err}")
 
@@ -540,7 +630,8 @@ def fetch_new_disclosures(
 
     logger.info(
         f"[{source}] fetched_count={fetched_count}, filtered_count={filtered_count}, "
-        f"forecast_revision_count={forecast_count}, financial_statement_count={financial_count}"
+        f"forecast_revision_count={forecast_count}, financial_statement_count={financial_count}, "
+        f"possible_truncation={possible_truncation}"
     )
 
     # ウォッチリスト銘柄ごとの生ヒット数

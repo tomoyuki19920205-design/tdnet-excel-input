@@ -50,6 +50,16 @@ STARTUP_DELAY_SEC = 15
 GLOBAL_LOCK_MAX_AGE = 60  # 分
 JOB_LOCK_MAX_AGE = 15     # 分
 
+# 各 step の timeout設定
+# ingest は deadline (7200s) より必ず短くすることで、後段 step の実行予算を確保する。
+INGEST_TIMEOUT_SEC      = 5400   # 90分 (全体 deadline 120分より小さく、後段に30分予算を残す)
+PROCESS_TIMEOUT_SEC     = 1200   # 20分
+NOTIFY_TIMEOUT_SEC      =   60   # 1分
+
+# 後段 step の最低必要予算（これ未満なら skip して明示ログ）
+PROCESS_MIN_BUDGET_SEC  =  300   # 5分
+NOTIFY_MIN_BUDGET_SEC   =   60   # 1分
+
 
 # ============================================================
 # subprocess ステップ実行ヘルパー
@@ -173,8 +183,10 @@ def main() -> int:
     logger.info(f"{'=' * 55}")
     logger.info(f"  {TASK_NAME} START run_id={run_id}")
     logger.info(f"  dry_run={args.dry_run} skip_delay={args.skip_delay}")
-    logger.info(f"  [TIMEOUT] ingest timeout_sec=7200")
-    logger.info(f"  [TIMEOUT] realtime max runtime=120min")
+    logger.info(f"  [TIMEOUT] ingest timeout_sec={INGEST_TIMEOUT_SEC}")
+    logger.info(f"  [TIMEOUT] process timeout_sec={PROCESS_TIMEOUT_SEC}")
+    logger.info(f"  [TIMEOUT] notify timeout_sec={NOTIFY_TIMEOUT_SEC}")
+    logger.info(f"  [TIMEOUT] realtime max runtime={DEADLINE_MINUTES}min")
     logger.info(f"{'=' * 55}")
 
     t_start = time.monotonic()
@@ -208,43 +220,101 @@ def main() -> int:
         deadline = time.monotonic() + (DEADLINE_MINUTES * 60)
         steps: list[StepResult] = []
         dry_flag = ["--dry-run"] if args.dry_run else []
+        process_ran = False
+        notify_ran = False
+        process_skip_reason: str | None = None
+        notify_skip_reason: str | None = None
+        ingest_timed_out = False
 
         # ── Step 1: ingest ──
-        if time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        logger.info(
+            f"[REALTIME_DEADLINE_BUDGET] step=ingest "
+            f"remaining_sec={remaining:.0f} timeout_sec={INGEST_TIMEOUT_SEC}"
+        )
+        if remaining > 0:
             logger.info(f"[TIMING] ingest_start_at={datetime.now(JST).isoformat(timespec='seconds')}")
             step = run_step("ingest", [
                 PYTHON, "tools/pipeline_run.py", "ingest",
                 "--trigger", "scheduler", "--ingest-mode", "realtime", *dry_flag,
-            ], timeout_sec=7200)
+            ], timeout_sec=INGEST_TIMEOUT_SEC)
             steps.append(step)
             logger.info(f"[TIMING] ingest_end_at={datetime.now(JST).isoformat(timespec='seconds')} ingest_sec={step.duration:.1f}")
+            if step.status == "timeout":
+                ingest_timed_out = True
+                logger.warning(
+                    f"[REALTIME_INGEST_TIMEOUT] "
+                    f"elapsed_sec={step.duration:.0f} "
+                    f"action=check_budget_for_downstream"
+                )
         else:
             logger.info(f"[{TASK_NAME}] deadline exceeded, skipping ingest")
 
         # ── Step 2: process-realtime (queue 駆動の軽量差分処理) ──
-        if time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        logger.info(
+            f"[REALTIME_DEADLINE_BUDGET] step=process-realtime "
+            f"remaining_sec={remaining:.0f} timeout_sec={PROCESS_TIMEOUT_SEC}"
+        )
+        if remaining >= PROCESS_MIN_BUDGET_SEC:
+            if ingest_timed_out:
+                # ingest が timeout していても、state_db に保存済みのキューが残っている場合がある。
+                # process-realtime は既存 job_queue を拾う設計なので、試行してよい。
+                logger.info(
+                    f"[REALTIME_CONTINUE_AFTER_INGEST_FAILURE] "
+                    f"next_step=process-realtime "
+                    f"remaining_sec={remaining:.0f} "
+                    f"reason=ingest_timeout_existing_queue_may_exist"
+                )
             logger.info(f"[TIMING] process_start_at={datetime.now(JST).isoformat(timespec='seconds')}")
             step = run_step("process-realtime", [
                 PYTHON, "tools/pipeline_run.py", "process-realtime",
                 "--trigger", "scheduler",
                 *dry_flag,
-            ], timeout_sec=1200)
+            ], timeout_sec=PROCESS_TIMEOUT_SEC)
             steps.append(step)
+            process_ran = True
             logger.info(f"[TIMING] process_end_at={datetime.now(JST).isoformat(timespec='seconds')} process_sec={step.duration:.1f}")
+        elif ingest_timed_out:
+            process_skip_reason = f"deadline_insufficient_after_ingest_timeout remaining_sec={remaining:.0f}"
+            logger.warning(
+                f"[REALTIME_ABORT_AFTER_INGEST_FAILURE] "
+                f"reason=deadline_insufficient "
+                f"remaining_sec={remaining:.0f} "
+                f"required_min_sec={PROCESS_MIN_BUDGET_SEC}"
+            )
         else:
-            logger.info(f"[{TASK_NAME}] deadline exceeded, skipping process-realtime")
+            process_skip_reason = f"deadline_insufficient remaining_sec={remaining:.0f} required_min_sec={PROCESS_MIN_BUDGET_SEC}"
+            logger.warning(
+                f"[REALTIME_STEP_SKIPPED_DEADLINE] "
+                f"step=process-realtime "
+                f"remaining_sec={remaining:.0f} "
+                f"required_min_sec={PROCESS_MIN_BUDGET_SEC}"
+            )
 
         # ── Step 3: notify ──
-        if time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        logger.info(
+            f"[REALTIME_DEADLINE_BUDGET] step=notify "
+            f"remaining_sec={remaining:.0f} timeout_sec={NOTIFY_TIMEOUT_SEC}"
+        )
+        if remaining >= NOTIFY_MIN_BUDGET_SEC:
             logger.info(f"[TIMING] notify_start_at={datetime.now(JST).isoformat(timespec='seconds')}")
             step = run_step("notify", [
                 PYTHON, "tools/pipeline_run.py", "notify",
                 "--trigger", "scheduler", *dry_flag,
-            ], timeout_sec=60)
+            ], timeout_sec=NOTIFY_TIMEOUT_SEC)
             steps.append(step)
+            notify_ran = True
             logger.info(f"[TIMING] notify_end_at={datetime.now(JST).isoformat(timespec='seconds')} notify_sec={step.duration:.1f}")
         else:
-            logger.info(f"[{TASK_NAME}] deadline exceeded, skipping notify")
+            notify_skip_reason = f"deadline_insufficient remaining_sec={remaining:.0f} required_min_sec={NOTIFY_MIN_BUDGET_SEC}"
+            logger.warning(
+                f"[REALTIME_STEP_SKIPPED_DEADLINE] "
+                f"step=notify "
+                f"remaining_sec={remaining:.0f} "
+                f"required_min_sec={NOTIFY_MIN_BUDGET_SEC}"
+            )
 
         # ── Step 4: light reconcile (当日分のみ) ──
         # リアルタイムでの実行は不要なため nightly バッチに委譲しスキップする
@@ -258,7 +328,14 @@ def main() -> int:
         elapsed = time.monotonic() - t_start
         deadline_exceeded = elapsed > (DEADLINE_MINUTES * 60)
         logger.info(f"[TIMING] total_elapsed_sec={elapsed:.1f}")
-        _print_summary(steps, elapsed, deadline_exceeded=deadline_exceeded)
+        _print_summary(
+            steps, elapsed,
+            deadline_exceeded=deadline_exceeded,
+            process_ran=process_ran,
+            notify_ran=notify_ran,
+            process_skip_reason=process_skip_reason,
+            notify_skip_reason=notify_skip_reason,
+        )
 
         # 失敗判定
         failed = [s for s in steps if s.status in ("error", "timeout")]
@@ -274,6 +351,10 @@ def _print_summary(
     *,
     skip_reason: str | None = None,
     deadline_exceeded: bool = False,
+    process_ran: bool = False,
+    notify_ran: bool = False,
+    process_skip_reason: str | None = None,
+    notify_skip_reason: str | None = None,
 ) -> None:
     """実行結果サマリーを出力。"""
     print()
@@ -296,6 +377,12 @@ def _print_summary(
     print(f"  elapsed             : {elapsed:.1f}s")
     if deadline_exceeded:
         print(f"  deadline_exceeded   : YES (>{DEADLINE_MINUTES}min)")
+    print(f"  process_ran         : {process_ran}")
+    print(f"  notify_ran          : {notify_ran}")
+    if process_skip_reason:
+        print(f"  process_skip_reason : {process_skip_reason}")
+    if notify_skip_reason:
+        print(f"  notify_skip_reason  : {notify_skip_reason}")
     print("=" * 55)
     print()
 
@@ -308,6 +395,10 @@ def _print_summary(
         f"elapsed={elapsed:.1f}s "
         f"deadline_exceeded={deadline_exceeded} "
         f"skip_reason={skip_reason or 'none'} "
+        f"process_ran={process_ran} "
+        f"notify_ran={notify_ran} "
+        f"process_skip_reason={process_skip_reason or 'none'} "
+        f"notify_skip_reason={notify_skip_reason or 'none'} "
         f"{step_info}"
     )
 
