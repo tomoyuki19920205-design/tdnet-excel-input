@@ -16,7 +16,7 @@
 - 既存テーブルへの write は**そのまま維持**
 - 直後に canonical テーブルへも write (best-effort)
 - canonical write 失敗時は warning ログのみ、既存処理に影響しない
-- 3箇所で dual-write: sqlite_to_supabase.py (tdnet), sync_financials.py (jquants), sync_segments.py (excel_legacy)
+- 3箇所で dual-write: tools/sqlite_to_supabase.py (tdnet), sync_financials.py (jquants), sync_segments.py (excel_legacy)
 
 ### 意思決定事項
 - jquants は一律 priority=6 (FY 特例なし)

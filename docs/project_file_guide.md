@@ -181,18 +181,16 @@
 
 ## Cloud Sync — Supabase / J-Quants 同期
 
-### sqlite_to_supabase.py (root)
-- **Purpose**: SQLite quarterly_results / segment → Supabase financials / segment_financials に push
-- **Used when**: pipeline_run.py 経由、または手動での Supabase push
+### tools/sqlite_to_supabase.py
+- **Purpose**: SQLite (decision_db.db) → Supabase push。filings_process.py の Realtime / Nightly / Reconcile 全経路で使用
+- **Used when**: pipeline_run.py 経由（自動）または手動での Supabase push
 - **Typical command**:
   ```
-  python sqlite_to_supabase.py
+  .venv\Scripts\python.exe -m tools.sqlite_to_supabase
+  .venv\Scripts\python.exe -m tools.sqlite_to_supabase --resume
+  .venv\Scripts\python.exe -m tools.sqlite_to_supabase --dry-run
   ```
-- **Notes**: root にある（tools/ の sqlite_to_supabase.py とは異なる可能性あり）
-
-### tools/sqlite_to_supabase.py
-- **Purpose**: tools/ 版の SQLite → Supabase push
-- **Used when**: filings_process.py から呼ばれる
+- **Notes**: root 直下の旧版 `sqlite_to_supabase.py` は `29c97b5` で削除済み。tools 版のみ使用すること
 
 ### tools/supabase_loader.py
 - **Purpose**: XBRL 抽出 JSON → Supabase PostgREST API で直接ロード
