@@ -887,6 +887,12 @@ def process_documents(
                     logger.info("[DISCORD_D4_LEGACY_FALLBACK_ALLOWED] Aggregation not explicitly requested. Proceeding with traditional 1-by-1 notification.")
                 # -------------------------------------------------
 
+                # Phase 2C: Discord送信成功イベントを蓄積する。
+                # Supabase INSERTの前に update_discord_sent_at_supabase() を呼ぶと
+                # 行がまだ存在しないため no row found になる。
+                # そのため、INSERT後フェーズで改めて呼ぶ設計にする。
+                notified_events: dict[str, EventRecord] = {}
+
                 for ev in unnotified:
                     _notify_ok = should_notify_event(ev)
                     if not _notify_ok:
@@ -908,18 +914,9 @@ def process_documents(
 
                     if _send_result == SendResult.SUCCESS:
                         mark_notified(conn, ev.event_id)
-                        # Supabase discord_sent_at も更新 (best-effort)
-                        try:
-                            from .tdnet_event_store import update_discord_sent_at_supabase as _update_sb_sent_at
-                            _update_sb_sent_at(ev, dry_run=False)
-                        except Exception as _sb_err:
-                            logger.warning(
-                                "[EVENT_NOTIFY_SUPABASE_SENT_AT_UPDATE_FAILED] "
-                                "event_id=%s ticker=%s error=%s",
-                                ev.event_id[:12],
-                                ev.ticker,
-                                _sb_err,
-                            )
+                        # Supabase discord_sent_at の更新は INSERT後フェーズで行う。
+                        # ここでは event_id → EventRecord を記録するだけ。
+                        notified_events[ev.event_id] = ev
                         result.notified += 1
 
                     elif _send_result == SendResult.UNCERTAIN:
@@ -981,6 +978,12 @@ def process_documents(
 
         # ── Supabase 同期 (best-effort) ──
         # dry_run時はSkip。エラーはログのみ、メイン処理は止めない。
+        # notified_events は通知フェーズ（webhook_url and not dry_run）で構築される dict。
+        # webhook_urlなし / dry_run時は通知フェーズが走らないため空dictをフォールバック。
+        try:
+            _notified_events_safe: dict = notified_events  # type: ignore[name-defined]
+        except NameError:
+            _notified_events_safe = {}
         if not dry_run:
             try:
                 from .tdnet_event_store import save_event_to_supabase as _save_to_sb
@@ -1000,6 +1003,7 @@ def process_documents(
                         try:
                             _sb_result = _save_to_sb(_rec, dry_run=False)
                             _action = _sb_result.get("action", "error")
+                            _save_ok = _action in ("inserted", "updated", "dedup_skipped")
                             if _action == "inserted":
                                 result.supabase_saved += 1
                                 logger.info(
@@ -1027,6 +1031,26 @@ def process_documents(
                                     f"type={_rec.event_type} "
                                     f"error={_sb_result.get('error', 'unknown')}"
                                 )
+
+                            # Phase 2C: Supabase INSERT/UPSERT 完了後に discord_sent_at を更新する。
+                            # notify前には行が存在しないため、ここで更新する設計（順序修正）。
+                            # _notified_events_safe は通知フェーズで構築。dry_run時は空のため安全。
+                            if _save_ok and _rec.event_id in _notified_events_safe:
+                                try:
+                                    from .tdnet_event_store import update_discord_sent_at_supabase as _update_sb_sent_at
+                                    _update_sb_sent_at(_notified_events_safe[_rec.event_id], dry_run=False)
+                                    logger.info(
+                                        "[EVENT_NOTIFY_SUPABASE_SENT_AT_UPDATE_AFTER_INSERT] "
+                                        "event_id=%s ticker=%s",
+                                        _rec.event_id[:12], _rec.ticker,
+                                    )
+                                except Exception as _sb_sent_err:
+                                    logger.warning(
+                                        "[EVENT_NOTIFY_SUPABASE_SENT_AT_UPDATE_FAILED_AFTER_INSERT] "
+                                        "event_id=%s ticker=%s error=%s",
+                                        _rec.event_id[:12], _rec.ticker, _sb_sent_err,
+                                    )
+
                         except Exception as _sb_ev_e:
                             result.supabase_errors += 1
                             logger.warning(
