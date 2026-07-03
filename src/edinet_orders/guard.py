@@ -20,10 +20,34 @@ def _normalize_segment_name(val: str | None) -> str | None:
     return val
 
 
+def _has_period_qualifier(cell: str) -> bool:
+    """
+    テキストに前期/当期などの期間区分キーワードが含まれるか判定する。
+    前連結会計年度・当連結会計年度・前事業年度・当事業年度 等の正常な横並び表ヘッダーを識別するために使用。
+    """
+    _PERIOD_QW = [
+        "前連結", "当連結", "前事業", "当事業",
+        "前連結会計年度", "当連結会計年度",
+        "前事業年度", "当事業年度",
+        "前期", "当期",
+        "前年同期", "当年同期",
+        "前連結累計", "当連結累計",
+        "第\\d+期",  # 「第X期」形式
+    ]
+    for kw in _PERIOD_QW:
+        if re.search(kw, cell):
+            return True
+    return False
+
+
 def _has_repeated_orders_header(row: dict[str, Any]) -> bool:
     """
     3列ヘッダーなどの列ずれ疑いを検知するため、
     source_header, source_label, snippet内に「受注高」が複数回出現するか判定する。
+
+    ただし、前期・当期の横並び正常テーブル（例: 前連結会計年度 受注高 / 当連結会計年度 受注高）は
+    期間区分キーワードが各セルに含まれる場合に限り除外する。
+    曖昧な3列ヘッダー（期間区分なしで同一metricが複数列）は引き続きTHREE_COLUMN_HEADER_REVIEWにする。
     """
     targets = [
         row.get("source_header", ""),
@@ -39,8 +63,27 @@ def _has_repeated_orders_header(row: dict[str, Any]) -> bool:
             # 芝浦機械型などの「受注高(百万円)前年同期比(%)」による誤検知を防ぐため、
             # 「前年同期比」や「増減率」等の直前にある「受注高」はカウントから除外する
             line_clean = re.sub(r"受注残?高[^|]*?(?:前年同期|増減|比較|比)", "", line)
-            if line_clean.count("受注高") >= 2:
-                return True
+            if line_clean.count("受注高") < 2:
+                continue
+
+            # 「受注高」が2回以上出現する行：
+            # パイプ(|)でセル分割して各セルを精査する。
+            # 各セルが期間区分KW（前連結・当連結等）を持っており、
+            # かつ1セル内で「受注高」が1回だけなら「前期/当期 横並び正常テーブル」と判断してスキップ。
+            cells = [c.strip() for c in line_clean.split("|")]
+            order_cells = [c for c in cells if "受注高" in c]
+
+            if len(order_cells) >= 2:
+                # 全セルが期間区分KWを持っているかチェック
+                all_have_period = all(_has_period_qualifier(c) for c in order_cells)
+                # 全セル内での「受注高」が1回ずつかチェック（1セル内に2回は真の3列ヘッダー）
+                all_single_occurrence = all(c.count("受注高") == 1 for c in order_cells)
+                if all_have_period and all_single_occurrence:
+                    # 正常な前期/当期 横並び表 → スキップ（THREE_COLUMN_HEADER_REVIEWにしない）
+                    continue
+
+            # 上記条件を満たさない場合は従来通りreview対象
+            return True
     return False
 
 
