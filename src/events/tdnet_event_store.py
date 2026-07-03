@@ -417,13 +417,14 @@ def _calculate_notification_compare(ticker: str, extracted: dict, client=None) -
                             prev_sales = None
                             prev_op = None
                             if res.data:
-                                for row in res.data:
+                                sorted_data = sorted(res.data, key=lambda x: x.get('source_priority', 999))
+                                for row in sorted_data:
                                     period = str(row.get('period', ''))
                                     metric = row.get('metric')
                                     val = row.get('value')
                                     if period.startswith(prev_fy) and val is not None:
-                                        if metric == 'sales': prev_sales = val
-                                        elif metric == 'operating_profit': prev_op = val
+                                        if metric == 'sales' and prev_sales is None: prev_sales = val
+                                        elif metric == 'operating_profit' and prev_op is None: prev_op = val
                             
                             if s_yoy is None and s_f is not None and prev_sales is not None and prev_sales > 0:
                                 s_yoy = (s_f / 1_000_000) / prev_sales - 1.0
@@ -475,17 +476,18 @@ def _calculate_notification_compare(ticker: str, extracted: dict, client=None) -
                 prev_op = None
                 
                 if res.data:
-                    for row in res.data:
+                    sorted_data = sorted(res.data, key=lambda x: x.get('source_priority', 999))
+                    for row in sorted_data:
                         period = str(row.get('period', ''))
                         metric = row.get('metric')
                         val = row.get('value')
                         
                         if period.startswith(str(current_fy)) and val is not None:
-                            if metric == 'sales': curr_sales = val
-                            elif metric == 'operating_profit': curr_op = val
+                            if metric == 'sales' and curr_sales is None: curr_sales = val
+                            elif metric == 'operating_profit' and curr_op is None: curr_op = val
                         elif period.startswith(str(prev_fy)) and val is not None:
-                            if metric == 'sales': prev_sales = val
-                            elif metric == 'operating_profit': prev_op = val
+                            if metric == 'sales' and prev_sales is None: prev_sales = val
+                            elif metric == 'operating_profit' and prev_op is None: prev_op = val
                 
                 s_yoy = None
                 if curr_sales is not None and prev_sales is not None and prev_sales > 0:
@@ -557,14 +559,15 @@ def _supplement_current_yoy(ticker: str, extracted: dict, client) -> None:
         prev_o = None
         
         if res.data:
-            for row in res.data:
+            sorted_data = sorted(res.data, key=lambda x: x.get('source_priority', 999))
+            for row in sorted_data:
                 period = str(row.get("period", ""))
                 metric = row.get("metric")
                 val = row.get("value")
                 
                 if period.startswith(prev_fy) and val is not None:
-                    if metric == "sales": prev_s = val
-                    elif metric == "operating_profit": prev_o = val
+                    if metric == "sales" and prev_s is None: prev_s = val
+                    elif metric == "operating_profit" and prev_o is None: prev_o = val
                     
         # 単位合わせ: TDNET(extracted)は円単位、canonical_financialsは百万円単位
         if s_yoy is None and s_curr is not None and prev_s is not None and prev_s > 0:
