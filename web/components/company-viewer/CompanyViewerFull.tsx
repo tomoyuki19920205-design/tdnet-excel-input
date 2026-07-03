@@ -24,9 +24,7 @@ import FinancialsTable from "@/components/company-viewer/FinancialsTable";
 import {
   loadCompanyInfo,
   loadFinancials,
-  loadEdinetOrders,
   type CompanyInfo,
-  type EdinetOrderRecord,
 } from "@/lib/viewer-api";
 import type { FinancialRecord } from "@/types/financial";
 import type { SegmentRecord } from "@/types/segment";
@@ -155,7 +153,6 @@ export default function CompanyViewerFull({
   const [info, setInfo] = useState<CompanyInfo | null>(null);
   const [financials, setFinancials] = useState<FinancialRecord[]>([]);
   const [segments, setSegments] = useState<SegmentRecord[]>([]);
-  const [edinetOrders, setEdinetOrders] = useState<EdinetOrderRecord[]>([]);
   const currentTickerRef = useRef<string>("");
 
   // ticker が変わったらデータ再フェッチ
@@ -167,14 +164,12 @@ export default function CompanyViewerFull({
     setInfo(null);
     setFinancials([]);
     setSegments([]);
-    setEdinetOrders([]);
 
     (async () => {
-      const [infoR, plR, segR, ordersR] = await Promise.allSettled([
+      const [infoR, plR, segR] = await Promise.allSettled([
         loadCompanyInfo(supabase, ticker),
         loadFinancials(supabase, ticker),
         loadSegments(supabase, ticker),
-        loadEdinetOrders(supabase, ticker),
       ]);
 
       // ticker が変わっていたら結果を捨てる
@@ -194,7 +189,6 @@ export default function CompanyViewerFull({
       }
 
       if (segR.status === "fulfilled") setSegments(segR.value);
-      if (ordersR.status === "fulfilled") setEdinetOrders(ordersR.value);
 
       setLoading(false);
     })();
@@ -232,33 +226,6 @@ export default function CompanyViewerFull({
         <div className="cvf-error">
           <span className="cvf-error-title">⚠️ データ取得エラー</span>
           <span className="cvf-error-msg">{error}</span>
-        </div>
-      )}
-
-      {/* ── EDINET Orders 本体 ── */}
-      {!loading && edinetOrders.length > 0 && (
-        <div className="cvf-edinet-orders" style={{ marginBottom: "20px", padding: "10px", backgroundColor: "var(--bg-card, #1e293b)", borderRadius: "6px", border: "1px solid var(--border-color, #334155)" }}>
-          <h3 style={{ fontSize: "14px", fontWeight: "bold", margin: "0 0 10px 0", color: "var(--text-primary, #e2e8f0)" }}>EDINET受注KPI (受注高・受注残推移)</h3>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px", textAlign: "left", color: "var(--text-secondary, #cbd5e1)" }}>
-            <thead>
-              <tr style={{ borderBottom: "1px solid var(--border-color, #475569)" }}>
-                <th style={{ padding: "4px 8px", fontWeight: "normal" }}>期末日</th>
-                <th style={{ padding: "4px 8px", fontWeight: "normal" }}>受注高</th>
-                <th style={{ padding: "4px 8px", fontWeight: "normal" }}>受注残</th>
-                <th style={{ padding: "4px 8px", fontWeight: "normal" }}>doc_id</th>
-              </tr>
-            </thead>
-            <tbody>
-              {edinetOrders.map((r, i) => (
-                <tr key={i} style={{ borderBottom: "1px solid var(--border-light, #334155)" }}>
-                  <td style={{ padding: "4px 8px" }}>{r.period}</td>
-                  <td style={{ padding: "4px 8px" }}>{r.orders_received != null ? r.orders_received.toLocaleString() + "百万円" : "未開示"}</td>
-                  <td style={{ padding: "4px 8px" }}>{r.order_backlog != null ? r.order_backlog.toLocaleString() + "百万円" : "未開示"}</td>
-                  <td style={{ padding: "4px 8px", opacity: 0.7 }} title={`source_unit: ${r.source_unit || "不明"}`}>{r.doc_id}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       )}
 
