@@ -782,6 +782,14 @@ def run_ingest(
             yanoshin_timeout_sec=yanoshin_timeout_sec,
         )
 
+        # [JQUANTS_SHADOW] Phase 2: Shadow Run — JQUANTS_SHADOW_ENABLED=1 の場合のみ実行
+        # DB保存なし・Discord通知なし・本番フロー影響なし
+        # 例外時も本番処理を継続（try/except は _run_jquants_shadow 内部で担保）
+        _run_jquants_shadow(
+            items,
+            date_str=getattr(config, "start_date", None),
+        )
+
         # 決算短信のみフィルタ（予想修正は別処理）
         target_items = [
             item for item in items
@@ -1264,6 +1272,79 @@ def main():
     if summary["errors"] > 0:
         sys.exit(1)
     sys.exit(0)
+
+
+# ============================================================
+# J-Quants Shadow Run ヘルパー (Phase 2)
+# ============================================================
+
+def _run_jquants_shadow(
+    legacy_items: list,
+    *,
+    date_str=None,
+) -> None:
+    """
+    J-Quants TDnet Shadow Run を実行する。
+
+    既存 YANOSHIN/HTML 取得結果 (legacy_items) と J-Quants 取得結果を並走比較し、
+    差分をログのみで記録する。DB保存・Discord通知・本番フロー変更は一切行わない。
+
+    安全制約:
+      - JQUANTS_SHADOW_ENABLED=1 の場合のみ実行 (デフォルト OFF)
+      - 全体を try/except で囲む (例外でも本番処理は継続)
+      - DB保存なし / Discord通知なし / 本番フロー変更なし
+      - APIキー・token・認証ヘッダー・.env値は出力しない
+
+    Args:
+        legacy_items: fetch_new_disclosures() の返り値 (list[DisclosureItem])
+        date_str:     対象日 (YYYY-MM-DD or YYYYMMDD or None=当日)
+    """
+    if os.environ.get("JQUANTS_SHADOW_ENABLED", "0") != "1":
+        return  # デフォルト OFF — 本番フローへの影響ゼロ
+
+    _shadow_logger = logging.getLogger("jquants.shadow")
+
+    try:
+        from src.utils import today_yyyymmdd
+        from src.jquants.shadow_runner import run_shadow_comparison
+
+        # date_str を YYYYMMDD 形式に正規化
+        if date_str and isinstance(date_str, str) and "-" in date_str:
+            target = date_str.replace("-", "")
+        elif date_str:
+            target = str(date_str)
+        else:
+            target = today_yyyymmdd()
+
+        _shadow_logger.info(
+            f"[JQUANTS_SHADOW_TRIGGER] "
+            f"date={target!r} "
+            f"legacy_count={len(legacy_items)}"
+        )
+
+        result = run_shadow_comparison(
+            target,
+            legacy_items=legacy_items,  # list[DisclosureItem] をそのまま渡す
+        )
+
+        _shadow_logger.info(
+            f"[JQUANTS_SHADOW_SUMMARY] "
+            f"date={target!r} "
+            f"jq_total={result.jquants_total} "
+            f"legacy_total={result.legacy_total} "
+            f"truncation_gap={result.truncation_gap} "
+            f"missing_in_legacy={len(result.missing_in_legacy)} "
+            f"matched={result.matched_count} "
+            f"fetch_error={result.fetch_error!r}"
+        )
+
+    except Exception as e:
+        # Shadow Run の失敗は非致命的 — ログのみ出力し本番処理を継続する
+        _shadow_logger.error(
+            f"[JQUANTS_SHADOW_ERROR] "
+            f"shadow run failed (non-fatal): {e}"
+        )
+        # raise しない — 本番フローを止めない
 
 
 if __name__ == "__main__":
