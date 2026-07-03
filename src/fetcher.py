@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import time
 import unicodedata
@@ -460,6 +461,78 @@ def _fetch_via_html(target_date: str | date_type | None = None, session: request
 
 
 # ============================================================
+# ルート0: J-Quants TDnet API（Primary Path / Phase 3）
+# ============================================================
+
+def _fetch_via_jquants(
+    target_date: str,
+    *,
+    session: requests.Session | None = None,
+) -> list[DisclosureItem]:
+    """
+    J-Quants /v2/td/list から当日の開示一覧を全件取得し
+    既存 DisclosureItem 形式に変換して返す。
+
+    安全制約:
+      - JQUANTS_PRIMARY_ENABLED=1 の場合のみ呼ばれる
+      - DB保存なし / Discord通知なし / 本番フロー変更なし
+      - APIキー・token・.env値は出力しない
+      - 失敗した場合は例外を raise して呼び出し元が fallback する
+
+    Args:
+        target_date: YYYYMMDD 形式の日付文字列
+        session: requests.Session (オプション、テスト用モック注入可)
+
+    Returns:
+        list[DisclosureItem] — disclosure_id = sha256(doc_url) で既存仕様に準拠
+
+    Raises:
+        任意の例外 — 呼び出し元 (fetch_new_disclosures) が fallback を行う
+    """
+    from src.jquants.adapter import fetch_jquants_disclosures
+
+    logger.info(
+        f"[JQUANTS_PRIMARY_FETCH_START] "
+        f"date={target_date!r}"
+    )
+
+    # session は adapter 側の _session 引数に渡す
+    jq_items = fetch_jquants_disclosures(
+        target_date,
+        timeout_sec=30.0,
+        max_pages=50,
+        _session=session,
+    )
+
+    results: list[DisclosureItem] = []
+    for jq in jq_items:
+        # doc_url は TDnet 標準 URL (署名付きURLは使わない)
+        # FileID = "1401" + DiscNo → URL は adapter._make_doc_url_from_disc_no() で生成済み
+        doc_url = jq.doc_url
+
+        # disclosure_id は既存仕様に合わせて sha256(doc_url)
+        disclosure_id = sha256(doc_url)
+
+        results.append(DisclosureItem(
+            disclosure_id=disclosure_id,
+            ticker=jq.ticker,
+            company_name=jq.company_name,
+            title=jq.title,
+            doc_url=doc_url,
+            published_at=jq.published_at,
+            xbrl_url=jq.xbrl_url,  # Shadow Run と同様に None (lazy)
+            disclosure_type=jq.disclosure_type,
+        ))
+
+    logger.info(
+        f"[JQUANTS_PRIMARY_FETCH_DONE] "
+        f"date={target_date!r} "
+        f"total={len(results)}"
+    )
+    return results
+
+
+# ============================================================
 # メインエクスポート: 二重化取得
 # ============================================================
 
@@ -485,6 +558,105 @@ def fetch_new_disclosures(
     source = ""
     possible_truncation = False
     is_backfill = target_date is not None and _parse_target_date(target_date) != today_yyyymmdd()
+
+    # ── J-Quants Primary Path (Phase 3) ──────────────────────────────────
+    # JQUANTS_PRIMARY_ENABLED=1 かつ 当日取得の場合のみ J-Quants を第一候補にする。
+    # バックフィル時はスキップして既存 HTML スクレイピングへ。
+    # 失敗時は [JQUANTS_PRIMARY_FALLBACK] ログを出して既存 YANOSHIN/HTML へ fallback。
+    jquants_primary_enabled = os.environ.get("JQUANTS_PRIMARY_ENABLED", "0") == "1"
+
+    if jquants_primary_enabled and not is_backfill:
+        date_str = _parse_target_date(target_date)
+        try:
+            fetched_items = _fetch_via_jquants(date_str, session=session)
+            source = "JQUANTS_PRIMARY"
+            logger.info(
+                f"[JQUANTS_PRIMARY_FETCH_DONE] "
+                f"date={date_str!r} "
+                f"fetched_count={len(fetched_items)}"
+            )
+            # J-Quants 成功 → 以降の YANOSHIN/HTML 取得をスキップして
+            # フィルタリング処理へ進む
+            fetched_count = len(fetched_items)
+
+            # ETF/投信/ファンド除外
+            instrument_skipped = 0
+            after_instrument: list[DisclosureItem] = []
+            for item in fetched_items:
+                if is_instrument_excluded(item.ticker, item.title, item.company_name):
+                    instrument_skipped += 1
+                    logger.info(
+                        f"[{source}] skip_reason=instrument_excluded, "
+                        f"code={item.ticker}, name={item.company_name}, "
+                        f"title={item.title[:50]}"
+                    )
+                    continue
+                after_instrument.append(item)
+
+            if instrument_skipped > 0:
+                logger.info(f"[{source}] instrument_skipped_count={instrument_skipped}")
+
+            # フィルタリング
+            filtered_items = [
+                item for item in after_instrument
+                if _matches_filter(item.title) and _matches_watchlist(item.ticker, watch)
+            ]
+            filtered_count = len(filtered_items)
+            forecast_count = sum(1 for i in filtered_items if i.disclosure_type == DisclosureType.FORECAST_REVISION)
+            financial_count = sum(1 for i in filtered_items if i.disclosure_type == DisclosureType.FINANCIAL_STATEMENT)
+
+            logger.info(
+                f"[{source}] fetched_count={fetched_count}, filtered_count={filtered_count}, "
+                f"forecast_revision_count={forecast_count}, financial_statement_count={financial_count}, "
+                f"possible_truncation=False"
+            )
+
+            # ウォッチリスト銘柄ごとの生ヒット数
+            if watch:
+                for code in watch:
+                    hit_count = sum(1 for i in fetched_items if i.ticker == code)
+                    logger.info(f"[{source}] raw_hit_{code}={hit_count}")
+
+            # 重複排除（DB照合）
+            already_processed_count = 0
+            already_processed_fs = 0
+            already_processed_tickers: list[str] = []
+            if is_processed_fn:
+                new_items = []
+                for item in filtered_items:
+                    if is_processed_fn(item.disclosure_id):
+                        already_processed_count += 1
+                        if item.disclosure_type == DisclosureType.FINANCIAL_STATEMENT:
+                            already_processed_fs += 1
+                            already_processed_tickers.append(item.ticker)
+                    else:
+                        new_items.append(item)
+            else:
+                new_items = filtered_items
+
+            new_count = len(new_items)
+            new_fs = sum(1 for i in new_items if i.disclosure_type == DisclosureType.FINANCIAL_STATEMENT)
+            logger.info(
+                f"[{source}] new_count={new_count} "
+                f"already_processed={already_processed_count} "
+                f"already_processed_financial_statement={already_processed_fs} "
+                f"new_financial_statement={new_fs}"
+            )
+            if already_processed_tickers:
+                logger.info(
+                    f"[{source}] already_processed_tickers="
+                    f"{','.join(already_processed_tickers[:20])}"
+                )
+            return new_items
+
+        except Exception as jq_err:
+            # J-Quants 失敗 → 既存 YANOSHIN/HTML へ fallback
+            logger.warning(
+                f"[JQUANTS_PRIMARY_FALLBACK] "
+                f"J-Quants primary fetch failed, falling back to YANOSHIN/HTML: {jq_err}"
+            )
+            # 以降の処理（is_backfill ブランチ）へ fall through
+    # ─────────────────────────────────────────────────────────────────────
 
     if is_backfill:
         # 過去日付: HTML スクレイピングのみ（yanoshin API は当日限定）
