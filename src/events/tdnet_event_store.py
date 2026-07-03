@@ -782,8 +782,18 @@ def save_event_to_supabase(
     event: EventRecord,
     *,
     dry_run: bool = False,
+    discord_sent_at: "str | None" = None,
 ) -> dict:
     """EventRecord → Supabase tdnet_events へ INSERT (best-effort)
+
+    Parameters
+    ----------
+    event : EventRecord
+    dry_run : bool
+    discord_sent_at : str | None
+        Discord 送信済み時刻 (ISO8601)。指定すると INSERT/UPSERT/UPDATE 時に
+        discord_sent_at カラムへ同時書き込みを行う（原子的更新）。
+        None の場合は書き込まない（既存の値を保持）。
 
     Returns:
         {"action": "inserted"|"dedup_skipped"|"error"|"dry_run", ...}
@@ -1021,6 +1031,10 @@ def save_event_to_supabase(
 
         # INSERT with ON CONFLICT DO NOTHING (dedupe_key unique)
         # supabase-py uses upsert with ignoreDuplicates
+        # discord_sent_at が指定されている場合は INSERT 行に含める（原子的更新）
+        if discord_sent_at is not None:
+            row["discord_sent_at"] = discord_sent_at
+
         if dry_run:
             logger.info(
                 f"[STORE DRY-RUN] WOULD INSERT ticker={event.ticker} "
@@ -1047,7 +1061,14 @@ def save_event_to_supabase(
                 f"[STORE] INSERTED ticker={event.ticker} "
                 f"type={original_event_type} -> {display_category} "
                 f"dedupe_key={dedupe_key[:12]}... title={display_title[:50]}"
+                + (f" discord_sent_at={discord_sent_at[:19]}" if discord_sent_at else "")
             )
+            if discord_sent_at:
+                logger.info(
+                    "[EVENT_NOTIFY_SUPABASE_SENT_AT_UPDATE_AFTER_INSERT] "
+                    "ticker=%s dedupe=%s (atomic with INSERT)",
+                    event.ticker, dedupe_key[:12],
+                )
         else:
             result["action"] = "dedup_skipped"
             result["display_category"] = display_category
@@ -1056,6 +1077,33 @@ def save_event_to_supabase(
                 f"type={original_event_type} -> {display_category} "
                 f"dedupe_key={dedupe_key[:12]}..."
             )
+            # DEDUP_SKIPPED: 既存行がある場合に discord_sent_at を別途 PATCH で更新する
+            if discord_sent_at is not None:
+                try:
+                    upd_resp = (
+                        client.table("tdnet_events")
+                        .update({"discord_sent_at": discord_sent_at})
+                        .eq("dedupe_key", dedupe_key)
+                        .execute()
+                    )
+                    if upd_resp.data and len(upd_resp.data) > 0:
+                        logger.info(
+                            "[EVENT_NOTIFY_SUPABASE_SENT_AT_UPDATE_ON_DEDUP] "
+                            "ticker=%s dedupe=%s",
+                            event.ticker, dedupe_key[:12],
+                        )
+                    else:
+                        logger.warning(
+                            "[STORE] discord_sent_at update on dedup: no row found "
+                            "ticker=%s dedupe=%s",
+                            event.ticker, dedupe_key[:12],
+                        )
+                except Exception as _upd_e:
+                    logger.warning(
+                        "[STORE] discord_sent_at update on dedup FAILED: "
+                        "ticker=%s error=%s",
+                        event.ticker, _upd_e,
+                    )
 
         return result
 

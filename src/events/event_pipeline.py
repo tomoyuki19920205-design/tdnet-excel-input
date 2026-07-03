@@ -978,15 +978,27 @@ def process_documents(
 
         # ── Supabase 同期 (best-effort) ──
         # dry_run時はSkip。エラーはログのみ、メイン処理は止めない。
-        # notified_events は通知フェーズ（webhook_url and not dry_run）で構築される dict。
-        # webhook_urlなし / dry_run時は通知フェーズが走らないため空dictをフォールバック。
+        # notified_events_by_dedupe: 通知フェーズで構築。dedupe_key → EventRecord のマップ。
+        # dedupe_key ベースで照合することで event_id のUUID不一致リスクを排除する。
         try:
             _notified_events_safe: dict = notified_events  # type: ignore[name-defined]
         except NameError:
             _notified_events_safe = {}
+
+        # dedupe_key → ev への逆引きマップを構築（Phase 2C の照合精度向上）
+        try:
+            from .tdnet_event_store import build_dedupe_key as _build_dedupe_key
+            _notified_by_dedupe: dict[str, "EventRecord"] = {
+                _build_dedupe_key(ev): ev
+                for ev in _notified_events_safe.values()
+            }
+        except Exception as _map_e:
+            logger.warning(f"[EVENT_SUPABASE] dedupe_key map build failed (fallback to empty): {_map_e}")
+            _notified_by_dedupe = {}
+
         if not dry_run:
             try:
-                from .tdnet_event_store import save_event_to_supabase as _save_to_sb
+                from .tdnet_event_store import save_event_to_supabase as _save_to_sb, build_dedupe_key as _build_dkey
                 # 今回処理で inserted / updated になった EventRecord を収集
                 _records_to_sync: list[EventRecord] = []
                 for dr in result.details:
@@ -999,9 +1011,31 @@ def process_documents(
                         f"[EVENT_SUPABASE] syncing {len(_records_to_sync)} new/updated events "
                         f"to Supabase tdnet_events ..."
                     )
+                    from datetime import datetime, timezone
                     for _rec in _records_to_sync:
                         try:
-                            _sb_result = _save_to_sb(_rec, dry_run=False)
+                            # Phase 2C: discord_sent_at を save_event_to_supabase に直接渡して原子的更新。
+                            # INSERT と sent_at 更新を1回のAPIコールで完結させることで
+                            # 「INSERT前にPATCHが走り no row found になる」レースコンディションを根本解消。
+                            _rec_dedupe = _build_dkey(_rec)
+                            _discord_sent_at_to_save: str | None = None
+                            if _rec_dedupe in _notified_by_dedupe:
+                                _discord_sent_at_to_save = datetime.now(timezone.utc).isoformat()
+                                logger.info(
+                                    "[EVENT_NOTIFY_SUPABASE_SENT_AT_WILL_ATOMIC] "
+                                    "event_id=%s ticker=%s dedupe=%s",
+                                    _rec.event_id[:12], _rec.ticker, _rec_dedupe[:12],
+                                )
+                            elif _rec.event_id in _notified_events_safe:
+                                # event_id ベースのフォールバック照合
+                                _discord_sent_at_to_save = datetime.now(timezone.utc).isoformat()
+                                logger.info(
+                                    "[EVENT_NOTIFY_SUPABASE_SENT_AT_WILL_ATOMIC_FALLBACK] "
+                                    "event_id=%s ticker=%s (dedupe mismatch, id match)",
+                                    _rec.event_id[:12], _rec.ticker,
+                                )
+
+                            _sb_result = _save_to_sb(_rec, dry_run=False, discord_sent_at=_discord_sent_at_to_save)
                             _action = _sb_result.get("action", "error")
                             _save_ok = _action in ("inserted", "updated", "dedup_skipped")
                             if _action == "inserted":
@@ -1031,25 +1065,6 @@ def process_documents(
                                     f"type={_rec.event_type} "
                                     f"error={_sb_result.get('error', 'unknown')}"
                                 )
-
-                            # Phase 2C: Supabase INSERT/UPSERT 完了後に discord_sent_at を更新する。
-                            # notify前には行が存在しないため、ここで更新する設計（順序修正）。
-                            # _notified_events_safe は通知フェーズで構築。dry_run時は空のため安全。
-                            if _save_ok and _rec.event_id in _notified_events_safe:
-                                try:
-                                    from .tdnet_event_store import update_discord_sent_at_supabase as _update_sb_sent_at
-                                    _update_sb_sent_at(_notified_events_safe[_rec.event_id], dry_run=False)
-                                    logger.info(
-                                        "[EVENT_NOTIFY_SUPABASE_SENT_AT_UPDATE_AFTER_INSERT] "
-                                        "event_id=%s ticker=%s",
-                                        _rec.event_id[:12], _rec.ticker,
-                                    )
-                                except Exception as _sb_sent_err:
-                                    logger.warning(
-                                        "[EVENT_NOTIFY_SUPABASE_SENT_AT_UPDATE_FAILED_AFTER_INSERT] "
-                                        "event_id=%s ticker=%s error=%s",
-                                        _rec.event_id[:12], _rec.ticker, _sb_sent_err,
-                                    )
 
                         except Exception as _sb_ev_e:
                             result.supabase_errors += 1

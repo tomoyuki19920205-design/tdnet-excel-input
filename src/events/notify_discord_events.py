@@ -23,7 +23,6 @@ if _PROJECT_ROOT not in sys.path:
 from src.events.common_storage import ensure_events_table, get_unnotified_events, mark_notified, mark_filtered
 from src.events.common_notify import send_event_discord, SendResult
 from src.events.notify_rules import filter_and_sort_events
-from src.events.tdnet_event_store import update_discord_sent_at_supabase
 
 logger = logging.getLogger("event_notify")
 
@@ -88,10 +87,38 @@ def main():
             send_result = send_event_discord(webhook_url, ev, dry_run=args.dry_run)
             if send_result == SendResult.SUCCESS:
                 mark_notified(conn, ev.event_id)
-                # Supabase の discord_sent_at も更新 (best-effort)
-                sb_ok = update_discord_sent_at_supabase(ev, dry_run=False)
-                if sb_ok:
-                    supabase_updated += 1
+                # Supabase の discord_sent_at も更新 (best-effort, 原子的)
+                # save_event_to_supabase に discord_sent_at を渡すことで
+                # INSERT と discord_sent_at 更新を1回のAPIコールで完結させる。
+                # すでに INSERT 済みの場合は DEDUP_SKIPPED になり、
+                # その際は PATCH で discord_sent_at を更新するフォールバックが動く。
+                try:
+                    from datetime import datetime, timezone
+                    from src.events.tdnet_event_store import save_event_to_supabase as _sev_sb
+                    _sent_at_iso = datetime.now(timezone.utc).isoformat()
+                    sb_result = _sev_sb(ev, dry_run=args.dry_run, discord_sent_at=_sent_at_iso)
+                    sb_action = sb_result.get("action", "error")
+                    if sb_action in ("inserted", "dedup_skipped"):
+                        supabase_updated += 1
+                        logger.info(
+                            "[NOTIFY] supabase discord_sent_at saved: "
+                            "event_id=%s ticker=%s action=%s",
+                            ev.event_id[:12], ev.ticker, sb_action,
+                        )
+                    elif sb_action == "dry_run":
+                        supabase_updated += 1
+                    else:
+                        logger.warning(
+                            "[NOTIFY] supabase discord_sent_at save failed: "
+                            "event_id=%s ticker=%s action=%s",
+                            ev.event_id[:12], ev.ticker, sb_action,
+                        )
+                except Exception as _sb_err:
+                    logger.warning(
+                        "[NOTIFY] supabase discord_sent_at update error: "
+                        "event_id=%s ticker=%s error=%s",
+                        ev.event_id[:12], ev.ticker, _sb_err,
+                    )
                 sent += 1
             elif send_result == SendResult.SKIPPED:
                 # dry_run時
