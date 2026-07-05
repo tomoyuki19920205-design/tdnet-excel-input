@@ -38,6 +38,9 @@ _SALES_TAGS = {
 _PROFIT_TAGS = {
     "jppfs_cor:operatingincome",                # 営業利益 / セグメント利益
     "jppfs_cor:operatingprofit",
+    "jppfs_cor:ordinaryincome",                 # 経常利益
+    "jppfs_cor:ordinaryincomebnk",              # 経常利益（銀行業）
+    "jppfs_cor:incomebeforeincometaxes",        # 税引前当期純利益
 }
 # IFRS基準
 _IFRS_SALES_TAGS = {
@@ -77,6 +80,9 @@ _COMPANY_PROFIT_SUFFIXES = (
     "profitlossifrs",
     "profitlossbeforetaxifrs",
     "businessprofitlossifrs",
+    "ordinaryincome",
+    "ordinaryincomebnk",
+    "incomebeforeincometaxes",
 )
 
 ALL_SALES_TAGS = _SALES_TAGS | _IFRS_SALES_TAGS
@@ -423,11 +429,15 @@ def extract_segments_from_xbrl_zip(
                     if profit is not None:
                         profit = _to_million_yen(profit, unit)
 
-                    # previous row は period を1年前にする
                     if period_type == "previous" and _prev_period:
                         row_period = _prev_period
                     else:
                         row_period = estimated_period or ""
+
+                    profit_tag = data.get("profit_tag")
+                    row_raw_json = None
+                    if profit_tag:
+                        row_raw_json = {"profit_tag": profit_tag}
 
                     row = SegmentRawRow(
                         source="xbrl",
@@ -448,6 +458,7 @@ def extract_segments_from_xbrl_zip(
                         is_consolidated=True,
                         accounting_standard=accounting_standard,
                         table_title=f"XBRL segment: {seg_file}",
+                        raw_json=row_raw_json,
                     )
                     results.append(row)
     
@@ -480,6 +491,21 @@ def _find_segment_files(zf: zipfile.ZipFile) -> list[str]:
                 pass
     return seg_files
 
+
+def _get_profit_priority(name: str) -> int:
+    """利益タグの優先順位（低い方が優先）"""
+    n = name.lower()
+    if "extraordinary" in n:
+        return 999
+    if "operating" in n or "businessprofit" in n or "profitlossifrs" in n:
+        return 1
+    if "ordinaryincomebnk" in n:
+        return 3
+    if "ordinaryincome" in n:
+        return 2
+    if "beforetax" in n or "incomebefore" in n:
+        return 4
+    return 1
 
 def _extract_ixbrl_segment_data(
     soup: BeautifulSoup, accounting_standard: str
@@ -553,14 +579,19 @@ def _extract_ixbrl_segment_data(
                 )):
                     is_primary_sales = True
             elif any(local_name.endswith(s) for s in _COMPANY_PROFIT_SUFFIXES):
-                is_profit = True
+                if not local_name.endswith("extraordinaryincome"):
+                    is_profit = True
 
         if is_sales:
             if is_primary_sales or "sales" not in result[key]:
                 result[key]["sales"] = value
         elif is_profit:
-            if "profit" not in result[key]:
+            priority = _get_profit_priority(name)
+            current_priority = result[key].get("profit_priority", 999)
+            if priority < current_priority:
                 result[key]["profit"] = value
+                result[key]["profit_priority"] = priority
+                result[key]["profit_tag"] = name
 
     # (member, period_type) 単位に集約済みのためそのまま返す
     aggregated: dict[tuple[str, str], dict] = {
