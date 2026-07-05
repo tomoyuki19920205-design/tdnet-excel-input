@@ -127,7 +127,12 @@ def save_prior_comparative_from_event(
                 logger.info(f"[PRIOR_COMP_SAVER] doc_id={doc_id} SKIP: xbrl zip not found in archive (raw={raw_doc_id})")
                 continue
 
-            xbrl_rows = extract_segments_from_xbrl_zip(zip_path)
+            # title 取得
+            title = None
+            ev = supabase_select("tdnet_events", params={"source_url": f"ilike.%{doc_id}%"})
+            if ev and len(ev) > 0:
+                title = ev[0].get("title", "")
+            xbrl_rows = extract_segments_from_xbrl_zip(zip_path, title=title)
             if not xbrl_rows:
                 logger.info(f"[PRIOR_COMP_SAVER] doc_id={doc_id} SKIP: no xbrl segments extracted")
                 continue
@@ -135,7 +140,13 @@ def save_prior_comparative_from_event(
             ticker = xbrl_rows[0].normalized_ticker
             if not ticker:
                 continue
-                
+
+            # quarter が UNKNOWN の場合は skip
+            if xbrl_rows[0].quarter == "UNKNOWN":
+                logger.info(f"[PRIOR_COMP_SAVER] doc_id={doc_id} ticker={ticker} SKIP: quarter is UNKNOWN")
+                stats["skipped_no_official"] = stats.get("skipped_no_official", 0) + 1
+                continue
+
             # canary指定がある場合は他をスキップ
             if canary_tickers is not None and ticker not in canary_tickers:
                 continue

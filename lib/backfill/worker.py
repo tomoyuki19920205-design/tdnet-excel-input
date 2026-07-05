@@ -284,15 +284,7 @@ def _extract_segments(doc_path, filing, financials_data, via, fid, metrics, *, r
     period = (financials_data or {}).get("period", "")
     quarter = (financials_data or {}).get("quarter", "")
 
-    # --- period / quarter フォールバック: filing.title からパース ---
-    if not period or not quarter:
-        from src.year_parser import extract_fiscal_info
-        title_fy, title_q = extract_fiscal_info(filing.title)
-        if not period and title_fy:
-            period = title_fy
-        if not quarter and title_q:
-            quarter = title_q
-
+    # --- period / quarter フォールバック: 古い判定は無効化 ---
     # period / quarter 空保存禁止 → quarantine
     if not period or not quarter:
         return [], f"period_quarter_unresolved:period={period!r},quarter={quarter!r}"
@@ -559,25 +551,18 @@ def process_one_filing(
             logger.info(f"[worker] XBRL fallback: fid={fid} ticker={filing.ticker} hint={hint} source={fallback_source}")
             try:
                 from src.segment.xbrl_segment_extractor import extract_segments_from_xbrl_zip
-                xbrl_rows = extract_segments_from_xbrl_zip(effective_xbrl_path)
+                xbrl_rows = extract_segments_from_xbrl_zip(effective_xbrl_path, title=getattr(filing, "title", None))
                 if xbrl_rows and len(xbrl_rows) > 0:
                     # period / quarter 解決
                     period = (financials_data or {}).get("period", "")
                     quarter = (financials_data or {}).get("quarter", "")
-                    if not period or not quarter:
-                        from src.year_parser import extract_fiscal_info
-                        title_fy, title_q = extract_fiscal_info(filing.title)
-                        if not period and title_fy:
-                            period = title_fy
-                        if not quarter and title_q:
-                            quarter = title_q
                     # period を XBRL row から取得 (fallback)
                     if not period and xbrl_rows[0].period:
                         period = xbrl_rows[0].period
                     if not quarter and xbrl_rows[0].quarter:
                         quarter = xbrl_rows[0].quarter
 
-                    if period and quarter:
+                    if period and quarter and quarter != "UNKNOWN":
                         xbrl_segment_records = []
                         for idx, row in enumerate(xbrl_rows):
                             seg_name = row.normalized_segment_name or row.raw_segment_name
@@ -766,16 +751,9 @@ def process_one_filing_xbrl_first(
         if seg_r.success:
             period = (financials_data or {}).get("period", "")
             quarter = (financials_data or {}).get("quarter", "")
-            # --- period / quarter フォールバック ---
-            if not period or not quarter:
-                from src.year_parser import extract_fiscal_info
-                title_fy, title_q = extract_fiscal_info(filing.title)
-                if not period and title_fy:
-                    period = title_fy
-                if not quarter and title_q:
-                    quarter = title_q
-            # period / quarter 空保存禁止
-            if not period or not quarter:
+            # --- period / quarter フォールバック: 古い判定は無効化 ---
+            # period / quarter 空またはUNKNOWN保存禁止
+            if not period or not quarter or quarter == "UNKNOWN":
                 segment_records = []
                 xbrl_seg_hint = f"period_quarter_unresolved:period={period!r},quarter={quarter!r}"
             else:
@@ -977,23 +955,16 @@ def process_one_filing_pdf_only(
         logger.info(f"[worker/pdf_only] XBRL fallback: fid={fid} ticker={filing.ticker} hint={hint}")
         try:
             from src.segment.xbrl_segment_extractor import extract_segments_from_xbrl_zip
-            xbrl_rows = extract_segments_from_xbrl_zip(xbrl_path_cached)
+            xbrl_rows = extract_segments_from_xbrl_zip(xbrl_path_cached, title=getattr(filing, "title", None))
             if xbrl_rows and len(xbrl_rows) > 0:
                 period = (financials_data or {}).get("period", "")
                 quarter = (financials_data or {}).get("quarter", "")
-                if not period or not quarter:
-                    from src.year_parser import extract_fiscal_info
-                    title_fy, title_q = extract_fiscal_info(filing.title)
-                    if not period and title_fy:
-                        period = title_fy
-                    if not quarter and title_q:
-                        quarter = title_q
                 if not period and xbrl_rows[0].period:
                     period = xbrl_rows[0].period
                 if not quarter and xbrl_rows[0].quarter:
                     quarter = xbrl_rows[0].quarter
 
-                if period and quarter:
+                if period and quarter and quarter != "UNKNOWN":
                     xbrl_segment_records = []
                     for idx, row in enumerate(xbrl_rows):
                         seg_name = row.normalized_segment_name or row.raw_segment_name

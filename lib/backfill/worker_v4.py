@@ -429,13 +429,6 @@ def _try_pdf_source_v4(
     # period / quarter 解決
     period = (financials_data or {}).get("period", "")
     quarter = (financials_data or {}).get("quarter", "")
-    if not period or not quarter:
-        from src.year_parser import extract_fiscal_info
-        title_fy, title_q = extract_fiscal_info(filing.title)
-        if not period and title_fy:
-            period = title_fy
-        if not quarter and title_q:
-            quarter = title_q
     # V4 result から period/quarter を取得できる場合も試みる
     if v4_result.extracted_periods:
         pr = v4_result.extracted_periods[0]
@@ -457,7 +450,7 @@ def _try_pdf_source_v4(
         if any(x in _title for x in _ANNUAL_KW) and not any(x in _title for x in _QUARTER_KW):
             quarter = "FY"
 
-    if not period or not quarter:
+    if not period or not quarter or quarter == "UNKNOWN":
         return SourceCandidate(
             source="pdf", attempted=True, available=True,
             error=f"period_quarter_unresolved:period={period!r},quarter={quarter!r}",
@@ -1099,13 +1092,6 @@ def process_one_filing_v4(
                     # ── Step A: 既存ロジック（financials_data or title）──
                     _ai_period = (financials_data or {}).get("period", "")
                     _ai_quarter = (financials_data or {}).get("quarter", "")
-                    if not _ai_period or not _ai_quarter:
-                        from src.year_parser import extract_fiscal_info
-                        _fy, _fq = extract_fiscal_info(getattr(filing, "title", ""))
-                        if not _ai_period and _fy:
-                            _ai_period = _fy
-                        if not _ai_quarter and _fq:
-                            _ai_quarter = _fq
 
                     # ── Step B: PDF本文 + タイトル + AI出力 で period/quarter を補完 ──
                     _title_str = getattr(filing, "title", "") or ""

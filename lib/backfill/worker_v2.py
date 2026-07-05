@@ -518,7 +518,7 @@ def _try_xbrl_source(
 
     try:
         from src.segment.xbrl_segment_extractor import extract_segments_from_xbrl_zip
-        xbrl_rows = extract_segments_from_xbrl_zip(xbrl_path)
+        xbrl_rows = extract_segments_from_xbrl_zip(xbrl_path, title=getattr(filing, "title", None))
     except Exception as e:
         logger.debug(f"[v2] XBRL extraction error: fid={fid} err={e}")
         return SourceCandidate(
@@ -535,19 +535,12 @@ def _try_xbrl_source(
     # period / quarter 解決
     period = (financials_data or {}).get("period", "")
     quarter = (financials_data or {}).get("quarter", "")
-    if not period or not quarter:
-        from src.year_parser import extract_fiscal_info
-        title_fy, title_q = extract_fiscal_info(filing.title)
-        if not period and title_fy:
-            period = title_fy
-        if not quarter and title_q:
-            quarter = title_q
     if not period and xbrl_rows[0].period:
         period = xbrl_rows[0].period
     if not quarter and xbrl_rows[0].quarter:
         quarter = xbrl_rows[0].quarter
 
-    if not period or not quarter:
+    if not period or not quarter or quarter == "UNKNOWN":
         return SourceCandidate(
             source="xbrl", attempted=True, available=True,
             error=f"period_quarter_unresolved:period={period!r},quarter={quarter!r}",
