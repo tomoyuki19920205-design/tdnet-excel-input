@@ -291,6 +291,23 @@ def _extract_ticker_from_context(context_ref: str) -> Optional[str]:
     return None
 
 
+def _parse_quarter_from_title(title: str) -> str:
+    """タイトルから1Q, 2Q, 3Q, FY を判定する。"""
+    if not title: return "UNKNOWN"
+    t = title.lower().replace('１', '1').replace('２', '2').replace('３', '3')
+    # 訂正の除去
+    t = re.sub(r'[\(（]訂正[\)）]', '', t)
+    t = t.replace('訂正', '')
+    
+    if '第3四半期' in t: return '3Q'
+    if '第2四半期' in t or '中間' in t: return '2Q'
+    if '第1四半期' in t: return '1Q'
+    
+    if '決算短信' in t:
+        if not re.search(r'第[1234]四半期', t) and '中間' not in t:
+            return 'FY'
+    return "UNKNOWN"
+
 # ============================================================
 # メインエントリ
 # ============================================================
@@ -298,6 +315,8 @@ def extract_segments_from_xbrl_zip(
     zip_path: str,
     period: Optional[str] = None,
     quarter: Optional[str] = None,
+    title: Optional[str] = None,
+
 ) -> list[SegmentRawRow]:
     """XBRL ZIP からセグメント情報を抽出。
 
@@ -338,29 +357,20 @@ def extract_segments_from_xbrl_zip(
                 if "ifsm" in fn or "iffr" in fn:
                     accounting_standard = "IFRS"
                 
-                # period + quarter をファイル名から抽出
-                # パターン: tse-qcedjpfr-22880-2025-12-31-02-2026-02-24
-                #                                         ^^ quarter idx
-                if not estimated_period or not estimated_quarter:
-                    pm = re.search(
-                        r"-(\d{4}-\d{2}-\d{2})-(\d{2})-",
-                        seg_file,
-                    )
+                # quarter の優先順位: 1. 引数quarter, 2. titleからの判定
+                if not estimated_quarter and title:
+                    q_from_title = _parse_quarter_from_title(title)
+                    if q_from_title and q_from_title != "UNKNOWN":
+                        estimated_quarter = q_from_title
+
+                if not estimated_quarter:
+                    estimated_quarter = "UNKNOWN"
+
+                # period のみをファイル名から抽出するように変更
+                if not estimated_period:
+                    pm = re.search(r"-(\d{4}-\d{2}-\d{2})", seg_file)
                     if pm:
-                        if not estimated_period:
-                            estimated_period = pm.group(1)
-                        if not estimated_quarter:
-                            qi = pm.group(2)  # "01"=1Q, "02"=2Q, "03"=3Q, "01" for annual=FY
-                            if "qced" in fn or "qce" in fn:
-                                # quarterly: 01→1Q, 02→2Q, 03→3Q
-                                q_map = {"01": "1Q", "02": "2Q", "03": "3Q"}
-                                estimated_quarter = q_map.get(qi, "FY")
-                            elif "aced" in fn or "sned" in fn or "anre" in fn:
-                                estimated_quarter = "FY"
-                            elif "sced" in fn:
-                                estimated_quarter = "2Q"
-                            else:
-                                estimated_quarter = "FY"
+                        estimated_period = pm.group(1)
                 
                 # period を月末丸め (PL との key 一致のため)
                 if estimated_period:
