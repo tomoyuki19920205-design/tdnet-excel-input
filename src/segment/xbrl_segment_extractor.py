@@ -461,6 +461,52 @@ def extract_segments_from_xbrl_zip(
                         raw_json=row_raw_json,
                     )
                     results.append(row)
+                    
+            # --- Deduplication Pass ---
+            from src.segment.normalize import normalize_segment_key
+            
+            # Group by period, quarter, normalized_key
+            groups = {}
+            for r in results:
+                k = (r.period, r.quarter, normalize_segment_key(r.raw_segment_name))
+                if k not in groups:
+                    groups[k] = []
+                groups[k].append(r)
+                
+            dedup_results = []
+            for k, rows_in_group in groups.items():
+                if len(rows_in_group) == 1:
+                    dedup_results.append(rows_in_group[0])
+                    continue
+                    
+                # Multiple rows for the same key
+                # Check if they have the same sales and profit
+                first_sales = rows_in_group[0].sales
+                first_profit = rows_in_group[0].profit
+                conflict = False
+                for r in rows_in_group[1:]:
+                    if r.sales is not None and first_sales is not None and r.sales != first_sales:
+                        conflict = True
+                    if r.profit is not None and first_profit is not None and r.profit != first_profit:
+                        conflict = True
+                        
+                if conflict:
+                    # Conflicting value duplicate
+                    for r in rows_in_group:
+                        rj = r.raw_json or {}
+                        rj["duplicate_resolution_reason"] = "conflicting_value"
+                        r.raw_json = rj
+                        dedup_results.append(r)
+                else:
+                    # Same value duplicate, keep the shortest name (prioritizes simpler names)
+                    sorted_rows = sorted(rows_in_group, key=lambda x: len(x.raw_segment_name))
+                    best_row = sorted_rows[0]
+                    rj = best_row.raw_json or {}
+                    rj["duplicate_resolution_reason"] = "folded_same_value"
+                    best_row.raw_json = rj
+                    dedup_results.append(best_row)
+                    
+            results = dedup_results
     
     except zipfile.BadZipFile:
         logger.warning(f"Bad ZIP: {zip_path}")
