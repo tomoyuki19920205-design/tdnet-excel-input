@@ -242,3 +242,19 @@ def compute_fingerprint(*parts: str) -> str:
     """
     combined = "|".join(str(p) for p in parts)
     return hashlib.sha256(combined.encode("utf-8")).hexdigest()[:32]
+
+
+def extract_common_disclosure_no(value: str) -> str | None:
+    if not value:
+        return None
+    import re
+    m = re.search(r'(?:1401|0812)(\d{14})', value)
+    if m:
+        return m.group(1)
+    m = re.search(r'(20\d{12})', value)
+    if m:
+        return m.group(1)
+    m = re.search(r'(\d{14})', value)
+    if m:
+        return m.group(1)
+    return None

@@ -347,13 +347,28 @@ def _process_validated_item(
 
 
 def _find_cached_xbrl(xbrl_dir: str, ticker: str, doc_id: str = "") -> str | None:
-    """xbrl_archive ディレクトリ内のキャッシュ済みZIPを検索 (doc_id完全一致必須)"""
+    from .common_normalizers import extract_common_disclosure_no
     d = Path(xbrl_dir)
-    if not d.is_dir() or not doc_id:
+    if not d.is_dir():
         return None
-    candidates = sorted(d.glob(f"{ticker}_*{doc_id}*.zip"), reverse=True)
-    if candidates:
-        return str(candidates[0])
+        
+    if not doc_id:
+        return None
+
+    common_id = extract_common_disclosure_no(doc_id)
+    if not common_id:
+        return None
+
+    candidates = sorted(d.glob(f"{ticker}_*.zip"), reverse=True)
+    matches = []
+    for c in candidates:
+        zip_id = extract_common_disclosure_no(c.name)
+        if zip_id and zip_id == common_id:
+            matches.append(c)
+
+    if len(matches) == 1:
+        return str(matches[0])
+            
     return None
 
 

@@ -281,47 +281,39 @@ def derive_archive_date(doc: dict, zip_path: str, xbrl_doc_id: str) -> tuple[str
     raise ValueError("invalid_archive_date")
 
 def find_zip_for_doc(doc: dict, source_doc_id: str, xbrl_doc_id: str, archive_date: str) -> tuple[str, str]:
-    """workerに渡す zip_path を安全に決める。失敗時は ValueError を送出する。"""
-    doc_zip = str(doc.get("zip_path") or "").strip()
-    if doc_zip:
-        p = Path(doc_zip)
-        if p.is_file():
-            if is_valid_xbrl_doc_id(xbrl_doc_id) and xbrl_doc_id in p.name:
-                return doc_zip, "explicit_zip_path"
-            # If xbrl_doc_id doesn't match, we fall back to searching
-
-    base = _PROJECT_ROOT / "data" / "xbrl_archive"
-    if not base.is_dir():
-        raise ValueError("file_not_found")
+    """共通14桁の開示番号で ZIP を安全に特定する。失敗時は ValueError を送出する。"""
+    from .common_normalizers import extract_common_disclosure_no
 
     ticker = str(doc.get("ticker") or "").strip()
-    if not ticker:
-        raise ValueError("file_not_found")
+    if not ticker or ticker == "None":
+        raise ValueError("invalid_required_field: ticker is missing")
+    
+    base = _PROJECT_ROOT / "data" / "xbrl_archive"
+    d = Path(base)
+    if not d.is_dir():
+        raise ValueError(f"file_not_found: XBRL_ARCHIVE_DIR missing {d}")
+        
+    target_id = xbrl_doc_id or source_doc_id
+    if not target_id:
+        raise ValueError("invalid_required_field: doc_id missing")
+        
+    common_id = extract_common_disclosure_no(target_id)
+    if not common_id:
+        raise ValueError(f"file_not_found: Invalid or hash doc_id {target_id}")
 
-    # 2. xbrl_doc_id 完全一致
-    if is_valid_xbrl_doc_id(xbrl_doc_id):
-        cands = sorted(base.glob(f"{ticker}_*_{xbrl_doc_id}.zip"))
-        if len(cands) == 1:
-            return str(cands[0]), "xbrl_doc_id_exact"
-        if len(cands) > 1:
-            raise ValueError("ambiguous_zip_match")
+    candidates = sorted(d.glob(f"{ticker}_*.zip"), reverse=True)
+    matches = []
+    for c in candidates:
+        zip_id = extract_common_disclosure_no(c.name)
+        if zip_id and zip_id == common_id:
+            matches.append(c)
 
-    # 3. source_doc_id 末尾 14桁一致 & archive_date 一致 (古いファイルの代用を完全禁止)
-    if is_valid_source_doc_id(source_doc_id):
-        s14 = source_doc_id[-14:]
-        cands = sorted(base.glob(f"{ticker}_*.zip"))
-        # archive_date があればそれで絞り込む
-        if archive_date:
-            cands = [c for c in cands if f"_{archive_date}_" in c.name]
-        matched = [c for c in cands if s14 in c.name]
-        if len(matched) == 1:
-            return str(matched[0]), "source_doc_id_base14"
-        if len(matched) > 1:
-            raise ValueError("ambiguous_zip_match")
-
-
-
-    raise ValueError("file_not_found")
+    if len(matches) == 1:
+        return str(matches[0]), f"found {common_id}"
+    elif len(matches) > 1:
+        raise ValueError(f"ambiguous_zip_match: Multiple ZIPs for {common_id}")
+        
+    raise ValueError(f"file_not_found: No matching ZIP for {common_id}")
 
 # ── worker 入力 JSON 構築 ──────────────────────────────────────────────────────────────────────────────────
 def build_worker_input(doc: dict) -> dict:

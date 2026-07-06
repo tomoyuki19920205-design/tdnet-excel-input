@@ -931,17 +931,29 @@ def run_earnings_production(
 # ユーティリティ
 # ============================================================
 def _find_cached_xbrl(xbrl_dir: str, ticker: str, doc_id: str = "") -> str | None:
+    from .common_normalizers import extract_common_disclosure_no
     d = Path(xbrl_dir)
     if not d.is_dir():
         return None
         
-    if doc_id:
-        # Require doc_id to be present in the filename
-        candidates = sorted(d.glob(f"{ticker}_*{doc_id}*.zip"), reverse=True)
-        if candidates:
-            return str(candidates[0])
-            
-    return None
+    if not doc_id:
+        return None
+
+    common_id = extract_common_disclosure_no(doc_id)
+    if not common_id:
+        return None # hash or invalid
+
+    candidates = sorted(d.glob(f"{ticker}_*.zip"), reverse=True)
+    matches = []
+    for c in candidates:
+        zip_id = extract_common_disclosure_no(c.name)
+        if zip_id and zip_id == common_id:
+            matches.append(c)
+
+    if len(matches) == 1:
+        return str(matches[0])
+    
+    return None # Ambiguous or not found
 
 
 def _format_reasons_with_ai(narrative: NarrativeData, model: str = "") -> dict:
