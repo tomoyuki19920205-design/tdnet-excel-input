@@ -276,11 +276,11 @@ def run_earnings_production(
         enable_discord = os.getenv("EARNINGS_SUBPROCESS_ENABLE_DISCORD", "0") == "1"
         enable_state_update = os.getenv("EARNINGS_SUBPROCESS_ENABLE_STATE_UPDATE", "0") == "1"
 
-        if enable_real_save and allowlist_j:
+        if (enable_real_save or dry_run) and allowlist_j:
             logger.info(
-                "[EARNINGS] USE_SUBPROCESS_WORKER=1 dry_run=False ENABLE_REAL_SAVE=1 "
-                "allowlist=%s discord=%s state_update=%s → 新方式実保存ルート",
-                allowlist_j, enable_discord, enable_state_update,
+                "[EARNINGS] USE_SUBPROCESS_WORKER=1 dry_run=%s ENABLE_REAL_SAVE=%s "
+                "allowlist=%s discord=%s state_update=%s → subprocess route",
+                dry_run, enable_real_save, allowlist_j, enable_discord, enable_state_update,
             )
             from src.events.earnings_subprocess_runner import (
                 run_earnings_subprocess_dry_run,
@@ -308,9 +308,14 @@ def run_earnings_production(
                 if _t not in allowlist_j:
                     logger.debug("[EARNINGS] ticker=%s not in allowlist. skip.", _t)
                     continue
-                if state_db and state_db.is_processed(_did):
-                    logger.info("[EARNINGS] ticker=%s disclosure_id=%s is already processed in state_db. skip.", _t, _did)
-                    continue
+                if state_db:
+                    _log = state_db.get_log(_did)
+                    _status = _log.get("status", "") if _log else ""
+                    if _status in ("extract_failed", "parse_failed"):
+                        logger.info("[EARNINGS] ticker=%s disclosure_id=%s has status=%s. Proceeding to earnings extraction.", _t, _did, _status)
+                    elif state_db.is_processed(_did):
+                        logger.info("[EARNINGS] ticker=%s disclosure_id=%s is already processed in state_db. skip.", _t, _did)
+                        continue
                 
                 # ZIPダウンロード追加
                 _xbrl_url = getattr(d, "xbrl_url", "") or ""
@@ -344,8 +349,9 @@ def run_earnings_production(
                 _ticker = doc_j.get("ticker")
                 _wr = results_by_ticker_j.get(_ticker)
                 if not _wr or _wr.get("status") != "ok":
-                    # worker失敗の場合も、手動でのリトライ等に備えて payload を生成・validate しておく
-                    pass
+                    logger.warning("[EARNINGS][REAL] %s worker failed (status=%s). skipping save route.", _ticker, _wr.get("error_type") if _wr else "missing")
+                    result.errors.append(f"{_ticker}: worker_failed={_wr.get('error_type') if _wr else 'missing'}")
+                    continue
 
                 try:
                     # ── payload 生成 / validation ───────────────────────────────
@@ -369,6 +375,11 @@ def run_earnings_production(
                         logger.error("[EARNINGS][REAL] %s call_plan invalid: %s. STOP.", _ticker, _cp_reason)
                         result.errors.append(f"{_ticker}: call_plan_invalid={_cp_reason}")
                         return result
+
+                    if dry_run:
+                        logger.info("[EARNINGS][REAL] [DRY_RUN] would save ticker=%s. skipping save route.", _ticker)
+                        result.validated_count += 1
+                        continue
 
                     # ── SQLite 保存前: semantic duplicate ガード ───────────────────
                     # fingerprint の一致有無に関わらず、意味的な重複を検知してスキップ
@@ -451,9 +462,9 @@ def run_earnings_production(
         else:
             # ENABLE_REAL_SAVE=0 または allowlist 未設定 ➡️ 旧方式 fallback
             logger.warning(
-                "[EARNINGS] USE_SUBPROCESS_WORKER=1 dry_run=False but ENABLE_REAL_SAVE=%s allowlist=%s. "
+                "[EARNINGS] USE_SUBPROCESS_WORKER=1 dry_run=%s but ENABLE_REAL_SAVE=%s allowlist=%s. "
                 "Falling back to sequential mode for safety.",
-                os.getenv("EARNINGS_SUBPROCESS_ENABLE_REAL_SAVE", "0"), allowlist_j,
+                dry_run, enable_real_save, allowlist_j,
             )
     else:
         pass # sequential
@@ -525,9 +536,7 @@ def run_earnings_production(
                 fy_reason = cached_parsed.get("fy_reason", "")
                 
                 if earnings is None:
-                    # Instead of skipping, create a dummy earnings object so we still generate a card with YOY-
-                    from .common_models import EarningsSummaryData
-                    earnings = EarningsSummaryData()
+                    continue
                     
                 parse_success += 1
                 result.validated_count += 1
@@ -535,9 +544,8 @@ def run_earnings_production(
                 
             else:
                 if not xbrl_path:
-                    logger.warning(f"[EARNINGS] {ticker} No XBRL found, creating dummy earnings for retry state")
-                    from .common_models import EarningsSummaryData
-                    earnings = EarningsSummaryData()
+                    logger.warning(f"[EARNINGS] {ticker} No XBRL found. skip.")
+                    continue
                 else:
                     # ---- 数値抽出 ----
                     try:
@@ -556,12 +564,10 @@ def run_earnings_production(
                             logger.error(f"[EARNINGS] {ticker} not a valid ZIP file")
                         result.errors.append(f"{ticker}: parse error: {str(e)[:80]}")
                         parse_failed += 1
-                        from .common_models import EarningsSummaryData
-                        earnings = EarningsSummaryData()
+                        continue
 
                     if earnings is None:
-                        from .common_models import EarningsSummaryData
-                        earnings = EarningsSummaryData()
+                        continue
 
                     parse_success += 1
                     result.validated_count += 1
