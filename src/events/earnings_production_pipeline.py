@@ -478,7 +478,8 @@ def run_earnings_production(
                 logger.info(f"[EARNINGS] {ticker} no xbrl_url, trying cache")
 
             if not xbrl_path:
-                xbrl_path = _find_cached_xbrl(xbrl_dir, ticker)
+                doc_id = str(getattr(doc, "doc_id", "")) or str(getattr(doc, "tdnet_id", ""))
+                xbrl_path = _find_cached_xbrl(xbrl_dir, ticker, doc_id=doc_id)
                 if xbrl_path:
                     logger.info(f"[EARNINGS] {ticker} found cached ZIP: {Path(xbrl_path).name}")
             if not xbrl_path:
@@ -524,39 +525,46 @@ def run_earnings_production(
                 fy_reason = cached_parsed.get("fy_reason", "")
                 
                 if earnings is None:
-                    result.no_yoy_count += 1
-                    continue
+                    # Instead of skipping, create a dummy earnings object so we still generate a card with YOY-
+                    from .common_models import EarningsSummaryData
+                    earnings = EarningsSummaryData()
                     
                 parse_success += 1
                 result.validated_count += 1
                 logger.info(f"[EARNINGS] {ticker} parsed cache hit! Bypassing heavy extraction.")
                 
             else:
-                # ---- 数値抽出 ----
-                try:
-                    earnings = extract_earnings_data(
-                        xbrl_path=xbrl_path, title=doc.title, ticker=ticker,
-                    )
-                except Exception as e:
-                    logger.error(f"[EARNINGS] {ticker} parse error: {e}")
-                    logger.error(f"[EARNINGS] {ticker} xbrl_path={xbrl_path}")
-                    # ZIP内ファイル一覧を出力
+                if not xbrl_path:
+                    logger.warning(f"[EARNINGS] {ticker} No XBRL found, creating dummy earnings for retry state")
+                    from .common_models import EarningsSummaryData
+                    earnings = EarningsSummaryData()
+                else:
+                    # ---- 数値抽出 ----
                     try:
-                        import zipfile
-                        with zipfile.ZipFile(xbrl_path) as zf:
-                            logger.error(f"[EARNINGS] {ticker} ZIP contents: {zf.namelist()[:10]}")
-                    except Exception:
-                        logger.error(f"[EARNINGS] {ticker} not a valid ZIP file")
-                    result.errors.append(f"{ticker}: parse error: {str(e)[:80]}")
-                    parse_failed += 1
-                    continue
+                        earnings = extract_earnings_data(
+                            xbrl_path=xbrl_path, title=doc.title, ticker=ticker,
+                        )
+                    except Exception as e:
+                        logger.error(f"[EARNINGS] {ticker} parse error: {e}")
+                        logger.error(f"[EARNINGS] {ticker} xbrl_path={xbrl_path}")
+                        # ZIP内ファイル一覧を出力
+                        try:
+                            import zipfile
+                            with zipfile.ZipFile(xbrl_path) as zf:
+                                logger.error(f"[EARNINGS] {ticker} ZIP contents: {zf.namelist()[:10]}")
+                        except Exception:
+                            logger.error(f"[EARNINGS] {ticker} not a valid ZIP file")
+                        result.errors.append(f"{ticker}: parse error: {str(e)[:80]}")
+                        parse_failed += 1
+                        from .common_models import EarningsSummaryData
+                        earnings = EarningsSummaryData()
 
-                if earnings is None:
-                    result.no_yoy_count += 1
-                    continue
+                    if earnings is None:
+                        from .common_models import EarningsSummaryData
+                        earnings = EarningsSummaryData()
 
-                parse_success += 1
-                result.validated_count += 1
+                    parse_success += 1
+                    result.validated_count += 1
 
                 # ---- 企業名フォールバック ----
                 company_name = doc.company_name
@@ -637,6 +645,10 @@ def run_earnings_production(
                                     ][:3]
 
                 # ---- 通知メッセージ生成 ----
+                from src.period_normalizer import format_fiscal_period
+                disp_label = format_fiscal_period(fiscal_year, quarter)
+                disp_title = f"[{disp_label}] {doc.title}" if disp_label else doc.title
+
                 full_message = format_earnings_message(
                     ticker=ticker,
                     company_name=company_name,
@@ -644,7 +656,7 @@ def run_earnings_production(
                     segment_lines=segment_lines,
                     company_reasons=company_reasons,
                     segment_reasons=segment_reasons,
-                    title=doc.title,
+                    title=disp_title,
                 )
 
                 # ---- PDF取得・テキスト抽出 (フォールバック用) ----
@@ -826,11 +838,38 @@ def run_earnings_production(
                     save_data["guidance_op_yoy"] = guidance.op_yoy
                     save_data["guidance_eps_yoy"] = guidance.eps_yoy
 
-
-                action = save_earnings_summary(conn, save_data)
-                if action == "inserted":
-                    result.saved_count += 1
-                    result.saved_tickers.append(ticker)
+                # ---- 保存直前の期間ガード ----
+                xbrl_fy = getattr(earnings, "fiscal_year", "") or ""
+                xbrl_q = getattr(earnings, "quarter", "") or ""
+                
+                period_mismatch = False
+                if xbrl_q and quarter and xbrl_q != quarter:
+                    period_mismatch = True
+                if xbrl_fy and fiscal_year and xbrl_fy != fiscal_year:
+                    period_mismatch = True
+                    
+                if not xbrl_path:
+                    period_mismatch = True # Force mismatch treatment for missing XBRL
+                
+                if period_mismatch:
+                    logger.warning(f"[EARNINGS] {ticker} Period mismatch guard triggered! event={fiscal_year}/{quarter} xbrl={xbrl_fy}/{xbrl_q}")
+                    action = "skipped_period_mismatch"
+                    earnings.sales_current = None
+                    earnings.op_current = None
+                    earnings.sales_yoy = None
+                    earnings.op_yoy = None
+                    if hasattr(earnings, "has_yoy"):
+                        earnings.has_yoy = False
+                    # Update save_data with None for financials
+                    save_data["sales_value"] = None
+                    save_data["op_value"] = None
+                else:
+                    action = save_earnings_summary(conn, save_data)
+                    
+                if action == "inserted" or action == "skipped_period_mismatch":
+                    if action == "inserted":
+                        result.saved_count += 1
+                        result.saved_tickers.append(ticker)
                     # ---- tdnet_events へ earnings イベントを best-effort 保存 ----
                     try:
                         _save_earnings_to_tdnet_events(
@@ -891,13 +930,17 @@ def run_earnings_production(
 # ============================================================
 # ユーティリティ
 # ============================================================
-def _find_cached_xbrl(xbrl_dir: str, ticker: str) -> str | None:
+def _find_cached_xbrl(xbrl_dir: str, ticker: str, doc_id: str = "") -> str | None:
     d = Path(xbrl_dir)
     if not d.is_dir():
         return None
-    candidates = sorted(d.glob(f"{ticker}_*.zip"), reverse=True)
-    if candidates:
-        return str(candidates[0])
+        
+    if doc_id:
+        # Require doc_id to be present in the filename
+        candidates = sorted(d.glob(f"{ticker}_*{doc_id}*.zip"), reverse=True)
+        if candidates:
+            return str(candidates[0])
+            
     return None
 
 

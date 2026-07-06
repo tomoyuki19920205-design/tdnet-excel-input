@@ -114,7 +114,8 @@ def _validate_candidate(
         xbrl_path = download_document(doc.xbrl_url, xbrl_dir)
 
     if not xbrl_path:
-        xbrl_path = _find_cached_xbrl(xbrl_dir, ticker)
+        doc_id = str(getattr(doc, "doc_id", "")) or str(getattr(doc, "tdnet_id", ""))
+        xbrl_path = _find_cached_xbrl(xbrl_dir, ticker, doc_id=doc_id)
 
     if not xbrl_path:
         return None, SkipReason.MISSING_ZIP
@@ -345,12 +346,12 @@ def _process_validated_item(
     }
 
 
-def _find_cached_xbrl(xbrl_dir: str, ticker: str) -> str | None:
-    """xbrl_archive ディレクトリ内のキャッシュ済みZIPを検索"""
+def _find_cached_xbrl(xbrl_dir: str, ticker: str, doc_id: str = "") -> str | None:
+    """xbrl_archive ディレクトリ内のキャッシュ済みZIPを検索 (doc_id完全一致必須)"""
     d = Path(xbrl_dir)
-    if not d.is_dir():
+    if not d.is_dir() or not doc_id:
         return None
-    candidates = sorted(d.glob(f"{ticker}_*.zip"), reverse=True)
+    candidates = sorted(d.glob(f"{ticker}_*{doc_id}*.zip"), reverse=True)
     if candidates:
         return str(candidates[0])
     return None

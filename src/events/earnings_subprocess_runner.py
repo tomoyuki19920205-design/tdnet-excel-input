@@ -306,23 +306,20 @@ def find_zip_for_doc(doc: dict, source_doc_id: str, xbrl_doc_id: str, archive_da
         if len(cands) > 1:
             raise ValueError("ambiguous_zip_match")
 
-    # 3. source_doc_id 末尾 14桁一致
+    # 3. source_doc_id 末尾 14桁一致 & archive_date 一致 (古いファイルの代用を完全禁止)
     if is_valid_source_doc_id(source_doc_id):
         s14 = source_doc_id[-14:]
         cands = sorted(base.glob(f"{ticker}_*.zip"))
+        # archive_date があればそれで絞り込む
+        if archive_date:
+            cands = [c for c in cands if f"_{archive_date}_" in c.name]
         matched = [c for c in cands if s14 in c.name]
         if len(matched) == 1:
             return str(matched[0]), "source_doc_id_base14"
         if len(matched) > 1:
             raise ValueError("ambiguous_zip_match")
 
-    # 4. ticker + archive_date 一致
-    if archive_date:
-        cands = sorted(base.glob(f"{ticker}_{archive_date}_*.zip"))
-        if len(cands) == 1:
-            return str(cands[0]), "ticker_archive_date"
-        if len(cands) > 1:
-            raise ValueError("ambiguous_zip_match")
+
 
     raise ValueError("file_not_found")
 
