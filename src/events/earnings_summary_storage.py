@@ -141,7 +141,8 @@ def save_earnings_summary(
         return "already_exists"
 
     now = _now_jst()
-    data.setdefault("created_at", now)
+    if not data.get("created_at"):
+        data["created_at"] = now
 
     placeholders = ", ".join("?" for _ in _INSERT_COLS)
     col_names = ", ".join(_INSERT_COLS)
