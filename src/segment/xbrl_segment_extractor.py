@@ -235,6 +235,41 @@ def _detect_unit_from_html(html_content: str) -> str:
     return "million_yen"  # デフォルト
 
 
+
+def _parse_context_periods(soup: BeautifulSoup) -> dict[str, dict]:
+    contexts = {}
+    for ctx in soup.find_all(lambda t: t.name and t.name.endswith("context")):
+        cid = ctx.get("id")
+        if not cid:
+            continue
+        
+        info = {}
+        period = ctx.find(lambda t: t.name and t.name.endswith("period"))
+        if period:
+            start = period.find(lambda t: t.name and t.name.endswith("startdate"))
+            end = period.find(lambda t: t.name and t.name.endswith("enddate"))
+            instant = period.find(lambda t: t.name and t.name.endswith("instant"))
+            
+            if start and end:
+                info["type"] = "duration"
+                s_str = start.get_text(strip=True).split("T")[0]
+                e_str = end.get_text(strip=True).split("T")[0]
+                info["start"] = s_str
+                info["end"] = e_str
+                try:
+                    s_date = datetime.datetime.strptime(s_str, "%Y-%m-%d").date()
+                    e_date = datetime.datetime.strptime(e_str, "%Y-%m-%d").date()
+                    info["duration_days"] = (e_date - s_date).days
+                    info["duration_months"] = round(info["duration_days"] / 30.436875)
+                except Exception:
+                    pass
+            elif instant:
+                info["type"] = "instant"
+                info["instant"] = instant.get_text(strip=True).split("T")[0]
+        
+        contexts[cid] = info
+    return contexts
+
 def _to_million_yen(value: int, unit: str) -> int:
     """百万円に変換。"""
     if unit == "million_yen":
@@ -349,6 +384,16 @@ def extract_segments_from_xbrl_zip(
     
     try:
         with zipfile.ZipFile(zip_path) as zf:
+            global_context_map = {}
+            for name in zf.namelist():
+                if name.endswith((".htm", ".html")):
+                    try:
+                        content = zf.read(name).decode("utf-8", errors="replace")
+                        if "context" in content.lower():
+                            s = BeautifulSoup(content, "html.parser")
+                            global_context_map.update(_parse_context_periods(s))
+                    except Exception as e:
+                        logger.warning(f"Failed to parse context in {name}: {e}")
             # セグメント情報ファイルを探す (acsg, qcsg 等)
             seg_files = _find_segment_files(zf)
             if not seg_files:
@@ -387,7 +432,7 @@ def extract_segments_from_xbrl_zip(
                 
                 # iXBRL タグ抽出
                 soup = BeautifulSoup(content, "html.parser")
-                rows = _extract_ixbrl_segment_data(soup, accounting_standard)
+                rows = _extract_ixbrl_segment_data(soup, accounting_standard, estimated_quarter, global_context_map)
                 
                 if not rows:
                     continue
@@ -554,7 +599,7 @@ def _get_profit_priority(name: str) -> int:
     return 1
 
 def _extract_ixbrl_segment_data(
-    soup: BeautifulSoup, accounting_standard: str
+    soup: BeautifulSoup, accounting_standard: str, estimated_quarter: str = "UNKNOWN", global_context_map: Optional[dict] = None
 ) -> dict[tuple[str, str], dict]:
     """iXBRL タグからセグメント別の売上/利益を抽出。
 
@@ -568,12 +613,13 @@ def _extract_ixbrl_segment_data(
     sales_tags = ALL_SALES_TAGS
     profit_tags = ALL_PROFIT_TAGS
 
-    # 優先: 外部顧客への売上高 > その他売上タグ
+    # 優先: 計 (NetSales等) > 外部顧客への売上高等のその他売上タグ
     _PRIMARY_SALES_NAMES = {
-        "jpcrp_cor:revenuesfromexternalcustomers",
-        "jpigp_cor:revenuefromexternalcustomersifrs",
-        "jpigp_cor:revenuefromexternalcustomers2ifrs",
-        "jpigp_cor:salestoexternalcustomersifrs",
+        "jppfs_cor:netsales",
+        "jpigp_cor:netsalesifrs",
+        "jpigp_cor:revenueifrs",
+        "jpigp_cor:revenue",
+        "jpigp_cor:revenue2ifrs",
     }
 
     # 集約キー: (member, period_type) で current/previous を分離
@@ -615,13 +661,13 @@ def _extract_ixbrl_segment_data(
             local_name = name.split(":")[-1] if ":" in name else name
             if any(local_name.endswith(s) for s in _COMPANY_SALES_SUFFIXES):
                 is_sales = True
-                # 外部顧客売上系は primary 扱い
+                # 計(NetSales等)は primary 扱い
                 if any(local_name.endswith(s) for s in (
-                    "revenuesfromexternalcustomers",
-                    "operatingrevenuefromexternalcustomersifrs",
-                    "salestoexternalcustomersifrs",
-                    "revenuefromexternalcustomersifrs",
-                    "revenuefromexternalcustomers2ifrs",
+                    "netsales",
+                    "netsalesifrs",
+                    "revenueifrs",
+                    "revenue",
+                    "revenue2ifrs",
                 )):
                     is_primary_sales = True
             elif any(local_name.endswith(s) for s in _COMPANY_PROFIT_SUFFIXES):
