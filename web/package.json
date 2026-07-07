@@ -1,28 +1,10 @@
 {
-  "name": "web",
-  "version": "0.1.0",
   "private": true,
+  "name": "tdnet-excel-input-web-disabled",
   "scripts": {
-    "dev": "next dev --port 3001",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint",
-    "deploy": "echo 'ERROR: DO NOT DEPLOY VERCEL FROM HERE. This repo is not for Vercel.' && exit 1",
-    "deploy:prod": "echo 'ERROR: DO NOT DEPLOY VERCEL FROM HERE. This repo is not for Vercel.' && exit 1"
-  },
-  "dependencies": {
-    "@supabase/ssr": "^0.9.0",
-    "@supabase/supabase-js": "^2.99.3",
-    "next": "16.2.0",
-    "react": "19.2.4",
-    "react-dom": "19.2.4"
-  },
-  "devDependencies": {
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.2.0",
-    "typescript": "^5"
+    "build": "node ./DO_NOT_DEPLOY_THIS_DIRECTORY.js",
+    "dev": "node ./DO_NOT_DEPLOY_THIS_DIRECTORY.js",
+    "start": "node ./DO_NOT_DEPLOY_THIS_DIRECTORY.js",
+    "vercel-build": "node ./DO_NOT_DEPLOY_THIS_DIRECTORY.js"
   }
 }
