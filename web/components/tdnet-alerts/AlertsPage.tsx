@@ -526,6 +526,18 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
       const period = ext.fiscal_period;
       if (period) lines.push(String(period));
 
+    } else if (event.event_type === "earnings") {
+      if (event.formatted_message) {
+        const fm = event.formatted_message.trim();
+        const fmArr = fm.split("\n");
+        if (fmArr[0].startsWith("📊 ")) {
+          lines.push(fmArr.slice(1).join("\n").trim());
+        } else {
+          lines.push(fm);
+        }
+      } else {
+        if (event.event_subtype) lines.push(event.event_subtype);
+      }
     } else {
       // fallback
       if (event.event_subtype) lines.push(event.event_subtype);
@@ -804,6 +816,12 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
                     <span className={`alert-badge ${badge.category}`}>
                       {badge.emoji} {subtypeLabel || badge.label}
                     </span>
+                    {strength && strength.value && (
+                      <span className="alert-strength" style={{ marginLeft: "8px", fontWeight: "bold", fontSize: "0.9rem", color: "var(--text-primary)" }}>
+                        {strength.value}
+                        {strength.yoy && <span style={{ marginLeft: "4px", fontSize: "0.9em", color: "var(--text-secondary)" }}>({strength.yoy})</span>}
+                      </span>
+                    )}
                     {event.event_type === "edinet_order_partial" && (
                       <span className="alert-badge" style={{ backgroundColor: "#fef08a", color: "#854d0e", marginLeft: "4px" }}>
                         片側のみ
