@@ -9,12 +9,14 @@ SEGMENT_EXTRACTION_SPEC §5.1
 from __future__ import annotations
 
 import calendar
+import datetime
 import hashlib
 import logging
 import os
 import re
 import zipfile
 from typing import Optional
+from dateutil.relativedelta import relativedelta
 
 from bs4 import BeautifulSoup
 
@@ -26,6 +28,28 @@ from src.segment.normalize import (
 )
 
 logger = logging.getLogger("xbrl_seg")
+
+def _calculate_expected_context_end(period_str: str, quarter: str) -> Optional[datetime.date]:
+    if not period_str or len(period_str) < 10:
+        return None
+    try:
+        fy_end = datetime.datetime.strptime(period_str[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+        
+    months_to_subtract = 0
+    if quarter == "1Q": months_to_subtract = 9
+    elif quarter == "2Q": months_to_subtract = 6
+    elif quarter == "3Q": months_to_subtract = 3
+    elif quarter == "FY": months_to_subtract = 0
+    elif quarter == "4Q": months_to_subtract = 0
+    
+    if months_to_subtract == 0:
+        return fy_end
+        
+    d = fy_end - relativedelta(months=months_to_subtract)
+    _, last_day = calendar.monthrange(d.year, d.month)
+    return datetime.date(d.year, d.month, min(d.day, last_day))
 
 # ============================================================
 # iXBRL タグ → セグメント値マッピング
@@ -446,12 +470,50 @@ def extract_segments_from_xbrl_zip(
                 # 単位検出
                 unit = _detect_unit_from_html(content)
                 
-                # iXBRL タグ抽出
                 soup = BeautifulSoup(content, "html.parser")
                 rows = _extract_ixbrl_segment_data(soup, accounting_standard, estimated_quarter, global_context_map)
                 
                 if not rows:
                     continue
+
+                # --- Context Date Guard (Prioritizing segment fact contextRefs) ---
+                if period and estimated_quarter and global_context_map:
+                    expected_end = _calculate_expected_context_end(period, estimated_quarter)
+                    if expected_end:
+                        actual_ends = []
+                        # 1. Try to get end dates from context_refs actually used in segment facts
+                        used_ctx_ids = [r.get("context_ref") for r in rows.values() if "context_ref" in r]
+                        for cid in used_ctx_ids:
+                            info = global_context_map.get(cid)
+                            if info and info.get("type") == "duration" and "end" in info:
+                                try:
+                                    actual_ends.append(datetime.datetime.strptime(info["end"][:10], "%Y-%m-%d").date())
+                                except ValueError:
+                                    pass
+                        
+                        # 2. Fallback only if no valid end dates could be extracted from used contexts
+                        if not actual_ends:
+                            for cid, info in global_context_map.items():
+                                if info.get("type") == "duration" and "end" in info:
+                                    if _classify_period_type(cid) == "current":
+                                        try:
+                                            actual_ends.append(datetime.datetime.strptime(info["end"][:10], "%Y-%m-%d").date())
+                                        except ValueError:
+                                            pass
+                        
+                        if actual_ends:
+                            min_diff = min(abs((ae - expected_end).days) for ae in actual_ends)
+                            if min_diff > 40:
+                                best_actual = next(ae for ae in actual_ends if abs((ae - expected_end).days) == min_diff)
+                                logger.warning(
+                                    f"[XBRL] Context Date Guard failed for {basename}. "
+                                    f"expected_end={expected_end} (fy={period}, q={estimated_quarter}), "
+                                    f"closest_actual_end={best_actual}, min_diff={min_diff} days, "
+                                    f"actual_ends={[str(d) for d in actual_ends]}. "
+                                    f"Title: '{document_title}'. Skipping."
+                                )
+                                return []
+                # ------------------------------------------------------------------
                 
                 # SegmentRawRow に変換
                 # _extract_ixbrl_segment_data の key は (member_name, period_type)
@@ -666,6 +728,7 @@ def _extract_ixbrl_segment_data(
         key = (member, period_type)
         if key not in result:
             result[key] = {}
+        result[key]["context_ref"] = ctx
 
         value = _parse_ixbrl_number(text, sign)
         if value is None:
