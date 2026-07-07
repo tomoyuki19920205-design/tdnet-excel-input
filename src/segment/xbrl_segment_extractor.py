@@ -455,7 +455,11 @@ def extract_segments_from_xbrl_zip(
                 if estimated_period and len(estimated_period) >= 4:
                     try:
                         _prev_year = int(estimated_period[:4]) - 1
-                        _prev_period = f"{_prev_year}{estimated_period[4:]}"
+                        _month_day = estimated_period[5:]
+                        if _month_day == "02-29" and not calendar.isleap(_prev_year):
+                            _prev_period = f"{_prev_year}-02-28"
+                        else:
+                            _prev_period = f"{_prev_year}-{_month_day}"
                     except ValueError:
                         _prev_period = None
 
