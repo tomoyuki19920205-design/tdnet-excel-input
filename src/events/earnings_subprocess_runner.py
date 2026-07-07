@@ -301,7 +301,15 @@ def find_zip_for_doc(doc: dict, source_doc_id: str, xbrl_doc_id: str, archive_da
     if not common_id:
         raise ValueError(f"file_not_found: Invalid or hash doc_id {target_id}")
 
-    candidates = sorted(d.glob(f"{ticker}_*.zip"), reverse=True)
+    candidates_list = list(d.glob(f"{ticker}_*.zip"))
+    
+    if common_id:
+        candidates_list.extend(d.glob(f"{common_id}.zip"))
+        candidates_list.extend(d.glob(f"*{common_id}*.zip"))
+        
+    # 重複を排除しつつ、逆順ソート（新しいものを優先する等の意図）
+    candidates = sorted(list(set(candidates_list)), reverse=True)
+    
     matches = []
     for c in candidates:
         zip_id = extract_common_disclosure_no(c.name)
