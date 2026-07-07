@@ -792,6 +792,8 @@ def main(args: list[str] | None = None) -> int:
         "xbrl_skipped_special": 0,
         "xbrl_skipped_no_data": 0,
         "xbrl_skipped_quarter": 0,
+        "xbrl_skipped_fy_end_unresolved": 0,
+        "xbrl_skipped_disc_no_unresolved": 0,
         "xbrl_errors": 0,
         # Phase 2-A: xbrl → canonical_segments (EAV) dual-write
         "xbrl_cs_batches": 0,
@@ -838,7 +840,18 @@ def main(args: list[str] | None = None) -> int:
             except Exception as e:
                 logger.warning(f"Error fetching fy_end for disc_no {disc_no}: {e}")
         else:
+            if not dry_run:
+                stats["xbrl_skipped_disc_no_unresolved"] += 1
+                logger.warning(f"  [SKIP] disc_no unresolved from {zpath}")
+                continue
             logger.warning(f"  [DRY-RUN] could not extract disc_no from {zpath}")
+            
+        if disc_no and not fy_end:
+            if not dry_run:
+                stats["xbrl_skipped_fy_end_unresolved"] += 1
+                logger.warning(f"  [SKIP] fy_end unresolved for disc_no {disc_no}")
+                continue
+            logger.warning(f"  [DRY-RUN] fallback for unresolved fy_end (disc_no: {disc_no})")
 
         rows = extract_segments_from_xbrl_zip(zpath, period=fy_end)
         if not rows:
@@ -981,6 +994,10 @@ def main(args: list[str] | None = None) -> int:
         print(f"    cs_dual_write_written    : {stats['xbrl_cs_written']}")
         if stats["xbrl_cs_errors"]:
             print(f"    cs_dual_write_errors     : {stats['xbrl_cs_errors']}")
+    if stats["xbrl_skipped_fy_end_unresolved"] > 0:
+        print(f"    skipped_fy_unresolved    : {stats['xbrl_skipped_fy_end_unresolved']}")
+    if stats["xbrl_skipped_disc_no_unresolved"] > 0:
+        print(f"    skipped_disc_unresolved  : {stats['xbrl_skipped_disc_no_unresolved']}")
     if stats["xbrl_errors"]:
         print(f"    errors                   : {stats['xbrl_errors']}")
 
