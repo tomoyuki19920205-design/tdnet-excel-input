@@ -25,6 +25,7 @@ class DisclosureItem:
     published_at: str
     xbrl_url: str | None = None
     disclosure_type: str = ""  # DisclosureType の値
+    source_doc_id: str | None = None
 
 
 @dataclass

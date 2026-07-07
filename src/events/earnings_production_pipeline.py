@@ -320,6 +320,22 @@ def run_earnings_production(
                 # ZIPダウンロード追加
                 _xbrl_url = getattr(d, "xbrl_url", "") or ""
                 _zip_path = ""
+                
+                # J-Quants オンデマンドXBRL取得
+                source_doc_id = getattr(d, "source_doc_id", "") or ""
+                if not _xbrl_url and source_doc_id and os.environ.get("JQUANTS_PRIMARY_ENABLED", "0") == "1":
+                    try:
+                        from src.jquants.adapter import get_file_url
+                        logger.info(f"[EARNINGS][JQUANTS] fetching on-demand XBRL URL for {_t} (disc_no={source_doc_id})")
+                        f_urls = get_file_url(source_doc_id, "x")
+                        if f_urls and "xbrl" in f_urls:
+                            _xbrl_url = f_urls["xbrl"]
+                            logger.info(f"[EARNINGS][JQUANTS] on-demand fetch success")
+                        else:
+                            logger.warning(f"[EARNINGS][JQUANTS] on-demand fetch failed (no xbrl key in response)")
+                    except Exception as e:
+                        logger.warning(f"[EARNINGS][JQUANTS] on-demand fetch error: {e}")
+
                 if _xbrl_url:
                     _zip_path = download_document(_xbrl_url, xbrl_dir, session=session, alternate_paths=[docs_dir]) or ""
 
@@ -479,12 +495,33 @@ def run_earnings_production(
         try:
             # ---- XBRL取得 ----
             xbrl_path = None
-            if getattr(doc, 'xbrl_url', None):
-                xbrl_path = download_document(doc.xbrl_url, xbrl_dir, session=session, alternate_paths=[docs_dir])
+            _xbrl_url = getattr(doc, 'xbrl_url', None)
+
+            # J-Quants オンデマンドXBRL取得
+            source_doc_id = getattr(doc, "source_doc_id", "") or ""
+            if not _xbrl_url and source_doc_id and os.environ.get("JQUANTS_PRIMARY_ENABLED", "0") == "1":
+                try:
+                    from src.jquants.adapter import get_file_url
+                    logger.info(f"[EARNINGS][JQUANTS] fetching on-demand XBRL URL for {ticker} (disc_no={source_doc_id})")
+                    f_urls = get_file_url(source_doc_id, "x")
+                    if f_urls and "xbrl" in f_urls:
+                        _xbrl_url = f_urls["xbrl"]
+                        logger.info(f"[EARNINGS][JQUANTS] on-demand fetch success")
+                        if isinstance(doc, dict):
+                            doc["xbrl_url"] = _xbrl_url
+                        else:
+                            setattr(doc, "xbrl_url", _xbrl_url)
+                    else:
+                        logger.warning(f"[EARNINGS][JQUANTS] on-demand fetch failed (no xbrl key in response)")
+                except Exception as e:
+                    logger.warning(f"[EARNINGS][JQUANTS] on-demand fetch error: {e}")
+
+            if _xbrl_url:
+                xbrl_path = download_document(_xbrl_url, xbrl_dir, session=session, alternate_paths=[docs_dir])
                 if xbrl_path:
                     logger.info(f"[EARNINGS] {ticker} ZIP downloaded: {Path(xbrl_path).name}")
                 else:
-                    logger.info(f"[EARNINGS] {ticker} ZIP download failed: {doc.xbrl_url}")
+                    logger.info(f"[EARNINGS] {ticker} ZIP download failed: {_xbrl_url}")
             else:
                 logger.info(f"[EARNINGS] {ticker} no xbrl_url, trying cache")
 

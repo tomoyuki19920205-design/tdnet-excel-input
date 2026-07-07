@@ -522,6 +522,7 @@ def _fetch_via_jquants(
             published_at=jq.published_at,
             xbrl_url=jq.xbrl_url,  # Shadow Run と同様に None (lazy)
             disclosure_type=jq.disclosure_type,
+            source_doc_id=jq.disclosure_id,
         ))
 
     logger.info(
