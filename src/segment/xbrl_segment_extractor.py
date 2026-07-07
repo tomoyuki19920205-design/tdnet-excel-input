@@ -402,25 +402,20 @@ def extract_segments_from_xbrl_zip(
                     except Exception as e:
                         logger.warning(f"Failed to parse context in {name}: {e}")
             
-            # Quarter Guard Logic
+            # Quarter Trusted Logic (replaces Guard Logic)
             title_quarter = None
             if document_title:
                 title_quarter = _parse_quarter_from_title(document_title)
                 
-            if meta_quarter and meta_quarter != "UNKNOWN":
-                if title_quarter and title_quarter != "UNKNOWN":
-                    if meta_quarter != title_quarter:
-                        logger.warning(f"[XBRL] Quarter mismatch for {basename}: meta={meta_quarter}, title={title_quarter} ({document_title}). Skipping extraction.")
-                        return []
-                else:
-                    logger.warning(f"[XBRL] Could not verify quarter from title for {basename}: '{document_title}'. Skipping to be safe.")
-                    return []
-                estimated_quarter = meta_quarter
-            else:
-                if title_quarter and title_quarter != "UNKNOWN":
-                    estimated_quarter = title_quarter
-                else:
-                    estimated_quarter = "UNKNOWN"
+            if not title_quarter or title_quarter == "UNKNOWN":
+                logger.warning(f"[XBRL] Could not verify quarter from title for {basename}: '{document_title}'. Skipping to be safe.")
+                return []
+                
+            # title_quarter is trusted.
+            if meta_quarter and meta_quarter != "UNKNOWN" and meta_quarter != title_quarter:
+                logger.info(f"[XBRL] Quarter mismatch for {basename}: meta={meta_quarter}, title={title_quarter} ({document_title}). Trusting title_quarter.")
+            
+            estimated_quarter = title_quarter
                     
             # セグメント情報ファイルを探す (acsg, qcsg 等)
             seg_files = _find_segment_files(zf)
