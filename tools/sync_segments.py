@@ -827,7 +827,7 @@ def main(args: list[str] | None = None) -> int:
                 jquants_conn = sqlite3.connect(os.path.join(_PROJECT_ROOT, "data", "jquants.db"))
                 c = jquants_conn.cursor()
                 c.execute('''
-                    SELECT current_fiscal_year_end_date 
+                    SELECT current_fiscal_year_end_date, type_of_current_period 
                     FROM jquants_financials_normalized 
                     WHERE raw_json LIKE ?
                     LIMIT 1
@@ -835,8 +835,9 @@ def main(args: list[str] | None = None) -> int:
                 row_fy = c.fetchone()
                 if row_fy:
                     fy_end = row_fy[0]
+                    quarter = row_fy[1]
                 jquants_conn.close()
-                logger.info(f"  [DRY-RUN] disc_no={disc_no}, fy_end={fy_end}")
+                logger.info(f"  [DRY-RUN] disc_no={disc_no}, fy_end={fy_end}, quarter={quarter}")
             except Exception as e:
                 logger.warning(f"Error fetching fy_end for disc_no {disc_no}: {e}")
         else:
@@ -853,7 +854,7 @@ def main(args: list[str] | None = None) -> int:
                 continue
             logger.warning(f"  [DRY-RUN] fallback for unresolved fy_end (disc_no: {disc_no})")
 
-        rows = extract_segments_from_xbrl_zip(zpath, period=fy_end)
+        rows = extract_segments_from_xbrl_zip(zpath, period=fy_end, quarter=quarter)
         if not rows:
             continue
         
