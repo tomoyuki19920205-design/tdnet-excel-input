@@ -393,53 +393,69 @@ def _calculate_notification_compare(ticker: str, extracted: dict, client=None) -
         calc_source = "llm_extracted"
 
         if s_yoy is None or o_yoy is None:
-            if s_f is None and o_f is None:
-                reason_code = "forecast_missing"
-            else:
-                if quarter in ("FY", "4Q"):
+            if quarter in ("FY", "4Q"):
+                if s_f is None and o_f is None:
+                    reason_code = "forecast_missing"
+                else:
                     if s_yoy is None and s_f is not None and s_curr is not None and s_curr > 0:
                         s_yoy = (s_f / s_curr) - 1.0
                         calc_source = "calculated_from_current"
                     if o_yoy is None and o_f is not None and o_curr is not None and o_curr > 0:
                         o_yoy = (o_f / o_curr) - 1.0
                         calc_source = "calculated_from_current"
-                elif quarter == "1Q":
-                    current_fy = extracted.get("fiscal_year")
-                    if client is not None and current_fy:
-                        try:
-                            prev_fy = str(int(current_fy) - 1)
-                            res = client.table('canonical_financials') \
-                                .select('period, metric, value') \
-                                .eq('ticker', ticker) \
-                                .eq('quarter', 'FY') \
-                                .in_('metric', ['sales', 'operating_profit']) \
-                                .execute()
-                            prev_sales = None
-                            prev_op = None
-                            if res.data:
-                                sorted_data = sorted(res.data, key=lambda x: x.get('source_priority', 999))
-                                for row in sorted_data:
-                                    period = str(row.get('period', ''))
-                                    metric = row.get('metric')
-                                    val = row.get('value')
-                                    if period.startswith(prev_fy) and val is not None:
-                                        if metric == 'sales' and prev_sales is None: prev_sales = val
-                                        elif metric == 'operating_profit' and prev_op is None: prev_op = val
-                            
-                            if s_yoy is None and s_f is not None and prev_sales is not None and prev_sales > 0:
-                                s_yoy = (s_f / 1_000_000) / prev_sales - 1.0
-                                calc_source = "calculated_from_db_prev_fy"
-                            if o_yoy is None and o_f is not None and prev_op is not None and prev_op > 0:
-                                o_yoy = (o_f / 1_000_000) / prev_op - 1.0
-                                calc_source = "calculated_from_db_prev_fy"
-                            if prev_sales is None and prev_op is None:
-                                reason_code = "prev_actual_missing"
-                        except Exception as e:
-                            logger.warning(f"[STORE] Failed to fetch previous FY for 1Q YoY fallback: {e}")
-                            reason_code = "db_error"
+            elif quarter == "1Q":
+                current_fy = extracted.get("fiscal_year")
+                if client is not None and current_fy:
+                    try:
+                        prev_fy = str(int(current_fy) - 1)
+                        res = client.table('canonical_financials') \
+                            .select('period, metric, value') \
+                            .eq('ticker', ticker) \
+                            .eq('quarter', 'FY') \
+                            .in_('metric', ['sales', 'operating_profit']) \
+                            .execute()
+                        prev_sales = None
+                        prev_op = None
+                        curr_f_sales = None
+                        curr_f_op = None
+                        if res.data:
+                            sorted_data = sorted(res.data, key=lambda x: x.get('source_priority', 999))
+                            for row in sorted_data:
+                                period = str(row.get('period', ''))
+                                metric = row.get('metric')
+                                val = row.get('value')
+                                if val is None:
+                                    continue
+                                if period.startswith(prev_fy):
+                                    if metric == 'sales' and prev_sales is None: prev_sales = val
+                                    elif metric == 'operating_profit' and prev_op is None: prev_op = val
+                                elif period.startswith(current_fy):
+                                    if metric == 'sales' and curr_f_sales is None: curr_f_sales = val
+                                    elif metric == 'operating_profit' and curr_f_op is None: curr_f_op = val
+                        
+                        s_forecast_millions = (s_f / 1_000_000) if s_f is not None else curr_f_sales
+                        o_forecast_millions = (o_f / 1_000_000) if o_f is not None else curr_f_op
 
-                if s_yoy is None and o_yoy is None and not reason_code:
-                    reason_code = "calculation_failed_or_missing_inputs"
+                        if s_yoy is None and s_forecast_millions is not None and prev_sales is not None and prev_sales > 0:
+                            s_yoy = s_forecast_millions / prev_sales - 1.0
+                            calc_source = "calculated_from_db_prev_fy" if s_f is not None else "canonical_financials"
+                        if o_yoy is None and o_forecast_millions is not None and prev_op is not None and prev_op > 0:
+                            o_yoy = o_forecast_millions / prev_op - 1.0
+                            calc_source = "calculated_from_db_prev_fy" if o_f is not None else "canonical_financials"
+                        
+                        if prev_sales is None and prev_op is None:
+                            reason_code = "prev_actual_missing"
+                        elif s_forecast_millions is None and o_forecast_millions is None:
+                            reason_code = "forecast_missing"
+                    except Exception as e:
+                        logger.warning(f"[STORE] Failed to fetch previous FY for 1Q YoY fallback: {e}")
+                        reason_code = "db_error"
+                else:
+                    if s_f is None and o_f is None:
+                        reason_code = "forecast_missing"
+
+            if s_yoy is None and o_yoy is None and not reason_code:
+                reason_code = "calculation_failed_or_missing_inputs"
 
         if s_yoy is not None or o_yoy is not None:
             compare_data = {
