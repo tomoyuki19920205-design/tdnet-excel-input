@@ -88,6 +88,24 @@ def _is_tanshin_title(title: str) -> bool:
     return True
 
 
+def _derive_fiscal_year_end_period(title: str) -> str | None:
+    """タイトル「YYYY年M月期」からその月の末日をYYYY-MM-DD形式で算出する。"""
+    if not title:
+        return None
+    import unicodedata
+    import re
+    import calendar
+    # 全角数字を半角にする
+    norm_title = unicodedata.normalize("NFKC", title)
+    m = re.search(r"(\d{4})年(\d{1,2})月期", norm_title)
+    if not m:
+        return None
+    year = int(m.group(1))
+    month = int(m.group(2))
+    last_day = calendar.monthrange(year, month)[1]
+    return f"{year:04d}-{month:02d}-{last_day:02d}"
+
+
 # ============================================================
 # fiscal_year / quarter 解析
 # ============================================================
@@ -436,6 +454,54 @@ def run_earnings_production(
                         logger.error("[EARNINGS][REAL] %s Supabase 保存失敗: %s", _ticker, _sup_err)
                         result.errors.append(f"{_ticker}: supabase_error={_sup_err}")
                         return result
+
+                    # ── canonical_financials 同期 ──────────────────────────────
+                    if _sup_ok:
+                        try:
+                            _args = _merged_plan["earnings_summary_args"]
+                            _title = _args.get("title", "")
+                            _period = None
+                            
+                            # payload 内に period / fiscal_year_end があれば優先
+                            _payload_ext = _payload.get("extracted", {})
+                            _period_cand = _payload_ext.get("period") or _payload_ext.get("fiscal_year_end")
+                            if _period_cand:
+                                _period = _period_cand
+                            else:
+                                _period = _derive_fiscal_year_end_period(_title)
+                                
+                            if not _period:
+                                logger.warning("[EARNINGS][REAL] %s period不明のためcanonical同期をスキップ (title=%r)", _ticker, _title)
+                            else:
+                                _q = _args.get("quarter", "")
+                                _sales = _args.get("sales_value")
+                                _op = _args.get("op_value")
+                                _doc_id = _ev_dict.get("source_doc_id", "")
+                                
+                                logger.info("[EARNINGS][REAL] %s canonical同期開始 (period=%s, quarter=%s)", _ticker, _period, _q)
+                                from lib.pipeline.canonical_writer import write_financials_canonical
+                                
+                                _metrics = {}
+                                if _sales is not None: _metrics["sales"] = _sales / 1_000_000
+                                if _op is not None: _metrics["operating_profit"] = _op / 1_000_000
+                                
+                                _config = {
+                                    "SUPABASE_URL": os.getenv("SUPABASE_URL", ""),
+                                    "SUPABASE_KEY": os.getenv("SUPABASE_KEY", "")
+                                }
+                                write_financials_canonical(
+                                    ticker=_ticker,
+                                    period=_period,
+                                    quarter=_q,
+                                    metrics_dict=_metrics,
+                                    source="jquants_earnings_summary",
+                                    filing_id=_doc_id,
+                                    unit="millions_jpy",
+                                    config=_config
+                                )
+                                logger.info("[EARNINGS][REAL] %s canonical同期完了", _ticker)
+                        except Exception as e:
+                            logger.error("[EARNINGS][REAL] %s canonical同期中にエラー: %s", _ticker, e)
 
                     # ── Discord 送信 ────────────────────────────────────────────
                     _discord_sent = False
