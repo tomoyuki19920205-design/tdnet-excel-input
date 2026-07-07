@@ -378,22 +378,50 @@ def extract_segments_from_xbrl_zip(
     
     # doc_type / period / quarter をファイル名から推定
     basename = os.path.basename(zip_path)
-    estimated_quarter = quarter
+    meta_quarter = quarter
     estimated_period = period
     accounting_standard = "JP"  # デフォルト
     
     try:
         with zipfile.ZipFile(zip_path) as zf:
             global_context_map = {}
+            document_title = None
             for name in zf.namelist():
                 if name.endswith((".htm", ".html")):
                     try:
                         content = zf.read(name).decode("utf-8", errors="replace")
+                        
+                        if not document_title:
+                            m = re.search(r'<ix:nonNumeric[^>]*?name=[\"\'\s]*[^:]*:(?:DocumentTitle|DocumentName)[\"\'\s]*[^>]*>(.*?)</ix:nonNumeric>', content, re.I | re.S)
+                            if m:
+                                document_title = m.group(1).strip()
+                                
                         if "context" in content.lower():
                             s = BeautifulSoup(content, "html.parser")
                             global_context_map.update(_parse_context_periods(s))
                     except Exception as e:
                         logger.warning(f"Failed to parse context in {name}: {e}")
+            
+            # Quarter Guard Logic
+            title_quarter = None
+            if document_title:
+                title_quarter = _parse_quarter_from_title(document_title)
+                
+            if meta_quarter and meta_quarter != "UNKNOWN":
+                if title_quarter and title_quarter != "UNKNOWN":
+                    if meta_quarter != title_quarter:
+                        logger.warning(f"[XBRL] Quarter mismatch for {basename}: meta={meta_quarter}, title={title_quarter} ({document_title}). Skipping extraction.")
+                        return []
+                else:
+                    logger.warning(f"[XBRL] Could not verify quarter from title for {basename}: '{document_title}'. Skipping to be safe.")
+                    return []
+                estimated_quarter = meta_quarter
+            else:
+                if title_quarter and title_quarter != "UNKNOWN":
+                    estimated_quarter = title_quarter
+                else:
+                    estimated_quarter = "UNKNOWN"
+                    
             # セグメント情報ファイルを探す (acsg, qcsg 等)
             seg_files = _find_segment_files(zf)
             if not seg_files:
@@ -408,14 +436,7 @@ def extract_segments_from_xbrl_zip(
                 if "ifsm" in fn or "iffr" in fn:
                     accounting_standard = "IFRS"
                 
-                # quarter の優先順位: 1. 引数quarter, 2. titleからの判定
-                if not estimated_quarter and title:
-                    q_from_title = _parse_quarter_from_title(title)
-                    if q_from_title and q_from_title != "UNKNOWN":
-                        estimated_quarter = q_from_title
-
-                if not estimated_quarter:
-                    estimated_quarter = "UNKNOWN"
+                # estimated_quarter is already determined by Quarter Guard Logic
 
                 # period のみをファイル名から抽出するように変更
                 if not estimated_period:
