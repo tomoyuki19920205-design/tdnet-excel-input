@@ -810,12 +810,45 @@ def main(args: list[str] | None = None) -> int:
     for zpath in zip_files:
         basename = os.path.basename(zpath)
         
-        rows = extract_segments_from_xbrl_zip(zpath)
+        # disc_no をファイルパスから推測して jquants から period (FY End) を取得
+        disc_no = None
+        fy_end = None
+        from pathlib import Path
+        parts = Path(zpath).parts
+        for p in parts:
+            if p.isdigit() and len(p) >= 10:
+                disc_no = p
+                break
+        
+        if disc_no:
+            try:
+                jquants_conn = sqlite3.connect(os.path.join(_PROJECT_ROOT, "data", "jquants.db"))
+                c = jquants_conn.cursor()
+                c.execute('''
+                    SELECT current_fiscal_year_end_date 
+                    FROM jquants_financials_normalized 
+                    WHERE raw_json LIKE ?
+                    LIMIT 1
+                ''', (f'%"{disc_no}"%',))
+                row_fy = c.fetchone()
+                if row_fy:
+                    fy_end = row_fy[0]
+                jquants_conn.close()
+                logger.info(f"  [DRY-RUN] disc_no={disc_no}, fy_end={fy_end}")
+            except Exception as e:
+                logger.warning(f"Error fetching fy_end for disc_no {disc_no}: {e}")
+        else:
+            logger.warning(f"  [DRY-RUN] could not extract disc_no from {zpath}")
+
+        rows = extract_segments_from_xbrl_zip(zpath, period=fy_end)
         if not rows:
             continue
         
         stats["zips_with_segments"] += 1
         ticker = rows[0].normalized_ticker if rows else "?"
+        periods_found = set(r.period for r in rows)
+        if dry_run:
+            logger.info(f"  [DRY-RUN] Extracted periods for {ticker}: {periods_found}")
         period = max((r.period for r in rows), default="") if rows else ""  # prior rows が先頭でも current period を使う
 
         # JP 候補取得 — 日英統合なし方針により無効化（2026-05以降）
