@@ -373,6 +373,57 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
     return "";
   };
 
+const buildCompareLine = (event: EnrichedEvent): string | null => {
+  const rawVal = event.raw_payload;
+  const rp: Record<string, unknown> | null =
+    typeof rawVal === "string"
+      ? (() => {
+          try {
+            return JSON.parse(rawVal) as Record<string, unknown>;
+          } catch {
+            return null;
+          }
+        })()
+      : (rawVal as Record<string, unknown> | null) ?? null;
+
+  const ncj = rp && typeof rp === "object" && rp.notification_compare_json
+    ? (rp.notification_compare_json as Record<string, unknown>)
+    : null;
+
+  if (!ncj || !ncj.compare || typeof ncj.compare !== "object") {
+    return null;
+  }
+
+  const comp = ncj.compare as Record<string, unknown>;
+  const reason = comp.reason;
+  if (typeof reason === "string" && reason.startsWith("forecast_missing")) {
+    return null;
+  }
+
+  const sYoy = comp.sales_yoy;
+  const opYoy = comp.op_yoy;
+  if (sYoy === undefined && opYoy === undefined) {
+    return null;
+  }
+
+  const fmtYoy = (v: unknown): string => {
+    if (v === null || v === undefined) return "";
+    if (typeof v === "string" && v.includes("%")) return v;
+    const n = Number(v);
+    if (isNaN(n)) return String(v);
+    const sign = n > 0 ? "+" : "";
+    return `${sign}${Math.round(n * 100)}%`;
+  };
+
+  const label = comp.label ? `${comp.label}: ` : "";
+  const sStr = sYoy !== undefined && sYoy !== null ? `売上 YOY ${fmtYoy(sYoy)}` : "";
+  const opStr = opYoy !== undefined && opYoy !== null ? `営業利益 YOY ${fmtYoy(opYoy)}` : "";
+  const parts = [sStr, opStr].filter(Boolean);
+  
+  if (parts.length === 0) return null;
+  return `${label}${parts.join(" / ")}`;
+};
+
   // ============================================================
   // Discord対象タブ専用フォーマッタ
   // raw_payload.extracted から Discord通知相当の表示文字列を生成
@@ -537,6 +588,11 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
         }
       } else {
         if (event.event_subtype) lines.push(event.event_subtype);
+      }
+      
+      const compLine = buildCompareLine(event);
+      if (compLine) {
+        lines.push(compLine);
       }
     } else {
       // fallback
@@ -787,6 +843,14 @@ export default function AlertsPage({ userId, userEmail }: AlertsPageProps) {
                 ) {
                   mainText = mainText + "\n" + event.headline;
                 }
+
+                if (event.event_type === "earnings") {
+                  const compLine = buildCompareLine(event);
+                  if (compLine) {
+                    mainText += `\n${compLine}`;
+                  }
+                }
+
                 cardBody = mainText;
               }
               // DEBUG LOG
