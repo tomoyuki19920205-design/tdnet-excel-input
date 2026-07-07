@@ -30,6 +30,7 @@ _FORECAST_TAG_MAP = {
     "NetSales": "sales",
     "Revenue": "sales",
     "OperatingRevenue": "sales",
+    "OperatingRevenues": "sales",
     "OperatingRevenuesREIT": "sales",
     "OperatingRevenuesIFRS": "sales",
     "RevenueIFRS": "sales",
