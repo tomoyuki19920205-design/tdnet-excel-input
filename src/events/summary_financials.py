@@ -38,6 +38,7 @@ class PeriodFinancials:
     """ある期間の財務数値"""
     sales: int | None = None
     operating_profit: int | None = None
+    gross_profit: int | None = None
     source: str = ""  # "xbrl" / "pdf"
 
 
@@ -61,14 +62,15 @@ class SegmentFinancials:
 
 @dataclass
 class EarningsSummaryData:
-    """決算短信数値の全体構造"""
-    # 全社（累計ベース）
+    """決算短信の全値の構成"""
+    # 通期（累計ベース）
     sales_current: int | None = None
     sales_prior: int | None = None
     op_current: int | None = None
     op_prior: int | None = None
+    gross_profit_current: int | None = None
 
-    # 単四半期ベース（QoQ用）
+    # 単体ベース（QoQ用）
     sales_q_current: int | None = None   # 当四半期単体
     sales_q_prior: int | None = None     # 前四半期単体
     op_q_current: int | None = None
@@ -259,6 +261,8 @@ _XBRL_TAG_MAP = {
     "OperatingIncome": "operating_profit",
     "OperatingProfit": "operating_profit",
     "OrdinaryIncome": "operating_profit",
+    "GrossProfit": "gross_profit",
+    "GrossProfitLoss": "gross_profit",
 }
 
 _IXBRL_EXTENSIONS = ("-ixbrl.htm", ".ixbrl.htm", "-ixbrl.html", ".ixbrl.html", ".ixbrl")
@@ -420,10 +424,10 @@ def _parse_xbrl_multi_period(raw: bytes) -> dict[str, PeriodFinancials]:
 
     # 各期間の値を格納
     values: dict[str, dict[str, int | None]] = {
-        "current_ytd": {"sales": None, "operating_profit": None},
-        "prior_ytd": {"sales": None, "operating_profit": None},
-        "current_q": {"sales": None, "operating_profit": None},
-        "prior_q": {"sales": None, "operating_profit": None},
+        "current_ytd": {"sales": None, "operating_profit": None, "gross_profit": None},
+        "prior_ytd": {"sales": None, "operating_profit": None, "gross_profit": None},
+        "current_q": {"sales": None, "operating_profit": None, "gross_profit": None},
+        "prior_q": {"sales": None, "operating_profit": None, "gross_profit": None},
     }
     priority: dict[str, dict[str, bool]] = {k: {} for k in values}
 
@@ -437,7 +441,7 @@ def _parse_xbrl_multi_period(raw: bytes) -> dict[str, PeriodFinancials]:
             continue
 
         field_name = _XBRL_TAG_MAP[tag_local]
-        if field_name not in ("sales", "operating_profit"):
+        if field_name not in ("sales", "operating_profit", "gross_profit"):
             continue
 
         ctx = elem.get("contextRef", "")
@@ -457,12 +461,12 @@ def _parse_xbrl_multi_period(raw: bytes) -> dict[str, PeriodFinancials]:
             priority[period_type][field_name] = is_consol
 
     # パス1で当期売上が取れていれば結果を構築
-    if values["current_ytd"]["sales"] is not None:
-        return {k: PeriodFinancials(sales=v["sales"], operating_profit=v["operating_profit"], source="xbrl")
+    if values["current_ytd"]["sales"] is not None or values["current_ytd"]["gross_profit"] is not None:
+        return {k: PeriodFinancials(sales=v["sales"], operating_profit=v["operating_profit"], gross_profit=v["gross_profit"], source="xbrl")
                 for k, v in values.items()}
 
     # --- パス2: iXBRLモード ---
-    values = {k: {"sales": None, "operating_profit": None} for k in values}
+    values = {k: {"sales": None, "operating_profit": None, "gross_profit": None} for k in values}
     priority = {k: {} for k in values}
 
     for elem in root.iter():
@@ -486,7 +490,7 @@ def _parse_xbrl_multi_period(raw: bytes) -> dict[str, PeriodFinancials]:
             continue
 
         field_name = _XBRL_TAG_MAP[concept_local]
-        if field_name not in ("sales", "operating_profit"):
+        if field_name not in ("sales", "operating_profit", "gross_profit"):
             continue
 
         # Forecast/Estimate は除外
@@ -512,7 +516,7 @@ def _parse_xbrl_multi_period(raw: bytes) -> dict[str, PeriodFinancials]:
             values[period_type][field_name] = val
             priority[period_type][field_name] = is_consol
 
-    return {k: PeriodFinancials(sales=v["sales"], operating_profit=v["operating_profit"], source="xbrl")
+    return {k: PeriodFinancials(sales=v["sales"], operating_profit=v["operating_profit"], gross_profit=v["gross_profit"], source="xbrl")
             for k, v in values.items()}
 
 
@@ -560,19 +564,36 @@ def _extract_multi_period_from_xbrl(xbrl_path: str) -> dict[str, PeriodFinancial
         summary_candidates = [c for c in candidates if _is_summary_file(c)]
         other = [c for c in candidates if not _is_summary_file(c)]
 
+        merged_result = {}
         for entry in summary_candidates + other:
             try:
                 entry_bytes = zf.read(entry)
                 result = _parse_xbrl_multi_period(entry_bytes)
-                if result.get("current_ytd") and result["current_ytd"].sales is not None:
-                    logger.info(f"[FINANCIALS] multi-period extract OK: {entry}")
+                if not merged_result:
+                    merged_result = result
+                else:
+                    for k, v in result.items():
+                        if k not in merged_result:
+                            merged_result[k] = v
+                        else:
+                            if merged_result[k].sales is None: merged_result[k].sales = v.sales
+                            if merged_result[k].operating_profit is None: merged_result[k].operating_profit = v.operating_profit
+                            if merged_result[k].gross_profit is None: merged_result[k].gross_profit = v.gross_profit
+
+                if merged_result.get("current_ytd") and merged_result["current_ytd"].sales is not None and merged_result["current_ytd"].gross_profit is not None:
+                    logger.info(f"[FINANCIALS] multi-period extract OK (fully populated): {entry}")
                     zf.close()
-                    return result
+                    return merged_result
             except Exception as e:
                 logger.debug(f"[FINANCIALS] parse failed: {entry}: {e}")
 
+        if merged_result and merged_result.get("current_ytd") and (merged_result["current_ytd"].sales is not None or merged_result["current_ytd"].gross_profit is not None):
+            logger.info(f"[FINANCIALS] multi-period extract OK (partial or complete)")
+            zf.close()
+            return merged_result
+
         zf.close()
-        return {}
+        return merged_result if merged_result else {}
 
     # 単体ファイル
     return _parse_xbrl_multi_period(raw)
@@ -651,16 +672,17 @@ def extract_earnings_data(
         periods = _extract_multi_period_from_xbrl(xbrl_path)
 
     if periods.get("current_ytd") and periods["current_ytd"].sales is not None:
-        cur = periods["current_ytd"]
+        cur_ytd = periods["current_ytd"]
         pri = periods.get("prior_ytd", PeriodFinancials())
         cur_q = periods.get("current_q", PeriodFinancials())
         pri_q = periods.get("prior_q", PeriodFinancials())
 
-        result.sales_current = cur.sales
+        result.sales_current = cur_ytd.sales
         result.sales_prior = pri.sales
-        result.op_current = cur.operating_profit
+        result.op_current = cur_ytd.operating_profit
         result.op_prior = pri.operating_profit
-        result.source = "xbrl"
+        result.gross_profit_current = cur_ytd.gross_profit
+        result.source = cur_ytd.source
 
         # 単四半期値
         if cur_q.sales is not None:
@@ -674,8 +696,8 @@ def extract_earnings_data(
 
         logger.info(
             f"[FINANCIALS] XBRL extracted: "
-            f"sales_cur={cur.sales} sales_pri={pri.sales} "
-            f"op_cur={cur.operating_profit} op_pri={pri.operating_profit} "
+            f"sales_cur={cur_ytd.sales} sales_pri={pri.sales} "
+            f"op_cur={cur_ytd.operating_profit} op_pri={pri.operating_profit} "
             f"q_sales_cur={cur_q.sales} q_sales_pri={pri_q.sales}"
         )
 

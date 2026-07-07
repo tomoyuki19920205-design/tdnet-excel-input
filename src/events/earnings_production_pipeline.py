@@ -476,6 +476,7 @@ def run_earnings_production(
                                 _q = _args.get("quarter", "")
                                 _sales = _args.get("sales_value")
                                 _op = _args.get("op_value")
+                                _gross = _args.get("gross_profit_value")
                                 _doc_id = _ev_dict.get("source_doc_id", "")
                                 
                                 logger.info("[EARNINGS][REAL] %s canonical同期開始 (period=%s, quarter=%s)", _ticker, _period, _q)
@@ -484,10 +485,12 @@ def run_earnings_production(
                                 _metrics = {}
                                 if _sales is not None: _metrics["sales"] = _sales / 1_000_000
                                 if _op is not None: _metrics["operating_profit"] = _op / 1_000_000
+                                if _gross is not None: _metrics["gross_profit"] = _gross / 1_000_000
                                 
+                                _url = os.getenv("SUPABASE_URL", "").rstrip("/")
                                 _config = {
-                                    "SUPABASE_URL": os.getenv("SUPABASE_URL", ""),
-                                    "SUPABASE_KEY": os.getenv("SUPABASE_KEY", "")
+                                    "rest_url": f"{_url}/rest/v1" if _url else "",
+                                    "key": os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY", "")
                                 }
                                 write_financials_canonical(
                                     ticker=_ticker,
@@ -929,6 +932,7 @@ def run_earnings_production(
                     "sales_yoy": earnings.sales_yoy,
                     "op_value": earnings.op_current,
                     "op_yoy": earnings.op_yoy,
+                    "gross_profit_value": getattr(earnings, "gross_profit_current", None),
                     "segment_summary_json": seg_json,
                     "overall_reason_summary": "\n".join(company_reasons),
                     "segment_reason_summary": json.dumps(segment_reasons, ensure_ascii=False) if segment_reasons else "",
@@ -965,6 +969,7 @@ def run_earnings_production(
                     action = "skipped_period_mismatch"
                     earnings.sales_current = None
                     earnings.op_current = None
+                    earnings.gross_profit_current = None
                     earnings.sales_yoy = None
                     earnings.op_yoy = None
                     if hasattr(earnings, "has_yoy"):
@@ -972,6 +977,7 @@ def run_earnings_production(
                     # Update save_data with None for financials
                     save_data["sales_value"] = None
                     save_data["op_value"] = None
+                    save_data["gross_profit_value"] = None
                 else:
                     action = save_earnings_summary(conn, save_data)
                     
@@ -1105,6 +1111,7 @@ def _build_earnings_event_record(
         "op_label": getattr(earnings, "op_label", ""),
         "op_source": getattr(earnings, "op_source", ""),
         "op_yoy": earnings.op_yoy,
+        "gross_profit_value": getattr(earnings, "gross_profit_current", None),
         "has_yoy": earnings.has_yoy,
         "segments": [
             {"name": s.name, "sales": s.sales_current, "profit": s.profit_current}
