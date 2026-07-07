@@ -381,7 +381,7 @@ def extract_segments_from_xbrl_zip(
     period: Optional[str] = None,
     quarter: Optional[str] = None,
     title: Optional[str] = None,
-
+    include_context_evidence: bool = False,
 ) -> list[SegmentRawRow]:
     """XBRL ZIP からセグメント情報を抽出。
 
@@ -477,6 +477,8 @@ def extract_segments_from_xbrl_zip(
                     continue
 
                 # --- Context Date Guard (Prioritizing segment fact contextRefs) ---
+                date_guard_status = "UNKNOWN"
+                expected_end = None
                 if period and estimated_quarter and global_context_map:
                     expected_end = _calculate_expected_context_end(period, estimated_quarter)
                     if expected_end:
@@ -505,6 +507,7 @@ def extract_segments_from_xbrl_zip(
                             min_diff = min(abs((ae - expected_end).days) for ae in actual_ends)
                             if min_diff > 40:
                                 best_actual = next(ae for ae in actual_ends if abs((ae - expected_end).days) == min_diff)
+                                date_guard_status = "SKIP"
                                 logger.warning(
                                     f"[XBRL] Context Date Guard failed for {basename}. "
                                     f"expected_end={expected_end} (fy={period}, q={estimated_quarter}), "
@@ -513,6 +516,8 @@ def extract_segments_from_xbrl_zip(
                                     f"Title: '{document_title}'. Skipping."
                                 )
                                 return []
+                            else:
+                                date_guard_status = "PASS"
                 # ------------------------------------------------------------------
                 
                 # SegmentRawRow に変換
@@ -565,6 +570,28 @@ def extract_segments_from_xbrl_zip(
                     row_raw_json = None
                     if profit_tag:
                         row_raw_json = {"profit_tag": profit_tag}
+
+                    if include_context_evidence:
+                        row_raw_json = row_raw_json or {}
+                        ctx_ref = data.get("context_ref", "")
+                        cinfo = global_context_map.get(ctx_ref, {})
+                        cstart = cinfo.get("start", "?")
+                        cend = cinfo.get("end", "?")
+                        d_days = "?"
+                        if cend != "?" and expected_end:
+                            try:
+                                cdate = datetime.datetime.strptime(cend[:10], "%Y-%m-%d").date()
+                                d_days = abs((cdate - expected_end).days)
+                            except: pass
+                        row_raw_json["_context_evidence"] = {
+                            "context_ref": ctx_ref,
+                            "context_start": cstart,
+                            "context_end": cend,
+                            "expected_context_end": str(expected_end) if expected_end else "?",
+                            "diff_days": d_days,
+                            "date_guard_status": date_guard_status,
+                            "evidence_mode": True
+                        }
 
                     row = SegmentRawRow(
                         source="xbrl",
