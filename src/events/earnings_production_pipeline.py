@@ -467,12 +467,14 @@ def run_earnings_production(
                         _cp_sales = _cp_args.get("sales_value")
                         _cp_op = _cp_args.get("op_value")
                         _cp_gross = _cp_args.get("gross_profit_value")
+                        _cp_sga = _cp_args.get("selling_general_and_administrative_expenses_value")
                         _cp_doc_id = _merged_plan["tdnet_event_payload"].get("source_doc_id", "")
                         
                         _cp_metrics = {}
                         if _cp_sales is not None: _cp_metrics["sales"] = _cp_sales / 1_000_000
                         if _cp_op is not None: _cp_metrics["operating_profit"] = _cp_op / 1_000_000
                         if _cp_gross is not None: _cp_metrics["gross_profit"] = _cp_gross / 1_000_000
+                        if _cp_sga is not None: _cp_metrics["selling_general_and_administrative_expenses"] = _cp_sga / 1_000_000
                         
                         _cp_guidance = _cp_payload_ext.get("guidance", {})
                         
@@ -549,6 +551,7 @@ def run_earnings_production(
                                 _sales = _args.get("sales_value")
                                 _op = _args.get("op_value")
                                 _gross = _args.get("gross_profit_value")
+                                _sga = _args.get("selling_general_and_administrative_expenses_value")
                                 _doc_id = _ev_dict.get("source_doc_id", "")
                                 
                                 logger.info("[EARNINGS][REAL] %s canonical同期開始 (period=%s, quarter=%s)", _ticker, _period, _q)
@@ -558,6 +561,7 @@ def run_earnings_production(
                                 if _sales is not None: _metrics["sales"] = _sales / 1_000_000
                                 if _op is not None: _metrics["operating_profit"] = _op / 1_000_000
                                 if _gross is not None: _metrics["gross_profit"] = _gross / 1_000_000
+                                if _sga is not None: _metrics["selling_general_and_administrative_expenses"] = _sga / 1_000_000
                                 
                                 _url = os.getenv("SUPABASE_URL", "").rstrip("/")
                                 _config = {
@@ -1043,6 +1047,7 @@ def run_earnings_production(
                     "op_value": earnings.op_current,
                     "op_yoy": earnings.op_yoy,
                     "gross_profit_value": getattr(earnings, "gross_profit_current", None),
+                    "selling_general_and_administrative_expenses_value": getattr(earnings, "selling_general_and_administrative_expenses_current", None),
                     "segment_summary_json": seg_json,
                     "overall_reason_summary": "\n".join(company_reasons),
                     "segment_reason_summary": json.dumps(segment_reasons, ensure_ascii=False) if segment_reasons else "",
@@ -1088,6 +1093,7 @@ def run_earnings_production(
                     save_data["sales_value"] = None
                     save_data["op_value"] = None
                     save_data["gross_profit_value"] = None
+                    save_data["selling_general_and_administrative_expenses_value"] = None
                 else:
                     action = save_earnings_summary(conn, save_data)
                     
@@ -1223,6 +1229,7 @@ def _build_earnings_event_record(
         "op_source": getattr(earnings, "op_source", ""),
         "op_yoy": earnings.op_yoy,
         "gross_profit_value": getattr(earnings, "gross_profit_current", None),
+        "selling_general_and_administrative_expenses_value": getattr(earnings, "selling_general_and_administrative_expenses_current", None),
         "has_yoy": earnings.has_yoy,
         "segments": [
             {"name": s.name, "sales": s.sales_current, "profit": s.profit_current}

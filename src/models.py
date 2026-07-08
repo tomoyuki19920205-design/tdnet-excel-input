@@ -45,6 +45,7 @@ class ExtractedFinancials:
     """抽出された決算数値"""
     sales: int | None = None             # 累計売上高（Excel単位に変換済み）
     gross_profit: int | None = None      # 累計粗利益（抽出できない場合None）
+    selling_general_and_administrative_expenses: int | None = None # 累計販管費
     operating_profit: int | None = None  # 累計営業利益
     cost_of_sales: int | None = None     # 売上原価（計算補完用）
     fiscal_year: str = ""                # "R8/3" 形式

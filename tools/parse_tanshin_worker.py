@@ -534,7 +534,6 @@ def _run_production_parse(
         earnings, guidance, fiscal_year, quarter, is_4q
     )
 
-    # ── 11. extracted_payload 組み立て (raw_payload.extracted 相当) ─────────
     extracted_payload = {
         "ticker": ticker,
         "source_doc_id": source_doc_id,
@@ -544,6 +543,8 @@ def _run_production_parse(
         "sales_current": earnings.sales_current,
         "sales_label": getattr(earnings, "sales_label", ""),
         "sales_yoy": earnings.sales_yoy,
+        "gross_profit_current": getattr(earnings, "gross_profit_current", None),
+        "selling_general_and_administrative_expenses_current": getattr(earnings, "selling_general_and_administrative_expenses_current", None),
         "op_current": earnings.op_current,
         "op_label": getattr(earnings, "op_label", ""),
         "op_source": getattr(earnings, "op_source", ""),

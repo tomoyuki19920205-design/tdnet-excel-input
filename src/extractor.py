@@ -76,6 +76,7 @@ _XBRL_TAG_MAP = {
     "OperatingRevenuesREIT": "sales",        # REIT/投資法人の営業収益
     "OperatingRevenueINV": "sales",          # 投資法人の営業収益
     "GrossProfit": "gross_profit",
+    "SellingGeneralAndAdministrativeExpenses": "selling_general_and_administrative_expenses",
     "CostOfSales": "cost_of_sales",          # 売上原価（計算補完用）
     "OperatingIncome": "operating_profit",
     "OperatingProfit": "operating_profit",
@@ -115,6 +116,9 @@ def _find_xbrl_in_zip(zf: zipfile.ZipFile) -> list[str]:
 
 def _is_current_duration(context_ref: str) -> bool:
     """contextRefが当期累計を指すかを判定（部分一致）"""
+    lower_ref = context_ref.lower()
+    if "prior" in lower_ref or "previous" in lower_ref or "前" in lower_ref:
+        return False
     return any(kw in context_ref for kw in _CURRENT_DURATION_KEYWORDS)
 
 
@@ -188,6 +192,7 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
     values: dict[str, int | None] = {
         "sales": None,
         "gross_profit": None,
+        "selling_general_and_administrative_expenses": None,
         "operating_profit": None,
         "cost_of_sales": None,
     }
@@ -218,6 +223,7 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
         result = ExtractedFinancials(
             sales=values["sales"],
             gross_profit=values["gross_profit"],
+            selling_general_and_administrative_expenses=values["selling_general_and_administrative_expenses"],
             operating_profit=values["operating_profit"],
             source_unit="円",
             confidence="high",
@@ -227,7 +233,7 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
         return result
 
     # --- パス2: iXBRLモード（ix:nonFraction の name 属性）---
-    values = {"sales": None, "gross_profit": None, "operating_profit": None, "cost_of_sales": None}
+    values = {"sales": None, "gross_profit": None, "selling_general_and_administrative_expenses": None, "operating_profit": None, "cost_of_sales": None}
     value_priority = {}
     detected_unit = "円"
     unknown_tags: set[str] = set()
@@ -399,6 +405,8 @@ def _extract_from_xbrl(xbrl_path: str) -> ExtractedFinancials | None:
             missing_fields = []
             if summary_result.gross_profit is None:
                 missing_fields.append("gross_profit")
+            if getattr(summary_result, "selling_general_and_administrative_expenses", None) is None:
+                missing_fields.append("selling_general_and_administrative_expenses")
             if not hasattr(summary_result, "cost_of_sales") or getattr(summary_result, "cost_of_sales", None) is None:
                 missing_fields.append("cost_of_sales")
             if summary_result.sales is None:
@@ -423,6 +431,11 @@ def _extract_from_xbrl(xbrl_path: str) -> ExtractedFinancials | None:
                             summary_result.gross_profit = pl_result.gross_profit
                             summary_result.field_sources["gross_profit"] = "attachment_xbrl"
                             logger.info(f"[XBRL] Attachment補完: gross_profit={pl_result.gross_profit}")
+
+                        if "selling_general_and_administrative_expenses" in missing_fields and pl_result.selling_general_and_administrative_expenses is not None:
+                            summary_result.selling_general_and_administrative_expenses = pl_result.selling_general_and_administrative_expenses
+                            summary_result.field_sources["selling_general_and_administrative_expenses"] = "attachment_xbrl"
+                            logger.info(f"[XBRL] Attachment補完: sga={pl_result.selling_general_and_administrative_expenses}")
 
                         if "cost_of_sales" in missing_fields:
                             pl_cos = getattr(pl_result, "cost_of_sales", None)

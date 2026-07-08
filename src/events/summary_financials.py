@@ -40,6 +40,7 @@ class PeriodFinancials:
     sales: int | None = None
     operating_profit: int | None = None
     gross_profit: int | None = None
+    selling_general_and_administrative_expenses: int | None = None
     source: str = ""  # "xbrl" / "pdf"
     sales_priority: tuple | None = None
     evidences: list = field(default_factory=list)
@@ -72,6 +73,7 @@ class EarningsSummaryData:
     op_current: int | None = None
     op_prior: int | None = None
     gross_profit_current: int | None = None
+    selling_general_and_administrative_expenses_current: int | None = None
 
     # 単体ベース（QoQ用）
     sales_q_current: int | None = None   # 当四半期単体
@@ -267,6 +269,7 @@ _XBRL_TAG_MAP = {
     "OrdinaryIncome": "operating_profit",
     "GrossProfit": "gross_profit",
     "GrossProfitLoss": "gross_profit",
+    "SellingGeneralAndAdministrativeExpenses": "selling_general_and_administrative_expenses",
 }
 
 _FALLBACK_TAG_MAP = {
@@ -432,10 +435,10 @@ def _parse_xbrl_multi_period(raw: bytes, include_evidence: bool = False) -> dict
 
     # 各期間の値を格納
     values: dict[str, dict[str, int | None]] = {
-        "current_ytd": {"sales": None, "operating_profit": None, "gross_profit": None},
-        "prior_ytd": {"sales": None, "operating_profit": None, "gross_profit": None},
-        "current_q": {"sales": None, "operating_profit": None, "gross_profit": None},
-        "prior_q": {"sales": None, "operating_profit": None, "gross_profit": None},
+        "current_ytd": {"sales": None, "operating_profit": None, "gross_profit": None, "selling_general_and_administrative_expenses": None},
+        "prior_ytd": {"sales": None, "operating_profit": None, "gross_profit": None, "selling_general_and_administrative_expenses": None},
+        "current_q": {"sales": None, "operating_profit": None, "gross_profit": None, "selling_general_and_administrative_expenses": None},
+        "prior_q": {"sales": None, "operating_profit": None, "gross_profit": None, "selling_general_and_administrative_expenses": None},
     }
     priority: dict[str, dict[str, tuple[bool, int]]] = {k: {} for k in values}
     evidences = {k: [] for k in values}
@@ -451,7 +454,7 @@ def _parse_xbrl_multi_period(raw: bytes, include_evidence: bool = False) -> dict
         field_name = _XBRL_TAG_MAP.get(tag_local) or _FALLBACK_TAG_MAP.get(tag_local)
         if not field_name:
             continue
-        if field_name not in ("sales", "operating_profit", "gross_profit"):
+        if field_name not in ("sales", "operating_profit", "gross_profit", "selling_general_and_administrative_expenses"):
             continue
 
         ctx = elem.get("contextRef", "")
@@ -482,11 +485,11 @@ def _parse_xbrl_multi_period(raw: bytes, include_evidence: bool = False) -> dict
 
     # パス1で当期売上が取れていれば結果を構築
     if values["current_ytd"]["sales"] is not None or values["current_ytd"]["gross_profit"] is not None:
-        return {k: PeriodFinancials(sales=v["sales"], operating_profit=v["operating_profit"], gross_profit=v["gross_profit"], source="xbrl", sales_priority=priority[k].get("sales", (-1, False)), evidences=evidences[k])
+        return {k: PeriodFinancials(sales=v["sales"], operating_profit=v["operating_profit"], gross_profit=v["gross_profit"], selling_general_and_administrative_expenses=v["selling_general_and_administrative_expenses"], source="xbrl", sales_priority=priority[k].get("sales", (-1, False)), evidences=evidences[k])
                 for k, v in values.items()}
 
     # --- パス2: iXBRLモード ---
-    values = {k: {"sales": None, "operating_profit": None, "gross_profit": None} for k in values}
+    values = {k: {"sales": None, "operating_profit": None, "gross_profit": None, "selling_general_and_administrative_expenses": None} for k in values}
     priority = {k: {} for k in values}
     evidences = {k: [] for k in values}
 
@@ -512,7 +515,7 @@ def _parse_xbrl_multi_period(raw: bytes, include_evidence: bool = False) -> dict
         if not field_name:
             continue
 
-        if field_name not in ("sales", "operating_profit", "gross_profit"):
+        if field_name not in ("sales", "operating_profit", "gross_profit", "selling_general_and_administrative_expenses"):
             continue
 
         # Forecast/Estimate は除外
@@ -550,7 +553,7 @@ def _parse_xbrl_multi_period(raw: bytes, include_evidence: bool = False) -> dict
                 ))
 
 
-    return {k: PeriodFinancials(sales=v["sales"], operating_profit=v["operating_profit"], gross_profit=v["gross_profit"], source="xbrl", sales_priority=priority[k].get("sales", (-1, False)), evidences=evidences[k])
+    return {k: PeriodFinancials(sales=v["sales"], operating_profit=v["operating_profit"], gross_profit=v["gross_profit"], selling_general_and_administrative_expenses=v["selling_general_and_administrative_expenses"], source="xbrl", sales_priority=priority[k].get("sales", (-1, False)), evidences=evidences[k])
             for k, v in values.items()}
 
 
@@ -617,6 +620,7 @@ def _extract_multi_period_from_xbrl(xbrl_path: str, include_evidence: bool = Fal
                                 merged_result[k].sales_priority = new_sp
                             if merged_result[k].operating_profit is None: merged_result[k].operating_profit = v.operating_profit
                             if merged_result[k].gross_profit is None: merged_result[k].gross_profit = v.gross_profit
+                            if getattr(merged_result[k], "selling_general_and_administrative_expenses", None) is None: merged_result[k].selling_general_and_administrative_expenses = getattr(v, "selling_general_and_administrative_expenses", None)
                             if include_evidence:
                                 merged_result[k].evidences.extend(v.evidences)
 
@@ -723,6 +727,7 @@ def extract_earnings_data(
         result.op_current = cur_ytd.operating_profit
         result.op_prior = pri.operating_profit
         result.gross_profit_current = cur_ytd.gross_profit
+        result.selling_general_and_administrative_expenses_current = getattr(cur_ytd, "selling_general_and_administrative_expenses", None)
         result.source = cur_ytd.source
         if include_evidence:
             result.evidences.extend(cur_ytd.evidences)

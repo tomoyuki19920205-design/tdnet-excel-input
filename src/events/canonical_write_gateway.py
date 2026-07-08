@@ -15,6 +15,7 @@ ALLOWED_METRICS = {
     'ordinary_profit',
     'net_income',
     'gross_profit',
+    'selling_general_and_administrative_expenses',
     'eps'
 }
 
