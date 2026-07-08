@@ -275,7 +275,7 @@ def _build_primary_metric(earnings, guidance) -> tuple[str, float | None, float 
 
 # ─── notification_compare_json 生成 ──────────────────────────────────────────
 
-def _build_notification_compare_json(earnings, guidance, fiscal_year: str, quarter: str) -> dict:
+def _build_notification_compare_json(earnings, guidance, fiscal_year: str, quarter: str, is_4q: bool = False) -> dict:
     """
     Viewer の 3 行目表示に使われる notification_compare_json を生成する。
     本番 Supabase の修復済み57件と同じ compare/current 形式で出力する。
@@ -293,7 +293,7 @@ def _build_notification_compare_json(earnings, guidance, fiscal_year: str, quart
         "op_yoy": round(earnings.op_yoy, 6) if earnings.op_yoy is not None else None,
     }
 
-    if guidance and guidance.has_guidance:
+    if (is_4q or quarter in ("FY", "4Q")) and guidance and guidance.has_guidance:
         compare = {
             "label": "来期FY予",
             "sales_yoy": round(guidance.sales_yoy, 6) if guidance.sales_yoy is not None else None,
@@ -465,23 +465,22 @@ def _run_production_parse(
     if is_4q and quarter not in ("FY", "4Q", "1Q", "2Q", "3Q"):
         quarter = "FY"
 
-    # ── 6. ガイダンス抽出 (FY/4Q のみ) ──────────────────────────────────────
+    # ── 6. ガイダンス抽出 ──────────────────────────────────────────────────────
     guidance = None
-    if is_4q or quarter in ("FY", "4Q"):
-        try:
-            from src.events.earnings_guidance_extractor import (
-                extract_guidance_from_zip,
-                format_guidance_section,
-            )
-            t0 = time.perf_counter()
-            guidance = extract_guidance_from_zip(
-                xbrl_path=zip_path_str,
-                actual_sales=earnings.sales_current,
-                actual_op=earnings.op_current,
-            )
-            t_sections["extract_guidance_ms"] = round((time.perf_counter() - t0) * 1000, 1)
-        except Exception:
-            t_sections["extract_guidance_ms"] = -1
+    try:
+        from src.events.earnings_guidance_extractor import (
+            extract_guidance_from_zip,
+            format_guidance_section,
+        )
+        t0 = time.perf_counter()
+        guidance = extract_guidance_from_zip(
+            xbrl_path=zip_path_str,
+            actual_sales=earnings.sales_current,
+            actual_op=earnings.op_current,
+        )
+        t_sections["extract_guidance_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+    except Exception:
+        t_sections["extract_guidance_ms"] = -1
 
     # ── 7. 通知メッセージ生成 ─────────────────────────────────────────────────
     # AI API 呼び出しはスキップ。理由テキストは生テキストを最大3文に分割して利用。
@@ -509,7 +508,7 @@ def _run_production_parse(
             title=doc_title,
         )
 
-        if guidance:
+        if (is_4q or quarter in ("FY", "4Q")) and guidance:
             from src.events.earnings_guidance_extractor import format_guidance_section
             gs = format_guidance_section(guidance)
             if gs:
@@ -532,7 +531,7 @@ def _run_production_parse(
 
     # ── 10. notification_compare_json ────────────────────────────────────────
     notification_compare_json = _build_notification_compare_json(
-        earnings, guidance, fiscal_year, quarter
+        earnings, guidance, fiscal_year, quarter, is_4q
     )
 
     # ── 11. extracted_payload 組み立て (raw_payload.extracted 相当) ─────────
@@ -557,6 +556,19 @@ def _run_production_parse(
             for s in (earnings.segments or [])
         ],
     }
+
+    if guidance and guidance.has_guidance:
+        extracted_payload["guidance"] = {
+            "sales_forecast": guidance.sales_forecast,
+            "sales_forecast_low": guidance.sales_forecast_low,
+            "sales_forecast_high": guidance.sales_forecast_high,
+            "op_forecast": guidance.op_forecast,
+            "op_forecast_low": guidance.op_forecast_low,
+            "op_forecast_high": guidance.op_forecast_high,
+            "eps_forecast": getattr(guidance, "eps_forecast", None),
+            "sales_yoy": getattr(guidance, "sales_yoy", None),
+            "op_yoy": getattr(guidance, "op_yoy", None),
+        }
 
     elapsed_ms = round((time.perf_counter() - t_start) * 1000, 1)
 
