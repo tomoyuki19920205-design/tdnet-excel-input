@@ -144,6 +144,40 @@ def build_normalized_canonical_write_plan(
             
     return plans
 
+def should_allow_real_canonical_db_apply(ticker: str) -> dict:
+    import os
+    
+    apply_flag = os.getenv("EARNINGS_CANONICAL_WRITE_REPLACE_APPLY") == "1"
+    canary_flag = os.getenv("EARNINGS_CANONICAL_WRITE_APPLY_CANARY") == "1"
+    
+    allowed_tickers_env = os.getenv("EARNINGS_CANONICAL_WRITE_APPLY_TICKERS", "")
+    allowed_tickers = [t.strip() for t in allowed_tickers_env.split(",") if t.strip()]
+    ticker_allowed = ticker in allowed_tickers
+    
+    allow_db_token = os.getenv("EARNINGS_CANONICAL_WRITE_APPLY_ALLOW_DB", "")
+    allow_db_ok = allow_db_token == "I_UNDERSTAND_WRITE_CANONICAL_FINANCIALS"
+    
+    reasons = []
+    if not apply_flag:
+        reasons.append("EARNINGS_CANONICAL_WRITE_REPLACE_APPLY is not 1")
+    if not canary_flag:
+        reasons.append("EARNINGS_CANONICAL_WRITE_APPLY_CANARY is not 1")
+    if not ticker_allowed:
+        reasons.append(f"Ticker {ticker} is not in EARNINGS_CANONICAL_WRITE_APPLY_TICKERS")
+    if not allow_db_ok:
+        reasons.append("EARNINGS_CANONICAL_WRITE_APPLY_ALLOW_DB is not I_UNDERSTAND_WRITE_CANONICAL_FINANCIALS")
+        
+    allowed = apply_flag and canary_flag and ticker_allowed and allow_db_ok
+    
+    return {
+        "allowed": allowed,
+        "reasons": reasons,
+        "apply_flag_on": apply_flag,
+        "canary_flag_on": canary_flag,
+        "ticker_allowed": ticker_allowed,
+        "allow_db_token_ok": allow_db_ok
+    }
+
 def apply_normalized_canonical_write_plans(
     plans: list[CanonicalWritePlan],
     writer_func,

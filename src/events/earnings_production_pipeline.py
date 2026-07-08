@@ -575,7 +575,7 @@ def run_earnings_production(
                                 
                                 if is_apply or is_dryrun:
                                     logger.info("[EARNINGS][REAL] %s canonical同期(REPLACE %s) 開始", _ticker, "APPLY" if is_apply else "DRY-RUN")
-                                    from src.events.canonical_write_gateway import build_normalized_canonical_write_plan, validate_canonical_write_plan, apply_normalized_canonical_write_plans
+                                    from src.events.canonical_write_gateway import build_normalized_canonical_write_plan, validate_canonical_write_plan, apply_normalized_canonical_write_plans, should_allow_real_canonical_db_apply
                                     _guidance = _payload_ext.get("guidance", {})
                                     _plans = build_normalized_canonical_write_plan(
                                         ticker=_ticker,
