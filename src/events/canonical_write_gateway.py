@@ -123,6 +123,10 @@ def build_normalized_canonical_write_plan(
         if m_val is None:
             continue
             
+        # Exclude SGA/販管費 from canonical_financials writes
+        if m_name == "selling_general_and_administrative_expenses":
+            continue
+            
         plan = CanonicalWritePlan(
             ticker=ticker,
             period=normalized_period or "unknown",
