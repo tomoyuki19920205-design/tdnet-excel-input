@@ -479,17 +479,30 @@ def extract_segments_from_xbrl_zip(
                 # --- Context Date Guard (Prioritizing segment fact contextRefs) ---
                 date_guard_status = "UNKNOWN"
                 expected_end = None
+                
+                def _get_prior_expected_end(ed: datetime.date) -> datetime.date:
+                    try:
+                        if ed.month == 2 and ed.day == 29:
+                            return datetime.date(ed.year - 1, 2, 28)
+                        else:
+                            return datetime.date(ed.year - 1, ed.month, ed.day)
+                    except ValueError:
+                        return ed
+                        
                 if period and estimated_quarter and global_context_map:
                     expected_end = _calculate_expected_context_end(period, estimated_quarter)
                     if expected_end:
-                        actual_ends = []
+                        actual_ends = [] # tuple of (actual_date, period_type, cid)
+                        
                         # 1. Try to get end dates from context_refs actually used in segment facts
-                        used_ctx_ids = [r.get("context_ref") for r in rows.values() if "context_ref" in r]
+                        used_ctx_ids = list(set([r.get("context_ref") for r in rows.values() if "context_ref" in r]))
                         for cid in used_ctx_ids:
                             info = global_context_map.get(cid)
                             if info and info.get("type") == "duration" and "end" in info:
                                 try:
-                                    actual_ends.append(datetime.datetime.strptime(info["end"][:10], "%Y-%m-%d").date())
+                                    dt = datetime.datetime.strptime(info["end"][:10], "%Y-%m-%d").date()
+                                    ptype = _classify_period_type(cid)
+                                    actual_ends.append((dt, ptype, cid))
                                 except ValueError:
                                     pass
                         
@@ -497,27 +510,36 @@ def extract_segments_from_xbrl_zip(
                         if not actual_ends:
                             for cid, info in global_context_map.items():
                                 if info.get("type") == "duration" and "end" in info:
-                                    if _classify_period_type(cid) == "current":
+                                    ptype = _classify_period_type(cid)
+                                    if ptype == "current" or ptype == "previous":
                                         try:
-                                            actual_ends.append(datetime.datetime.strptime(info["end"][:10], "%Y-%m-%d").date())
+                                            dt = datetime.datetime.strptime(info["end"][:10], "%Y-%m-%d").date()
+                                            actual_ends.append((dt, ptype, cid))
                                         except ValueError:
                                             pass
                         
                         if actual_ends:
-                            min_diff = min(abs((ae - expected_end).days) for ae in actual_ends)
-                            if min_diff > 40:
-                                best_actual = next(ae for ae in actual_ends if abs((ae - expected_end).days) == min_diff)
+                            # Group by period_type
+                            current_ends = [x for x in actual_ends if x[1] == "current"]
+                            previous_ends = [x for x in actual_ends if x[1] == "previous"]
+                            
+                            # We need at least one valid current end that passes the guard
+                            date_guard_status = "PASS"
+                            
+                            if current_ends:
+                                min_diff = min(abs((ae[0] - expected_end).days) for ae in current_ends)
+                                if min_diff > 40:
+                                    date_guard_status = "SKIP"
+                            else:
                                 date_guard_status = "SKIP"
+                                
+                            if date_guard_status == "SKIP":
                                 logger.warning(
                                     f"[XBRL] Context Date Guard failed for {basename}. "
-                                    f"expected_end={expected_end} (fy={period}, q={estimated_quarter}), "
-                                    f"closest_actual_end={best_actual}, min_diff={min_diff} days, "
-                                    f"actual_ends={[str(d) for d in actual_ends]}. "
+                                    f"expected_end={expected_end} (fy={period}, q={estimated_quarter}). "
                                     f"Title: '{document_title}'. Skipping."
                                 )
                                 return []
-                            else:
-                                date_guard_status = "PASS"
                 # ------------------------------------------------------------------
                 
                 # SegmentRawRow に変換
@@ -577,19 +599,34 @@ def extract_segments_from_xbrl_zip(
                         cinfo = global_context_map.get(ctx_ref, {})
                         cstart = cinfo.get("start", "?")
                         cend = cinfo.get("end", "?")
+                        
+                        ptype = _classify_period_type(ctx_ref) if ctx_ref else "unknown"
+                        
                         d_days = "?"
+                        adjusted_expected_end_str = "?"
+                        
                         if cend != "?" and expected_end:
                             try:
                                 cdate = datetime.datetime.strptime(cend[:10], "%Y-%m-%d").date()
-                                d_days = abs((cdate - expected_end).days)
+                                
+                                if ptype == "previous":
+                                    adj_expected_end = _get_prior_expected_end(expected_end)
+                                    adjusted_expected_end_str = str(adj_expected_end)
+                                    d_days = abs((cdate - adj_expected_end).days)
+                                else:
+                                    adjusted_expected_end_str = str(expected_end)
+                                    d_days = abs((cdate - expected_end).days)
                             except: pass
+                        
                         row_raw_json["_context_evidence"] = {
                             "context_ref": ctx_ref,
                             "context_start": cstart,
                             "context_end": cend,
                             "expected_context_end": str(expected_end) if expected_end else "?",
+                            "adjusted_expected_context_end": adjusted_expected_end_str,
                             "diff_days": d_days,
-                            "date_guard_status": date_guard_status,
+                            "date_guard_status": "PASS" if type(d_days) is int and d_days <= 40 else ("SKIP" if type(d_days) is int else "UNKNOWN"),
+                            "context_period_type": ptype,
                             "evidence_mode": True
                         }
 
