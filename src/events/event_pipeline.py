@@ -1011,7 +1011,6 @@ def process_documents(
                         f"[EVENT_SUPABASE] syncing {len(_records_to_sync)} new/updated events "
                         f"to Supabase tdnet_events ..."
                     )
-                    from datetime import datetime, timezone
                     for _rec in _records_to_sync:
                         try:
                             # Phase 2C: discord_sent_at を save_event_to_supabase に直接渡して原子的更新。
