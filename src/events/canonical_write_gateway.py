@@ -316,3 +316,32 @@ def apply_normalized_canonical_write_plans(
         "db_write_attempted": bool(writer_func) and len(plans_to_write) > 0,
         "db_result": db_result
     }
+
+
+def canonical_writer_adapter(plans_to_write: list['CanonicalWritePlan'], config: dict = None) -> dict:
+    """
+    Adapter to pass Normalized CanonicalWritePlan to the real DB writer.
+    Ensures unit is properly propagated.
+    """
+    from lib.pipeline.canonical_writer import write_financials_canonical
+    
+    written_count = 0
+    responses = []
+    for p in plans_to_write:
+        if p.unit != 'millions_jpy':
+            raise ValueError(f'canonical_writer_adapter received invalid unit: {p.unit}')
+            
+        res = write_financials_canonical(
+            ticker=p.ticker,
+            period=p.period,
+            quarter=p.quarter,
+            metrics_dict={p.metric: p.value},
+            source=p.source,
+            filing_id=p.filing_id,
+            unit=p.unit,
+            config=config
+        )
+        responses.append(res)
+        written_count += res.get('written', 0)
+        
+    return {'written': written_count, 'supabase_response': responses}
