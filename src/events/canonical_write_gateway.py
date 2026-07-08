@@ -36,6 +36,11 @@ def validate_canonical_write_plan(plan: CanonicalWritePlan) -> CanonicalWritePla
         plan.block_reason = "Value is None"
         return plan
         
+    # 1.5 Quarter validation
+    if plan.quarter not in ("1Q", "2Q", "3Q", "4Q", "FY"):
+        plan.block_reason = f"Invalid quarter for canonical write: {plan.quarter}"
+        return plan
+        
     # 2. Metric check
     if plan.metric not in ALLOWED_METRICS:
         plan.block_reason = f"Unsupported metric: {plan.metric}"
