@@ -23,6 +23,7 @@ import os
 import re
 import zipfile
 from dataclasses import dataclass, field
+from src.events.pipeline_context import EarningsExtractionEvidence
 from pathlib import Path
 from typing import Optional
 from xml.etree import ElementTree as ET
@@ -41,6 +42,7 @@ class PeriodFinancials:
     gross_profit: int | None = None
     source: str = ""  # "xbrl" / "pdf"
     sales_priority: tuple | None = None
+    evidences: list = field(default_factory=list)
 
 
 @dataclass
@@ -79,6 +81,7 @@ class EarningsSummaryData:
 
     # セグメント
     segments: list[SegmentFinancials] = field(default_factory=list)
+    evidences: list = field(default_factory=list)
 
     # メタ
     period: str = ""       # "2025-03-31"
@@ -412,7 +415,7 @@ def _apply_ixbrl_scale(raw_text: str, scale: str, sign: str) -> int | None:
 # XBRL パーサ（当期 + 前期同時抽出）
 # ============================================================
 
-def _parse_xbrl_multi_period(raw: bytes) -> dict[str, PeriodFinancials]:
+def _parse_xbrl_multi_period(raw: bytes, include_evidence: bool = False) -> dict[str, PeriodFinancials]:
     """XBRLバイト列から当期・前期・当四半期・前四半期の数値を同時抽出。
 
     Returns:
@@ -435,6 +438,7 @@ def _parse_xbrl_multi_period(raw: bytes) -> dict[str, PeriodFinancials]:
         "prior_q": {"sales": None, "operating_profit": None, "gross_profit": None},
     }
     priority: dict[str, dict[str, tuple[bool, int]]] = {k: {} for k in values}
+    evidences = {k: [] for k in values}
 
     # --- パス1: 従来XBRLモード ---
     for elem in root.iter():
@@ -468,15 +472,23 @@ def _parse_xbrl_multi_period(raw: bytes) -> dict[str, PeriodFinancials]:
         if values[period_type][field_name] is None or new_prio > current_prio:
             values[period_type][field_name] = val
             priority[period_type][field_name] = new_prio
+            if include_evidence:
+                evidences[period_type].append(EarningsExtractionEvidence(
+                    metric=field_name, value=val, tag_name=tag_local, context_ref=ctx,
+                    unit="unknown", scale=None, source_file="xbrl", extraction_source="xbrl",
+                    priority=tag_prio, fallback_used=is_fallback
+                ))
+
 
     # パス1で当期売上が取れていれば結果を構築
     if values["current_ytd"]["sales"] is not None or values["current_ytd"]["gross_profit"] is not None:
-        return {k: PeriodFinancials(sales=v["sales"], operating_profit=v["operating_profit"], gross_profit=v["gross_profit"], source="xbrl", sales_priority=priority[k].get("sales", (-1, False)))
+        return {k: PeriodFinancials(sales=v["sales"], operating_profit=v["operating_profit"], gross_profit=v["gross_profit"], source="xbrl", sales_priority=priority[k].get("sales", (-1, False)), evidences=evidences[k])
                 for k, v in values.items()}
 
     # --- パス2: iXBRLモード ---
     values = {k: {"sales": None, "operating_profit": None, "gross_profit": None} for k in values}
     priority = {k: {} for k in values}
+    evidences = {k: [] for k in values}
 
     for elem in root.iter():
         tag = elem.tag
@@ -529,8 +541,16 @@ def _parse_xbrl_multi_period(raw: bytes) -> dict[str, PeriodFinancials]:
         if values[period_type][field_name] is None or new_prio > current_prio:
             values[period_type][field_name] = val
             priority[period_type][field_name] = new_prio
+            if include_evidence:
+                sc = int(scale) if scale and scale.lstrip("-").isdigit() else None
+                evidences[period_type].append(EarningsExtractionEvidence(
+                    metric=field_name, value=val, tag_name=concept_local, context_ref=ctx,
+                    unit="unknown", scale=sc, source_file="ixbrl", extraction_source="ixbrl",
+                    priority=tag_prio, fallback_used=is_fallback
+                ))
 
-    return {k: PeriodFinancials(sales=v["sales"], operating_profit=v["operating_profit"], gross_profit=v["gross_profit"], source="xbrl", sales_priority=priority[k].get("sales", (-1, False)))
+
+    return {k: PeriodFinancials(sales=v["sales"], operating_profit=v["operating_profit"], gross_profit=v["gross_profit"], source="xbrl", sales_priority=priority[k].get("sales", (-1, False)), evidences=evidences[k])
             for k, v in values.items()}
 
 
@@ -555,7 +575,7 @@ def _is_summary_file(name: str) -> bool:
     return "/summary/" in lower or "summary" in os.path.basename(lower)
 
 
-def _extract_multi_period_from_xbrl(xbrl_path: str) -> dict[str, PeriodFinancials]:
+def _extract_multi_period_from_xbrl(xbrl_path: str, include_evidence: bool = False) -> dict[str, PeriodFinancials]:
     """XBRLファイル（ZIPまたは単体）から複数期間の数値を抽出"""
     try:
         raw = Path(xbrl_path).read_bytes()
@@ -582,7 +602,7 @@ def _extract_multi_period_from_xbrl(xbrl_path: str) -> dict[str, PeriodFinancial
         for entry in summary_candidates + other:
             try:
                 entry_bytes = zf.read(entry)
-                result = _parse_xbrl_multi_period(entry_bytes)
+                result = _parse_xbrl_multi_period(entry_bytes, include_evidence=include_evidence)
                 if not merged_result:
                     merged_result = result
                 else:
@@ -597,6 +617,8 @@ def _extract_multi_period_from_xbrl(xbrl_path: str) -> dict[str, PeriodFinancial
                                 merged_result[k].sales_priority = new_sp
                             if merged_result[k].operating_profit is None: merged_result[k].operating_profit = v.operating_profit
                             if merged_result[k].gross_profit is None: merged_result[k].gross_profit = v.gross_profit
+                            if include_evidence:
+                                merged_result[k].evidences.extend(v.evidences)
 
                 if merged_result.get("current_ytd") and merged_result["current_ytd"].sales is not None and merged_result["current_ytd"].gross_profit is not None:
                     logger.info(f"[FINANCIALS] multi-period extract OK (fully populated): {entry}")
@@ -614,7 +636,7 @@ def _extract_multi_period_from_xbrl(xbrl_path: str) -> dict[str, PeriodFinancial
         return merged_result if merged_result else {}
 
     # 単体ファイル
-    return _parse_xbrl_multi_period(raw)
+    return _parse_xbrl_multi_period(raw, include_evidence=include_evidence)
 
 
 # ============================================================
@@ -667,6 +689,7 @@ def extract_earnings_data(
     pdf_path: str | None = None,
     title: str = "",
     ticker: str = "",
+    include_evidence: bool = False,
 ) -> EarningsSummaryData | None:
     """決算短信から数値を抽出しYOY/QoQを算出する。
 
@@ -687,7 +710,7 @@ def extract_earnings_data(
     # ---- XBRL から複数期間抽出 ----
     periods: dict[str, PeriodFinancials] = {}
     if xbrl_path and os.path.isfile(xbrl_path):
-        periods = _extract_multi_period_from_xbrl(xbrl_path)
+        periods = _extract_multi_period_from_xbrl(xbrl_path, include_evidence=include_evidence)
 
     if periods.get("current_ytd") and periods["current_ytd"].sales is not None:
         cur_ytd = periods["current_ytd"]
@@ -701,6 +724,9 @@ def extract_earnings_data(
         result.op_prior = pri.operating_profit
         result.gross_profit_current = cur_ytd.gross_profit
         result.source = cur_ytd.source
+        if include_evidence:
+            result.evidences.extend(cur_ytd.evidences)
+            result.evidences.extend(cur_q.evidences)
 
         # 単四半期値
         if cur_q.sales is not None:

@@ -12,6 +12,7 @@ import re
 import unicodedata
 import zipfile
 from dataclasses import dataclass, field
+from src.events.pipeline_context import EarningsExtractionEvidence
 from pathlib import Path
 from typing import Optional
 from xml.etree import ElementTree as ET
@@ -145,6 +146,7 @@ class GuidanceData:
     ordinary_forecast: Optional[float] = None
     net_income_forecast: Optional[float] = None
     eps_forecast: Optional[float] = None
+    evidences: list = field(default_factory=list)
 
     sales_actual: Optional[float] = None
     op_actual: Optional[float] = None
@@ -253,10 +255,14 @@ def _select_best_candidates(candidates: list[dict]) -> dict:
 
         best_val = best_exact["value"] if best_exact else (best_upper["value"] if best_upper else (best_lower["value"] if best_lower else None))
         result[metric] = best_val
+        if best_exact:
+            result[f"{metric}_exact_candidate"] = best_exact
         if best_lower:
             result[f"{metric}_low"] = best_lower["value"]
+            result[f"{metric}_lower_candidate"] = best_lower
         if best_upper:
             result[f"{metric}_high"] = best_upper["value"]
+            result[f"{metric}_upper_candidate"] = best_upper
             
     return result
 
@@ -548,6 +554,8 @@ def _extract_eps_from_forecast_table(plain_text: str) -> list[dict]:
         is_suspicious = abs(eps_val) > _EPS_SUSPICIOUS_THRESHOLD
 
         candidates.append({
+                "tag_name": elem.get("name", "").split(":")[-1] if elem.get("name") else elem.tag.split("}")[-1],
+                "context_ref": ctx if 'ctx' in locals() else '',
             "metric": "eps",
             "value": eps_val,
             "period_type": period_type,
@@ -1077,6 +1085,8 @@ def _collect_forecast_candidates_from_bytes(raw: bytes) -> list[dict]:
                 continue
             is_consol = "Consolidated" in ctx and "NonConsolidated" not in ctx
             candidates.append({
+                "tag_name": elem.get("name", "").split(":")[-1] if elem.get("name") else elem.tag.split("}")[-1],
+                "context_ref": ctx if 'ctx' in locals() else '',
                 "metric": field_name,
                 "value": val,
                 "period_type": _classify_period_type(ctx),
@@ -1105,6 +1115,8 @@ def _collect_forecast_candidates_from_bytes(raw: bytes) -> list[dict]:
             # 従来XBRLではdecimalsやscaleの適用が複雑なため一旦そのまま読む
             is_consol = "Consolidated" in ctx and "NonConsolidated" not in ctx
             candidates.append({
+                "tag_name": elem.get("name", "").split(":")[-1] if elem.get("name") else elem.tag.split("}")[-1],
+                "context_ref": ctx if 'ctx' in locals() else '',
                 "metric": field_name,
                 "value": val,
                 "period_type": _classify_period_type(ctx),
@@ -1133,6 +1145,8 @@ def _collect_forecast_candidates_from_bytes(raw: bytes) -> list[dict]:
             is_consol = "Consolidated" in ctx and "NonConsolidated" not in ctx
             is_basic = tag_local in _EPS_BASIC_TAGS
             candidates.append({
+                "tag_name": elem.get("name", "").split(":")[-1] if elem.get("name") else elem.tag.split("}")[-1],
+                "context_ref": ctx if 'ctx' in locals() else '',
                 "metric": "eps",
                 "value": val,
                 "period_type": _classify_period_type(ctx),
@@ -1183,6 +1197,8 @@ def _collect_forecast_candidates_from_bytes(raw: bytes) -> list[dict]:
                 continue
             is_consol = "Consolidated" in ctx and "NonConsolidated" not in ctx
             candidates.append({
+                "tag_name": elem.get("name", "").split(":")[-1] if elem.get("name") else elem.tag.split("}")[-1],
+                "context_ref": ctx if 'ctx' in locals() else '',
                 "metric": field_name,
                 "value": val,
                 "period_type": _classify_period_type(ctx),
@@ -1203,6 +1219,8 @@ def _collect_forecast_candidates_from_bytes(raw: bytes) -> list[dict]:
             if val is not None:
                 is_consol = "Consolidated" in ctx and "NonConsolidated" not in ctx
                 candidates.append({
+                "tag_name": elem.get("name", "").split(":")[-1] if elem.get("name") else elem.tag.split("}")[-1],
+                "context_ref": ctx if 'ctx' in locals() else '',
                     "metric": field_name,
                     "value": val,
                     "period_type": _classify_period_type(ctx),
@@ -1224,6 +1242,8 @@ def _collect_forecast_candidates_from_bytes(raw: bytes) -> list[dict]:
             is_consol = "Consolidated" in ctx and "NonConsolidated" not in ctx
             is_basic = concept_local in _EPS_BASIC_TAGS
             candidates.append({
+                "tag_name": elem.get("name", "").split(":")[-1] if elem.get("name") else elem.tag.split("}")[-1],
+                "context_ref": ctx if 'ctx' in locals() else '',
                 "metric": "eps",
                 "value": val,
                 "period_type": _classify_period_type(ctx),
@@ -1272,6 +1292,7 @@ def extract_guidance_from_zip(
     actual_op: int | None = None,
     pdf_path: str | None = None,
     pdf_text: str = "",
+    include_evidence: bool = False,
 ) -> GuidanceData:
     """XBRL ZIP から来期ガイダンスデータを抽出する。"""
     guidance = GuidanceData(
@@ -1350,6 +1371,17 @@ def extract_guidance_from_zip(
         guidance.ordinary_forecast = best.get("ordinary_profit")
         guidance.net_income_forecast = best.get("net_income")
         guidance.eps_forecast = best.get("eps")
+
+        if include_evidence and best:
+            for metric in ["sales", "operating_profit", "ordinary_profit", "net_income", "eps"]:
+                if metric in best:
+                    cand = best.get(f"{metric}_exact_candidate") or best.get(f"{metric}_upper_candidate") or best.get(f"{metric}_lower_candidate") or {}
+                    guidance.evidences.append(EarningsExtractionEvidence(
+                        metric=metric, value=best[metric],
+                        tag_name=cand.get("tag_name"), context_ref=cand.get("context_ref"),
+                        extraction_source="xbrl", priority=99
+                    ))
+
         
         # XBRL公式YoYがあれば優先的にセット
         if "sales_yoy_extracted" in best:
