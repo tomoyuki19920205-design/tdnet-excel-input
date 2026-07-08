@@ -282,6 +282,10 @@ _XBRL_TAG_MAP = {
 
 _FALLBACK_TAG_MAP = {
     "OperatingRevenues": "sales",
+    "OrdinaryIncomeBNK": "sales",
+    "OperatingRevenuesSE": "sales",
+    "NetSalesOfCompletedConstructionContractsCNS": "sales",
+    "GrossProfitOnCompletedConstructionContractsCNS": "gross_profit",
 }
 
 _IXBRL_EXTENSIONS = ("-ixbrl.htm", ".ixbrl.htm", "-ixbrl.html", ".ixbrl.html", ".ixbrl")
@@ -458,10 +462,12 @@ def _parse_xbrl_multi_period(raw: bytes, include_evidence: bool = False) -> dict
             continue
         tag_local = tag.split("}")[-1] if "}" in tag else tag
         
-        is_fallback = tag_local in _FALLBACK_TAG_MAP
-        field_name = _XBRL_TAG_MAP.get(tag_local) or _FALLBACK_TAG_MAP.get(tag_local)
-        if not field_name:
+        primary_metric = _XBRL_TAG_MAP.get(tag_local)
+        fallback_metric = _FALLBACK_TAG_MAP.get(tag_local)
+        if primary_metric is None and fallback_metric is None:
             continue
+        field_name = primary_metric or fallback_metric
+        is_fallback = primary_metric is None and fallback_metric is not None
         if field_name not in ("sales", "operating_profit", "gross_profit", "selling_general_and_administrative_expenses"):
             continue
 
@@ -518,11 +524,12 @@ def _parse_xbrl_multi_period(raw: bytes, include_evidence: bool = False) -> dict
             continue
 
         concept_local = concept_name.split(":")[-1] if ":" in concept_name else concept_name
-        is_fallback = concept_local in _FALLBACK_TAG_MAP
-        field_name = _XBRL_TAG_MAP.get(concept_local) or _FALLBACK_TAG_MAP.get(concept_local)
-        if not field_name:
+        primary_metric = _XBRL_TAG_MAP.get(concept_local)
+        fallback_metric = _FALLBACK_TAG_MAP.get(concept_local)
+        if primary_metric is None and fallback_metric is None:
             continue
-
+        field_name = primary_metric or fallback_metric
+        is_fallback = primary_metric is None and fallback_metric is not None
         if field_name not in ("sales", "operating_profit", "gross_profit", "selling_general_and_administrative_expenses"):
             continue
 

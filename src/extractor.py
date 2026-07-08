@@ -92,6 +92,15 @@ _XBRL_TAG_MAP = {
 }
 
 
+_FALLBACK_TAG_MAP = {
+    "OperatingRevenues": "sales",
+    "OrdinaryIncomeBNK": "sales",
+    "OperatingRevenuesSE": "sales",
+    "NetSalesOfCompletedConstructionContractsCNS": "sales",
+    "GrossProfitOnCompletedConstructionContractsCNS": "gross_profit",
+}
+
+
 # ZIPまたはiXBRLファイルの拡張子パターン（優先順）
 _IXBRL_EXTENSIONS = ("-ixbrl.htm", ".ixbrl.htm", "-ixbrl.html", ".ixbrl.html", ".ixbrl")
 _XBRL_EXTENSIONS = (".xbrl",)
@@ -204,7 +213,7 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
         "operating_profit": None,
         "cost_of_sales": None,
     }
-    value_priority: dict[str, bool] = {}
+    value_priority: dict[str, tuple[int, bool]] = {}
 
     # --- パス1: 従来XBRLモード（タグ名直接マッチ）---
     for elem in root.iter():
@@ -213,16 +222,22 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
             continue
         tag_local = tag.split("}")[-1] if "}" in tag else tag
 
-        if tag_local in _XBRL_TAG_MAP:
-            field_name = _XBRL_TAG_MAP[tag_local]
+        primary_metric = _XBRL_TAG_MAP.get(tag_local)
+        fallback_metric = _FALLBACK_TAG_MAP.get(tag_local)
+        if primary_metric is not None or fallback_metric is not None:
+            field_name = primary_metric or fallback_metric
+            is_fallback = primary_metric is None and fallback_metric is not None
             context = elem.get("contextRef", "")
             if _is_current_duration(context):
                 val = normalize_number(elem.text or "")
                 if val is not None:
                     is_consol = _is_consolidated_preferred(context)
-                    if values[field_name] is None or (is_consol and not value_priority.get(field_name)):
+                    tag_prio = 0 if is_fallback else 10
+                    new_prio = (tag_prio, is_consol)
+                    current_prio = value_priority.get(field_name, (-1, False))
+                    if values[field_name] is None or new_prio > current_prio:
                         values[field_name] = val
-                        value_priority[field_name] = is_consol
+                        value_priority[field_name] = new_prio
 
     if values["sales"] is not None:
         sources = {k: source_label for k, v in values.items() if v is not None and k != "cost_of_sales"}
@@ -266,14 +281,17 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
 
         concept_local = concept_name.split(":")[-1] if ":" in concept_name else concept_name
 
-        if concept_local not in _XBRL_TAG_MAP:
+        primary_metric = _XBRL_TAG_MAP.get(concept_local)
+        fallback_metric = _FALLBACK_TAG_MAP.get(concept_local)
+        if primary_metric is None and fallback_metric is None:
             if any(kw in concept_local.lower() for kw in [
                 "sales", "revenue", "profit", "income", "loss", "operating", "gross",
             ]):
                 unknown_tags.add(concept_name)
             continue
 
-        field_name = _XBRL_TAG_MAP[concept_local]
+        field_name = primary_metric or fallback_metric
+        is_fallback = primary_metric is None and fallback_metric is not None
 
         if not _is_current_duration(context):
             continue
@@ -301,9 +319,12 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
                 pass
 
         is_consol = _is_consolidated_preferred(context)
-        if values[field_name] is None or (is_consol and not value_priority.get(field_name)):
+        tag_prio = 0 if is_fallback else 10
+        new_prio = (tag_prio, is_consol)
+        current_prio = value_priority.get(field_name, (-1, False))
+        if values[field_name] is None or new_prio > current_prio:
             values[field_name] = val
-            value_priority[field_name] = is_consol
+            value_priority[field_name] = new_prio
             if field_name == "sales":
                 sales_context = context
 
