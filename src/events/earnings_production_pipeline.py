@@ -38,6 +38,53 @@ from .summary_financials import (
 from .summary_narrative_extractor import extract_narrative, NarrativeData
 from .earnings_shadow_writer import run_shadow_write_plan
 from .summary_notify import format_earnings_message, send_earnings_discord
+
+def _run_canonical_gateway_dryrun(ticker: str, period: str | None, quarter: str, metrics: dict, doc_id: str):
+    import json
+    import os
+    from src.events.canonical_write_gateway import validate_canonical_write_plan
+    from src.events.pipeline_context import CanonicalWritePlan
+    from dataclasses import asdict
+    import logging
+    log = logging.getLogger(__name__)
+
+    gw_plans = []
+    all_allowed = True
+    for m_name, m_val in metrics.items():
+        p = CanonicalWritePlan(
+            ticker=ticker,
+            period=period or "unknown",
+            quarter=quarter,
+            metric=m_name,
+            value=m_val,
+            unit="millions_jpy",
+            source="jquants_earnings_summary",
+            filing_id=doc_id
+        )
+        p.validate_and_prepare()
+        p = validate_canonical_write_plan(p)
+        if not p.write_allowed:
+            all_allowed = False
+        gw_plans.append(asdict(p))
+
+    report_file = "scratch/phase4c_gateway_dryrun.json"
+    existing_report = []
+    if os.path.exists(report_file):
+        try:
+            with open(report_file, "r", encoding="utf-8") as f:
+                existing_report = json.load(f)
+        except: pass
+    existing_report.append({
+        "ticker": ticker,
+        "period": period,
+        "quarter": quarter,
+        "all_allowed": all_allowed,
+        "plans": gw_plans
+    })
+    with open(report_file, "w", encoding="utf-8") as f:
+        json.dump(existing_report, f, indent=2, ensure_ascii=False)
+        
+    return all_allowed
 from .earnings_summary_storage import (
     ensure_earnings_summary_table,
     save_earnings_summary,
@@ -410,6 +457,29 @@ def run_earnings_production(
                         logger.error("[EARNINGS][REAL] %s call_plan invalid: %s. STOP.", _ticker, _cp_reason)
                         result.errors.append(f"{_ticker}: call_plan_invalid={_cp_reason}")
                         return result
+
+                    if os.getenv("EARNINGS_CANONICAL_GATEWAY_DRYRUN") == "1":
+                        _cp_args = _merged_plan["earnings_summary_args"]
+                        _cp_title = _cp_args.get("title", "")
+                        _cp_payload_ext = _payload.get("extracted", {})
+                        _cp_period = _cp_payload_ext.get("period") or _cp_payload_ext.get("fiscal_year_end") or _derive_fiscal_year_end_period(_cp_title)
+                        
+                        _cp_q = _cp_args.get("quarter", "")
+                        _cp_sales = _cp_args.get("sales_value")
+                        _cp_op = _cp_args.get("op_value")
+                        _cp_gross = _cp_args.get("gross_profit_value")
+                        _cp_doc_id = _merged_plan["tdnet_event_payload"].get("source_doc_id", "")
+                        
+                        _cp_metrics = {}
+                        if _cp_sales is not None: _cp_metrics["sales"] = _cp_sales / 1_000_000
+                        if _cp_op is not None: _cp_metrics["operating_profit"] = _cp_op / 1_000_000
+                        if _cp_gross is not None: _cp_metrics["gross_profit"] = _cp_gross / 1_000_000
+                        
+                        _all_allowed = _run_canonical_gateway_dryrun(_ticker, _cp_period, _cp_q, _cp_metrics, _cp_doc_id)
+                        if not _all_allowed and dry_run:
+                            logger.error(f"[EARNINGS][GATEWAY] {_ticker} Unsafe canonical plan detected! STOPPING in dry-run.")
+                            result.errors.append(f"{_ticker}: canonical_gateway_rejected")
+                            continue
 
                     if dry_run:
                         logger.info("[EARNINGS][REAL] [DRY_RUN] would save ticker=%s. skipping save route.", _ticker)
