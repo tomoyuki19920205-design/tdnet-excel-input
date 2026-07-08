@@ -569,16 +569,40 @@ def run_earnings_production(
                                     "rest_url": f"{_url}/rest/v1" if _url else "",
                                     "key": os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY", "")
                                 }
-                                write_financials_canonical(
-                                    ticker=_ticker,
-                                    period=_period,
-                                    quarter=_q,
-                                    metrics_dict=_metrics,
-                                    source="jquants_earnings_summary",
-                                    filing_id=_doc_id,
-                                    unit="millions_jpy",
-                                    config=_config
-                                )
+                                
+                                if os.getenv("EARNINGS_CANONICAL_WRITE_REPLACE_DRYRUN") == "1":
+                                    logger.info("[EARNINGS][REAL] %s canonical同期(REPLACE DRY-RUN) 開始", _ticker)
+                                    from src.events.canonical_write_gateway import build_normalized_canonical_write_plan, validate_canonical_write_plan
+                                    _guidance = _payload_ext.get("guidance", {})
+                                    _plans = build_normalized_canonical_write_plan(
+                                        ticker=_ticker,
+                                        period_raw=_period,
+                                        quarter_raw=_q,
+                                        metrics_raw=_metrics,
+                                        guidance_raw=_guidance,
+                                        filing_id=_doc_id
+                                    )
+                                    _all_allowed = True
+                                    for p in _plans:
+                                        vp = validate_canonical_write_plan(p)
+                                        if not vp.write_allowed:
+                                            _all_allowed = False
+                                            logger.warning(f"[EARNINGS][REAL] {_ticker} DRY-RUN blocked: {vp.metric} {vp.quarter} {vp.block_reason}")
+                                    if not _all_allowed:
+                                        logger.error(f"[EARNINGS][REAL] {_ticker} DRY-RUN blocked due to unsafe plans.")
+                                        # Since it's dry-run, we just log and stop saving
+                                    logger.info("[EARNINGS][REAL] %s canonical同期(REPLACE DRY-RUN) 完了", _ticker)
+                                else:
+                                    write_financials_canonical(
+                                        ticker=_ticker,
+                                        period=_period,
+                                        quarter=_q,
+                                        metrics_dict=_metrics,
+                                        source="jquants_earnings_summary",
+                                        filing_id=_doc_id,
+                                        unit="millions_jpy",
+                                        config=_config
+                                    )
                                 logger.info("[EARNINGS][REAL] %s canonical同期完了", _ticker)
                         except Exception as e:
                             logger.error("[EARNINGS][REAL] %s canonical同期中にエラー: %s", _ticker, e)
