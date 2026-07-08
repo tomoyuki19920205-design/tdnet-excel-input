@@ -141,21 +141,16 @@ def _is_tanshin_title(title: str) -> bool:
 
 
 def _derive_fiscal_year_end_period(title: str) -> str | None:
-    """タイトル「YYYY年M月期」からその月の末日をYYYY-MM-DD形式で算出する。"""
+    """タイトル「YYYY年M月期」や「令和X年M月期」からその月の末日をYYYY-MM-DD形式で算出する。"""
     if not title:
         return None
-    import unicodedata
-    import re
-    import calendar
-    # 全角数字を半角にする
-    norm_title = unicodedata.normalize("NFKC", title)
-    m = re.search(r"(\d{4})年(\d{1,2})月期", norm_title)
-    if not m:
-        return None
-    year = int(m.group(1))
-    month = int(m.group(2))
-    last_day = calendar.monthrange(year, month)[1]
-    return f"{year:04d}-{month:02d}-{last_day:02d}"
+    from src.year_parser import extract_fiscal_year_from_title, _era_period_to_iso
+    fy = extract_fiscal_year_from_title(title)
+    if fy:
+        iso = _era_period_to_iso(fy)
+        if iso and len(iso) >= 10 and "-" in iso:
+            return iso
+    return None
 
 
 # ============================================================

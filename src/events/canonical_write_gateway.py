@@ -32,6 +32,14 @@ def validate_canonical_write_plan(plan: CanonicalWritePlan) -> CanonicalWritePla
         plan.block_reason = "Missing mandatory fields (ticker, period, quarter, metric)"
         return plan
         
+    if plan.period.lower() in ("unknown", "null"):
+        plan.block_reason = "period_missing_or_unknown"
+        return plan
+        
+    if plan.quarter.lower() in ("unknown", "null"):
+        plan.block_reason = "quarter_missing_or_unknown"
+        return plan
+        
     if plan.value is None:
         plan.block_reason = "Value is None"
         return plan
@@ -203,22 +211,25 @@ def apply_normalized_canonical_write_plans(
     
     actuals_count = 0
     forecasts_count = 0
+    valid_plans = []
     
     for p in plans:
+        validate_canonical_write_plan(p)
         if not p.write_allowed:
             blocked_reasons.append(p.block_reason)
         else:
+            valid_plans.append(p)
             source_row_keys.append(p.source_row_key)
             if p.quarter == "FY" and "forecast" in p.source:
                 forecasts_count += 1
             else:
                 actuals_count += 1
                 
-    if blocked_reasons:
+    if not valid_plans and blocked_reasons:
         return {
             "status": "blocked",
             "total_plans": len(plans),
-            "write_allowed_count": len(plans) - len(blocked_reasons),
+            "write_allowed_count": len(valid_plans),
             "skipped_existing_count": 0,
             "conflict_count": 0,
             "would_write_count": 0,
@@ -231,7 +242,7 @@ def apply_normalized_canonical_write_plans(
             "db_write_attempted": False
         }
         
-    if not plans:
+    if not valid_plans and not blocked_reasons:
         return {
             "status": "success",
             "total_plans": 0,
@@ -265,10 +276,9 @@ def apply_normalized_canonical_write_plans(
     conflict_reasons = []
     plans_to_write = []
     
-    for p in plans:
-        if p.source_row_key in existing_rows_map:
-            ex = existing_rows_map[p.source_row_key]
-            # check fields
+    for p in valid_plans:
+        ex = existing_rows_map.get(p.source_row_key)
+        if ex:
             is_match = (
                 str(float(ex.get("value")) if ex.get("value") is not None else "None") == str(float(p.value) if p.value is not None else "None") and
                 str(ex.get("period")) == str(p.period) and
