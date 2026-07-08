@@ -40,6 +40,7 @@ class PeriodFinancials:
     operating_profit: int | None = None
     gross_profit: int | None = None
     source: str = ""  # "xbrl" / "pdf"
+    sales_priority: tuple | None = None
 
 
 @dataclass
@@ -265,6 +266,10 @@ _XBRL_TAG_MAP = {
     "GrossProfitLoss": "gross_profit",
 }
 
+_FALLBACK_TAG_MAP = {
+    "OperatingRevenues": "sales",
+}
+
 _IXBRL_EXTENSIONS = ("-ixbrl.htm", ".ixbrl.htm", "-ixbrl.html", ".ixbrl.html", ".ixbrl")
 _XBRL_EXTENSIONS = (".xbrl",)
 _ZIP_SIGNATURE = b"PK\x03\x04"
@@ -429,7 +434,7 @@ def _parse_xbrl_multi_period(raw: bytes) -> dict[str, PeriodFinancials]:
         "current_q": {"sales": None, "operating_profit": None, "gross_profit": None},
         "prior_q": {"sales": None, "operating_profit": None, "gross_profit": None},
     }
-    priority: dict[str, dict[str, bool]] = {k: {} for k in values}
+    priority: dict[str, dict[str, tuple[bool, int]]] = {k: {} for k in values}
 
     # --- パス1: 従来XBRLモード ---
     for elem in root.iter():
@@ -437,10 +442,11 @@ def _parse_xbrl_multi_period(raw: bytes) -> dict[str, PeriodFinancials]:
         if not isinstance(tag, str):
             continue
         tag_local = tag.split("}")[-1] if "}" in tag else tag
-        if tag_local not in _XBRL_TAG_MAP:
+        
+        is_fallback = tag_local in _FALLBACK_TAG_MAP
+        field_name = _XBRL_TAG_MAP.get(tag_local) or _FALLBACK_TAG_MAP.get(tag_local)
+        if not field_name:
             continue
-
-        field_name = _XBRL_TAG_MAP[tag_local]
         if field_name not in ("sales", "operating_profit", "gross_profit"):
             continue
 
@@ -456,13 +462,16 @@ def _parse_xbrl_multi_period(raw: bytes) -> dict[str, PeriodFinancials]:
             continue
 
         is_consol = _is_consolidated_preferred(ctx)
-        if values[period_type][field_name] is None or (is_consol and not priority[period_type].get(field_name)):
+        tag_prio = 0 if is_fallback else 10
+        new_prio = (tag_prio, is_consol)
+        current_prio = priority[period_type].get(field_name, (-1, False))
+        if values[period_type][field_name] is None or new_prio > current_prio:
             values[period_type][field_name] = val
-            priority[period_type][field_name] = is_consol
+            priority[period_type][field_name] = new_prio
 
     # パス1で当期売上が取れていれば結果を構築
     if values["current_ytd"]["sales"] is not None or values["current_ytd"]["gross_profit"] is not None:
-        return {k: PeriodFinancials(sales=v["sales"], operating_profit=v["operating_profit"], gross_profit=v["gross_profit"], source="xbrl")
+        return {k: PeriodFinancials(sales=v["sales"], operating_profit=v["operating_profit"], gross_profit=v["gross_profit"], source="xbrl", sales_priority=priority[k].get("sales", (-1, False)))
                 for k, v in values.items()}
 
     # --- パス2: iXBRLモード ---
@@ -486,10 +495,11 @@ def _parse_xbrl_multi_period(raw: bytes) -> dict[str, PeriodFinancials]:
             continue
 
         concept_local = concept_name.split(":")[-1] if ":" in concept_name else concept_name
-        if concept_local not in _XBRL_TAG_MAP:
+        is_fallback = concept_local in _FALLBACK_TAG_MAP
+        field_name = _XBRL_TAG_MAP.get(concept_local) or _FALLBACK_TAG_MAP.get(concept_local)
+        if not field_name:
             continue
 
-        field_name = _XBRL_TAG_MAP[concept_local]
         if field_name not in ("sales", "operating_profit", "gross_profit"):
             continue
 
@@ -512,11 +522,15 @@ def _parse_xbrl_multi_period(raw: bytes) -> dict[str, PeriodFinancials]:
             continue
 
         is_consol = _is_consolidated_preferred(ctx)
-        if values[period_type][field_name] is None or (is_consol and not priority[period_type].get(field_name)):
+        tag_prio = 0 if is_fallback else 10
+        new_prio = (tag_prio, is_consol)
+        current_prio = priority[period_type].get(field_name, (-1, False))
+        
+        if values[period_type][field_name] is None or new_prio > current_prio:
             values[period_type][field_name] = val
-            priority[period_type][field_name] = is_consol
+            priority[period_type][field_name] = new_prio
 
-    return {k: PeriodFinancials(sales=v["sales"], operating_profit=v["operating_profit"], gross_profit=v["gross_profit"], source="xbrl")
+    return {k: PeriodFinancials(sales=v["sales"], operating_profit=v["operating_profit"], gross_profit=v["gross_profit"], source="xbrl", sales_priority=priority[k].get("sales", (-1, False)))
             for k, v in values.items()}
 
 
@@ -576,7 +590,11 @@ def _extract_multi_period_from_xbrl(xbrl_path: str) -> dict[str, PeriodFinancial
                         if k not in merged_result:
                             merged_result[k] = v
                         else:
-                            if merged_result[k].sales is None: merged_result[k].sales = v.sales
+                            curr_sp = merged_result[k].sales_priority or (-1, False)
+                            new_sp = v.sales_priority or (-1, False)
+                            if merged_result[k].sales is None or new_sp > curr_sp:
+                                merged_result[k].sales = v.sales
+                                merged_result[k].sales_priority = new_sp
                             if merged_result[k].operating_profit is None: merged_result[k].operating_profit = v.operating_profit
                             if merged_result[k].gross_profit is None: merged_result[k].gross_profit = v.gross_profit
 
