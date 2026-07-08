@@ -83,7 +83,12 @@ def run_shadow_write_plan(
                 source=source,
                 filing_id=ident.filing_id
             )
-            plan.validate_and_prepare()
+            plan.validate_and_prepare() # Sets source_row_key
+            
+            # Use the new gateway
+            from src.events.canonical_write_gateway import validate_canonical_write_plan
+            plan = validate_canonical_write_plan(plan)
+            
             matched_ev = next((e for e in evidence_list if e.metric == metric_name), None)
             
             diff = {
