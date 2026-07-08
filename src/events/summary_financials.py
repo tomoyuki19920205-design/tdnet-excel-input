@@ -264,12 +264,20 @@ _XBRL_TAG_MAP = {
     "OperatingRevenue": "sales",
     "OperatingRevenuesREIT": "sales",
     "OperatingRevenueINV": "sales",
+    "SalesIFRS": "sales",
+    "RevenueFromContractsWithCustomers": "sales",
+    "RevenueIFRS": "sales",
+    "NetOperatingRevenueSEC": "sales",
+    "OperatingRevenueSEC": "sales",
     "OperatingIncome": "operating_profit",
     "OperatingProfit": "operating_profit",
+    "OperatingIncomeIFRS": "operating_profit",
     "OrdinaryIncome": "operating_profit",
     "GrossProfit": "gross_profit",
     "GrossProfitLoss": "gross_profit",
+    "GrossProfitIFRS": "gross_profit",
     "SellingGeneralAndAdministrativeExpenses": "selling_general_and_administrative_expenses",
+    "SellingGeneralAndAdministrativeExpensesIFRS": "selling_general_and_administrative_expenses",
 }
 
 _FALLBACK_TAG_MAP = {

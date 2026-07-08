@@ -75,11 +75,19 @@ _XBRL_TAG_MAP = {
     "OperatingRevenue": "sales",
     "OperatingRevenuesREIT": "sales",        # REIT/投資法人の営業収益
     "OperatingRevenueINV": "sales",          # 投資法人の営業収益
+    "SalesIFRS": "sales",
+    "RevenueFromContractsWithCustomers": "sales",
+    "RevenueIFRS": "sales",
+    "NetOperatingRevenueSEC": "sales",
+    "OperatingRevenueSEC": "sales",
     "GrossProfit": "gross_profit",
+    "GrossProfitIFRS": "gross_profit",
     "SellingGeneralAndAdministrativeExpenses": "selling_general_and_administrative_expenses",
+    "SellingGeneralAndAdministrativeExpensesIFRS": "selling_general_and_administrative_expenses",
     "CostOfSales": "cost_of_sales",          # 売上原価（計算補完用）
     "OperatingIncome": "operating_profit",
     "OperatingProfit": "operating_profit",
+    "OperatingIncomeIFRS": "operating_profit",
     "OrdinaryIncome": "operating_profit",    # 経常利益（営業利益なし時のFB）
 }
 
