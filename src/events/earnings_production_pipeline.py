@@ -36,6 +36,7 @@ from .summary_financials import (
     EarningsSummaryData,
 )
 from .summary_narrative_extractor import extract_narrative, NarrativeData
+from .earnings_shadow_writer import run_shadow_write_plan
 from .summary_notify import format_earnings_message, send_earnings_discord
 from .earnings_summary_storage import (
     ensure_earnings_summary_table,
@@ -920,6 +921,17 @@ def run_earnings_production(
             # ---- DB保存（全件） ----
             result.generated_count += 1
 
+            # ---- EARNINGS_WRITE_PLAN_SHADOW ----
+            run_shadow_write_plan(
+                ticker=ticker,
+                doc=doc,
+                earnings=earnings,
+                guidance=guidance,
+                xbrl_path=xbrl_path,
+                fiscal_year=fiscal_year,
+                quarter=quarter
+            )
+
             if not dry_run:
                 save_data = {
                     "ticker": ticker,
@@ -985,6 +997,7 @@ def run_earnings_production(
                     if action == "inserted":
                         result.saved_count += 1
                         result.saved_tickers.append(ticker)
+
                     # ---- tdnet_events へ earnings イベントを best-effort 保存 ----
                     try:
                         _save_earnings_to_tdnet_events(
