@@ -41,6 +41,11 @@ def validate_canonical_write_plan(plan: CanonicalWritePlan) -> CanonicalWritePla
         plan.block_reason = f"Invalid quarter for canonical write: {plan.quarter}"
         return plan
         
+    # 1.6 Forecast block
+    if plan.source == "jquants_forecast_fy":
+        plan.block_reason = "Forecast FY rows are not allowed in canonical_financials actuals table"
+        return plan
+        
     # 2. Metric check
     if plan.metric not in ALLOWED_METRICS:
         plan.block_reason = f"Unsupported metric: {plan.metric}"
