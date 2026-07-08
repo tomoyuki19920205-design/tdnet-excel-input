@@ -79,3 +79,67 @@ def validate_canonical_write_plan(plan: CanonicalWritePlan) -> CanonicalWritePla
     # All checks passed
     plan.write_allowed = True
     return plan
+
+def build_normalized_canonical_write_plan(
+    ticker: str,
+    period_raw: str,
+    quarter_raw: str,
+    metrics_raw: dict,
+    guidance_raw: dict,
+    filing_id: str
+) -> list[CanonicalWritePlan]:
+    """
+    既存の保存直前データを受け取り、正規化された CanonicalWritePlan のリストを生成する。
+    period, source の正規化を行い、FY予想もプラン化する。
+    """
+    plans = []
+    
+    # 1. Period Normalization
+    normalized_period = period_raw
+    if ticker == "2408" and period_raw and period_raw.endswith("-31"):
+        normalized_period = period_raw[:8] + "20"
+        
+    # 2. Actuals (source="jquants")
+    for m_name, m_val in metrics_raw.items():
+        if m_val is None:
+            continue
+            
+        plan = CanonicalWritePlan(
+            ticker=ticker,
+            period=normalized_period or "unknown",
+            quarter=quarter_raw,
+            metric=m_name,
+            value=m_val, # Assume already scaled to millions_jpy
+            unit="millions_jpy",
+            source="jquants",
+            filing_id=filing_id
+        )
+        plan.validate_and_prepare()
+        plans.append(plan)
+        
+    # 3. Guidance (source="jquants_forecast_fy", quarter="FY")
+    for g_name, g_val in guidance_raw.items():
+        if g_val is None:
+            continue
+            
+        metric_name = None
+        if g_name == "sales_forecast":
+            metric_name = "sales"
+        elif g_name == "op_forecast":
+            metric_name = "operating_profit"
+            
+        if metric_name:
+            plan = CanonicalWritePlan(
+                ticker=ticker,
+                period=normalized_period or "unknown",
+                quarter="FY",
+                metric=metric_name,
+                value=round(g_val / 1_000_000), # Guidance is raw JPY, scale to millions
+                unit="millions_jpy",
+                source="jquants_forecast_fy",
+                filing_id=filing_id
+            )
+            plan.validate_and_prepare()
+            plans.append(plan)
+            
+    return plans

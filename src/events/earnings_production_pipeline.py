@@ -39,35 +39,38 @@ from .summary_narrative_extractor import extract_narrative, NarrativeData
 from .earnings_shadow_writer import run_shadow_write_plan
 from .summary_notify import format_earnings_message, send_earnings_discord
 
-def _run_canonical_gateway_dryrun(ticker: str, period: str | None, quarter: str, metrics: dict, doc_id: str):
+def _run_canonical_gateway_dryrun(ticker: str, period: str | None, quarter: str, metrics: dict, doc_id: str, guidance: dict | None = None):
     import json
     import os
-    from src.events.canonical_write_gateway import validate_canonical_write_plan
-    from src.events.pipeline_context import CanonicalWritePlan
+    from src.events.canonical_write_gateway import validate_canonical_write_plan, build_normalized_canonical_write_plan
     from dataclasses import asdict
     import logging
     log = logging.getLogger(__name__)
 
+    guidance = guidance or {}
     gw_plans = []
     all_allowed = True
-    for m_name, m_val in metrics.items():
-        p = CanonicalWritePlan(
-            ticker=ticker,
-            period=period or "unknown",
-            quarter=quarter,
-            metric=m_name,
-            value=m_val,
-            unit="millions_jpy",
-            source="jquants_earnings_summary",
-            filing_id=doc_id
-        )
-        p.validate_and_prepare()
+    
+    normalized_plans = build_normalized_canonical_write_plan(
+        ticker=ticker,
+        period_raw=period or "unknown",
+        quarter_raw=quarter,
+        metrics_raw=metrics,
+        guidance_raw=guidance,
+        filing_id=doc_id
+    )
+    
+    for p in normalized_plans:
         p = validate_canonical_write_plan(p)
         if not p.write_allowed:
             all_allowed = False
         gw_plans.append(asdict(p))
 
-    report_file = "scratch/phase4c_gateway_dryrun.json"
+    guidance_absent_reason = None
+    if not guidance:
+        guidance_absent_reason = "existing_worker_skips_guidance_for_non_fy_quarters"
+
+    report_file = "scratch/phase4d_normalized_write_plan.json"
     existing_report = []
     if os.path.exists(report_file):
         try:
@@ -79,6 +82,7 @@ def _run_canonical_gateway_dryrun(ticker: str, period: str | None, quarter: str,
         "period": period,
         "quarter": quarter,
         "all_allowed": all_allowed,
+        "guidance_absent_reason": guidance_absent_reason,
         "plans": gw_plans
     })
     with open(report_file, "w", encoding="utf-8") as f:
@@ -475,7 +479,9 @@ def run_earnings_production(
                         if _cp_op is not None: _cp_metrics["operating_profit"] = _cp_op / 1_000_000
                         if _cp_gross is not None: _cp_metrics["gross_profit"] = _cp_gross / 1_000_000
                         
-                        _all_allowed = _run_canonical_gateway_dryrun(_ticker, _cp_period, _cp_q, _cp_metrics, _cp_doc_id)
+                        _cp_guidance = _cp_payload_ext.get("guidance", {})
+                        
+                        _all_allowed = _run_canonical_gateway_dryrun(_ticker, _cp_period, _cp_q, _cp_metrics, _cp_doc_id, _cp_guidance)
                         if not _all_allowed and dry_run:
                             logger.error(f"[EARNINGS][GATEWAY] {_ticker} Unsafe canonical plan detected! STOPPING in dry-run.")
                             result.errors.append(f"{_ticker}: canonical_gateway_rejected")
