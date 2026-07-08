@@ -186,6 +186,7 @@ def apply_normalized_canonical_write_plans(
     """
     Gateway通過済みの CanonicalWritePlan リストを実際の DB writer へ渡す。
     全件 write_allowed=True でない場合は、安全のため1件も保存しない。
+    既存の source_row_key がDBに存在する場合は、内容が一致すれば skip、不一致なら conflict として保存をブロックする。
     """
     blocked_reasons = []
     source_row_keys = []
@@ -206,8 +207,14 @@ def apply_normalized_canonical_write_plans(
     if blocked_reasons:
         return {
             "status": "blocked",
-            "blocked_reasons": blocked_reasons,
+            "total_plans": len(plans),
+            "write_allowed_count": len(plans) - len(blocked_reasons),
+            "skipped_existing_count": 0,
+            "conflict_count": 0,
             "would_write_count": 0,
+            "blocked_reasons": blocked_reasons,
+            "skipped_source_row_keys": [],
+            "conflict_source_row_keys": [],
             "actuals_count": 0,
             "forecasts_count": 0,
             "source_row_keys": [],
@@ -217,22 +224,90 @@ def apply_normalized_canonical_write_plans(
     if not plans:
         return {
             "status": "success",
+            "total_plans": 0,
+            "write_allowed_count": 0,
+            "skipped_existing_count": 0,
+            "conflict_count": 0,
             "would_write_count": 0,
+            "blocked_reasons": [],
+            "skipped_source_row_keys": [],
+            "conflict_source_row_keys": [],
             "actuals_count": 0,
             "forecasts_count": 0,
             "source_row_keys": [],
             "db_write_attempted": False
         }
-        
-    # All allowed, safe to write
-    db_result = writer_func(plans, config) if writer_func else {}
+
+    # 1. Fetch existing rows if config is provided
+    existing_rows_map = {}
+    if config and source_row_keys:
+        from lib.pipeline.db import supabase_select
+        keys_str = ",".join(source_row_keys)
+        params = {"select": "*", "source_row_key": f"in.({keys_str})"}
+        res = supabase_select("canonical_financials", params=params, config=config)
+        if isinstance(res, list):
+            for row in res:
+                existing_rows_map[row["source_row_key"]] = row
+
+    # 2. Check for skipped / conflict
+    skipped_existing_keys = []
+    conflict_keys = []
+    conflict_reasons = []
+    plans_to_write = []
+    
+    for p in plans:
+        if p.source_row_key in existing_rows_map:
+            ex = existing_rows_map[p.source_row_key]
+            # check fields
+            is_match = (
+                str(float(ex.get("value")) if ex.get("value") is not None else "None") == str(float(p.value) if p.value is not None else "None") and
+                str(ex.get("period")) == str(p.period) and
+                str(ex.get("quarter")) == str(p.quarter) and
+                str(ex.get("metric")) == str(p.metric) and
+                str(ex.get("source")) == str(p.source) and
+                str(ex.get("unit")) == str(p.unit)
+            )
+            if is_match:
+                skipped_existing_keys.append(p.source_row_key)
+            else:
+                conflict_keys.append(p.source_row_key)
+                conflict_reasons.append(f"Conflict on {p.source_row_key}: db_value={ex.get('value')} vs plan_value={p.value}")
+        else:
+            plans_to_write.append(p)
+            
+    if conflict_keys:
+        return {
+            "status": "conflict",
+            "total_plans": len(plans),
+            "write_allowed_count": len(plans),
+            "skipped_existing_count": len(skipped_existing_keys),
+            "conflict_count": len(conflict_keys),
+            "would_write_count": 0,
+            "blocked_reasons": conflict_reasons,
+            "skipped_source_row_keys": skipped_existing_keys,
+            "conflict_source_row_keys": conflict_keys,
+            "actuals_count": actuals_count,
+            "forecasts_count": forecasts_count,
+            "source_row_keys": source_row_keys,
+            "db_write_attempted": False
+        }
+
+    # All allowed and no conflicts
+    db_result = writer_func(plans_to_write, config) if writer_func and plans_to_write else {}
     
     return {
         "status": "success",
-        "would_write_count": len(plans),
+        "total_plans": len(plans),
+        "write_allowed_count": len(plans),
+        "skipped_existing_count": len(skipped_existing_keys),
+        "conflict_count": 0,
+        "would_write_count": len(plans_to_write),
+        "blocked_reasons": [],
+        "skipped_source_row_keys": skipped_existing_keys,
+        "conflict_source_row_keys": [],
         "actuals_count": actuals_count,
         "forecasts_count": forecasts_count,
         "source_row_keys": source_row_keys,
-        "db_write_attempted": bool(writer_func),
+        "db_write_attempted": bool(writer_func) and len(plans_to_write) > 0,
         "db_result": db_result
     }
