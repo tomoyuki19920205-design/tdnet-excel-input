@@ -262,14 +262,29 @@ def apply_normalized_canonical_write_plans(
 
     # 1. Fetch existing rows if config is provided
     existing_rows_map = {}
+    existing_by_natural = {}
     if config and source_row_keys:
         from lib.pipeline.db import supabase_select
-        keys_str = ",".join(source_row_keys)
+        query_keys = []
+        for p in valid_plans:
+            query_keys.append(p.source_row_key)
+            # Also fetch filing_id-less counterpart
+            key_no_fid = f"cf|{p.ticker}|{p.period}|{p.quarter}|{p.metric}|{p.source}|"
+            query_keys.append(key_no_fid)
+        
+        # Deduplicate keys
+        query_keys = list(set(query_keys))
+        
+        keys_str = ",".join(query_keys)
         params = {"select": "*", "source_row_key": f"in.({keys_str})"}
         res = supabase_select("canonical_financials", params=params, config=config)
         if isinstance(res, list):
             for row in res:
+                # Map by source_row_key
                 existing_rows_map[row["source_row_key"]] = row
+                # Map by natural key
+                nat_key = (row["ticker"], row["period"], row["quarter"], row["metric"], row["source"])
+                existing_by_natural[nat_key] = row
 
     # 2. Check for skipped / conflict
     skipped_existing_keys = []
@@ -278,21 +293,34 @@ def apply_normalized_canonical_write_plans(
     plans_to_write = []
     
     for p in valid_plans:
+        # Check source_row_key first (exact match)
         ex = existing_rows_map.get(p.source_row_key)
+        
+        # If no exact match, check natural key
+        is_natural_match = False
+        if not ex:
+            nat_key = (p.ticker, p.period, p.quarter, p.metric, p.source)
+            ex = existing_by_natural.get(nat_key)
+            if ex:
+                is_natural_match = True
+                
         if ex:
             is_match = (
                 str(float(ex.get("value")) if ex.get("value") is not None else "None") == str(float(p.value) if p.value is not None else "None") and
-                str(ex.get("period")) == str(p.period) and
-                str(ex.get("quarter")) == str(p.quarter) and
-                str(ex.get("metric")) == str(p.metric) and
-                str(ex.get("source")) == str(p.source) and
                 str(ex.get("unit")) == str(p.unit)
             )
             if is_match:
                 skipped_existing_keys.append(p.source_row_key)
             else:
                 conflict_keys.append(p.source_row_key)
-                conflict_reasons.append(f"Conflict on {p.source_row_key}: db_value={ex.get('value')} vs plan_value={p.value}")
+                if is_natural_match:
+                    conflict_reasons.append(
+                        f"Natural key conflict on ({p.ticker}, {p.period}, {p.quarter}, {p.metric}, {p.source}): "
+                        f"db_value={ex.get('value')} {ex.get('unit')} (key={ex.get('source_row_key')}) "
+                        f"vs plan_value={p.value} {p.unit} (key={p.source_row_key})"
+                    )
+                else:
+                    conflict_reasons.append(f"Conflict on {p.source_row_key}: db_value={ex.get('value')} vs plan_value={p.value}")
         else:
             plans_to_write.append(p)
             
