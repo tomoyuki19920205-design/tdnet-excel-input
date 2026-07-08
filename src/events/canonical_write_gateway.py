@@ -143,3 +143,62 @@ def build_normalized_canonical_write_plan(
             plans.append(plan)
             
     return plans
+
+def apply_normalized_canonical_write_plans(
+    plans: list[CanonicalWritePlan],
+    writer_func,
+    config: dict = None
+) -> dict:
+    """
+    Gateway通過済みの CanonicalWritePlan リストを実際の DB writer へ渡す。
+    全件 write_allowed=True でない場合は、安全のため1件も保存しない。
+    """
+    blocked_reasons = []
+    source_row_keys = []
+    
+    actuals_count = 0
+    forecasts_count = 0
+    
+    for p in plans:
+        if not p.write_allowed:
+            blocked_reasons.append(p.block_reason)
+        else:
+            source_row_keys.append(p.source_row_key)
+            if p.quarter == "FY" and "forecast" in p.source:
+                forecasts_count += 1
+            else:
+                actuals_count += 1
+                
+    if blocked_reasons:
+        return {
+            "status": "blocked",
+            "blocked_reasons": blocked_reasons,
+            "would_write_count": 0,
+            "actuals_count": 0,
+            "forecasts_count": 0,
+            "source_row_keys": [],
+            "db_write_attempted": False
+        }
+        
+    if not plans:
+        return {
+            "status": "success",
+            "would_write_count": 0,
+            "actuals_count": 0,
+            "forecasts_count": 0,
+            "source_row_keys": [],
+            "db_write_attempted": False
+        }
+        
+    # All allowed, safe to write
+    db_result = writer_func(plans, config) if writer_func else {}
+    
+    return {
+        "status": "success",
+        "would_write_count": len(plans),
+        "actuals_count": actuals_count,
+        "forecasts_count": forecasts_count,
+        "source_row_keys": source_row_keys,
+        "db_write_attempted": bool(writer_func),
+        "db_result": db_result
+    }
