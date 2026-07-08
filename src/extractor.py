@@ -80,8 +80,11 @@ _XBRL_TAG_MAP = {
     "RevenueIFRS": "sales",
     "NetOperatingRevenueSEC": "sales",
     "OperatingRevenueSEC": "sales",
+    "GrossOperatingRevenues": "sales",
+    "GrossOperatingRevenue": "sales",
     "GrossProfit": "gross_profit",
     "GrossProfitIFRS": "gross_profit",
+    "OperatingGrossProfit": "gross_profit",
     "SellingGeneralAndAdministrativeExpenses": "selling_general_and_administrative_expenses",
     "SellingGeneralAndAdministrativeExpensesIFRS": "selling_general_and_administrative_expenses",
     "CostOfSales": "cost_of_sales",          # 売上原価（計算補完用）
