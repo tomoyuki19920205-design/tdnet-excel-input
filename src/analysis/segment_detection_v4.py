@@ -3357,6 +3357,55 @@ def _run_v4_inner(
     # 既存の FAIL 分岐および Phase 0-8 のロジックには一切触れない。
     # ------------------------------------------------------------------
     if result.segments:
+        from src.segment.segment_name_validator import validate_segment_name, RowType
+        valid_segments = []
+        for seg in result.segments:
+            name = seg.segment_name or ""
+            # 1. 空の判定
+            if not name.strip():
+                logger.warning("[v4] segment_validation_failed: empty name")
+                continue
+            # 2. 文字化け判定
+            if "\ufffd" in name:
+                logger.warning("[v4] segment_validation_failed: garbled char in %r", name)
+                continue
+            # 3. 長すぎる判定
+            if len(name) > 30:
+                logger.warning("[v4] segment_validation_failed: name too long (%d chars): %r", len(name), name)
+                continue
+            # 4. 本文混入・単一セグメント省略文などのブラックリスト判定
+            has_bad_kw = False
+            for kw in ("当社グループは", "について", "セグメント情報", "記載を省略", "報告セグメントは", "事業セグメントは", "単一のセグメント", "重要性が乏しい", "連結財務諸表", "であるため"):
+                if kw in name:
+                    has_bad_kw = True
+                    logger.warning("[v4] segment_validation_failed: bad keyword %r in %r", kw, name)
+                    break
+            if has_bad_kw:
+                continue
+            # 5. 売上と利益が両方とも None の判定
+            if seg.segment_sales is None and seg.segment_profit is None:
+                logger.warning("[v4] segment_validation_failed: both sales and profit are None in %r", name)
+                continue
+            # 6. 数値列の不自然な対応（数値のみ・数値ライク）の判定
+            if _NUMERIC_LIKE_HEADER_RE.match(name):
+                logger.warning("[v4] segment_validation_failed: numeric-like name %r", name)
+                continue
+            # 7. 標準バリデーター（PL科目などの判定）
+            val_res = validate_segment_name(name)
+            if not val_res.is_valid or val_res.row_type == RowType.INVALID:
+                logger.warning("[v4] segment_validation_failed: failed segment_name_validator (%s) for %r", val_res.invalid_reason, name)
+                continue
+                
+            valid_segments.append(seg)
+            
+        if len(valid_segments) != len(result.segments):
+            logger.info("[v4] segment_quarantine: filtered invalid segments from %d to %d", len(result.segments), len(valid_segments))
+            result.segments = valid_segments
+
+        if not result.segments:
+            result.quarantine_reason = "validation_failed"
+            return result
+
         seg_names = [s.segment_name for s in result.segments]
 
         # 条件1: セグメント数が少なすぎる
