@@ -186,6 +186,7 @@ def run_batch(
     target_tickers: list[str] | None = None,
     enable_prior_comparative: bool = False,
     prior_comparative_canary_tickers: list[str] | None = None,
+    canonical_target: str = "all",
 ) -> dict:
     """
     filings process (batch) を実行。
@@ -203,6 +204,7 @@ def run_batch(
             - None: 全 phase 実行（デフォルト）
         limit_filings: filing 件数制限（0=無制限）
         target_tickers: 特定 ticker のみ処理（canonical 用）
+        canonical_target: canonical同期の対象 ("all" | "financials" | "segments")
 
     Returns:
         {"push": dict, "jquants": dict | None, "canonical": dict, "mode": str}
@@ -228,6 +230,7 @@ def run_batch(
             t0_batch=t0_batch,
             enable_prior_comparative=enable_prior_comparative,
             prior_comparative_canary_tickers=prior_comparative_canary_tickers,
+            canonical_target=canonical_target,
         )
     finally:
         _remove_batch_log_handler(batch_handler)
@@ -248,6 +251,7 @@ def _run_batch_inner(
     t0_batch: float,
     enable_prior_comparative: bool,
     prior_comparative_canary_tickers: list[str] | None,
+    canonical_target: str,
 ) -> dict:
     """run_batch の内部実装。"""
     _is_realtime = mode == "realtime"
@@ -399,6 +403,8 @@ def _run_batch_inner(
                 target_keys=target_keys,
                 lookback_days=canonical_lookback_days,
                 strict=strict_canonical,
+                sync_financials=canonical_target in ("all", "financials"),
+                sync_segments=canonical_target in ("all", "segments"),
             )
             result["canonical"] = canonical_stats
             logger.info(

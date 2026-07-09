@@ -422,6 +422,8 @@ def sync_canonical(
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
     strict: bool = False,
     allow_fallback: bool = True,
+    sync_financials: bool = True,
+    sync_segments: bool = True,
 ) -> dict:
     """日次差分で canonical_financials / canonical_segments を更新する。
 
@@ -433,6 +435,8 @@ def sync_canonical(
         strict: True なら canonical 失敗で例外を raise
         allow_fallback: False なら target_keys で 0 件でも lookback fallback しない
                          (realtime 用)
+        sync_financials: False なら financials の書き込みを行わない
+        sync_segments: False なら segments の書き込みを行わない
 
     Returns:
         {
@@ -474,10 +478,13 @@ def sync_canonical(
     logger.info("[canonical] phase=select_financials_rows START")
     _t0 = time.monotonic()
     try:
-        fin_rows, fin_fb = _select_financials_rows(
-            db_path, target_keys=target_keys, lookback_days=lookback_days,
-            allow_fallback=allow_fallback,
-        )
+        if sync_financials:
+            fin_rows, fin_fb = _select_financials_rows(
+                db_path, target_keys=target_keys, lookback_days=lookback_days,
+                allow_fallback=allow_fallback,
+            )
+        else:
+            fin_rows, fin_fb = [], False
         logger.info(
             f"[canonical] phase=select_financials_rows END "
             f"elapsed={time.monotonic()-_t0:.1f}s "
@@ -494,10 +501,13 @@ def sync_canonical(
     _t0 = time.monotonic()
     seg_excluded_sql = 0
     try:
-        seg_rows, seg_fb, seg_excluded_sql = _select_segments_rows(
-            db_path, target_keys=target_keys, lookback_days=lookback_days,
-            allow_fallback=allow_fallback,
-        )
+        if sync_segments:
+            seg_rows, seg_fb, seg_excluded_sql = _select_segments_rows(
+                db_path, target_keys=target_keys, lookback_days=lookback_days,
+                allow_fallback=allow_fallback,
+            )
+        else:
+            seg_rows, seg_fb, seg_excluded_sql = [], False, 0
         logger.info(
             f"[canonical] phase=select_segments_rows END "
             f"elapsed={time.monotonic()-_t0:.1f}s "
@@ -595,7 +605,7 @@ def sync_canonical(
         # Note: quarterly_results のデータは百万円単位 (unit 列 = "百万円")。
         # canonical_financials には unit="millions_jpy" で書き込む。
         try:
-            if fin_rows and not dry_run:
+            if sync_financials and fin_rows and not dry_run:
                 logger.info(
                     f"[canonical] write_canonical_financials START "
                     f"rows={len(fin_rows)}"
@@ -677,7 +687,7 @@ def sync_canonical(
                     f"skipped={fin_stats['skipped']} errors={fin_stats['errors']} "
                     f"batches={fin_stats['batches_succeeded']}/{fin_stats['batches_attempted']}"
                 )
-            elif fin_rows and dry_run:
+            elif sync_financials and fin_rows and dry_run:
                 logger.info(f"[canonical] write_canonical_financials DRY-RUN targets={len(fin_rows)}")
                 fin_stats["skipped"] = len(fin_rows)
         except Exception as e:
@@ -689,7 +699,7 @@ def sync_canonical(
 
         # -- Segments --
         try:
-            if seg_rows and not dry_run:
+            if sync_segments and seg_rows and not dry_run:
                 logger.info(
                     f"[canonical] write_canonical_segments START "
                     f"rows={len(seg_rows)}"
@@ -845,7 +855,7 @@ def sync_canonical(
                     f"skipped={seg_stats['skipped']} errors={seg_stats['errors']} "
                     f"batches={seg_stats['batches_succeeded']}/{seg_stats['batches_attempted']}"
                 )
-            elif seg_rows and dry_run:
+            elif sync_segments and seg_rows and dry_run:
                 logger.info(f"[canonical] write_canonical_segments DRY-RUN targets={len(seg_rows)}")
                 seg_stats["skipped"] = len(seg_rows)
         except Exception as e:

@@ -85,7 +85,8 @@ def _run_process(dry_run: bool, skip_jquants: bool, mode: str = "nightly",
                  target_tickers: list[str] | None = None,
                  canonical_lookback_days: int = 7,
                  enable_prior_comparative: bool = False,
-                 prior_comparative_canary_tickers: list[str] | None = None) -> StepResult:
+                 prior_comparative_canary_tickers: list[str] | None = None,
+                 canonical_target: str = "all") -> StepResult:
     step = StepResult("process")
     st = time.monotonic()
     try:
@@ -97,6 +98,7 @@ def _run_process(dry_run: bool, skip_jquants: bool, mode: str = "nightly",
             canonical_lookback_days=canonical_lookback_days,
             enable_prior_comparative=enable_prior_comparative,
             prior_comparative_canary_tickers=prior_comparative_canary_tickers,
+            canonical_target=canonical_target,
         )
         step.detail = result
         push_errors = result.get("push", {}).get("errors", 0)
@@ -415,6 +417,9 @@ def main():
                         help="prior_comparative の保存処理を有効化する (default: False)")
     parser.add_argument("--prior-comparative-canary-tickers", type=str, nargs="*",
                         help="特定の ticker のみ prior_comparative を保存する (カンマ区切りも可)")
+    parser.add_argument("--canonical-target", type=str, default="all",
+                        choices=["all", "financials", "segments"],
+                        help="canonical sync target (default: all)")
     args = parser.parse_args()
 
     # --verbose が指定されたら DEBUG レベルに
@@ -581,6 +586,7 @@ def main():
                 canonical_lookback_days=getattr(args, 'lookback_days', 7),
                 enable_prior_comparative=args.enable_prior_comparative,
                 prior_comparative_canary_tickers=canary_tickers,
+                canonical_target=getattr(args, 'canonical_target', 'all'),
             ),
             trigger_type=trigger,
         )
