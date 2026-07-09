@@ -21,6 +21,7 @@ from typing import Any, Optional
 
 from .common_models import EventRecord, EventType
 from .notify_rules import should_notify_event
+from lib.pipeline.retry_helper import with_retry
 
 logger = logging.getLogger("tdnet_event_store")
 
@@ -126,6 +127,10 @@ def _get_supabase():
         logger.error(f"[STORE] Supabase init failed: {e}")
         return None
 
+@with_retry(max_tries=3, status_forcelist=(429, 500, 502, 503, 504), backoff_factor=1.0)
+def _supabase_execute(query_builder):
+    """Helper to execute Supabase query with retry."""
+    return query_builder.execute()
 
 # ============================================================
 # dedupe_key 生成
@@ -412,8 +417,8 @@ def _calculate_notification_compare(ticker: str, extracted: dict, client=None) -
                             .select('period, metric, value') \
                             .eq('ticker', ticker) \
                             .eq('quarter', 'FY') \
-                            .in_('metric', ['sales', 'operating_profit']) \
-                            .execute()
+                            .in_('metric', ['sales', 'operating_profit'])
+                        res = _supabase_execute(res)
                         prev_sales = None
                         prev_op = None
                         curr_f_sales = None
@@ -483,8 +488,8 @@ def _calculate_notification_compare(ticker: str, extracted: dict, client=None) -
                     .select('period, metric, value') \
                     .eq('ticker', ticker) \
                     .eq('quarter', target_quarter) \
-                    .in_('metric', ['sales', 'operating_profit']) \
-                    .execute()
+                    .in_('metric', ['sales', 'operating_profit'])
+                res = _supabase_execute(res)
                 
                 curr_sales = None
                 curr_op = None
@@ -568,8 +573,8 @@ def _supplement_current_yoy(ticker: str, extracted: dict, client) -> None:
             .select("period, metric, value") \
             .eq("ticker", ticker) \
             .eq("quarter", quarter) \
-            .in_("metric", ["sales", "operating_profit"]) \
-            .execute()
+            .in_("metric", ["sales", "operating_profit"])
+        res = _supabase_execute(res)
             
         prev_s = None
         prev_o = None
@@ -799,6 +804,8 @@ def save_event_to_supabase(
     *,
     dry_run: bool = False,
     discord_sent_at: "str | None" = None,
+    prefetched_existing_rows: list[dict] | None = None,
+    _skip_db_write: bool = False,
 ) -> dict:
     """EventRecord → Supabase tdnet_events へ INSERT (best-effort)
 
@@ -840,17 +847,22 @@ def save_event_to_supabase(
                     start_iso = start_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
                     end_iso = end_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-                    exist_res = (
-                        client.table("tdnet_events")
-                        .select("id, primary_metric_yoy")
-                        .eq("ticker", event.ticker or "")
-                        .eq("event_type", display_category)
-                        .gte("disclosed_at", start_iso)
-                        .lt("disclosed_at", end_iso)
-                        .execute()
-                    )
-                    if exist_res.data:
-                        for ext_row in exist_res.data:
+                    if prefetched_existing_rows is not None:
+                        exist_data = [r for r in prefetched_existing_rows if r.get("event_type") == display_category and start_iso <= r.get("disclosed_at", "") < end_iso]
+                    else:
+                        exist_res = (
+                            client.table("tdnet_events")
+                            .select("id, primary_metric_yoy, event_type, disclosed_at")
+                            .eq("ticker", event.ticker or "")
+                            .eq("event_type", display_category)
+                            .gte("disclosed_at", start_iso)
+                            .lt("disclosed_at", end_iso)
+                        )
+                        exist_res = _supabase_execute(exist_res)
+                        exist_data = exist_res.data or []
+                        
+                    if exist_data:
+                        for ext_row in exist_data:
                             if ext_row.get("primary_metric_yoy") is not None:
                                 logger.info(
                                     f"[STORE] DEDUP_SKIPPED (YOY protect) ticker={event.ticker} "
@@ -872,24 +884,28 @@ def save_event_to_supabase(
                 day_start_iso = start_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
                 next_day_iso = end_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
                 
-                q = (
-                    client.table("tdnet_events")
-                    .select("*")
-                    .eq("ticker", event.ticker or "")
-                    .order("created_at", desc=True)
-                )
-
-                q = q.limit(20)
-                strict_match_res = q.execute()
+                if prefetched_existing_rows is not None:
+                        strict_match_data = prefetched_existing_rows
+                else:
+                    q = (
+                        client.table("tdnet_events")
+                        .select("*")
+                        .eq("ticker", event.ticker or "")
+                        .order("created_at", desc=True)
+                    )
+    
+                    q = q.limit(20)
+                    strict_match_res = _supabase_execute(q)
+                    strict_match_data = strict_match_res.data or []
 
                 matched_row = None
                 match_reason = ""
                 
-                if strict_match_res.data:
+                if strict_match_data:
                     norm_title = _normalize_headline(event.title)
                     xbrl_doc_id = _nested_get(raw_payload, "raw", "xbrl_doc_id") or _nested_get(raw_payload, "extracted", "xbrl_doc_id")
                     
-                    for r in strict_match_res.data:
+                    for r in strict_match_data:
                         if r.get("event_type") != display_category:
                             continue
                         raw_p = _safe_json(r.get("raw_payload"))
@@ -957,8 +973,15 @@ def save_event_to_supabase(
                     # YOY保護のロジック: 上書き時、新しいYOYがnullで既存にYOYがあれば維持
                     if display_category == DISPLAY_EARNINGS and metric_yoy is None:
                         # check existing YOY from another query, or we can just fetch it now
-                        exist_yoy_res = client.table("tdnet_events").select("primary_metric_yoy").eq("id", existing_id).execute()
-                        if exist_yoy_res.data and exist_yoy_res.data[0].get("primary_metric_yoy") is not None:
+                        if prefetched_existing_rows is not None:
+                            exist_yoy = next((r.get("primary_metric_yoy") for r in prefetched_existing_rows if r.get("id") == existing_id), None)
+                            has_yoy = exist_yoy is not None
+                        else:
+                            exist_yoy_res = client.table("tdnet_events").select("primary_metric_yoy").eq("id", existing_id)
+                            exist_yoy_res = _supabase_execute(exist_yoy_res)
+                            has_yoy = bool(exist_yoy_res.data and exist_yoy_res.data[0].get("primary_metric_yoy") is not None)
+                        
+                        if has_yoy:
                             logger.info(f"[STORE] DEDUP_SKIPPED (YOY protect strict) ticker={event.ticker}")
                             result["action"] = "dedup_skipped"
                             result["display_category"] = display_category
@@ -1034,7 +1057,15 @@ def save_event_to_supabase(
                         logger.info(f"[STORE DRY-RUN] WOULD UPDATE existing record ticker={event.ticker} id={existing_id[:8]} (reason: {match_reason})")
                         return result
                         
-                    resp = client.table("tdnet_events").update(row).eq("id", existing_id).execute()
+                    if _skip_db_write:
+                        result["action"] = "would_update"
+                        result["id"] = existing_id
+                        result["display_category"] = display_category
+                        result["_row"] = row
+                        return result
+                        
+                    resp = client.table("tdnet_events").update(row).eq("id", existing_id)
+                    resp = _supabase_execute(resp)
                     if resp.data and len(resp.data) > 0:
                         result["action"] = "updated"
                         result["id"] = existing_id
@@ -1061,13 +1092,17 @@ def save_event_to_supabase(
             result["display_title"] = display_title
             result["display_category"] = display_category
             result["priority_rank"] = row.get("priority_rank", 50)
+        if _skip_db_write:
+            result["action"] = "would_insert"
+            result["display_category"] = display_category
+            result["_row"] = row
             return result
             
         resp = (
             client.table("tdnet_events")
             .upsert(row, on_conflict="dedupe_key", ignore_duplicates=True)
-            .execute()
         )
+        resp = _supabase_execute(resp)
 
         if resp.data and len(resp.data) > 0:
             result["action"] = "inserted"
@@ -1100,8 +1135,8 @@ def save_event_to_supabase(
                         client.table("tdnet_events")
                         .update({"discord_sent_at": discord_sent_at})
                         .eq("dedupe_key", dedupe_key)
-                        .execute()
                     )
+                    upd_resp = _supabase_execute(upd_resp)
                     if upd_resp.data and len(upd_resp.data) > 0:
                         logger.info(
                             "[EVENT_NOTIFY_SUPABASE_SENT_AT_UPDATE_ON_DEDUP] "
@@ -1137,13 +1172,15 @@ def save_events_batch(
     events: list[EventRecord],
     *,
     dry_run: bool = False,
+    chunk_size: int = 50,
+    discord_sent_at_map: dict[str, str] | None = None,
 ) -> dict:
-    """複数イベントをまとめて保存。
-
+    """複数イベントをチャンク単位でまとめて安全にバルク保存（UPSERT/UPDATE）。
+    
     Returns:
-        {"inserted": int, "dedup_skipped": int, "errors": int, "dry_run": int}
+        {"inserted": int, "dedup_skipped": int, "errors": int, "dry_run": int, "updated": int}
     """
-    counts = {"inserted": 0, "dedup_skipped": 0, "errors": 0, "dry_run": 0}
+    counts = {"inserted": 0, "dedup_skipped": 0, "errors": 0, "dry_run": 0, "updated": 0}
     category_counts = {
         "classified_buyback": 0,
         "classified_forecast": 0,
@@ -1162,22 +1199,90 @@ def save_events_batch(
         DISPLAY_OTHER: "classified_other",
     }
 
-    for ev in events:
-        result = save_event_to_supabase(ev, dry_run=dry_run)
-        action = result.get("action", "error")
-        if action in counts:
-            counts[action] += 1
-        else:
-            counts["errors"] += 1
+    client = _get_supabase()
 
-        # カテゴリ集計
-        cat = result.get("display_category", "")
-        cat_key = _cat_key_map.get(cat, "classified_undecided")
-        category_counts[cat_key] += 1
+    def _fallback_single(chunk: list[EventRecord]):
+        for ev in chunk:
+            ds_at = discord_sent_at_map.get(ev.event_id) if discord_sent_at_map else None
+            res = save_event_to_supabase(ev, dry_run=dry_run, discord_sent_at=ds_at)
+            action = res.get("action", "error")
+            counts[action] = counts.get(action, 0) + 1
+            cat = res.get("display_category", "")
+            cat_key = _cat_key_map.get(cat, "classified_undecided")
+            category_counts[cat_key] += 1
+
+    if client is None:
+        logger.warning("[STORE_BULK] Supabase client not available — fallback to single (which will also fail)")
+        _fallback_single(events)
+        return counts
+
+    for i in range(0, len(events), chunk_size):
+        chunk = events[i:i+chunk_size]
+        tickers = list({ev.ticker for ev in chunk if ev.ticker})
+        if not tickers:
+            continue
+
+        try:
+            # バルクで既存行をフェッチ (直近20日分などを取得して全メモリ展開)
+            # YOY保護や厳密マッチのために必要
+            today_iso = (datetime.now(JST) - timedelta(days=20)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            exist_q = client.table("tdnet_events").select("*").in_("ticker", tickers).gte("disclosed_at", today_iso).order("created_at", desc=True)
+            exist_res = _supabase_execute(exist_q)
+            prefetched_existing_rows = exist_res.data or []
+            
+            rows_to_insert = []
+            rows_to_update = []
+            results = []
+
+            for ev in chunk:
+                # DB書き込みをスキップし、どう処理すべきか（would_insert / would_update / dedup_skipped）を判定
+                ds_at = discord_sent_at_map.get(ev.event_id) if discord_sent_at_map else None
+                res = save_event_to_supabase(
+                    ev, 
+                    dry_run=dry_run, 
+                    discord_sent_at=ds_at,
+                    prefetched_existing_rows=prefetched_existing_rows, 
+                    _skip_db_write=True
+                )
+                results.append(res)
+                
+                if res.get("action") == "would_insert" and "_row" in res:
+                    rows_to_insert.append(res["_row"])
+                elif res.get("action") == "would_update" and "_row" in res:
+                    res["_row"]["id"] = res["id"] # UPDATE用にidを付与
+                    rows_to_update.append(res["_row"])
+
+            if not dry_run:
+                # バルク INSERT
+                if rows_to_insert:
+                    ins_resp = _supabase_execute(
+                        client.table("tdnet_events").upsert(rows_to_insert, on_conflict="dedupe_key", ignore_duplicates=True)
+                    )
+                # バルク UPDATE
+                if rows_to_update:
+                    upd_resp = _supabase_execute(
+                        client.table("tdnet_events").upsert(rows_to_update) # id があるので UPDATE として動作
+                    )
+
+            # カウント集計
+            for res in results:
+                action = res.get("action", "error")
+                if action == "would_insert": action = "dry_run" if dry_run else "inserted"
+                elif action == "would_update": action = "dry_run" if dry_run else "updated"
+                counts[action] = counts.get(action, 0) + 1
+
+                cat = res.get("display_category", "")
+                cat_key = _cat_key_map.get(cat, "classified_undecided")
+                category_counts[cat_key] += 1
+
+        except Exception as e:
+            logger.error(f"[STORE_BULK] Bulk processing failed for chunk, falling back to single: {e}")
+            _fallback_single(chunk)
 
     logger.info(
-        f"[STORE] batch complete: inserted={counts['inserted']} "
-        f"dedup={counts['dedup_skipped']} errors={counts['errors']}"
+        f"[STORE] batch complete: inserted={counts.get('inserted',0)} "
+        f"updated={counts.get('updated',0)} "
+        f"dedup={counts.get('dedup_skipped',0)} errors={counts.get('errors',0)}"
     )
     logger.info(
         f"[STORE] category breakdown: "
@@ -1223,8 +1328,8 @@ def update_discord_sent_at_supabase(
             client.table("tdnet_events")
             .update({"discord_sent_at": now_iso})
             .eq("dedupe_key", dedupe_key)
-            .execute()
         )
+        resp = _supabase_execute(resp)
 
         if resp.data and len(resp.data) > 0:
             logger.info(

@@ -381,6 +381,7 @@ def _process_single_document(
     event_types: set[str] | None = None,
     dry_run: bool = False,
     db_path: str = "",
+    pre_fetched: dict | None = None,
 ) -> list[dict]:
     """1文書を分類・抽出・保存する。
 
@@ -442,7 +443,11 @@ def _process_single_document(
         """テキストとPDFパスをキャッシュ付きで取得（同一文書内で複数回呼んでも1回だけ取得）。"""
         nonlocal _text_fetched, _text, _fetched_pdf_path
         if not _text_fetched:
-            _text, _fetched_pdf_path = _get_text_and_pdf(doc)
+            if pre_fetched and "text" in pre_fetched and "pdf_path" in pre_fetched:
+                _text = pre_fetched["text"]
+                _fetched_pdf_path = pre_fetched["pdf_path"]
+            else:
+                _text, _fetched_pdf_path = _get_text_and_pdf(doc)
             _text_fetched = True
         return _text, _fetched_pdf_path
 
@@ -715,33 +720,71 @@ def process_documents(
             conn = sqlite3.connect(":memory:")
             ensure_events_table(conn)
 
-        for doc in docs:
-            result.processed += 1
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        def _prefetch_worker(doc: DocumentMeta) -> dict | None:
+            # 軽量事前分類（PDFが必要か判定）
+            title = doc.title
+            allowed = event_types or {EventType.BUYBACK, EventType.FORECAST_REVISION, EventType.DIVIDEND_REVISION}
+            _pre_buyback_subtype = classify_buyback_subtype(title)
+            _pre_forecast = classify_forecast(title, "")
+            _pre_dividend = classify_dividend(title, "")
+            _need_buyback  = (EventType.BUYBACK in allowed) and (_pre_buyback_subtype != "ignore")
+            _need_forecast = (EventType.FORECAST_REVISION in allowed) and _pre_forecast.is_target
+            _need_dividend = (EventType.DIVIDEND_REVISION in allowed) and _pre_dividend.is_target
+            
+            if not (_need_buyback or _need_forecast or _need_dividend):
+                return None
+                
             try:
-                doc_results = _process_single_document(doc, conn, event_types, dry_run, db_path=db_path)
-                for dr in doc_results:
-                    if dr.get("action") == "skipped_non_target":
-                        result.skipped_all_doc_ids.append(doc.doc_id)
-                        continue  # detailsにも入れず、他のカウントも行わない
-                    elif dr.get("action") == "error":
-                        result.errors += 1
-                    elif dr.get("action") == "inserted":
-                        result.detected += 1
-                        result.saved += 1
-                    elif dr.get("action") == "updated":
-                        result.detected += 1
-                        result.saved += 1
-                    elif dr.get("action") == "dry_run":
-                        result.detected += 1
-                    elif dr.get("action") in ("no_change", "no_change_detected"):
-                        result.skipped += 1
-                    result.details.append(dr)
+                _text, _pdf_path = _get_text_and_pdf(doc)
+                return {"text": _text, "pdf_path": _pdf_path}
             except Exception as e:
-                result.errors += 1
-                logger.error(f"[EVENT] processing failed doc_id={doc.doc_id[:16]}: {e}")
-                result.details.append({
-                    "doc_id": doc.doc_id, "ticker": doc.ticker, "action": "error", "error": str(e),
-                })
+                logger.warning(f"[EVENT_PIPELINE] Pre-fetch failed for doc_id={doc.doc_id}: {e}")
+                return None
+
+        CHUNK_SIZE = 50
+        for chunk_idx in range(0, len(docs), CHUNK_SIZE):
+            chunk = docs[chunk_idx:chunk_idx+CHUNK_SIZE]
+            
+            pre_fetched_map = {}
+            max_workers = int(os.environ.get("TDNET_PDF_PREFETCH_WORKERS", os.environ.get("PREFETCH_MAX_WORKERS", "5")))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {executor.submit(_prefetch_worker, doc): doc.doc_id for doc in chunk}
+                for fut in as_completed(futures):
+                    doc_id = futures[fut]
+                    res = fut.result()
+                    if res:
+                        pre_fetched_map[doc_id] = res
+
+            for doc in chunk:
+                result.processed += 1
+                try:
+                    pf = pre_fetched_map.get(doc.doc_id)
+                    doc_results = _process_single_document(doc, conn, event_types, dry_run, db_path=db_path, pre_fetched=pf)
+                    for dr in doc_results:
+                        if dr.get("action") == "skipped_non_target":
+                            result.skipped_all_doc_ids.append(doc.doc_id)
+                            continue  # detailsにも入れず、他のカウントも行わない
+                        elif dr.get("action") == "error":
+                            result.errors += 1
+                        elif dr.get("action") == "inserted":
+                            result.detected += 1
+                            result.saved += 1
+                        elif dr.get("action") == "updated":
+                            result.detected += 1
+                            result.saved += 1
+                        elif dr.get("action") == "dry_run":
+                            result.detected += 1
+                        elif dr.get("action") in ("no_change", "no_change_detected"):
+                            result.skipped += 1
+                        result.details.append(dr)
+                except Exception as e:
+                    result.errors += 1
+                    logger.error(f"[EVENT] processing failed doc_id={doc.doc_id[:16]}: {e}")
+                    result.details.append({
+                        "doc_id": doc.doc_id, "ticker": doc.ticker, "action": "error", "error": str(e),
+                    })
 
         # 通知: new のみ
         if webhook_url and not dry_run and conn:
@@ -998,7 +1041,7 @@ def process_documents(
 
         if not dry_run:
             try:
-                from .tdnet_event_store import save_event_to_supabase as _save_to_sb, build_dedupe_key as _build_dkey
+                from .tdnet_event_store import save_events_batch as _save_batch, build_dedupe_key as _build_dkey
                 # 今回処理で inserted / updated になった EventRecord を収集
                 _records_to_sync: list[EventRecord] = []
                 for dr in result.details:
@@ -1009,72 +1052,36 @@ def process_documents(
                 if _records_to_sync:
                     logger.info(
                         f"[EVENT_SUPABASE] syncing {len(_records_to_sync)} new/updated events "
-                        f"to Supabase tdnet_events ..."
+                        f"to Supabase tdnet_events (bulk)..."
                     )
+                    
+                    _discord_sent_at_map = {}
                     for _rec in _records_to_sync:
-                        try:
-                            # Phase 2C: discord_sent_at を save_event_to_supabase に直接渡して原子的更新。
-                            # INSERT と sent_at 更新を1回のAPIコールで完結させることで
-                            # 「INSERT前にPATCHが走り no row found になる」レースコンディションを根本解消。
-                            _rec_dedupe = _build_dkey(_rec)
-                            _discord_sent_at_to_save: str | None = None
-                            if _rec_dedupe in _notified_by_dedupe:
-                                _discord_sent_at_to_save = datetime.now(timezone.utc).isoformat()
-                                logger.info(
-                                    "[EVENT_NOTIFY_SUPABASE_SENT_AT_WILL_ATOMIC] "
-                                    "event_id=%s ticker=%s dedupe=%s",
-                                    _rec.event_id[:12], _rec.ticker, _rec_dedupe[:12],
-                                )
-                            elif _rec.event_id in _notified_events_safe:
-                                # event_id ベースのフォールバック照合
-                                _discord_sent_at_to_save = datetime.now(timezone.utc).isoformat()
-                                logger.info(
-                                    "[EVENT_NOTIFY_SUPABASE_SENT_AT_WILL_ATOMIC_FALLBACK] "
-                                    "event_id=%s ticker=%s (dedupe mismatch, id match)",
-                                    _rec.event_id[:12], _rec.ticker,
-                                )
-
-                            _sb_result = _save_to_sb(_rec, dry_run=False, discord_sent_at=_discord_sent_at_to_save)
-                            _action = _sb_result.get("action", "error")
-                            _save_ok = _action in ("inserted", "updated", "dedup_skipped")
-                            if _action == "inserted":
-                                result.supabase_saved += 1
-                                logger.info(
-                                    f"[EVENT_SUPABASE] INSERTED ticker={_rec.ticker} "
-                                    f"type={_rec.event_type} "
-                                    f"-> {_sb_result.get('display_category')}"
-                                )
-                            elif _action == "dedup_skipped":
-                                result.supabase_dedup_skipped += 1
-                                logger.debug(
-                                    f"[EVENT_SUPABASE] DEDUP_SKIP ticker={_rec.ticker} "
-                                    f"type={_rec.event_type}"
-                                )
-                            elif _action == "updated":
-                                result.supabase_saved += 1
-                                logger.info(
-                                    f"[EVENT_SUPABASE] UPDATED ticker={_rec.ticker} "
-                                    f"type={_rec.event_type} "
-                                    f"-> {_sb_result.get('display_category')}"
-                                )
-                            else:
-                                result.supabase_errors += 1
-                                logger.warning(
-                                    f"[EVENT_SUPABASE] ERROR ticker={_rec.ticker} "
-                                    f"type={_rec.event_type} "
-                                    f"error={_sb_result.get('error', 'unknown')}"
-                                )
-
-                        except Exception as _sb_ev_e:
-                            result.supabase_errors += 1
-                            logger.warning(
-                                f"[EVENT_SUPABASE] EXCEPTION ticker={_rec.ticker} "
-                                f"type={_rec.event_type}: {_sb_ev_e}"
+                        _rec_dedupe = _build_dkey(_rec)
+                        if _rec_dedupe in _notified_by_dedupe:
+                            _discord_sent_at_map[_rec.event_id] = datetime.now(timezone.utc).isoformat()
+                            logger.info(
+                                "[EVENT_NOTIFY_SUPABASE_SENT_AT_WILL_ATOMIC] "
+                                "event_id=%s ticker=%s dedupe=%s",
+                                _rec.event_id[:12], _rec.ticker, _rec_dedupe[:12],
                             )
+                        elif _rec.event_id in _notified_events_safe:
+                            _discord_sent_at_map[_rec.event_id] = datetime.now(timezone.utc).isoformat()
+                            logger.info(
+                                "[EVENT_NOTIFY_SUPABASE_SENT_AT_WILL_ATOMIC_FALLBACK] "
+                                "event_id=%s ticker=%s (dedupe mismatch, id match)",
+                                _rec.event_id[:12], _rec.ticker,
+                            )
+                            
+                    batch_res = _save_batch(_records_to_sync, dry_run=False, discord_sent_at_map=_discord_sent_at_map)
+                    
+                    result.supabase_saved += batch_res.get("inserted", 0) + batch_res.get("updated", 0)
+                    result.supabase_dedup_skipped += batch_res.get("dedup_skipped", 0)
+                    result.supabase_errors += batch_res.get("errors", 0)
 
                     logger.info(
-                        f"[EVENT_SUPABASE] sync done: "
-                        f"inserted={result.supabase_saved} "
+                        f"[EVENT_SUPABASE] sync done (bulk): "
+                        f"saved={result.supabase_saved} "
                         f"dedup={result.supabase_dedup_skipped} "
                         f"errors={result.supabase_errors}"
                     )

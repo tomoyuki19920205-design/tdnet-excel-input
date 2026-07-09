@@ -10,6 +10,7 @@ from src.cache.cache_manager import make_cache_key, load_binary, save_binary, ge
 import shutil
 
 import requests
+from lib.pipeline.retry_helper import with_retry
 
 logger = logging.getLogger("tdnet")
 
@@ -67,6 +68,7 @@ def download_document(url: str, save_dir: str, session: requests.Session | None 
     result = download_document_ex(url, save_dir, session=session, alternate_paths=alternate_paths)
     return result.path if result.success else None
 
+@with_retry(max_tries=3, status_forcelist=(429, 500, 502, 503, 504), backoff_factor=1.0)
 def download_document_ex(url: str, save_dir: str, session: requests.Session | None = None, alternate_paths: list[str] | None = None) -> DownloadResult:
     try:
         save_path = Path(save_dir)

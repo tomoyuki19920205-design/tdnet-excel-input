@@ -141,6 +141,7 @@ def _process_single(
     dry_run: bool = False,
     dump_dir: str | None = None,
     session=None,
+    pre_fetched: dict | None = None,
 ) -> dict:
     """
     単一開示を処理する。
@@ -157,7 +158,11 @@ def _process_single(
 
     # ダウンロード
     docs_dir = str(Path(config.state_db_path).parent / "docs")
-    doc_path = download_document(item.doc_url, docs_dir, session=session)
+    
+    if pre_fetched and pre_fetched.get("doc_path"):
+        doc_path = pre_fetched["doc_path"]
+    else:
+        doc_path = download_document(item.doc_url, docs_dir, session=session)
 
     if doc_path is None:
         if not dry_run:
@@ -178,8 +183,12 @@ def _process_single(
 
     # XBRL取得 + ZIP永続化
     xbrl_path = None
-    if item.xbrl_url:
+    if pre_fetched and "xbrl_path" in pre_fetched:
+        xbrl_path = pre_fetched["xbrl_path"]
+    elif item.xbrl_url:
         xbrl_path = download_document(item.xbrl_url, docs_dir, session=session)
+        
+    if xbrl_path:
         # XBRL ZIP を永続化（再調査用）
         if xbrl_path and os.path.isfile(xbrl_path):
             try:
@@ -197,11 +206,15 @@ def _process_single(
                 logger.warning(f"[INGEST] XBRL ZIP archive failed: {e}")
 
     # 抽出
-    financials, extract_error = extract_financials(
-        doc_path=doc_path,
-        title=item.title,
-        xbrl_path=xbrl_path,
-    )
+    if pre_fetched and "financials" in pre_fetched:
+        financials = pre_fetched["financials"]
+        extract_error = pre_fetched["extract_error"]
+    else:
+        financials, extract_error = extract_financials(
+            doc_path=doc_path,
+            title=item.title,
+            xbrl_path=xbrl_path,
+        )
 
     if financials is None:
         error_msg = extract_error or "抽出失敗"
@@ -823,10 +836,53 @@ def run_ingest(
         last_heartbeat_time = time.monotonic()
         last_progress_time = time.monotonic()
 
-        for i, item in enumerate(target_items):
-            current_time = time.monotonic()
-            last_ticker = item.ticker
-            last_step = "ingest"
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        docs_dir = str(Path(config.state_db_path).parent / "docs")
+
+        def _prefetch_worker(item):
+            # 冪等チェックでスキップ
+            if state_db.is_processed(item.disclosure_id):
+                return None
+                
+            # ダウンロード (リトライは download_document_ex に付与済み)
+            doc_path = download_document(item.doc_url, docs_dir, session=session)
+            if not doc_path:
+                return None
+            xbrl_path = None
+            if item.xbrl_url:
+                xbrl_path = download_document(item.xbrl_url, docs_dir, session=session)
+                
+            # 解析
+            financials, extract_error = extract_financials(doc_path=doc_path, title=item.title, xbrl_path=xbrl_path)
+            return {
+                "doc_path": doc_path,
+                "xbrl_path": xbrl_path,
+                "financials": financials,
+                "extract_error": extract_error
+            }
+
+        CHUNK_SIZE = 50
+        for chunk_idx in range(0, len(target_items), CHUNK_SIZE):
+            chunk = target_items[chunk_idx:chunk_idx+CHUNK_SIZE]
+            
+            # Pre-fetch & Pre-parse (Bounded Parallel)
+            pre_fetched_map = {}
+            max_workers = int(os.environ.get("TDNET_PDF_PREFETCH_WORKERS", os.environ.get("PREFETCH_MAX_WORKERS", "5")))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {executor.submit(_prefetch_worker, item): item.disclosure_id for item in chunk}
+                for fut in as_completed(futures):
+                    doc_id = futures[fut]
+                    try:
+                        res = fut.result()
+                        if res:
+                            pre_fetched_map[doc_id] = res
+                    except Exception as e:
+                        logger.warning(f"[INGEST] Pre-fetch failed for doc_id={doc_id[:16]}: {e}")
+
+            for item in chunk:
+                current_time = time.monotonic()
+                last_ticker = item.ticker
+                last_step = "ingest"
 
             if current_time - last_heartbeat_time >= 30:
                 try:
@@ -863,9 +919,11 @@ def run_ingest(
                 continue
 
             try:
+                pf = pre_fetched_map.get(item.disclosure_id)
                 result = _process_single(
                     item, config, state_db, decision_db, run_id,
                     dry_run=dry_run, dump_dir=dump_dir, session=session,
+                    pre_fetched=pf
                 )
                 results.append(result)
                 if result.get("status") in ("inserted", "updated", "no_change", "dry_run"):

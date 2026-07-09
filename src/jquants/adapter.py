@@ -27,6 +27,7 @@ import requests
 from src.events.env_loader import load_project_env
 from src.models import DisclosureItem
 from src.jquants.classifier import classify_disclosure_jquants
+from lib.pipeline.retry_helper import with_retry
 
 logger = logging.getLogger("jquants.adapter")
 
@@ -178,6 +179,7 @@ def _build_headers() -> dict[str, str]:
     return {"x-api-key": _get_api_key()}
 
 
+@with_retry(max_tries=3, status_forcelist=(429, 500, 502, 503, 504), backoff_factor=1.0)
 def fetch_tdnet_list_raw(
     date_str: str,
     *,
@@ -370,6 +372,7 @@ def fetch_jquants_disclosures(
     return results
 
 
+@with_retry(max_tries=3, status_forcelist=(429, 500, 502, 503, 504), backoff_factor=1.0)
 def get_file_url(
     disc_no: str,
     file_type: str,  # "g"=全文PDF, "s"=サマリPDF, "x"=XBRL
