@@ -188,6 +188,7 @@ def main() -> int:
         step = run_step("process-batch", [
             PYTHON, "tools/pipeline_run.py", "process-batch",
             "--trigger", "scheduler",
+            "--skip-jquants-sync",
             *dry_flag,
         ], timeout_sec=1800)  # 30分
         steps.append(step)

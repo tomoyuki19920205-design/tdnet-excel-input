@@ -177,6 +177,7 @@ def run_batch(
     *,
     dry_run: bool = False,
     skip_jquants: bool = False,
+    skip_jquants_sync: bool = False,
     db_path: str | None = None,
     strict_canonical: bool = False,
     canonical_lookback_days: int = _DEFAULT_CANONICAL_LOOKBACK_DAYS,
@@ -219,6 +220,7 @@ def run_batch(
         return _run_batch_inner(
             dry_run=dry_run,
             skip_jquants=skip_jquants,
+            skip_jquants_sync=skip_jquants_sync,
             db_path=db_path,
             strict_canonical=strict_canonical,
             canonical_lookback_days=canonical_lookback_days,
@@ -240,6 +242,7 @@ def _run_batch_inner(
     *,
     dry_run: bool,
     skip_jquants: bool,
+    skip_jquants_sync: bool,
     db_path: str | None,
     strict_canonical: bool,
     canonical_lookback_days: int,
@@ -335,6 +338,9 @@ def _run_batch_inner(
     if phase is None or phase == "push":
         if skip_jquants:
             logger.info("[filings_process] Step 2: J-Quants sync SKIPPED")
+        elif skip_jquants_sync:
+            logger.info("[filings_process] Step 2: J-Quants sync SKIPPED (skipped by skip_jquants_sync)")
+            result["jquants"] = {"status": "skipped", "reason": "skipped_by_skip_jquants_sync"}
         else:
             logger.info("[filings_process] Step 2: J-Quants financial sync")
             try:

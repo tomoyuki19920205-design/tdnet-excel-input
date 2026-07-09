@@ -86,13 +86,16 @@ def _run_process(dry_run: bool, skip_jquants: bool, mode: str = "nightly",
                  canonical_lookback_days: int = 7,
                  enable_prior_comparative: bool = False,
                  prior_comparative_canary_tickers: list[str] | None = None,
-                 canonical_target: str = "all") -> StepResult:
+                 canonical_target: str = "all",
+                 skip_jquants_sync: bool = False) -> StepResult:
     step = StepResult("process")
     st = time.monotonic()
     try:
         from tools.filings_process import run_batch
         result = run_batch(
-            dry_run=dry_run, skip_jquants=skip_jquants, mode=mode,
+            dry_run=dry_run, skip_jquants=skip_jquants,
+            skip_jquants_sync=skip_jquants_sync,
+            mode=mode,
             phase=phase, limit_filings=limit_filings,
             target_tickers=target_tickers,
             canonical_lookback_days=canonical_lookback_days,
@@ -387,6 +390,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="書き込みをスキップ")
     parser.add_argument("--skip-notify", action="store_true", help="Discord通知をスキップ")
     parser.add_argument("--skip-jquants", action="store_true", help="J-Quants syncをスキップ")
+    parser.add_argument("--skip-jquants-sync", action="store_true", help="J-Quants canonical同期をスキップ")
     parser.add_argument("--ticker", type=str, help="特定 ticker (rebuild/process)")
     parser.add_argument("--trigger", type=str, default="manual",
                         choices=["scheduler", "manual", "retry", "reconcile"],
@@ -587,6 +591,7 @@ def main():
                 enable_prior_comparative=args.enable_prior_comparative,
                 prior_comparative_canary_tickers=canary_tickers,
                 canonical_target=getattr(args, 'canonical_target', 'all'),
+                skip_jquants_sync=getattr(args, 'skip_jquants_sync', False),
             ),
             trigger_type=trigger,
         )
