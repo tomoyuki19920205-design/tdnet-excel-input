@@ -261,6 +261,7 @@ def run_backfill(
     filing_list_path: str | None = None,
     reset_target: bool = False,
     force_done: bool = False,
+    dry_run_only: bool = True,
 ) -> dict:
     """バックフィルを実行する (Phase 1 / Phase 2 自動選択)。"""
     run_id = generate_run_id()
@@ -477,7 +478,7 @@ def run_backfill(
     fid_buffer: list[str] = []
 
     def _flush(buf, fid_buf):
-        _flush_buffer(buf, fid_buf, decision_db_path, db_batch_size, metrics, store, run_logger)
+        _flush_buffer(buf, fid_buf, decision_db_path, db_batch_size, metrics, store, run_logger, dry_run_only=dry_run_only)
 
     logger.info(f"[backfill] phase={mode} stage start: input_count={len(pending)}")
     print(f"[backfill] {mode} start: {len(pending)} filings")
@@ -494,7 +495,7 @@ def run_backfill(
             segment_buffer=segment_buffer, fid_buffer=fid_buffer,
             db_batch_size=db_batch_size,
             flush_every_seconds=flush_every_seconds,
-            flush_callback=_flush if decision_db_path else None,
+            flush_callback=_flush,
         )
     elif use_v2:
         from lib.backfill.phase2_runner import run_phase2_v2
@@ -508,7 +509,7 @@ def run_backfill(
             segment_buffer=segment_buffer, fid_buffer=fid_buffer,
             db_batch_size=db_batch_size,
             flush_every_seconds=flush_every_seconds,
-            flush_callback=_flush if decision_db_path else None,
+            flush_callback=_flush,
         )
     elif phase2:
         from lib.backfill.phase2_runner import run_phase2
@@ -522,7 +523,7 @@ def run_backfill(
             segment_buffer=segment_buffer, fid_buffer=fid_buffer,
             db_batch_size=db_batch_size, decision_db_path=decision_db_path,
             flush_every_seconds=flush_every_seconds,
-            flush_callback=_flush if decision_db_path else None,
+            flush_callback=_flush,
         )
     else:
         _run_phase1(
@@ -535,13 +536,14 @@ def run_backfill(
             segment_buffer=segment_buffer, fid_buffer=fid_buffer,
             db_batch_size=db_batch_size, decision_db_path=decision_db_path,
             flush_every_seconds=flush_every_seconds,
+            dry_run_only=dry_run_only,
         )
 
     logger.info(f"[backfill] {mode} done")
     print(f"[backfill] {mode} done")
 
     # ── 5. 残りバッファ flush ──
-    if segment_buffer and decision_db_path:
+    if segment_buffer:
         logger.info(f"[backfill] flush start: record_count={len(segment_buffer)}")
         _flush(segment_buffer, fid_buffer)
         logger.info("[backfill] flush done")
@@ -568,6 +570,7 @@ def _run_phase1(
     skip_pdf, only_xbrl,
     segment_buffer, fid_buffer, db_batch_size, decision_db_path,
     flush_every_seconds,
+    dry_run_only: bool = True,
 ):
     """Phase 1: 従来の ThreadPoolExecutor。"""
     last_flush = time.monotonic()
@@ -612,11 +615,11 @@ def _run_phase1(
 
             try:
                 if result.status == "ok":
-                    store.mark_done(fid, via=result.via, segment_count=len(result.segment_records), result_fingerprint=result.result_fingerprint, duration_ms=result.metrics.get("total_ms", 0))
+                     store.mark_done(fid, via=result.via, segment_count=len(result.segment_records), result_fingerprint=result.result_fingerprint, duration_ms=result.metrics.get("total_ms", 0))
                 elif result.status == "quarantined":
-                    store.mark_quarantined(fid, error=(result.quarantine or {}).get("error_message", ""), stage=(result.quarantine or {}).get("stage", "unknown"), review_hint=(result.quarantine or {}).get("review_hint", ""))
+                     store.mark_quarantined(fid, error=(result.quarantine or {}).get("error_message", ""), stage=(result.quarantine or {}).get("stage", "unknown"), review_hint=(result.quarantine or {}).get("review_hint", ""))
                 elif result.status == "failed":
-                    store.mark_failed(fid, error=(result.quarantine or {}).get("error_message", "unknown"), stage="worker")
+                     store.mark_failed(fid, error=(result.quarantine or {}).get("error_message", "unknown"), stage="worker")
             except Exception:
                 pass
 
@@ -625,17 +628,28 @@ def _run_phase1(
                 fid_buffer.append(fid)
 
             now_t = time.monotonic()
-            if decision_db_path and (len(segment_buffer) >= db_batch_size or (now_t - last_flush > flush_every_seconds and segment_buffer)):
-                _flush_buffer(segment_buffer, fid_buffer, decision_db_path, db_batch_size, metrics, store, run_logger)
+            if (len(segment_buffer) >= db_batch_size or (now_t - last_flush > flush_every_seconds and segment_buffer)):
+                _flush_buffer(segment_buffer, fid_buffer, decision_db_path, db_batch_size, metrics, store, run_logger, dry_run_only=dry_run_only)
                 last_flush = time.monotonic()
 
             if i % 10 == 0 or i == len(futures):
                 logger.info(f"[backfill] progress: {i}/{len(futures)} ok={metrics.ok_count} q={metrics.quarantined_count} f={metrics.failed_count}")
 
 
-def _flush_buffer(buffer, fid_buffer, decision_db_path, batch_size, metrics, store, run_logger):
+def _flush_buffer(buffer, fid_buffer, decision_db_path, batch_size, metrics, store, run_logger, dry_run_only: bool = True):
     """segment バッファを DB に flush し、state を mark_upserted する。"""
-    if not decision_db_path:
+    if dry_run_only or not decision_db_path:
+        # DB書き込みが指定されていない(dry-runモード)場合でも、
+        # 本番のDBを読み取り専用で開いて検証レポートをコンソールに表示する。
+        try:
+            from src.migration.migration_db import MigrationDB
+            from lib.backfill.batch_upsert import dry_run_upsert_segments
+            real_db_path = decision_db_path or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "decision_db.db")
+            db = MigrationDB(real_db_path)
+            dry_run_upsert_segments(buffer, db)
+            db.close()
+        except Exception as e:
+            logger.error(f"[dry-run] verification verification failed: {e}")
         buffer.clear()
         fid_buffer.clear()
         return
@@ -978,8 +992,21 @@ def main():
                         help="集計のみ。download・extract・upsert しない")
     parser.add_argument("--force-done", action="store_true",
                         help="done/partial/skipped_normal/quarantined を全て再実行対象にする (upsert 更新)")
+    parser.add_argument("--apply", action="store_true",
+                        help="実際にDBに書き込む (ALLOW_BACKFILL_XBRL_WRITE=1 環境変数も必要)")
 
     args = parser.parse_args()
+
+    # ── 実行禁止ガード ──
+    dry_run_only = True
+    if args.apply:
+        if os.environ.get("ALLOW_BACKFILL_XBRL_WRITE") != "1":
+            import sys
+            print("[ERROR] backfill_xbrl write mode is disabled by default. Use dry-run or explicitly enable ALLOW_BACKFILL_XBRL_WRITE=1 after GPT approval.", file=sys.stderr)
+            sys.exit(1)
+        dry_run_only = False
+    else:
+        logging.getLogger("backfill").info("Running in default dry-run mode (no SQLite write). Verification report will be shown.")
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s %(message)s", datefmt="%H:%M:%S")
     start_date, end_date = _compute_date_range(args)
@@ -1016,6 +1043,7 @@ def main():
             filing_list_path=args.filing_list,
             reset_target=args.reset_target,
             force_done=args.force_done,
+            dry_run_only=dry_run_only,
         )
     except Exception:
         import traceback
