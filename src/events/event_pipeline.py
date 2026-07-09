@@ -793,7 +793,6 @@ def process_documents(
                 logger.info(f"[EVENT_NOTIFY] unnotified_events={len(unnotified)}")
                 
                 # --- GLOBAL OUTBOX BLOCKER GUARD ---
-                import os
                 outbox_db_path = os.getenv("OUTBOX_DB_PATH", "data/state.db")
                 try:
                     from .discord_outbox import verify_outbox_schema, scan_outbox_blockers
@@ -986,7 +985,6 @@ def process_documents(
         elif dry_run and conn:
             # dry-run: 検知されたイベントをログ出力 (should_notify_event=False は表示のみスキップ)
             try:
-                import os
                 unnotified = get_unnotified_events(conn)
                 logger.info(f"[EVENT_NOTIFY] dry-run unnotified_events={len(unnotified)}")
 

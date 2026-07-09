@@ -840,10 +840,6 @@ def run_ingest(
         docs_dir = str(Path(config.state_db_path).parent / "docs")
 
         def _prefetch_worker(item):
-            # 冪等チェックでスキップ
-            if state_db.is_processed(item.disclosure_id):
-                return None
-                
             # ダウンロード (リトライは download_document_ex に付与済み)
             doc_path = download_document(item.doc_url, docs_dir, session=session)
             if not doc_path:
@@ -869,7 +865,12 @@ def run_ingest(
             pre_fetched_map = {}
             max_workers = int(os.environ.get("TDNET_PDF_PREFETCH_WORKERS", os.environ.get("PREFETCH_MAX_WORKERS", "5")))
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = {executor.submit(_prefetch_worker, item): item.disclosure_id for item in chunk}
+                futures = {}
+                for item in chunk:
+                    # 冪等チェックはメインスレッドで実行してスレッド間共有を回避
+                    if not state_db.is_processed(item.disclosure_id):
+                        futures[executor.submit(_prefetch_worker, item)] = item.disclosure_id
+
                 for fut in as_completed(futures):
                     doc_id = futures[fut]
                     try:
