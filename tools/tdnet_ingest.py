@@ -885,63 +885,63 @@ def run_ingest(
                 last_ticker = item.ticker
                 last_step = "ingest"
 
-            if current_time - last_heartbeat_time >= 30:
-                try:
-                    state_db.update_process_lock_heartbeat(process_name, processed_count=processed_count, current_step=last_step, total_candidates=total_candidates)
-                except Exception as e:
-                    logger.warning(f"[LOCK] heartbeat update failed (non-fatal): {e}")
-                last_heartbeat_time = current_time
-                logger.info("[LOCK] heartbeat updated")
+                if current_time - last_heartbeat_time >= 30:
+                    try:
+                        state_db.update_process_lock_heartbeat(process_name, processed_count=processed_count, current_step=last_step, total_candidates=total_candidates)
+                    except Exception as e:
+                        logger.warning(f"[LOCK] heartbeat update failed (non-fatal): {e}")
+                    last_heartbeat_time = current_time
+                    logger.info("[LOCK] heartbeat updated")
 
-            if processed_count > 0 and (processed_count % 10 == 0 or current_time - last_progress_time >= 30):
-                elapsed_sec = current_time - t0
-                avg_sec = elapsed_sec / max(processed_count, 1)
-                rem_count = total_candidates - processed_count
-                eta_sec = avg_sec * rem_count
-                logger.info(
-                    f"[PROGRESS] run_id={run_id} processed={processed_count}/{total_candidates} "
-                    f"success={success_count} skipped={skipped_count} failed={failed_count} "
-                    f"remaining={rem_count} elapsed_sec={int(elapsed_sec)} avg_sec_per_item={avg_sec:.2f} "
-                    f"eta_sec={int(eta_sec)} current_ticker={last_ticker} current_step={last_step}"
-                )
-                last_progress_time = current_time
+                if processed_count > 0 and (processed_count % 10 == 0 or current_time - last_progress_time >= 30):
+                    elapsed_sec = current_time - t0
+                    avg_sec = elapsed_sec / max(processed_count, 1)
+                    rem_count = total_candidates - processed_count
+                    eta_sec = avg_sec * rem_count
+                    logger.info(
+                        f"[PROGRESS] run_id={run_id} processed={processed_count}/{total_candidates} "
+                        f"success={success_count} skipped={skipped_count} failed={failed_count} "
+                        f"remaining={rem_count} elapsed_sec={int(elapsed_sec)} avg_sec_per_item={avg_sec:.2f} "
+                        f"eta_sec={int(eta_sec)} current_ticker={last_ticker} current_step={last_step}"
+                    )
+                    last_progress_time = current_time
 
-            # ── 旧ルートからの V2 takeover 対象除外 ──
-            if v2_takeover_active and item.ticker in v2_allowlist and item.disclosure_id:
-                results.append({
-                    "status": "skipped",
-                    "detail": "V2_TAKEOVER_ACTIVE",
-                    "code": item.ticker,
-                    "source_type": "pdf",
-                    "disclosure_id": item.disclosure_id,
-                })
-                skipped_count += 1
-                processed_count += 1
-                continue
-
-            try:
-                pf = pre_fetched_map.get(item.disclosure_id)
-                result = _process_single(
-                    item, config, state_db, decision_db, run_id,
-                    dry_run=dry_run, dump_dir=dump_dir, session=session,
-                    pre_fetched=pf
-                )
-                results.append(result)
-                if result.get("status") in ("inserted", "updated", "no_change", "dry_run"):
-                    success_count += 1
-                elif result.get("status") == "skipped":
+                # ── 旧ルートからの V2 takeover 対象除外 ──
+                if v2_takeover_active and item.ticker in v2_allowlist and item.disclosure_id:
+                    results.append({
+                        "status": "skipped",
+                        "detail": "V2_TAKEOVER_ACTIVE",
+                        "code": item.ticker,
+                        "source_type": "pdf",
+                        "disclosure_id": item.disclosure_id,
+                    })
                     skipped_count += 1
-                else:
+                    processed_count += 1
+                    continue
+
+                try:
+                    pf = pre_fetched_map.get(item.disclosure_id)
+                    result = _process_single(
+                        item, config, state_db, decision_db, run_id,
+                        dry_run=dry_run, dump_dir=dump_dir, session=session,
+                        pre_fetched=pf
+                    )
+                    results.append(result)
+                    if result.get("status") in ("inserted", "updated", "no_change", "dry_run"):
+                        success_count += 1
+                    elif result.get("status") == "skipped":
+                        skipped_count += 1
+                    else:
+                        failed_count += 1
+                except Exception as e:
+                    results.append({
+                        "status": "error",
+                        "detail": f"予期しないエラー: {e}",
+                        "code": item.ticker,
+                    })
                     failed_count += 1
-            except Exception as e:
-                results.append({
-                    "status": "error",
-                    "detail": f"予期しないエラー: {e}",
-                    "code": item.ticker,
-                })
-                failed_count += 1
-            
-            processed_count += 1
+                
+                processed_count += 1
 
         elapsed = time.monotonic() - t0
         avg_sec = elapsed / max(processed_count, 1)
