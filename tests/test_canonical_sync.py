@@ -36,7 +36,7 @@ def _create_test_db(path: str, *, n_financials: int = 3, n_segments: int = 3):
         CREATE TABLE IF NOT EXISTS quarterly_results (
             id INTEGER PRIMARY KEY,
             company_code TEXT,
-            period TEXT,
+            fiscal_year_end TEXT,
             quarter TEXT,
             sales REAL,
             gross_profit REAL,
@@ -52,7 +52,7 @@ def _create_test_db(path: str, *, n_financials: int = 3, n_segments: int = 3):
     for i in range(n_financials):
         conn.execute(
             "INSERT INTO quarterly_results "
-            "(company_code, period, quarter, sales, operating_profit, "
+            "(company_code, fiscal_year_end, quarter, sales, operating_profit, "
             "field_sources, disclosure_id, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (f"{1000+i}", "2025-03", f"{i+1}Q", 1000+i*100, 100+i*10,
@@ -260,13 +260,15 @@ class TestStatsExtension:
         conn = sqlite3.connect(db_path)
         now_iso = datetime.now(JST).isoformat()
         conn.execute("""CREATE TABLE IF NOT EXISTS quarterly_results (
-            id INTEGER PRIMARY KEY, company_code TEXT, period TEXT, quarter TEXT,
+            id INTEGER PRIMARY KEY,
+            company_code TEXT,
+            fiscal_year_end TEXT, quarter TEXT,
             sales REAL, gross_profit REAL, sga REAL, operating_profit REAL,
             field_sources TEXT, disclosure_id TEXT, disclosure_datetime TEXT,
             revision_flag INTEGER DEFAULT 0, updated_at TEXT
         )""")
         conn.execute(
-            "INSERT INTO quarterly_results (company_code, period, quarter, sales, "
+            "INSERT INTO quarterly_results (company_code, fiscal_year_end, quarter, sales, "
             "operating_profit, field_sources, updated_at) VALUES (?,?,?,?,?,?,?)",
             ("1000", "2025-03-31", "1Q", 1000, 100, "summary_xbrl", now_iso),
         )
@@ -613,7 +615,9 @@ class TestSegmentSchemaCompat:
         now_iso = datetime.now(JST).isoformat()
 
         conn.execute("""CREATE TABLE IF NOT EXISTS quarterly_results (
-            id INTEGER PRIMARY KEY, company_code TEXT, period TEXT, quarter TEXT,
+            id INTEGER PRIMARY KEY,
+            company_code TEXT,
+            fiscal_year_end TEXT, quarter TEXT,
             sales REAL, gross_profit REAL, sga REAL, operating_profit REAL,
             field_sources TEXT, disclosure_id TEXT, disclosure_datetime TEXT,
             revision_flag INTEGER DEFAULT 0, updated_at TEXT
@@ -660,7 +664,9 @@ class TestSegmentSchemaCompat:
         now_iso = datetime.now(JST).isoformat()
 
         conn.execute("""CREATE TABLE IF NOT EXISTS quarterly_results (
-            id INTEGER PRIMARY KEY, company_code TEXT, period TEXT, quarter TEXT,
+            id INTEGER PRIMARY KEY,
+            company_code TEXT,
+            fiscal_year_end TEXT, quarter TEXT,
             sales REAL, gross_profit REAL, sga REAL, operating_profit REAL,
             field_sources TEXT, disclosure_id TEXT, disclosure_datetime TEXT,
             revision_flag INTEGER DEFAULT 0, updated_at TEXT
@@ -714,7 +720,9 @@ def _create_segment_only_db(path: str, rows: list[dict]):
     now_iso = datetime.now(JST).isoformat()
 
     conn.execute("""CREATE TABLE IF NOT EXISTS quarterly_results (
-        id INTEGER PRIMARY KEY, company_code TEXT, period TEXT, quarter TEXT,
+            id INTEGER PRIMARY KEY,
+            company_code TEXT,
+            fiscal_year_end TEXT, quarter TEXT,
         sales REAL, gross_profit REAL, sga REAL, operating_profit REAL,
         field_sources TEXT, disclosure_id TEXT, disclosure_datetime TEXT,
         revision_flag INTEGER DEFAULT 0, updated_at TEXT
@@ -829,7 +837,7 @@ class TestHistoricalBackfillExclusion:
             assert result["segments"]["excluded_historical_backfill_sql"] == 1
             assert "excluded_hb=" in result["summary"]
 
-    def test_null_data_source_is_not_excluded(self, tmp_path):
+    def test_null_data_source_is_excluded(self, tmp_path):
         db_path = str(tmp_path / "test.db")
         _create_segment_only_db(db_path, [
             {"company_code": "6750", "fiscal_year_end": "2025-03-31",
@@ -844,8 +852,8 @@ class TestHistoricalBackfillExclusion:
         ])
         from lib.pipeline.canonical_sync import _select_segments_rows
         rows, fb, excluded = _select_segments_rows(db_path, lookback_days=7)
-        assert len(rows) == 3
-        assert excluded == 0
+        assert len(rows) == 1
+        assert excluded == 2
 
     def test_excluded_count_is_scoped_not_global(self, tmp_path):
         db_path = str(tmp_path / "test.db")

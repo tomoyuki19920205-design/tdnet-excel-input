@@ -66,9 +66,10 @@ DEFAULT_LOOKBACK_DAYS = 7
 # 展開ロジック = canonical_writer.py / 書き込み粒度 = ここ
 CANONICAL_BATCH_SIZE = 200
 
-# historical_backfill 除外条件 (NULL data_source は通す)
-_NON_BACKFILL_CLAUSE = "COALESCE(data_source, '') != 'historical_backfill'"
-_IS_BACKFILL_CLAUSE = "data_source = 'historical_backfill'"
+# セグメント同期用のホワイトリストと除外条件 (excel_legacy, historical_backfill を除外)
+_NON_BACKFILL_CLAUSE = "data_source IN ('backfill_xbrl', 'backfill_v4_pdf', 'backfill_v4_ai', 'tdnet', 'xbrl')"
+_IS_BACKFILL_CLAUSE = "COALESCE(data_source, '') NOT IN ('backfill_xbrl', 'backfill_v4_pdf', 'backfill_v4_ai', 'tdnet', 'xbrl')"
+
 
 # financials 対象 metric マッピング
 _FINANCIALS_METRIC_COLS = {
