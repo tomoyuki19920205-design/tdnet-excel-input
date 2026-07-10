@@ -622,6 +622,10 @@ def extract_segments_from_xbrl_zip(
                             "context_ref": ctx_ref,
                             "context_start": cstart,
                             "context_end": cend,
+                            "duration_days": cinfo.get("duration_days", "?"),
+                            "current_or_previous": period_type,
+                            "quarter": estimated_quarter or "",
+                            "selection_reason": data.get("selection_reason", ""),
                             "expected_context_end": str(expected_end) if expected_end else "?",
                             "adjusted_expected_context_end": adjusted_expected_end_str,
                             "diff_days": d_days,
@@ -768,8 +772,8 @@ def _extract_ixbrl_segment_data(
         "jpigp_cor:revenue2ifrs",
     }
 
-    # 集約キー: (member, period_type) で current/previous を分離
-    result: dict[tuple[str, str], dict] = {}
+    # 一時的な蓄積用。キーを (member, period_type, context_ref) にして上書き衝突を防ぐ
+    temp_candidate: dict[tuple[str, str, str], dict] = {}
 
     # ix:nonfraction タグを収集
     for tag in soup.find_all("ix:nonfraction"):
@@ -788,11 +792,16 @@ def _extract_ixbrl_segment_data(
         if not member:
             continue
 
-        # キーに period_type を含めることで current と previous を分離
-        key = (member, period_type)
-        if key not in result:
-            result[key] = {}
-        result[key]["context_ref"] = ctx
+        # キーを (member, period_type, context_ref) にする
+        key = (member, period_type, ctx)
+        if key not in temp_candidate:
+            temp_candidate[key] = {
+                "context_ref": ctx,
+                "sales": None,
+                "profit": None,
+                "profit_priority": 999,
+                "profit_tag": None
+            }
 
         value = _parse_ixbrl_number(text, sign)
         if value is None:
@@ -822,17 +831,114 @@ def _extract_ixbrl_segment_data(
                     is_profit = True
 
         if is_sales:
-            if is_primary_sales or "sales" not in result[key]:
-                result[key]["sales"] = value
+            if is_primary_sales or temp_candidate[key]["sales"] is None:
+                temp_candidate[key]["sales"] = value
         elif is_profit:
             priority = _get_profit_priority(name)
-            current_priority = result[key].get("profit_priority", 999)
+            current_priority = temp_candidate[key].get("profit_priority", 999)
             if priority < current_priority:
-                result[key]["profit"] = value
-                result[key]["profit_priority"] = priority
-                result[key]["profit_tag"] = name
+                temp_candidate[key]["profit"] = value
+                temp_candidate[key]["profit_priority"] = priority
+                temp_candidate[key]["profit_tag"] = name
 
-    # (member, period_type) 単位に集約済みのためそのまま返す
+    # global_context_map から「当期の期待終了日」の基準値 (reference_end) を推定
+    reference_end: Optional[datetime.date] = None
+    if global_context_map:
+        for cid, info in global_context_map.items():
+            if info.get("type") == "duration" and "end" in info:
+                ptype = _classify_period_type(cid)
+                if ptype == "current":
+                    try:
+                        dt = datetime.datetime.strptime(info["end"][:10], "%Y-%m-%d").date()
+                        if reference_end is None or dt > reference_end:
+                            reference_end = dt
+                    except ValueError:
+                        pass
+
+    # グループ化: (member, period_type) ごとに候補を集約
+    groups: dict[tuple[str, str], list[dict]] = {}
+    for (member, period_type, ctx), data in temp_candidate.items():
+        gkey = (member, period_type)
+        if gkey not in groups:
+            groups[gkey] = []
+
+        # 片方の指標しか存在しない場合は、存在する値だけを保持 (別contextから補完しない)
+        # 必要なのは best_cand になった context 単位での sales / profit のみ
+        groups[gkey].append(data)
+
+    # quarter に応じた期待 duration 日数
+    target_duration = 365
+    if estimated_quarter == "1Q":
+        target_duration = 90
+    elif estimated_quarter == "2Q":
+        target_duration = 180
+    elif estimated_quarter == "3Q":
+        target_duration = 270
+    elif estimated_quarter in ("FY", "4Q"):
+        target_duration = 365
+
+    result: dict[tuple[str, str], dict] = {}
+    for gkey, candidates in groups.items():
+        member, period_type = gkey
+
+        valid_candidates = []
+        for cand in candidates:
+            ctx = cand["context_ref"]
+            info = global_context_map.get(ctx, {}) if global_context_map else {}
+            actual_duration = info.get("duration_days")
+            actual_end_str = info.get("end")
+
+            # 1. duration 差の算出
+            if actual_duration is not None:
+                diff_duration = abs(actual_duration - target_duration)
+            else:
+                diff_duration = 9999
+
+            # 2. 期待終了日差の算出
+            expected_end_date = reference_end
+            if expected_end_date and period_type == "previous":
+                try:
+                    if expected_end_date.month == 2 and expected_end_date.day == 29:
+                        expected_end_date = datetime.date(expected_end_date.year - 1, 2, 28)
+                    else:
+                        expected_end_date = datetime.date(expected_end_date.year - 1, expected_end_date.month, expected_end_date.day)
+                except ValueError:
+                    pass
+
+            diff_end = 9999
+            if actual_end_str and expected_end_date:
+                try:
+                    actual_end_date = datetime.datetime.strptime(actual_end_str[:10], "%Y-%m-%d").date()
+                    diff_end = abs((actual_end_date - expected_end_date).days)
+                except ValueError:
+                    pass
+
+            # 40日許容差チェック (期待durationまたは期待終了日との差が40日を超えるものは除外)
+            if diff_duration > 40 or diff_end > 40:
+                continue
+
+            both_exist = 0 if (cand["sales"] is not None and cand["profit"] is not None) else 1
+            sort_key = (
+                diff_duration,   # 1. 期待durationとの差が小さい
+                diff_end,        # 2. 対象期の期待終了日との差が小さい
+                both_exist,      # 3. salesとprofitの両方が存在
+                ctx              # 4. context_refによる安定した順序
+            )
+            valid_candidates.append((sort_key, cand))
+
+        if not valid_candidates:
+            continue
+
+        # 最適な候補をソート順で決定
+        valid_candidates.sort(key=lambda x: x[0])
+        best_sort_key, best_cand = valid_candidates[0]
+
+        diff_duration, diff_end, both_exist, ctx = best_sort_key
+        best_cand["selection_reason"] = f"duration_diff={diff_duration}, end_diff={diff_end}, both_exist={both_exist == 0}"
+
+        result[gkey] = best_cand
+
+    # 有効なデータのみ集約して返却
     aggregated: dict[tuple[str, str], dict] = {
         k: v for k, v in result.items() if v
     }
