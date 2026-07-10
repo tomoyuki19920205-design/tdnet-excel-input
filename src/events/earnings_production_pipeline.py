@@ -23,6 +23,7 @@ import sqlite3
 import time
 from src.cache.cache_manager import make_cache_key, load_json, save_json
 import dataclasses
+from .common_normalizers import extract_common_disclosure_no
 from .summary_financials import EarningsSummaryData
 from .earnings_guidance_extractor import GuidanceData
 import unicodedata
@@ -50,7 +51,7 @@ def _run_canonical_gateway_dryrun(ticker: str, period: str | None, quarter: str,
     guidance = guidance or {}
     gw_plans = []
     all_allowed = True
-    
+
     normalized_plans = build_normalized_canonical_write_plan(
         ticker=ticker,
         period_raw=period or "unknown",
@@ -59,7 +60,7 @@ def _run_canonical_gateway_dryrun(ticker: str, period: str | None, quarter: str,
         guidance_raw=guidance,
         filing_id=doc_id
     )
-    
+
     for p in normalized_plans:
         p = validate_canonical_write_plan(p)
         if not p.write_allowed:
@@ -87,7 +88,7 @@ def _run_canonical_gateway_dryrun(ticker: str, period: str | None, quarter: str,
     })
     with open(report_file, "w", encoding="utf-8") as f:
         json.dump(existing_report, f, indent=2, ensure_ascii=False)
-        
+
     return all_allowed
 from .earnings_summary_storage import (
     ensure_earnings_summary_table,
@@ -226,29 +227,125 @@ def _sync_canonical_financials(
         logger.error("[EARNINGS][CANONICAL] %s canonical同期中にエラー: %s route=%s", ticker, e, route)
 
 
+def _check_canonical_financials_saved(client, ticker: str, period: str, quarter: str) -> bool:
+    try:
+        res = client.table("canonical_financials").select("metric").eq("ticker", ticker).eq("period", period).eq("quarter", quarter).execute()
+        if res.data:
+            metrics = {row.get("metric") for row in res.data}
+            if "sales" in metrics or "operating_profit" in metrics:
+                return True
+        return False
+    except Exception as e:
+        logger.warning("[EARNINGS][CANONICAL] PL check exception: %s", e)
+        return False
+
+
+def _check_canonical_segments_saved(client, ticker: str, period: str, quarter: str, expected_names: list[str] | None) -> bool:
+    if expected_names is None:
+        return False
+    if not expected_names:
+        return True
+    try:
+        res = client.table("canonical_segments").select("segment_key").eq("ticker", ticker).eq("period", period).eq("quarter", quarter).execute()
+        if res.data:
+            existing_keys = {row.get("segment_key") for row in res.data}
+            from lib.segment.normalize import normalize_segment_key
+            for name in expected_names:
+                norm_key = normalize_segment_key(name)
+                if norm_key not in existing_keys:
+                    return False
+            return True
+        return False
+    except Exception as e:
+        logger.warning("[EARNINGS][CANONICAL] Segment check exception: %s", e)
+        return False
+
+
+def _extract_expected_segment_names_from_xbrl(zip_path: str, period: str, quarter: str) -> list[str]:
+    from src.segment.xbrl_segment_extractor import extract_segments_from_xbrl_zip
+    try:
+        raw_rows = extract_segments_from_xbrl_zip(zip_path, period, quarter)
+    except Exception:
+        return []
+    expected_names = []
+    target_days = 365
+    if quarter == "1Q": target_days = 90
+    elif quarter == "2Q": target_days = 180
+    elif quarter == "3Q": target_days = 270
+
+    for r in raw_rows:
+        if r.period != period:
+            continue
+
+        evidence = r.raw_json.get("_context_evidence") if r.raw_json else None
+        if not evidence:
+            continue
+        cstart = evidence.get("context_start")
+        cend = evidence.get("context_end")
+        if not cstart or not cend or cstart == "?" or cend == "?":
+            continue
+        try:
+            import datetime
+            s_dt = datetime.datetime.strptime(cstart[:10], "%Y-%m-%d").date()
+            e_dt = datetime.datetime.strptime(cend[:10], "%Y-%m-%d").date()
+            duration_days = (e_dt - s_dt).days
+            if abs(duration_days - target_days) > 40:
+                continue
+        except Exception:
+            continue
+
+        name = r.normalized_segment_name or r.raw_segment_name
+        if name and name not in expected_names:
+            expected_names.append(name)
+
+    return expected_names
+
+
 def _sync_canonical_segments(
     ticker: str,
     period: str,
     quarter: str,
+    canonical_filing_id: str,
+    common_disclosure_no: str,
     xbrl_path: str | None,
-    filing_id: str,
     dry_run: bool,
     route: str,
+    run_id: str = "",
 ):
     import os
+    from .common_normalizers import extract_common_disclosure_no
+
     if not period:
         logger.warning("[EARNINGS][SEGMENT_CANONICAL] %s period不明のため同期をスキップ route=%s", ticker, route)
         return
 
-    logger.info("[EARNINGS][SEGMENT_CANONICAL] %s segment開始 %s %s %s %s", ticker, period, quarter, route, filing_id)
-
-    if not xbrl_path or not os.path.exists(xbrl_path):
-        logger.warning("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s stage=extract error_type=FileNotFound message=XBRL ZIP file not found at %s", ticker, xbrl_path or "")
+    # 1. canonical_filing_idが想定形式 (64桁16進数) か確認
+    if not canonical_filing_id or len(canonical_filing_id) != 64 or not all(c in "0123456789abcdefABCDEF" for c in canonical_filing_id):
+        logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s stage=identity reason=canonical_filing_id_invalid expected=64_hex actual=%s", ticker, canonical_filing_id)
         return
 
+    # 2. common_disclosure_noが14桁か確認
+    if not common_disclosure_no or len(common_disclosure_no) != 14 or not common_disclosure_no.isdigit():
+        logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s stage=identity reason=common_disclosure_no_invalid expected=14_digits actual=%s", ticker, common_disclosure_no)
+        return
+
+    # 3. xbrl_pathの存在確認
+    if not xbrl_path or not os.path.exists(xbrl_path):
+        logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s stage=identity reason=zip_missing path=%s", ticker, xbrl_path or "")
+        return
+
+    # 4. xbrl_pathの書類IDがcommon_disclosure_noと一致するか確認
+    zip_basename = os.path.basename(xbrl_path)
+    zip_no = extract_common_disclosure_no(zip_basename)
+    if not zip_no or zip_no != common_disclosure_no:
+        logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s stage=identity reason=zip_doc_id_mismatch expected=%s actual=%s", ticker, common_disclosure_no, zip_no or "")
+        return
+
+    logger.info("[EARNINGS][SEGMENT_CANONICAL] %s segment開始 %s %s %s %s", ticker, period, quarter, route, canonical_filing_id)
+
+    # 5. 正式抽出器を呼ぶ
     try:
         from src.segment.xbrl_segment_extractor import extract_segments_from_xbrl_zip
-        # 既存の正式抽出器を利用
         raw_rows = extract_segments_from_xbrl_zip(
             zip_path=xbrl_path,
             period=period,
@@ -258,16 +355,57 @@ def _sync_canonical_segments(
         logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s stage=extract error_type=%s message=%s", ticker, type(e).__name__, str(e))
         return
 
-    # 当期のみフィルタリング
+    # 6. 対象contextだけを選択 (累計優先、単独四半期除外)
     target_segs = []
+    target_days = 365
+    if quarter == "1Q": target_days = 90
+    elif quarter == "2Q": target_days = 180
+    elif quarter == "3Q": target_days = 270
+
+    # 重複回避のため、member名ごとの最適レコードを選択するマップ
+    # (member) -> (best_record, best_diff)
+    best_segs = {}
+
     for r in raw_rows:
         if r.period != period:
             continue
-        # segment_name は normalized_segment_name を優先、なければ raw_segment_name を使用
+
         name = r.normalized_segment_name or r.raw_segment_name
         if not name:
             continue
 
+        # _context_evidence から開始日・終了日をパースして duration を判定
+        evidence = r.raw_json.get("_context_evidence") if r.raw_json else None
+        if not evidence:
+            continue
+        cstart = evidence.get("context_start")
+        cend = evidence.get("context_end")
+        if not cstart or not cend or cstart == "?" or cend == "?":
+            continue
+        try:
+            import datetime
+            s_dt = datetime.datetime.strptime(cstart[:10], "%Y-%m-%d").date()
+            e_dt = datetime.datetime.strptime(cend[:10], "%Y-%m-%d").date()
+            duration_days = (e_dt - s_dt).days
+        except Exception:
+            continue
+
+        # ターゲット日数との差を算出
+        diff_days = abs(duration_days - target_days)
+        # 40日を超えるズレは単独期など無関係なコンテキストなので除外
+        if diff_days > 40:
+            continue
+
+        # すでにこのmemberの候補がある場合、よりターゲット日数に近いものを優先
+        if name in best_segs:
+            prev_diff = best_segs[name][1]
+            if diff_days < prev_diff:
+                best_segs[name] = (r, diff_days)
+        else:
+            best_segs[name] = (r, diff_days)
+
+    for r, _ in best_segs.values():
+        name = r.normalized_segment_name or r.raw_segment_name
         target_segs.append({
             "segment_name": name,
             "sales": r.sales,
@@ -283,6 +421,7 @@ def _sync_canonical_segments(
 
     rows_count = len(target_segs)
 
+    # 7. dry-runでなければ正式writerを呼ぶ (canonical_filing_idを渡す)
     if dry_run:
         logger.info("[EARNINGS][SEGMENT_CANONICAL] %s dry-run保存スキップ rows=%d", ticker, rows_count)
         return
@@ -297,14 +436,13 @@ def _sync_canonical_segments(
             "key": os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY", "")
         }
 
-        # 既存の正式writerを利用して保存
         res = write_segments_canonical(
             ticker=ticker,
             period=period,
             quarter=quarter,
             segments=target_segs,
             source="xbrl",
-            filing_id=filing_id,
+            filing_id=canonical_filing_id,
             unit="millions_jpy",
             config=_config,
         )
@@ -533,9 +671,9 @@ def run_earnings_production(
             for d in tanshin_docs:
                 _t = getattr(d, "ticker", "")
                 _did = getattr(d, "disclosure_id", "") or getattr(d, "doc_id", "") or getattr(d, "source_doc_id", "") or ""
-                
+
                 print(f"[DEBUG] _t={_t}, allowlist_j={allowlist_j}, _did={_did}, is_processed={state_db.is_processed(_did) if state_db else 'No state_db'}")
-                
+
                 if _t not in allowlist_j:
                     logger.debug("[EARNINGS] ticker=%s not in allowlist. skip.", _t)
                     continue
@@ -547,11 +685,11 @@ def run_earnings_production(
                     elif state_db.is_processed(_did):
                         logger.info("[EARNINGS] ticker=%s disclosure_id=%s is already processed in state_db. skip.", _t, _did)
                         continue
-                
+
                 # ZIPダウンロード追加
                 _xbrl_url = getattr(d, "xbrl_url", "") or ""
                 _zip_path = ""
-                
+
                 # J-Quants オンデマンドXBRL取得
                 source_doc_id = getattr(d, "source_doc_id", "") or ""
                 if not _xbrl_url and source_doc_id and os.environ.get("JQUANTS_PRIMARY_ENABLED", "0") == "1":
@@ -628,22 +766,22 @@ def run_earnings_production(
                         _cp_title = _cp_args.get("title", "")
                         _cp_payload_ext = _payload.get("extracted", {})
                         _cp_period = _cp_payload_ext.get("period") or _cp_payload_ext.get("fiscal_year_end") or _derive_fiscal_year_end_period(_cp_title)
-                        
+
                         _cp_q = _cp_args.get("quarter", "")
                         _cp_sales = _cp_args.get("sales_value")
                         _cp_op = _cp_args.get("op_value")
                         _cp_gross = _cp_args.get("gross_profit_value")
                         _cp_sga = _cp_args.get("selling_general_and_administrative_expenses_value")
                         _cp_doc_id = _merged_plan["tdnet_event_payload"].get("source_doc_id", "")
-                        
+
                         _cp_metrics = {}
                         if _cp_sales is not None: _cp_metrics["sales"] = _cp_sales / 1_000_000
                         if _cp_op is not None: _cp_metrics["operating_profit"] = _cp_op / 1_000_000
                         if _cp_gross is not None: _cp_metrics["gross_profit"] = _cp_gross / 1_000_000
                         if _cp_sga is not None: _cp_metrics["selling_general_and_administrative_expenses"] = _cp_sga / 1_000_000
-                        
+
                         _cp_guidance = _cp_payload_ext.get("guidance", {})
-                        
+
                         _all_allowed = _run_canonical_gateway_dryrun(_ticker, _cp_period, _cp_q, _cp_metrics, _cp_doc_id, _cp_guidance)
                         if not _all_allowed and dry_run:
                             logger.error(f"[EARNINGS][GATEWAY] {_ticker} Unsafe canonical plan detected! STOPPING in dry-run.")
@@ -679,14 +817,15 @@ def run_earnings_production(
                     # ── Supabase 保存実行 ────────────────────────────────────────
                     logger.info("[EARNINGS][REAL] ✁ Supabase保存: %s", _ticker)
                     _ev_dict = _merged_plan["tdnet_event_payload"]
-                    
+
                     # ── Supabase ID の復元 ──
                     if state_db:
                         # state_db から元の Supabase ID があれば拾う (既存レコードの UPDATE 防止)
                         # 今回は新規レコードとして挿入するため、UUIDは新規生成する。
                         pass
 
-                    _ev_rec = EventRecord(**_ev_dict)
+                    _ev_rec_fields = {k: v for k, v in _ev_dict.items() if k not in ("source_url", "archive_path")}
+                    _ev_rec = EventRecord(**_ev_rec_fields)
                     _sup_res = save_event_to_supabase(_ev_rec)
                     _sup_ok = _sup_res.get("action") != "error"
                     _sup_err = _sup_res.get("error", "")
@@ -695,28 +834,52 @@ def run_earnings_production(
                         result.errors.append(f"{_ticker}: supabase_error={_sup_err}")
                         return result
 
-                    # ── canonical_financials 同期 ──────────────────────────────
-                    if _sup_ok:
-                        _args = _merged_plan["earnings_summary_args"]
-                        _title = _args.get("title", "")
-                        _period = None
+                    # ── canonical_financials / segments 同期 (再試行サポート付き) ──────────────────────────────
+                    _args = _merged_plan["earnings_summary_args"]
+                    _title = _args.get("title", "")
+                    _period = None
 
-                        # payload 内に period / fiscal_year_end があれば優先
-                        _payload_ext = _payload.get("extracted", {})
-                        _period_cand = _payload_ext.get("period") or _payload_ext.get("fiscal_year_end")
-                        if _period_cand:
-                            _period = _period_cand
-                        else:
-                            _period = _derive_fiscal_year_end_period(_title)
+                    # payload 内に period / fiscal_year_end があれば優先
+                    _payload_ext = _payload.get("extracted", {})
+                    _period_cand = _payload_ext.get("period") or _payload_ext.get("fiscal_year_end")
+                    if _period_cand:
+                        _period = _period_cand
+                    else:
+                        _period = _derive_fiscal_year_end_period(_title)
 
-                        _q = _args.get("quarter", "")
-                        _sales = _args.get("sales_value")
-                        _op = _args.get("op_value")
-                        _gross = _args.get("gross_profit_value")
-                        _sga = _args.get("selling_general_and_administrative_expenses_value")
-                        _doc_id = _ev_dict.get("source_doc_id", "")
-                        _guidance = _payload_ext.get("guidance", {})
+                    _q = _args.get("quarter", "")
+                    _sales = _args.get("sales_value")
+                    _op = _args.get("op_value")
+                    _gross = _args.get("gross_profit_value")
+                    _sga = _args.get("selling_general_and_administrative_expenses_value")
+                    _doc_id = _ev_dict.get("source_doc_id", "")  # 64桁ハッシュ値
+                    _guidance = _payload_ext.get("guidance", {})
 
+                    # 14桁書類IDの解決
+                    _disclosure_no = extract_common_disclosure_no(doc_j.get("source_url", "")) or ""
+
+                    # Supabaseクライアントの取得と登録状況の確認
+                    from .tdnet_event_store import _get_supabase
+                    _client = _get_supabase()
+
+                    _expected_segs = None
+                    _resolved_zip = _find_cached_xbrl(xbrl_dir, _ticker, doc_id=_disclosure_no)
+                    if _resolved_zip and os.path.exists(_resolved_zip):
+                        try:
+                            _expected_segs = _extract_expected_segment_names_from_xbrl(
+                                _resolved_zip, _period, _q
+                            )
+                        except Exception:
+                            pass
+
+                    _pl_saved = False
+                    _seg_saved = False
+                    if _client:
+                        _pl_saved = _check_canonical_financials_saved(_client, _ticker, _period, _q)
+                        _seg_saved = _check_canonical_segments_saved(_client, _ticker, _period, _q, _expected_segs)
+
+                    # PL同期
+                    if not _pl_saved:
                         _sync_canonical_financials(
                             ticker=_ticker,
                             period=_period,
@@ -730,13 +893,17 @@ def run_earnings_production(
                             dry_run=dry_run,
                             route="subprocess",
                         )
+
+                    # セグメント同期
+                    if not _seg_saved:
                         try:
                             _sync_canonical_segments(
                                 ticker=_ticker,
                                 period=_period,
                                 quarter=_q,
-                                xbrl_path=_find_cached_xbrl(xbrl_dir, _ticker, doc_id=_doc_id),
-                                filing_id=_doc_id,
+                                canonical_filing_id=_doc_id,
+                                common_disclosure_no=_disclosure_no,
+                                xbrl_path=_resolved_zip,
                                 dry_run=dry_run,
                                 route="subprocess",
                             )
@@ -779,7 +946,7 @@ def run_earnings_production(
                     logger.exception("[EARNINGS][REAL] %s 予期せぬエラー: %s", _ticker, e)
                     result.errors.append(f"{_ticker}: runtime_error={str(e)[:80]}")
                     return result
-            
+
             return result
         else:
             # ENABLE_REAL_SAVE=0 または allowlist 未設定 ➡️ 旧方式 fallback
@@ -845,10 +1012,10 @@ def run_earnings_production(
             parser_version = "v4_2c_001"
             tdnet_id_str = str(getattr(doc, "tdnet_id", "")) or str(getattr(doc, "doc_id", ""))
             doc_url_str = str(getattr(doc, "doc_url", "")) or str(getattr(doc, "xbrl_url", ""))
-            
+
             parsed_key = make_cache_key(f"tdnet_parsed:{parser_version}", doc_id=tdnet_id_str, url=doc_url_str)
             cached_parsed = load_json(parsed_key, conn) if conn else load_json(parsed_key)
-            
+
             if cached_parsed:
                 earnings_dict = cached_parsed.get("earnings")
                 if earnings_dict:
@@ -862,7 +1029,7 @@ def run_earnings_production(
                     earnings = EarningsSummaryData(**earnings_dict)
                 else:
                     earnings = None
-                    
+
                 company_name = cached_parsed.get("company_name", "")
                 fiscal_year = cached_parsed.get("fiscal_year", "")
                 quarter = cached_parsed.get("quarter", "")
@@ -871,20 +1038,20 @@ def run_earnings_production(
                 company_reasons = cached_parsed.get("company_reasons", [])
                 segment_reasons = cached_parsed.get("segment_reasons", [])
                 full_message = cached_parsed.get("full_message", "")
-                
+
                 guidance_dict = cached_parsed.get("guidance")
                 guidance = GuidanceData(**guidance_dict) if guidance_dict else None
-                
+
                 is_4q = cached_parsed.get("is_4q", False)
                 fy_reason = cached_parsed.get("fy_reason", "")
-                
+
                 if earnings is None:
                     continue
-                    
+
                 parse_success += 1
                 result.validated_count += 1
                 logger.info(f"[EARNINGS] {ticker} parsed cache hit! Bypassing heavy extraction.")
-                
+
             else:
                 if not xbrl_path:
                     logger.warning(f"[EARNINGS] {ticker} No XBRL found. skip.")
@@ -958,7 +1125,7 @@ def run_earnings_production(
                                             earnings.sales_prior = prev_ext.get("sales_current")
                                         if earnings.op_prior is None and prev_ext.get("op_current"):
                                             earnings.op_prior = prev_ext.get("op_current")
-                                
+
                                 # YOY再計算
                                 # setterがない場合は property を上書きできないので直接プロパティは更新できないが...
                                 # EarningsSummaryData は dataclass なので直接再計算してセットしてもよいが、プロパティなので注意。
@@ -1203,16 +1370,16 @@ def run_earnings_production(
                 # ---- 保存直前の期間ガード ----
                 xbrl_fy = getattr(earnings, "fiscal_year", "") or ""
                 xbrl_q = getattr(earnings, "quarter", "") or ""
-                
+
                 period_mismatch = False
                 if xbrl_q and quarter and xbrl_q != quarter:
                     period_mismatch = True
                 if xbrl_fy and fiscal_year and xbrl_fy != fiscal_year:
                     period_mismatch = True
-                    
+
                 if not xbrl_path:
                     period_mismatch = True # Force mismatch treatment for missing XBRL
-                
+
                 if period_mismatch:
                     logger.warning(f"[EARNINGS] {ticker} Period mismatch guard triggered! event={fiscal_year}/{quarter} xbrl={xbrl_fy}/{xbrl_q}")
                     action = "skipped_period_mismatch"
@@ -1230,7 +1397,7 @@ def run_earnings_production(
                     save_data["selling_general_and_administrative_expenses_value"] = None
                 else:
                     action = save_earnings_summary(conn, save_data)
-                    
+
                 if action == "inserted" or action == "skipped_period_mismatch":
                     if action == "inserted":
                         result.saved_count += 1
@@ -1255,10 +1422,43 @@ def run_earnings_production(
                     except Exception as _e:
                         logger.warning(f"[EARNINGS_STORE] {ticker} tdnet_events save failed (non-fatal): {_e}")
 
-                    # ---- canonical_financials 同期 ----
-                    if _sup_ok:
-                        _seq_period = _derive_fiscal_year_end_period(doc.title)
-                        _seq_doc_id = getattr(doc, "disclosure_id", "") or getattr(doc, "doc_id", "") or ""
+                    # ---- canonical_financials / segments 同期 (再試行サポート付き) ----
+                    _seq_period = _derive_fiscal_year_end_period(doc.title)
+                    _seq_doc_id = getattr(doc, "disclosure_id", "") or getattr(doc, "doc_id", "") or ""
+
+                    # 14桁書類IDの解決
+                    _seq_disclosure_no = ""
+                    for attr_name in ("doc_id", "tdnet_id"):
+                        val = str(getattr(doc, attr_name, ""))
+                        if val and len(val) == 14 and val.isdigit():
+                            _seq_disclosure_no = val
+                            break
+                    if not _seq_disclosure_no:
+                        _seq_disclosure_no = extract_common_disclosure_no(getattr(doc, "doc_url", "")) or ""
+                    if not _seq_disclosure_no:
+                        _seq_disclosure_no = extract_common_disclosure_no(getattr(doc, "xbrl_url", "")) or ""
+
+                    # Supabaseクライアントの取得と登録状況の確認
+                    from .tdnet_event_store import _get_supabase
+                    _client = _get_supabase()
+
+                    _expected_segs = None
+                    if xbrl_path and os.path.exists(xbrl_path):
+                        try:
+                            _expected_segs = _extract_expected_segment_names_from_xbrl(
+                                xbrl_path, _seq_period, quarter
+                            )
+                        except Exception:
+                            pass
+
+                    _pl_saved = False
+                    _seg_saved = False
+                    if _client:
+                        _pl_saved = _check_canonical_financials_saved(_client, ticker, _seq_period, quarter)
+                        _seg_saved = _check_canonical_segments_saved(_client, ticker, _seq_period, quarter, _expected_segs)
+
+                    # PL同期
+                    if not _pl_saved:
                         _seq_guidance_dict = {}
                         if guidance and guidance.has_guidance:
                             _seq_guidance_dict = dataclasses.asdict(guidance)
@@ -1276,13 +1476,17 @@ def run_earnings_production(
                             dry_run=dry_run,
                             route="sequential",
                         )
+
+                    # セグメント同期
+                    if not _seg_saved:
                         try:
                             _sync_canonical_segments(
                                 ticker=ticker,
                                 period=_seq_period,
                                 quarter=quarter,
+                                canonical_filing_id=_seq_doc_id,
+                                common_disclosure_no=_seq_disclosure_no,
                                 xbrl_path=xbrl_path,
-                                filing_id=_seq_doc_id,
                                 dry_run=dry_run,
                                 route="sequential",
                             )
@@ -1338,7 +1542,7 @@ def _find_cached_xbrl(xbrl_dir: str, ticker: str, doc_id: str = "") -> str | Non
     d = Path(xbrl_dir)
     if not d.is_dir():
         return None
-        
+
     if not doc_id:
         return None
 
@@ -1355,7 +1559,7 @@ def _find_cached_xbrl(xbrl_dir: str, ticker: str, doc_id: str = "") -> str | Non
 
     if len(matches) == 1:
         return str(matches[0])
-    
+
     return None # Ambiguous or not found
 
 
