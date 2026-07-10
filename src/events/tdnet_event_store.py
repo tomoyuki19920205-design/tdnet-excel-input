@@ -1351,3 +1351,174 @@ def update_discord_sent_at_supabase(
             f"ticker={event.ticker} error={e}"
         )
         return False
+
+
+def update_tdnet_event_fields_by_identity(
+    client,
+    *,
+    id: str,
+    ticker: str,
+    disclosed_at: str,
+    dedupe_key: str,
+    pdf_url: str,
+    updates: dict,
+    dry_run: bool = True,
+) -> dict:
+    """指定された5つの識別条件すべてに一致する tdnet_events の既存レコード1件について、
+    許可された少数のカラムに限定して安全に更新（UPDATE）する。
+
+    Parameters
+    ----------
+    client : SupabaseClient
+    id : str
+    ticker : str
+    disclosed_at : str
+    dedupe_key : str
+    pdf_url : str
+    updates : dict
+        更新するカラムと値の辞書。
+    dry_run : bool, default True
+
+    Returns
+    -------
+    dict
+        処理結果の情報
+    """
+    result = {
+        "status": "error",
+        "matched_rows": 0,
+        "affected_rows": 0,
+        "dry_run": dry_run,
+        "update_called": False,
+        "allowed_columns": ["raw_payload", "primary_metric_value", "primary_metric_yoy", "display_summary", "formatted_message"],
+        "changed_columns": [],
+        "unchanged_columns": [],
+        "before": {},
+        "after": {},
+        "stop_reason": None,
+    }
+
+    # 1. 5つの条件のバリデーション
+    identity_fields = {
+        "id": id,
+        "ticker": ticker,
+        "disclosed_at": disclosed_at,
+        "dedupe_key": dedupe_key,
+        "pdf_url": pdf_url,
+    }
+    for field_name, field_val in identity_fields.items():
+        if not field_val or not isinstance(field_val, str) or not field_val.strip():
+            result["stop_reason"] = f"Missing or empty identity field: {field_name}"
+            return result
+
+    # 2. updates カラムのバリデーション
+    if not updates or not isinstance(updates, dict):
+        result["stop_reason"] = "Updates dict must be a non-empty dict"
+        return result
+
+    for col in updates.keys():
+        if col not in result["allowed_columns"]:
+            result["stop_reason"] = f"Column not allowed for partial update: {col}"
+            return result
+
+    try:
+        if client is None:
+            result["stop_reason"] = "Supabase client not available"
+            return result
+
+        # 3. 事前SELECTによる対象1件の確認 (最大2件)
+        q = (
+            client.table("tdnet_events")
+            .select("*")
+            .eq("id", id)
+            .eq("ticker", ticker)
+            .eq("disclosed_at", disclosed_at)
+            .eq("dedupe_key", dedupe_key)
+            .eq("pdf_url", pdf_url)
+            .limit(2)
+        )
+        select_res = _supabase_execute(q)
+        data = select_res.data or []
+        result["matched_rows"] = len(data)
+
+        if len(data) == 0:
+            result["stop_reason"] = "Target record not found (matched_rows = 0)"
+            return result
+        elif len(data) > 1:
+            result["stop_reason"] = "Target record is not unique (matched_rows > 1)"
+            return result
+
+        # 4. 現在値と更新予定値の比較 (更新前後差分の生成)
+        existing_row = data[0]
+        before_vals = {}
+        after_vals = {}
+        changed_cols = []
+        unchanged_cols = []
+
+        for col, val in updates.items():
+            before_vals[col] = existing_row.get(col)
+            after_vals[col] = val
+
+            is_changed = False
+            if col == "raw_payload":
+                try:
+                    b_json = json.loads(existing_row.get(col, "{}")) if isinstance(existing_row.get(col), str) else existing_row.get(col)
+                    a_json = json.loads(val) if isinstance(val, str) else val
+                    if _strip_volatile_keys(b_json) != _strip_volatile_keys(a_json):
+                        is_changed = True
+                except Exception:
+                    is_changed = (existing_row.get(col) != val)
+            else:
+                is_changed = (existing_row.get(col) != val)
+
+            if is_changed:
+                changed_cols.append(col)
+            else:
+                unchanged_cols.append(col)
+
+        result["before"] = before_vals
+        result["after"] = after_vals
+        result["changed_columns"] = changed_cols
+        result["unchanged_columns"] = unchanged_cols
+
+        # 5. dry-run処理
+        if dry_run:
+            result["status"] = "success"
+            return result
+
+        # 6. apply処理 (dry_run = False)
+        if len(changed_cols) == 0:
+            result["status"] = "success"
+            logger.info(f"[STORE] Partial update skipped (no changes) for id={id[:8]}")
+            return result
+
+        result["update_called"] = True
+
+        # 変更されたカラムのみに絞った update_payload を作成
+        update_payload = {col: updates[col] for col in changed_cols}
+
+        upd_q = (
+            client.table("tdnet_events")
+            .update(update_payload)
+            .eq("id", id)
+            .eq("ticker", ticker)
+            .eq("disclosed_at", disclosed_at)
+            .eq("dedupe_key", dedupe_key)
+            .eq("pdf_url", pdf_url)
+        )
+        upd_res = _supabase_execute(upd_q)
+        upd_data = upd_res.data or []
+        result["affected_rows"] = len(upd_data)
+
+        if len(upd_data) == 1:
+            result["status"] = "success"
+            logger.info(f"[STORE] Successfully partially updated tdnet_events record id={id[:8]}")
+        else:
+            result["stop_reason"] = f"Affected rows is not exactly 1 (affected_rows = {len(upd_data)})"
+
+        return result
+
+    except Exception as e:
+        logger.error(f"[STORE] update_tdnet_event_fields_by_identity FAILED: {e}")
+        result["stop_reason"] = f"Exception occurred: {e}"
+        return result
