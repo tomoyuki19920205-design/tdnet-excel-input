@@ -914,7 +914,7 @@ def sync(
                             all_canonical_rows,
                             on_conflict="source_row_key",
                             config=canonical_config,
-                            batch_size=200,
+                            batch_size=1000, # Increased for Phase 2 nightly speedup
                             session=api.session,
                         )
                         logger.info(
@@ -1003,7 +1003,7 @@ def sync(
                                 fc_rows,
                                 on_conflict="source_row_key",
                                 config=canonical_config,
-                                batch_size=200,
+                                batch_size=1000, # Increased for Phase 2 nightly speedup
                                 session=api.session,
                             )
                             logger.info(
