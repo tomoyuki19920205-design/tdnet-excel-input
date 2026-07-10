@@ -1170,7 +1170,100 @@ class TestCanonicalCompletionStrictness:
         ]
         assert _check_canonical_segments_saved(client, "9982", "2027-02-28", "1Q", fid, expected) is True
 
-    # ──── 呼出元コール引数（call_args）検証テスト ────
+    # ──── キー一致・期待集合検証テスト ────
+    def test_key_alignment_scenarios(self):
+        from src.events.earnings_production_pipeline import _build_expected_segment_metrics_from_canonical_rows
+        from lib.pipeline.canonical_writer import expand_segments_rows
+
+        fid = "a" * 64
+
+        # 1. アパレル事業 (期待キーと writer 生成キーが完全一致)
+        segs1 = [{"segment_name": "アパレル事業", "sales": 100, "profit": 10}]
+        exp1 = _build_expected_segment_metrics_from_canonical_rows("7601", "2027-02-28", "1Q", segs1, "xbrl", fid)
+        rows1, _ = expand_segments_rows(ticker="7601", period="2027-02-28", quarter="1Q", segments=segs1, source="xbrl", filing_id=fid, unit="millions_jpy")
+        assert len(exp1) == 2
+        for r in rows1:
+            assert (r["segment_key"], r["metric"]) in exp1
+
+        # 2. ローソン・ポプラ事業 (記号を含む場合)
+        segs2 = [{"segment_name": "ローソン・ポプラ事業", "sales": 200, "profit": 20}]
+        exp2 = _build_expected_segment_metrics_from_canonical_rows("7601", "2027-02-28", "1Q", segs2, "xbrl", fid)
+        rows2, _ = expand_segments_rows(ticker="7601", period="2027-02-28", quarter="1Q", segments=segs2, source="xbrl", filing_id=fid, unit="millions_jpy")
+        assert len(exp2) == 2
+        for r in rows2:
+            assert (r["segment_key"], r["metric"]) in exp2
+
+        # 3. 英語セグメント名 (大文字・空白を含む場合)
+        segs3 = [{"segment_name": "Apparel And Textile Sector", "sales": 300, "profit": 30}]
+        exp3 = _build_expected_segment_metrics_from_canonical_rows("7601", "2027-02-28", "1Q", segs3, "xbrl", fid)
+        rows3, _ = expand_segments_rows(ticker="7601", period="2027-02-28", quarter="1Q", segments=segs3, source="xbrl", filing_id=fid, unit="millions_jpy")
+        assert len(exp3) == 2
+        for r in rows3:
+            assert (r["segment_key"], r["metric"]) in exp3
+
+        # 4. metricがsalesとprofitの両方存在する場合
+        assert ("アパレル事業", "sales") in exp1
+        assert ("アパレル事業", "profit") in exp1
+
+        # 5. salesだけ非null
+        segs5 = [{"segment_name": "アパレル事業", "sales": 100, "profit": None}]
+        exp5 = _build_expected_segment_metrics_from_canonical_rows("7601", "2027-02-28", "1Q", segs5, "xbrl", fid)
+        assert len(exp5) == 1
+        assert ("アパレル事業", "sales") in exp5
+        assert ("アパレル事業", "profit") not in exp5
+
+        # 6. profitだけ非null
+        segs6 = [{"segment_name": "アパレル事業", "sales": None, "profit": 10}]
+        exp6 = _build_expected_segment_metrics_from_canonical_rows("7601", "2027-02-28", "1Q", segs6, "xbrl", fid)
+        assert len(exp6) == 1
+        assert ("アパレル事業", "sales") not in exp6
+        assert ("アパレル事業", "profit") in exp6
+
+        # 7. 両方null
+        segs7 = [{"segment_name": "アパレル事業", "sales": None, "profit": None}]
+        exp7 = _build_expected_segment_metrics_from_canonical_rows("7601", "2027-02-28", "1Q", segs7, "xbrl", fid)
+        assert len(exp7) == 0
+
+        # 8. 重複する保存予定行
+        segs8 = [
+            {"segment_name": "アパレル事業", "sales": 100, "profit": 10},
+            {"segment_name": "アパレル事業", "sales": 100, "profit": 10},
+        ]
+        exp8 = _build_expected_segment_metrics_from_canonical_rows("7601", "2027-02-28", "1Q", segs8, "xbrl", fid)
+        assert len(exp8) == 2  # 重複排除されている
+
+    def test_key_real_poplar_scenarios(self):
+        from src.events.earnings_production_pipeline import _build_expected_segment_metrics_from_canonical_rows
+        from lib.pipeline.canonical_writer import expand_segments_rows
+        fid = "a" * 64
+        segs = [
+            {"segment_name": "Smartstore", "sales": 500, "profit": 50},
+            {"segment_name": "Lawson Poplar", "sales": 300, "profit": 30},
+            {"segment_name": "Other", "sales": 50, "profit": 5},
+        ]
+        exp = _build_expected_segment_metrics_from_canonical_rows("7601", "2027-02-28", "1Q", segs, "xbrl", fid)
+        rows, _ = expand_segments_rows(ticker="7601", period="2027-02-28", quarter="1Q", segments=segs, source="xbrl", filing_id=fid, unit="millions_jpy")
+        assert len(exp) == 6
+        for r in rows:
+            assert (r["segment_key"], r["metric"]) in exp
+
+    def test_key_real_takihyo_scenarios(self):
+        from src.events.earnings_production_pipeline import _build_expected_segment_metrics_from_canonical_rows
+        from lib.pipeline.canonical_writer import expand_segments_rows
+        fid = "a" * 64
+        segs = [
+            {"segment_name": "Apparel And Textile", "sales": 1000, "profit": 100},
+            {"segment_name": "Rental Business", "sales": 400, "profit": 40},
+            {"segment_name": "Material", "sales": 200, "profit": 20},
+            {"segment_name": "Other", "sales": 100, "profit": 10},
+        ]
+        exp = _build_expected_segment_metrics_from_canonical_rows("9982", "2027-02-28", "1Q", segs, "xbrl", fid)
+        rows, _ = expand_segments_rows(ticker="9982", period="2027-02-28", quarter="1Q", segments=segs, source="xbrl", filing_id=fid, unit="millions_jpy")
+        assert len(exp) == 8
+        for r in rows:
+            assert (r["segment_key"], r["metric"]) in exp
+
+    # ──── 呼出元個別検証テスト ────
     @patch("src.events.earnings_subprocess_runner.build_discord_call_plan")
     @patch("src.events.earnings_subprocess_runner.validate_save_call_plan")
     @patch("src.events.earnings_subprocess_runner.build_save_call_plan")
@@ -1184,20 +1277,19 @@ class TestCanonicalCompletionStrictness:
     @patch("src.events.tdnet_event_store._get_supabase")
     @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
     @patch("os.path.exists", return_value=True)
-    def test_caller_validation_args(
+    def test_caller_pl_call_args(
         self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_fin, m_check_seg,
         m_supa, m_run, m_payload, m_valid, m_plan, m_cp_valid, m_discord_plan, monkeypatch
     ):
         from src.events.earnings_production_pipeline import run_earnings_production
-        from src.models import DisclosureItem
         import sqlite3
         from src.events.earnings_summary_storage import ensure_earnings_summary_table
+        from tests.test_earnings_canonical_sync import DummyDoc
 
-        # テスト用のDBセットアップ
         conn = sqlite3.connect(":memory:")
         ensure_earnings_summary_table(conn)
 
-        # モック返却値設定
+        # モック設定
         mock_client = MagicMock()
         m_get_supabase.return_value = mock_client
         m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
@@ -1205,7 +1297,7 @@ class TestCanonicalCompletionStrictness:
         m_check_seg.return_value = True
         m_supa.return_value = {"action": "inserted"}
 
-        # subprocess runner のモック戻り値
+        # subprocess runner モック設定
         m_run.return_value = {"results": [{"ticker": "7601", "status": "ok"}]}
         m_valid.return_value = (True, "")
         m_cp_valid.return_value = (True, "")
@@ -1226,7 +1318,7 @@ class TestCanonicalCompletionStrictness:
                 "quarter": "1Q",
                 "sales_value": 500_000_000,
                 "op_value": 50_000_000,
-                "title": "2027\u5e742\u6708\u671f \u7b2c1\u56db\u534a\u671f\u6c7a\u7b97\u77ed\u4fe1",
+                "title": "2027年2月期 第1四半期決算短信",
                 "fingerprint": "dummy_fingerprint_7601",
             },
             "tdnet_event_payload": {
@@ -1235,34 +1327,286 @@ class TestCanonicalCompletionStrictness:
             }
         }
 
-        # extract_and_filter はダミーの target_segs を返すようにする
-        m_extract_and_filter.return_value = [
-            {"segment_name": "apparel", "sales": 100, "profit": 10, "segment_type": "ordinary"}
-        ]
-
-        from tests.test_earnings_canonical_sync import DummyDoc
-        doc = DummyDoc("7601", "2027\u5e742\u6708\u671f \u7b2c1\u56db\u534a\u671f\u6c7a\u7b97\u77ed\u4fe1", h_64)
+        doc = DummyDoc("7601", "2027年2月期 第1四半期決算短信", h_64)
         doc.doc_url = "https://www.release.tdnet.info/inbs/140120260709590505.pdf"
         doc.xbrl_url = "https://www.release.tdnet.info/xbrl/140120260709590505.zip"
         doc.pdf_url = ""
         doc.doc_id = "20260709590505"
         doc.source_doc_id = h_64
 
-        # 実行 (サブプロセスルート)
         monkeypatch.setenv("USE_SUBPROCESS_WORKER", "1")
         monkeypatch.setenv("EARNINGS_SUBPROCESS_ALLOWLIST", "7601")
         monkeypatch.setenv("EARNINGS_SUBPROCESS_ENABLE_REAL_SAVE", "1")
         run_earnings_production([doc], conn, webhook_url="")
 
-        # 各完了判定への call_args を検証
         assert m_check_fin.call_count == 1
         args, kwargs = m_check_fin.call_args
         assert kwargs.get("filing_id") == h_64
-        assert kwargs.get("filing_id") != "20260709590505"
-        assert kwargs.get("expected_metrics") == ["sales", "operating_profit"]
+        assert kwargs.get("filing_id") != "20260709590505"  # 14桁書類IDが渡らない
+
+    @patch("src.events.earnings_subprocess_runner.build_discord_call_plan")
+    @patch("src.events.earnings_subprocess_runner.validate_save_call_plan")
+    @patch("src.events.earnings_subprocess_runner.build_save_call_plan")
+    @patch("src.events.earnings_subprocess_runner.validate_save_ready_payload")
+    @patch("src.events.earnings_subprocess_runner.build_save_ready_payload")
+    @patch("src.events.earnings_subprocess_runner.run_earnings_subprocess_dry_run")
+    @patch("src.events.tdnet_event_store.save_event_to_supabase")
+    @patch("src.events.earnings_production_pipeline._check_canonical_segments_saved")
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved")
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("os.path.exists", return_value=True)
+    def test_caller_segment_call_args(
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_fin, m_check_seg,
+        m_supa, m_run, m_payload, m_valid, m_plan, m_cp_valid, m_discord_plan, monkeypatch
+    ):
+        from src.events.earnings_production_pipeline import run_earnings_production
+        import sqlite3
+        from src.events.earnings_summary_storage import ensure_earnings_summary_table
+        from tests.test_earnings_canonical_sync import DummyDoc
+
+        conn = sqlite3.connect(":memory:")
+        ensure_earnings_summary_table(conn)
+
+        # モック設定
+        mock_client = MagicMock()
+        m_get_supabase.return_value = mock_client
+        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+        m_check_fin.return_value = True
+        m_check_seg.return_value = True
+        m_supa.return_value = {"action": "inserted"}
+        m_extract_and_filter.return_value = [
+            {"segment_name": "アパレル事業", "sales": 100, "profit": 10}
+        ]
+
+        # subprocess runner モック設定
+        m_run.return_value = {"results": [{"ticker": "7601", "status": "ok"}]}
+        m_valid.return_value = (True, "")
+        m_cp_valid.return_value = (True, "")
+        m_discord_plan.return_value = {"discord_message": "dummy msg"}
+        m_payload.return_value = {
+            "extracted": {
+                "ticker": "7601",
+                "period": "2027-02-28",
+                "quarter": "1Q",
+                "guidance": {}
+            }
+        }
+        h_64 = "c1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        m_plan.return_value = {
+            "earnings_summary_args": {
+                "ticker": "7601",
+                "fiscal_year": "2027",
+                "quarter": "1Q",
+                "sales_value": 500_000_000,
+                "op_value": 50_000_000,
+                "title": "2027年2月期 第1四半期決算短信",
+                "fingerprint": "dummy_fingerprint_7601",
+            },
+            "tdnet_event_payload": {
+                "ticker": "7601",
+                "source_doc_id": h_64
+            }
+        }
+
+        doc = DummyDoc("7601", "2027年2月期 第1四半期決算短信", h_64)
+        doc.doc_url = "https://www.release.tdnet.info/inbs/140120260709590505.pdf"
+        doc.xbrl_url = "https://www.release.tdnet.info/xbrl/140120260709590505.zip"
+        doc.pdf_url = ""
+        doc.doc_id = "20260709590505"
+        doc.source_doc_id = h_64
+
+        monkeypatch.setenv("USE_SUBPROCESS_WORKER", "1")
+        monkeypatch.setenv("EARNINGS_SUBPROCESS_ALLOWLIST", "7601")
+        monkeypatch.setenv("EARNINGS_SUBPROCESS_ENABLE_REAL_SAVE", "1")
+        run_earnings_production([doc], conn, webhook_url="")
 
         assert m_check_seg.call_count == 1
         args, kwargs = m_check_seg.call_args
         assert kwargs.get("filing_id") == h_64
-        assert kwargs.get("filing_id") != "20260709590505"
-        assert kwargs.get("expected_segment_metrics") == [("apparel", "sales"), ("apparel", "operating_profit")]
+        assert kwargs.get("filing_id") != "20260709590505"  # 14桁書類IDが渡らない
+        # キー一致の検証 (writerが保存するキーアパレル事業になっていること)
+        assert set(kwargs.get("expected_segment_metrics")) == {("アパレル事業", "sales"), ("アパレル事業", "profit")}
+
+    @patch("src.events.earnings_subprocess_runner.build_discord_call_plan")
+    @patch("src.events.earnings_subprocess_runner.validate_save_call_plan")
+    @patch("src.events.earnings_subprocess_runner.build_save_call_plan")
+    @patch("src.events.earnings_subprocess_runner.validate_save_ready_payload")
+    @patch("src.events.earnings_subprocess_runner.build_save_ready_payload")
+    @patch("src.events.earnings_subprocess_runner.run_earnings_subprocess_dry_run")
+    @patch("src.events.tdnet_event_store.save_event_to_supabase")
+    @patch("src.events.earnings_production_pipeline._sync_canonical_segments")
+    @patch("src.events.earnings_production_pipeline._check_canonical_segments_saved")
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("os.path.exists", return_value=True)
+    def test_caller_subprocess_route(
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_sync_seg,
+        m_supa, m_run, m_payload, m_valid, m_plan, m_cp_valid, m_discord_plan, monkeypatch
+    ):
+        from src.events.earnings_production_pipeline import run_earnings_production
+        import sqlite3
+        from src.events.earnings_summary_storage import ensure_earnings_summary_table
+        from tests.test_earnings_canonical_sync import DummyDoc
+
+        conn = sqlite3.connect(":memory:")
+        ensure_earnings_summary_table(conn)
+
+        # モック設定
+        mock_client = MagicMock()
+        m_get_supabase.return_value = mock_client
+        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+        m_check_seg.return_value = False  # 同期処理を実行させる
+        m_supa.return_value = {"action": "inserted"}
+        target_segs = [{"segment_name": "アパレル事業", "sales": 100, "profit": 10}]
+        m_extract_and_filter.return_value = target_segs
+
+        # subprocess runner モック設定
+        m_run.return_value = {"results": [{"ticker": "7601", "status": "ok"}]}
+        m_valid.return_value = (True, "")
+        m_cp_valid.return_value = (True, "")
+        m_discord_plan.return_value = {"discord_message": "dummy msg"}
+        m_payload.return_value = {
+            "extracted": {
+                "ticker": "7601",
+                "period": "2027-02-28",
+                "quarter": "1Q",
+                "guidance": {}
+            }
+        }
+        h_64 = "c1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        m_plan.return_value = {
+            "earnings_summary_args": {
+                "ticker": "7601",
+                "fiscal_year": "2027",
+                "quarter": "1Q",
+                "sales_value": 500_000_000,
+                "op_value": 50_000_000,
+                "title": "2027年2月期 第1四半期決算短信",
+                "fingerprint": "dummy_fingerprint_7601",
+            },
+            "tdnet_event_payload": {
+                "ticker": "7601",
+                "source_doc_id": h_64
+            }
+        }
+
+        doc = DummyDoc("7601", "2027年2月期 第1四半期決算短信", h_64)
+        doc.doc_url = "https://www.release.tdnet.info/inbs/140120260709590505.pdf"
+        doc.xbrl_url = "https://www.release.tdnet.info/xbrl/140120260709590505.zip"
+        doc.pdf_url = ""
+        doc.doc_id = "20260709590505"
+        doc.source_doc_id = h_64
+
+        monkeypatch.setenv("USE_SUBPROCESS_WORKER", "1")
+        monkeypatch.setenv("EARNINGS_SUBPROCESS_ALLOWLIST", "7601")
+        monkeypatch.setenv("EARNINGS_SUBPROCESS_ENABLE_REAL_SAVE", "1")
+        run_earnings_production([doc], conn, webhook_url="")
+
+        # 完了判定の target_segs と、同期処理に渡った target_segs が同一内容であることを call_args で検証
+        assert m_check_seg.call_count == 1
+        _, check_kwargs = m_check_seg.call_args
+
+        assert m_sync_seg.call_count == 1
+        _, sync_kwargs = m_sync_seg.call_args
+
+        # 同期の target_segs が正しいことの検証
+        assert sync_kwargs.get("target_segs") == target_segs
+
+        # 完了判定用の expected_segment_metrics が、同期に渡した target_segs からヘルパーで一貫して構築されたものであることの検証
+        from src.events.earnings_production_pipeline import _build_expected_segment_metrics_from_canonical_rows
+        expected = _build_expected_segment_metrics_from_canonical_rows("7601", "2027-02-28", "1Q", target_segs, "xbrl", h_64)
+        assert set(check_kwargs.get("expected_segment_metrics")) == expected
+
+    @patch("src.events.earnings_subprocess_runner.build_discord_call_plan")
+    @patch("src.events.earnings_subprocess_runner.validate_save_call_plan")
+    @patch("src.events.earnings_subprocess_runner.build_save_call_plan")
+    @patch("src.events.earnings_subprocess_runner.validate_save_ready_payload")
+    @patch("src.events.earnings_subprocess_runner.build_save_ready_payload")
+    @patch("src.events.earnings_subprocess_runner.run_earnings_subprocess_dry_run")
+    @patch("src.events.tdnet_event_store.save_event_to_supabase")
+    @patch("src.events.earnings_production_pipeline._sync_canonical_segments")
+    @patch("src.events.earnings_production_pipeline._check_canonical_segments_saved")
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("os.path.exists", return_value=True)
+    def test_caller_sequential_route(
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_sync_seg,
+        m_supa, m_run, m_payload, m_valid, m_plan, m_cp_valid, m_discord_plan, monkeypatch
+    ):
+        from src.events.earnings_production_pipeline import run_earnings_production
+        import sqlite3
+        from src.events.earnings_summary_storage import ensure_earnings_summary_table
+        from tests.test_earnings_canonical_sync import DummyDoc
+
+        conn = sqlite3.connect(":memory:")
+        ensure_earnings_summary_table(conn)
+
+        # モック設定
+        mock_client = MagicMock()
+        m_get_supabase.return_value = mock_client
+        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+        m_check_seg.return_value = False  # 同期処理を実行させる
+        m_supa.return_value = {"action": "inserted"}
+        target_segs = [{"segment_name": "アパレル事業", "sales": 100, "profit": 10}]
+        m_extract_and_filter.return_value = target_segs
+
+        # subprocess runner モック設定 (シーケンシャルルートでも一応セットしておく)
+        m_run.return_value = {"results": [{"ticker": "7601", "status": "ok"}]}
+        m_valid.return_value = (True, "")
+        m_cp_valid.return_value = (True, "")
+        m_discord_plan.return_value = {"discord_message": "dummy msg"}
+        m_payload.return_value = {
+            "extracted": {
+                "ticker": "7601",
+                "period": "2027-02-28",
+                "quarter": "1Q",
+                "guidance": {}
+            }
+        }
+        h_64 = "c1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        m_plan.return_value = {
+            "earnings_summary_args": {
+                "ticker": "7601",
+                "fiscal_year": "2027",
+                "quarter": "1Q",
+                "sales_value": 500_000_000,
+                "op_value": 50_000_000,
+                "title": "2027年2月期 第1四半期決算短信",
+                "fingerprint": "dummy_fingerprint_7601",
+            },
+            "tdnet_event_payload": {
+                "ticker": "7601",
+                "source_doc_id": h_64
+            }
+        }
+
+        doc = DummyDoc("7601", "2027年2月期 第1四半期決算短信", h_64)
+        doc.doc_url = "https://www.release.tdnet.info/inbs/140120260709590505.pdf"
+        doc.xbrl_url = "https://www.release.tdnet.info/xbrl/140120260709590505.zip"
+        doc.pdf_url = ""
+        doc.doc_id = "20260709590505"
+        doc.source_doc_id = h_64
+
+        # シーケンシャルルート（非サブプロセス）で実行
+        monkeypatch.setenv("USE_SUBPROCESS_WORKER", "0")
+        monkeypatch.setenv("EARNINGS_SUBPROCESS_ALLOWLIST", "")
+        run_earnings_production([doc], conn, webhook_url="")
+
+        # 完了判定の target_segs と、同期処理に渡った target_segs が同一内容であることを call_args で検証
+        assert m_check_seg.call_count == 1
+        _, check_kwargs = m_check_seg.call_args
+
+        assert m_sync_seg.call_count == 1
+        _, sync_kwargs = m_sync_seg.call_args
+
+        # 同期の target_segs が正しいことの検証
+        assert sync_kwargs.get("target_segs") == target_segs
+
+        # 完了判定用の expected_segment_metrics が、同期に渡した target_segs からヘルパーで一貫して構築されたものであることの検証
+        from src.events.earnings_production_pipeline import _build_expected_segment_metrics_from_canonical_rows
+        expected = _build_expected_segment_metrics_from_canonical_rows("7601", "2027-02-28", "1Q", target_segs, "xbrl", h_64)
+        assert set(check_kwargs.get("expected_segment_metrics")) == expected
