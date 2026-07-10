@@ -824,7 +824,7 @@ def extract_segments_from_xbrl_zip_detailed(
             parsed_file_count=parsed_file_count
         )
 
-    is_date_guard_ok = (expected_end is None) or (date_guard_status_final == "PASS")
+    is_date_guard_ok = (expected_end is not None) and (date_guard_status_final == "PASS")
 
     if (
         candidate_file_count >= 1

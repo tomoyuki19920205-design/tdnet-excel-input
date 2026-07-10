@@ -376,6 +376,7 @@ class TestSegmentExtractionDetailed:
         assert res.segments == []
         assert res.date_guard_status == "PASS"
         assert res.candidate_file_count == 1
+        assert res.parsed_file_count == res.candidate_file_count
         assert res.parsed_file_count == 1
 
     def test_legacy_api_parity(self, tmp_path):
@@ -520,5 +521,23 @@ class TestSegmentExtractionDetailed:
         assert res.status == "success_empty"
         assert res.segments == []
         assert res.candidate_file_count == 2
+        assert res.candidate_file_count == 2
         assert res.parsed_file_count == 2
 
+    def test_expected_end_unresolved(self, tmp_path):
+        contexts = [
+            {"id": "CurrentYearYTD_Duration_tse-acedjpfr-25900DomesticBeverageBusinessReportableSegmentsMember", "start": "2026-03-01", "end": "2026-08-31"},
+        ]
+        facts = []
+        zip_p = tmp_path / "expected_end_none.zip"
+        create_dummy_ixbrl_zip(zip_p, "2027年2月期 第2四半期決算短信［日本基準］(連結)", contexts, facts)
+
+        res = extract_segments_from_xbrl_zip_detailed(str(zip_p), period=None, quarter="2Q")
+        assert res.status == "context_unresolved"
+        assert res.status != "success_empty"
+        assert res.date_guard_status == "UNKNOWN"
+        assert res.date_guard_status != "PASS"
+        assert len(res.segments) == 0
+
+        legacy_res = extract_segments_from_xbrl_zip(str(zip_p), period=None, quarter="2Q")
+        assert legacy_res == []
