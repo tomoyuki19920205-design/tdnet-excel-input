@@ -226,6 +226,99 @@ def _sync_canonical_financials(
         logger.error("[EARNINGS][CANONICAL] %s canonical同期中にエラー: %s route=%s", ticker, e, route)
 
 
+def _sync_canonical_segments(
+    ticker: str,
+    period: str,
+    quarter: str,
+    xbrl_path: str | None,
+    filing_id: str,
+    dry_run: bool,
+    route: str,
+):
+    import os
+    if not period:
+        logger.warning("[EARNINGS][SEGMENT_CANONICAL] %s period不明のため同期をスキップ route=%s", ticker, route)
+        return
+
+    logger.info("[EARNINGS][SEGMENT_CANONICAL] %s segment開始 %s %s %s %s", ticker, period, quarter, route, filing_id)
+
+    if not xbrl_path or not os.path.exists(xbrl_path):
+        logger.warning("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s stage=extract error_type=FileNotFound message=XBRL ZIP file not found at %s", ticker, xbrl_path or "")
+        return
+
+    try:
+        from src.segment.xbrl_segment_extractor import extract_segments_from_xbrl_zip
+        # 既存の正式抽出器を利用
+        raw_rows = extract_segments_from_xbrl_zip(
+            zip_path=xbrl_path,
+            period=period,
+            quarter=quarter,
+        )
+    except Exception as e:
+        logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s stage=extract error_type=%s message=%s", ticker, type(e).__name__, str(e))
+        return
+
+    # 当期のみフィルタリング
+    target_segs = []
+    for r in raw_rows:
+        if r.period != period:
+            continue
+        # segment_name は normalized_segment_name を優先、なければ raw_segment_name を使用
+        name = r.normalized_segment_name or r.raw_segment_name
+        if not name:
+            continue
+
+        target_segs.append({
+            "segment_name": name,
+            "sales": r.sales,
+            "profit": r.profit,
+            "source_system": r.source_system or "tdnet",
+            "segment_type": r.segment_type or "ordinary",
+            "derivation_method": r.derivation_method or "",
+        })
+
+    if not target_segs:
+        logger.info("[EARNINGS][SEGMENT_CANONICAL] %s segment情報なし", ticker)
+        return
+
+    rows_count = len(target_segs)
+
+    if dry_run:
+        logger.info("[EARNINGS][SEGMENT_CANONICAL] %s dry-run保存スキップ rows=%d", ticker, rows_count)
+        return
+
+    try:
+        from lib.pipeline.canonical_writer import write_segments_canonical
+
+        # Supabase 接続情報の解決
+        _url = os.getenv("SUPABASE_URL", "").rstrip("/")
+        _config = {
+            "rest_url": f"{_url}/rest/v1" if _url else "",
+            "key": os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY", "")
+        }
+
+        # 既存の正式writerを利用して保存
+        res = write_segments_canonical(
+            ticker=ticker,
+            period=period,
+            quarter=quarter,
+            segments=target_segs,
+            source="xbrl",
+            filing_id=filing_id,
+            unit="millions_jpy",
+            config=_config,
+        )
+        written = res.get("written", 0)
+        errors = res.get("errors", 0)
+        if errors > 0 and written == 0:
+            logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s stage=write error_type=UpsertFailed message=segments upsert failed", ticker)
+        else:
+            logger.info("[EARNINGS][SEGMENT_CANONICAL] %s segment保存成功 rows=%d", ticker, written)
+
+    except Exception as e:
+        logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s stage=write error_type=%s message=%s", ticker, type(e).__name__, str(e))
+
+
 # ============================================================
 # fiscal_year / quarter 解析
 # ============================================================
@@ -637,6 +730,18 @@ def run_earnings_production(
                             dry_run=dry_run,
                             route="subprocess",
                         )
+                        try:
+                            _sync_canonical_segments(
+                                ticker=_ticker,
+                                period=_period,
+                                quarter=_q,
+                                xbrl_path=_find_cached_xbrl(xbrl_dir, _ticker, doc_id=_doc_id),
+                                filing_id=_doc_id,
+                                dry_run=dry_run,
+                                route="subprocess",
+                            )
+                        except Exception as _seg_e:
+                            logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s subprocess route exception: %s", _ticker, _seg_e)
 
                     # ── Discord 送信 ────────────────────────────────────────────
                     _discord_sent = False
@@ -1171,6 +1276,18 @@ def run_earnings_production(
                             dry_run=dry_run,
                             route="sequential",
                         )
+                        try:
+                            _sync_canonical_segments(
+                                ticker=ticker,
+                                period=_seq_period,
+                                quarter=quarter,
+                                xbrl_path=xbrl_path,
+                                filing_id=_seq_doc_id,
+                                dry_run=dry_run,
+                                route="sequential",
+                            )
+                        except Exception as _seg_e:
+                            logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s sequential route exception: %s", ticker, _seg_e)
                 else:
                     result.already_exists_count += 1
                     continue  # 既存の場合は通知もスキップ

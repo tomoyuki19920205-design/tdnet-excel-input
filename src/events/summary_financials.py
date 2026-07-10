@@ -362,9 +362,10 @@ def _decode_html_bytes(raw: bytes) -> str:
     検出順序:
       1. BOM (UTF-8 BOM, UTF-16 BOM)
       2. <meta charset="..."> タグ
-      3. chardet (利用可能な場合)
-      4. Shift_JIS fallback (日本語HTML向け)
-      5. UTF-8 errors=replace fallback
+      3. UTF-8 (strict) -> 成功時はこれを採用 (誤ってCP932と判定されるのを防止)
+      4. chardet (利用可能な場合)
+      5. Shift_JIS (cp932) fallback (エラーなしでデコードできる場合)
+      6. UTF-8 errors=replace fallback
     """
     # 1. BOM
     if raw[:3] == b"\xef\xbb\xbf":
@@ -386,7 +387,13 @@ def _decode_html_bytes(raw: bytes) -> str:
         except (UnicodeDecodeError, LookupError):
             pass
 
-    # 3. chardet (利用可能な場合)
+    # 3. UTF-8 (strict)
+    try:
+        return raw.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        pass
+
+    # 4. chardet (利用可能な場合)
     try:
         import chardet
         detected = chardet.detect(raw[:5000])
@@ -399,15 +406,13 @@ def _decode_html_bytes(raw: bytes) -> str:
     except ImportError:
         pass
 
-    # 4. Shift_JIS fallback (TDnetの多くはShift_JIS)
+    # 5. Shift_JIS (cp932) fallback (TDnetの多くはShift_JIS)
     try:
-        result = raw.decode("cp932")
-        # 正常にデコードできた場合は採用
-        return result
+        return raw.decode("cp932", errors="strict")
     except UnicodeDecodeError:
         pass
 
-    # 5. UTF-8 fallback
+    # 6. UTF-8 fallback
     return raw.decode("utf-8", errors="replace")
 
 
