@@ -209,6 +209,8 @@ def _detect_unit(text: str) -> str:
 def _normalize_text(text: str) -> str:
     """全角→半角、NFKC正規化、および数値の分断修復"""
     if not text: return ""
+    # CID表記 (cid:数字) を完全に除去して、誤数値抽出を防止する
+    text = re.sub(r"\(cid:\d+\)", " ", text)
     s = unicodedata.normalize("NFKC", text)
     s = s.replace("\u3000", " ")  # 全角スペース
     
@@ -1173,6 +1175,24 @@ def _extract_from_text(
     # 追加属性
     setattr(event, "extraction_stage", "none")
     setattr(event, "fallback_used", False)
+
+    # CID文字化け検知 (置換される前の生の text を使用)
+    cid_count = len(re.findall(r"\(cid:\d+\)", text))
+    anchors = [
+        "前回発表予想", "今回修正予想", "増減額", "増減率",
+        "売上高", "営業利益", "経常利益", "純利益", "業績予想"
+    ]
+    anchor_matches = sum(1 for anchor in anchors if anchor in text)
+    is_garbled = (cid_count >= 10) and (anchor_matches < 2)
+
+    if is_garbled:
+        logger.info(f"[FORECAST] Garbled text detected (cids={cid_count}, anchors={anchor_matches}). Skipping native extraction.")
+        event.extraction_source = source
+        event.extracted_metrics_count = 0
+        event.subtype = "undecided"
+        event.importance = 0
+        event.confidence = 0.0
+        return event
 
     full_text = _normalize_text(text)
     full_title = _normalize_text(title)
