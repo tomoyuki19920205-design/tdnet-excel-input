@@ -798,16 +798,16 @@ def extract_segments_from_xbrl_zip_detailed(
         )
 
     date_guard_status_final = "UNKNOWN"
-    if "PASS" in date_guard_status_set:
-        date_guard_status_final = "PASS"
-    elif "SKIP" in date_guard_status_set:
+    if "SKIP" in date_guard_status_set:
         date_guard_status_final = "SKIP"
+    elif "PASS" in date_guard_status_set:
+        date_guard_status_final = "PASS"
 
     if expected_end and date_guard_status_final == "SKIP":
         return SegmentExtractionResult(
             status="date_guard_skip",
             segments=results,
-            reason="all_candidate_files_skipped_by_date_guard",
+            reason="all_candidate_files_skipped_by_date_guard" if "PASS" not in date_guard_status_set else "mixed_date_guard_results_contains_skip",
             title_quarter=estimated_quarter,
             date_guard_status="SKIP",
             candidate_file_count=candidate_file_count,
