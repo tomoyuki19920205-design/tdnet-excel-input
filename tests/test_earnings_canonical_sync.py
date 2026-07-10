@@ -1551,7 +1551,7 @@ class TestCanonicalCompletionStrictness:
         m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
         m_check_seg.return_value = False  # 同期処理を実行させる
         m_supa.return_value = {"action": "inserted"}
-        target_segs = [{"segment_name": "アパレル事業", "sales": 100, "profit": 10}]
+        target_segs = [{"segment_name": "\u30a2\u30d1\u30ec\u30eb\u4e8b\u696d", "sales": 100, "profit": 10}]
         m_extract_and_filter.return_value = target_segs
 
         # subprocess runner モック設定 (シーケンシャルルートでも一応セットしておく)
@@ -1575,7 +1575,7 @@ class TestCanonicalCompletionStrictness:
                 "quarter": "1Q",
                 "sales_value": 500_000_000,
                 "op_value": 50_000_000,
-                "title": "2027年2月期 第1四半期決算短信",
+                "title": "2027\u5e742\u6708\u671f \u7b2c1\u56db\u534a\u671f\u6c7a\u7b97\u77ed\u4fe1",
                 "fingerprint": "dummy_fingerprint_7601",
             },
             "tdnet_event_payload": {
@@ -1584,7 +1584,7 @@ class TestCanonicalCompletionStrictness:
             }
         }
 
-        doc = DummyDoc("7601", "2027年2月期 第1四半期決算短信", h_64)
+        doc = DummyDoc("7601", "2027\u5e742\u6708\u671f \u7b2c1\u56db\u534a\u671f\u6c7a\u7b97\u77ed\u4fe1", h_64)
         doc.doc_url = "https://www.release.tdnet.info/inbs/140120260709590505.pdf"
         doc.xbrl_url = "https://www.release.tdnet.info/xbrl/140120260709590505.zip"
         doc.pdf_url = ""
@@ -1610,3 +1610,927 @@ class TestCanonicalCompletionStrictness:
         from src.events.earnings_production_pipeline import _build_expected_segment_metrics_from_canonical_rows
         expected = _build_expected_segment_metrics_from_canonical_rows("7601", "2027-02-28", "1Q", target_segs, "xbrl", h_64)
         assert set(check_kwargs.get("expected_segment_metrics")) == expected
+
+
+class TestCanonicalRetryOnDuplicate:
+    """Phase 4: 重複スキップ時の canonical 不足分限定再同期の独立検証"""
+
+    @patch("src.events.earnings_production_pipeline._sync_canonical_financials")
+    @patch("src.events.earnings_production_pipeline._sync_canonical_segments")
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved")
+    @patch("src.events.earnings_production_pipeline._check_canonical_segments_saved")
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("os.path.exists", return_value=True)
+    def test_helper_pl_and_segment_both_complete(
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+    ):
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        m_get_supabase.return_value = mock_client
+        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+
+        fid = "a" * 64
+        disclosure_no = "20260709590505"
+        pl_vals = {"sales": 100, "op": 10}
+
+        m_check_pl.return_value = True
+        m_check_seg.return_value = True
+        target_segs = [{"segment_name": "Apparel", "sales": 100, "profit": 10}]
+        m_extract_and_filter.return_value = target_segs
+
+        _retry_incomplete_canonical_for_duplicate(
+            ticker="7601",
+            period="2027-02-28",
+            quarter="1Q",
+            filing_id=fid,
+            disclosure_no=disclosure_no,
+            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            pl_values=pl_vals,
+            dry_run=False,
+            target_segs=target_segs,
+        )
+        assert m_sync_pl.call_count == 0
+        assert m_sync_seg.call_count == 0
+
+    @patch("src.events.earnings_production_pipeline._sync_canonical_financials")
+    @patch("src.events.earnings_production_pipeline._sync_canonical_segments")
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved")
+    @patch("src.events.earnings_production_pipeline._check_canonical_segments_saved")
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("os.path.exists", return_value=True)
+    def test_helper_pl_incomplete_seg_complete(
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+    ):
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        m_get_supabase.return_value = mock_client
+        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+
+        fid = "a" * 64
+        disclosure_no = "20260709590505"
+        pl_vals = {"sales": 100, "op": 10}
+
+        m_check_pl.side_effect = [False, True]
+        m_check_seg.return_value = True
+        target_segs = [{"segment_name": "Apparel", "sales": 100, "profit": 10}]
+        m_extract_and_filter.return_value = target_segs
+
+        _retry_incomplete_canonical_for_duplicate(
+            ticker="7601",
+            period="2027-02-28",
+            quarter="1Q",
+            filing_id=fid,
+            disclosure_no=disclosure_no,
+            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            pl_values=pl_vals,
+            dry_run=False,
+            target_segs=target_segs,
+        )
+        assert m_sync_pl.call_count == 1
+        assert m_sync_seg.call_count == 0
+
+    @patch("src.events.earnings_production_pipeline._sync_canonical_financials")
+    @patch("src.events.earnings_production_pipeline._sync_canonical_segments")
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved")
+    @patch("src.events.earnings_production_pipeline._check_canonical_segments_saved")
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("os.path.exists", return_value=True)
+    def test_helper_pl_complete_seg_incomplete(
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+    ):
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        m_get_supabase.return_value = mock_client
+        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+
+        fid = "a" * 64
+        disclosure_no = "20260709590505"
+        pl_vals = {"sales": 100, "op": 10}
+
+        m_check_pl.return_value = True
+        m_check_seg.side_effect = [False, True]
+        target_segs = [{"segment_name": "Apparel", "sales": 100, "profit": 10}]
+        m_extract_and_filter.return_value = target_segs
+
+        _retry_incomplete_canonical_for_duplicate(
+            ticker="7601",
+            period="2027-02-28",
+            quarter="1Q",
+            filing_id=fid,
+            disclosure_no=disclosure_no,
+            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            pl_values=pl_vals,
+            dry_run=False,
+            target_segs=target_segs,
+        )
+        assert m_sync_pl.call_count == 0
+        assert m_sync_seg.call_count == 1
+
+    @patch("src.events.earnings_production_pipeline._sync_canonical_financials")
+    @patch("src.events.earnings_production_pipeline._sync_canonical_segments")
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved")
+    @patch("src.events.earnings_production_pipeline._check_canonical_segments_saved")
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("os.path.exists", return_value=True)
+    def test_helper_zip_missing_seg_skipped_pl_continues(
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+    ):
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        m_get_supabase.return_value = mock_client
+
+        fid = "a" * 64
+        disclosure_no = "20260709590505"
+        pl_vals = {"sales": 100, "op": 10}
+
+        m_check_pl.side_effect = [False, True]
+        m_check_seg.return_value = False
+        m_find.return_value = None
+
+        _retry_incomplete_canonical_for_duplicate(
+            ticker="7601",
+            period="2027-02-28",
+            quarter="1Q",
+            filing_id=fid,
+            disclosure_no=disclosure_no,
+            xbrl_path=None,
+            pl_values=pl_vals,
+            dry_run=False,
+            target_segs=None,
+        )
+        assert m_sync_pl.call_count == 1
+        assert m_sync_seg.call_count == 0
+
+    @patch("src.events.earnings_subprocess_runner.build_discord_call_plan")
+    @patch("src.events.earnings_subprocess_runner.validate_save_call_plan")
+    @patch("src.events.earnings_subprocess_runner.build_save_call_plan")
+    @patch("src.events.earnings_subprocess_runner.validate_save_ready_payload")
+    @patch("src.events.earnings_subprocess_runner.build_save_ready_payload")
+    @patch("src.events.earnings_subprocess_runner.run_earnings_subprocess_dry_run")
+    @patch("src.events.tdnet_event_store.save_event_to_supabase")
+    @patch("src.events.earnings_production_pipeline._retry_incomplete_canonical_for_duplicate")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    @patch("os.path.exists", return_value=True)
+    def test_subprocess_route_retry_calling_and_exact_gate(
+        self, m_exists, m_get_supabase, m_retry, m_supa_save, m_run, m_payload, m_valid, m_plan, m_cp_valid, m_discord_plan, monkeypatch
+    ):
+        from src.events.earnings_production_pipeline import run_earnings_production
+        import sqlite3
+        from src.events.earnings_summary_storage import ensure_earnings_summary_table
+        from tests.test_earnings_canonical_sync import DummyDoc
+
+        conn = sqlite3.connect(":memory:")
+        ensure_earnings_summary_table(conn)
+
+        h_64 = "c1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        # \u6c7a\u7b97\u77ed\u4fe1 = 決算短信
+        title = "2027 Q1 Earning Report " + "\u6c7a\u7b97\u77ed\u4fe1"
+        doc = DummyDoc("7601", title, h_64)
+        doc.published_at = "2026-07-09T15:00:00Z"
+        doc.doc_url = "https://www.release.tdnet.info/inbs/140120260709590505.pdf"
+        doc.xbrl_url = "https://www.release.tdnet.info/xbrl/140120260709590505.zip"
+        doc.pdf_url = ""
+        doc.doc_id = "20260709590505"
+        doc.source_doc_id = h_64
+
+        from src.events.earnings_summary_storage import save_earnings_summary
+        existing_data = {
+            "ticker": "7601",
+            "company_name": "Poplar",
+            "fiscal_year": "2027",
+            "quarter": "1Q",
+            "title": doc.title,
+            "disclosure_date": "2026-07-09",
+            "fingerprint": "existing_fp",
+        }
+        save_earnings_summary(conn, existing_data)
+
+        mock_client = MagicMock()
+        m_get_supabase.return_value = mock_client
+
+        mock_select = mock_client.table.return_value.select
+        mock_eq = mock_select.return_value.eq
+        mock_exec = mock_eq.return_value.execute
+        mock_exec.return_value.data = [{"id": "some_existing_event_id"}]
+
+        m_run.return_value = {"results": [{"ticker": "7601", "status": "ok"}]}
+        m_valid.return_value = (True, "")
+        m_cp_valid.return_value = (True, "")
+        m_discord_plan.return_value = {"discord_message": "dummy msg"}
+        m_payload.return_value = {
+            "extracted": {
+                "ticker": "7601",
+                "period": "2027-02-28",
+                "quarter": "1Q",
+                "guidance": {}
+            }
+        }
+        m_plan.return_value = {
+            "earnings_summary_args": {
+                "ticker": "7601",
+                "fiscal_year": "2027",
+                "quarter": "1Q",
+                "sales_value": 500_000_000,
+                "op_value": 50_000_000,
+                "title": doc.title,
+                "fingerprint": "dummy_fingerprint_7601",
+                "disclosure_date": "2026-07-09",
+            },
+            "tdnet_event_payload": {
+                "ticker": "7601",
+                "source_doc_id": h_64
+            }
+        }
+
+        monkeypatch.setenv("USE_SUBPROCESS_WORKER", "1")
+        monkeypatch.setenv("EARNINGS_SUBPROCESS_ALLOWLIST", "7601")
+        monkeypatch.setenv("EARNINGS_SUBPROCESS_ENABLE_REAL_SAVE", "1")
+        run_earnings_production([doc], conn, webhook_url="")
+
+        assert m_retry.call_count == 1
+        assert m_supa_save.call_count == 0
+
+        # --- シナリオ2: Exact Gate 不一致 (既存通知が存在しない場合、再同期しない) ---
+        m_retry.reset_mock()
+        mock_exec.return_value.data = []
+
+        run_earnings_production([doc], conn, webhook_url="")
+        assert m_retry.call_count == 0
+
+        # --- シナリオ3: Exact Gate select エラー (fail-closed, 再同期しない) ---
+        m_retry.reset_mock()
+        mock_exec.side_effect = Exception("Supabase read error")
+
+        run_earnings_production([doc], conn, webhook_url="")
+        assert m_retry.call_count == 0
+
+    @patch("src.events.earnings_subprocess_runner.build_discord_call_plan")
+    @patch("src.events.earnings_subprocess_runner.validate_save_call_plan")
+    @patch("src.events.earnings_subprocess_runner.build_save_call_plan")
+    @patch("src.events.earnings_subprocess_runner.validate_save_ready_payload")
+    @patch("src.events.earnings_subprocess_runner.build_save_ready_payload")
+    @patch("src.events.earnings_subprocess_runner.run_earnings_subprocess_dry_run")
+    @patch("src.events.tdnet_event_store.save_event_to_supabase")
+    @patch("src.events.earnings_production_pipeline._retry_incomplete_canonical_for_duplicate")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("src.events.earnings_production_pipeline.load_json")
+    @patch("os.path.exists", return_value=True)
+    def test_sequential_route_retry_calling_and_side_effects(
+        self, m_exists, m_load_json, m_find, m_get_supabase, m_retry, m_supa_save, m_run, m_payload, m_valid, m_plan, m_cp_valid, m_discord_plan, monkeypatch
+    ):
+        from src.events.earnings_production_pipeline import run_earnings_production
+        import sqlite3
+        from src.events.earnings_summary_storage import ensure_earnings_summary_table
+        from tests.test_earnings_canonical_sync import DummyDoc
+
+        conn = sqlite3.connect(":memory:")
+        ensure_earnings_summary_table(conn)
+
+        h_64 = "c1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+
+        # 1. docを最優先で初期化し、日本語タイトルを一箇所に限定（エスケープ化）
+        title = "2027 Q1 Earning Report " + "\u6c7a\u7b97\u77ed\u4fe1"
+        doc = DummyDoc("7601", title, h_64)
+        doc.published_at = "2026-07-09T15:00:00Z"
+        doc.doc_url = "https://www.release.tdnet.info/inbs/140120260709590505.pdf"
+        doc.xbrl_url = "https://www.release.tdnet.info/xbrl/140120260709590505.zip"
+        doc.pdf_url = ""
+        doc.doc_id = "20260709590505"
+        doc.source_doc_id = h_64
+
+        from src.events.earnings_summary_storage import save_earnings_summary
+        from src.events.earnings_production_pipeline import _compute_earnings_fingerprint
+        fp = _compute_earnings_fingerprint("7601", doc.title, h_64)
+
+        existing_data = {
+            "ticker": "7601",
+            "company_name": "Poplar",
+            "fiscal_year": "2027",
+            "quarter": "1Q",
+            "title": doc.title,
+            "disclosure_date": "2026-07-09",
+            "fingerprint": fp,
+        }
+        save_earnings_summary(conn, existing_data)
+
+        count_before = conn.execute("SELECT count(*) FROM earnings_summaries").fetchone()[0]
+
+        mock_client = MagicMock()
+        m_get_supabase.return_value = mock_client
+        m_cp_valid.return_value = (True, "")
+        m_discord_plan.return_value = {"discord_message": "dummy msg"}
+        m_payload.return_value = {
+            "extracted": {
+                "ticker": "7601",
+                "period": "2027-02-28",
+                "quarter": "1Q",
+                "guidance": {}
+            }
+        }
+        m_plan.return_value = {
+            "earnings_summary_args": {
+                "ticker": "7601",
+                "fiscal_year": "2027",
+                "quarter": "1Q",
+                "sales_value": 500_000_000,
+                "op_value": 50_000_000,
+                "title": doc.title,
+                "fingerprint": fp,
+                "disclosure_date": "2026-07-09",
+            },
+            "tdnet_event_payload": {
+                "ticker": "7601",
+                "source_doc_id": h_64
+            }
+        }
+
+        # _find_cached_xbrl をモック化してダミーパスを返しダウンロード処理をバイパス
+        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+
+        # load_json をモック化してダミーのパース済み結果を返し重い抽出処理をバイパス
+        cached_parsed = {
+            "earnings": {
+                "sales_current": 110,
+                "sales_prior": 100,
+                "op_current": 120,
+                "op_prior": 100,
+                "sales_q_current": 110,
+                "sales_q_prior": 100,
+                "op_q_current": 120,
+                "op_q_prior": 100,
+            },
+            "company_name": "Poplar",
+            "fiscal_year": "2027",
+            "quarter": "1Q",
+            "summary_line": "sales 500M (+10%), op 50M (+20%)",
+            "segment_lines": [],
+            "company_reasons": [],
+            "segment_reasons": [],
+            "full_message": "dummy message",
+            "guidance": {},
+            "is_4q": False,
+            "fy_reason": "",
+        }
+        m_load_json.return_value = cached_parsed
+
+        monkeypatch.setenv("USE_SUBPROCESS_WORKER", "0")
+        monkeypatch.setenv("EARNINGS_SUBPROCESS_ALLOWLIST", "")
+        run_earnings_production([doc], conn, webhook_url="")
+
+        assert m_retry.call_count == 1
+
+        count_after = conn.execute("SELECT count(*) FROM earnings_summaries").fetchone()[0]
+        assert count_before == count_after
+        assert m_supa_save.call_count == 0
+
+    @patch("src.events.earnings_production_pipeline._sync_canonical_financials")
+    @patch("src.events.earnings_production_pipeline._sync_canonical_segments")
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved")
+    @patch("src.events.earnings_production_pipeline._check_canonical_segments_saved")
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("os.path.exists", return_value=True)
+    def test_helper_pl_values_empty(
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+    ):
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        m_get_supabase.return_value = mock_client
+        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+
+        fid = "a" * 64
+        disclosure_no = "20260709590505"
+        pl_vals = {}
+
+        m_check_seg.side_effect = [False, True]
+        target_segs = [{"segment_name": "Apparel", "sales": 100, "profit": 10}]
+        m_extract_and_filter.return_value = target_segs
+
+        _retry_incomplete_canonical_for_duplicate(
+            ticker="7601",
+            period="2027-02-28",
+            quarter="1Q",
+            filing_id=fid,
+            disclosure_no=disclosure_no,
+            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            pl_values=pl_vals,
+            dry_run=False,
+            target_segs=target_segs,
+        )
+        m_sync_pl.assert_not_called()
+        m_sync_seg.assert_called_once()
+        m_check_pl.assert_not_called()
+
+    @patch("src.events.earnings_production_pipeline._sync_canonical_financials")
+    @patch("src.events.earnings_production_pipeline._sync_canonical_segments")
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved")
+    @patch("src.events.earnings_production_pipeline._check_canonical_segments_saved")
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("os.path.exists", return_value=True)
+    def test_helper_pl_still_incomplete(
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+    ):
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        m_get_supabase.return_value = mock_client
+        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+
+        fid = "a" * 64
+        disclosure_no = "20260709590505"
+        pl_vals = {"sales": 100, "op": 10}
+
+        m_check_pl.side_effect = [False, False]
+        m_check_seg.return_value = True
+
+        _retry_incomplete_canonical_for_duplicate(
+            ticker="7601",
+            period="2027-02-28",
+            quarter="1Q",
+            filing_id=fid,
+            disclosure_no=disclosure_no,
+            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            pl_values=pl_vals,
+            dry_run=False,
+            target_segs=None,
+        )
+        m_sync_pl.assert_called_once()
+        assert m_check_pl.call_count == 2
+        m_sync_seg.assert_not_called()
+
+    @patch("src.events.earnings_production_pipeline._sync_canonical_financials")
+    @patch("src.events.earnings_production_pipeline._sync_canonical_segments")
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved")
+    @patch("src.events.earnings_production_pipeline._check_canonical_segments_saved")
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("os.path.exists", return_value=True)
+    def test_helper_segment_still_incomplete(
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+    ):
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        m_get_supabase.return_value = mock_client
+        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+
+        fid = "a" * 64
+        disclosure_no = "20260709590505"
+        pl_vals = {"sales": 100, "op": 10}
+
+        m_check_pl.return_value = True
+        m_check_seg.side_effect = [False, False]
+        target_segs = [{"segment_name": "Apparel", "sales": 100, "profit": 10}]
+        m_extract_and_filter.return_value = target_segs
+
+        _retry_incomplete_canonical_for_duplicate(
+            ticker="7601",
+            period="2027-02-28",
+            quarter="1Q",
+            filing_id=fid,
+            disclosure_no=disclosure_no,
+            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            pl_values=pl_vals,
+            dry_run=False,
+            target_segs=target_segs,
+        )
+        m_sync_seg.assert_called_once()
+        assert m_check_seg.call_count == 2
+        m_sync_pl.assert_not_called()
+
+    @patch("src.events.earnings_production_pipeline._sync_canonical_financials")
+    @patch("src.events.earnings_production_pipeline._sync_canonical_segments")
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved")
+    @patch("src.events.earnings_production_pipeline._check_canonical_segments_saved")
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("os.path.exists", return_value=True)
+    def test_helper_dry_run(
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+    ):
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        m_get_supabase.return_value = mock_client
+        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+
+        fid = "a" * 64
+        disclosure_no = "20260709590505"
+        pl_vals = {"sales": 100, "op": 10}
+
+        m_check_pl.return_value = False
+        m_check_seg.return_value = False
+        target_segs = [{"segment_name": "Apparel", "sales": 100, "profit": 10}]
+        m_extract_and_filter.return_value = target_segs
+
+        _retry_incomplete_canonical_for_duplicate(
+            ticker="7601",
+            period="2027-02-28",
+            quarter="1Q",
+            filing_id=fid,
+            disclosure_no=disclosure_no,
+            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            pl_values=pl_vals,
+            dry_run=True,
+            target_segs=target_segs,
+        )
+        m_sync_pl.assert_not_called()
+        m_sync_seg.assert_not_called()
+        assert m_check_pl.call_count == 1
+        assert m_check_seg.call_count == 1
+
+    @patch("src.events.earnings_production_pipeline._sync_canonical_financials")
+    @patch("src.events.earnings_production_pipeline._sync_canonical_segments")
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved")
+    @patch("src.events.earnings_production_pipeline._check_canonical_segments_saved")
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("os.path.exists", return_value=True)
+    def test_helper_zip_id_mismatch(
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+    ):
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        m_get_supabase.return_value = mock_client
+        m_find.return_value = "C:/xbrl_cache/7601_99999999999999.zip"
+
+        fid = "a" * 64
+        disclosure_no = "20260709590505"
+        pl_vals = {"sales": 100, "op": 10}
+
+        m_check_pl.side_effect = [False, True]
+        m_check_seg.return_value = False
+
+        _retry_incomplete_canonical_for_duplicate(
+            ticker="7601",
+            period="2027-02-28",
+            quarter="1Q",
+            filing_id=fid,
+            disclosure_no=disclosure_no,
+            xbrl_path="C:/xbrl_cache/7601_99999999999999.zip",
+            pl_values=pl_vals,
+            dry_run=False,
+            target_segs=None,
+        )
+        m_sync_pl.assert_called_once()
+        m_sync_seg.assert_not_called()
+
+    @patch("src.events.earnings_production_pipeline._sync_canonical_financials")
+    @patch("src.events.earnings_production_pipeline._sync_canonical_segments")
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved")
+    @patch("src.events.earnings_production_pipeline._check_canonical_segments_saved")
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("os.path.exists", return_value=True)
+    def test_helper_segment_extraction_empty(
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+    ):
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        m_get_supabase.return_value = mock_client
+        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+
+        fid = "a" * 64
+        disclosure_no = "20260709590505"
+        pl_vals = {"sales": 100, "op": 10}
+
+        m_check_pl.return_value = True
+        m_check_seg.return_value = False
+        m_extract_and_filter.return_value = []
+
+        _retry_incomplete_canonical_for_duplicate(
+            ticker="7601",
+            period="2027-02-28",
+            quarter="1Q",
+            filing_id=fid,
+            disclosure_no=disclosure_no,
+            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            pl_values=pl_vals,
+            dry_run=False,
+            target_segs=None,
+        )
+        m_sync_seg.assert_not_called()
+        m_extract_and_filter.assert_called_once()
+
+    @patch("src.events.earnings_production_pipeline._sync_canonical_financials")
+    @patch("src.events.earnings_production_pipeline._sync_canonical_segments")
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved")
+    @patch("src.events.earnings_production_pipeline._check_canonical_segments_saved")
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("os.path.exists", return_value=True)
+    def test_helper_target_segs_reused(
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+    ):
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        m_get_supabase.return_value = mock_client
+        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+
+        fid = "a" * 64
+        disclosure_no = "20260709590505"
+        pl_vals = {"sales": 100, "op": 10}
+
+        m_check_pl.return_value = True
+        m_check_seg.side_effect = [False, True]
+        target_segs = [{"segment_name": "Apparel", "sales": 100, "profit": 10}]
+        m_extract_and_filter.return_value = target_segs
+
+        _retry_incomplete_canonical_for_duplicate(
+            ticker="7601",
+            period="2027-02-28",
+            quarter="1Q",
+            filing_id=fid,
+            disclosure_no=disclosure_no,
+            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            pl_values=pl_vals,
+            dry_run=False,
+            target_segs=target_segs,
+        )
+        m_extract_and_filter.assert_not_called()
+        m_sync_seg.assert_called_once()
+        passed_segs = m_sync_seg.call_args[1].get("target_segs")
+        assert passed_segs is target_segs
+
+    @patch("src.events.earnings_production_pipeline._sync_canonical_financials")
+    @patch("src.events.earnings_production_pipeline._sync_canonical_segments")
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved")
+    @patch("src.events.earnings_production_pipeline._check_canonical_segments_saved")
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("os.path.exists", return_value=True)
+    def test_helper_pl_exception_segment_continues(
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+    ):
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        m_get_supabase.return_value = mock_client
+        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+
+        fid = "a" * 64
+        disclosure_no = "20260709590505"
+        pl_vals = {"sales": 100, "op": 10}
+
+        m_check_pl.side_effect = [False, True]
+        m_sync_pl.side_effect = Exception("PL Sync error")
+        m_check_seg.side_effect = [False, True]
+        target_segs = [{"segment_name": "Apparel", "sales": 100, "profit": 10}]
+        m_extract_and_filter.return_value = target_segs
+
+        _retry_incomplete_canonical_for_duplicate(
+            ticker="7601",
+            period="2027-02-28",
+            quarter="1Q",
+            filing_id=fid,
+            disclosure_no=disclosure_no,
+            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            pl_values=pl_vals,
+            dry_run=False,
+            target_segs=target_segs,
+        )
+        m_sync_pl.assert_called_once()
+        m_sync_seg.assert_called_once()
+        assert m_check_seg.call_count == 2
+
+    @patch("src.events.earnings_production_pipeline._sync_canonical_financials")
+    @patch("src.events.earnings_production_pipeline._sync_canonical_segments")
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved")
+    @patch("src.events.earnings_production_pipeline._check_canonical_segments_saved")
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("os.path.exists", return_value=True)
+    def test_helper_segment_exception_safe_exit(
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+    ):
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        m_get_supabase.return_value = mock_client
+        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+
+        fid = "a" * 64
+        disclosure_no = "20260709590505"
+        pl_vals = {"sales": 100, "op": 10}
+
+        m_check_pl.side_effect = [False, True]
+        m_check_seg.side_effect = [False, True]
+        m_sync_seg.side_effect = Exception("Segment Sync Error")
+        target_segs = [{"segment_name": "Apparel", "sales": 100, "profit": 10}]
+        m_extract_and_filter.return_value = target_segs
+
+        _retry_incomplete_canonical_for_duplicate(
+            ticker="7601",
+            period="2027-02-28",
+            quarter="1Q",
+            filing_id=fid,
+            disclosure_no=disclosure_no,
+            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            pl_values=pl_vals,
+            dry_run=False,
+            target_segs=target_segs,
+        )
+        m_sync_pl.assert_called_once()
+        m_sync_seg.assert_called_once()
+
+    @patch("src.events.earnings_subprocess_runner.build_discord_call_plan")
+    @patch("src.events.earnings_subprocess_runner.validate_save_call_plan")
+    @patch("src.events.earnings_subprocess_runner.build_save_call_plan")
+    @patch("src.events.earnings_subprocess_runner.validate_save_ready_payload")
+    @patch("src.events.earnings_subprocess_runner.build_save_ready_payload")
+    @patch("src.events.earnings_subprocess_runner.run_earnings_subprocess_dry_run")
+    @patch("src.events.tdnet_event_store.save_event_to_supabase")
+    @patch("src.events.earnings_production_pipeline._retry_incomplete_canonical_for_duplicate")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    @patch("os.path.exists", return_value=True)
+    def test_strict_side_effects_zero_subprocess(
+        self, m_exists, m_get_supabase, m_retry, m_supa_save, m_run, m_payload, m_valid, m_plan, m_cp_valid, m_discord_plan, monkeypatch
+    ):
+        from src.events.earnings_production_pipeline import run_earnings_production
+        import sqlite3
+        from src.events.earnings_summary_storage import ensure_earnings_summary_table
+        from tests.test_earnings_canonical_sync import DummyDoc
+
+        conn = sqlite3.connect(":memory:")
+        ensure_earnings_summary_table(conn)
+
+        h_64 = "c1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        title = "2027 Q1 Earning Report " + "\u6c7a\u7b97\u77ed\u4fe1"
+        doc = DummyDoc("7601", title, h_64)
+        doc.published_at = "2026-07-09T15:00:00Z"
+        doc.doc_url = "https://www.release.tdnet.info/inbs/140120260709590505.pdf"
+        doc.xbrl_url = "https://www.release.tdnet.info/xbrl/140120260709590505.zip"
+        doc.pdf_url = ""
+        doc.doc_id = "20260709590505"
+        doc.source_doc_id = h_64
+
+        from src.events.earnings_summary_storage import save_earnings_summary
+        existing_data = {
+            "ticker": "7601",
+            "company_name": "Poplar",
+            "fiscal_year": "2027",
+            "quarter": "1Q",
+            "title": doc.title,
+            "disclosure_date": "2026-07-09",
+            "fingerprint": "existing_fp",
+        }
+        save_earnings_summary(conn, existing_data)
+
+        mock_client = MagicMock()
+        m_get_supabase.return_value = mock_client
+
+        mock_select = mock_client.table.return_value.select
+        mock_eq = mock_select.return_value.eq
+        mock_exec = mock_eq.return_value.execute
+        mock_exec.return_value.data = [{"id": "some_existing_event_id"}]
+
+        m_run.return_value = {"results": [{"ticker": "7601", "status": "ok"}]}
+        m_valid.return_value = (True, "")
+        m_cp_valid.return_value = (True, "")
+        m_discord_plan.return_value = {"discord_message": "dummy msg"}
+        m_payload.return_value = {
+            "extracted": {
+                "ticker": "7601",
+                "period": "2027-02-28",
+                "quarter": "1Q",
+                "guidance": {}
+            }
+        }
+        m_plan.return_value = {
+            "earnings_summary_args": {
+                "ticker": "7601",
+                "fiscal_year": "2027",
+                "quarter": "1Q",
+                "sales_value": 500_000_000,
+                "op_value": 50_000_000,
+                "title": doc.title,
+                "fingerprint": "dummy_fingerprint_7601",
+                "disclosure_date": "2026-07-09",
+            },
+            "tdnet_event_payload": {
+                "ticker": "7601",
+                "source_doc_id": h_64
+            }
+        }
+
+        monkeypatch.setenv("USE_SUBPROCESS_WORKER", "1")
+        monkeypatch.setenv("EARNINGS_SUBPROCESS_ALLOWLIST", "7601")
+        monkeypatch.setenv("EARNINGS_SUBPROCESS_ENABLE_REAL_SAVE", "1")
+        run_earnings_production([doc], conn, webhook_url="")
+
+        m_supa_save.assert_not_called()
+        mock_client.table.return_value.insert.assert_not_called()
+        mock_client.table.return_value.update.assert_not_called()
+        mock_client.table.return_value.upsert.assert_not_called()
+
+    @patch("src.events.earnings_production_pipeline._sync_canonical_financials")
+    @patch("src.events.earnings_production_pipeline._sync_canonical_segments")
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved")
+    @patch("src.events.earnings_production_pipeline._check_canonical_segments_saved")
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("os.path.exists", return_value=True)
+    def test_helper_9982_model(
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+    ):
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        m_get_supabase.return_value = mock_client
+        m_find.return_value = "C:/xbrl_cache/9982_20260709590450.zip"
+
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        disclosure_no = "20260709590450"
+        pl_vals = {"sales": 17656, "op": 815}
+
+        m_check_pl.return_value = True
+        m_check_seg.side_effect = [False, True]
+        target_segs = [
+            {"segment_name": "SegA", "sales": 10, "profit": 1},
+            {"segment_name": "SegB", "sales": 20, "profit": 2},
+            {"segment_name": "SegC", "sales": 30, "profit": 3},
+            {"segment_name": "SegD", "sales": 40, "profit": 4},
+        ]
+        m_extract_and_filter.return_value = target_segs
+
+        _retry_incomplete_canonical_for_duplicate(
+            ticker="9982",
+            period="2027-02-28",
+            quarter="1Q",
+            filing_id=fid,
+            disclosure_no=disclosure_no,
+            xbrl_path="C:/xbrl_cache/9982_20260709590450.zip",
+            pl_values=pl_vals,
+            dry_run=False,
+            target_segs=target_segs,
+        )
+        m_sync_pl.assert_not_called()
+        m_sync_seg.assert_called_once()
+        check_pl_args = m_check_pl.call_args[1]
+        assert check_pl_args.get("filing_id") == fid
+        assert check_pl_args.get("filing_id") != disclosure_no
+
+        sync_seg_args = m_sync_seg.call_args[1]
+        assert sync_seg_args.get("canonical_filing_id") == fid
+        assert sync_seg_args.get("common_disclosure_no") == disclosure_no
+
+    @patch("src.events.earnings_production_pipeline._sync_canonical_financials")
+    @patch("src.events.earnings_production_pipeline._sync_canonical_segments")
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved")
+    @patch("src.events.earnings_production_pipeline._check_canonical_segments_saved")
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("os.path.exists", return_value=True)
+    def test_helper_7601_model(
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+    ):
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        m_get_supabase.return_value = mock_client
+        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+
+        fid = "4836e8c1953047daf09850a4b7f86ef0186f8ab85a348e41355323f2c3bf1da8"
+        disclosure_no = "20260709590505"
+        pl_vals = {"sales": 500, "op": 50}
+
+        m_check_pl.return_value = True
+        m_check_seg.side_effect = [False, True]
+        target_segs = [
+            {"segment_name": "Seg1", "sales": 100, "profit": 10},
+            {"segment_name": "Seg2", "sales": 200, "profit": 20},
+            {"segment_name": "Seg3", "sales": 300, "profit": 30},
+        ]
+        m_extract_and_filter.return_value = target_segs
+
+        _retry_incomplete_canonical_for_duplicate(
+            ticker="7601",
+            period="2027-02-28",
+            quarter="1Q",
+            filing_id=fid,
+            disclosure_no=disclosure_no,
+            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            pl_values=pl_vals,
+            dry_run=False,
+            target_segs=target_segs,
+        )
+        m_sync_pl.assert_not_called()
+        m_sync_seg.assert_called_once()
+
+        sync_seg_args = m_sync_seg.call_args[1]
+        assert sync_seg_args.get("canonical_filing_id") == fid
+        assert sync_seg_args.get("common_disclosure_no") == disclosure_no

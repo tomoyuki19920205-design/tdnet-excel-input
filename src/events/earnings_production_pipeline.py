@@ -334,7 +334,258 @@ def _check_canonical_segments_saved(
         return False
 
 
+def _retry_incomplete_canonical_for_duplicate(
+    ticker: str,
+    period: str,
+    quarter: str,
+    filing_id: str,
+    disclosure_no: str,
+    xbrl_path: str | None,
+    pl_values: dict,
+    dry_run: bool,
+    target_segs: list[dict] | None = None,
+) -> None:
+    """重複スキップされたドキュメントの canonical 不足分限定再同期を試みる。
+    本番コードへの最終判定名伝播は行わず、警告ログ出力のうえで fail-closed ガードを徹底する。
+    """
+    logger.info(
+        "[EARNINGS][CANONICAL_RETRY] ticker=%s filing_id=%s route=duplicate reason=exact_duplicate",
+        ticker,
+        filing_id,
+    )
+
+    # 1. 識別情報のバリデーション (不足時は安全に全体を早期リターンスキップ)
+    if (
+        not ticker
+        or not period
+        or not quarter
+        or not filing_id
+        or len(filing_id) != 64
+        or not all(c in "0123456789abcdefABCDEF" for c in filing_id)
+    ):
+        logger.warning(
+            "[EARNINGS][CANONICAL_RETRY] basic identity missing or invalid. ticker=%s filing_id=%s. skipping retry.",
+            ticker,
+            filing_id,
+        )
+        return
+
+    # Supabase クライアントの取得
+    from .tdnet_event_store import _get_supabase
+    client = _get_supabase()
+    if not client:
+        logger.warning("[EARNINGS][CANONICAL_RETRY] Supabase client not available — skipping retry")
+        return
+
+    # ------------------ PL 再同期 ------------------
+    try:
+        sales = pl_values.get("sales")
+        op = pl_values.get("op")
+        expected_metrics = []
+        if sales is not None:
+            expected_metrics.append("sales")
+        if op is not None:
+            expected_metrics.append("operating_profit")
+
+        if not expected_metrics:
+            logger.info(
+                "[EARNINGS][CANONICAL_RETRY] ticker=%s kind=financials status=unresolved reason=pl_values_empty",
+                ticker,
+            )
+        else:
+            # 完了判定
+            pl_complete = _check_canonical_financials_saved(
+                client=client,
+                ticker=ticker,
+                period=period,
+                quarter=quarter,
+                filing_id=filing_id,
+                expected_metrics=expected_metrics,
+            )
+            if pl_complete:
+                logger.info(
+                    "[EARNINGS][CANONICAL_RETRY] ticker=%s kind=financials status=already_complete",
+                    ticker,
+                )
+            else:
+                logger.info(
+                    "[EARNINGS][CANONICAL_RETRY] ticker=%s kind=financials status=retrying missing=%s",
+                    ticker,
+                    expected_metrics,
+                )
+                if not dry_run:
+                    _sync_canonical_financials(
+                        ticker=ticker,
+                        period=period,
+                        quarter=quarter,
+                        sales_value=sales,
+                        op_value=op,
+                        gross_value=pl_values.get("gross"),
+                        sga_value=pl_values.get("sga"),
+                        guidance=pl_values.get("guidance") or {},
+                        filing_id=filing_id,
+                        dry_run=dry_run,
+                        route="canonical_retry",
+                    )
+                    # 再確認
+                    pl_post_complete = _check_canonical_financials_saved(
+                        client=client,
+                        ticker=ticker,
+                        period=period,
+                        quarter=quarter,
+                        filing_id=filing_id,
+                        expected_metrics=expected_metrics,
+                    )
+                    if pl_post_complete:
+                        logger.info(
+                            "[EARNINGS][CANONICAL_RETRY] ticker=%s kind=financials status=complete",
+                            ticker,
+                        )
+                    else:
+                        logger.warning(
+                            "[EARNINGS][CANONICAL_RETRY] ticker=%s kind=financials status=still_incomplete",
+                            ticker,
+                        )
+                else:
+                    logger.info(
+                        "[EARNINGS][CANONICAL_RETRY] ticker=%s kind=financials status=would_retry",
+                        ticker,
+                    )
+    except Exception as pl_e:
+        logger.error(
+            "[EARNINGS][CANONICAL_RETRY] PL retry exception: %s. Continuing segment retry.",
+            pl_e,
+        )
+
+    # ------------------ セグメント 再同期 ------------------
+    try:
+        from src.events.env_loader import get_project_root
+        import os
+        xbrl_dir = str(get_project_root() / "data" / "xbrl_archive")
+
+        if not disclosure_no or len(disclosure_no) != 14 or not disclosure_no.isdigit():
+            logger.info(
+                "[EARNINGS][CANONICAL_RETRY] ticker=%s kind=segments status=unresolved reason=zip_doc_id_mismatch",
+                ticker,
+            )
+        else:
+            resolved_zip = xbrl_path
+            # 引き渡されていない場合のみ、セグメント処理内部で ZIP 解決を行う
+            if not resolved_zip:
+                resolved_zip = _find_cached_xbrl(xbrl_dir, ticker, doc_id=disclosure_no)
+
+            if not resolved_zip or not os.path.exists(resolved_zip):
+                logger.info(
+                    "[EARNINGS][CANONICAL_RETRY] ticker=%s kind=segments status=unresolved reason=zip_not_found",
+                    ticker,
+                )
+            else:
+                zip_basename = os.path.basename(resolved_zip)
+                zip_no = extract_common_disclosure_no(zip_basename)
+                if not zip_no or zip_no != disclosure_no:
+                    logger.info(
+                        "[EARNINGS][CANONICAL_RETRY] ticker=%s kind=segments status=unresolved reason=zip_doc_id_mismatch",
+                        ticker,
+                    )
+                else:
+                    # 抽出 (最大1回制限)
+                    if target_segs is None:
+                        target_segs = _extract_and_filter_segments(
+                            resolved_zip, period, quarter
+                        )
+
+                    if not target_segs:
+                        logger.info(
+                            "[EARNINGS][CANONICAL_RETRY] ticker=%s kind=segments status=empty_unresolved",
+                            ticker,
+                        )
+                    else:
+                        # 期待集合作成 (expand_segments_rowsを再利用してwriter完全一致キーを作る)
+                        expected_segment_metrics = []
+                        expected_set = _build_expected_segment_metrics_from_canonical_rows(
+                            ticker=ticker,
+                            period=period,
+                            quarter=quarter,
+                            target_segs=target_segs,
+                            source="xbrl",
+                            filing_id=filing_id,
+                        )
+                        expected_segment_metrics = list(expected_set)
+
+                        if not expected_segment_metrics:
+                            logger.warning(
+                                "[EARNINGS][CANONICAL_RETRY] segment expected metrics empty. skipping segment retry."
+                            )
+                        else:
+                            # 完了判定
+                            seg_complete = _check_canonical_segments_saved(
+                                client=client,
+                                ticker=ticker,
+                                period=period,
+                                quarter=quarter,
+                                filing_id=filing_id,
+                                expected_segment_metrics=expected_segment_metrics,
+                            )
+                            if seg_complete:
+                                logger.info(
+                                    "[EARNINGS][CANONICAL_RETRY] ticker=%s kind=segments status=already_complete",
+                                    ticker,
+                                )
+                            else:
+                                logger.info(
+                                    "[EARNINGS][CANONICAL_RETRY] ticker=%s kind=segments status=retrying missing=%s",
+                                    ticker,
+                                    expected_segment_metrics,
+                                )
+                                if not dry_run:
+                                    _sync_canonical_segments(
+                                        ticker=ticker,
+                                        period=period,
+                                        quarter=quarter,
+                                        canonical_filing_id=filing_id,
+                                        common_disclosure_no=disclosure_no,
+                                        xbrl_path=resolved_zip,
+                                        dry_run=dry_run,
+                                        route="canonical_retry",
+                                        target_segs=target_segs,
+                                    )
+                                    # 再確認
+                                    seg_post_complete = _check_canonical_segments_saved(
+                                        client=client,
+                                        ticker=ticker,
+                                        period=period,
+                                        quarter=quarter,
+                                        filing_id=filing_id,
+                                        expected_segment_metrics=expected_segment_metrics,
+                                    )
+                                    if seg_post_complete:
+                                        logger.info(
+                                            "[EARNINGS][CANONICAL_RETRY] ticker=%s kind=segments status=complete",
+                                            ticker,
+                                        )
+                                    else:
+                                        logger.warning(
+                                            "[EARNINGS][CANONICAL_RETRY] ticker=%s kind=segments status=still_incomplete",
+                                            ticker,
+                                        )
+                                else:
+                                    logger.info(
+                                        "[EARNINGS][CANONICAL_RETRY] ticker=%s kind=segments status=would_retry",
+                                        ticker,
+                                    )
+    except Exception as seg_e:
+        logger.error(
+            "[EARNINGS][CANONICAL_RETRY] Segment retry exception: %s",
+            seg_e,
+        )
+
+    logger.info(
+        "[EARNINGS][CANONICAL_RETRY] retry sequence finished. notification and discord skipped."
+    )
+
+
 def _extract_and_filter_segments(
+
     xbrl_path: str,
     period: str,
     quarter: str,
@@ -907,7 +1158,78 @@ def run_earnings_production(
                     if _dup_rec:
                         logger.info("[EARNINGS][REAL] %s semantic duplicate. skip.", _ticker)
                         result.already_exists_count += 1
+
+                        # Exact Gate: 64桁 filing_id で tdnet_events 上の既存通知の有無を完全一致確認 (fail-closed)
+                        _cp_doc_id = _merged_plan["tdnet_event_payload"].get("source_doc_id", "")
+                        _exact_exists = False
+
+                        try:
+                            from .tdnet_event_store import _get_supabase
+                            _client = _get_supabase()
+                            if _client and _cp_doc_id:
+                                _exact_res = _client.table("tdnet_events").select("id").eq("source_doc_id", _cp_doc_id).execute()
+                                if _exact_res.data:
+                                    _exact_exists = True
+                                else:
+                                    logger.info("[EARNINGS][CANONICAL_RETRY] ticker=%s reason=semantic_duplicate_not_exact", _ticker)
+                            else:
+                                logger.warning("[EARNINGS][CANONICAL_RETRY] ticker=%s reason=exact_lookup_failed (supabase unavailable)", _ticker)
+                        except Exception as _gate_e:
+                            logger.error("[EARNINGS][CANONICAL_RETRY] ticker=%s reason=exact_lookup_failed (exception: %s)", _ticker, _gate_e)
+
+                        if _exact_exists:
+                            try:
+                                # 重複ブロック内で通常経路と同じ生成式を使ってローカル変数を構築
+                                _cp_args = _merged_plan["earnings_summary_args"]
+                                _cp_title = _cp_args.get("title", "")
+                                _cp_payload_ext = _payload.get("extracted", {})
+                                _cp_period = _cp_payload_ext.get("period") or _cp_payload_ext.get("fiscal_year_end") or _derive_fiscal_year_end_period(_cp_title)
+                                _cp_q = _cp_args.get("quarter", "")
+                                _cp_sales = _cp_args.get("sales_value")
+                                _cp_op = _cp_args.get("op_value")
+                                _cp_gross = _cp_args.get("gross_profit_value")
+                                _cp_sga = _cp_args.get("selling_general_and_administrative_expenses_value")
+
+                                # 14桁書類IDの解決
+                                _cp_disclosure_no = ""
+                                for k in ("disclosure_no", "common_disclosure_no", "doc_id", "tdnet_id"):
+                                    val = str(doc_j.get(k, ""))
+                                    if val and len(val) == 14 and val.isdigit():
+                                        _cp_disclosure_no = val
+                                        break
+                                if not _cp_disclosure_no:
+                                    _cp_disclosure_no = extract_common_disclosure_no(doc_j.get("source_url", "")) or ""
+                                if not _cp_disclosure_no:
+                                    _cp_disclosure_no = extract_common_disclosure_no(doc_j.get("xbrl_url", "")) or ""
+                                if not _cp_disclosure_no:
+                                    _cp_disclosure_no = extract_common_disclosure_no(doc_j.get("pdf_url", "")) or ""
+
+                                _cp_resolved_zip = _find_cached_xbrl(xbrl_dir, _ticker, doc_id=_cp_disclosure_no)
+
+                                _cp_pl_vals = {
+                                    "sales": _cp_sales,
+                                    "op": _cp_op,
+                                    "gross": _cp_gross,
+                                    "sga": _cp_sga,
+                                    "guidance": _cp_payload_ext.get("guidance", {}),
+                                }
+
+                                _retry_incomplete_canonical_for_duplicate(
+                                    ticker=_ticker,
+                                    period=_cp_period,
+                                    quarter=_cp_q,
+                                    filing_id=_cp_doc_id,
+                                    disclosure_no=_cp_disclosure_no,
+                                    xbrl_path=_cp_resolved_zip,
+                                    pl_values=_cp_pl_vals,
+                                    dry_run=dry_run,
+                                    target_segs=None,
+                                )
+                            except Exception as _retry_e:
+                                logger.error("[EARNINGS][CANONICAL_RETRY] Subprocess retry error: %s", _retry_e)
+
                         continue
+
 
                     # ── SQLite 保存実行 ──────────────────────────────────────────
                     logger.info("[EARNINGS][REAL] ✁ SQLite保存: %s", _ticker)
@@ -1696,7 +2018,49 @@ def run_earnings_production(
                             logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s sequential route exception: %s", ticker, _seg_e)
                 else:
                     result.already_exists_count += 1
+
+                    try:
+                        # 重複ブロック内で通常経路と同じ生成式を使ってローカル変数を構築
+                        _seq_period = _derive_fiscal_year_end_period(doc.title)
+                        _seq_doc_id = getattr(doc, "disclosure_id", "") or getattr(doc, "doc_id", "") or ""
+
+                        _seq_disclosure_no = ""
+                        for attr_name in ("disclosure_no", "common_disclosure_no", "doc_id", "tdnet_id"):
+                            val = str(getattr(doc, attr_name, ""))
+                            if val and len(val) == 14 and val.isdigit():
+                                _seq_disclosure_no = val
+                                break
+                        if not _seq_disclosure_no:
+                            _seq_disclosure_no = extract_common_disclosure_no(getattr(doc, "doc_url", "")) or ""
+                        if not _seq_disclosure_no:
+                            _seq_disclosure_no = extract_common_disclosure_no(getattr(doc, "xbrl_url", "")) or ""
+                        if not _seq_disclosure_no:
+                            _seq_disclosure_no = extract_common_disclosure_no(getattr(doc, "pdf_url", "")) or ""
+
+                        _seq_pl_vals = {
+                            "sales": earnings.sales_current,
+                            "op": earnings.op_current,
+                            "gross": getattr(earnings, "gross_profit_current", None),
+                            "sga": getattr(earnings, "selling_general_and_administrative_expenses_current", None),
+                            "guidance": dataclasses.asdict(guidance) if (guidance and guidance.has_guidance) else {},
+                        }
+
+                        _retry_incomplete_canonical_for_duplicate(
+                            ticker=ticker,
+                            period=_seq_period,
+                            quarter=quarter,
+                            filing_id=_seq_doc_id,
+                            disclosure_no=_seq_disclosure_no,
+                            xbrl_path=xbrl_path,
+                            pl_values=_seq_pl_vals,
+                            dry_run=dry_run,
+                            target_segs=None,
+                        )
+                    except Exception as _seq_retry_e:
+                        logger.error("[EARNINGS][CANONICAL_RETRY] Sequential retry error: %s", _seq_retry_e)
+
                     continue  # 既存の場合は通知もスキップ
+
             else:
                 logger.info(f"[DRY-RUN] would save: {ticker} {company_name}")
                 result.saved_count += 1
