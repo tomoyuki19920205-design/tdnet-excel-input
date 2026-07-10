@@ -405,6 +405,41 @@ def _extract_and_filter_segments(
     return target_segs
 
 
+def _build_expected_segment_metrics_from_canonical_rows(
+    ticker: str,
+    period: str,
+    quarter: str,
+    target_segs: list[dict],
+    source: str,
+    filing_id: str | None = None,
+) -> set[tuple[str, str]]:
+    if not target_segs:
+        return set()
+    from lib.pipeline.canonical_writer import expand_segments_rows
+    # write_segments_canonical 内部と完全に同じ引数・既定値を渡す
+    rows, _ = expand_segments_rows(
+        ticker=ticker,
+        period=period,
+        quarter=quarter,
+        segments=target_segs,
+        source=source,
+        filing_id=filing_id,
+        disclosure_datetime=None,
+        correction_flag=False,
+        unit="millions_jpy",
+    )
+    if not rows:
+        return set()
+    expected = set()
+    for row in rows:
+        seg_key = row.get("segment_key")
+        metric = row.get("metric")
+        val = row.get("value")
+        if val is not None and seg_key and metric:
+            expected.add((seg_key, metric))
+    return expected
+
+
 def _extract_expected_segment_names_from_xbrl(zip_path: str, period: str, quarter: str) -> list[str]:
     segs = _extract_and_filter_segments(zip_path, period, quarter)
     return [s["segment_name"] for s in segs]
@@ -953,16 +988,15 @@ def run_earnings_production(
                                     quarter=_q,
                                 )
                                 if _target_segs:
-                                    from src.segment.normalize import normalize_segment_key
-                                    for r in _target_segs:
-                                        seg_name = r.get("segment_name")
-                                        if not seg_name:
-                                            continue
-                                        seg_key = normalize_segment_key(seg_name)
-                                        if r.get("sales") is not None:
-                                            _expected_segment_metrics.append((seg_key, "sales"))
-                                        if r.get("profit") is not None:
-                                            _expected_segment_metrics.append((seg_key, "operating_profit"))
+                                    _expected_set = _build_expected_segment_metrics_from_canonical_rows(
+                                        ticker=_ticker,
+                                        period=_period,
+                                        quarter=_q,
+                                        target_segs=_target_segs,
+                                        source="xbrl",
+                                        filing_id=_doc_id,
+                                    )
+                                    _expected_segment_metrics = list(_expected_set)
                             except Exception:
                                 pass
 
@@ -1586,16 +1620,15 @@ def run_earnings_production(
                                     quarter=quarter,
                                 )
                                 if _target_segs:
-                                    from src.segment.normalize import normalize_segment_key
-                                    for r in _target_segs:
-                                        seg_name = r.get("segment_name")
-                                        if not seg_name:
-                                            continue
-                                        seg_key = normalize_segment_key(seg_name)
-                                        if r.get("sales") is not None:
-                                            _expected_segment_metrics.append((seg_key, "sales"))
-                                        if r.get("profit") is not None:
-                                            _expected_segment_metrics.append((seg_key, "operating_profit"))
+                                    _expected_set = _build_expected_segment_metrics_from_canonical_rows(
+                                        ticker=ticker,
+                                        period=_seq_period,
+                                        quarter=quarter,
+                                        target_segs=_target_segs,
+                                        source="xbrl",
+                                        filing_id=_seq_doc_id,
+                                    )
+                                    _expected_segment_metrics = list(_expected_set)
                             except Exception:
                                 pass
 
