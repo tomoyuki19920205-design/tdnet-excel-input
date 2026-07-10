@@ -315,30 +315,53 @@ def _sync_canonical_segments(
     import os
     from .common_normalizers import extract_common_disclosure_no
 
+    # 開始時ログ (秘密情報を含まない)
+    logger.info(
+        "[EARNINGS][SEGMENT_CANONICAL] %s identity canonical_filing_id=%s common_disclosure_no=%s route=%s",
+        ticker,
+        canonical_filing_id or "",
+        common_disclosure_no or "",
+        route,
+    )
+
     if not period:
         logger.warning("[EARNINGS][SEGMENT_CANONICAL] %s period不明のため同期をスキップ route=%s", ticker, route)
         return
 
     # 1. canonical_filing_idが想定形式 (64桁16進数) か確認
     if not canonical_filing_id or len(canonical_filing_id) != 64 or not all(c in "0123456789abcdefABCDEF" for c in canonical_filing_id):
-        logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s stage=identity reason=canonical_filing_id_invalid expected=64_hex actual=%s", ticker, canonical_filing_id)
+        logger.error(
+            "[EARNINGS][SEGMENT_CANONICAL][ERROR] %s stage=identity reason=canonical_filing_id_missing",
+            ticker
+        )
         return
 
     # 2. common_disclosure_noが14桁か確認
     if not common_disclosure_no or len(common_disclosure_no) != 14 or not common_disclosure_no.isdigit():
-        logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s stage=identity reason=common_disclosure_no_invalid expected=14_digits actual=%s", ticker, common_disclosure_no)
+        logger.error(
+            "[EARNINGS][SEGMENT_CANONICAL][ERROR] %s stage=identity reason=common_disclosure_no_missing",
+            ticker
+        )
         return
 
     # 3. xbrl_pathの存在確認
     if not xbrl_path or not os.path.exists(xbrl_path):
-        logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s stage=identity reason=zip_missing path=%s", ticker, xbrl_path or "")
+        logger.error(
+            "[EARNINGS][SEGMENT_CANONICAL][ERROR] %s stage=identity reason=zip_not_found",
+            ticker
+        )
         return
 
     # 4. xbrl_pathの書類IDがcommon_disclosure_noと一致するか確認
     zip_basename = os.path.basename(xbrl_path)
     zip_no = extract_common_disclosure_no(zip_basename)
     if not zip_no or zip_no != common_disclosure_no:
-        logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s stage=identity reason=zip_doc_id_mismatch expected=%s actual=%s", ticker, common_disclosure_no, zip_no or "")
+        logger.error(
+            "[EARNINGS][SEGMENT_CANONICAL][ERROR] %s stage=identity reason=zip_doc_id_mismatch expected=%s actual=%s",
+            ticker,
+            common_disclosure_no,
+            zip_no or "",
+        )
         return
 
     logger.info("[EARNINGS][SEGMENT_CANONICAL] %s segment開始 %s %s %s %s", ticker, period, quarter, route, canonical_filing_id)
@@ -855,8 +878,19 @@ def run_earnings_production(
                     _doc_id = _ev_dict.get("source_doc_id", "")  # 64桁ハッシュ値
                     _guidance = _payload_ext.get("guidance", {})
 
-                    # 14桁書類IDの解決
-                    _disclosure_no = extract_common_disclosure_no(doc_j.get("source_url", "")) or ""
+                    # 14桁書類IDの解決 (明示フィールドまたはURLから取得する。検索前にZIPファイル名から逆算しない)
+                    _disclosure_no = ""
+                    for k in ("disclosure_no", "common_disclosure_no", "doc_id", "tdnet_id"):
+                        val = str(doc_j.get(k, ""))
+                        if val and len(val) == 14 and val.isdigit():
+                            _disclosure_no = val
+                            break
+                    if not _disclosure_no:
+                        _disclosure_no = extract_common_disclosure_no(doc_j.get("source_url", "")) or ""
+                    if not _disclosure_no:
+                        _disclosure_no = extract_common_disclosure_no(doc_j.get("xbrl_url", "")) or ""
+                    if not _disclosure_no:
+                        _disclosure_no = extract_common_disclosure_no(doc_j.get("pdf_url", "")) or ""
 
                     # Supabaseクライアントの取得と登録状況の確認
                     from .tdnet_event_store import _get_supabase
@@ -999,8 +1033,21 @@ def run_earnings_production(
                 logger.info(f"[EARNINGS] {ticker} no xbrl_url, trying cache")
 
             if not xbrl_path:
-                doc_id = str(getattr(doc, "doc_id", "")) or str(getattr(doc, "tdnet_id", ""))
-                xbrl_path = _find_cached_xbrl(xbrl_dir, ticker, doc_id=doc_id)
+                # 14桁書類IDを明示フィールドまたはURLから取得する (検索前にZIPファイル名から逆算しない)
+                _temp_disclosure_no = ""
+                for attr_name in ("disclosure_no", "common_disclosure_no", "doc_id", "tdnet_id"):
+                    val = str(getattr(doc, attr_name, ""))
+                    if val and len(val) == 14 and val.isdigit():
+                        _temp_disclosure_no = val
+                        break
+                if not _temp_disclosure_no:
+                    _temp_disclosure_no = extract_common_disclosure_no(getattr(doc, "doc_url", "")) or ""
+                if not _temp_disclosure_no:
+                    _temp_disclosure_no = extract_common_disclosure_no(getattr(doc, "xbrl_url", "")) or ""
+                if not _temp_disclosure_no:
+                    _temp_disclosure_no = extract_common_disclosure_no(getattr(doc, "pdf_url", "")) or ""
+
+                xbrl_path = _find_cached_xbrl(xbrl_dir, ticker, doc_id=_temp_disclosure_no)
                 if xbrl_path:
                     logger.info(f"[EARNINGS] {ticker} found cached ZIP: {Path(xbrl_path).name}")
             if not xbrl_path:
@@ -1426,9 +1473,9 @@ def run_earnings_production(
                     _seq_period = _derive_fiscal_year_end_period(doc.title)
                     _seq_doc_id = getattr(doc, "disclosure_id", "") or getattr(doc, "doc_id", "") or ""
 
-                    # 14桁書類IDの解決
+                    # 14桁書類IDの解決 (明示フィールドまたはURLから取得する。検索前にZIPファイル名から逆算しない)
                     _seq_disclosure_no = ""
-                    for attr_name in ("doc_id", "tdnet_id"):
+                    for attr_name in ("disclosure_no", "common_disclosure_no", "doc_id", "tdnet_id"):
                         val = str(getattr(doc, attr_name, ""))
                         if val and len(val) == 14 and val.isdigit():
                             _seq_disclosure_no = val
@@ -1437,6 +1484,8 @@ def run_earnings_production(
                         _seq_disclosure_no = extract_common_disclosure_no(getattr(doc, "doc_url", "")) or ""
                     if not _seq_disclosure_no:
                         _seq_disclosure_no = extract_common_disclosure_no(getattr(doc, "xbrl_url", "")) or ""
+                    if not _seq_disclosure_no:
+                        _seq_disclosure_no = extract_common_disclosure_no(getattr(doc, "pdf_url", "")) or ""
 
                     # Supabaseクライアントの取得と登録状況の確認
                     from .tdnet_event_store import _get_supabase
@@ -1543,24 +1592,23 @@ def _find_cached_xbrl(xbrl_dir: str, ticker: str, doc_id: str = "") -> str | Non
     if not d.is_dir():
         return None
 
-    if not doc_id:
+    # doc_idが14桁数字のみで構成されていることを厳格に検証
+    if not doc_id or len(doc_id) != 14 or not doc_id.isdigit():
         return None
-
-    common_id = extract_common_disclosure_no(doc_id)
-    if not common_id:
-        return None # hash or invalid
 
     candidates = sorted(d.glob(f"{ticker}_*.zip"), reverse=True)
     matches = []
     for c in candidates:
+        # ZIPファイル名は、取得した14桁書類ID (doc_id) との一致確認だけに使う
         zip_id = extract_common_disclosure_no(c.name)
-        if zip_id and zip_id == common_id:
-            matches.append(c)
+        if zip_id and zip_id == doc_id:
+            if c.is_file():
+                matches.append(c)
 
     if len(matches) == 1:
         return str(matches[0])
 
-    return None # Ambiguous or not found
+    return None
 
 
 def _format_reasons_with_ai(narrative: NarrativeData, model: str = "") -> dict:
