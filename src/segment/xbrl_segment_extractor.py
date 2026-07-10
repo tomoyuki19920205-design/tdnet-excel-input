@@ -16,6 +16,7 @@ import os
 import re
 import zipfile
 from typing import Optional
+from dataclasses import dataclass
 from dateutil.relativedelta import relativedelta
 
 from bs4 import BeautifulSoup
@@ -376,6 +377,17 @@ def _parse_quarter_from_title(title: str) -> str:
 # ============================================================
 # メインエントリ
 # ============================================================
+@dataclass
+class SegmentExtractionResult:
+    status: str
+    segments: list[SegmentRawRow]
+    reason: str | None = None
+    title_quarter: str | None = None
+    date_guard_status: str | None = None
+    candidate_file_count: int = 0
+    parsed_file_count: int = 0
+
+
 def extract_segments_from_xbrl_zip(
     zip_path: str,
     period: Optional[str] = None,
@@ -393,93 +405,153 @@ def extract_segments_from_xbrl_zip(
     Returns:
         SegmentRawRow のリスト
     """
+    result = extract_segments_from_xbrl_zip_detailed(
+        zip_path=zip_path,
+        period=period,
+        quarter=quarter,
+        title=title,
+        include_context_evidence=include_context_evidence
+    )
+    return result.segments
+
+
+def extract_segments_from_xbrl_zip_detailed(
+    zip_path: str,
+    period: Optional[str] = None,
+    quarter: Optional[str] = None,
+    title: Optional[str] = None,
+    include_context_evidence: bool = False,
+) -> SegmentExtractionResult:
+    """XBRL ZIP からセグメント情報を詳細ステータス付きで抽出。"""
+    parse_error_count = 0
+    unresolved_context_count = 0
+    date_guard_status_set = set()
+    candidate_file_count = 0
+    parsed_file_count = 0
+    results = []
+
     if not os.path.exists(zip_path):
         logger.warning(f"ZIP not found: {zip_path}")
-        return []
+        return SegmentExtractionResult(
+            status="zip_not_found",
+            segments=[],
+            reason="zip_file_not_found"
+        )
 
-    results: list[SegmentRawRow] = []
-    doc_hash = hashlib.md5(open(zip_path, "rb").read()).hexdigest()[:12]
-    
-    # doc_type / period / quarter をファイル名から推定
+    try:
+        doc_hash = hashlib.md5(open(zip_path, "rb").read()).hexdigest()[:12]
+    except Exception as e:
+        logger.warning(f"Failed to read/hash ZIP file {zip_path}: {e}")
+        return SegmentExtractionResult(
+            status="parse_error",
+            segments=[],
+            reason=f"zip_hash_failure: {type(e).__name__}"
+        )
+
     basename = os.path.basename(zip_path)
     meta_quarter = quarter
     estimated_period = period
-    accounting_standard = "JP"  # デフォルト
-    
+    accounting_standard = "JP"
+
+    global_context_map = {}
+    document_title = None
+    title_quarter = None
+
     try:
         with zipfile.ZipFile(zip_path) as zf:
-            global_context_map = {}
-            document_title = None
             for name in zf.namelist():
                 if name.endswith((".htm", ".html")):
                     try:
                         content = zf.read(name).decode("utf-8", errors="replace")
-                        
+
                         if not document_title:
                             m = re.search(r'<ix:nonNumeric[^>]*?name=[\"\'\s]*[^:]*:(?:DocumentTitle|DocumentName)[\"\'\s]*[^>]*>(.*?)</ix:nonNumeric>', content, re.I | re.S)
                             if m:
                                 document_title = m.group(1).strip()
-                                
+
                         if "context" in content.lower():
                             s = BeautifulSoup(content, "html.parser")
                             global_context_map.update(_parse_context_periods(s))
                     except Exception as e:
                         logger.warning(f"Failed to parse context in {name}: {e}")
-            
-            # Quarter Trusted Logic (replaces Guard Logic)
-            title_quarter = None
+                        parse_error_count += 1
+
             if document_title:
                 title_quarter = _parse_quarter_from_title(document_title)
-                
+
             if not title_quarter or title_quarter == "UNKNOWN":
                 logger.warning(f"[XBRL] Could not verify quarter from title for {basename}: '{document_title}'. Skipping to be safe.")
-                return []
-                
-            # title_quarter is trusted.
+                return SegmentExtractionResult(
+                    status="quarter_unresolved",
+                    segments=[],
+                    reason="title_quarter_unknown",
+                    title_quarter=title_quarter
+                )
+
+            estimated_quarter = title_quarter
             if meta_quarter and meta_quarter != "UNKNOWN" and meta_quarter != title_quarter:
                 logger.info(f"[XBRL] Quarter mismatch for {basename}: meta={meta_quarter}, title={title_quarter} ({document_title}). Trusting title_quarter.")
-            
-            estimated_quarter = title_quarter
-                    
-            # セグメント情報ファイルを探す (acsg, qcsg 等)
+
             seg_files = _find_segment_files(zf)
+            candidate_file_count = len(seg_files)
             if not seg_files:
                 logger.info(f"[XBRL] No segment files in {basename}")
-                return []
-            
+                return SegmentExtractionResult(
+                    status="segment_source_unavailable",
+                    segments=[],
+                    reason="no_segment_files_in_zip",
+                    title_quarter=estimated_quarter,
+                    candidate_file_count=0
+                )
+
+            if not global_context_map:
+                logger.warning(f"[XBRL] global_context_map is empty for {basename}")
+                return SegmentExtractionResult(
+                    status="context_unresolved",
+                    segments=[],
+                    reason="global_context_map_empty",
+                    title_quarter=estimated_quarter,
+                    candidate_file_count=candidate_file_count
+                )
+
+            expected_end = None
+            if period and estimated_quarter:
+                expected_end = _calculate_expected_context_end(period, estimated_quarter)
+
             for seg_file in seg_files:
-                content = zf.read(seg_file).decode("utf-8", errors="replace")
-                
-                # ファイル名から情報抽出
+                try:
+                    content = zf.read(seg_file).decode("utf-8", errors="replace")
+                except Exception as e:
+                    logger.warning(f"Failed to read segment file {seg_file}: {e}")
+                    parse_error_count += 1
+                    continue
+
                 fn = seg_file.lower()
                 if "ifsm" in fn or "iffr" in fn:
                     accounting_standard = "IFRS"
-                
-                # estimated_quarter is already determined by Quarter Guard Logic
 
-                # period のみをファイル名から抽出するように変更
-                if not estimated_period:
+                loop_period = estimated_period
+                if not loop_period:
                     pm = re.search(r"-(\d{4}-\d{2}-\d{2})", seg_file)
                     if pm:
-                        estimated_period = pm.group(1)
-                
-                # period を月末丸め (PL との key 一致のため)
-                if estimated_period:
-                    estimated_period = _round_to_month_end(estimated_period)
+                        loop_period = pm.group(1)
 
-                # 単位検出
-                unit = _detect_unit_from_html(content)
-                
-                soup = BeautifulSoup(content, "html.parser")
-                rows = _extract_ixbrl_segment_data(soup, accounting_standard, estimated_quarter, global_context_map)
-                
-                if not rows:
+                if loop_period:
+                    loop_period = _round_to_month_end(loop_period)
+
+                try:
+                    unit = _detect_unit_from_html(content)
+                    soup = BeautifulSoup(content, "html.parser")
+                    rows = _extract_ixbrl_segment_data(soup, accounting_standard, estimated_quarter, global_context_map)
+                except Exception as e:
+                    logger.warning(f"Failed to parse BeautifulSoup or rows in {seg_file}: {e}")
+                    parse_error_count += 1
                     continue
 
-                # --- Context Date Guard (Prioritizing segment fact contextRefs) ---
-                date_guard_status = "UNKNOWN"
-                expected_end = None
-                
+                parsed_file_count += 1
+
+                file_date_guard_status = "UNKNOWN"
+
                 def _get_prior_expected_end(ed: datetime.date) -> datetime.date:
                     try:
                         if ed.month == 2 and ed.day == 29:
@@ -488,13 +560,10 @@ def extract_segments_from_xbrl_zip(
                             return datetime.date(ed.year - 1, ed.month, ed.day)
                     except ValueError:
                         return ed
-                        
-                if period and estimated_quarter and global_context_map:
-                    expected_end = _calculate_expected_context_end(period, estimated_quarter)
-                    if expected_end:
-                        actual_ends = [] # tuple of (actual_date, period_type, cid)
-                        
-                        # 1. Try to get end dates from context_refs actually used in segment facts
+
+                if expected_end:
+                    actual_ends = []
+                    if rows:
                         used_ctx_ids = list(set([r.get("context_ref") for r in rows.values() if "context_ref" in r]))
                         for cid in used_ctx_ids:
                             info = global_context_map.get(cid)
@@ -505,49 +574,44 @@ def extract_segments_from_xbrl_zip(
                                     actual_ends.append((dt, ptype, cid))
                                 except ValueError:
                                     pass
-                        
-                        # 2. Fallback only if no valid end dates could be extracted from used contexts
-                        if not actual_ends:
-                            for cid, info in global_context_map.items():
-                                if info.get("type") == "duration" and "end" in info:
-                                    ptype = _classify_period_type(cid)
-                                    if ptype == "current" or ptype == "previous":
-                                        try:
-                                            dt = datetime.datetime.strptime(info["end"][:10], "%Y-%m-%d").date()
-                                            actual_ends.append((dt, ptype, cid))
-                                        except ValueError:
-                                            pass
-                        
-                        if actual_ends:
-                            # Group by period_type
-                            current_ends = [x for x in actual_ends if x[1] == "current"]
-                            previous_ends = [x for x in actual_ends if x[1] == "previous"]
-                            
-                            # We need at least one valid current end that passes the guard
-                            date_guard_status = "PASS"
-                            
-                            if current_ends:
-                                min_diff = min(abs((ae[0] - expected_end).days) for ae in current_ends)
-                                if min_diff > 40:
-                                    date_guard_status = "SKIP"
-                            else:
-                                date_guard_status = "SKIP"
-                                
-                            if date_guard_status == "SKIP":
-                                logger.warning(
-                                    f"[XBRL] Context Date Guard failed for {basename}. "
-                                    f"expected_end={expected_end} (fy={period}, q={estimated_quarter}). "
-                                    f"Title: '{document_title}'. Skipping."
-                                )
-                                return []
-                # ------------------------------------------------------------------
-                
-                # SegmentRawRow に変換
-                # _extract_ixbrl_segment_data の key は (member_name, period_type)
-                # period_type: "current" | "previous"
-                ticker = None
 
-                # ticker 抽出: 全タグから1件取れれば十分
+                    if not actual_ends:
+                        for cid, info in global_context_map.items():
+                            if info.get("type") == "duration" and "end" in info:
+                                ptype = _classify_period_type(cid)
+                                if ptype == "current" or ptype == "previous":
+                                    try:
+                                        dt = datetime.datetime.strptime(info["end"][:10], "%Y-%m-%d").date()
+                                        actual_ends.append((dt, ptype, cid))
+                                    except ValueError:
+                                        pass
+
+                    if actual_ends:
+                        current_ends = [x for x in actual_ends if x[1] == "current"]
+                        if current_ends:
+                            min_diff = min(abs((ae[0] - expected_end).days) for ae in current_ends)
+                            if min_diff > 40:
+                                file_date_guard_status = "SKIP"
+                            else:
+                                file_date_guard_status = "PASS"
+                        else:
+                            file_date_guard_status = "SKIP"
+                    else:
+                        file_date_guard_status = "SKIP"
+
+                date_guard_status_set.add(file_date_guard_status)
+
+                if file_date_guard_status == "SKIP":
+                    logger.warning(
+                        f"[XBRL] Context Date Guard failed for file {seg_file}. "
+                        f"expected_end={expected_end} (fy={period}, q={estimated_quarter}). Skipping."
+                    )
+                    continue
+
+                if not rows:
+                    continue
+
+                ticker = None
                 for tag in soup.find_all("ix:nonfraction")[:20]:
                     _ctx = tag.get("contextref", "")
                     if _ctx:
@@ -555,12 +619,11 @@ def extract_segments_from_xbrl_zip(
                         if ticker:
                             break
 
-                # previous rows 用に前期 period を計算
-                _prev_period: Optional[str] = None
-                if estimated_period and len(estimated_period) >= 4:
+                _prev_period = None
+                if loop_period and len(loop_period) >= 4:
                     try:
-                        _prev_year = int(estimated_period[:4]) - 1
-                        _month_day = estimated_period[5:]
+                        _prev_year = int(loop_period[:4]) - 1
+                        _month_day = loop_period[5:]
                         if _month_day == "02-29" and not calendar.isleap(_prev_year):
                             _prev_period = f"{_prev_year}-02-28"
                         else:
@@ -570,7 +633,6 @@ def extract_segments_from_xbrl_zip(
 
                 for key, data in rows.items():
                     member_name, period_type = key
-
                     raw_name = _camel_to_readable(member_name)
                     normalized = normalize_segment_name(raw_name)
                     special = classify_special_row(normalized or raw_name)
@@ -586,7 +648,7 @@ def extract_segments_from_xbrl_zip(
                     if period_type == "previous" and _prev_period:
                         row_period = _prev_period
                     else:
-                        row_period = estimated_period or ""
+                        row_period = loop_period or ""
 
                     profit_tag = data.get("profit_tag")
                     row_raw_json = None
@@ -599,16 +661,14 @@ def extract_segments_from_xbrl_zip(
                         cinfo = global_context_map.get(ctx_ref, {})
                         cstart = cinfo.get("start", "?")
                         cend = cinfo.get("end", "?")
-                        
                         ptype = _classify_period_type(ctx_ref) if ctx_ref else "unknown"
-                        
+
                         d_days = "?"
                         adjusted_expected_end_str = "?"
-                        
+
                         if cend != "?" and expected_end:
                             try:
                                 cdate = datetime.datetime.strptime(cend[:10], "%Y-%m-%d").date()
-                                
                                 if ptype == "previous":
                                     adj_expected_end = _get_prior_expected_end(expected_end)
                                     adjusted_expected_end_str = str(adj_expected_end)
@@ -616,8 +676,9 @@ def extract_segments_from_xbrl_zip(
                                 else:
                                     adjusted_expected_end_str = str(expected_end)
                                     d_days = abs((cdate - expected_end).days)
-                            except: pass
-                        
+                            except:
+                                pass
+
                         row_raw_json["_context_evidence"] = {
                             "context_ref": ctx_ref,
                             "context_start": cstart,
@@ -656,59 +717,141 @@ def extract_segments_from_xbrl_zip(
                         raw_json=row_raw_json,
                     )
                     results.append(row)
-                    
-            # --- Deduplication Pass ---
-            from src.segment.normalize import normalize_segment_key
-            
-            # Group by period, quarter, normalized_key
-            groups = {}
-            for r in results:
-                k = (r.period, r.quarter, normalize_segment_key(r.raw_segment_name))
-                if k not in groups:
-                    groups[k] = []
-                groups[k].append(r)
-                
-            dedup_results = []
-            for k, rows_in_group in groups.items():
-                if len(rows_in_group) == 1:
-                    dedup_results.append(rows_in_group[0])
-                    continue
-                    
-                # Multiple rows for the same key
-                # Check if they have the same sales and profit
-                first_sales = rows_in_group[0].sales
-                first_profit = rows_in_group[0].profit
-                conflict = False
-                for r in rows_in_group[1:]:
-                    if r.sales is not None and first_sales is not None and r.sales != first_sales:
-                        conflict = True
-                    if r.profit is not None and first_profit is not None and r.profit != first_profit:
-                        conflict = True
-                        
-                if conflict:
-                    # Conflicting value duplicate
-                    for r in rows_in_group:
-                        rj = r.raw_json or {}
-                        rj["duplicate_resolution_reason"] = "conflicting_value"
-                        r.raw_json = rj
-                        dedup_results.append(r)
-                else:
-                    # Same value duplicate, keep the shortest name (prioritizes simpler names)
-                    sorted_rows = sorted(rows_in_group, key=lambda x: len(x.raw_segment_name))
-                    best_row = sorted_rows[0]
-                    rj = best_row.raw_json or {}
-                    rj["duplicate_resolution_reason"] = "folded_same_value"
-                    best_row.raw_json = rj
-                    dedup_results.append(best_row)
-                    
-            results = dedup_results
-    
-    except zipfile.BadZipFile:
+
+            if results:
+                from src.segment.normalize import normalize_segment_key
+                groups = {}
+                for r in results:
+                    k = (r.period, r.quarter, normalize_segment_key(r.raw_segment_name))
+                    if k not in groups:
+                        groups[k] = []
+                    groups[k].append(r)
+
+                dedup_results = []
+                for k, rows_in_group in groups.items():
+                    if len(rows_in_group) == 1:
+                        dedup_results.append(rows_in_group[0])
+                        continue
+                    first_sales = rows_in_group[0].sales
+                    first_profit = rows_in_group[0].profit
+                    conflict = False
+                    for r in rows_in_group[1:]:
+                        if r.sales is not None and first_sales is not None and r.sales != first_sales:
+                            conflict = True
+                        if r.profit is not None and first_profit is not None and r.profit != first_profit:
+                            conflict = True
+                    if conflict:
+                        for r in rows_in_group:
+                            rj = r.raw_json or {}
+                            rj["duplicate_resolution_reason"] = "conflicting_value"
+                            r.raw_json = rj
+                            dedup_results.append(r)
+                    else:
+                        sorted_rows = sorted(rows_in_group, key=lambda x: len(x.raw_segment_name))
+                        best_row = sorted_rows[0]
+                        rj = best_row.raw_json or {}
+                        rj["duplicate_resolution_reason"] = "folded_same_value"
+                        best_row.raw_json = rj
+                        dedup_results.append(best_row)
+                results = dedup_results
+
+    except zipfile.BadZipFile as e:
         logger.warning(f"Bad ZIP: {zip_path}")
+        parse_error_count += 1
+        return SegmentExtractionResult(
+            status="parse_error",
+            segments=[],
+            reason=f"bad_zip_file: {type(e).__name__}",
+            candidate_file_count=candidate_file_count,
+            parsed_file_count=parsed_file_count
+        )
     except Exception as e:
         logger.warning(f"Error processing {zip_path}: {e}")
-    
-    return results
+        parse_error_count += 1
+        return SegmentExtractionResult(
+            status="parse_error",
+            segments=results,
+            reason=f"unexpected_exception: {type(e).__name__}",
+            candidate_file_count=candidate_file_count,
+            parsed_file_count=parsed_file_count
+        )
+
+    if parse_error_count > 0:
+        return SegmentExtractionResult(
+            status="parse_error",
+            segments=results,
+            reason="partial_parsing_failure",
+            title_quarter=estimated_quarter,
+            date_guard_status="PASS" if "PASS" in date_guard_status_set else ("SKIP" if "SKIP" in date_guard_status_set else "UNKNOWN"),
+            candidate_file_count=candidate_file_count,
+            parsed_file_count=parsed_file_count
+        )
+
+    if unresolved_context_count > 0:
+        return SegmentExtractionResult(
+            status="context_unresolved",
+            segments=results,
+            reason="unresolved_contexts_exist",
+            title_quarter=estimated_quarter,
+            candidate_file_count=candidate_file_count,
+            parsed_file_count=parsed_file_count
+        )
+
+    date_guard_status_final = "UNKNOWN"
+    if "PASS" in date_guard_status_set:
+        date_guard_status_final = "PASS"
+    elif "SKIP" in date_guard_status_set:
+        date_guard_status_final = "SKIP"
+
+    if expected_end and date_guard_status_final == "SKIP":
+        return SegmentExtractionResult(
+            status="date_guard_skip",
+            segments=results,
+            reason="all_candidate_files_skipped_by_date_guard",
+            title_quarter=estimated_quarter,
+            date_guard_status="SKIP",
+            candidate_file_count=candidate_file_count,
+            parsed_file_count=parsed_file_count
+        )
+
+    if len(results) > 0:
+        return SegmentExtractionResult(
+            status="success_with_rows",
+            segments=results,
+            title_quarter=estimated_quarter,
+            date_guard_status=date_guard_status_final,
+            candidate_file_count=candidate_file_count,
+            parsed_file_count=parsed_file_count
+        )
+
+    is_date_guard_ok = (expected_end is None) or (date_guard_status_final == "PASS")
+
+    if (
+        candidate_file_count >= 1
+        and parsed_file_count == candidate_file_count
+        and parse_error_count == 0
+        and unresolved_context_count == 0
+        and is_date_guard_ok
+        and len(results) == 0
+    ):
+        return SegmentExtractionResult(
+            status="success_empty",
+            segments=[],
+            title_quarter=estimated_quarter,
+            date_guard_status=date_guard_status_final,
+            candidate_file_count=candidate_file_count,
+            parsed_file_count=parsed_file_count
+        )
+
+    return SegmentExtractionResult(
+        status="date_guard_skip" if date_guard_status_final == "SKIP" else "context_unresolved",
+        segments=results,
+        reason="fallback_unresolved_status",
+        title_quarter=estimated_quarter,
+        date_guard_status=date_guard_status_final,
+        candidate_file_count=candidate_file_count,
+        parsed_file_count=parsed_file_count
+    )
 
 
 def _find_segment_files(zf: zipfile.ZipFile) -> list[str]:

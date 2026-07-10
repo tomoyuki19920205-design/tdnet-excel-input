@@ -2,7 +2,11 @@ import os
 import pytest
 import zipfile
 import datetime
-from src.segment.xbrl_segment_extractor import extract_segments_from_xbrl_zip
+from src.segment.xbrl_segment_extractor import (
+    extract_segments_from_xbrl_zip,
+    extract_segments_from_xbrl_zip_detailed,
+    SegmentExtractionResult
+)
 
 def create_dummy_ixbrl_zip(zip_path, title, contexts: list[dict], facts: list[dict]):
     # context xml を構築
@@ -277,3 +281,238 @@ class TestXBRLSegmentContextSelection:
         assert evidence["quarter"] == "2Q"
         assert "selection_reason" in evidence
         assert "duration_diff=3" in evidence["selection_reason"]
+
+
+class TestSegmentExtractionDetailed:
+
+    def test_zip_not_found(self):
+        res = extract_segments_from_xbrl_zip_detailed("nonexistent_zip_file.zip")
+        assert res.status == "zip_not_found"
+        assert res.segments == []
+        assert res.reason == "zip_file_not_found"
+
+    def test_quarter_unresolved(self, tmp_path):
+        zip_p = tmp_path / "unknown_quarter.zip"
+        create_dummy_ixbrl_zip(zip_p, "四半期情報が含まれていないタイトルです", [], [])
+
+        res = extract_segments_from_xbrl_zip_detailed(str(zip_p), period="2027-02-28")
+        assert res.status == "quarter_unresolved"
+        assert res.segments == []
+        assert res.title_quarter == "UNKNOWN"
+
+    def test_segment_source_unavailable(self, tmp_path):
+        zip_p = tmp_path / "no_seg_files.zip"
+        with zipfile.ZipFile(zip_p, "w") as zf:
+            zf.writestr("ixbrl-main-only.htm", "<html><body><ix:nonNumeric name='jpcrp_cor:DocumentTitle'>2027年2月期 第2四半期決算短信［日本基準］(連結)</ix:nonNumeric></body></html>")
+
+        res = extract_segments_from_xbrl_zip_detailed(str(zip_p), period="2027-02-28", quarter="2Q")
+        assert res.status == "segment_source_unavailable"
+        assert res.segments == []
+        assert res.reason == "no_segment_files_in_zip"
+
+    def test_context_unresolved(self, tmp_path):
+        zip_p = tmp_path / "empty_context.zip"
+        main_html = "<html><body><ix:nonNumeric name='jpcrp_cor:DocumentTitle'>2027年2月期 第2四半期決算短信［日本基準］(連結)</ix:nonNumeric></body></html>"
+        sg_html = "<html><body>セグメント情報</body></html>"
+        with zipfile.ZipFile(zip_p, "w") as zf:
+            zf.writestr("ixbrl-main-7601.htm", main_html)
+            zf.writestr("ixbrl-qcsg-7601.htm", sg_html)
+
+        res = extract_segments_from_xbrl_zip_detailed(str(zip_p), period="2027-02-28", quarter="2Q")
+        assert res.status == "context_unresolved"
+        assert res.segments == []
+        assert res.reason == "global_context_map_empty"
+
+    def test_date_guard_skip(self, tmp_path):
+        contexts = [
+            {"id": "CurrentYearYTD_DomesticBeverageBusinessReportableSegmentsMember", "start": "2026-01-10", "end": "2026-10-15"},
+        ]
+        facts = [
+            {"name": "jppfs_cor:netsales", "context": "CurrentYearYTD_DomesticBeverageBusinessReportableSegmentsMember", "val": "200,000,000"},
+        ]
+        zip_p = tmp_path / "date_guard_skip.zip"
+        create_dummy_ixbrl_zip(zip_p, "2027年2月期 第2四半期決算短信［日本基準］(連結)", contexts, facts)
+
+        res = extract_segments_from_xbrl_zip_detailed(str(zip_p), period="2027-02-28", quarter="2Q")
+        assert res.status == "date_guard_skip"
+        assert res.segments == []
+        assert res.date_guard_status == "SKIP"
+
+    def test_parse_error(self, tmp_path):
+        zip_p = tmp_path / "corrupted.zip"
+        with open(zip_p, "w") as f:
+            f.write("not a zip file content")
+
+        res = extract_segments_from_xbrl_zip_detailed(str(zip_p), period="2027-02-28", quarter="2Q")
+        assert res.status == "parse_error"
+        assert res.segments == []
+        assert "bad_zip_file" in res.reason
+
+    def test_success_with_rows(self, tmp_path):
+        contexts = [
+            {"id": "CurrentYearYTD_Duration_tse-acedjpfr-25900DomesticBeverageBusinessReportableSegmentsMember", "start": "2026-03-01", "end": "2026-08-31"},
+        ]
+        facts = [
+            {"name": "jppfs_cor:netsales", "context": "CurrentYearYTD_Duration_tse-acedjpfr-25900DomesticBeverageBusinessReportableSegmentsMember", "val": "200,000,000"},
+        ]
+        zip_p = tmp_path / "success_rows.zip"
+        create_dummy_ixbrl_zip(zip_p, "2027年2月期 第2四半期決算短信［日本基準］(連結)", contexts, facts)
+
+        res = extract_segments_from_xbrl_zip_detailed(str(zip_p), period="2027-02-28", quarter="2Q")
+        assert res.status == "success_with_rows"
+        assert len(res.segments) == 1
+        assert res.segments[0].sales == 200000000
+
+    def test_success_empty(self, tmp_path):
+        contexts = [
+            {"id": "CurrentYearYTD_Duration_tse-acedjpfr-25900DomesticBeverageBusinessReportableSegmentsMember", "start": "2026-03-01", "end": "2026-08-31"},
+        ]
+        facts = []
+        zip_p = tmp_path / "success_empty.zip"
+        create_dummy_ixbrl_zip(zip_p, "2027年2月期 第2四半期決算短信［日本基準］(連結)", contexts, facts)
+
+        res = extract_segments_from_xbrl_zip_detailed(str(zip_p), period="2027-02-28", quarter="2Q")
+        assert res.status == "success_empty"
+        assert res.segments == []
+        assert res.date_guard_status == "PASS"
+        assert res.candidate_file_count == 1
+        assert res.parsed_file_count == 1
+
+    def test_legacy_api_parity(self, tmp_path):
+        contexts = [
+            {"id": "CurrentYearYTD_Duration_tse-acedjpfr-25900DomesticBeverageBusinessReportableSegmentsMember", "start": "2026-03-01", "end": "2026-08-31"},
+        ]
+        facts = [
+            {"name": "jppfs_cor:netsales", "context": "CurrentYearYTD_Duration_tse-acedjpfr-25900DomesticBeverageBusinessReportableSegmentsMember", "val": "150,000,000"},
+        ]
+        zip_p = tmp_path / "parity.zip"
+        create_dummy_ixbrl_zip(zip_p, "2027年2月期 第2四半期決算短信［日本基準］(連結)", contexts, facts)
+
+        detailed_res = extract_segments_from_xbrl_zip_detailed(str(zip_p), period="2027-02-28", quarter="2Q")
+        legacy_res = extract_segments_from_xbrl_zip(str(zip_p), period="2027-02-28", quarter="2Q")
+
+        assert len(detailed_res.segments) == len(legacy_res)
+        assert detailed_res.segments[0].sales == legacy_res[0].sales
+        assert detailed_res.segments[0].raw_segment_name == legacy_res[0].raw_segment_name
+
+    def test_legacy_api_calls_detailed_once(self, tmp_path):
+        contexts = [
+            {"id": "CurrentYearYTD_Duration_tse-acedjpfr-25900DomesticBeverageBusinessReportableSegmentsMember", "start": "2026-03-01", "end": "2026-08-31"},
+        ]
+        facts = [
+            {"name": "jppfs_cor:netsales", "context": "CurrentYearYTD_Duration_tse-acedjpfr-25900DomesticBeverageBusinessReportableSegmentsMember", "val": "150,000,000"},
+        ]
+        zip_p = tmp_path / "call_count.zip"
+        create_dummy_ixbrl_zip(zip_p, "2027年2月期 第2四半期決算短信［日本基準］(連結)", contexts, facts)
+
+        from unittest.mock import patch
+        with patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip_detailed") as mock_detailed:
+            mock_detailed.return_value = SegmentExtractionResult(status="success_with_rows", segments=[])
+            extract_segments_from_xbrl_zip(str(zip_p), period="2027-02-28", quarter="2Q")
+            mock_detailed.assert_called_once()
+
+    def test_mixed_case_k_partially_failed(self, tmp_path):
+        main_html = """
+        <html>
+        <body>
+          <ix:nonNumeric name="jpcrp_cor:DocumentTitle">2027年2月期 第2四半期決算短信［日本基準］(連結)</ix:nonNumeric>
+          <xbrli:context id="CurrentYearYTD_DomesticBeverageBusinessReportableSegmentsMember">
+            <xbrli:period>
+              <xbrli:startDate>2026-03-01</xbrli:startDate>
+              <xbrli:endDate>2026-08-31</xbrli:endDate>
+            </xbrli:period>
+          </xbrli:context>
+        </body>
+        </html>
+        """
+        sg_html_a = """
+        <html>
+        <body>
+          <ix:nonfraction name="jppfs_cor:netsales" contextref="CurrentYearYTD_DomesticBeverageBusinessReportableSegmentsMember" unitref="JPY" decimals="0" scale="6">120,000,000</ix:nonfraction>
+        </body>
+        </html>
+        """
+        zip_p = tmp_path / "mixed_k.zip"
+        with zipfile.ZipFile(zip_p, "w") as zf:
+            zf.writestr("ixbrl-main-7601.htm", main_html)
+            zf.writestr("ixbrl-qcsg-filea.htm", sg_html_a)
+            zf.writestr("ixbrl-qcsg-fileb.htm", "broken html or content")
+
+        from unittest.mock import patch
+        with patch("src.segment.xbrl_segment_extractor._extract_ixbrl_segment_data") as mock_extract:
+            mock_extract.side_effect = [
+                {("DomesticMember", "current"): {"sales": 120000000, "context_ref": "CurrentYearYTD_DomesticBeverageBusinessReportableSegmentsMember"}},
+                Exception("mock segment data parse error")
+            ]
+            res = extract_segments_from_xbrl_zip_detailed(str(zip_p), period="2027-02-28", quarter="2Q")
+
+        assert res.status == "parse_error"
+        assert res.reason == "partial_parsing_failure"
+        assert len(res.segments) == 1
+        assert res.segments[0].sales == 120000000
+        assert res.candidate_file_count == 2
+        assert res.parsed_file_count == 1
+
+    def test_mixed_case_l_partially_skipped(self, tmp_path):
+        main_html = """
+        <html>
+        <body>
+          <ix:nonNumeric name="jpcrp_cor:DocumentTitle">2027年2月期 第2四半期決算短信［日本基準］(連結)</ix:nonNumeric>
+          <xbrli:context id="CurrentYearYTD_DomesticBeverageBusinessReportableSegmentsMember">
+            <xbrli:period>
+              <xbrli:startDate>2026-03-01</xbrli:startDate>
+              <xbrli:endDate>2026-08-31</xbrli:endDate>
+            </xbrli:period>
+          </xbrli:context>
+          <xbrli:context id="MismatchDuration">
+            <xbrli:period>
+              <xbrli:startDate>2026-01-10</xbrli:startDate>
+              <xbrli:endDate>2026-08-31</xbrli:endDate>
+            </xbrli:period>
+          </xbrli:context>
+        </body>
+        </html>
+        """
+        zip_p = tmp_path / "mixed_l.zip"
+        with zipfile.ZipFile(zip_p, "w") as zf:
+            zf.writestr("ixbrl-main-7601.htm", main_html)
+            zf.writestr("ixbrl-qcsg-filea.htm", "<html><body></body></html>")
+            zf.writestr("ixbrl-qcsg-fileb.htm", "<html><body></body></html>")
+
+        from unittest.mock import patch
+        with patch("src.segment.xbrl_segment_extractor._extract_ixbrl_segment_data") as mock_extract:
+            mock_extract.side_effect = [{}, {}]
+
+            res = extract_segments_from_xbrl_zip_detailed(str(zip_p), period="2027-02-28", quarter="2Q")
+
+        assert res.status == "success_empty"
+        assert res.date_guard_status == "PASS"
+        assert res.candidate_file_count == 2
+        assert res.parsed_file_count == 2
+
+    def test_mixed_case_m_all_success_empty(self, tmp_path):
+        main_html = """
+        <html>
+        <body>
+          <ix:nonNumeric name="jpcrp_cor:DocumentTitle">2027年2月期 第2四半期決算短信［日本基準］(連結)</ix:nonNumeric>
+          <xbrli:context id="CurrentYearYTD_DomesticBeverageBusinessReportableSegmentsMember">
+            <xbrli:period>
+              <xbrli:startDate>2026-03-01</xbrli:startDate>
+              <xbrli:endDate>2026-08-31</xbrli:endDate>
+            </xbrli:period>
+          </xbrli:context>
+        </body>
+        </html>
+        """
+        zip_p = tmp_path / "mixed_m.zip"
+        with zipfile.ZipFile(zip_p, "w") as zf:
+            zf.writestr("ixbrl-main-7601.htm", main_html)
+            zf.writestr("ixbrl-qcsg-filea.htm", "<html><body></body></html>")
+            zf.writestr("ixbrl-qcsg-fileb.htm", "<html><body></body></html>")
+
+        res = extract_segments_from_xbrl_zip_detailed(str(zip_p), period="2027-02-28", quarter="2Q")
+        assert res.status == "success_empty"
+        assert res.segments == []
+        assert res.candidate_file_count == 2
+        assert res.parsed_file_count == 2
+
