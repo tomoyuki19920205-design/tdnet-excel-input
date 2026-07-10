@@ -227,12 +227,31 @@ def _sync_canonical_financials(
         logger.error("[EARNINGS][CANONICAL] %s canonical同期中にエラー: %s route=%s", ticker, e, route)
 
 
-def _check_canonical_financials_saved(client, ticker: str, period: str, quarter: str) -> bool:
+def _check_canonical_financials_saved(
+    client,
+    ticker: str,
+    period: str,
+    quarter: str,
+    filing_id: str | None = None,
+    expected_metrics: list[str] | None = None,
+) -> bool:
+    if not filing_id:
+        return False
+    if expected_metrics is None:
+        expected_metrics = ["sales", "operating_profit"]
+    if not expected_metrics:
+        return True
     try:
-        res = client.table("canonical_financials").select("metric").eq("ticker", ticker).eq("period", period).eq("quarter", quarter).execute()
+        res = client.table("canonical_financials") \
+            .select("metric") \
+            .eq("ticker", ticker) \
+            .eq("period", period) \
+            .eq("quarter", quarter) \
+            .eq("filing_id", filing_id) \
+            .execute()
         if res.data:
             metrics = {row.get("metric") for row in res.data}
-            if "sales" in metrics or "operating_profit" in metrics:
+            if all(m in metrics for m in expected_metrics):
                 return True
         return False
     except Exception as e:
@@ -872,10 +891,23 @@ def run_earnings_production(
                         except Exception:
                             pass
 
+                    _expected_metrics = []
+                    if _sales is not None:
+                        _expected_metrics.append("sales")
+                    if _op is not None:
+                        _expected_metrics.append("operating_profit")
+
                     _pl_saved = False
                     _seg_saved = False
                     if _client:
-                        _pl_saved = _check_canonical_financials_saved(_client, _ticker, _period, _q)
+                        _pl_saved = _check_canonical_financials_saved(
+                            client=_client,
+                            ticker=_ticker,
+                            period=_period,
+                            quarter=_q,
+                            filing_id=_doc_id,
+                            expected_metrics=_expected_metrics,
+                        )
                         _seg_saved = _check_canonical_segments_saved(_client, _ticker, _period, _q, _expected_segs)
 
                     # PL同期
@@ -1451,10 +1483,23 @@ def run_earnings_production(
                         except Exception:
                             pass
 
+                    _expected_metrics = []
+                    if earnings.sales_current is not None:
+                        _expected_metrics.append("sales")
+                    if earnings.op_current is not None:
+                        _expected_metrics.append("operating_profit")
+
                     _pl_saved = False
                     _seg_saved = False
                     if _client:
-                        _pl_saved = _check_canonical_financials_saved(_client, ticker, _seq_period, quarter)
+                        _pl_saved = _check_canonical_financials_saved(
+                            client=_client,
+                            ticker=ticker,
+                            period=_seq_period,
+                            quarter=quarter,
+                            filing_id=_seq_doc_id,
+                            expected_metrics=_expected_metrics,
+                        )
                         _seg_saved = _check_canonical_segments_saved(_client, ticker, _seq_period, quarter, _expected_segs)
 
                     # PL同期
