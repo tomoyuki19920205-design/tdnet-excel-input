@@ -1,7 +1,7 @@
 import pytest
 import sqlite3
 import dataclasses
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, ANY
 from src.events.earnings_production_pipeline import run_earnings_production, _sync_canonical_financials
 from src.events.summary_financials import EarningsSummaryData
 
@@ -528,3 +528,368 @@ class TestHTMLDecoder:
         from src.events.summary_financials import _decode_html_bytes
         decoded = _decode_html_bytes(raw)
         assert decoded == text
+
+
+class TestRealtimeSegmentIdentity:
+    """Realtimeセグメント識別子分離・ZIP正本一致修正の検証テスト (Section 12要件に基づく)"""
+
+    @pytest.fixture
+    def setup_db(self):
+        conn = sqlite3.connect(":memory:")
+        from src.events.earnings_summary_storage import ensure_earnings_summary_table
+        ensure_earnings_summary_table(conn)
+        return conn
+
+    @patch("lib.pipeline.canonical_writer.write_segments_canonical")
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip")
+    def test_common_function_scenarios(self, m_extract, m_cache, m_write, tmp_path):
+        from src.events.earnings_production_pipeline import _sync_canonical_segments
+        from src.segment.models import SegmentRawRow
+        import os
+
+        # テスト用のZIPを作成
+        zip_dir = tmp_path / "xbrl_cache"
+        zip_dir.mkdir()
+        zip_path = zip_dir / "7601_20260709590505.zip"
+        zip_path.write_bytes(b"dummy zip content")
+
+        # extract_segments_from_xbrl_zip が返すモックデータ
+        m_extract.return_value = [
+            SegmentRawRow(
+                source="xbrl",
+                raw_ticker="7601",
+                period="2027-02-28",
+                quarter="1Q",
+                raw_segment_name="Smartstore",
+                sales=1242,
+                profit=-90,
+                raw_json={"_context_evidence": {"context_start": "2026-03-01", "context_end": "2026-05-31", "current_or_previous": "current"}}
+            )
+        ]
+        m_write.return_value = {"written": 1, "skipped": 0, "errors": 0}
+
+        # 1. 64桁filing_idがwriterへ渡る
+        # 2. 14桁書類IDがZIP識別へ使われる (ZIP名の ID と common_disclosure_no の一致検証)
+        # 3. 64桁IDがZIP検索へ渡らない (共通関数内で ZIP 名から 64 桁ハッシュを渡していないか検証)
+        _sync_canonical_segments(
+            ticker="7601",
+            period="2027-02-28",
+            quarter="1Q",
+            canonical_filing_id="4836e8c1953047daf09850a4b7f86ef0186f8ab85a348e41355323f2c3bf1da8", # 64桁
+            common_disclosure_no="20260709590505", # 14桁
+            xbrl_path=str(zip_path),
+            dry_run=False,
+            route="seq"
+        )
+        assert m_write.call_count == 1
+        # call_argsの検証
+        args, kwargs = m_write.call_args
+        assert kwargs.get("filing_id") == "4836e8c1953047daf09850a4b7f86ef0186f8ab85a348e41355323f2c3bf1da8"
+        assert kwargs.get("filing_id") != "20260709590505"
+
+        # 4. 不正な64桁filing_idを拒否 (不正な64桁 → 未呼び出し)
+        m_write.reset_mock()
+        _sync_canonical_segments(
+            ticker="7601",
+            period="2027-02-28",
+            quarter="1Q",
+            canonical_filing_id="invalid_hash_value_12345", # 不正
+            common_disclosure_no="20260709590505",
+            xbrl_path=str(zip_path),
+            dry_run=False,
+            route="seq"
+        )
+        assert m_write.call_count == 0
+
+        # 5. 不正な14桁書類IDを拒否 (数字以外など)
+        m_write.reset_mock()
+        _sync_canonical_segments(
+            ticker="7601",
+            period="2027-02-28",
+            quarter="1Q",
+            canonical_filing_id="4836e8c1953047daf09850a4b7f86ef0186f8ab85a348e41355323f2c3bf1da8",
+            common_disclosure_no="invalid_doc_id_", # 不正
+            xbrl_path=str(zip_path),
+            dry_run=False,
+            route="seq"
+        )
+        assert m_write.call_count == 0
+
+        # 6. ZIP書類ID不一致でwriter未呼び出し
+        m_write.reset_mock()
+        # zip_path を 9982 のものにする
+        wrong_zip = zip_dir / "9982_20260709590450.zip"
+        wrong_zip.write_bytes(b"dummy")
+        _sync_canonical_segments(
+            ticker="7601",
+            period="2027-02-28",
+            quarter="1Q",
+            canonical_filing_id="4836e8c1953047daf09850a4b7f86ef0186f8ab85a348e41355323f2c3bf1da8",
+            common_disclosure_no="20260709590505", # 7601のIDを期待
+            xbrl_path=str(wrong_zip), # 9982のZIP
+            dry_run=False,
+            route="seq"
+        )
+        assert m_write.call_count == 0
+
+        # 7. ZIP未存在でwriter未呼び出し
+        m_write.reset_mock()
+        _sync_canonical_segments(
+            ticker="7601",
+            period="2027-02-28",
+            quarter="1Q",
+            canonical_filing_id="4836e8c1953047daf09850a4b7f86ef0186f8ab85a348e41355323f2c3bf1da8",
+            common_disclosure_no="20260709590505",
+            xbrl_path="C:/non_existent_path.zip",
+            dry_run=False,
+            route="seq"
+        )
+        assert m_write.call_count == 0
+
+        # 8. dry-runでwriter未呼び出し
+        m_write.reset_mock()
+        _sync_canonical_segments(
+            ticker="7601",
+            period="2027-02-28",
+            quarter="1Q",
+            canonical_filing_id="4836e8c1953047daf09850a4b7f86ef0186f8ab85a348e41355323f2c3bf1da8",
+            common_disclosure_no="20260709590505",
+            xbrl_path=str(zip_path),
+            dry_run=True, # dry-run
+            route="seq"
+        )
+        assert m_write.call_count == 0
+
+
+    def test_find_cached_xbrl_real_path_scenarios(self, tmp_path):
+        from src.events.earnings_production_pipeline import _find_cached_xbrl
+
+        # テスト用のダミーZIPファイル群の作成
+        zip1 = tmp_path / "7601_20260709590505.zip"
+        zip1.write_bytes(b"dummy")
+
+        zip2 = tmp_path / "7601_20260709590450.zip"
+        zip2.write_bytes(b"dummy")
+
+        # 9. 一致ZIPが1件なら正しいパス
+        res1 = _find_cached_xbrl(str(tmp_path), "7601", "20260709590505")
+        assert res1 == str(zip1)
+
+        # 10. 別書類IDZIPだけならNone (存在しないIDの指定)
+        res2 = _find_cached_xbrl(str(tmp_path), "7601", "20260709590999")
+        assert res2 is None
+
+        # 11. ZIPなしならNone
+        res3 = _find_cached_xbrl(str(tmp_path), "9982", "20260709590505")
+        assert res3 is None
+
+        # 12. 64桁ハッシュならNone (14桁ではないため弾かれること)
+        res4 = _find_cached_xbrl(str(tmp_path), "7601", "4836e8c1953047daf09850a4b7f86ef0186f8ab85a348e41355323f2c3bf1da8")
+        assert res4 is None
+
+        # 13. 不正値ならNone (文字混じりなど)
+        res5 = _find_cached_xbrl(str(tmp_path), "7601", "invalid_no_1234")
+        assert res5 is None
+
+        # 14. 複数候補なら安全にNone (glob時に複数ヒットした場合)
+        assert _find_cached_xbrl(str(tmp_path), "7601", "") is None
+
+
+    def test_sequential_route_scenarios(self, setup_db, monkeypatch):
+        from src.events.earnings_production_pipeline import run_earnings_production
+        from src.events.earnings_production_pipeline import EarningsSummaryData
+        import dataclasses
+
+        monkeypatch.setenv("USE_SUBPROCESS_WORKER", "0")
+
+        # 15. writerへ64桁filing_id
+        # 16. ZIP検索へ14桁書類ID
+        # 17. 9982相当の実引数
+        # 18. 7601相当の実引数
+        # 19. 14桁取得不能時にwriter未呼び出し
+
+        mock_client = MagicMock()
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
+
+        with patch("src.events.tdnet_event_store._get_supabase", return_value=mock_client), \
+             patch("src.events.earnings_production_pipeline._find_cached_xbrl") as m_find, \
+             patch("src.events.earnings_production_pipeline._sync_canonical_segments") as m_seg, \
+             patch("src.events.earnings_production_pipeline._save_earnings_to_tdnet_events") as m_save, \
+             patch("src.events.earnings_production_pipeline.load_json") as m_load, \
+             patch("src.events.earnings_production_pipeline._extract_expected_segment_names_from_xbrl", return_value=["Smartstore"]), \
+             patch("os.path.exists", return_value=True):
+
+            m_save.return_value = {"action": "dedup_skipped"}
+            m_find.return_value = "C:/xbrl_archive/dummy.zip"
+
+            # 17. 9982相当の実引数の検証
+            # 64桁filing_id
+            h_9982 = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+            doc_9982 = DummyDoc("9982", "2027年2月期 第1四半期決算短信［日本基準］(連結)", h_9982)
+            doc_9982.doc_url = "https://www.release.tdnet.info/inbs/140120260709590450.pdf" # 14桁ID: 20260709590450
+            doc_9982.doc_id = "20260709590450"
+
+            e = EarningsSummaryData(sales_current=15388, op_current=447)
+            m_load.return_value = {
+                "earnings": dataclasses.asdict(e),
+                "company_name": "タキヒヨー",
+                "fiscal_year": "2027",
+                "quarter": "1Q",
+            }
+
+            run_earnings_production([doc_9982], setup_db, webhook_url="")
+
+            # _find_cached_xbrl へ渡った実値を call_args で検証 (16. ZIP検索へ14桁書類ID)
+            m_find.assert_called_with(ANY, "9982", doc_id="20260709590450")
+            # 64桁ハッシュ値が _find_cached_xbrl に渡っていないことを検証
+            for call in m_find.call_args_list:
+                _, kwargs = call
+                assert kwargs.get("doc_id") != h_9982
+
+            # _sync_canonical_segments へ渡った実値を検証 (15. writerへ64桁、17. 9982相当)
+            m_seg.assert_called_with(
+                ticker="9982",
+                period="2027-02-28",
+                quarter="1Q",
+                canonical_filing_id=h_9982,
+                common_disclosure_no="20260709590450",
+                xbrl_path=ANY,
+                dry_run=False,
+                route="sequential"
+            )
+
+            # 18. 7601相当の実引数の検証
+            m_find.reset_mock()
+            m_seg.reset_mock()
+
+            h_7601 = "4836e8c1953047daf09850a4b7f86ef0186f8ab85a348e41355323f2c3bf1da8"
+            doc_7601 = DummyDoc("7601", "2027年2月期 第1四半期決算短信［日本基準］(連結)", h_7601)
+            doc_7601.doc_url = "https://www.release.tdnet.info/inbs/140120260709590505.pdf" # 14桁ID: 20260709590505
+            doc_7601.doc_id = "20260709590505"
+
+            run_earnings_production([doc_7601], setup_db, webhook_url="")
+            m_find.assert_called_with(ANY, "7601", doc_id="20260709590505")
+            m_seg.assert_called_with(
+                ticker="7601",
+                period="2027-02-28",
+                quarter="1Q",
+                canonical_filing_id=h_7601,
+                common_disclosure_no="20260709590505",
+                xbrl_path=ANY,
+                dry_run=False,
+                route="sequential"
+            )
+
+            # 19. 14桁取得不能時にwriter未呼び出し (URLや明示IDを空にする)
+            m_find.reset_mock()
+            m_seg.reset_mock()
+
+            doc_no_id = DummyDoc("7601", "2027年2月期 第1四半期決算短信［日本基準］(連結)", h_7601)
+            doc_no_id.doc_url = ""
+            doc_no_id.doc_id = "" # 空
+
+            run_earnings_production([doc_no_id], setup_db, webhook_url="")
+            # 14桁解決できず、_find_cached_xbrl への doc_id が空になることを検証
+            m_find.assert_called_with(ANY, "7601", doc_id="")
+
+
+    def test_subprocess_route_scenarios(self, setup_db, monkeypatch):
+        from src.events.earnings_production_pipeline import run_earnings_production
+        from src.events.earnings_production_pipeline import EarningsSummaryData
+        import dataclasses
+
+        monkeypatch.setenv("USE_SUBPROCESS_WORKER", "1")
+        monkeypatch.setenv("EARNINGS_SUBPROCESS_ENABLE_REAL_SAVE", "1")
+        monkeypatch.setenv("EARNINGS_SUBPROCESS_ALLOWLIST", "9982,7601")
+
+        mock_client = MagicMock()
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
+
+        # 20. writerへ64桁filing_id
+        # 21. ZIP検索へ14桁書類ID
+        # 22. source_doc_idが64桁でもZIP検索へ流用しない
+        # 23. URLから14桁番号を正しく取得
+        # 24. 14桁取得不能時にwriter未呼び出し
+
+        with patch("src.events.earnings_subprocess_runner.run_earnings_subprocess_dry_run") as m_run, \
+             patch("src.events.earnings_subprocess_runner.build_save_ready_payload") as m_payload, \
+             patch("src.events.earnings_subprocess_runner.validate_save_ready_payload") as m_valid, \
+             patch("src.events.earnings_subprocess_runner.build_save_call_plan") as m_plan, \
+             patch("src.events.earnings_subprocess_runner.validate_save_call_plan") as m_cp_valid, \
+             patch("src.events.earnings_subprocess_runner.build_discord_call_plan") as m_discord_plan, \
+             patch("src.events.tdnet_event_store.save_event_to_supabase") as m_supa, \
+             patch("src.events.earnings_production_pipeline._find_cached_xbrl") as m_find, \
+             patch("src.events.earnings_production_pipeline._sync_canonical_segments") as m_seg, \
+             patch("src.events.earnings_production_pipeline._extract_expected_segment_names_from_xbrl", return_value=["Smartstore"]), \
+             patch("src.events.tdnet_event_store._get_supabase", return_value=mock_client), \
+             patch("os.path.exists", return_value=True):
+
+            h_9982 = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+            m_run.return_value = {"results": [{"ticker": "9982", "status": "ok"}]}
+            m_valid.return_value = (True, "")
+            m_cp_valid.return_value = (True, "")
+            m_discord_plan.return_value = {"discord_message": "dummy msg"}
+            m_supa.return_value = {"action": "inserted"}
+            m_find.return_value = "C:/xbrl_archive/dummy.zip"
+
+            # payload
+            e = EarningsSummaryData(sales_current=15388, op_current=447)
+            m_payload.return_value = {
+                "extracted": {
+                    "ticker": "9982",
+                    "period": "2027-02-28",
+                    "quarter": "1Q",
+                    "guidance": {}
+                }
+            }
+            m_plan.return_value = {
+                "earnings_summary_args": {
+                    "ticker": "9982",
+                    "fiscal_year": "2027",
+                    "quarter": "1Q",
+                    "sales_value": 15388,
+                    "op_value": 447,
+                    "title": "2027年2月期 第1四半期決算短信［日本基準］(連結)",
+                    "fingerprint": "dummy_fingerprint_9982",
+                },
+                "tdnet_event_payload": {
+                    "ticker": "9982",
+                    "source_doc_id": h_9982 # 64桁
+                }
+            }
+
+            doc_9982 = DummyDoc("9982", "2027年2月期 第1四半期決算短信［日本基準］(連結)", h_9982)
+            doc_9982.doc_url = "https://www.release.tdnet.info/inbs/140120260709590450.pdf"
+            doc_9982.doc_id = "20260709590450"
+
+            run_earnings_production([doc_9982], setup_db, webhook_url="")
+
+            # 21. ZIP検索へ14桁書類ID (22. source_doc_id 64桁を ZIP 検索に流用しないことの検証)
+            m_find.assert_called_with(ANY, "9982", doc_id="20260709590450")
+            for call in m_find.call_args_list:
+                _, kwargs = call
+                assert kwargs.get("doc_id") != h_9982
+
+            # 20. writerへ64桁filing_id
+            m_seg.assert_called_with(
+                ticker="9982",
+                period="2027-02-28",
+                quarter="1Q",
+                canonical_filing_id=h_9982,
+                common_disclosure_no="20260709590450",
+                xbrl_path=ANY,
+                dry_run=False,
+                route="subprocess"
+            )
+
+            # 24. 14桁取得不能時にwriter未呼び出し
+            m_find.reset_mock()
+            m_seg.reset_mock()
+
+            doc_no_id = DummyDoc("9982", "2027年2月期 第1四半期決算短信［日本基準］(連結)", h_9982)
+            doc_no_id.doc_url = ""
+            doc_no_id.doc_id = ""
+
+            run_earnings_production([doc_no_id], setup_db, webhook_url="")
+            m_find.assert_called_with(ANY, "9982", doc_id="")
