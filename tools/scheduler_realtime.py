@@ -46,7 +46,7 @@ PYTHON = os.path.join(_PROJECT_ROOT, ".venv", "Scripts", "python.exe")
 # ── step 定義 ──────────────────────────────────────────────
 TASK_NAME = "TDNET_Realtime"
 DEADLINE_MINUTES = 120
-STARTUP_DELAY_SEC = 15
+STARTUP_DELAY_SEC = 40
 GLOBAL_LOCK_MAX_AGE = 60  # 分
 JOB_LOCK_MAX_AGE = 15     # 分
 
