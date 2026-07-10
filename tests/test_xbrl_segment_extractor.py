@@ -458,16 +458,16 @@ class TestSegmentExtractionDetailed:
         <html>
         <body>
           <ix:nonNumeric name="jpcrp_cor:DocumentTitle">2027年2月期 第2四半期決算短信［日本基準］(連結)</ix:nonNumeric>
-          <xbrli:context id="CurrentYearYTD_DomesticBeverageBusinessReportableSegmentsMember">
+          <xbrli:context id="CurrentYearYTD_Duration_tse-acedjpfr-25900DomesticBeverageBusinessReportableSegmentsMember">
             <xbrli:period>
               <xbrli:startDate>2026-03-01</xbrli:startDate>
               <xbrli:endDate>2026-08-31</xbrli:endDate>
             </xbrli:period>
           </xbrli:context>
-          <xbrli:context id="MismatchDuration">
+          <xbrli:context id="CurrentYearYTD_Mismatch">
             <xbrli:period>
               <xbrli:startDate>2026-01-10</xbrli:startDate>
-              <xbrli:endDate>2026-08-31</xbrli:endDate>
+              <xbrli:endDate>2026-10-15</xbrli:endDate>
             </xbrli:period>
           </xbrli:context>
         </body>
@@ -481,12 +481,18 @@ class TestSegmentExtractionDetailed:
 
         from unittest.mock import patch
         with patch("src.segment.xbrl_segment_extractor._extract_ixbrl_segment_data") as mock_extract:
-            mock_extract.side_effect = [{}, {}]
+            mock_extract.side_effect = [
+                {("MemberA", "current"): {"sales": 100, "context_ref": "CurrentYearYTD_Duration_tse-acedjpfr-25900DomesticBeverageBusinessReportableSegmentsMember"}},
+                {("MemberB", "current"): {"sales": 200, "context_ref": "CurrentYearYTD_Mismatch"}}
+            ]
 
             res = extract_segments_from_xbrl_zip_detailed(str(zip_p), period="2027-02-28", quarter="2Q")
 
-        assert res.status == "success_empty"
-        assert res.date_guard_status == "PASS"
+        assert res.status == "date_guard_skip"
+        assert res.date_guard_status == "SKIP"
+        # 正常に抽出された filea の segments は捨てずに保持されていること！
+        assert len(res.segments) == 1
+        assert res.segments[0].sales == 100
         assert res.candidate_file_count == 2
         assert res.parsed_file_count == 2
 
