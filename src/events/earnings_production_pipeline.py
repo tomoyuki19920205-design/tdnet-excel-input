@@ -153,6 +153,79 @@ def _derive_fiscal_year_end_period(title: str) -> str | None:
     return None
 
 
+def _sync_canonical_financials(
+    ticker: str,
+    period: str,
+    quarter: str,
+    sales_value: float | None,
+    op_value: float | None,
+    gross_value: float | None,
+    sga_value: float | None,
+    guidance: dict,
+    filing_id: str,
+    dry_run: bool,
+    route: str,
+):
+    import os
+    if not period:
+        logger.warning("[EARNINGS][CANONICAL] %s period不明のためcanonical同期をスキップ route=%s", ticker, route)
+        return
+
+    logger.info("[EARNINGS][CANONICAL] %s canonical同期開始 (period=%s, quarter=%s) route=%s", ticker, period, quarter, route)
+    try:
+        from lib.pipeline.canonical_writer import write_financials_canonical
+
+        _metrics = {}
+        if sales_value is not None: _metrics["sales"] = sales_value / 1_000_000
+        if op_value is not None: _metrics["operating_profit"] = op_value / 1_000_000
+        if gross_value is not None: _metrics["gross_profit"] = gross_value / 1_000_000
+        if sga_value is not None: _metrics["selling_general_and_administrative_expenses"] = sga_value / 1_000_000
+
+        _url = os.getenv("SUPABASE_URL", "").rstrip("/")
+        _config = {
+            "rest_url": f"{_url}/rest/v1" if _url else "",
+            "key": os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY", "")
+        }
+
+        is_apply = os.getenv("EARNINGS_CANONICAL_WRITE_REPLACE_APPLY") == "1"
+        is_dryrun = os.getenv("EARNINGS_CANONICAL_WRITE_REPLACE_DRYRUN") == "1"
+
+        if is_apply or is_dryrun or dry_run:
+            logger.info("[EARNINGS][CANONICAL] %s canonical同期(REPLACE %s) 開始 route=%s", ticker, "APPLY" if is_apply and not dry_run else "DRY-RUN", route)
+            from src.events.canonical_write_gateway import build_normalized_canonical_write_plan, validate_canonical_write_plan
+            _plans = build_normalized_canonical_write_plan(
+                ticker=ticker,
+                period_raw=period,
+                quarter_raw=quarter,
+                metrics_raw=_metrics,
+                guidance_raw=guidance,
+                filing_id=filing_id
+            )
+            _all_allowed = True
+            for p in _plans:
+                vp = validate_canonical_write_plan(p)
+                if not vp.write_allowed:
+                    _all_allowed = False
+                    logger.warning(f"[EARNINGS][CANONICAL] {ticker} DRY-RUN blocked: {vp.metric} {vp.quarter} {vp.block_reason} route={route}")
+            if not _all_allowed:
+                logger.error(f"[EARNINGS][CANONICAL] {ticker} DRY-RUN blocked due to unsafe plans. route={route}")
+            logger.info("[EARNINGS][CANONICAL] %s canonical同期(REPLACE DRY-RUN) 完了 route=%s", ticker, route)
+        else:
+            write_financials_canonical(
+                ticker=ticker,
+                period=period,
+                quarter=quarter,
+                metrics_dict=_metrics,
+                source="jquants_earnings_summary",
+                filing_id=filing_id,
+                unit="millions_jpy",
+                config=_config
+            )
+            logger.info("[EARNINGS][CANONICAL] %s canonical同期完了 route=%s", ticker, route)
+    except Exception as e:
+        logger.error("[EARNINGS][CANONICAL] %s canonical同期中にエラー: %s route=%s", ticker, e, route)
+
+
 # ============================================================
 # fiscal_year / quarter 解析
 # ============================================================
@@ -531,83 +604,39 @@ def run_earnings_production(
 
                     # ── canonical_financials 同期 ──────────────────────────────
                     if _sup_ok:
-                        try:
-                            _args = _merged_plan["earnings_summary_args"]
-                            _title = _args.get("title", "")
-                            _period = None
-                            
-                            # payload 内に period / fiscal_year_end があれば優先
-                            _payload_ext = _payload.get("extracted", {})
-                            _period_cand = _payload_ext.get("period") or _payload_ext.get("fiscal_year_end")
-                            if _period_cand:
-                                _period = _period_cand
-                            else:
-                                _period = _derive_fiscal_year_end_period(_title)
-                                
-                            if not _period:
-                                logger.warning("[EARNINGS][REAL] %s period不明のためcanonical同期をスキップ (title=%r)", _ticker, _title)
-                            else:
-                                _q = _args.get("quarter", "")
-                                _sales = _args.get("sales_value")
-                                _op = _args.get("op_value")
-                                _gross = _args.get("gross_profit_value")
-                                _sga = _args.get("selling_general_and_administrative_expenses_value")
-                                _doc_id = _ev_dict.get("source_doc_id", "")
-                                
-                                logger.info("[EARNINGS][REAL] %s canonical同期開始 (period=%s, quarter=%s)", _ticker, _period, _q)
-                                from lib.pipeline.canonical_writer import write_financials_canonical
-                                
-                                _metrics = {}
-                                if _sales is not None: _metrics["sales"] = _sales / 1_000_000
-                                if _op is not None: _metrics["operating_profit"] = _op / 1_000_000
-                                if _gross is not None: _metrics["gross_profit"] = _gross / 1_000_000
-                                if _sga is not None: _metrics["selling_general_and_administrative_expenses"] = _sga / 1_000_000
-                                
-                                _url = os.getenv("SUPABASE_URL", "").rstrip("/")
-                                _config = {
-                                    "rest_url": f"{_url}/rest/v1" if _url else "",
-                                    "key": os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY", "")
-                                }
-                                
-                                is_apply = os.getenv("EARNINGS_CANONICAL_WRITE_REPLACE_APPLY") == "1"
-                                is_dryrun = os.getenv("EARNINGS_CANONICAL_WRITE_REPLACE_DRYRUN") == "1"
-                                
-                                if is_apply or is_dryrun:
-                                    logger.info("[EARNINGS][REAL] %s canonical同期(REPLACE %s) 開始", _ticker, "APPLY" if is_apply else "DRY-RUN")
-                                    from src.events.canonical_write_gateway import build_normalized_canonical_write_plan, validate_canonical_write_plan, apply_normalized_canonical_write_plans, should_allow_real_canonical_db_apply
-                                    _guidance = _payload_ext.get("guidance", {})
-                                    _plans = build_normalized_canonical_write_plan(
-                                        ticker=_ticker,
-                                        period_raw=_period,
-                                        quarter_raw=_q,
-                                        metrics_raw=_metrics,
-                                        guidance_raw=_guidance,
-                                        filing_id=_doc_id
-                                    )
-                                    _all_allowed = True
-                                    for p in _plans:
-                                        vp = validate_canonical_write_plan(p)
-                                        if not vp.write_allowed:
-                                            _all_allowed = False
-                                            logger.warning(f"[EARNINGS][REAL] {_ticker} DRY-RUN blocked: {vp.metric} {vp.quarter} {vp.block_reason}")
-                                    if not _all_allowed:
-                                        logger.error(f"[EARNINGS][REAL] {_ticker} DRY-RUN blocked due to unsafe plans.")
-                                        # Since it's dry-run, we just log and stop saving
-                                    logger.info("[EARNINGS][REAL] %s canonical同期(REPLACE DRY-RUN) 完了", _ticker)
-                                else:
-                                    write_financials_canonical(
-                                        ticker=_ticker,
-                                        period=_period,
-                                        quarter=_q,
-                                        metrics_dict=_metrics,
-                                        source="jquants_earnings_summary",
-                                        filing_id=_doc_id,
-                                        unit="millions_jpy",
-                                        config=_config
-                                    )
-                                logger.info("[EARNINGS][REAL] %s canonical同期完了", _ticker)
-                        except Exception as e:
-                            logger.error("[EARNINGS][REAL] %s canonical同期中にエラー: %s", _ticker, e)
+                        _args = _merged_plan["earnings_summary_args"]
+                        _title = _args.get("title", "")
+                        _period = None
+
+                        # payload 内に period / fiscal_year_end があれば優先
+                        _payload_ext = _payload.get("extracted", {})
+                        _period_cand = _payload_ext.get("period") or _payload_ext.get("fiscal_year_end")
+                        if _period_cand:
+                            _period = _period_cand
+                        else:
+                            _period = _derive_fiscal_year_end_period(_title)
+
+                        _q = _args.get("quarter", "")
+                        _sales = _args.get("sales_value")
+                        _op = _args.get("op_value")
+                        _gross = _args.get("gross_profit_value")
+                        _sga = _args.get("selling_general_and_administrative_expenses_value")
+                        _doc_id = _ev_dict.get("source_doc_id", "")
+                        _guidance = _payload_ext.get("guidance", {})
+
+                        _sync_canonical_financials(
+                            ticker=_ticker,
+                            period=_period,
+                            quarter=_q,
+                            sales_value=_sales,
+                            op_value=_op,
+                            gross_value=_gross,
+                            sga_value=_sga,
+                            guidance=_guidance,
+                            filing_id=_doc_id,
+                            dry_run=dry_run,
+                            route="subprocess",
+                        )
 
                     # ── Discord 送信 ────────────────────────────────────────────
                     _discord_sent = False
@@ -1103,8 +1132,9 @@ def run_earnings_production(
                         result.saved_tickers.append(ticker)
 
                     # ---- tdnet_events へ earnings イベントを best-effort 保存 ----
+                    _sup_ok = False
                     try:
-                        _save_earnings_to_tdnet_events(
+                        _ev_res = _save_earnings_to_tdnet_events(
                             doc=doc,
                             earnings=earnings,
                             company_name=company_name,
@@ -1115,8 +1145,32 @@ def run_earnings_production(
                             xbrl_path=xbrl_path,
                             dry_run=dry_run,
                         )
+                        if _ev_res.get("action") in ("inserted", "updated", "dry_run"):
+                            _sup_ok = True
                     except Exception as _e:
                         logger.warning(f"[EARNINGS_STORE] {ticker} tdnet_events save failed (non-fatal): {_e}")
+
+                    # ---- canonical_financials 同期 ----
+                    if _sup_ok:
+                        _seq_period = _derive_fiscal_year_end_period(doc.title)
+                        _seq_doc_id = getattr(doc, "disclosure_id", "") or getattr(doc, "doc_id", "") or ""
+                        _seq_guidance_dict = {}
+                        if guidance and guidance.has_guidance:
+                            _seq_guidance_dict = dataclasses.asdict(guidance)
+
+                        _sync_canonical_financials(
+                            ticker=ticker,
+                            period=_seq_period,
+                            quarter=quarter,
+                            sales_value=earnings.sales_current,
+                            op_value=earnings.op_current,
+                            gross_value=getattr(earnings, "gross_profit_current", None),
+                            sga_value=getattr(earnings, "selling_general_and_administrative_expenses_current", None),
+                            guidance=_seq_guidance_dict,
+                            filing_id=_seq_doc_id,
+                            dry_run=dry_run,
+                            route="sequential",
+                        )
                 else:
                     result.already_exists_count += 1
                     continue  # 既存の場合は通知もスキップ
