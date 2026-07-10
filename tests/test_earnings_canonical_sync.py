@@ -756,7 +756,8 @@ class TestRealtimeSegmentIdentity:
                 common_disclosure_no="20260709590450",
                 xbrl_path=ANY,
                 dry_run=False,
-                route="sequential"
+                route="sequential",
+                target_segs=ANY
             )
 
             # 18. 7601相当の実引数の検証
@@ -778,7 +779,8 @@ class TestRealtimeSegmentIdentity:
                 common_disclosure_no="20260709590505",
                 xbrl_path=ANY,
                 dry_run=False,
-                route="sequential"
+                route="sequential",
+                target_segs=ANY
             )
 
             # 19. 14桁取得不能時にwriter未呼び出し (URLや明示IDを空にする)
@@ -880,7 +882,8 @@ class TestRealtimeSegmentIdentity:
                 common_disclosure_no="20260709590450",
                 xbrl_path=ANY,
                 dry_run=False,
-                route="subprocess"
+                route="subprocess",
+                target_segs=ANY
             )
 
             # 24. 14桁取得不能時にwriter未呼び出し
@@ -893,3 +896,373 @@ class TestRealtimeSegmentIdentity:
 
             run_earnings_production([doc_no_id], setup_db, webhook_url="")
             m_find.assert_called_with(ANY, "9982", doc_id="")
+
+
+class TestCanonicalCompletionStrictness:
+    """Phase 3 canonical保存完了判定の開示単位・指標単位厳格化の検証テスト"""
+
+    # ──── PL 完了判定の 10 件の必須テスト ────
+    def test_pl_case1_both_exist(self):
+        # 1. 今回のfiling_idでsales・operating_profitが両方存在 -> 完了
+        from src.events.earnings_production_pipeline import _check_canonical_financials_saved
+        client = MagicMock()
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+            {"metric": "sales"}, {"metric": "operating_profit"}
+        ]
+        fid = "a" * 64
+        assert _check_canonical_financials_saved(client, "7601", "2027-02-28", "1Q", fid, ["sales", "operating_profit"]) is True
+
+    def test_pl_case2_sales_only(self):
+        # 2. 今回のfiling_idでsalesだけ存在 -> 未完了
+        from src.events.earnings_production_pipeline import _check_canonical_financials_saved
+        client = MagicMock()
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+            {"metric": "sales"}
+        ]
+        fid = "a" * 64
+        assert _check_canonical_financials_saved(client, "7601", "2027-02-28", "1Q", fid, ["sales", "operating_profit"]) is False
+
+    def test_pl_case3_op_only(self):
+        # 3. 今回のfiling_idでoperating_profitだけ存在 -> 未完了
+        from src.events.earnings_production_pipeline import _check_canonical_financials_saved
+        client = MagicMock()
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+            {"metric": "operating_profit"}
+        ]
+        fid = "a" * 64
+        assert _check_canonical_financials_saved(client, "7601", "2027-02-28", "1Q", fid, ["sales", "operating_profit"]) is False
+
+    def test_pl_case4_other_filing_id_only(self):
+        # 4. 別filing_idで両方存在 -> 未完了 (DB検索のeq("filing_id")条件により空が返る)
+        from src.events.earnings_production_pipeline import _check_canonical_financials_saved
+        client = MagicMock()
+        # 今回の filing_id の検索結果は空にする
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
+        fid = "a" * 64
+        assert _check_canonical_financials_saved(client, "7601", "2027-02-28", "1Q", fid, ["sales", "operating_profit"]) is False
+
+    def test_pl_case5_mixed_filing_id(self):
+        # 5. 別filing_idと今回filing_idの行が混在 -> 今回filing_idの全期待metricがなければ未完了
+        from src.events.earnings_production_pipeline import _check_canonical_financials_saved
+        client = MagicMock()
+        # DBからは今回filing_idに紐づくデータ（salesのみ）が返る
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+            {"metric": "sales"}
+        ]
+        fid = "a" * 64
+        assert _check_canonical_financials_saved(client, "7601", "2027-02-28", "1Q", fid, ["sales", "operating_profit"]) is False
+
+    def test_pl_case6_single_expected_metric(self):
+        # 6. 非nullの期待metricが1種類だけ -> その1種類が存在すれば完了
+        from src.events.earnings_production_pipeline import _check_canonical_financials_saved
+        client = MagicMock()
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+            {"metric": "sales"}
+        ]
+        fid = "a" * 64
+        assert _check_canonical_financials_saved(client, "7601", "2027-02-28", "1Q", fid, ["sales"]) is True
+
+    def test_pl_case7_empty_expected_metrics(self):
+        # 7. 期待metric集合が空 -> 未完了 (仕様: 空の場合は完了扱いにしない)
+        from src.events.earnings_production_pipeline import _check_canonical_financials_saved
+        client = MagicMock()
+        fid = "a" * 64
+        assert _check_canonical_financials_saved(client, "7601", "2027-02-28", "1Q", fid, []) is False
+
+    def test_pl_case8_invalid_filing_id(self):
+        # 8. filing_idが空または不正 -> 未完了
+        from src.events.earnings_production_pipeline import _check_canonical_financials_saved
+        client = MagicMock()
+        assert _check_canonical_financials_saved(client, "7601", "2027-02-28", "1Q", "", ["sales"]) is False
+        assert _check_canonical_financials_saved(client, "7601", "2027-02-28", "1Q", "invalid_length_123", ["sales"]) is False
+
+    def test_pl_case9_order_independence(self):
+        # 9. DB取得順序を反転 -> 結果不変
+        from src.events.earnings_production_pipeline import _check_canonical_financials_saved
+        client = MagicMock()
+        fid = "a" * 64
+
+        # 順序1
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+            {"metric": "operating_profit"}, {"metric": "sales"}
+        ]
+        res1 = _check_canonical_financials_saved(client, "7601", "2027-02-28", "1Q", fid, ["sales", "operating_profit"])
+
+        # 順序2
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+            {"metric": "sales"}, {"metric": "operating_profit"}
+        ]
+        res2 = _check_canonical_financials_saved(client, "7601", "2027-02-28", "1Q", fid, ["sales", "operating_profit"])
+
+        assert res1 is True and res2 is True
+
+    def test_pl_case10_metric_duplicates(self):
+        # 10. 同一metricの重複行 -> 期待集合判定は正しく完了
+        from src.events.earnings_production_pipeline import _check_canonical_financials_saved
+        client = MagicMock()
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+            {"metric": "sales"}, {"metric": "sales"}, {"metric": "operating_profit"}
+        ]
+        fid = "a" * 64
+        assert _check_canonical_financials_saved(client, "7601", "2027-02-28", "1Q", fid, ["sales", "operating_profit"]) is True
+
+    # ──── セグメント完了判定の 13 件の必須テスト ────
+    def test_seg_case1_all_exist(self):
+        # 1. 今回のfiling_idで全(segment_key, metric)が存在 -> 完了
+        from src.events.earnings_production_pipeline import _check_canonical_segments_saved
+        client = MagicMock()
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+            {"segment_key": "apparel", "metric": "sales"},
+            {"segment_key": "apparel", "metric": "operating_profit"}
+        ]
+        fid = "b" * 64
+        assert _check_canonical_segments_saved(client, "7601", "2027-02-28", "1Q", fid, [("apparel", "sales"), ("apparel", "operating_profit")]) is True
+
+    def test_seg_case2_sales_missing(self):
+        # 2. 1つのsegmentのsalesだけ欠落 -> 未完了
+        from src.events.earnings_production_pipeline import _check_canonical_segments_saved
+        client = MagicMock()
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+            {"segment_key": "apparel", "metric": "operating_profit"}
+        ]
+        fid = "b" * 64
+        assert _check_canonical_segments_saved(client, "7601", "2027-02-28", "1Q", fid, [("apparel", "sales"), ("apparel", "operating_profit")]) is False
+
+    def test_seg_case3_op_missing(self):
+        # 3. 1つのsegment of operating_profitだけ欠落 -> 未完了
+        from src.events.earnings_production_pipeline import _check_canonical_segments_saved
+        client = MagicMock()
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+            {"segment_key": "apparel", "metric": "sales"}
+        ]
+        fid = "b" * 64
+        assert _check_canonical_segments_saved(client, "7601", "2027-02-28", "1Q", fid, [("apparel", "sales"), ("apparel", "operating_profit")]) is False
+
+    def test_seg_case4_segment_key_mismatch(self):
+        # 4. segment_nameだけ一致しsegment_keyが不一致 -> 未完了
+        from src.events.earnings_production_pipeline import _check_canonical_segments_saved
+        client = MagicMock()
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+            {"segment_key": "other_key", "metric": "sales"}
+        ]
+        fid = "b" * 64
+        assert _check_canonical_segments_saved(client, "7601", "2027-02-28", "1Q", fid, [("apparel", "sales")]) is False
+
+    def test_seg_case5_other_filing_id_only(self):
+        # 5. 別filing_idに全行が存在 -> 未完了 (eq("filing_id")条件により空)
+        from src.events.earnings_production_pipeline import _check_canonical_segments_saved
+        client = MagicMock()
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
+        fid = "b" * 64
+        assert _check_canonical_segments_saved(client, "7601", "2027-02-28", "1Q", fid, [("apparel", "sales")]) is False
+
+    def test_seg_case6_partial_segments_exist(self):
+        # 6. 今回filing_idに一部segmentだけ存在 -> 未完了
+        from src.events.earnings_production_pipeline import _check_canonical_segments_saved
+        client = MagicMock()
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+            {"segment_key": "apparel", "metric": "sales"}
+        ]
+        fid = "b" * 64
+        expected = [("apparel", "sales"), ("rental", "sales")]
+        assert _check_canonical_segments_saved(client, "7601", "2027-02-28", "1Q", fid, expected) is False
+
+    def test_seg_case7_sales_only_expected(self):
+        # 7. salesのみを期待するsegment -> salesが存在すれば、そのsegmentは充足
+        from src.events.earnings_production_pipeline import _check_canonical_segments_saved
+        client = MagicMock()
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+            {"segment_key": "apparel", "metric": "sales"}
+        ]
+        fid = "b" * 64
+        assert _check_canonical_segments_saved(client, "7601", "2027-02-28", "1Q", fid, [("apparel", "sales")]) is True
+
+    def test_seg_case8_op_only_expected(self):
+        # 8. operating_profitのみを期待するsegment -> operating_profitが存在すれば、そのsegmentは充足
+        from src.events.earnings_production_pipeline import _check_canonical_segments_saved
+        client = MagicMock()
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+            {"segment_key": "apparel", "metric": "operating_profit"}
+        ]
+        fid = "b" * 64
+        assert _check_canonical_segments_saved(client, "7601", "2027-02-28", "1Q", fid, [("apparel", "operating_profit")]) is True
+
+    def test_seg_case9_empty_expected(self):
+        # 9. 期待集合が空 -> 未完了
+        from src.events.earnings_production_pipeline import _check_canonical_segments_saved
+        client = MagicMock()
+        fid = "b" * 64
+        assert _check_canonical_segments_saved(client, "7601", "2027-02-28", "1Q", fid, []) is False
+
+    def test_seg_case10_order_independence(self):
+        # 10. DB取得順序を反転 -> 結果不変
+        from src.events.earnings_production_pipeline import _check_canonical_segments_saved
+        client = MagicMock()
+        fid = "b" * 64
+        expected = [("apparel", "sales"), ("apparel", "operating_profit")]
+
+        # 順序1
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+            {"segment_key": "apparel", "metric": "operating_profit"},
+            {"segment_key": "apparel", "metric": "sales"}
+        ]
+        res1 = _check_canonical_segments_saved(client, "7601", "2027-02-28", "1Q", fid, expected)
+
+        # 順序2
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+            {"segment_key": "apparel", "metric": "sales"},
+            {"segment_key": "apparel", "metric": "operating_profit"}
+        ]
+        res2 = _check_canonical_segments_saved(client, "7601", "2027-02-28", "1Q", fid, expected)
+        assert res1 is True and res2 is True
+
+    def test_seg_case11_duplicates(self):
+        # 11. 同一(segment_key, metric)の重複行 -> 期待集合判定は正しく完了
+        from src.events.earnings_production_pipeline import _check_canonical_segments_saved
+        client = MagicMock()
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+            {"segment_key": "apparel", "metric": "sales"},
+            {"segment_key": "apparel", "metric": "sales"},
+            {"segment_key": "apparel", "metric": "operating_profit"}
+        ]
+        fid = "b" * 64
+        expected = [("apparel", "sales"), ("apparel", "operating_profit")]
+        assert _check_canonical_segments_saved(client, "7601", "2027-02-28", "1Q", fid, expected) is True
+
+    def test_seg_case12_poplar_scenarios(self):
+        # 12. Poplar(7601)相当の複数segment・2metric -> 全行が揃う場合だけ完了
+        from src.events.earnings_production_pipeline import _check_canonical_segments_saved
+        client = MagicMock()
+        fid = "b" * 64
+        expected = [
+            ("retail", "sales"), ("retail", "operating_profit"),
+            ("rental", "sales"), ("rental", "operating_profit")
+        ]
+        # 不足状態 (rental の profit がない)
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+            {"segment_key": "retail", "metric": "sales"},
+            {"segment_key": "retail", "metric": "operating_profit"},
+            {"segment_key": "rental", "metric": "sales"}
+        ]
+        assert _check_canonical_segments_saved(client, "7601", "2027-02-28", "1Q", fid, expected) is False
+
+        # 揃った状態
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data.append(
+            {"segment_key": "rental", "metric": "operating_profit"}
+        )
+        assert _check_canonical_segments_saved(client, "7601", "2027-02-28", "1Q", fid, expected) is True
+
+    def test_seg_case13_takihyo_scenarios(self):
+        # 13. Takihyo(9982)相当の複数segment・2metric -> 全行が揃う場合だけ完了
+        from src.events.earnings_production_pipeline import _check_canonical_segments_saved
+        client = MagicMock()
+        fid = "b" * 64
+        expected = [
+            ("apparel_wholesale", "sales"), ("apparel_wholesale", "operating_profit"),
+            ("rental", "sales"), ("rental", "operating_profit")
+        ]
+        # 揃った状態
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+            {"segment_key": "apparel_wholesale", "metric": "sales"},
+            {"segment_key": "apparel_wholesale", "metric": "operating_profit"},
+            {"segment_key": "rental", "metric": "sales"},
+            {"segment_key": "rental", "metric": "operating_profit"}
+        ]
+        assert _check_canonical_segments_saved(client, "9982", "2027-02-28", "1Q", fid, expected) is True
+
+    # ──── 呼出元コール引数（call_args）検証テスト ────
+    @patch("src.events.earnings_subprocess_runner.build_discord_call_plan")
+    @patch("src.events.earnings_subprocess_runner.validate_save_call_plan")
+    @patch("src.events.earnings_subprocess_runner.build_save_call_plan")
+    @patch("src.events.earnings_subprocess_runner.validate_save_ready_payload")
+    @patch("src.events.earnings_subprocess_runner.build_save_ready_payload")
+    @patch("src.events.earnings_subprocess_runner.run_earnings_subprocess_dry_run")
+    @patch("src.events.tdnet_event_store.save_event_to_supabase")
+    @patch("src.events.earnings_production_pipeline._check_canonical_segments_saved")
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved")
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("os.path.exists", return_value=True)
+    def test_caller_validation_args(
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_fin, m_check_seg,
+        m_supa, m_run, m_payload, m_valid, m_plan, m_cp_valid, m_discord_plan, monkeypatch
+    ):
+        from src.events.earnings_production_pipeline import run_earnings_production
+        from src.models import DisclosureItem
+        import sqlite3
+        from src.events.earnings_summary_storage import ensure_earnings_summary_table
+
+        # テスト用のDBセットアップ
+        conn = sqlite3.connect(":memory:")
+        ensure_earnings_summary_table(conn)
+
+        # モック返却値設定
+        mock_client = MagicMock()
+        m_get_supabase.return_value = mock_client
+        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+        m_check_fin.return_value = True
+        m_check_seg.return_value = True
+        m_supa.return_value = {"action": "inserted"}
+
+        # subprocess runner のモック戻り値
+        m_run.return_value = {"results": [{"ticker": "7601", "status": "ok"}]}
+        m_valid.return_value = (True, "")
+        m_cp_valid.return_value = (True, "")
+        m_discord_plan.return_value = {"discord_message": "dummy msg"}
+        m_payload.return_value = {
+            "extracted": {
+                "ticker": "7601",
+                "period": "2027-02-28",
+                "quarter": "1Q",
+                "guidance": {}
+            }
+        }
+        h_64 = "c1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        m_plan.return_value = {
+            "earnings_summary_args": {
+                "ticker": "7601",
+                "fiscal_year": "2027",
+                "quarter": "1Q",
+                "sales_value": 500_000_000,
+                "op_value": 50_000_000,
+                "title": "2027\u5e742\u6708\u671f \u7b2c1\u56db\u534a\u671f\u6c7a\u7b97\u77ed\u4fe1",
+                "fingerprint": "dummy_fingerprint_7601",
+            },
+            "tdnet_event_payload": {
+                "ticker": "7601",
+                "source_doc_id": h_64
+            }
+        }
+
+        # extract_and_filter はダミーの target_segs を返すようにする
+        m_extract_and_filter.return_value = [
+            {"segment_name": "apparel", "sales": 100, "profit": 10, "segment_type": "ordinary"}
+        ]
+
+        from tests.test_earnings_canonical_sync import DummyDoc
+        doc = DummyDoc("7601", "2027\u5e742\u6708\u671f \u7b2c1\u56db\u534a\u671f\u6c7a\u7b97\u77ed\u4fe1", h_64)
+        doc.doc_url = "https://www.release.tdnet.info/inbs/140120260709590505.pdf"
+        doc.xbrl_url = "https://www.release.tdnet.info/xbrl/140120260709590505.zip"
+        doc.pdf_url = ""
+        doc.doc_id = "20260709590505"
+        doc.source_doc_id = h_64
+
+        # 実行 (サブプロセスルート)
+        monkeypatch.setenv("USE_SUBPROCESS_WORKER", "1")
+        monkeypatch.setenv("EARNINGS_SUBPROCESS_ALLOWLIST", "7601")
+        monkeypatch.setenv("EARNINGS_SUBPROCESS_ENABLE_REAL_SAVE", "1")
+        run_earnings_production([doc], conn, webhook_url="")
+
+        # 各完了判定への call_args を検証
+        assert m_check_fin.call_count == 1
+        args, kwargs = m_check_fin.call_args
+        assert kwargs.get("filing_id") == h_64
+        assert kwargs.get("filing_id") != "20260709590505"
+        assert kwargs.get("expected_metrics") == ["sales", "operating_profit"]
+
+        assert m_check_seg.call_count == 1
+        args, kwargs = m_check_seg.call_args
+        assert kwargs.get("filing_id") == h_64
+        assert kwargs.get("filing_id") != "20260709590505"
+        assert kwargs.get("expected_segment_metrics") == [("apparel", "sales"), ("apparel", "operating_profit")]

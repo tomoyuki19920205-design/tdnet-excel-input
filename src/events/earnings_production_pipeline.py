@@ -237,10 +237,18 @@ def _check_canonical_financials_saved(
 ) -> bool:
     if not filing_id:
         return False
+    # 64桁16進数バリデーション
+    if not isinstance(filing_id, str) or len(filing_id) != 64 or not all(c in "0123456789abcdefABCDEF" for c in filing_id):
+        logger.warning("[EARNINGS][CANONICAL_COMPLETION] %s kind=financials status=incomplete invalid_filing_id=%s", ticker, filing_id)
+        return False
     if expected_metrics is None:
         expected_metrics = ["sales", "operating_profit"]
     if not expected_metrics:
-        return True
+        logger.info(
+            "[EARNINGS][CANONICAL_COMPLETION] %s kind=financials filing_id=%s status=incomplete missing=%s",
+            ticker, filing_id, "empty expected_metrics"
+        )
+        return False
     try:
         res = client.table("canonical_financials") \
             .select("metric") \
@@ -251,49 +259,110 @@ def _check_canonical_financials_saved(
             .execute()
         if res.data:
             metrics = {row.get("metric") for row in res.data}
-            if all(m in metrics for m in expected_metrics):
+            missing = [m for m in expected_metrics if m not in metrics]
+            if not missing:
+                logger.info(
+                    "[EARNINGS][CANONICAL_COMPLETION] %s kind=financials filing_id=%s status=complete expected=%s found=%s",
+                    ticker, filing_id, expected_metrics, list(metrics)
+                )
                 return True
+            logger.info(
+                "[EARNINGS][CANONICAL_COMPLETION] %s kind=financials filing_id=%s status=incomplete missing=%s",
+                ticker, filing_id, missing
+            )
+            return False
+        logger.info(
+            "[EARNINGS][CANONICAL_COMPLETION] %s kind=financials filing_id=%s status=incomplete missing=%s",
+            ticker, filing_id, expected_metrics
+        )
         return False
     except Exception as e:
         logger.warning("[EARNINGS][CANONICAL] PL check exception: %s", e)
         return False
 
 
-def _check_canonical_segments_saved(client, ticker: str, period: str, quarter: str, expected_names: list[str] | None) -> bool:
-    if expected_names is None:
+def _check_canonical_segments_saved(
+    client,
+    ticker: str,
+    period: str,
+    quarter: str,
+    filing_id: str | None = None,
+    expected_segment_metrics: list[tuple[str, str]] | None = None,
+) -> bool:
+    if not filing_id:
         return False
-    if not expected_names:
-        return True
+    if not isinstance(filing_id, str) or len(filing_id) != 64 or not all(c in "0123456789abcdefABCDEF" for c in filing_id):
+        logger.warning("[EARNINGS][CANONICAL_COMPLETION] %s kind=segments status=incomplete invalid_filing_id=%s", ticker, filing_id)
+        return False
+    if expected_segment_metrics is None:
+        return False
+    if not expected_segment_metrics:
+        logger.info(
+            "[EARNINGS][CANONICAL_COMPLETION] %s kind=segments filing_id=%s status=incomplete missing=%s",
+            ticker, filing_id, "empty expected_segment_metrics"
+        )
+        return False
     try:
-        res = client.table("canonical_segments").select("segment_key").eq("ticker", ticker).eq("period", period).eq("quarter", quarter).execute()
+        res = client.table("canonical_segments") \
+            .select("segment_key, metric") \
+            .eq("ticker", ticker) \
+            .eq("period", period) \
+            .eq("quarter", quarter) \
+            .eq("filing_id", filing_id) \
+            .execute()
         if res.data:
-            existing_keys = {row.get("segment_key") for row in res.data}
-            from lib.segment.normalize import normalize_segment_key
-            for name in expected_names:
-                norm_key = normalize_segment_key(name)
-                if norm_key not in existing_keys:
-                    return False
-            return True
+            existing_pairs = {(row.get("segment_key"), row.get("metric")) for row in res.data}
+            missing = [pair for pair in expected_segment_metrics if pair not in existing_pairs]
+            if not missing:
+                logger.info(
+                    "[EARNINGS][CANONICAL_COMPLETION] %s kind=segments filing_id=%s status=complete expected=%s found=%s",
+                    ticker, filing_id, expected_segment_metrics, list(existing_pairs)
+                )
+                return True
+            logger.info(
+                "[EARNINGS][CANONICAL_COMPLETION] %s kind=segments filing_id=%s status=incomplete missing=%s",
+                ticker, filing_id, missing
+            )
+            return False
+        logger.info(
+            "[EARNINGS][CANONICAL_COMPLETION] %s kind=segments filing_id=%s status=incomplete missing=%s",
+            ticker, filing_id, expected_segment_metrics
+        )
         return False
     except Exception as e:
         logger.warning("[EARNINGS][CANONICAL] Segment check exception: %s", e)
         return False
 
 
-def _extract_expected_segment_names_from_xbrl(zip_path: str, period: str, quarter: str) -> list[str]:
+def _extract_and_filter_segments(
+    xbrl_path: str,
+    period: str,
+    quarter: str,
+) -> list[dict]:
     from src.segment.xbrl_segment_extractor import extract_segments_from_xbrl_zip
     try:
-        raw_rows = extract_segments_from_xbrl_zip(zip_path, period, quarter)
-    except Exception:
+        raw_rows = extract_segments_from_xbrl_zip(
+            zip_path=xbrl_path,
+            period=period,
+            quarter=quarter,
+        )
+    except Exception as e:
+        logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] stage=extract error_type=%s message=%s", type(e).__name__, str(e))
         return []
-    expected_names = []
+
+    target_segs = []
     target_days = 365
     if quarter == "1Q": target_days = 90
     elif quarter == "2Q": target_days = 180
     elif quarter == "3Q": target_days = 270
 
+    best_segs = {}
     for r in raw_rows:
         if r.period != period:
+            continue
+
+        name = r.normalized_segment_name or r.raw_segment_name
+        if not name:
             continue
 
         evidence = r.raw_json.get("_context_evidence") if r.raw_json else None
@@ -308,16 +377,37 @@ def _extract_expected_segment_names_from_xbrl(zip_path: str, period: str, quarte
             s_dt = datetime.datetime.strptime(cstart[:10], "%Y-%m-%d").date()
             e_dt = datetime.datetime.strptime(cend[:10], "%Y-%m-%d").date()
             duration_days = (e_dt - s_dt).days
-            if abs(duration_days - target_days) > 40:
-                continue
         except Exception:
             continue
 
-        name = r.normalized_segment_name or r.raw_segment_name
-        if name and name not in expected_names:
-            expected_names.append(name)
+        diff_days = abs(duration_days - target_days)
+        if diff_days > 40:
+            continue
 
-    return expected_names
+        if name in best_segs:
+            prev_diff = best_segs[name][1]
+            if diff_days < prev_diff:
+                best_segs[name] = (r, diff_days)
+        else:
+            best_segs[name] = (r, diff_days)
+
+    for r, _ in best_segs.values():
+        name = r.normalized_segment_name or r.raw_segment_name
+        target_segs.append({
+            "segment_name": name,
+            "sales": r.sales,
+            "profit": r.profit,
+            "source_system": r.source_system or "tdnet",
+            "segment_type": r.segment_type or "ordinary",
+            "derivation_method": r.derivation_method or "",
+        })
+
+    return target_segs
+
+
+def _extract_expected_segment_names_from_xbrl(zip_path: str, period: str, quarter: str) -> list[str]:
+    segs = _extract_and_filter_segments(zip_path, period, quarter)
+    return [s["segment_name"] for s in segs]
 
 
 def _sync_canonical_segments(
@@ -330,6 +420,7 @@ def _sync_canonical_segments(
     dry_run: bool,
     route: str,
     run_id: str = "",
+    target_segs: list[dict] | None = None,
 ):
     import os
     from .common_normalizers import extract_common_disclosure_no
@@ -385,77 +476,9 @@ def _sync_canonical_segments(
 
     logger.info("[EARNINGS][SEGMENT_CANONICAL] %s segment開始 %s %s %s %s", ticker, period, quarter, route, canonical_filing_id)
 
-    # 5. 正式抽出器を呼ぶ
-    try:
-        from src.segment.xbrl_segment_extractor import extract_segments_from_xbrl_zip
-        raw_rows = extract_segments_from_xbrl_zip(
-            zip_path=xbrl_path,
-            period=period,
-            quarter=quarter,
-        )
-    except Exception as e:
-        logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s stage=extract error_type=%s message=%s", ticker, type(e).__name__, str(e))
-        return
-
-    # 6. 対象contextだけを選択 (累計優先、単独四半期除外)
-    target_segs = []
-    target_days = 365
-    if quarter == "1Q": target_days = 90
-    elif quarter == "2Q": target_days = 180
-    elif quarter == "3Q": target_days = 270
-
-    # 重複回避のため、member名ごとの最適レコードを選択するマップ
-    # (member) -> (best_record, best_diff)
-    best_segs = {}
-
-    for r in raw_rows:
-        if r.period != period:
-            continue
-
-        name = r.normalized_segment_name or r.raw_segment_name
-        if not name:
-            continue
-
-        # _context_evidence から開始日・終了日をパースして duration を判定
-        evidence = r.raw_json.get("_context_evidence") if r.raw_json else None
-        if not evidence:
-            continue
-        cstart = evidence.get("context_start")
-        cend = evidence.get("context_end")
-        if not cstart or not cend or cstart == "?" or cend == "?":
-            continue
-        try:
-            import datetime
-            s_dt = datetime.datetime.strptime(cstart[:10], "%Y-%m-%d").date()
-            e_dt = datetime.datetime.strptime(cend[:10], "%Y-%m-%d").date()
-            duration_days = (e_dt - s_dt).days
-        except Exception:
-            continue
-
-        # ターゲット日数との差を算出
-        diff_days = abs(duration_days - target_days)
-        # 40日を超えるズレは単独期など無関係なコンテキストなので除外
-        if diff_days > 40:
-            continue
-
-        # すでにこのmemberの候補がある場合、よりターゲット日数に近いものを優先
-        if name in best_segs:
-            prev_diff = best_segs[name][1]
-            if diff_days < prev_diff:
-                best_segs[name] = (r, diff_days)
-        else:
-            best_segs[name] = (r, diff_days)
-
-    for r, _ in best_segs.values():
-        name = r.normalized_segment_name or r.raw_segment_name
-        target_segs.append({
-            "segment_name": name,
-            "sales": r.sales,
-            "profit": r.profit,
-            "source_system": r.source_system or "tdnet",
-            "segment_type": r.segment_type or "ordinary",
-            "derivation_method": r.derivation_method or "",
-        })
+    # 5. target_segsが渡されていなければ抽出とフィルタリングを実行
+    if target_segs is None:
+        target_segs = _extract_and_filter_segments(xbrl_path, period, quarter)
 
     if not target_segs:
         logger.info("[EARNINGS][SEGMENT_CANONICAL] %s segment情報なし", ticker)
@@ -915,15 +938,33 @@ def run_earnings_production(
                     from .tdnet_event_store import _get_supabase
                     _client = _get_supabase()
 
-                    _expected_segs = None
+                    _target_segs = None
+                    _expected_segment_metrics = []
                     _resolved_zip = _find_cached_xbrl(xbrl_dir, _ticker, doc_id=_disclosure_no)
                     if _resolved_zip and os.path.exists(_resolved_zip):
-                        try:
-                            _expected_segs = _extract_expected_segment_names_from_xbrl(
-                                _resolved_zip, _period, _q
-                            )
-                        except Exception:
-                            pass
+                        # xbrl_pathの書類IDがcommon_disclosure_noと一致するか確認 (ガード)
+                        zip_basename = os.path.basename(_resolved_zip)
+                        zip_no = extract_common_disclosure_no(zip_basename)
+                        if zip_no and zip_no == _disclosure_no:
+                            try:
+                                _target_segs = _extract_and_filter_segments(
+                                    xbrl_path=_resolved_zip,
+                                    period=_period,
+                                    quarter=_q,
+                                )
+                                if _target_segs:
+                                    from src.segment.normalize import normalize_segment_key
+                                    for r in _target_segs:
+                                        seg_name = r.get("segment_name")
+                                        if not seg_name:
+                                            continue
+                                        seg_key = normalize_segment_key(seg_name)
+                                        if r.get("sales") is not None:
+                                            _expected_segment_metrics.append((seg_key, "sales"))
+                                        if r.get("profit") is not None:
+                                            _expected_segment_metrics.append((seg_key, "operating_profit"))
+                            except Exception:
+                                pass
 
                     _expected_metrics = []
                     if _sales is not None:
@@ -942,7 +983,14 @@ def run_earnings_production(
                             filing_id=_doc_id,
                             expected_metrics=_expected_metrics,
                         )
-                        _seg_saved = _check_canonical_segments_saved(_client, _ticker, _period, _q, _expected_segs)
+                        _seg_saved = _check_canonical_segments_saved(
+                            client=_client,
+                            ticker=_ticker,
+                            period=_period,
+                            quarter=_q,
+                            filing_id=_doc_id,
+                            expected_segment_metrics=_expected_segment_metrics,
+                        )
 
                     # PL同期
                     if not _pl_saved:
@@ -972,6 +1020,7 @@ def run_earnings_production(
                                 xbrl_path=_resolved_zip,
                                 dry_run=dry_run,
                                 route="subprocess",
+                                target_segs=_target_segs,
                             )
                         except Exception as _seg_e:
                             logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s subprocess route exception: %s", _ticker, _seg_e)
@@ -1523,14 +1572,32 @@ def run_earnings_production(
                     from .tdnet_event_store import _get_supabase
                     _client = _get_supabase()
 
-                    _expected_segs = None
+                    _target_segs = None
+                    _expected_segment_metrics = []
                     if xbrl_path and os.path.exists(xbrl_path):
-                        try:
-                            _expected_segs = _extract_expected_segment_names_from_xbrl(
-                                xbrl_path, _seq_period, quarter
-                            )
-                        except Exception:
-                            pass
+                        # xbrl_pathの書類IDがcommon_disclosure_noと一致するか確認 (ガード)
+                        zip_basename = os.path.basename(xbrl_path)
+                        zip_no = extract_common_disclosure_no(zip_basename)
+                        if zip_no and zip_no == _seq_disclosure_no:
+                            try:
+                                _target_segs = _extract_and_filter_segments(
+                                    xbrl_path=xbrl_path,
+                                    period=_seq_period,
+                                    quarter=quarter,
+                                )
+                                if _target_segs:
+                                    from src.segment.normalize import normalize_segment_key
+                                    for r in _target_segs:
+                                        seg_name = r.get("segment_name")
+                                        if not seg_name:
+                                            continue
+                                        seg_key = normalize_segment_key(seg_name)
+                                        if r.get("sales") is not None:
+                                            _expected_segment_metrics.append((seg_key, "sales"))
+                                        if r.get("profit") is not None:
+                                            _expected_segment_metrics.append((seg_key, "operating_profit"))
+                            except Exception:
+                                pass
 
                     _expected_metrics = []
                     if earnings.sales_current is not None:
@@ -1549,7 +1616,14 @@ def run_earnings_production(
                             filing_id=_seq_doc_id,
                             expected_metrics=_expected_metrics,
                         )
-                        _seg_saved = _check_canonical_segments_saved(_client, ticker, _seq_period, quarter, _expected_segs)
+                        _seg_saved = _check_canonical_segments_saved(
+                            client=_client,
+                            ticker=ticker,
+                            period=_seq_period,
+                            quarter=quarter,
+                            filing_id=_seq_doc_id,
+                            expected_segment_metrics=_expected_segment_metrics,
+                        )
 
                     # PL同期
                     if not _pl_saved:
@@ -1583,6 +1657,7 @@ def run_earnings_production(
                                 xbrl_path=xbrl_path,
                                 dry_run=dry_run,
                                 route="sequential",
+                                target_segs=_target_segs,
                             )
                         except Exception as _seg_e:
                             logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s sequential route exception: %s", ticker, _seg_e)
