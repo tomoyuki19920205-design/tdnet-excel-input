@@ -203,6 +203,11 @@ class TestCanonicalSyncFunction:
 
 
 class TestRealtimeSegmentSync:
+    @pytest.fixture(autouse=True)
+    def mock_zip_verification(self):
+        with patch("src.events.earnings_production_pipeline._verify_zip_internal_document_id", return_value=True):
+            yield
+
     @pytest.fixture
     def setup_db(self):
         conn = sqlite3.connect(":memory:")
@@ -314,7 +319,7 @@ class TestRealtimeSegmentSync:
         assert call_args["common_disclosure_no"] == "20260709590450"
         assert call_args["route"] == "subprocess"
 
-    @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip")
+    @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip_detailed")
     @patch("lib.pipeline.canonical_writer.write_segments_canonical")
     def test_sync_canonical_segments_poplar(self, m_write, m_extract):
         # 16. 前年同期を除外することの確認
@@ -322,7 +327,9 @@ class TestRealtimeSegmentSync:
         from src.events.earnings_production_pipeline import _sync_canonical_segments
         from src.segment.models import SegmentRawRow
 
-        m_extract.return_value = [
+        m_res = MagicMock()
+        m_res.status = "success_with_rows"
+        m_res.segments = [
             # 前年同期 (7.当期のみ保存、16.前年同期は除外)
             SegmentRawRow(source="xbrl", raw_ticker="7601", period="2026-02-28", quarter="1Q", raw_segment_name="Smartstore", sales=1299, profit=-63, raw_json={"_context_evidence": {"context_start": "2025-03-01", "context_end": "2025-05-31"}}),
             # 当期 (90日duration)
@@ -330,6 +337,7 @@ class TestRealtimeSegmentSync:
             SegmentRawRow(source="xbrl", raw_ticker="7601", period="2027-02-28", quarter="1Q", raw_segment_name="Lawson Poplar", sales=1529, profit=248, raw_json={"_context_evidence": {"context_start": "2026-03-01", "context_end": "2026-05-31"}}),
             SegmentRawRow(source="xbrl", raw_ticker="7601", period="2027-02-28", quarter="1Q", raw_segment_name="Other", sales=167, profit=-5, raw_json={"_context_evidence": {"context_start": "2026-03-01", "context_end": "2026-05-31"}}),
         ]
+        m_extract.return_value = m_res
         m_write.return_value = {"written": 3, "skipped": 0, "errors": 0}
 
         with patch("os.path.exists", return_value=True):
@@ -342,19 +350,22 @@ class TestRealtimeSegmentSync:
         assert args["quarter"] == "1Q"
         assert len(args["segments"]) == 3
 
-    @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip")
+    @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip_detailed")
     @patch("lib.pipeline.canonical_writer.write_segments_canonical")
     def test_sync_canonical_segments_takihyo(self, m_write, m_extract):
         # 28. タキヒヨー相当1Q
         from src.events.earnings_production_pipeline import _sync_canonical_segments
         from src.segment.models import SegmentRawRow
 
-        m_extract.return_value = [
+        m_res = MagicMock()
+        m_res.status = "success_with_rows"
+        m_res.segments = [
             SegmentRawRow(source="xbrl", raw_ticker="9982", period="2027-02-28", quarter="1Q", raw_segment_name="Apparel And Textile", sales=15388, profit=447, raw_json={"_context_evidence": {"context_start": "2026-03-01", "context_end": "2026-05-31"}}),
             SegmentRawRow(source="xbrl", raw_ticker="9982", period="2027-02-28", quarter="1Q", raw_segment_name="Rental Business", sales=249, profit=140, raw_json={"_context_evidence": {"context_start": "2026-03-01", "context_end": "2026-05-31"}}),
             SegmentRawRow(source="xbrl", raw_ticker="9982", period="2027-02-28", quarter="1Q", raw_segment_name="Material", sales=1775, profit=211, raw_json={"_context_evidence": {"context_start": "2026-03-01", "context_end": "2026-05-31"}}),
             SegmentRawRow(source="xbrl", raw_ticker="9982", period="2027-02-28", quarter="1Q", raw_segment_name="Other", sales=263, profit=16, raw_json={"_context_evidence": {"context_start": "2026-03-01", "context_end": "2026-05-31"}}),
         ]
+        m_extract.return_value = m_res
         m_write.return_value = {"written": 4, "skipped": 0, "errors": 0}
 
         with patch("os.path.exists", return_value=True):
@@ -364,31 +375,37 @@ class TestRealtimeSegmentSync:
         args = m_write.call_args[1]
         assert len(args["segments"]) == 4
 
-    @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip")
+    @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip_detailed")
     @patch("lib.pipeline.canonical_writer.write_segments_canonical")
     def test_sync_canonical_segments_no_data(self, m_write, m_extract):
         # 24. セグメントなし開示を毎回再解析し続けない (正常終了判定)
         from src.events.earnings_production_pipeline import _sync_canonical_segments
-        m_extract.return_value = []
+        m_res = MagicMock()
+        m_res.status = "success_empty"
+        m_res.segments = []
+        m_extract.return_value = m_res
         with patch("os.path.exists", return_value=True):
             _sync_canonical_segments("7601", "2027-02-28", "1Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590505", "C:/xbrl_archive/20260709590505.zip", dry_run=False, route="seq")
         assert m_write.call_count == 0
 
-    @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip")
+    @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip_detailed")
     @patch("lib.pipeline.canonical_writer.write_segments_canonical")
     def test_sync_canonical_segments_dry_run(self, m_write, m_extract):
         # 11. dry-runでwriter未呼び出し
         from src.events.earnings_production_pipeline import _sync_canonical_segments
         from src.segment.models import SegmentRawRow
 
-        m_extract.return_value = [
+        m_res = MagicMock()
+        m_res.status = "success_with_rows"
+        m_res.segments = [
             SegmentRawRow(source="xbrl", raw_ticker="7601", period="2027-02-28", quarter="1Q", raw_segment_name="Other", sales=100, profit=10, raw_json={"_context_evidence": {"context_start": "2026-03-01", "context_end": "2026-05-31"}}),
         ]
+        m_extract.return_value = m_res
         with patch("os.path.exists", return_value=True):
             _sync_canonical_segments("7601", "2027-02-28", "1Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590505", "C:/xbrl_archive/20260709590505.zip", dry_run=True, route="seq")
         assert m_write.call_count == 0
 
-    @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip")
+    @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip_detailed")
     @patch("lib.pipeline.canonical_writer.write_segments_canonical")
     def test_sync_canonical_segments_extract_fail_handled(self, m_write, m_extract):
         # 26. セグメント失敗で通知・PLを巻き戻さない
@@ -398,14 +415,17 @@ class TestRealtimeSegmentSync:
             _sync_canonical_segments("7601", "2027-02-28", "1Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590505", "C:/xbrl_archive/20260709590505.zip", dry_run=False, route="seq")
         assert m_write.call_count == 0
 
-    @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip")
+    @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip_detailed")
     @patch("lib.pipeline.canonical_writer.write_segments_canonical")
     def test_sync_canonical_segments_writer_fail_handled(self, m_write, m_extract):
         from src.events.earnings_production_pipeline import _sync_canonical_segments
         from src.segment.models import SegmentRawRow
-        m_extract.return_value = [
+        m_res = MagicMock()
+        m_res.status = "success_with_rows"
+        m_res.segments = [
             SegmentRawRow(source="xbrl", raw_ticker="7601", period="2027-02-28", quarter="1Q", raw_segment_name="Other", sales=100, profit=10, raw_json={"_context_evidence": {"context_start": "2026-03-01", "context_end": "2026-05-31"}}),
         ]
+        m_extract.return_value = m_res
         m_write.side_effect = Exception("Write error")
         with patch("os.path.exists", return_value=True):
             _sync_canonical_segments("7601", "2027-02-28", "1Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590505", "C:/xbrl_archive/20260709590505.zip", dry_run=False, route="seq")
@@ -429,7 +449,7 @@ class TestRealtimeSegmentSync:
             _sync_canonical_segments("7601", "2027-02-28", "1Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590505", "C:/xbrl_archive/20260709590450.zip", False, "seq")
             assert m_write.call_count == 0
 
-    @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip")
+    @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip_detailed")
     @patch("lib.pipeline.canonical_writer.write_segments_canonical")
     def test_context_duration_selection(self, m_write, m_extract):
         # 12. 1Qの3か月累計を選択
@@ -442,10 +462,13 @@ class TestRealtimeSegmentSync:
         from src.segment.models import SegmentRawRow
 
         # 13. 2Q累計(180日)優先、単独(90日)除外
-        m_extract.return_value = [
+        m_res = MagicMock()
+        m_res.status = "success_with_rows"
+        m_res.segments = [
             SegmentRawRow(source="xbrl", raw_ticker="7601", period="2027-02-28", quarter="2Q", raw_segment_name="Smartstore", sales=100, profit=10, raw_json={"_context_evidence": {"context_start": "2026-06-01", "context_end": "2026-08-31"}}), # 単独3ヶ月 (90日)
             SegmentRawRow(source="xbrl", raw_ticker="7601", period="2027-02-28", quarter="2Q", raw_segment_name="Smartstore", sales=200, profit=20, raw_json={"_context_evidence": {"context_start": "2026-03-01", "context_end": "2026-08-31"}}), # 累計6ヶ月 (180日)
         ]
+        m_extract.return_value = m_res
         with patch("os.path.exists", return_value=True):
             _sync_canonical_segments("7601", "2027-02-28", "2Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590505", "C:/xbrl_archive/20260709590505.zip", False, "seq")
 
@@ -456,10 +479,13 @@ class TestRealtimeSegmentSync:
 
         # 17. 順序入れ替え
         m_write.reset_mock()
-        m_extract.return_value = [
+        m_res2 = MagicMock()
+        m_res2.status = "success_with_rows"
+        m_res2.segments = [
             SegmentRawRow(source="xbrl", raw_ticker="7601", period="2027-02-28", quarter="2Q", raw_segment_name="Smartstore", sales=200, profit=20, raw_json={"_context_evidence": {"context_start": "2026-03-01", "context_end": "2026-08-31"}}), # 累計6ヶ月 (180日)
             SegmentRawRow(source="xbrl", raw_ticker="7601", period="2027-02-28", quarter="2Q", raw_segment_name="Smartstore", sales=100, profit=10, raw_json={"_context_evidence": {"context_start": "2026-06-01", "context_end": "2026-08-31"}}), # 単独3ヶ月 (90日)
         ]
+        m_extract.return_value = m_res2
         with patch("os.path.exists", return_value=True):
             _sync_canonical_segments("7601", "2027-02-28", "2Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590505", "C:/xbrl_archive/20260709590505.zip", False, "seq")
 
@@ -542,7 +568,7 @@ class TestRealtimeSegmentIdentity:
 
     @patch("lib.pipeline.canonical_writer.write_segments_canonical")
     @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
-    @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip")
+    @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip_detailed")
     def test_common_function_scenarios(self, m_extract, m_cache, m_write, tmp_path):
         from src.events.earnings_production_pipeline import _sync_canonical_segments
         from src.segment.models import SegmentRawRow
@@ -555,7 +581,9 @@ class TestRealtimeSegmentIdentity:
         zip_path.write_bytes(b"dummy zip content")
 
         # extract_segments_from_xbrl_zip が返すモックデータ
-        m_extract.return_value = [
+        m_res = MagicMock()
+        m_res.status = "success_with_rows"
+        m_res.segments = [
             SegmentRawRow(
                 source="xbrl",
                 raw_ticker="7601",
@@ -567,6 +595,7 @@ class TestRealtimeSegmentIdentity:
                 raw_json={"_context_evidence": {"context_start": "2026-03-01", "context_end": "2026-05-31", "current_or_previous": "current"}}
             )
         ]
+        m_extract.return_value = m_res
         m_write.return_value = {"written": 1, "skipped": 0, "errors": 0}
 
         # 1. 64桁filing_idがwriterへ渡る
@@ -1614,6 +1643,11 @@ class TestCanonicalCompletionStrictness:
 
 class TestCanonicalRetryOnDuplicate:
     """Phase 4: 重複スキップ時の canonical 不足分限定再同期の独立検証"""
+
+    @pytest.fixture(autouse=True)
+    def mock_zip_verification(self):
+        with patch("src.events.earnings_production_pipeline._verify_zip_internal_document_id", return_value=True):
+            yield
 
     @patch("src.events.earnings_production_pipeline._sync_canonical_financials")
     @patch("src.events.earnings_production_pipeline._sync_canonical_segments")
@@ -3429,18 +3463,20 @@ class TestNoSegmentInfoStateManagement:
     @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
     @patch("src.events.tdnet_event_store._get_supabase")
     def test_29_new_normal_route_inserts_merged_state(self, m_get_supabase, m_extract, m_check_pl, m_check_seg, tmp_path):
-        """29. 新規通常経路の INSERT 前に no_segment_info がマージされること"""
+        """29. 新規通常経路の INSERT 前に no_segment_info がマージされること (64桁ID分離の検証)"""
         from src.events.earnings_production_pipeline import run_earnings_production
         import sqlite3
         import os
         mock_client = MagicMock()
-        d_no = "20260709590450"
-        fid = f"1401{d_no}"  # 本番仕様の 1401 + 14桁数字文字列
+        pdf_url = "https://www.release.tdnet.info/inbs/140120260709590450.pdf"
+        filing_id = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c" # 64桁ハッシュ値
+        external_document_id = "140120260709590450" # 18桁外部文書ID
+        disclosure_no = "20260709590450" # 14桁
 
         zip_dir = tmp_path / "data" / "xbrl_archive"
         zip_dir.mkdir(parents=True, exist_ok=True)
-        zip_path = zip_dir / f"9982_{d_no}.zip"
-        self._create_dummy_zip_with_internal_id(zip_path, d_no)
+        zip_path = zip_dir / f"9982_{disclosure_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, disclosure_no)
 
         self._setup_mock_supabase(mock_client, [])
         m_get_supabase.return_value = mock_client
@@ -3454,26 +3490,26 @@ class TestNoSegmentInfoStateManagement:
             return []
         m_extract.side_effect = side_effect
 
-        doc = DummyDoc("9982", "2027年2月期 第1四半期決算短信", fid)
-        doc.doc_url = f"https://example.com/pdf/{d_no}.pdf" # doc_url 属性を追加！
-        doc.pdf_url = f"https://example.com/pdf/{d_no}.pdf" # pdf_url 属性も設定！
-        doc.disclosure_no = d_no # disclosure_no を直接付加！
+        doc = DummyDoc("9982", "2027年2月期 第1四半期決算短信", filing_id)
+        doc.disclosure_id = filing_id
+        doc.source_doc_id = external_document_id
+        doc.doc_id = external_document_id
+        doc.doc_url = pdf_url
+        doc.pdf_url = pdf_url
+        doc.disclosure_no = disclosure_no
         doc.disclosed_at = "2026-07-10T15:00:00+09:00"
         doc.company_name = "株式会社ダミー"
-        doc.disclosure_datetime = "2026-07-10T15:00:00+09:00" # タイムゾーン付きで設定！
-        doc.published_at = "2026-07-10T15:00:00+09:00" # タイムゾーン付きで設定！
+        doc.disclosure_datetime = "2026-07-10T15:00:00+09:00"
+        doc.published_at = "2026-07-10T15:00:00+09:00"
         
-        # モックの SQLite コネクション
         conn = sqlite3.connect(":memory:")
 
-        # 新規通常経路を強制起動するための環境変数パッチ
         env_patches = {
             "USE_SUBPROCESS_WORKER": "1",
             "EARNINGS_SUBPROCESS_ENABLE_REAL_SAVE": "1",
             "EARNINGS_SUBPROCESS_ALLOWLIST": "9982"
         }
 
-        # run_earnings_production 内の save_event_to_supabase がインポートするモジュール元を patch
         with patch.dict(os.environ, env_patches):
             with patch("src.events.env_loader.get_project_root", return_value=tmp_path):
                 with patch("src.events.earnings_subprocess_runner._PROJECT_ROOT", tmp_path):
@@ -3487,10 +3523,22 @@ class TestNoSegmentInfoStateManagement:
                         )
                         m_save_sb.assert_called_once()
                         inserted_rec = m_save_sb.call_args[0][0]
+                        
+                        # ID分離の厳格なアサーション
+                        assert inserted_rec.source_doc_id == filing_id # Supabase EventRecord の Exact Gate 用 ID
                         import json
                         raw_payload = json.loads(inserted_rec.raw_payload_json)
                         assert raw_payload["canonical_sync_state"]["segments"]["status"] == "no_segment_info"
-                        assert raw_payload["canonical_sync_state"]["segments"]["filing_id"] == fid
+                        assert raw_payload["canonical_sync_state"]["segments"]["filing_id"] == filing_id # 64桁であることを検証
+                        assert raw_payload["canonical_sync_state"]["segments"]["disclosure_no"] == disclosure_no # 14桁であることを検証
+                        
+                        # 完了判定に 64桁の filing_id が正しく伝播しているかを call_args で検証
+                        m_check_pl.assert_called()
+                        m_check_seg.assert_called()
+                        pl_call_kwargs = m_check_pl.call_args[1]
+                        seg_call_kwargs = m_check_seg.call_args[1]
+                        assert pl_call_kwargs.get("filing_id") == filing_id
+                        assert seg_call_kwargs.get("filing_id") == filing_id
         conn.close()
 
     @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved")
@@ -3650,8 +3698,8 @@ class TestNoSegmentInfoStateManagement:
         """34. 7601モデル相当の検証 (success_with_rows, ZIP内部書類ID一致 -> 状態保存0、writer実行)"""
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
         mock_client = MagicMock()
-        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
-        d_no = "20260709590450"
+        fid = "4836e8c1953047daf09850a4b7f86ef0186f8ab85a348e41355323f2c3bf1da8" # ポプラ 64桁ハッシュ値
+        d_no = "20260709590505" # ポプラ 14桁開示番号
         zip_path = tmp_path / f"7601_{d_no}.zip"
         self._create_dummy_zip_with_internal_id(zip_path, d_no)
 
@@ -3780,3 +3828,73 @@ class TestNoSegmentInfoStateManagement:
             dry_run=False,
         )
         mock_client.table.return_value.update.assert_called_once()
+
+    # ───── 数値 filing_id 拒否テスト（Phase 5 復旧監査） ─────
+
+    @pytest.mark.parametrize("invalid_id", [
+        "20260709590450", # 14桁数値
+        "140120260709590450", # 18桁数値
+        "invalid_id_format_not_64_chars", # 64桁以外の文字列
+    ])
+    def test_canonical_check_rejects_invalid_filing_id(self, invalid_id):
+        """数値IDおよび不正フォーマットIDが完了判定で即座に拒否され、SELECTを実行しないこと"""
+        from src.events.earnings_production_pipeline import (
+            _check_canonical_financials_saved,
+            _check_canonical_segments_saved
+        )
+        mock_client = MagicMock()
+        
+        # Financials 判定
+        res_pl = _check_canonical_financials_saved(
+            client=mock_client,
+            ticker="9982",
+            period="2027-02-28",
+            quarter="1Q",
+            filing_id=invalid_id,
+            expected_metrics=["sales"]
+        )
+        assert res_pl is False
+        mock_client.table.assert_not_called() # SELECTを実行していないこと
+        
+        # Segments 判定
+        res_seg = _check_canonical_segments_saved(
+            client=mock_client,
+            ticker="9982",
+            period="2027-02-28",
+            quarter="1Q",
+            filing_id=invalid_id,
+            expected_segment_metrics=[("Apparel", "sales")]
+        )
+        assert res_seg is False
+        mock_client.table.assert_not_called() # SELECTを実行していないこと
+
+    # ───── strict ZIP検証テスト（Phase 5 復旧監査） ─────
+
+    def test_strict_zip_verify_internal_document_id_scenarios(self, tmp_path):
+        """_verify_zip_internal_document_id の厳格な fail-closed 挙動をテスト"""
+        from src.events.earnings_production_pipeline import _verify_zip_internal_document_id
+        import zipfile
+        import os
+        
+        # 1. 正常ZIP＋内部ID一致
+        ok_zip_path = tmp_path / "ok.zip"
+        with zipfile.ZipFile(ok_zip_path, "w") as zf:
+            zf.writestr("tse-aced-99820-20260709590450.xml", b"dummy")
+        assert _verify_zip_internal_document_id(str(ok_zip_path), "20260709590450") is True
+        
+        # 2. 正常ZIP＋内部ID不一致
+        assert _verify_zip_internal_document_id(str(ok_zip_path), "20260709590505") is False
+        
+        # 3. 破損ZIP（basenameが一致していてもFalseを返すこと）
+        broken_zip_path = tmp_path / "9982_20260709590450.zip"
+        broken_zip_path.write_bytes(b"invalid zip content")
+        assert _verify_zip_internal_document_id(str(broken_zip_path), "20260709590450") is False
+        
+        # 4. ZIP内部ID取得不能
+        no_id_zip_path = tmp_path / "noid.zip"
+        with zipfile.ZipFile(no_id_zip_path, "w") as zf:
+            zf.writestr("unrelated_file.txt", b"dummy")
+        assert _verify_zip_internal_document_id(str(no_id_zip_path), "20260709590450") is False
+        
+        # 5. 無効なdisclosure_no
+        assert _verify_zip_internal_document_id(str(ok_zip_path), "invalid_no") is False

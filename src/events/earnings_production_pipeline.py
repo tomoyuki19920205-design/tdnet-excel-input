@@ -156,17 +156,14 @@ def _is_disclosed_after_boundary(disclosed_at_str: str) -> bool:
 def _verify_zip_internal_document_id(zip_path: str, expected_disclosure_no: str) -> bool:
     """ZIPを開いて内部ファイルのいずれかの名前に含まれる書類IDが expected_disclosure_no と一致するか検証する。
     不一致時、ZIP破損時、例外発生時は False を返す。
-    ただし、テスト環境のダミーパスや破損ZIPとの互換性のために、ファイル名自体に ID が含まれていれば True を返す。
+    フォールバックは一切行わない (fail-closed)。
     """
+    if not zip_path or not os.path.exists(zip_path):
+        return False
+        
     import zipfile
     from src.events.common_normalizers import extract_common_disclosure_no
     
-    if not zip_path or not os.path.exists(zip_path):
-        # テスト用の仮想パスに対するフォールバック
-        zip_basename = os.path.basename(zip_path) if zip_path else ""
-        zip_no = extract_common_disclosure_no(zip_basename)
-        return zip_no == expected_disclosure_no
-        
     try:
         with zipfile.ZipFile(zip_path, "r") as zf:
             for name in zf.namelist():
@@ -174,10 +171,7 @@ def _verify_zip_internal_document_id(zip_path: str, expected_disclosure_no: str)
                 if doc_id == expected_disclosure_no:
                     return True
     except (zipfile.BadZipFile, Exception):
-        # テスト用のダミーバイナリZIPに対するフォールバック
-        zip_basename = os.path.basename(zip_path)
-        zip_no = extract_common_disclosure_no(zip_basename)
-        return zip_no == expected_disclosure_no
+        return False
     return False
 
 def _build_no_segment_info_state(filing_id: str, disclosure_no: str, period: str, quarter: str) -> Optional[dict]:
@@ -289,32 +283,17 @@ def _extract_and_filter_segments_detailed(
     period: str,
     quarter: str,
 ) -> tuple[list[dict], Optional[object]]:
-    import src.segment.xbrl_segment_extractor
-    orig_func = src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip
-    
-    # 既存テストの patch との互換性維持（型名のみを検知し、モック呼び出しへ安全に委譲）
-    if type(orig_func).__name__ in ("Mock", "MagicMock"):
-        try:
-            raw_rows = orig_func(zip_path=xbrl_path, period=period, quarter=quarter)
-        except Exception as e:
-            logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] mocked extract error: %s", e)
-            raw_rows = []
-        from unittest.mock import MagicMock as _MagicMock
-        detailed_result = _MagicMock()
-        detailed_result.status = "success_with_rows" if raw_rows else "success_empty"
-        detailed_result.segments = raw_rows
-    else:
-        from src.segment.xbrl_segment_extractor import extract_segments_from_xbrl_zip_detailed
-        try:
-            detailed_result = extract_segments_from_xbrl_zip_detailed(
-                zip_path=xbrl_path,
-                period=period,
-                quarter=quarter,
-            )
-            raw_rows = detailed_result.segments
-        except Exception as e:
-            logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] stage=extract_detailed error_type=%s message=%s", type(e).__name__, str(e))
-            return [], None
+    from src.segment.xbrl_segment_extractor import extract_segments_from_xbrl_zip_detailed
+    try:
+        detailed_result = extract_segments_from_xbrl_zip_detailed(
+            zip_path=xbrl_path,
+            period=period,
+            quarter=quarter,
+        )
+        raw_rows = detailed_result.segments if detailed_result else []
+    except Exception as e:
+        logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] stage=extract_detailed error_type=%s message=%s", type(e).__name__, str(e))
+        return [], None
 
     target_segs = []
     target_days = 365
@@ -562,10 +541,8 @@ def _check_canonical_financials_saved(
 ) -> bool:
     if not filing_id:
         return False
-    # 64桁16進数または14桁以上の数値IDを許容
-    _is_num_id = isinstance(filing_id, str) and len(filing_id) >= 14 and filing_id.isdigit()
-    _is_hash_id = isinstance(filing_id, str) and len(filing_id) == 64 and all(c in "0123456789abcdefABCDEF" for c in filing_id)
-    if not (_is_num_id or _is_hash_id):
+    # 64桁16進数のみを厳格に許容 (Phase 3確定仕様)
+    if not isinstance(filing_id, str) or len(filing_id) != 64 or not all(c in "0123456789abcdefABCDEF" for c in filing_id):
         logger.warning("[EARNINGS][CANONICAL_COMPLETION] %s kind=financials status=incomplete invalid_filing_id=%s", ticker, filing_id)
         return False
     if expected_metrics is None:
@@ -618,10 +595,8 @@ def _check_canonical_segments_saved(
 ) -> bool:
     if not filing_id:
         return False
-    # 64桁16進数または14桁以上の数値IDを許容
-    _is_num_id = isinstance(filing_id, str) and len(filing_id) >= 14 and filing_id.isdigit()
-    _is_hash_id = isinstance(filing_id, str) and len(filing_id) == 64 and all(c in "0123456789abcdefABCDEF" for c in filing_id)
-    if not (_is_num_id or _is_hash_id):
+    # 64桁16進数のみを厳格に許容 (Phase 3確定仕様)
+    if not isinstance(filing_id, str) or len(filing_id) != 64 or not all(c in "0123456789abcdefABCDEF" for c in filing_id):
         logger.warning("[EARNINGS][CANONICAL_COMPLETION] %s kind=segments status=incomplete invalid_filing_id=%s", ticker, filing_id)
         return False
     if expected_segment_metrics is None:
@@ -1377,7 +1352,8 @@ def run_earnings_production(
                     "doc_url":       getattr(d, "doc_url", "") or "",
                     "xbrl_url":      _xbrl_url,
                     "zip_path":      _zip_path,
-                    "source_doc_id": getattr(d, "disclosure_id", "") or getattr(d, "doc_id", "") or "",
+                    "source_doc_id": str(getattr(d, "disclosure_id", "") or "").strip(),
+                    "external_document_id": str(getattr(d, "source_doc_id", "") or getattr(d, "doc_id", "") or "").strip(),
                 })
 
             if not target_docs_j:
@@ -1546,7 +1522,16 @@ def run_earnings_production(
                     # ── Supabase 保存実行 ────────────────────────────────────────
                     logger.info("[EARNINGS][REAL] ✁ Supabase保存: %s", _ticker)
                     _ev_dict = _merged_plan["tdnet_event_payload"]
-                    _doc_id = _ev_dict.get("source_doc_id", "")  # 64桁ハッシュ値
+                    # ── Phase 5 IDの厳格な分離 ──
+                    canonical_filing_id = str(doc_j.get("source_doc_id") or "").strip()
+                    _ev_dict["source_doc_id"] = canonical_filing_id
+                    external_document_id = str(doc_j.get("external_document_id") or "").strip()
+
+                    # 64桁 canonical_filing_id の検証 (Phase 5復旧条件)
+                    _canonical_id_ok = (
+                        len(canonical_filing_id) == 64
+                        and all(c in "0123456789abcdefABCDEF" for c in canonical_filing_id)
+                    )
 
                     # 14桁書類IDの解決
                     _disclosure_no = ""
@@ -1581,12 +1566,8 @@ def run_earnings_production(
                     try:
                         # ZIP 内部書類 ID の検証を追加
                         _zip_internal_ok = _verify_zip_internal_document_id(_resolved_zip, _disclosure_no)
-                        _doc_id_ok = _doc_id and (
-                            (len(_doc_id) == 64 and all(c in "0123456789abcdefABCDEF" for c in _doc_id))
-                            or (len(_doc_id) >= 14 and _doc_id.isdigit())
-                        )
                         if (
-                            _doc_id_ok
+                            _canonical_id_ok
                             and _disclosure_no and len(_disclosure_no) == 14 and _disclosure_no.isdigit()
                             and _resolved_zip and os.path.exists(_resolved_zip)
                             and _zip_internal_ok
@@ -1604,11 +1585,11 @@ def run_earnings_production(
                                 if _pre_detailed_result and getattr(_pre_detailed_result, "status", None) == "success_empty":
                                     _disclosed_at = _ev_dict.get("disclosure_datetime") or ""
                                     if _is_disclosed_after_boundary(_disclosed_at):
-                                        _pending_no_segment_states[_doc_id] = {
+                                        _pending_no_segment_states[canonical_filing_id] = {
                                             "status": "no_segment_info",
                                             "version": 1,
-                                            "filing_id": _doc_id,
-                                            "disclosure_no": _disclosure_no,
+                                            "filing_id": canonical_filing_id, # 64桁
+                                            "disclosure_no": _disclosure_no, # 14桁
                                             "period": _period,
                                             "quarter": _q,
                                             "source": "exact_xbrl_zero_rows",
@@ -1617,8 +1598,8 @@ def run_earnings_production(
                         logger.error("[EARNINGS][NO_SEGMENT_STATE][ERROR] pre-extraction failed: %s", _pre_e)
 
                     # ── 新規通常経路での no_segment_info 状態のマージ ──
-                    if _doc_id in _pending_no_segment_states:
-                        _state = _pending_no_segment_states[_doc_id]
+                    if canonical_filing_id in _pending_no_segment_states:
+                        _state = _pending_no_segment_states[canonical_filing_id]
                         import json as _json
                         _raw_payload_json_str = _ev_dict.get("raw_payload_json") or "{}"
                         try:
@@ -1648,7 +1629,7 @@ def run_earnings_production(
                     _sup_res = save_event_to_supabase(_ev_rec)
                     
                     # 登録削除
-                    _pending_no_segment_states.pop(_doc_id, None)
+                    _pending_no_segment_states.pop(canonical_filing_id, None)
 
                     _sup_ok = _sup_res.get("action") != "error"
                     _sup_err = _sup_res.get("error", "")
@@ -1675,7 +1656,7 @@ def run_earnings_production(
                     _op = _args.get("op_value")
                     _gross = _args.get("gross_profit_value")
                     _sga = _args.get("selling_general_and_administrative_expenses_value")
-                    _doc_id = _ev_dict.get("source_doc_id", "")  # 64桁ハッシュ値
+                    canonical_filing_id = str(_ev_dict.get("source_doc_id") or "").strip()
                     _guidance = _payload_ext.get("guidance", {})
 
                     # 14桁書類IDの解決 (明示フィールドまたはURLから取得する。検索前にZIPファイル名から逆算しない)
@@ -1718,7 +1699,7 @@ def run_earnings_production(
                                         quarter=_q,
                                         target_segs=_target_segs,
                                         source="xbrl",
-                                        filing_id=_doc_id,
+                                        filing_id=canonical_filing_id,
                                     )
                                     _expected_segment_metrics = list(_expected_set)
                             except Exception:
@@ -1738,7 +1719,7 @@ def run_earnings_production(
                             ticker=_ticker,
                             period=_period,
                             quarter=_q,
-                            filing_id=_doc_id,
+                            filing_id=canonical_filing_id,
                             expected_metrics=_expected_metrics,
                         )
                         _seg_saved = _check_canonical_segments_saved(
@@ -1746,7 +1727,7 @@ def run_earnings_production(
                             ticker=_ticker,
                             period=_period,
                             quarter=_q,
-                            filing_id=_doc_id,
+                            filing_id=canonical_filing_id,
                             expected_segment_metrics=_expected_segment_metrics,
                         )
 
@@ -1761,7 +1742,7 @@ def run_earnings_production(
                             gross_value=_gross,
                             sga_value=_sga,
                             guidance=_guidance,
-                            filing_id=_doc_id,
+                            filing_id=canonical_filing_id,
                             dry_run=dry_run,
                             route="subprocess",
                         )
@@ -1773,7 +1754,7 @@ def run_earnings_production(
                                 ticker=_ticker,
                                 period=_period,
                                 quarter=_q,
-                                canonical_filing_id=_doc_id,
+                                canonical_filing_id=canonical_filing_id,
                                 common_disclosure_no=_disclosure_no,
                                 xbrl_path=_resolved_zip,
                                 dry_run=dry_run,
@@ -2291,7 +2272,8 @@ def run_earnings_production(
 
                     # ---- tdnet_events へ earnings イベントを best-effort 保存 ----
                     _seq_period = _derive_fiscal_year_end_period(doc.title)
-                    _seq_doc_id = getattr(doc, "disclosure_id", "") or getattr(doc, "doc_id", "") or ""
+                    _seq_doc_id = str(getattr(doc, "disclosure_id", "") or "").strip()
+                    _seq_external_doc_id = str(getattr(doc, "source_doc_id", "") or getattr(doc, "doc_id", "") or "").strip()
 
                     # 14桁書類IDの解決
                     _seq_disclosure_no = ""
@@ -2312,7 +2294,7 @@ def run_earnings_production(
                     _pre_detailed_result = None
                     try:
                         if (
-                            _seq_doc_id and len(_seq_doc_id) == 64
+                            len(_seq_doc_id) == 64
                             and _seq_disclosure_no and len(_seq_disclosure_no) == 14 and _seq_disclosure_no.isdigit()
                             and xbrl_path and os.path.exists(xbrl_path)
                             and not dry_run
@@ -2461,7 +2443,8 @@ def run_earnings_production(
                     try:
                         # 重複ブロック内で通常経路と同じ生成式を使ってローカル変数を構築
                         _seq_period = _derive_fiscal_year_end_period(doc.title)
-                        _seq_doc_id = getattr(doc, "disclosure_id", "") or getattr(doc, "doc_id", "") or ""
+                        _seq_doc_id = str(getattr(doc, "disclosure_id", "") or "").strip()
+                        _seq_external_doc_id = str(getattr(doc, "source_doc_id", "") or getattr(doc, "doc_id", "") or "").strip()
 
                         _seq_disclosure_no = ""
                         for attr_name in ("disclosure_no", "common_disclosure_no", "doc_id", "tdnet_id"):
