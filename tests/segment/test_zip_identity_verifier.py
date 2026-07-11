@@ -29,11 +29,28 @@ from src.segment.zip_identity_verifier import (
 # フィクスチャヘルパー
 # ================================================================
 
-def _make_zip(path: Path, internal_id: str) -> str:
-    """最小限の有効な ZIP を生成する。内部エントリ名に internal_id を含める。"""
+def _make_zip(path: Path, internal_id: str, ticker: str = "TXXX", period: str = "2027-03-31", quarter: str = "1Q", doc_type: str = "attachment_xbrl") -> str:
+    """エントリ名や ixbrl.htm 等に指定メタデータを含んだダミー ZIP を作成する。"""
+    q_map = {"1Q": "1", "2Q": "2", "3Q": "3", "FY": "4"}
+    q_num = q_map.get(quarter, "1")
+    
+    summary_htm_content = f"""
+    <html xmlns:xbrli="http://www.xbrl.org/2003/instance" xmlns:ix="http://www.xbrl.org/2003/instance">
+      <body>
+        <xbrli:identifier scheme="http://www.tse.or.jp/sicc">{ticker}0</xbrli:identifier>
+        <xbrli:endDate>{period}</xbrli:endDate>
+        <xbrli:instant>{period}</xbrli:instant>
+        <ix:nonFraction name="tse-ed-t:QuarterlyPeriod">{q_num}</ix:nonFraction>
+      </body>
+    </html>
+    """
+    
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr(f"{internal_id}_manifest.xml", b"<xbrl/>".decode())
-        zf.writestr(f"{internal_id}_data.xml", b"<data/>".decode())
+        zf.writestr(f"XBRLData/Summary/tse-qcedjpsm-{ticker}0-{internal_id}.xsd", b"")
+        zf.writestr(f"XBRLData/Summary/tse-qcedjpsm-{ticker}0-{internal_id}-ixbrl.htm", summary_htm_content.encode("utf-8"))
+        zf.writestr("XBRLData/Attachment/manifest.xml", f'<manifest><instance id="qcedjpfr" preferredFilename="tse-qcedjpfr-{ticker}0-{period}-01-{internal_id}.xbrl"/></manifest>'.encode("utf-8"))
+        if doc_type != "attachment_xbrl" and doc_type in ALLOWED_DOCUMENT_TYPES:
+            zf.writestr(f"XBRLData/Attachment/{doc_type}.xbrl", b"")
     return path
 
 
@@ -45,9 +62,25 @@ def _sha256(path: Path) -> str:
 
 def _make_zip_multi(path: Path, internal_ids: list[str]) -> str:
     """複数の internal ID を含む ZIP を生成する。"""
+    ticker = "TXXX"
+    period = "2027-03-31"
+    quarter = "1Q"
+    q_num = "1"
+    summary_htm_content = f"""
+    <html xmlns:xbrli="http://www.xbrl.org/2003/instance" xmlns:ix="http://www.xbrl.org/2003/instance">
+      <body>
+        <xbrli:identifier scheme="http://www.tse.or.jp/sicc">{ticker}0</xbrli:identifier>
+        <xbrli:endDate>{period}</xbrli:endDate>
+        <xbrli:instant>{period}</xbrli:instant>
+        <ix:nonFraction name="tse-ed-t:QuarterlyPeriod">{q_num}</ix:nonFraction>
+      </body>
+    </html>
+    """
     with zipfile.ZipFile(path, "w") as zf:
         for iid in internal_ids:
-            zf.writestr(f"{iid}_data.xml", b"<data/>".decode())
+            zf.writestr(f"XBRLData/Summary/tse-qcedjpsm-{ticker}0-{iid}.xsd", b"")
+        zf.writestr(f"XBRLData/Summary/tse-qcedjpsm-{ticker}0-{internal_ids[0]}-ixbrl.htm", summary_htm_content.encode("utf-8"))
+        zf.writestr("XBRLData/Attachment/manifest.xml", f'<manifest><instance id="qcedjpfr" preferredFilename="tse-qcedjpfr-{ticker}0-{period}-01-{internal_ids[0]}.xbrl"/></manifest>'.encode("utf-8"))
     return path
 
 
@@ -60,17 +93,18 @@ def _make_provenance(
     quarter: str = "1Q",
     document_type: str = "attachment_xbrl",
     source: str = "jquants",
-    official_request_succeeded: bool = True,
+    request_succeeded: bool = True,
     response_status: int = 200,
+    downloaded_size: int = 100,
 ) -> TrustedProvenance:
     return TrustedProvenance(
         source=source,
         requested_disclosure_no=requested_id,
         requested_file_type="x",
         resolved_by_function="get_file_url",
-        official_request_succeeded=official_request_succeeded,
+        official_request_succeeded=request_succeeded,
         response_status=response_status,
-        downloaded_size=100,
+        downloaded_size=downloaded_size,
         downloaded_sha256=sha256,
         internal_document_id=internal_id,
         ticker=ticker,
@@ -83,13 +117,13 @@ def _make_provenance(
 
 
 # ================================================================
-# Test A: 完全一致 → exact_document_id_match
+# Test A: ID 完全一致 ZIP は provenance なしで合格 → exact_document_id_match
 # ================================================================
 def test_a_exact_match(tmp_path):
-    """requested ID と internal ID が一致する → 経路 A PASS。provenance 不要。"""
-    req_id = "20260101000001"
+    req_id = "20260101000050"
     zip_path = tmp_path / f"{req_id}.zip"
-    _make_zip(zip_path, req_id)
+    _make_zip(zip_path, req_id, ticker="TXXX", period="2027-03-31", quarter="1Q")
+    sha = _sha256(zip_path)
 
     v = verify_zip_identity(
         zip_path=str(zip_path),
@@ -97,29 +131,32 @@ def test_a_exact_match(tmp_path):
         expected_ticker="TXXX",
         expected_period="2027-03-31",
         expected_quarter="1Q",
-        trusted_provenance=None,  # provenance 不要
+        trusted_provenance=None,
     )
     assert v.passed is True
     assert v.verdict == "exact_document_id_match"
-    assert v.rejection_reason == ""
     assert v.internal_id == req_id
+    assert v.zip_sha256 == sha
 
 
 # ================================================================
-# Test B: 公式関連 XBRL → official_linked_xbrl_match
+# Test B: 関連書類 ID が一致し provenance あり → official_linked_xbrl_match
 # ================================================================
 def test_b_official_linked_xbrl(tmp_path):
-    """requested ID と internal ID が異なるが、全条件を満たす TrustedProvenance がある → 経路 B PASS。"""
     req_id = "20260101000050"
     int_id = "20260102399999"
     zip_path = tmp_path / f"{req_id}.zip"
-    _make_zip(zip_path, int_id)
+    _make_zip(zip_path, int_id, ticker="TXXX", period="2027-03-31", quarter="1Q")
     sha = _sha256(zip_path)
 
     prov = _make_provenance(
         requested_id=req_id,
         internal_id=int_id,
         sha256=sha,
+        ticker="TXXX",
+        period="2027-03-31",
+        quarter="1Q",
+        downloaded_size=zip_path.stat().st_size,
     )
     v = verify_zip_identity(
         zip_path=str(zip_path),
@@ -131,18 +168,18 @@ def test_b_official_linked_xbrl(tmp_path):
     )
     assert v.passed is True
     assert v.verdict == "official_linked_xbrl_match"
-    assert v.rejection_reason == ""
     assert v.internal_id == int_id
+    assert v.zip_sha256 == sha
 
 
 # ================================================================
-# Test C: provenance なし、ID 不一致 → provenance_missing
+# Test C: 関連書類 ID だが provenance なし → provenance_missing
 # ================================================================
 def test_c_provenance_missing(tmp_path):
     req_id = "20260101000050"
-    int_id = "20260102399999"  # 不一致
+    int_id = "20260102399999"
     zip_path = tmp_path / f"{req_id}.zip"
-    _make_zip(zip_path, int_id)
+    _make_zip(zip_path, int_id, ticker="TXXX", period="2027-03-31", quarter="1Q")
 
     v = verify_zip_identity(
         zip_path=str(zip_path),
@@ -157,18 +194,21 @@ def test_c_provenance_missing(tmp_path):
 
 
 # ================================================================
-# Test D: hash 不一致 → provenance_hash_mismatch
+# Test D: ZIP hash 不一致 → provenance_hash_mismatch
 # ================================================================
 def test_d_hash_mismatch(tmp_path):
     req_id = "20260101000050"
     int_id = "20260102399999"
     zip_path = tmp_path / f"{req_id}.zip"
-    _make_zip(zip_path, int_id)
+    _make_zip(zip_path, int_id, ticker="TXXX", period="2027-03-31", quarter="1Q")
 
     prov = _make_provenance(
         requested_id=req_id,
         internal_id=int_id,
-        sha256="aabbcc" + "00" * 29,  # 故意に違う SHA-256
+        sha256="wronghash123456789012345678901234567890123456789012345678901234",
+        ticker="TXXX",
+        period="2027-03-31",
+        quarter="1Q",
     )
     v = verify_zip_identity(
         zip_path=str(zip_path),
@@ -189,13 +229,16 @@ def test_e_requested_id_mismatch(tmp_path):
     req_id = "20260101000050"
     int_id = "20260102399999"
     zip_path = tmp_path / f"{req_id}.zip"
-    _make_zip(zip_path, int_id)
+    _make_zip(zip_path, int_id, ticker="TXXX", period="2027-03-31", quarter="1Q")
     sha = _sha256(zip_path)
 
     prov = _make_provenance(
         requested_id="20260199999999",  # 別の requested ID
         internal_id=int_id,
         sha256=sha,
+        ticker="TXXX",
+        period="2027-03-31",
+        quarter="1Q",
     )
     v = verify_zip_identity(
         zip_path=str(zip_path),
@@ -216,19 +259,22 @@ def test_f_ticker_mismatch(tmp_path):
     req_id = "20260101000050"
     int_id = "20260102399999"
     zip_path = tmp_path / f"{req_id}.zip"
-    _make_zip(zip_path, int_id)
+    # ZIP内の ticker を "TYYY" (期待値 "TXXX" と異なる) にする
+    _make_zip(zip_path, int_id, ticker="TYYY", period="2027-03-31", quarter="1Q")
     sha = _sha256(zip_path)
 
     prov = _make_provenance(
         requested_id=req_id,
         internal_id=int_id,
         sha256=sha,
-        ticker="TZZZ",  # 別 ticker
+        ticker="TYYY",  # provenance も ZIP に合わせる (偽造防止照合は PASS するが expected と mismatch)
+        period="2027-03-31",
+        quarter="1Q",
     )
     v = verify_zip_identity(
         zip_path=str(zip_path),
         requested_disclosure_no=req_id,
-        expected_ticker="TXXX",
+        expected_ticker="TXXX",  # 期待値 "TXXX"
         expected_period="2027-03-31",
         expected_quarter="1Q",
         trusted_provenance=prov,
@@ -244,20 +290,23 @@ def test_g_period_mismatch(tmp_path):
     req_id = "20260101000050"
     int_id = "20260102399999"
     zip_path = tmp_path / f"{req_id}.zip"
-    _make_zip(zip_path, int_id)
+    # ZIP 内の period を "2026-03-31" (期待値 "2027-03-31" と異なる) にする
+    _make_zip(zip_path, int_id, ticker="TXXX", period="2026-03-31", quarter="1Q")
     sha = _sha256(zip_path)
 
     prov = _make_provenance(
         requested_id=req_id,
         internal_id=int_id,
         sha256=sha,
-        period="2026-03-31",  # 別期間
+        ticker="TXXX",
+        period="2026-03-31",  # provenance も ZIP に合わせる
+        quarter="1Q",
     )
     v = verify_zip_identity(
         zip_path=str(zip_path),
         requested_disclosure_no=req_id,
         expected_ticker="TXXX",
-        expected_period="2027-03-31",
+        expected_period="2027-03-31",  # 期待値 "2027-03-31"
         expected_quarter="1Q",
         trusted_provenance=prov,
     )
@@ -272,21 +321,24 @@ def test_h_quarter_mismatch(tmp_path):
     req_id = "20260101000050"
     int_id = "20260102399999"
     zip_path = tmp_path / f"{req_id}.zip"
-    _make_zip(zip_path, int_id)
+    # ZIP 内の quarter を "2Q" にする
+    _make_zip(zip_path, int_id, ticker="TXXX", period="2027-03-31", quarter="2Q")
     sha = _sha256(zip_path)
 
     prov = _make_provenance(
         requested_id=req_id,
         internal_id=int_id,
         sha256=sha,
-        quarter="2Q",  # 別 quarter
+        ticker="TXXX",
+        period="2027-03-31",
+        quarter="2Q",  # provenance も ZIP に合わせる
     )
     v = verify_zip_identity(
         zip_path=str(zip_path),
         requested_disclosure_no=req_id,
         expected_ticker="TXXX",
         expected_period="2027-03-31",
-        expected_quarter="1Q",
+        expected_quarter="1Q",  # 期待値 "1Q"
         trusted_provenance=prov,
     )
     assert v.passed is False
@@ -300,14 +352,18 @@ def test_i_document_type_mismatch(tmp_path):
     req_id = "20260101000050"
     int_id = "20260102399999"
     zip_path = tmp_path / f"{req_id}.zip"
-    _make_zip(zip_path, int_id)
+    # 許可されていない doc_type を設定して ZIP を作る
+    _make_zip(zip_path, int_id, ticker="TXXX", period="2027-03-31", quarter="1Q", doc_type="yuho_securities_report")
     sha = _sha256(zip_path)
 
     prov = _make_provenance(
         requested_id=req_id,
         internal_id=int_id,
         sha256=sha,
-        document_type="yuho_securities_report",  # 有価証券報告書など、許可外
+        ticker="TXXX",
+        period="2027-03-31",
+        quarter="1Q",
+        document_type="yuho_securities_report",  # 許可外
     )
     v = verify_zip_identity(
         zip_path=str(zip_path),
@@ -322,12 +378,13 @@ def test_i_document_type_mismatch(tmp_path):
 
 
 # ================================================================
-# Test J: 複数 internal ID 混在 → multiple_internal_document_ids
+# Test J: 複数書類 ID 混在 ZIP は拒否 → multiple_internal_document_ids
 # ================================================================
 def test_j_multiple_internal_ids(tmp_path):
     req_id = "20260101000050"
     zip_path = tmp_path / f"{req_id}.zip"
-    _make_zip_multi(zip_path, ["20260102111111", "20260102222222"])
+    # 複数 ID 混在
+    _make_zip_multi(zip_path, ["20260102399999", "20260103444444"])
 
     v = verify_zip_identity(
         zip_path=str(zip_path),
@@ -335,13 +392,14 @@ def test_j_multiple_internal_ids(tmp_path):
         expected_ticker="TXXX",
         expected_period="2027-03-31",
         expected_quarter="1Q",
+        trusted_provenance=None,
     )
     assert v.passed is False
     assert v.rejection_reason == "multiple_internal_document_ids"
 
 
 # ================================================================
-# Test K: 0 バイト ZIP → zero_byte_zip
+# Test K: 0 バイト ZIP 拒否 → zero_byte_zip
 # ================================================================
 def test_k_zero_byte_zip(tmp_path):
     req_id = "20260101000050"
@@ -354,18 +412,19 @@ def test_k_zero_byte_zip(tmp_path):
         expected_ticker="TXXX",
         expected_period="2027-03-31",
         expected_quarter="1Q",
+        trusted_provenance=None,
     )
     assert v.passed is False
     assert v.rejection_reason == "zero_byte_zip"
 
 
 # ================================================================
-# Test L: 破損 ZIP → broken_zip
+# Test L: 破損 ZIP 拒否 → broken_zip
 # ================================================================
 def test_l_broken_zip(tmp_path):
     req_id = "20260101000050"
     zip_path = tmp_path / f"{req_id}.zip"
-    zip_path.write_bytes(b"NOT_A_ZIP_FILE_AT_ALL")
+    zip_path.write_bytes(b"PK\x03\x04brokenzipdata123456789")
 
     v = verify_zip_identity(
         zip_path=str(zip_path),
@@ -373,96 +432,38 @@ def test_l_broken_zip(tmp_path):
         expected_ticker="TXXX",
         expected_period="2027-03-31",
         expected_quarter="1Q",
+        trusted_provenance=None,
     )
     assert v.passed is False
     assert v.rejection_reason == "broken_zip"
 
 
 # ================================================================
-# Test M: cache provenance 再利用 → linked PASS (ネットワークなし)
+# Test M: キャッシュされた provenance の再利用 → linked PASS
 # ================================================================
 def test_m_cache_provenance_reuse(tmp_path):
-    """保存済み provenance と現在 ZIP の hash が一致 → ネットワークなしで linked PASS。"""
     req_id = "20260101000050"
     int_id = "20260102399999"
     zip_path = tmp_path / f"{req_id}.zip"
-    _make_zip(zip_path, int_id)
+    _make_zip(zip_path, int_id, ticker="TXXX", period="2027-03-31", quarter="1Q")
     sha = _sha256(zip_path)
 
-    # 保存済み provenance をシミュレート
-    cached_prov = _make_provenance(
-        requested_id=req_id,
-        internal_id=int_id,
-        sha256=sha,
-    )
-
-    v = verify_zip_identity(
-        zip_path=str(zip_path),
-        requested_disclosure_no=req_id,
-        expected_ticker="TXXX",
-        expected_period="2027-03-31",
-        expected_quarter="1Q",
-        trusted_provenance=cached_prov,
-    )
-    assert v.passed is True
-    assert v.verdict == "official_linked_xbrl_match"
-
-
-# ================================================================
-# Test N: cache 改ざん (ZIP bytes が変化) → provenance_hash_mismatch
-# ================================================================
-def test_n_cache_tampered(tmp_path):
-    req_id = "20260101000050"
-    int_id = "20260102399999"
-    zip_path = tmp_path / f"{req_id}.zip"
-    _make_zip(zip_path, int_id)
-    original_sha = _sha256(zip_path)
-
-    # ZIP を改ざん
-    zip_path.write_bytes(zip_path.read_bytes() + b"TAMPERED")
-
-    prov = _make_provenance(
-        requested_id=req_id,
-        internal_id=int_id,
-        sha256=original_sha,  # 変更前の hash
-    )
-    v = verify_zip_identity(
-        zip_path=str(zip_path),
-        requested_disclosure_no=req_id,
-        expected_ticker="TXXX",
-        expected_period="2027-03-31",
-        expected_quarter="1Q",
-        trusted_provenance=prov,
-    )
-    assert v.passed is False
-    assert v.rejection_reason in ("broken_zip", "provenance_hash_mismatch")
-
-
-# ================================================================
-# Test O: 9982 相当フィクスチャ (実 ID 使用はテスト内のみ)
-# ================================================================
-def test_o_9982_equivalent_fixture(tmp_path):
-    """requested ID と internal ID が異なる公式関連 XBRL。linked PASS を確認。"""
-    req_id = "20260709590450"   # summary disclosure_no (fixture 専用)
-    int_id = "20260710399820"   # J-Quants 返却 internal ID (fixture 専用)
-    zip_path = tmp_path / f"{req_id}.zip"
-    _make_zip(zip_path, int_id)
-    sha = _sha256(zip_path)
-
+    # 既にキャッシュされている provenance
     prov = _make_provenance(
         requested_id=req_id,
         internal_id=int_id,
         sha256=sha,
-        ticker="9982_fixture",
-        period="2027-02-28",
+        ticker="TXXX",
+        period="2027-03-31",
         quarter="1Q",
-        document_type="attachment_xbrl",
+        downloaded_size=zip_path.stat().st_size,
     )
+    # verify実行
     v = verify_zip_identity(
         zip_path=str(zip_path),
         requested_disclosure_no=req_id,
-        expected_ticker="9982_fixture",
-        expected_period="2027-02-28",
+        expected_ticker="TXXX",
+        expected_period="2027-03-31",
         expected_quarter="1Q",
         trusted_provenance=prov,
     )
@@ -472,51 +473,134 @@ def test_o_9982_equivalent_fixture(tmp_path):
 
 
 # ================================================================
-# Test P: 7601 相当フィクスチャ → exact PASS
+# Test N: キャッシュ改ざん検出 (ファイル内容変更) → provenance_hash_mismatch
 # ================================================================
-def test_p_7601_equivalent_fixture(tmp_path):
-    """完全一致 ZIP (7601 相当)。exact PASS で既存動作不変を確認。"""
-    req_id = "20260709590505"   # fixture 専用
+def test_n_cache_tampered(tmp_path):
+    req_id = "20260101000050"
+    int_id = "20260102399999"
     zip_path = tmp_path / f"{req_id}.zip"
-    _make_zip(zip_path, req_id)  # 内部 ID = requested ID
+    _make_zip(zip_path, int_id, ticker="TXXX", period="2027-03-31", quarter="1Q")
+    sha = _sha256(zip_path)
+
+    # 正常取得時の provenance
+    prov = _make_provenance(
+        requested_id=req_id,
+        internal_id=int_id,
+        sha256=sha,
+        ticker="TXXX",
+        period="2027-03-31",
+        quarter="1Q",
+    )
+
+    # ZIP ファイルが改ざん（上書き）されたとする
+    zip_path.write_bytes(b"PK\x03\x04tamperedzipdata1234567890")
 
     v = verify_zip_identity(
         zip_path=str(zip_path),
         requested_disclosure_no=req_id,
-        expected_ticker="7601_fixture",
-        expected_period="2027-02-28",
+        expected_ticker="TXXX",
+        expected_period="2027-03-31",
         expected_quarter="1Q",
-        trusted_provenance=None,  # exact match なので不要
+        trusted_provenance=prov,
     )
-    assert v.passed is True
-    assert v.verdict == "exact_document_id_match"
+    assert v.passed is False
+    # ハッシュミスマッチ (または破損)
+    assert v.rejection_reason in ("provenance_hash_mismatch", "broken_zip")
 
 
 # ================================================================
-# Test Q: 無関係な同一 ticker ZIP (別期間) → period_mismatch
+# Test O: 9982 相当フィクスチャによる linked verification 疎通確認
 # ================================================================
-def test_q_same_ticker_different_period(tmp_path):
-    """ticker だけ一致する別期間の ZIP → 拒否。"""
-    req_id = "20260101000050"
-    int_id = "20260102399999"
+def test_o_9982_equivalent_fixture(tmp_path):
+    req_id = "20260709590450"
+    int_id = "20260710399820"
+    ticker = "9982"
+    period = "2027-02-28"
+    quarter = "1Q"
+
     zip_path = tmp_path / f"{req_id}.zip"
-    _make_zip(zip_path, int_id)
+    _make_zip(zip_path, int_id, ticker=ticker, period=period, quarter=quarter)
     sha = _sha256(zip_path)
 
     prov = _make_provenance(
         requested_id=req_id,
         internal_id=int_id,
         sha256=sha,
-        ticker="TXXX",  # ticker は一致
-        period="2026-03-31",  # 別期間
-        quarter="1Q",
+        ticker=ticker,
+        period=period,
+        quarter=quarter,
+        downloaded_size=zip_path.stat().st_size,
     )
+
     v = verify_zip_identity(
         zip_path=str(zip_path),
         requested_disclosure_no=req_id,
-        expected_ticker="TXXX",
-        expected_period="2027-03-31",  # 期待期間と不一致
-        expected_quarter="1Q",
+        expected_ticker=ticker,
+        expected_period=period,
+        expected_quarter=quarter,
+        trusted_provenance=prov,
+    )
+    assert v.passed is True
+    assert v.verdict == "official_linked_xbrl_match"
+    assert v.internal_id == int_id
+
+
+# ================================================================
+# Test P: 7601 相当フィクスチャによる exact verification 疎通確認
+# ================================================================
+def test_p_7601_equivalent_fixture(tmp_path):
+    req_id = "20260709590505"
+    ticker = "7601"
+    period = "2027-02-28"
+    quarter = "1Q"
+
+    zip_path = tmp_path / f"{req_id}.zip"
+    _make_zip(zip_path, req_id, ticker=ticker, period=period, quarter=quarter)
+    sha = _sha256(zip_path)
+
+    v = verify_zip_identity(
+        zip_path=str(zip_path),
+        requested_disclosure_no=req_id,
+        expected_ticker=ticker,
+        expected_period=period,
+        expected_quarter=quarter,
+        trusted_provenance=None,
+    )
+    assert v.passed is True
+    assert v.verdict == "exact_document_id_match"
+    assert v.internal_id == req_id
+
+
+# ================================================================
+# Test Q: 同一 ticker・異なる期間の公式 ZIP が渡された場合 → period_mismatch
+# ================================================================
+def test_q_same_ticker_different_period(tmp_path):
+    req_id = "20260709590450"
+    int_id = "20260710399820"
+    ticker = "9982"
+    period = "2027-02-28"
+    quarter = "1Q"
+
+    zip_path = tmp_path / f"{req_id}.zip"
+    # ZIP内の period を "2026-02-28" (別年度) にする
+    _make_zip(zip_path, int_id, ticker=ticker, period="2026-02-28", quarter=quarter)
+    sha = _sha256(zip_path)
+
+    prov = _make_provenance(
+        requested_id=req_id,
+        internal_id=int_id,
+        sha256=sha,
+        ticker=ticker,
+        period="2026-02-28",
+        quarter=quarter,
+    )
+
+    v = verify_zip_identity(
+        zip_path=str(zip_path),
+        requested_disclosure_no=req_id,
+        expected_ticker=ticker,
+        expected_period=period,  # 期待値 "2027-02-28"
+        expected_quarter=quarter,
         trusted_provenance=prov,
     )
     assert v.passed is False
@@ -524,21 +608,23 @@ def test_q_same_ticker_different_period(tmp_path):
 
 
 # ================================================================
-# Test R: 来歴の偽装 (外部入力で作った provenance は source 不一致で拒否)
+# Test R: 偽造 provenance による侵入 → untrusted_source
 # ================================================================
 def test_r_provenance_source_forgery(tmp_path):
-    """外部入力で source を偽った provenance は untrusted_source で拒否。"""
     req_id = "20260101000050"
     int_id = "20260102399999"
     zip_path = tmp_path / f"{req_id}.zip"
-    _make_zip(zip_path, int_id)
+    _make_zip(zip_path, int_id, ticker="TXXX", period="2027-03-31", quarter="1Q")
     sha = _sha256(zip_path)
 
     prov = _make_provenance(
         requested_id=req_id,
         internal_id=int_id,
         sha256=sha,
-        source="external_input",  # 偽装: jquants でない
+        source="external_input",  # 偽: jquants ではない
+        ticker="TXXX",
+        period="2027-03-31",
+        quarter="1Q",
     )
     v = verify_zip_identity(
         zip_path=str(zip_path),
