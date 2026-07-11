@@ -202,12 +202,17 @@ class TestCanonicalSyncFunction:
         assert mock_write.call_count == 0
 
 
-class TestRealtimeSegmentSync:
-    @pytest.fixture(autouse=True)
-    def mock_zip_verification(self):
-        with patch("src.events.earnings_production_pipeline._verify_zip_internal_document_id", return_value=True):
-            yield
+def _make_identity_zip(tmp_path, disclosure_no: str, filename: str = None):
+    import zipfile
+    if not filename:
+        filename = f"dummy_{disclosure_no}.zip"
+    zip_path = tmp_path / filename
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr(f"tse-aced-99820-{disclosure_no}.xml", b"dummy")
+    return zip_path
 
+
+class TestRealtimeSegmentSync:
     @pytest.fixture
     def setup_db(self):
         conn = sqlite3.connect(":memory:")
@@ -321,12 +326,13 @@ class TestRealtimeSegmentSync:
 
     @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip_detailed")
     @patch("lib.pipeline.canonical_writer.write_segments_canonical")
-    def test_sync_canonical_segments_poplar(self, m_write, m_extract):
+    def test_sync_canonical_segments_poplar(self, m_write, m_extract, tmp_path):
         # 16. 前年同期を除外することの確認
         # 27. ポプラ相当1Q
         from src.events.earnings_production_pipeline import _sync_canonical_segments
         from src.segment.models import SegmentRawRow
 
+        zip_path = _make_identity_zip(tmp_path, "20260709590505")
         m_res = MagicMock()
         m_res.status = "success_with_rows"
         m_res.segments = [
@@ -341,7 +347,7 @@ class TestRealtimeSegmentSync:
         m_write.return_value = {"written": 3, "skipped": 0, "errors": 0}
 
         with patch("os.path.exists", return_value=True):
-            _sync_canonical_segments("7601", "2027-02-28", "1Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590505", "C:/xbrl_archive/20260709590505.zip", dry_run=False, route="seq")
+            _sync_canonical_segments("7601", "2027-02-28", "1Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590505", str(zip_path), dry_run=False, route="seq")
 
         assert m_write.call_count == 1
         args = m_write.call_args[1]
@@ -352,11 +358,12 @@ class TestRealtimeSegmentSync:
 
     @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip_detailed")
     @patch("lib.pipeline.canonical_writer.write_segments_canonical")
-    def test_sync_canonical_segments_takihyo(self, m_write, m_extract):
+    def test_sync_canonical_segments_takihyo(self, m_write, m_extract, tmp_path):
         # 28. タキヒヨー相当1Q
         from src.events.earnings_production_pipeline import _sync_canonical_segments
         from src.segment.models import SegmentRawRow
 
+        zip_path = _make_identity_zip(tmp_path, "20260709590450")
         m_res = MagicMock()
         m_res.status = "success_with_rows"
         m_res.segments = [
@@ -369,7 +376,7 @@ class TestRealtimeSegmentSync:
         m_write.return_value = {"written": 4, "skipped": 0, "errors": 0}
 
         with patch("os.path.exists", return_value=True):
-            _sync_canonical_segments("9982", "2027-02-28", "1Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590450", "C:/xbrl_archive/20260709590450.zip", dry_run=False, route="seq")
+            _sync_canonical_segments("9982", "2027-02-28", "1Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590450", str(zip_path), dry_run=False, route="seq")
 
         assert m_write.call_count == 1
         args = m_write.call_args[1]
@@ -377,24 +384,26 @@ class TestRealtimeSegmentSync:
 
     @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip_detailed")
     @patch("lib.pipeline.canonical_writer.write_segments_canonical")
-    def test_sync_canonical_segments_no_data(self, m_write, m_extract):
+    def test_sync_canonical_segments_no_data(self, m_write, m_extract, tmp_path):
         # 24. セグメントなし開示を毎回再解析し続けない (正常終了判定)
         from src.events.earnings_production_pipeline import _sync_canonical_segments
+        zip_path = _make_identity_zip(tmp_path, "20260709590505")
         m_res = MagicMock()
         m_res.status = "success_empty"
         m_res.segments = []
         m_extract.return_value = m_res
         with patch("os.path.exists", return_value=True):
-            _sync_canonical_segments("7601", "2027-02-28", "1Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590505", "C:/xbrl_archive/20260709590505.zip", dry_run=False, route="seq")
+            _sync_canonical_segments("7601", "2027-02-28", "1Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590505", str(zip_path), dry_run=False, route="seq")
         assert m_write.call_count == 0
 
     @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip_detailed")
     @patch("lib.pipeline.canonical_writer.write_segments_canonical")
-    def test_sync_canonical_segments_dry_run(self, m_write, m_extract):
+    def test_sync_canonical_segments_dry_run(self, m_write, m_extract, tmp_path):
         # 11. dry-runでwriter未呼び出し
         from src.events.earnings_production_pipeline import _sync_canonical_segments
         from src.segment.models import SegmentRawRow
 
+        zip_path = _make_identity_zip(tmp_path, "20260709590505")
         m_res = MagicMock()
         m_res.status = "success_with_rows"
         m_res.segments = [
@@ -402,24 +411,26 @@ class TestRealtimeSegmentSync:
         ]
         m_extract.return_value = m_res
         with patch("os.path.exists", return_value=True):
-            _sync_canonical_segments("7601", "2027-02-28", "1Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590505", "C:/xbrl_archive/20260709590505.zip", dry_run=True, route="seq")
+            _sync_canonical_segments("7601", "2027-02-28", "1Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590505", str(zip_path), dry_run=True, route="seq")
         assert m_write.call_count == 0
 
     @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip_detailed")
     @patch("lib.pipeline.canonical_writer.write_segments_canonical")
-    def test_sync_canonical_segments_extract_fail_handled(self, m_write, m_extract):
+    def test_sync_canonical_segments_extract_fail_handled(self, m_write, m_extract, tmp_path):
         # 26. セグメント失敗で通知・PLを巻き戻さない
         from src.events.earnings_production_pipeline import _sync_canonical_segments
+        zip_path = _make_identity_zip(tmp_path, "20260709590505")
         m_extract.side_effect = Exception("Extract error")
         with patch("os.path.exists", return_value=True):
-            _sync_canonical_segments("7601", "2027-02-28", "1Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590505", "C:/xbrl_archive/20260709590505.zip", dry_run=False, route="seq")
+            _sync_canonical_segments("7601", "2027-02-28", "1Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590505", str(zip_path), dry_run=False, route="seq")
         assert m_write.call_count == 0
 
     @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip_detailed")
     @patch("lib.pipeline.canonical_writer.write_segments_canonical")
-    def test_sync_canonical_segments_writer_fail_handled(self, m_write, m_extract):
+    def test_sync_canonical_segments_writer_fail_handled(self, m_write, m_extract, tmp_path):
         from src.events.earnings_production_pipeline import _sync_canonical_segments
         from src.segment.models import SegmentRawRow
+        zip_path = _make_identity_zip(tmp_path, "20260709590505")
         m_res = MagicMock()
         m_res.status = "success_with_rows"
         m_res.segments = [
@@ -428,7 +439,7 @@ class TestRealtimeSegmentSync:
         m_extract.return_value = m_res
         m_write.side_effect = Exception("Write error")
         with patch("os.path.exists", return_value=True):
-            _sync_canonical_segments("7601", "2027-02-28", "1Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590505", "C:/xbrl_archive/20260709590505.zip", dry_run=False, route="seq")
+            _sync_canonical_segments("7601", "2027-02-28", "1Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590505", str(zip_path), dry_run=False, route="seq")
 
     # ───── 新規必須テストケース ─────
 
@@ -451,7 +462,7 @@ class TestRealtimeSegmentSync:
 
     @patch("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip_detailed")
     @patch("lib.pipeline.canonical_writer.write_segments_canonical")
-    def test_context_duration_selection(self, m_write, m_extract):
+    def test_context_duration_selection(self, m_write, m_extract, tmp_path):
         # 12. 1Qの3か月累計を選択
         # 13. 2Qで6か月累計を選択し単独3か月を除外
         # 14. 3Qで9か月累計を選択し単独3か月を除外
@@ -461,6 +472,7 @@ class TestRealtimeSegmentSync:
         from src.events.earnings_production_pipeline import _sync_canonical_segments
         from src.segment.models import SegmentRawRow
 
+        zip_path = _make_identity_zip(tmp_path, "20260709590505")
         # 13. 2Q累計(180日)優先、単独(90日)除外
         m_res = MagicMock()
         m_res.status = "success_with_rows"
@@ -470,7 +482,7 @@ class TestRealtimeSegmentSync:
         ]
         m_extract.return_value = m_res
         with patch("os.path.exists", return_value=True):
-            _sync_canonical_segments("7601", "2027-02-28", "2Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590505", "C:/xbrl_archive/20260709590505.zip", False, "seq")
+            _sync_canonical_segments("7601", "2027-02-28", "2Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590505", str(zip_path), False, "seq")
 
         assert m_write.call_count == 1
         args = m_write.call_args[1]
@@ -487,7 +499,10 @@ class TestRealtimeSegmentSync:
         ]
         m_extract.return_value = m_res2
         with patch("os.path.exists", return_value=True):
-            _sync_canonical_segments("7601", "2027-02-28", "2Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590505", "C:/xbrl_archive/20260709590505.zip", False, "seq")
+            _sync_canonical_segments("7601", "2027-02-28", "2Q", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c", "20260709590505", str(zip_path), False, "seq")
+
+        args = m_write.call_args[1]
+        assert args["segments"][0]["sales"] == 200 # 順序を入れ替えても累計が選ばれる
 
         args = m_write.call_args[1]
         assert args["segments"][0]["sales"] == 200 # 順序を入れ替えても累計が選ばれる
@@ -1644,11 +1659,6 @@ class TestCanonicalCompletionStrictness:
 class TestCanonicalRetryOnDuplicate:
     """Phase 4: 重複スキップ時の canonical 不足分限定再同期の独立検証"""
 
-    @pytest.fixture(autouse=True)
-    def mock_zip_verification(self):
-        with patch("src.events.earnings_production_pipeline._verify_zip_internal_document_id", return_value=True):
-            yield
-
     @patch("src.events.earnings_production_pipeline._sync_canonical_financials")
     @patch("src.events.earnings_production_pipeline._sync_canonical_segments")
     @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved")
@@ -1658,12 +1668,13 @@ class TestCanonicalRetryOnDuplicate:
     @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
     @patch("os.path.exists", return_value=True)
     def test_helper_pl_and_segment_both_complete(
-        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl, tmp_path
     ):
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
         mock_client = MagicMock()
         m_get_supabase.return_value = mock_client
-        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+        zip_path = _make_identity_zip(tmp_path, "20260709590505")
+        m_find.return_value = str(zip_path)
 
         fid = "a" * 64
         disclosure_no = "20260709590505"
@@ -1680,7 +1691,7 @@ class TestCanonicalRetryOnDuplicate:
             quarter="1Q",
             filing_id=fid,
             disclosure_no=disclosure_no,
-            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            xbrl_path=str(zip_path),
             pl_values=pl_vals,
             dry_run=False,
             target_segs=target_segs,
@@ -1697,12 +1708,13 @@ class TestCanonicalRetryOnDuplicate:
     @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
     @patch("os.path.exists", return_value=True)
     def test_helper_pl_incomplete_seg_complete(
-        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl, tmp_path
     ):
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
         mock_client = MagicMock()
         m_get_supabase.return_value = mock_client
-        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+        zip_path = _make_identity_zip(tmp_path, "20260709590505")
+        m_find.return_value = str(zip_path)
 
         fid = "a" * 64
         disclosure_no = "20260709590505"
@@ -1719,7 +1731,7 @@ class TestCanonicalRetryOnDuplicate:
             quarter="1Q",
             filing_id=fid,
             disclosure_no=disclosure_no,
-            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            xbrl_path=str(zip_path),
             pl_values=pl_vals,
             dry_run=False,
             target_segs=target_segs,
@@ -1736,12 +1748,13 @@ class TestCanonicalRetryOnDuplicate:
     @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
     @patch("os.path.exists", return_value=True)
     def test_helper_pl_complete_seg_incomplete(
-        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl, tmp_path
     ):
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
         mock_client = MagicMock()
         m_get_supabase.return_value = mock_client
-        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+        zip_path = _make_identity_zip(tmp_path, "20260709590505")
+        m_find.return_value = str(zip_path)
 
         fid = "a" * 64
         disclosure_no = "20260709590505"
@@ -1758,7 +1771,7 @@ class TestCanonicalRetryOnDuplicate:
             quarter="1Q",
             filing_id=fid,
             disclosure_no=disclosure_no,
-            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            xbrl_path=str(zip_path),
             pl_values=pl_vals,
             dry_run=False,
             target_segs=target_segs,
@@ -2035,12 +2048,13 @@ class TestCanonicalRetryOnDuplicate:
     @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
     @patch("os.path.exists", return_value=True)
     def test_helper_pl_values_empty(
-        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl, tmp_path
     ):
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
         mock_client = MagicMock()
         m_get_supabase.return_value = mock_client
-        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+        zip_path = _make_identity_zip(tmp_path, "20260709590505")
+        m_find.return_value = str(zip_path)
 
         fid = "a" * 64
         disclosure_no = "20260709590505"
@@ -2056,7 +2070,7 @@ class TestCanonicalRetryOnDuplicate:
             quarter="1Q",
             filing_id=fid,
             disclosure_no=disclosure_no,
-            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            xbrl_path=str(zip_path),
             pl_values=pl_vals,
             dry_run=False,
             target_segs=target_segs,
@@ -2074,12 +2088,13 @@ class TestCanonicalRetryOnDuplicate:
     @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
     @patch("os.path.exists", return_value=True)
     def test_helper_pl_still_incomplete(
-        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl, tmp_path
     ):
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
         mock_client = MagicMock()
         m_get_supabase.return_value = mock_client
-        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+        zip_path = _make_identity_zip(tmp_path, "20260709590505")
+        m_find.return_value = str(zip_path)
 
         fid = "a" * 64
         disclosure_no = "20260709590505"
@@ -2094,7 +2109,7 @@ class TestCanonicalRetryOnDuplicate:
             quarter="1Q",
             filing_id=fid,
             disclosure_no=disclosure_no,
-            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            xbrl_path=str(zip_path),
             pl_values=pl_vals,
             dry_run=False,
             target_segs=None,
@@ -2112,12 +2127,13 @@ class TestCanonicalRetryOnDuplicate:
     @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
     @patch("os.path.exists", return_value=True)
     def test_helper_segment_still_incomplete(
-        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl, tmp_path
     ):
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
         mock_client = MagicMock()
         m_get_supabase.return_value = mock_client
-        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+        zip_path = _make_identity_zip(tmp_path, "20260709590505")
+        m_find.return_value = str(zip_path)
 
         fid = "a" * 64
         disclosure_no = "20260709590505"
@@ -2134,7 +2150,7 @@ class TestCanonicalRetryOnDuplicate:
             quarter="1Q",
             filing_id=fid,
             disclosure_no=disclosure_no,
-            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            xbrl_path=str(zip_path),
             pl_values=pl_vals,
             dry_run=False,
             target_segs=target_segs,
@@ -2152,12 +2168,13 @@ class TestCanonicalRetryOnDuplicate:
     @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
     @patch("os.path.exists", return_value=True)
     def test_helper_dry_run(
-        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl, tmp_path
     ):
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
         mock_client = MagicMock()
         m_get_supabase.return_value = mock_client
-        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+        zip_path = _make_identity_zip(tmp_path, "20260709590505")
+        m_find.return_value = str(zip_path)
 
         fid = "a" * 64
         disclosure_no = "20260709590505"
@@ -2174,7 +2191,7 @@ class TestCanonicalRetryOnDuplicate:
             quarter="1Q",
             filing_id=fid,
             disclosure_no=disclosure_no,
-            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            xbrl_path=str(zip_path),
             pl_values=pl_vals,
             dry_run=True,
             target_segs=target_segs,
@@ -2193,12 +2210,13 @@ class TestCanonicalRetryOnDuplicate:
     @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
     @patch("os.path.exists", return_value=True)
     def test_helper_zip_id_mismatch(
-        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl, tmp_path
     ):
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
         mock_client = MagicMock()
         m_get_supabase.return_value = mock_client
-        m_find.return_value = "C:/xbrl_cache/7601_99999999999999.zip"
+        zip_path = _make_identity_zip(tmp_path, "99999999999999")
+        m_find.return_value = str(zip_path)
 
         fid = "a" * 64
         disclosure_no = "20260709590505"
@@ -2213,7 +2231,7 @@ class TestCanonicalRetryOnDuplicate:
             quarter="1Q",
             filing_id=fid,
             disclosure_no=disclosure_no,
-            xbrl_path="C:/xbrl_cache/7601_99999999999999.zip",
+            xbrl_path=str(zip_path),
             pl_values=pl_vals,
             dry_run=False,
             target_segs=None,
@@ -2230,12 +2248,13 @@ class TestCanonicalRetryOnDuplicate:
     @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
     @patch("os.path.exists", return_value=True)
     def test_helper_segment_extraction_empty(
-        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl, tmp_path
     ):
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
         mock_client = MagicMock()
         m_get_supabase.return_value = mock_client
-        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+        zip_path = _make_identity_zip(tmp_path, "20260709590505")
+        m_find.return_value = str(zip_path)
 
         fid = "a" * 64
         disclosure_no = "20260709590505"
@@ -2251,7 +2270,7 @@ class TestCanonicalRetryOnDuplicate:
             quarter="1Q",
             filing_id=fid,
             disclosure_no=disclosure_no,
-            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            xbrl_path=str(zip_path),
             pl_values=pl_vals,
             dry_run=False,
             target_segs=None,
@@ -2268,12 +2287,13 @@ class TestCanonicalRetryOnDuplicate:
     @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
     @patch("os.path.exists", return_value=True)
     def test_helper_target_segs_reused(
-        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl, tmp_path
     ):
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
         mock_client = MagicMock()
         m_get_supabase.return_value = mock_client
-        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+        zip_path = _make_identity_zip(tmp_path, "20260709590505")
+        m_find.return_value = str(zip_path)
 
         fid = "a" * 64
         disclosure_no = "20260709590505"
@@ -2290,7 +2310,7 @@ class TestCanonicalRetryOnDuplicate:
             quarter="1Q",
             filing_id=fid,
             disclosure_no=disclosure_no,
-            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            xbrl_path=str(zip_path),
             pl_values=pl_vals,
             dry_run=False,
             target_segs=target_segs,
@@ -2309,12 +2329,13 @@ class TestCanonicalRetryOnDuplicate:
     @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
     @patch("os.path.exists", return_value=True)
     def test_helper_pl_exception_segment_continues(
-        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl, tmp_path
     ):
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
         mock_client = MagicMock()
         m_get_supabase.return_value = mock_client
-        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+        zip_path = _make_identity_zip(tmp_path, "20260709590505")
+        m_find.return_value = str(zip_path)
 
         fid = "a" * 64
         disclosure_no = "20260709590505"
@@ -2332,7 +2353,7 @@ class TestCanonicalRetryOnDuplicate:
             quarter="1Q",
             filing_id=fid,
             disclosure_no=disclosure_no,
-            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            xbrl_path=str(zip_path),
             pl_values=pl_vals,
             dry_run=False,
             target_segs=target_segs,
@@ -2350,12 +2371,13 @@ class TestCanonicalRetryOnDuplicate:
     @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
     @patch("os.path.exists", return_value=True)
     def test_helper_segment_exception_safe_exit(
-        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl, tmp_path
     ):
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
         mock_client = MagicMock()
         m_get_supabase.return_value = mock_client
-        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+        zip_path = _make_identity_zip(tmp_path, "20260709590505")
+        m_find.return_value = str(zip_path)
 
         fid = "a" * 64
         disclosure_no = "20260709590505"
@@ -2373,7 +2395,7 @@ class TestCanonicalRetryOnDuplicate:
             quarter="1Q",
             filing_id=fid,
             disclosure_no=disclosure_no,
-            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            xbrl_path=str(zip_path),
             pl_values=pl_vals,
             dry_run=False,
             target_segs=target_segs,
@@ -2480,12 +2502,13 @@ class TestCanonicalRetryOnDuplicate:
     @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
     @patch("os.path.exists", return_value=True)
     def test_helper_9982_model(
-        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl, tmp_path
     ):
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
         mock_client = MagicMock()
         m_get_supabase.return_value = mock_client
-        m_find.return_value = "C:/xbrl_cache/9982_20260709590450.zip"
+        zip_path = _make_identity_zip(tmp_path, "20260709590450")
+        m_find.return_value = str(zip_path)
 
         fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
         disclosure_no = "20260709590450"
@@ -2507,7 +2530,7 @@ class TestCanonicalRetryOnDuplicate:
             quarter="1Q",
             filing_id=fid,
             disclosure_no=disclosure_no,
-            xbrl_path="C:/xbrl_cache/9982_20260709590450.zip",
+            xbrl_path=str(zip_path),
             pl_values=pl_vals,
             dry_run=False,
             target_segs=target_segs,
@@ -2531,12 +2554,13 @@ class TestCanonicalRetryOnDuplicate:
     @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
     @patch("os.path.exists", return_value=True)
     def test_helper_7601_model(
-        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl
+        self, m_exists, m_find, m_get_supabase, m_extract_and_filter, m_check_seg, m_check_pl, m_sync_seg, m_sync_pl, tmp_path
     ):
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
         mock_client = MagicMock()
         m_get_supabase.return_value = mock_client
-        m_find.return_value = "C:/xbrl_cache/7601_20260709590505.zip"
+        zip_path = _make_identity_zip(tmp_path, "20260709590505")
+        m_find.return_value = str(zip_path)
 
         fid = "4836e8c1953047daf09850a4b7f86ef0186f8ab85a348e41355323f2c3bf1da8"
         disclosure_no = "20260709590505"
@@ -2557,7 +2581,7 @@ class TestCanonicalRetryOnDuplicate:
             quarter="1Q",
             filing_id=fid,
             disclosure_no=disclosure_no,
-            xbrl_path="C:/xbrl_cache/7601_20260709590505.zip",
+            xbrl_path=str(zip_path),
             pl_values=pl_vals,
             dry_run=False,
             target_segs=target_segs,
