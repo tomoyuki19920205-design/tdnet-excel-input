@@ -2602,7 +2602,7 @@ class TestNoSegmentInfoStateManagement:
         mock_query.eq.return_value = mock_query
         mock_query.limit.return_value = mock_query
         mock_query.execute.return_value.data = select_data
-        
+
         mock_client.table.return_value.select.return_value = mock_query
         mock_client.table.return_value.update.return_value = mock_query
         return mock_query
@@ -2622,7 +2622,7 @@ class TestNoSegmentInfoStateManagement:
         mock_client = MagicMock()
         fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
         d_no = "20260709590450"
-        
+
         self._setup_mock_supabase(mock_client, [{
             "id": "event_uuid_1",
             "source_doc_id": fid,
@@ -2667,7 +2667,7 @@ class TestNoSegmentInfoStateManagement:
         mock_client = MagicMock()
         fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
         d_no = "20260709590450"
-        
+
         self._setup_mock_supabase(mock_client, [{
             "id": "uuid_x",
             "source_doc_id": fid,
@@ -2688,7 +2688,7 @@ class TestNoSegmentInfoStateManagement:
         mock_client = MagicMock()
         fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
         d_no = "20260709590450"
-        
+
         self._setup_mock_supabase(mock_client, [{
             "id": "uuid_x",
             "source_doc_id": fid,
@@ -2709,7 +2709,7 @@ class TestNoSegmentInfoStateManagement:
         mock_client = MagicMock()
         fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
         d_no = "20260709590450"
-        
+
         self._setup_mock_supabase(mock_client, [{
             "id": "uuid_x",
             "source_doc_id": fid,
@@ -2730,7 +2730,7 @@ class TestNoSegmentInfoStateManagement:
         mock_client = MagicMock()
         fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
         d_no = "20260709590450"
-        
+
         self._setup_mock_supabase(mock_client, [{
             "id": "uuid_x",
             "source_doc_id": fid,
@@ -2751,7 +2751,7 @@ class TestNoSegmentInfoStateManagement:
         mock_client = MagicMock()
         fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
         d_no = "20260709590450"
-        
+
         self._setup_mock_supabase(mock_client, [{
             "id": "uuid_x",
             "source_doc_id": fid,
@@ -2772,7 +2772,7 @@ class TestNoSegmentInfoStateManagement:
         mock_client = MagicMock()
         fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
         d_no = "20260709590450"
-        
+
         self._setup_mock_supabase(mock_client, [{
             "id": "uuid_x",
             "source_doc_id": fid,
@@ -2793,7 +2793,7 @@ class TestNoSegmentInfoStateManagement:
         mock_client = MagicMock()
         fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
         d_no = "20260709590450"
-        
+
         self._setup_mock_supabase(mock_client, [{
             "id": "uuid_x",
             "source_doc_id": fid,
@@ -2828,7 +2828,6 @@ class TestNoSegmentInfoStateManagement:
             "raw_payload": {"title": "2027年2月期 第1四半期決算短信"}
         }])
         m_get_supabase.return_value = mock_client
-        
         def side_effect(*args, **kwargs):
             import src.events.earnings_production_pipeline
             dummy_res = MagicMock()
@@ -3055,7 +3054,6 @@ class TestNoSegmentInfoStateManagement:
             "raw_payload": {"title": "dummy title"}
         }])
         m_get_supabase.return_value = mock_client
-        
         def side_effect(*args, **kwargs):
             import src.events.earnings_production_pipeline
             dummy_res = MagicMock()
@@ -3098,7 +3096,6 @@ class TestNoSegmentInfoStateManagement:
             "raw_payload": {"title": "dummy title"}
         }])
         m_get_supabase.return_value = mock_client
-        
         def side_effect(*args, **kwargs):
             import src.events.earnings_production_pipeline
             dummy_res = MagicMock()
@@ -3132,7 +3129,6 @@ class TestNoSegmentInfoStateManagement:
             "raw_payload": {"title": "dummy title"}
         }])
         m_get_supabase.return_value = mock_client
-        
         def side_effect(*args, **kwargs):
             import src.events.earnings_production_pipeline
             dummy_res = MagicMock()
@@ -3159,7 +3155,7 @@ class TestNoSegmentInfoStateManagement:
         mock_client = MagicMock()
         self._setup_mock_supabase(mock_client, [])
         m_get_supabase.return_value = mock_client
-        
+
         _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=str(zip_path), pl_values={"sales": 100, "op": 10}, dry_run=False)
         mock_client.table.return_value.update.assert_not_called()
 
@@ -3177,7 +3173,7 @@ class TestNoSegmentInfoStateManagement:
         mock_client = MagicMock()
         self._setup_mock_supabase(mock_client, [{"id": "id1"}, {"id": "id2"}])
         m_get_supabase.return_value = mock_client
-        
+
         _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=str(zip_path), pl_values={"sales": 100, "op": 10}, dry_run=False)
         mock_client.table.return_value.update.assert_not_called()
 
@@ -3203,7 +3199,6 @@ class TestNoSegmentInfoStateManagement:
         }])
         mock_client.table.return_value.update.side_effect = RuntimeError("Supabase error simulation")
         m_get_supabase.return_value = mock_client
-        
         def side_effect(*args, **kwargs):
             import src.events.earnings_production_pipeline
             dummy_res = MagicMock()
@@ -3262,7 +3257,6 @@ class TestNoSegmentInfoStateManagement:
             }
         }])
         m_get_supabase.return_value = mock_client
-        
         def side_effect(*args, **kwargs):
             import src.events.earnings_production_pipeline
             dummy_res = MagicMock()
@@ -3415,7 +3409,6 @@ class TestNoSegmentInfoStateManagement:
             "raw_payload": {"title": "2027年2月期 第1四半期決算短信"}
         }])
         m_get_supabase.return_value = mock_client
-        
         def side_effect(*args, **kwargs):
             import src.events.earnings_production_pipeline
             dummy_res = MagicMock()
@@ -3460,7 +3453,6 @@ class TestNoSegmentInfoStateManagement:
             "raw_payload": {"title": "2027年2月期 第1四半期決算短信"}
         }])
         m_get_supabase.return_value = mock_client
-        
         def side_effect(*args, **kwargs):
             import src.events.earnings_production_pipeline
             dummy_res = MagicMock()
@@ -3504,7 +3496,6 @@ class TestNoSegmentInfoStateManagement:
 
         self._setup_mock_supabase(mock_client, [])
         m_get_supabase.return_value = mock_client
-        
         def side_effect(*args, **kwargs):
             import src.events.earnings_production_pipeline
             dummy_res = MagicMock()
@@ -3525,7 +3516,7 @@ class TestNoSegmentInfoStateManagement:
         doc.company_name = "株式会社ダミー"
         doc.disclosure_datetime = "2026-07-10T15:00:00+09:00"
         doc.published_at = "2026-07-10T15:00:00+09:00"
-        
+
         conn = sqlite3.connect(":memory:")
 
         env_patches = {
@@ -3547,7 +3538,7 @@ class TestNoSegmentInfoStateManagement:
                         )
                         m_save_sb.assert_called_once()
                         inserted_rec = m_save_sb.call_args[0][0]
-                        
+
                         # ID分離の厳格なアサーション
                         assert inserted_rec.source_doc_id == filing_id # Supabase EventRecord の Exact Gate 用 ID
                         import json
@@ -3555,7 +3546,7 @@ class TestNoSegmentInfoStateManagement:
                         assert raw_payload["canonical_sync_state"]["segments"]["status"] == "no_segment_info"
                         assert raw_payload["canonical_sync_state"]["segments"]["filing_id"] == filing_id # 64桁であることを検証
                         assert raw_payload["canonical_sync_state"]["segments"]["disclosure_no"] == disclosure_no # 14桁であることを検証
-                        
+
                         # 完了判定に 64桁の filing_id が正しく伝播しているかを call_args で検証
                         m_check_pl.assert_called()
                         m_check_seg.assert_called()
@@ -3761,7 +3752,7 @@ class TestNoSegmentInfoStateManagement:
         fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
         d_no = "20260709590450"
         zip_path = tmp_path / f"9982_{d_no}.zip"
-        
+
         # 内部に無関係なファイル名のみを書き込む
         import zipfile
         zip_path.parent.mkdir(parents=True, exist_ok=True)
@@ -3831,7 +3822,7 @@ class TestNoSegmentInfoStateManagement:
             "raw_payload": {"title": "2027年2月期 第1四半期決算短信"}
         }])
         m_get_supabase.return_value = mock_client
-        
+
         def side_effect(*args, **kwargs):
             import src.events.earnings_production_pipeline
             dummy_res = MagicMock()
@@ -3867,7 +3858,7 @@ class TestNoSegmentInfoStateManagement:
             _check_canonical_segments_saved
         )
         mock_client = MagicMock()
-        
+
         # Financials 判定
         res_pl = _check_canonical_financials_saved(
             client=mock_client,
@@ -3879,7 +3870,7 @@ class TestNoSegmentInfoStateManagement:
         )
         assert res_pl is False
         mock_client.table.assert_not_called() # SELECTを実行していないこと
-        
+
         # Segments 判定
         res_seg = _check_canonical_segments_saved(
             client=mock_client,
@@ -3899,26 +3890,26 @@ class TestNoSegmentInfoStateManagement:
         from src.events.earnings_production_pipeline import _verify_zip_internal_document_id
         import zipfile
         import os
-        
+
         # 1. 正常ZIP＋内部ID一致
         ok_zip_path = tmp_path / "ok.zip"
         with zipfile.ZipFile(ok_zip_path, "w") as zf:
             zf.writestr("tse-aced-99820-20260709590450.xml", b"dummy")
         assert _verify_zip_internal_document_id(str(ok_zip_path), "20260709590450") is True
-        
+
         # 2. 正常ZIP＋内部ID不一致
         assert _verify_zip_internal_document_id(str(ok_zip_path), "20260709590505") is False
-        
+
         # 3. 破損ZIP（basenameが一致していてもFalseを返すこと）
         broken_zip_path = tmp_path / "9982_20260709590450.zip"
         broken_zip_path.write_bytes(b"invalid zip content")
         assert _verify_zip_internal_document_id(str(broken_zip_path), "20260709590450") is False
-        
+
         # 4. ZIP内部ID取得不能
         no_id_zip_path = tmp_path / "noid.zip"
         with zipfile.ZipFile(no_id_zip_path, "w") as zf:
             zf.writestr("unrelated_file.txt", b"dummy")
         assert _verify_zip_internal_document_id(str(no_id_zip_path), "20260709590450") is False
-        
+
         # 5. 無効なdisclosure_no
         assert _verify_zip_internal_document_id(str(ok_zip_path), "invalid_no") is False

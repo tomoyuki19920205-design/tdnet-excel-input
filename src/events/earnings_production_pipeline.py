@@ -160,10 +160,9 @@ def _verify_zip_internal_document_id(zip_path: str, expected_disclosure_no: str)
     """
     if not zip_path or not os.path.exists(zip_path):
         return False
-        
+
     import zipfile
     from src.events.common_normalizers import extract_common_disclosure_no
-    
     try:
         with zipfile.ZipFile(zip_path, "r") as zf:
             for name in zf.namelist():
@@ -805,10 +804,10 @@ def _retry_incomplete_canonical_for_duplicate(
             else:
                 zip_basename = os.path.basename(resolved_zip)
                 zip_no = extract_common_disclosure_no(zip_basename)
-                
+
                 # ZIP 内部書類 ID の検証を追加
                 zip_internal_ok = _verify_zip_internal_document_id(resolved_zip, disclosure_no)
-                
+
                 if not zip_no or zip_no != disclosure_no or not zip_internal_ok:
                     logger.info(
                         "[EARNINGS][CANONICAL_RETRY] ticker=%s kind=segments status=unresolved reason=zip_doc_id_mismatch",
@@ -1562,7 +1561,7 @@ def run_earnings_production(
                     _pre_target_segs = None
                     _pre_detailed_result = None
                     _resolved_zip = _find_cached_xbrl(xbrl_dir, _ticker, doc_id=_disclosure_no)
-                    
+
                     try:
                         # ZIP 内部書類 ID の検証を追加
                         _zip_internal_ok = _verify_zip_internal_document_id(_resolved_zip, _disclosure_no)
@@ -1580,7 +1579,6 @@ def run_earnings_production(
                                     _resolved_zip, _period, _q
                                 )
                                 _pre_detailed_result = _last_detailed_result
-                                
                                 # success_empty かつ 2026-07-05 境界確認
                                 if _pre_detailed_result and getattr(_pre_detailed_result, "status", None) == "success_empty":
                                     _disclosed_at = _ev_dict.get("disclosure_datetime") or ""
@@ -1627,7 +1625,7 @@ def run_earnings_production(
                     _ev_rec_fields = {k: v for k, v in _ev_dict.items() if k not in ("source_url", "archive_path")}
                     _ev_rec = EventRecord(**_ev_rec_fields)
                     _sup_res = save_event_to_supabase(_ev_rec)
-                    
+
                     # 登録削除
                     _pending_no_segment_states.pop(canonical_filing_id, None)
 
@@ -2306,7 +2304,7 @@ def run_earnings_production(
                                     xbrl_path, _seq_period, quarter
                                 )
                                 _pre_detailed_result = _last_detailed_result
-                                
+
                                 # success_empty かつ 2026-07-05 境界確認
                                 if _pre_detailed_result and getattr(_pre_detailed_result, "status", None) == "success_empty":
                                     _disclosed_at = getattr(doc, "disclosure_datetime", "") or getattr(doc, "published_at", "") or ""
