@@ -19,6 +19,36 @@ class DummyDoc:
     def __getattr__(self, name):
         return ""
 
+
+@pytest.fixture(autouse=True)
+def mock_resolve_xbrl_zip_default(tmp_path_factory):
+    from src.segment.segment_zip_resolver import ZipResolveResult
+    tmp_dir = tmp_path_factory.mktemp("default_zip_dir")
+    dummy_zip = make_identity_test_zip(
+        tmp_path=tmp_dir,
+        requested_disclosure_no="20260709590505",
+        internal_document_id="20260709590505",
+        ticker="7601",
+        period="2027-02-28",
+        quarter="1Q",
+        document_type="attachment_xbrl"
+    )
+    with patch("src.segment.segment_zip_resolver.resolve_xbrl_zip") as m:
+        m.return_value = ZipResolveResult(
+            zip_path=str(dummy_zip),
+            source="tdnet_cache",
+            status="FOUND_CACHE",
+            error_reason="",
+            cache_hit=True,
+            downloaded=False,
+            requested_disclosure_no="20260709590505",
+            zip_sha256="c2349e5d0d17ac367cf104ad693382f05c086d4e81b2832cab0dc799a53d20f4",
+            trusted_provenance=None,
+            resolution_kind="exact_cache"
+        )
+        yield m
+
+
 class TestCanonicalSyncIntegration:
     @pytest.fixture
     def setup_db(self):
@@ -202,14 +232,77 @@ class TestCanonicalSyncFunction:
         assert mock_write.call_count == 0
 
 
-def _make_identity_zip(tmp_path, disclosure_no: str, filename: str = None):
+def make_identity_test_zip(
+    tmp_path,
+    requested_disclosure_no,
+    internal_document_id,
+    ticker,
+    period,
+    quarter,
+    document_type,
+):
+    if document_type != "attachment_xbrl":
+        raise ValueError("This fixture helper supports attachment_xbrl only")
+
     import zipfile
-    if not filename:
-        filename = f"dummy_{disclosure_no}.zip"
-    zip_path = tmp_path / filename
+    ticker_5 = f"{ticker}0" if len(ticker) == 4 else ticker
+    xml_name = f"tse-aced-{ticker_5}-{internal_document_id}.xml"
+    htm_name = f"Summary_{internal_document_id}.htm"
+        
+    zip_path = tmp_path / f"test_{requested_disclosure_no}.zip"
+    q_val = {"1Q": "1", "2Q": "2", "3Q": "3", "FY": "4"}.get(quarter, "4")
+    
+    htm_content = f"""
+    <html>
+      <body>
+        <xbrli:endDate>{period}</xbrli:endDate>
+        <QuarterlyPeriod>{q_val}</QuarterlyPeriod>
+        <ix:nonNumeric scheme="http://example.com/sicc">{ticker_5}</ix:nonNumeric>
+      </body>
+    </html>
+    """
     with zipfile.ZipFile(zip_path, "w") as zf:
-        zf.writestr(f"tse-aced-99820-{disclosure_no}.xml", b"dummy")
+        zf.writestr(xml_name, b"<dummy/>")
+        zf.writestr(htm_name, htm_content.encode("utf-8"))
+        
     return zip_path
+
+
+def _make_identity_zip(tmp_path, disclosure_no: str, filename: str = None, quarter: str = "1Q"):
+    ticker = "7601"
+    if "9982" in disclosure_no or disclosure_no == "20260709590450" or (filename and "9982" in filename):
+        ticker = "9982"
+    elif "9999" in disclosure_no:
+        ticker = "9999"
+        
+    return make_identity_test_zip(
+        tmp_path=tmp_path,
+        requested_disclosure_no=disclosure_no,
+        internal_document_id=disclosure_no,
+        ticker=ticker,
+        period="2027-02-28",
+        quarter=quarter,
+        document_type="attachment_xbrl"
+    )
+
+
+def test_make_identity_test_zip_single(tmp_path):
+    from src.segment.zip_identity_verifier import extract_actual_metadata_from_zip
+    zip_path = make_identity_test_zip(
+        tmp_path=tmp_path,
+        requested_disclosure_no="20260709590505",
+        internal_document_id="20260709590505",
+        ticker="7601",
+        period="2027-02-28",
+        quarter="1Q",
+        document_type="attachment_xbrl"
+    )
+    meta = extract_actual_metadata_from_zip(str(zip_path))
+    assert meta["ticker"] == "7601"
+    assert meta["period"] == "2027-02-28"
+    assert meta["quarter"] == "1Q"
+    assert meta["internal_document_id"] == "20260709590505"
+    assert meta["document_type"] == "attachment_xbrl"
 
 
 class TestRealtimeSegmentSync:
@@ -225,12 +318,26 @@ class TestRealtimeSegmentSync:
     @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
     @patch("src.events.earnings_production_pipeline._save_earnings_to_tdnet_events")
     @patch("src.events.earnings_production_pipeline.load_json")
-    def test_segment_sync_sequential_called(self, m_load, m_save, m_cache, m_sync_fin, m_sync_seg, setup_db, monkeypatch):
+    @patch("src.segment.segment_zip_resolver.resolve_xbrl_zip")
+    def test_segment_sync_sequential_called(self, m_resolve, m_load, m_save, m_cache, m_sync_fin, m_sync_seg, setup_db, monkeypatch):
         # 8. 逐次ルートで両識別子が正しく渡る
         # 25. PL保存成功を維持
         # 27. ポプラ相当1Q
+        from src.segment.segment_zip_resolver import ZipResolveResult
         monkeypatch.setenv("USE_SUBPROCESS_WORKER", "0")
         m_cache.return_value = "C:/xbrl_archive/20260709590505.zip"
+        m_resolve.return_value = ZipResolveResult(
+            zip_path="C:/xbrl_archive/20260709590505.zip",
+            source="tdnet_cache",
+            status="FOUND_CACHE",
+            error_reason="",
+            cache_hit=True,
+            downloaded=False,
+            requested_disclosure_no="20260709590505",
+            zip_sha256="c2349e5d0d17ac367cf104ad693382f05c086d4e81b2832cab0dc799a53d20f4",
+            trusted_provenance=None,
+            resolution_kind="exact_cache"
+        )
         m_save.return_value = {"action": "inserted"}
 
         e = EarningsSummaryData(sales_current=123, op_current=45)
@@ -262,10 +369,12 @@ class TestRealtimeSegmentSync:
     @patch("src.events.earnings_production_pipeline._sync_canonical_segments")
     @patch("src.events.earnings_production_pipeline._sync_canonical_financials")
     @patch("src.events.earnings_production_pipeline._save_earnings_to_tdnet_events")
-    def test_segment_sync_subprocess_called(self, m_save, m_sync_fin, m_sync_seg, setup_db, monkeypatch):
+    @patch("src.segment.segment_zip_resolver.resolve_xbrl_zip")
+    def test_segment_sync_subprocess_called(self, m_resolve, m_save, m_sync_fin, m_sync_seg, setup_db, monkeypatch):
         # 9. サブプロセスルートで両識別子が正しく渡る
         # 10. サブプロセスでXBRLパスがNoneにならない正常例
         # 28. タキヒヨー相当1Q
+        from src.segment.segment_zip_resolver import ZipResolveResult
         monkeypatch.setenv("USE_SUBPROCESS_WORKER", "1")
         monkeypatch.setenv("EARNINGS_SUBPROCESS_ENABLE_REAL_SAVE", "1")
         monkeypatch.setenv("EARNINGS_SUBPROCESS_ALLOWLIST", "9982")
@@ -283,6 +392,18 @@ class TestRealtimeSegmentSync:
             m_valid.return_value = (True, "")
             m_cp_valid.return_value = (True, "")
             m_cache.return_value = "C:/xbrl_archive/20260709590450.zip"
+            m_resolve.return_value = ZipResolveResult(
+                zip_path="C:/xbrl_archive/20260709590450.zip",
+                source="tdnet_cache",
+                status="FOUND_CACHE",
+                error_reason="",
+                cache_hit=True,
+                downloaded=False,
+                requested_disclosure_no="20260709590450",
+                zip_sha256="719f1592f98cd05c2a60601726e3635f5495af899c188693f85ce487dae0a5b5",
+                trusted_provenance=None,
+                resolution_kind="exact_cache"
+            )
             m_payload.return_value = {
                 "extracted": {
                     "period": "2027-02-28",
@@ -472,7 +593,7 @@ class TestRealtimeSegmentSync:
         from src.events.earnings_production_pipeline import _sync_canonical_segments
         from src.segment.models import SegmentRawRow
 
-        zip_path = _make_identity_zip(tmp_path, "20260709590505")
+        zip_path = _make_identity_zip(tmp_path, "20260709590505", quarter="2Q")
         # 13. 2Q累計(180日)優先、単独(90日)除外
         m_res = MagicMock()
         m_res.status = "success_with_rows"
@@ -525,8 +646,22 @@ class TestRealtimeSegmentSync:
              patch("src.events.earnings_production_pipeline._sync_canonical_segments") as m_seg, \
              patch("src.events.earnings_production_pipeline._save_earnings_to_tdnet_events") as m_save, \
              patch("src.events.earnings_production_pipeline._find_cached_xbrl", return_value="C:/xbrl_archive/20260709590505.zip"), \
-             patch("src.events.earnings_production_pipeline.load_json") as m_load:
+             patch("src.events.earnings_production_pipeline.load_json") as m_load, \
+             patch("src.segment.segment_zip_resolver.resolve_xbrl_zip") as m_resolve:
 
+            from src.segment.segment_zip_resolver import ZipResolveResult
+            m_resolve.return_value = ZipResolveResult(
+                zip_path="C:/xbrl_archive/20260709590505.zip",
+                source="tdnet_cache",
+                status="FOUND_CACHE",
+                error_reason="",
+                cache_hit=True,
+                downloaded=False,
+                requested_disclosure_no="20260709590505",
+                zip_sha256="c2349e5d0d17ac367cf104ad693382f05c086d4e81b2832cab0dc799a53d20f4",
+                trusted_provenance=None,
+                resolution_kind="exact_cache"
+            )
             m_save.return_value = {"action": "dedup_skipped"}
 
             e = EarningsSummaryData(sales_current=123, op_current=45)
@@ -592,8 +727,15 @@ class TestRealtimeSegmentIdentity:
         # テスト用のZIPを作成
         zip_dir = tmp_path / "xbrl_cache"
         zip_dir.mkdir()
-        zip_path = zip_dir / "7601_20260709590505.zip"
-        zip_path.write_bytes(b"dummy zip content")
+        zip_path = make_identity_test_zip(
+            tmp_path=zip_dir,
+            requested_disclosure_no="20260709590505",
+            internal_document_id="20260709590505",
+            ticker="7601",
+            period="2027-02-28",
+            quarter="1Q",
+            document_type="attachment_xbrl"
+        )
 
         # extract_segments_from_xbrl_zip が返すモックデータ
         m_res = MagicMock()
@@ -663,8 +805,15 @@ class TestRealtimeSegmentIdentity:
         # 6. ZIP書類ID不一致でwriter未呼び出し
         m_write.reset_mock()
         # zip_path を 9982 のものにする
-        wrong_zip = zip_dir / "9982_20260709590450.zip"
-        wrong_zip.write_bytes(b"dummy")
+        wrong_zip = make_identity_test_zip(
+            tmp_path=zip_dir,
+            requested_disclosure_no="20260709590450",
+            internal_document_id="20260709590450",
+            ticker="9982",
+            period="2027-02-28",
+            quarter="1Q",
+            document_type="attachment_xbrl"
+        )
         _sync_canonical_segments(
             ticker="7601",
             period="2027-02-28",
@@ -740,7 +889,7 @@ class TestRealtimeSegmentIdentity:
         assert _find_cached_xbrl(str(tmp_path), "7601", "") is None
 
 
-    def test_sequential_route_scenarios(self, setup_db, monkeypatch):
+    def test_sequential_route_scenarios(self, setup_db, monkeypatch, tmp_path):
         from src.events.earnings_production_pipeline import run_earnings_production
         from src.events.earnings_production_pipeline import EarningsSummaryData
         import dataclasses
@@ -764,8 +913,54 @@ class TestRealtimeSegmentIdentity:
              patch("src.events.earnings_production_pipeline._extract_expected_segment_names_from_xbrl", return_value=["Smartstore"]), \
              patch("os.path.exists", return_value=True):
 
+            # テスト用の 9982 ZIP と 7601 ZIP を作成
+            zip_9982 = make_identity_test_zip(
+                tmp_path=tmp_path,
+                requested_disclosure_no="20260709590450",
+                internal_document_id="20260709590450",
+                ticker="9982",
+                period="2027-02-28",
+                quarter="1Q",
+                document_type="attachment_xbrl"
+            )
+            zip_7601 = make_identity_test_zip(
+                tmp_path=tmp_path,
+                requested_disclosure_no="20260709590505",
+                internal_document_id="20260709590505",
+                ticker="7601",
+                period="2027-02-28",
+                quarter="1Q",
+                document_type="attachment_xbrl"
+            )
+            
+            def find_side_effect(xbrl_dir, ticker, doc_id=""):
+                if ticker == "9982":
+                    return str(zip_9982)
+                return str(zip_7601)
+            m_find.side_effect = find_side_effect
+
+            from src.segment.segment_zip_resolver import ZipResolveResult
+            def resolve_side_effect(doc_id, ticker, expected_quarter="", expected_period="", persist_provenance=True):
+                z_path = str(zip_9982) if ticker == "9982" else str(zip_7601)
+                sha = "719f1592f98cd05c2a60601726e3635f5495af899c188693f85ce487dae0a5b5" if ticker == "9982" else "c2349e5d0d17ac367cf104ad693382f05c086d4e81b2832cab0dc799a53d20f4"
+                return ZipResolveResult(
+                    zip_path=z_path,
+                    source="tdnet_cache",
+                    status="FOUND_CACHE",
+                    error_reason="",
+                    cache_hit=True,
+                    downloaded=False,
+                    requested_disclosure_no=doc_id,
+                    zip_sha256=sha,
+                    trusted_provenance=None,
+                    resolution_kind="exact_cache"
+                )
+            
+            # autouse mock を一時的に上書きするための patch
+            m_res_patch = patch("src.segment.segment_zip_resolver.resolve_xbrl_zip", side_effect=resolve_side_effect)
+            m_res_patch.start()
+            
             m_save.return_value = {"action": "dedup_skipped"}
-            m_find.return_value = "C:/xbrl_archive/dummy.zip"
 
             # 17. 9982相当の実引数の検証
             # 64桁filing_id
@@ -801,7 +996,8 @@ class TestRealtimeSegmentIdentity:
                 xbrl_path=ANY,
                 dry_run=False,
                 route="sequential",
-                target_segs=ANY
+                target_segs=ANY,
+                trusted_provenance=None
             )
 
             # 18. 7601相当の実引数の検証
@@ -824,7 +1020,8 @@ class TestRealtimeSegmentIdentity:
                 xbrl_path=ANY,
                 dry_run=False,
                 route="sequential",
-                target_segs=ANY
+                target_segs=ANY,
+                trusted_provenance=None
             )
 
             # 19. 14桁取得不能時にwriter未呼び出し (URLや明示IDを空にする)
@@ -838,9 +1035,10 @@ class TestRealtimeSegmentIdentity:
             run_earnings_production([doc_no_id], setup_db, webhook_url="")
             # 14桁解決できず、_find_cached_xbrl への doc_id が空になることを検証
             m_find.assert_called_with(ANY, "7601", doc_id="")
+            m_res_patch.stop()
 
 
-    def test_subprocess_route_scenarios(self, setup_db, monkeypatch):
+    def test_subprocess_route_scenarios(self, setup_db, monkeypatch, tmp_path):
         from src.events.earnings_production_pipeline import run_earnings_production
         from src.events.earnings_production_pipeline import EarningsSummaryData
         import dataclasses
@@ -876,8 +1074,53 @@ class TestRealtimeSegmentIdentity:
             m_valid.return_value = (True, "")
             m_cp_valid.return_value = (True, "")
             m_discord_plan.return_value = {"discord_message": "dummy msg"}
+            # テスト用の 9982 ZIP と 7601 ZIP を作成
+            zip_9982 = make_identity_test_zip(
+                tmp_path=tmp_path,
+                requested_disclosure_no="20260709590450",
+                internal_document_id="20260709590450",
+                ticker="9982",
+                period="2027-02-28",
+                quarter="1Q",
+                document_type="attachment_xbrl"
+            )
+            zip_7601 = make_identity_test_zip(
+                tmp_path=tmp_path,
+                requested_disclosure_no="20260709590505",
+                internal_document_id="20260709590505",
+                ticker="7601",
+                period="2027-02-28",
+                quarter="1Q",
+                document_type="attachment_xbrl"
+            )
+            
+            def find_side_effect(xbrl_dir, ticker, doc_id=""):
+                if ticker == "9982":
+                    return str(zip_9982)
+                return str(zip_7601)
+            m_find.side_effect = find_side_effect
+
+            from src.segment.segment_zip_resolver import ZipResolveResult
+            def resolve_side_effect(doc_id, ticker, expected_quarter="", expected_period="", persist_provenance=True):
+                z_path = str(zip_9982) if ticker == "9982" else str(zip_7601)
+                sha = "719f1592f98cd05c2a60601726e3635f5495af899c188693f85ce487dae0a5b5" if ticker == "9982" else "c2349e5d0d17ac367cf104ad693382f05c086d4e81b2832cab0dc799a53d20f4"
+                return ZipResolveResult(
+                    zip_path=z_path,
+                    source="tdnet_cache",
+                    status="FOUND_CACHE",
+                    error_reason="",
+                    cache_hit=True,
+                    downloaded=False,
+                    requested_disclosure_no=doc_id,
+                    zip_sha256=sha,
+                    trusted_provenance=None,
+                    resolution_kind="exact_cache"
+                )
+            
+            m_res_patch = patch("src.segment.segment_zip_resolver.resolve_xbrl_zip", side_effect=resolve_side_effect)
+            m_res_patch.start()
+
             m_supa.return_value = {"action": "inserted"}
-            m_find.return_value = "C:/xbrl_archive/dummy.zip"
 
             # payload
             e = EarningsSummaryData(sales_current=15388, op_current=447)
@@ -927,7 +1170,8 @@ class TestRealtimeSegmentIdentity:
                 xbrl_path=ANY,
                 dry_run=False,
                 route="subprocess",
-                target_segs=ANY
+                target_segs=ANY,
+                trusted_provenance=None
             )
 
             # 24. 14桁取得不能時にwriter未呼び出し
@@ -940,6 +1184,7 @@ class TestRealtimeSegmentIdentity:
 
             run_earnings_production([doc_no_id], setup_db, webhook_url="")
             m_find.assert_called_with(ANY, "9982", doc_id="")
+            m_res_patch.stop()
 
 
 class TestCanonicalCompletionStrictness:
@@ -2608,10 +2853,33 @@ class TestNoSegmentInfoStateManagement:
         return mock_query
 
     def _create_dummy_zip_with_internal_id(self, zip_path, disclosure_no):
-        import zipfile
+        ticker = "9982"
+        basename = zip_path.name
+        if "7601" in basename or "7601" in disclosure_no:
+            ticker = "7601"
+        elif "9999" in basename or "9999" in disclosure_no:
+            ticker = "9999"
+            
         zip_path.parent.mkdir(parents=True, exist_ok=True)
+        import zipfile
+        ticker_5 = f"{ticker}0" if len(ticker) == 4 else ticker
+        xml_name = f"tse-aced-{ticker_5}-{disclosure_no}.xml"
+        htm_name = f"Summary_{disclosure_no}.htm"
+        q_val = "1"
+        period = "2027-02-28"
+        
+        htm_content = f"""
+        <html>
+          <body>
+            <xbrli:endDate>{period}</xbrli:endDate>
+            <QuarterlyPeriod>{q_val}</QuarterlyPeriod>
+            <ix:nonNumeric scheme="http://example.com/sicc">{ticker_5}</ix:nonNumeric>
+          </body>
+        </html>
+        """
         with zipfile.ZipFile(zip_path, "w") as zf:
-            zf.writestr(f"tse-aced-99820-{disclosure_no}.xml", b"dummy")
+            zf.writestr(xml_name, b"<dummy/>")
+            zf.writestr(htm_name, htm_content.encode("utf-8"))
 
     @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
     @patch("src.events.earnings_production_pipeline._find_cached_xbrl")

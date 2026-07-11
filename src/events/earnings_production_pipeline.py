@@ -158,10 +158,6 @@ def _verify_zip_internal_document_id(zip_path: str, expected_disclosure_no: str)
     不一致時、ZIP破損時、例外発生時は False を返す。
     フォールバックは一切行わない (fail-closed)。
     """
-    current_test = os.environ.get("PYTEST_CURRENT_TEST", "")
-    if current_test and "TestRealtimeSegmentIdentity" in current_test:
-        return True
-
     if not zip_path or not os.path.exists(zip_path):
         return False
 
@@ -800,35 +796,22 @@ def _retry_incomplete_canonical_for_duplicate(
                 ticker,
             )
         else:
-            current_test = os.environ.get("PYTEST_CURRENT_TEST", "")
-            use_legacy_zip_resolve = bool(current_test and "tests/segment/" not in current_test)
             _retry_provenance = None
             resolved_zip = xbrl_path
 
-            if use_legacy_zip_resolve:
-                if not resolved_zip:
-                    resolved_zip = _find_cached_xbrl(xbrl_dir, ticker, doc_id=disclosure_no)
-                if resolved_zip and os.path.exists(resolved_zip):
-                    zip_basename = os.path.basename(resolved_zip)
-                    zip_no = extract_common_disclosure_no(zip_basename)
-                    zip_internal_ok = _verify_zip_internal_document_id(resolved_zip, disclosure_no)
-                    if not zip_no or zip_no != disclosure_no or not zip_internal_ok:
-                        resolved_zip = None
-            else:
-                # 引き渡されていない場合のみ、セグメント処理内部で ZIP 解決を行う
-                if not resolved_zip:
-                    # 既存テストの mock 呼び出し回数アサーションとの互換性のためダミー呼び出し
-                    _ = _find_cached_xbrl(xbrl_dir, ticker, doc_id=disclosure_no)
-                    from src.segment.segment_zip_resolver import resolve_xbrl_zip
-                    resolved = resolve_xbrl_zip(
-                        doc_id=disclosure_no,
-                        ticker=ticker,
-                        expected_quarter=quarter,
-                        expected_period=period,
-                        persist_provenance=(not dry_run),
-                    )
-                    resolved_zip = resolved.zip_path
-                    _retry_provenance = resolved.trusted_provenance
+            if not resolved_zip:
+                # 既存テストの mock 呼び出し回数アサーションとの互換性のためダミー呼び出し
+                _ = _find_cached_xbrl(xbrl_dir, ticker, doc_id=disclosure_no)
+                from src.segment.segment_zip_resolver import resolve_xbrl_zip
+                resolved = resolve_xbrl_zip(
+                    doc_id=disclosure_no,
+                    ticker=ticker,
+                    expected_quarter=quarter,
+                    expected_period=period,
+                    persist_provenance=(not dry_run),
+                )
+                resolved_zip = resolved.zip_path
+                _retry_provenance = resolved.trusted_provenance
 
             if not resolved_zip or not os.path.exists(resolved_zip):
                 logger.info(
@@ -836,25 +819,18 @@ def _retry_incomplete_canonical_for_duplicate(
                     ticker,
                 )
             else:
-                if use_legacy_zip_resolve:
-                    zip_basename = os.path.basename(resolved_zip)
-                    zip_no = extract_common_disclosure_no(zip_basename)
-                    zip_internal_ok = _verify_zip_internal_document_id(resolved_zip, disclosure_no)
-                    verdict_passed = bool(zip_no and zip_no == disclosure_no and zip_internal_ok)
-                    verdict_reason = "zip_doc_id_mismatch" if not verdict_passed else ""
-                else:
-                    # verify_zip_identity を呼んで ID検証 (Path A/B 共通検証)
-                    from src.segment.zip_identity_verifier import verify_zip_identity
-                    verdict = verify_zip_identity(
-                        zip_path=resolved_zip,
-                        requested_disclosure_no=disclosure_no,
-                        expected_ticker=ticker,
-                        expected_period=period,
-                        expected_quarter=quarter,
-                        trusted_provenance=_retry_provenance,
-                    )
-                    verdict_passed = verdict.passed
-                    verdict_reason = verdict.rejection_reason
+                # verify_zip_identity を呼んで ID検証 (Path A/B 共通検証)
+                from src.segment.zip_identity_verifier import verify_zip_identity
+                verdict = verify_zip_identity(
+                    zip_path=resolved_zip,
+                    requested_disclosure_no=disclosure_no,
+                    expected_ticker=ticker,
+                    expected_period=period,
+                    expected_quarter=quarter,
+                    trusted_provenance=_retry_provenance,
+                )
+                verdict_passed = verdict.passed
+                verdict_reason = verdict.rejection_reason
 
                 if not verdict_passed:
                     logger.info(
@@ -926,31 +902,18 @@ def _retry_incomplete_canonical_for_duplicate(
                                     expected_segment_metrics,
                                 )
                                 if not dry_run:
-                                    if use_legacy_zip_resolve:
-                                        _sync_canonical_segments(
-                                            ticker=ticker,
-                                            period=period,
-                                            quarter=quarter,
-                                            canonical_filing_id=filing_id,
-                                            common_disclosure_no=disclosure_no,
-                                            xbrl_path=resolved_zip,
-                                            dry_run=dry_run,
-                                            route="canonical_retry",
-                                            target_segs=target_segs,
-                                        )
-                                    else:
-                                        _sync_canonical_segments(
-                                            ticker=ticker,
-                                            period=period,
-                                            quarter=quarter,
-                                            canonical_filing_id=filing_id,
-                                            common_disclosure_no=disclosure_no,
-                                            xbrl_path=resolved_zip,
-                                            dry_run=dry_run,
-                                            route="canonical_retry",
-                                            target_segs=target_segs,
-                                            trusted_provenance=_retry_provenance,
-                                        )
+                                    _sync_canonical_segments(
+                                        ticker=ticker,
+                                        period=period,
+                                        quarter=quarter,
+                                        canonical_filing_id=filing_id,
+                                        common_disclosure_no=disclosure_no,
+                                        xbrl_path=resolved_zip,
+                                        dry_run=dry_run,
+                                        route="canonical_retry",
+                                        target_segs=target_segs,
+                                        trusted_provenance=_retry_provenance,
+                                    )
                                     # 再確認
                                     seg_post_complete = _check_canonical_segments_saved(
                                         client=client,
@@ -1631,34 +1594,39 @@ def run_earnings_production(
 
                     try:
                         # ZIP 内部書類 ID の検証を追加
-                        _zip_internal_ok = _verify_zip_internal_document_id(_resolved_zip, _disclosure_no)
+                        # verify_zip_identity で厳格検証
+                        from src.segment.zip_identity_verifier import verify_zip_identity
+                        verdict = verify_zip_identity(
+                            zip_path=_resolved_zip,
+                            requested_disclosure_no=_disclosure_no,
+                            expected_ticker=_ticker,
+                            expected_period=_period,
+                            expected_quarter=_q,
+                            trusted_provenance=None,
+                        )
                         if (
                             _canonical_id_ok
                             and _disclosure_no and len(_disclosure_no) == 14 and _disclosure_no.isdigit()
                             and _resolved_zip and os.path.exists(_resolved_zip)
-                            and _zip_internal_ok
-                            and not dry_run
+                            and verdict.passed
                         ):
-                            zip_basename = os.path.basename(_resolved_zip)
-                            zip_no = extract_common_disclosure_no(zip_basename)
-                            if zip_no and zip_no == _disclosure_no:
-                                _pre_target_segs = _extract_and_filter_segments(
-                                    _resolved_zip, _period, _q, include_context_evidence=True
-                                )
-                                _pre_detailed_result = _last_detailed_result
-                                # success_empty かつ 2026-07-05 境界確認
-                                if _pre_detailed_result and getattr(_pre_detailed_result, "status", None) == "success_empty":
-                                    _disclosed_at = _ev_dict.get("disclosure_datetime") or ""
-                                    if _is_disclosed_after_boundary(_disclosed_at):
-                                        _pending_no_segment_states[canonical_filing_id] = {
-                                            "status": "no_segment_info",
-                                            "version": 1,
-                                            "filing_id": canonical_filing_id, # 64桁
-                                            "disclosure_no": _disclosure_no, # 14桁
-                                            "period": _period,
-                                            "quarter": _q,
-                                            "source": "exact_xbrl_zero_rows",
-                                        }
+                            _pre_target_segs = _extract_and_filter_segments(
+                                _resolved_zip, _period, _q, include_context_evidence=True
+                            )
+                            _pre_detailed_result = _last_detailed_result
+                            # success_empty かつ 2026-07-05 境界確認
+                            if _pre_detailed_result and getattr(_pre_detailed_result, "status", None) == "success_empty":
+                                _disclosed_at = _ev_dict.get("disclosure_datetime") or ""
+                                if _is_disclosed_after_boundary(_disclosed_at):
+                                    _pending_no_segment_states[canonical_filing_id] = {
+                                        "status": "no_segment_info",
+                                        "version": 1,
+                                        "filing_id": canonical_filing_id, # 64桁
+                                        "disclosure_no": _disclosure_no, # 14桁
+                                        "period": _period,
+                                        "quarter": _q,
+                                        "source": "exact_xbrl_zero_rows",
+                                    }
                     except Exception as _pre_e:
                         logger.error("[EARNINGS][NO_SEGMENT_STATE][ERROR] pre-extraction failed: %s", _pre_e)
 
@@ -1745,48 +1713,34 @@ def run_earnings_production(
                     _target_segs = _pre_target_segs
                     _expected_segment_metrics = []
                     
-                    current_test = os.environ.get("PYTEST_CURRENT_TEST", "")
-                    use_legacy_zip_resolve = bool(current_test and "tests/segment/" not in current_test)
                     _sub_provenance = None
+                    _resolved_zip = None
 
-                    if use_legacy_zip_resolve:
-                        _resolved_zip = _find_cached_xbrl(xbrl_dir, _ticker, doc_id=_disclosure_no)
-                        if _resolved_zip and os.path.exists(_resolved_zip):
-                            zip_basename = os.path.basename(_resolved_zip)
-                            zip_no = extract_common_disclosure_no(zip_basename)
-                            if not zip_no or zip_no != _disclosure_no:
-                                _resolved_zip = None
-                    else:
-                        # 既存テストの mock 呼び出し回数アサーションとの互換性のためダミー呼び出し
-                        _ = _find_cached_xbrl(xbrl_dir, _ticker, doc_id=_disclosure_no)
-                        from src.segment.segment_zip_resolver import resolve_xbrl_zip
-                        resolved = resolve_xbrl_zip(
-                            doc_id=_disclosure_no,
-                            ticker=_ticker,
-                            expected_quarter=_q,
-                            expected_period=_period,
-                            persist_provenance=(not dry_run),
-                        )
-                        _resolved_zip = resolved.zip_path
-                        _sub_provenance = resolved.trusted_provenance
+                    # 既存テストの mock 呼び出し回数アサーションとの互換性のためダミー呼び出し
+                    _ = _find_cached_xbrl(xbrl_dir, _ticker, doc_id=_disclosure_no)
+                    from src.segment.segment_zip_resolver import resolve_xbrl_zip
+                    resolved = resolve_xbrl_zip(
+                        doc_id=_disclosure_no,
+                        ticker=_ticker,
+                        expected_quarter=_q,
+                        expected_period=_period,
+                        persist_provenance=(not dry_run),
+                    )
+                    _resolved_zip = resolved.zip_path
+                    _sub_provenance = resolved.trusted_provenance
 
                     if _resolved_zip and os.path.exists(_resolved_zip):
-                        if use_legacy_zip_resolve:
-                            zip_basename = os.path.basename(_resolved_zip)
-                            zip_no = extract_common_disclosure_no(zip_basename)
-                            verdict_passed = bool(zip_no and zip_no == _disclosure_no)
-                        else:
-                            # verify_zip_identity を呼んで ID検証 (Path A/B 共通検証)
-                            from src.segment.zip_identity_verifier import verify_zip_identity
-                            verdict = verify_zip_identity(
-                                zip_path=_resolved_zip,
-                                requested_disclosure_no=_disclosure_no,
-                                expected_ticker=_ticker,
-                                expected_period=_period,
-                                expected_quarter=_q,
-                                trusted_provenance=_sub_provenance,
-                            )
-                            verdict_passed = verdict.passed
+                        # verify_zip_identity を呼んで ID検証 (Path A/B 共通検証)
+                        from src.segment.zip_identity_verifier import verify_zip_identity
+                        verdict = verify_zip_identity(
+                            zip_path=_resolved_zip,
+                            requested_disclosure_no=_disclosure_no,
+                            expected_ticker=_ticker,
+                            expected_period=_period,
+                            expected_quarter=_q,
+                            trusted_provenance=_sub_provenance,
+                        )
+                        verdict_passed = verdict.passed
 
                         if verdict_passed:
                             try:
@@ -1855,31 +1809,18 @@ def run_earnings_production(
                     # セグメント同期
                     if not _seg_saved:
                         try:
-                            if use_legacy_zip_resolve:
-                                _sync_canonical_segments(
-                                    ticker=_ticker,
-                                    period=_period,
-                                    quarter=_q,
-                                    canonical_filing_id=canonical_filing_id,
-                                    common_disclosure_no=_disclosure_no,
-                                    xbrl_path=_resolved_zip,
-                                    dry_run=dry_run,
-                                    route="subprocess",
-                                    target_segs=_target_segs,
-                                )
-                            else:
-                                _sync_canonical_segments(
-                                    ticker=_ticker,
-                                    period=_period,
-                                    quarter=_q,
-                                    canonical_filing_id=canonical_filing_id,
-                                    common_disclosure_no=_disclosure_no,
-                                    xbrl_path=_resolved_zip,
-                                    dry_run=dry_run,
-                                    route="subprocess",
-                                    target_segs=_target_segs,
-                                    trusted_provenance=_sub_provenance,
-                                )
+                            _sync_canonical_segments(
+                                ticker=_ticker,
+                                period=_period,
+                                quarter=_q,
+                                canonical_filing_id=canonical_filing_id,
+                                common_disclosure_no=_disclosure_no,
+                                xbrl_path=_resolved_zip,
+                                dry_run=dry_run,
+                                route="subprocess",
+                                target_segs=_target_segs,
+                                trusted_provenance=_sub_provenance,
+                            )
                         except Exception as _seg_e:
                             logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s subprocess route exception: %s", _ticker, _seg_e)
 
@@ -1955,45 +1896,20 @@ def run_earnings_production(
             if not _temp_disclosure_no:
                 _temp_disclosure_no = getattr(doc, "source_doc_id", "") or ""
 
-            current_test = os.environ.get("PYTEST_CURRENT_TEST", "")
-            use_legacy_zip_resolve = bool(current_test and "tests/segment/" not in current_test)
             _seq_provenance = None
 
-            if use_legacy_zip_resolve:
-                xbrl_path = None
-                _xbrl_url = getattr(doc, 'xbrl_url', None)
-                source_doc_id = getattr(doc, "source_doc_id", "") or ""
-                if not _xbrl_url and source_doc_id and os.environ.get("JQUANTS_PRIMARY_ENABLED", "0") == "1":
-                    try:
-                        from src.jquants.adapter import get_file_url
-                        logger.info(f"[EARNINGS][JQUANTS] fetching on-demand XBRL URL for {ticker} (disc_no={source_doc_id})")
-                        f_urls = get_file_url(source_doc_id, "x")
-                        if f_urls and "xbrl" in f_urls:
-                            _xbrl_url = f_urls["xbrl"]
-                            if isinstance(doc, dict):
-                                doc["xbrl_url"] = _xbrl_url
-                            else:
-                                setattr(doc, "xbrl_url", _xbrl_url)
-                    except Exception as e:
-                        logger.warning(f"[EARNINGS][JQUANTS] on-demand fetch error: {e}")
-
-                if _xbrl_url:
-                    xbrl_path = download_document(_xbrl_url, xbrl_dir, session=session, alternate_paths=[docs_dir])
-                if not xbrl_path:
-                    xbrl_path = _find_cached_xbrl(xbrl_dir, ticker, doc_id=_temp_disclosure_no)
-            else:
-                # 既存テストの mock 呼び出し回数アサーションとの互換性のためダミー呼び出し
-                _ = _find_cached_xbrl(xbrl_dir, ticker, doc_id=_temp_disclosure_no)
-                from src.segment.segment_zip_resolver import resolve_xbrl_zip
-                resolved = resolve_xbrl_zip(
-                    doc_id=_temp_disclosure_no,
-                    ticker=ticker,
-                    expected_quarter="",  # この段階では未確定なので空文字で渡し、メタデータを実体から自動抽出させる
-                    expected_period="",
-                    persist_provenance=(not dry_run),
-                )
-                xbrl_path = resolved.zip_path
-                _seq_provenance = resolved.trusted_provenance
+            # 既存テストの mock 呼び出し回数アサーションとの互換性のためダミー呼び出し
+            _ = _find_cached_xbrl(xbrl_dir, ticker, doc_id=_temp_disclosure_no)
+            from src.segment.segment_zip_resolver import resolve_xbrl_zip
+            resolved = resolve_xbrl_zip(
+                doc_id=_temp_disclosure_no,
+                ticker=ticker,
+                expected_quarter="",  # この段階では未確定なので空文字で渡し、メタデータを実体から自動抽出させる
+                expected_period="",
+                persist_provenance=(not dry_run),
+            )
+            xbrl_path = resolved.zip_path
+            _seq_provenance = resolved.trusted_provenance
 
             if xbrl_path:
                 logger.info(f"[EARNINGS] {ticker} resolved ZIP: {Path(xbrl_path).name}")
@@ -2554,31 +2470,18 @@ def run_earnings_production(
                     # セグメント同期
                     if not _seg_saved:
                         try:
-                            if use_legacy_zip_resolve:
-                                _sync_canonical_segments(
-                                    ticker=ticker,
-                                    period=_seq_period,
-                                    quarter=quarter,
-                                    canonical_filing_id=_seq_doc_id,
-                                    common_disclosure_no=_seq_disclosure_no,
-                                    xbrl_path=xbrl_path,
-                                    dry_run=dry_run,
-                                    route="sequential",
-                                    target_segs=_target_segs,
-                                )
-                            else:
-                                _sync_canonical_segments(
-                                    ticker=ticker,
-                                    period=_seq_period,
-                                    quarter=quarter,
-                                    canonical_filing_id=_seq_doc_id,
-                                    common_disclosure_no=_seq_disclosure_no,
-                                    xbrl_path=xbrl_path,
-                                    dry_run=dry_run,
-                                    route="sequential",
-                                    target_segs=_target_segs,
-                                    trusted_provenance=_seq_provenance,
-                                )
+                            _sync_canonical_segments(
+                                ticker=ticker,
+                                period=_seq_period,
+                                quarter=quarter,
+                                canonical_filing_id=_seq_doc_id,
+                                common_disclosure_no=_seq_disclosure_no,
+                                xbrl_path=xbrl_path,
+                                dry_run=dry_run,
+                                route="sequential",
+                                target_segs=_target_segs,
+                                trusted_provenance=_seq_provenance,
+                            )
                         except Exception as _seg_e:
                             logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s sequential route exception: %s", ticker, _seg_e)
                 else:

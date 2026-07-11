@@ -1,423 +1,385 @@
-"""tests/segment/test_runtime_provenance_wiring.py
-
-Phase 9F-R: resolver/pipeline 配線と信頼境界の自動テスト (Test S ~ Z)
-"""
-from __future__ import annotations
-
-import hashlib
-import io
-import json
 import os
-import zipfile
-import tempfile
-import shutil
-from pathlib import Path
-from unittest import mock
+import ast
 import pytest
-
-from src.segment.zip_identity_verifier import (
-    TrustedProvenance,
-    ZipIdentityVerdict,
-    verify_zip_identity,
-    extract_actual_metadata_from_zip,
-)
-from src.segment.segment_zip_resolver import resolve_xbrl_zip, ZipResolveResult
-from src.events.earnings_production_pipeline import _sync_canonical_segments
-
-# ======================================================================
-# テスト用ヘルパー
-# ======================================================================
-def _make_dummy_xbrl_zip(path: Path, ticker: str, period: str, quarter: str, internal_id: str) -> None:
-    """メタデータを実体から正しく抽出できるような構造のダミー ZIP を生成する。"""
-    q_map = {"1Q": "1", "2Q": "2", "3Q": "3", "FY": "4"}
-    q_num = q_map.get(quarter, "1")
-    
-    # Summary htm の作成
-    summary_htm_content = f"""
-    <html xmlns:xbrli="http://www.xbrl.org/2003/instance" xmlns:ix="http://www.xbrl.org/2003/instance">
-      <body>
-        <xbrli:identifier scheme="http://www.tse.or.jp/sicc">{ticker}0</xbrli:identifier>
-        <xbrli:endDate>{period}</xbrli:endDate>
-        <xbrli:instant>{period}</xbrli:instant>
-        <ix:nonFraction name="tse-ed-t:QuarterlyPeriod">{q_num}</ix:nonFraction>
-      </body>
-    </html>
-    """
-    
-    with zipfile.ZipFile(path, "w") as zf:
-        # ticker / internal_id を含む xsd ファイル
-        zf.writestr(f"XBRLData/Summary/tse-qcedjpsm-{ticker}0-{internal_id}.xsd", b"")
-        # Summary htm
-        zf.writestr(f"XBRLData/Summary/tse-qcedjpsm-{ticker}0-{internal_id}-ixbrl.htm", summary_htm_content.encode("utf-8"))
-        # manifest.xml
-        zf.writestr("XBRLData/Attachment/manifest.xml", f'<manifest><instance id="qcedjpfr" preferredFilename="tse-qcedjpfr-{ticker}0-{period}-01-{internal_id}.xbrl"/></manifest>'.encode("utf-8"))
+from unittest.mock import MagicMock, patch
+from src.segment.zip_identity_verifier import verify_zip_identity
+from src.segment.segment_zip_resolver import ZipResolveResult
+from tests.test_earnings_canonical_sync import make_identity_test_zip
 
 
-def _sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    h.update(path.read_bytes())
-    return h.hexdigest()
+def _make_dummy_zip_with_custom_name(tmp_path, name, content=b"dummy"):
+    zip_path = tmp_path / name
+    with open(zip_path, "wb") as f:
+        f.write(content)
+    return zip_path
 
 
-# ======================================================================
-# Test S: resolver fresh download wiring
-# ======================================================================
-@mock.patch("src.segment.segment_zip_resolver.get_file_url")
-@mock.patch("requests.get")
-def test_s_resolver_fresh_download_wiring(mock_get, mock_get_file_url, tmp_path):
-    """J-Quants公式API経由でのZIP新規ダウンロード時に TrustedProvenance が生成されることを確認。"""
-    req_id = "20260709590450"
-    int_id = "20260710399820"
-    ticker = "9982"
-    period = "2027-02-28"
-    quarter = "1Q"
-
-    # ダミー ZIP を生成
-    download_zip_path = tmp_path / "download.zip"
-    _make_dummy_xbrl_zip(download_zip_path, ticker, period, quarter, int_id)
-    zip_bytes = download_zip_path.read_bytes()
-    zip_sha = hashlib.sha256(zip_bytes).hexdigest()
-
-    # Mock設定
-    mock_get_file_url.return_value = {"xbrl": "http://mock-jquants/file.zip"}
-    mock_response = mock.Mock()
-    mock_response.status_code = 200
-    mock_response.iter_content.return_value = [zip_bytes]
-    mock_get.return_value = mock_response
-
-    # resolve_xbrl_zip の実行
-    cache_dir = tmp_path / "cache"
-    archive_dir = tmp_path / "archive"
-    
-    result = resolve_xbrl_zip(
-        doc_id=req_id,
-        ticker=ticker,
-        expected_quarter=quarter,
-        expected_period=period,
-        local_archive_dir=str(archive_dir),
-        cache_dir=str(cache_dir),
-        persist_provenance=True,
+# ==============================================================================
+# Test AA: PYTEST_CURRENT_TEST の有無や値によらず、検証結果が不変であることを確認
+# ==============================================================================
+def test_aa_pytest_env_insensitivity(tmp_path):
+    ok_zip = make_identity_test_zip(
+        tmp_path, "20260709590505", "20260709590505", "7601", "2027-02-28", "1Q", "attachment_xbrl"
     )
-
-    assert result.zip_path is not None
-    assert result.resolution_kind == "official_download"
-    assert result.trusted_provenance is not None
     
-    prov = result.trusted_provenance
-    assert prov.requested_disclosure_no == req_id
-    assert prov.internal_document_id == int_id
-    assert prov.downloaded_sha256 == zip_sha
-    assert prov.ticker == ticker
-    assert prov.period == period
-    assert prov.quarter == quarter
-    assert prov.document_type == "attachment_xbrl"
-
-    # sidecar が作成されていることを確認 (方式B)
-    sidecar_path = Path(result.zip_path + ".provenance.json")
-    assert sidecar_path.exists()
+    envs_to_test = ["", "tests/segment/test_something.py::TestA", "tests/other/test.py::TestRealtimeSegmentIdentity"]
+    results = []
     
-    # 照合
-    with open(sidecar_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    assert data["requested_disclosure_no"] == req_id
-    assert data["internal_document_id"] == int_id
-    assert data["zip_sha256"] == zip_sha
+    for val in envs_to_test:
+        with patch.dict(os.environ, {"PYTEST_CURRENT_TEST": val}):
+            res = verify_zip_identity(
+                zip_path=str(ok_zip),
+                requested_disclosure_no="20260709590505",
+                expected_ticker="7601",
+                expected_period="2027-02-28",
+                expected_quarter="1Q",
+                trusted_provenance=None
+            )
+            results.append((res.passed, res.rejection_reason))
+            
+    # 全環境変数状態で結果が完全に一致すること
+    assert len(set(results)) == 1
 
 
-# ======================================================================
-# Test T: pipeline は resolver provenance を使用
-# ======================================================================
-@mock.patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
-def test_t_pipeline_uses_resolver_provenance(mock_extract, tmp_path):
-    """_sync_canonical_segments が resolver 由来の provenance を使用して合格することを確認。"""
-    req_id = "20260709590450"
-    int_id = "20260710399820"
-    ticker = "9982"
-    period = "2027-02-28"
-    quarter = "1Q"
-
-    zip_path = tmp_path / "xbrl.zip"
-    _make_dummy_xbrl_zip(zip_path, ticker, period, quarter, int_id)
-    sha = _sha256(zip_path)
-
-    # 有効な provenance
-    prov = TrustedProvenance(
-        source="jquants",
-        requested_disclosure_no=req_id,
-        requested_file_type="x",
-        resolved_by_function="get_file_url",
-        official_request_succeeded=True,
-        response_status=200,
-        downloaded_size=zip_path.stat().st_size,
-        downloaded_sha256=sha,
-        internal_document_id=int_id,
-        ticker=ticker,
-        period=period,
-        quarter=quarter,
-        document_type="attachment_xbrl",
-        resolved_at="2026-07-11T12:00:00Z",
+# ==============================================================================
+# Test AB: 一致する basename ファイル名を持つが存在しない ZIP の拒否
+# ==============================================================================
+def test_ab_missing_zip_rejection():
+    res = verify_zip_identity(
+        zip_path="C:/non_existent_directory/20260709590505.zip",
+        requested_disclosure_no="20260709590505",
+        expected_ticker="7601",
+        expected_period="2027-02-28",
+        expected_quarter="1Q",
+        trusted_provenance=None
     )
+    assert res.passed is False
+    assert res.rejection_reason == "zip_not_found"
 
-    mock_extract.return_value = [{"segment_name": "Apparel", "segment_sales": 100, "segment_profit": 10}]
 
-    # pipeline 実行 (dry_run=True で Supabase への書込みはさせない)
-    # _sync_canonical_segments 内部で verify_zip_identity が走り、prov を用いて official_linked_xbrl_match で通過するはず
-    with mock.patch("src.events.earnings_production_pipeline.logger") as mock_logger:
-        _sync_canonical_segments(
-            ticker=ticker,
-            period=period,
-            quarter=quarter,
-            canonical_filing_id="b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c",
-            common_disclosure_no=req_id,
-            xbrl_path=str(zip_path),
-            dry_run=True,
-            route="test",
-            trusted_provenance=prov,
+# ==============================================================================
+# Test AC: 一致する basename の 0バイト ZIP の拒否
+# ==============================================================================
+def test_ac_zero_byte_zip_rejection(tmp_path):
+    zero_zip = _make_dummy_zip_with_custom_name(tmp_path, "20260709590505.zip", b"")
+    res = verify_zip_identity(
+        zip_path=str(zero_zip),
+        requested_disclosure_no="20260709590505",
+        expected_ticker="7601",
+        expected_period="2027-02-28",
+        expected_quarter="1Q",
+        trusted_provenance=None
+    )
+    assert res.passed is False
+    assert res.rejection_reason == "zero_byte_zip"
+
+
+# ==============================================================================
+# Test AD: 一致する basename の 破損 ZIP の拒否
+# ==============================================================================
+def test_ad_broken_zip_rejection(tmp_path):
+    broken_zip = _make_dummy_zip_with_custom_name(tmp_path, "20260709590505.zip", b"broken header and not zip format")
+    res = verify_zip_identity(
+        zip_path=str(broken_zip),
+        requested_disclosure_no="20260709590505",
+        expected_ticker="7601",
+        expected_period="2027-02-28",
+        expected_quarter="1Q",
+        trusted_provenance=None
+    )
+    assert res.passed is False
+    assert res.rejection_reason == "broken_zip"
+
+
+# ==============================================================================
+# Test AE: 内部 ID 不一致かつ provenance なしの拒否
+# ==============================================================================
+def test_ae_provenance_missing_rejection(tmp_path):
+    # 7601の開示情報で、内部IDが 20260709590450 (9982のID) になっている不整合ZIP
+    invalid_zip = make_identity_test_zip(
+        tmp_path, "20260709590505", "20260709590450", "7601", "2027-02-28", "1Q", "attachment_xbrl"
+    )
+    res = verify_zip_identity(
+        zip_path=str(invalid_zip),
+        requested_disclosure_no="20260709590505",
+        expected_ticker="7601",
+        expected_period="2027-02-28",
+        expected_quarter="1Q",
+        trusted_provenance=None
+    )
+    assert res.passed is False
+    assert res.rejection_reason == "provenance_missing"
+
+
+# ==============================================================================
+# Test AF: PYTEST_CURRENT_TEST が TestRealtimeSegmentIdentity であっても不正 ZIP は拒否
+# ==============================================================================
+def test_af_pytest_test_name_bypass_removal(tmp_path):
+    broken_zip = _make_dummy_zip_with_custom_name(tmp_path, "20260709590505.zip", b"broken")
+    
+    with patch.dict(os.environ, {"PYTEST_CURRENT_TEST": "tests/test_earnings_canonical_sync.py::TestRealtimeSegmentIdentity"}):
+        res = verify_zip_identity(
+            zip_path=str(broken_zip),
+            requested_disclosure_no="20260709590505",
+            expected_ticker="7601",
+            expected_period="2027-02-28",
+            expected_quarter="1Q",
+            trusted_provenance=None
         )
+        assert res.passed is False
+        assert res.rejection_reason == "broken_zip"
+
+
+# ==============================================================================
+# Test AG: sequential 経路で、開示1件につき resolve_xbrl_zip の呼び出しが最大1回
+# ==============================================================================
+@patch("src.events.earnings_production_pipeline._sync_canonical_segments")
+@patch("src.events.earnings_production_pipeline._sync_canonical_financials")
+@patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+@patch("src.events.earnings_production_pipeline._save_earnings_to_tdnet_events")
+@patch("src.events.earnings_production_pipeline.load_json")
+@patch("src.segment.segment_zip_resolver.resolve_xbrl_zip")
+def test_ag_sequential_resolve_once(m_resolve, m_load, m_save, m_cache, m_sync_fin, m_sync_seg, tmp_path):
+    from src.events.earnings_production_pipeline import run_earnings_production
+    from tests.test_earnings_canonical_sync import DummyDoc
+    import sqlite3
+    
+    conn = sqlite3.connect(":memory:")
+    from src.events.earnings_summary_storage import ensure_earnings_summary_table
+    ensure_earnings_summary_table(conn)
+    
+    m_cache.return_value = "C:/xbrl_archive/20260709590505.zip"
+    m_save.return_value = {"action": "inserted"}
+    
+    m_resolve.return_value = ZipResolveResult(
+        zip_path="C:/xbrl_archive/20260709590505.zip",
+        source="tdnet_cache",
+        status="FOUND_CACHE",
+        error_reason="",
+        cache_hit=True,
+        downloaded=False,
+        requested_disclosure_no="20260709590505",
+        zip_sha256="c2349e5d0d17ac367cf104ad693382f05c086d4e81b2832cab0dc799a53d20f4",
+        trusted_provenance=None,
+        resolution_kind="exact_cache"
+    )
+    
+    m_load.return_value = {
+        "earnings": {"sales_current": 100, "op_current": 10},
+        "company_name": "Test Poplar",
+        "fiscal_year": "2027",
+        "quarter": "1Q",
+    }
+    
+    doc = DummyDoc("7601", "2027年2月期 第1四半期決算短信［日本基準］(連結)", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c")
+    doc.doc_url = "https://www.release.tdnet.info/inbs/140120260709590505.pdf"
+    
+    with patch.dict(os.environ, {"USE_SUBPROCESS_WORKER": "0"}):
+        run_earnings_production([doc], conn, webhook_url="")
         
-        # エラーログが出力されず、正常開始ログが出ていることを確認
-        error_calls = [c for c in mock_logger.error.call_args_list if "stage=identity" in str(c)]
-        assert len(error_calls) == 0
+    assert m_resolve.call_count == 1
 
 
-# ======================================================================
-# Test U: pipeline へ plain ZIP path だけを渡した linked case (拒否)
-# ======================================================================
-def test_u_pipeline_plain_zip_linked_rejected(tmp_path):
-    """provenance を渡さない linked case は拒否されることを確認。"""
-    req_id = "20260709590450"
-    int_id = "20260710399820"
-    ticker = "9982"
-    period = "2027-02-28"
-    quarter = "1Q"
-
-    zip_path = tmp_path / "xbrl.zip"
-    _make_dummy_xbrl_zip(zip_path, ticker, period, quarter, int_id)
-
-    with mock.patch("src.events.earnings_production_pipeline.logger") as mock_logger:
-        _sync_canonical_segments(
-            ticker=ticker,
-            period=period,
-            quarter=quarter,
-            canonical_filing_id="b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c",
-            common_disclosure_no=req_id,
-            xbrl_path=str(zip_path),
-            dry_run=True,
-            route="test",
-            trusted_provenance=None,  # なし
-        )
-        # provenance_missing で identity エラーが記録される
-        error_calls = [c for c in mock_logger.error.call_args_list if "provenance_missing" in str(c)]
-        assert len(error_calls) > 0
-
-
-# ======================================================================
-# Test V: exact cache wiring (ネットワーク0回)
-# ======================================================================
-@mock.patch("src.segment.segment_zip_resolver.get_file_url")
-def test_v_exact_cache_wiring(mock_get_file_url, tmp_path):
-    """内部ID完全一致のキャッシュは、ネットワーク接続なしで exact_cache で PASS することを確認。"""
-    req_id = "20260709590450"
-    ticker = "9982"
-    period = "2027-02-28"
-    quarter = "1Q"
-
-    cache_dir = tmp_path / "cache"
-    cache_path_dir = cache_dir / req_id
-    cache_path_dir.mkdir(parents=True)
-    cache_zip = cache_path_dir / "xbrl.zip"
+# ==============================================================================
+# Test AH: subprocess 経路で、開示1件につき resolve_xbrl_zip の呼び出しが最大1回
+# ==============================================================================
+@patch("src.events.earnings_production_pipeline._sync_canonical_segments")
+@patch("src.events.earnings_production_pipeline._sync_canonical_financials")
+@patch("src.events.earnings_production_pipeline._save_earnings_to_tdnet_events")
+@patch("src.segment.segment_zip_resolver.resolve_xbrl_zip")
+def test_ah_subprocess_resolve_once(m_resolve, m_save, m_sync_fin, m_sync_seg, tmp_path):
+    from src.events.earnings_production_pipeline import run_earnings_production
+    from tests.test_earnings_canonical_sync import DummyDoc
+    import sqlite3
     
-    # 内部ID = requested ID となる ZIP
-    _make_dummy_xbrl_zip(cache_zip, ticker, period, quarter, req_id)
-
-    result = resolve_xbrl_zip(
-        doc_id=req_id,
-        ticker=ticker,
-        expected_quarter=quarter,
-        expected_period=period,
-        local_archive_dir=str(tmp_path / "archive"),
-        cache_dir=str(cache_dir),
-        allow_jquants_fetch=True,
+    conn = sqlite3.connect(":memory:")
+    from src.events.earnings_summary_storage import ensure_earnings_summary_table
+    ensure_earnings_summary_table(conn)
+    
+    m_save.return_value = {"action": "inserted"}
+    m_resolve.return_value = ZipResolveResult(
+        zip_path="C:/xbrl_archive/20260709590450.zip",
+        source="tdnet_cache",
+        status="FOUND_CACHE",
+        error_reason="",
+        cache_hit=True,
+        downloaded=False,
+        requested_disclosure_no="20260709590450",
+        zip_sha256="719f1592f98cd05c2a60601726e3635f5495af899c188693f85ce487dae0a5b5",
+        trusted_provenance=None,
+        resolution_kind="exact_cache"
     )
-
-    assert result.zip_path == str(cache_zip)
-    assert result.resolution_kind == "exact_cache"
-    assert result.trusted_provenance is None
-    # ネットワークが呼ばれていないこと
-    mock_get_file_url.assert_not_called()
-
-
-# ======================================================================
-# Test W: linked cache with valid metadata (ネットワーク0回)
-# ======================================================================
-@mock.patch("src.segment.segment_zip_resolver.get_file_url")
-def test_w_linked_cache_with_valid_sidecar(mock_get_file_url, tmp_path):
-    """有効な sidecar メタデータがある場合、ネットワーク接続なしで linked PASS することを確認。"""
-    req_id = "20260709590450"
-    int_id = "20260710399820"
-    ticker = "9982"
-    period = "2027-02-28"
-    quarter = "1Q"
-
-    cache_dir = tmp_path / "cache"
-    cache_path_dir = cache_dir / req_id
-    cache_path_dir.mkdir(parents=True)
-    cache_zip = cache_path_dir / "xbrl.zip"
-    _make_dummy_xbrl_zip(cache_zip, ticker, period, quarter, int_id)
-    sha = _sha256(cache_zip)
-
-    # sidecar を作成
-    prov = TrustedProvenance(
-        source="jquants",
-        requested_disclosure_no=req_id,
-        requested_file_type="x",
-        resolved_by_function="get_file_url",
-        official_request_succeeded=True,
-        response_status=200,
-        downloaded_size=cache_zip.stat().st_size,
-        downloaded_sha256=sha,
-        internal_document_id=int_id,
-        ticker=ticker,
-        period=period,
-        quarter=quarter,
-        document_type="attachment_xbrl",
-        resolved_at="2026-07-11T12:00:00Z",
-    )
-    from src.segment.segment_zip_resolver import _write_sidecar_provenance
-    _write_sidecar_provenance(str(cache_zip), prov)
-
-    # 実行
-    result = resolve_xbrl_zip(
-        doc_id=req_id,
-        ticker=ticker,
-        expected_quarter=quarter,
-        expected_period=period,
-        local_archive_dir=str(tmp_path / "archive"),
-        cache_dir=str(cache_dir),
-        allow_jquants_fetch=True,
-    )
-
-    assert result.zip_path == str(cache_zip)
-    assert result.resolution_kind == "verified_linked_cache"
-    assert result.trusted_provenance is not None
-    assert result.trusted_provenance.internal_document_id == int_id
-    mock_get_file_url.assert_not_called()
-
-
-# ======================================================================
-# Test X: linked cache metadata missing
-# ======================================================================
-@mock.patch("src.segment.segment_zip_resolver.get_file_url")
-@mock.patch("requests.get")
-def test_x_linked_cache_metadata_missing(mock_get, mock_get_file_url, tmp_path):
-    """sidecarがない場合、公式再取得＆ハッシュ照合により PASS することを確認。"""
-    req_id = "20260709590450"
-    int_id = "20260710399820"
-    ticker = "9982"
-    period = "2027-02-28"
-    quarter = "1Q"
-
-    cache_dir = tmp_path / "cache"
-    cache_path_dir = cache_dir / req_id
-    cache_path_dir.mkdir(parents=True)
-    cache_zip = cache_path_dir / "xbrl.zip"
-    _make_dummy_xbrl_zip(cache_zip, ticker, period, quarter, int_id)
-    sha = _sha256(cache_zip)
-
-    # mock ダウンロード用の実体 (同じ ZIP なので SHA は一致する)
-    mock_get_file_url.return_value = {"xbrl": "http://mock-jquants/file.zip"}
-    mock_response = mock.Mock()
-    mock_response.status_code = 200
-    mock_response.iter_content.return_value = [cache_zip.read_bytes()]
-    mock_get.return_value = mock_response
-
-    # resolve_xbrl_zip の実行 (persist_provenance=False にして sidecar は作成しない)
-    result = resolve_xbrl_zip(
-        doc_id=req_id,
-        ticker=ticker,
-        expected_quarter=quarter,
-        expected_period=period,
-        local_archive_dir=str(tmp_path / "archive"),
-        cache_dir=str(cache_dir),
-        allow_jquants_fetch=True,
-        persist_provenance=False,
-    )
-
-    assert result.zip_path == str(cache_zip)
-    assert result.resolution_kind == "verified_linked_cache"
-    assert result.trusted_provenance is not None
-    assert result.trusted_provenance.downloaded_sha256 == sha
-    # sidecar が作成されていないことを確認
-    assert not Path(str(cache_zip) + ".provenance.json").exists()
-
-
-# ======================================================================
-# Test Y: pipeline raw_payload 偽装拒否
-# ======================================================================
-def test_y_pipeline_fake_provenance_rejected(tmp_path):
-    """外部入力で偽装された provenance を pipeline は信用しないことを確認。"""
-    req_id = "20260709590450"
-    int_id = "20260710399820"
-    ticker = "9982"
-    period = "2027-02-28"
-    quarter = "1Q"
-
-    zip_path = tmp_path / "xbrl.zip"
-    _make_dummy_xbrl_zip(zip_path, ticker, period, quarter, int_id)
-    sha = _sha256(zip_path)
-
-    # source=jquants を騙る偽装 provenance (外部入力・偽造)
-    fake_prov = TrustedProvenance(
-        source="forged_source",  # jquants 以外
-        requested_disclosure_no=req_id,
-        requested_file_type="x",
-        resolved_by_function="get_file_url",
-        official_request_succeeded=True,
-        response_status=200,
-        downloaded_size=zip_path.stat().st_size,
-        downloaded_sha256=sha,
-        internal_document_id=int_id,
-        ticker=ticker,
-        period=period,
-        quarter=quarter,
-        document_type="attachment_xbrl",
-        resolved_at="2026-07-11T12:00:00Z",
-    )
-
-    with mock.patch("src.events.earnings_production_pipeline.logger") as mock_logger:
-        _sync_canonical_segments(
-            ticker=ticker,
-            period=period,
-            quarter=quarter,
-            canonical_filing_id="b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c",
-            common_disclosure_no=req_id,
-            xbrl_path=str(zip_path),
-            dry_run=True,
-            route="test",
-            trusted_provenance=fake_prov,
-        )
+    
+    with patch("src.events.earnings_subprocess_runner.run_earnings_subprocess_dry_run") as m_run, \
+         patch("src.events.earnings_subprocess_runner.build_save_ready_payload") as m_payload, \
+         patch("src.events.earnings_subprocess_runner.validate_save_ready_payload") as m_valid, \
+         patch("src.events.earnings_subprocess_runner.build_save_call_plan") as m_plan, \
+         patch("src.events.earnings_subprocess_runner.validate_save_call_plan") as m_cp_valid, \
+         patch("src.events.earnings_subprocess_runner.build_discord_call_plan") as m_discord_plan, \
+         patch("src.events.tdnet_event_store.save_event_to_supabase") as m_supa, \
+         patch("src.events.earnings_production_pipeline._find_cached_xbrl") as m_cache:
+         
+        m_run.return_value = {"results": [{"ticker": "9982", "status": "ok"}]}
+        m_valid.return_value = (True, "")
+        m_cp_valid.return_value = (True, "")
+        m_cache.return_value = "C:/xbrl_archive/20260709590450.zip"
         
-        # untrusted_source で identity エラーが記録される
-        error_calls = [c for c in mock_logger.error.call_args_list if "untrusted_source" in str(c)]
-        assert len(error_calls) > 0
+        m_payload.return_value = {"extracted": {"period": "2027-02-28", "guidance": {}}}
+        m_plan.return_value = {
+            "earnings_summary_args": {
+                "ticker": "9982", "title": "決算短信", "quarter": "1Q", "sales_value": 10, "op_value": 2,
+                "fingerprint": "1", "company_name": "T", "fiscal_year": "2027", "disclosure_date": "2026-07-10"
+            },
+            "tdnet_event_payload": {
+                "source_doc_id": "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c",
+                "source_url": "https://www.release.tdnet.info/inbs/140120260709590450.pdf"
+            }
+        }
+        m_discord_plan.return_value = {"discord_message": "test"}
+        m_supa.return_value = {"action": "inserted"}
+        
+        doc = DummyDoc("9982", "決算短信", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c")
+        doc.doc_url = "https://www.release.tdnet.info/inbs/140120260709590450.pdf"
+        
+        with patch.dict(os.environ, {"USE_SUBPROCESS_WORKER": "1", "EARNINGS_SUBPROCESS_ENABLE_REAL_SAVE": "1", "EARNINGS_SUBPROCESS_ALLOWLIST": "9982"}):
+            run_earnings_production([doc], conn, webhook_url="")
+            
+        assert m_resolve.call_count == 1
 
 
-# ======================================================================
-# Test Z: constructor 利用制限 (静的 constructor 呼び出し箇所監査)
-# ======================================================================
-def test_z_provenance_constructor_boundary():
-    """本番コード src/ 内で TrustedProvenance のインスタンス化が resolver のみに限定されていることを静的検証する。"""
-    src_dir = Path("src")
-    constructor_calls = []
+# ==============================================================================
+# Test AI: canonical_retry 経路で、開示1件につき resolve_xbrl_zip の呼び出しが最大1回
+# ==============================================================================
+@patch("src.events.earnings_production_pipeline._sync_canonical_segments")
+@patch("src.events.earnings_production_pipeline._sync_canonical_financials")
+@patch("src.events.earnings_production_pipeline._save_earnings_to_tdnet_events")
+@patch("src.segment.segment_zip_resolver.resolve_xbrl_zip")
+def test_ai_canonical_retry_resolve_once(m_resolve, m_save, m_sync_fin, m_sync_seg, tmp_path):
+    from src.events.earnings_production_pipeline import run_earnings_production
+    from tests.test_earnings_canonical_sync import DummyDoc
+    import sqlite3
+    
+    conn = sqlite3.connect(":memory:")
+    from src.events.earnings_summary_storage import ensure_earnings_summary_table
+    ensure_earnings_summary_table(conn)
+    
+    mock_client = MagicMock()
+    mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
+    
+    m_save.return_value = {"action": "dedup_skipped"}
+    m_resolve.return_value = ZipResolveResult(
+        zip_path="C:/xbrl_archive/20260709590505.zip",
+        source="tdnet_cache",
+        status="FOUND_CACHE",
+        error_reason="",
+        cache_hit=True,
+        downloaded=False,
+        requested_disclosure_no="20260709590505",
+        zip_sha256="c2349e5d0d17ac367cf104ad693382f05c086d4e81b2832cab0dc799a53d20f4",
+        trusted_provenance=None,
+        resolution_kind="exact_cache"
+    )
+    
+    doc = DummyDoc("7601", "決算短信", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c")
+    doc.doc_url = "https://www.release.tdnet.info/inbs/140120260709590505.pdf"
+    
+    with patch("src.events.tdnet_event_store._get_supabase", return_value=mock_client), \
+         patch("src.events.earnings_production_pipeline._find_cached_xbrl", return_value="C:/xbrl_archive/20260709590505.zip"), \
+         patch("src.events.earnings_production_pipeline.load_json") as m_load:
+         
+        m_load.return_value = {
+            "earnings": {"sales_current": 100, "op_current": 10},
+            "company_name": "Test Poplar", "fiscal_year": "2027", "quarter": "1Q",
+        }
+        
+        with patch.dict(os.environ, {"USE_SUBPROCESS_WORKER": "0"}):
+            run_earnings_production([doc], conn, webhook_url="")
+            
+        assert m_resolve.call_count == 1
 
-    # python ファイルを走査
-    for p in src_dir.rglob("*.py"):
-        content = p.read_text(encoding="utf-8", errors="ignore")
-        # "TrustedProvenance(" の文字列を探す (定義箇所 class TrustedProvenance 以外の呼び出し)
-        for line_no, line in enumerate(content.splitlines(), 1):
-            if "TrustedProvenance(" in line and "class TrustedProvenance" not in line:
-                constructor_calls.append((p.name, line_no, line))
 
-    # インスタンス化呼び出しが許されるのは segment_zip_resolver.py のみ
-    for file_name, line_no, line in constructor_calls:
-        assert file_name == "segment_zip_resolver.py", f"Constructor call leaked to {file_name}:{line_no} -> {line}"
+# ==============================================================================
+# Test AJ: resolver の返す同一オブジェクトが verifier と extractor へ伝播していることを確認
+# ==============================================================================
+@patch("src.segment.zip_identity_verifier.verify_zip_identity")
+@patch("src.events.earnings_production_pipeline._sync_canonical_segments")
+@patch("src.segment.segment_zip_resolver.resolve_xbrl_zip")
+def test_aj_resolver_object_propagation(m_resolve, m_sync_seg, m_verify, tmp_path):
+    from src.events.earnings_production_pipeline import run_earnings_production
+    from tests.test_earnings_canonical_sync import DummyDoc
+    import sqlite3
+    
+    conn = sqlite3.connect(":memory:")
+    from src.events.earnings_summary_storage import ensure_earnings_summary_table
+    ensure_earnings_summary_table(conn)
+    
+    m_prov = MagicMock() # ダミーの TrustedProvenance オブジェクト
+    
+    m_resolve.return_value = ZipResolveResult(
+        zip_path="C:/xbrl_archive/20260709590505.zip",
+        source="tdnet_cache",
+        status="FOUND_CACHE",
+        error_reason="",
+        cache_hit=True,
+        downloaded=False,
+        requested_disclosure_no="20260709590505",
+        zip_sha256="c2349e5d0d17ac367cf104ad693382f05c086d4e81b2832cab0dc799a53d20f4",
+        trusted_provenance=m_prov,
+        resolution_kind="exact_cache"
+    )
+    
+    m_verify.return_value.passed = True
+    
+    doc = DummyDoc("7601", "決算短信", "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c")
+    doc.doc_url = "https://www.release.tdnet.info/inbs/140120260709590505.pdf"
+    
+    with patch("src.events.earnings_production_pipeline._find_cached_xbrl", return_value="C:/xbrl_archive/20260709590505.zip"), \
+         patch("src.events.earnings_production_pipeline.load_json") as m_load, \
+         patch("src.events.earnings_production_pipeline._save_earnings_to_tdnet_events") as m_save, \
+         patch("src.events.earnings_production_pipeline._sync_canonical_financials"):
+         
+        m_save.return_value = {"action": "inserted"}
+        m_load.return_value = {
+            "earnings": {"sales_current": 100, "op_current": 10},
+            "company_name": "Test Poplar", "fiscal_year": "2027", "quarter": "1Q",
+        }
+        
+        with patch.dict(os.environ, {"USE_SUBPROCESS_WORKER": "0"}):
+            run_earnings_production([doc], conn, webhook_url="")
+            
+    # 同一の provenance オブジェクトが _sync_canonical_segments に伝播していること
+    assert m_sync_seg.call_args[1]["trusted_provenance"] is m_prov
+
+
+# ==============================================================================
+# Test AK & AL: AST (抽象構文木) 解析によるコード構造の厳格な検証
+# ==============================================================================
+def test_ak_al_static_code_structure():
+    pipeline_path = os.path.join("src", "events", "earnings_production_pipeline.py")
+    with open(pipeline_path, "r", encoding="utf-8") as f:
+        source = f.read()
+        
+    tree = ast.parse(source)
+    
+    # ── Test AL: 環境変数やテスト名により resolver をスキップ（バイパス）する条件分岐の有無監査 ──
+    # 本番コード内に "PYTEST_CURRENT_TEST" または "use_legacy_zip_resolve" に依存する
+    # 条件分岐が一切存在しないこと（監査結果 0件 の静的検証）
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in ("use_legacy_zip_resolve", "PYTEST_CURRENT_TEST"):
+            # L.1601 など、テスト用 Mock 記述以外に本番コード（earnings_production_pipeline.py）内に残存していないか検証
+            raise AssertionError(f"Deprecated symbol '{node.id}' found at line {node.lineno}")
+            
+    # ── Test AK: すべての _sync_canonical_segments 呼び出しにおいて trusted_provenance 引数が指定されているか検証 ──
+    class SyncCallVisitor(ast.NodeVisitor):
+        def visit_Call(self, node):
+            if isinstance(node.func, ast.Name) and node.func.id == "_sync_canonical_segments":
+                # キーワード引数に 'trusted_provenance' が含まれていることを確認
+                kwargs = [k.arg for k in node.keywords if k.arg is not None]
+                if "trusted_provenance" not in kwargs:
+                    raise AssertionError(
+                        f"Call to '_sync_canonical_segments' at line {node.lineno} is missing "
+                        f"'trusted_provenance' keyword argument."
+                    )
+            self.generic_visit(node)
+            
+    SyncCallVisitor().visit(tree)

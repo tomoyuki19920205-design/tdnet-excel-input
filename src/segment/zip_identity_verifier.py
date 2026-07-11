@@ -276,16 +276,6 @@ def verify_zip_identity(
     )
 
 
-    # 既存のテスト互換性のためのバイパス (tests/segment/ 以外のテストでダミーZIP使用時の identity エラーを回避)
-    current_test = os.environ.get("PYTEST_CURRENT_TEST", "")
-    if current_test and "tests/segment/" not in current_test:
-        zip_basename = os.path.basename(zip_path)
-        zip_no = _extract_disclosure_no_from_str(zip_basename)
-        if zip_no and zip_no == requested_disclosure_no:
-            return _PASS("exact_document_id_match", requested_disclosure_no, "")
-        else:
-            return _FAIL("zip_doc_id_mismatch")
-
     # ── STEP 1: ZIP 存在確認 ──────────────────────────────────
     if not zip_path or not os.path.exists(zip_path):
         logger.warning(
