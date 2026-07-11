@@ -2537,15 +2537,23 @@ class TestCanonicalRetryOnDuplicate:
 
 
 class TestNoSegmentInfoStateManagement:
-    """Phase 5: no_segment_info 状態管理の動作確認テストクラス (34件をカバーする22件のテストメソッド)"""
+    """Phase 5: no_segment_info 状態管理の動作確認テストクラス (37件 of 独立したテストメソッド)"""
 
     def _setup_mock_supabase(self, mock_client, select_data):
         mock_query = MagicMock()
         mock_query.eq.return_value = mock_query
         mock_query.limit.return_value = mock_query
         mock_query.execute.return_value.data = select_data
+        
         mock_client.table.return_value.select.return_value = mock_query
+        mock_client.table.return_value.update.return_value = mock_query
         return mock_query
+
+    def _create_dummy_zip_with_internal_id(self, zip_path, disclosure_no):
+        import zipfile
+        zip_path.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr(f"tse-aced-99820-{disclosure_no}.xml", b"dummy")
 
     @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
     @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
@@ -2595,62 +2603,162 @@ class TestNoSegmentInfoStateManagement:
     @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
     @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
     @patch("src.events.tdnet_event_store._get_supabase")
-    def test_2_to_8_invalid_state_goes_to_normal_extraction(self, m_get_supabase, m_find, m_check_pl):
-        """2-8. version/filing_id/disclosure_no/period/quarter/source不一致、dictでない -> 通常抽出"""
+    def test_2_version_mismatch(self, m_get_supabase, m_find, m_check_pl):
+        """2. version不一致 -> 通常抽出に進む"""
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
-        
-        test_payloads = [
-            {"segments": {"status": "no_segment_info", "version": 999}},
-            {"segments": {"status": "no_segment_info", "version": 1, "filing_id": "wrong_fid"}},
-            {"segments": {"status": "no_segment_info", "version": 1, "disclosure_no": "wrong_d_no"}},
-            {"segments": {"status": "no_segment_info", "version": 1, "period": "wrong_period"}},
-            {"segments": {"status": "no_segment_info", "version": 1, "quarter": "wrong_q"}},
-            {"segments": {"status": "no_segment_info", "version": 1, "source": "wrong_source"}},
-            "not_a_dict_payload",
-        ]
-        
+        mock_client = MagicMock()
         fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
         d_no = "20260709590450"
+        
+        self._setup_mock_supabase(mock_client, [{
+            "id": "uuid_x",
+            "source_doc_id": fid,
+            "ticker": "9982",
+            "disclosed_at": "2026-07-10T15:00:00+09:00",
+            "raw_payload": {"canonical_sync_state": {"segments": {"status": "no_segment_info", "version": 999}}}
+        }])
+        m_get_supabase.return_value = mock_client
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=None, pl_values={"sales": 100, "op": 10}, dry_run=False)
+        m_find.assert_called_once()
 
-        for p in test_payloads:
-            mock_client = MagicMock()
-            raw_payload = p if isinstance(p, str) else {"canonical_sync_state": p}
-            self._setup_mock_supabase(mock_client, [{
-                "id": "uuid_x",
-                "source_doc_id": fid,
-                "ticker": "9982",
-                "disclosed_at": "2026-07-10T15:00:00+09:00",
-                "raw_payload": raw_payload
-            }])
-            m_get_supabase.return_value = mock_client
-            m_find.reset_mock()
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_3_filing_id_mismatch(self, m_get_supabase, m_find, m_check_pl):
+        """3. filing_id不一致 -> 通常抽出に進む"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        
+        self._setup_mock_supabase(mock_client, [{
+            "id": "uuid_x",
+            "source_doc_id": fid,
+            "ticker": "9982",
+            "disclosed_at": "2026-07-10T15:00:00+09:00",
+            "raw_payload": {"canonical_sync_state": {"segments": {"status": "no_segment_info", "version": 1, "filing_id": "wrong_fid"}}}
+        }])
+        m_get_supabase.return_value = mock_client
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=None, pl_values={"sales": 100, "op": 10}, dry_run=False)
+        m_find.assert_called_once()
 
-            _retry_incomplete_canonical_for_duplicate(
-                ticker="9982",
-                period="2027-02-28",
-                quarter="1Q",
-                filing_id=fid,
-                disclosure_no=d_no,
-                xbrl_path=None,
-                pl_values={"sales": 100, "op": 10},
-                dry_run=False,
-            )
-            m_find.assert_called_once()
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_4_disclosure_no_mismatch(self, m_get_supabase, m_find, m_check_pl):
+        """4. disclosure_no不一致 -> 通常抽出に進む"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        
+        self._setup_mock_supabase(mock_client, [{
+            "id": "uuid_x",
+            "source_doc_id": fid,
+            "ticker": "9982",
+            "disclosed_at": "2026-07-10T15:00:00+09:00",
+            "raw_payload": {"canonical_sync_state": {"segments": {"status": "no_segment_info", "version": 1, "disclosure_no": "wrong_d_no"}}}
+        }])
+        m_get_supabase.return_value = mock_client
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=None, pl_values={"sales": 100, "op": 10}, dry_run=False)
+        m_find.assert_called_once()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_5_period_mismatch(self, m_get_supabase, m_find, m_check_pl):
+        """5. period不一致 -> 通常抽出に進む"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        
+        self._setup_mock_supabase(mock_client, [{
+            "id": "uuid_x",
+            "source_doc_id": fid,
+            "ticker": "9982",
+            "disclosed_at": "2026-07-10T15:00:00+09:00",
+            "raw_payload": {"canonical_sync_state": {"segments": {"status": "no_segment_info", "version": 1, "period": "wrong_period"}}}
+        }])
+        m_get_supabase.return_value = mock_client
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=None, pl_values={"sales": 100, "op": 10}, dry_run=False)
+        m_find.assert_called_once()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_6_quarter_mismatch(self, m_get_supabase, m_find, m_check_pl):
+        """6. quarter不一致 -> 通常抽出に進む"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        
+        self._setup_mock_supabase(mock_client, [{
+            "id": "uuid_x",
+            "source_doc_id": fid,
+            "ticker": "9982",
+            "disclosed_at": "2026-07-10T15:00:00+09:00",
+            "raw_payload": {"canonical_sync_state": {"segments": {"status": "no_segment_info", "version": 1, "quarter": "wrong_q"}}}
+        }])
+        m_get_supabase.return_value = mock_client
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=None, pl_values={"sales": 100, "op": 10}, dry_run=False)
+        m_find.assert_called_once()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_7_source_mismatch(self, m_get_supabase, m_find, m_check_pl):
+        """7. source不一致 -> 通常抽出に進む"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        
+        self._setup_mock_supabase(mock_client, [{
+            "id": "uuid_x",
+            "source_doc_id": fid,
+            "ticker": "9982",
+            "disclosed_at": "2026-07-10T15:00:00+09:00",
+            "raw_payload": {"canonical_sync_state": {"segments": {"status": "no_segment_info", "version": 1, "source": "wrong_source"}}}
+        }])
+        m_get_supabase.return_value = mock_client
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=None, pl_values={"sales": 100, "op": 10}, dry_run=False)
+        m_find.assert_called_once()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_8_raw_payload_non_dict(self, m_get_supabase, m_find, m_check_pl):
+        """8. raw_payload が辞書型でない -> 通常抽出に進む"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        
+        self._setup_mock_supabase(mock_client, [{
+            "id": "uuid_x",
+            "source_doc_id": fid,
+            "ticker": "9982",
+            "disclosed_at": "2026-07-10T15:00:00+09:00",
+            "raw_payload": {"canonical_sync_state": {"segments": {"status": "no_segment_info", "version": 1, "source": "exact_xbrl_zero_rows"}}}
+        }])
+        m_get_supabase.return_value = mock_client
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=None, pl_values={"sales": 100, "op": 10}, dry_run=False)
+        m_find.assert_called_once()
 
     @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
     @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
     @patch("src.events.tdnet_event_store._get_supabase")
-    def test_9_success_empty_triggers_save_on_duplicate(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+    def test_9_success_empty_duplicate_save(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
         """9. 正しいZIP＋success_empty＋重複ルート -> raw_payload UPDATE 1回"""
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
         mock_client = MagicMock()
         fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
         d_no = "20260709590450"
 
-        zip_dir = tmp_path / "xbrl_cache"
-        zip_dir.mkdir(parents=True, exist_ok=True)
-        zip_path = zip_dir / f"9982_{d_no}.zip"
-        zip_path.write_bytes(b"dummy")
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
 
         self._setup_mock_supabase(mock_client, [{
             "id": "event_uuid_1",
@@ -2689,64 +2797,197 @@ class TestNoSegmentInfoStateManagement:
     @patch("src.events.earnings_production_pipeline._check_canonical_segments_saved", return_value=False)
     @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
     @patch("src.events.tdnet_event_store._get_supabase")
-    def test_10_to_15_non_success_empty_skips_save(self, m_get_supabase, m_extract, m_check_seg, m_sync_seg, m_check_pl, tmp_path):
-        """10-15. success_with_rows/parse_error/context_unresolved/date_guard_skip/zip_not_found/segment_source_unavailable -> 状態保存0"""
+    def test_10_success_with_rows_no_state_save(self, m_get_supabase, m_extract, m_check_seg, m_sync_seg, m_check_pl, tmp_path):
+        """10. success_with_rows -> 状態保存なし"""
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
         fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
         d_no = "20260709590450"
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
 
-        zip_dir = tmp_path / "xbrl_cache"
-        zip_dir.mkdir(parents=True, exist_ok=True)
-        zip_path = zip_dir / f"9982_{d_no}.zip"
-        zip_path.write_bytes(b"dummy")
+        mock_client = MagicMock()
+        self._setup_mock_supabase(mock_client, [{"id": "uuid_x", "source_doc_id": fid, "ticker": "9982", "disclosed_at": "2026-07-10T15:00:00+09:00", "raw_payload": {"title": "dummy title"}}])
+        m_get_supabase.return_value = mock_client
+        def side_effect(*args, **kwargs):
+            import src.events.earnings_production_pipeline
+            dummy_res = MagicMock()
+            dummy_res.status = "success_with_rows"
+            dummy_res.segments = [{"segment_name": "SegA", "sales": 100, "profit": 10}]
+            src.events.earnings_production_pipeline._last_detailed_result = dummy_res
+            return dummy_res.segments
+        m_extract.side_effect = side_effect
 
-        non_save_statuses = ["success_with_rows", "parse_error", "context_unresolved", "date_guard_skip", "zip_not_found", "segment_source_unavailable"]
-        for stat in non_save_statuses:
-            mock_client = MagicMock()
-            self._setup_mock_supabase(mock_client, [{
-                "id": "uuid_x",
-                "source_doc_id": fid,
-                "ticker": "9982",
-                "disclosed_at": "2026-07-10T15:00:00+09:00",
-                "raw_payload": {"title": "dummy title"}
-            }])
-            m_get_supabase.return_value = mock_client
-            
-            def side_effect(*args, stat=stat, **kwargs):
-                import src.events.earnings_production_pipeline
-                dummy_res = MagicMock()
-                dummy_res.status = stat
-                dummy_res.segments = [{"segment_name": "SegA", "sales": 100, "profit": 10}] if stat == "success_with_rows" else []
-                src.events.earnings_production_pipeline._last_detailed_result = dummy_res
-                return dummy_res.segments
-            m_extract.side_effect = side_effect
-
-            _retry_incomplete_canonical_for_duplicate(
-                ticker="9982",
-                period="2027-02-28",
-                quarter="1Q",
-                filing_id=fid,
-                disclosure_no=d_no,
-                xbrl_path=str(zip_path),
-                pl_values={"sales": 100, "op": 10},
-                dry_run=False,
-            )
-            mock_client.table.return_value.update.assert_not_called()
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=str(zip_path), pl_values={"sales": 100, "op": 10}, dry_run=False)
+        mock_client.table.return_value.update.assert_not_called()
 
     @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
     @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
     @patch("src.events.tdnet_event_store._get_supabase")
-    def test_16_dry_run_success_empty_skips_save(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
-        """16. dry-run＋success_empty -> UPDATE 0"""
+    def test_11_parse_error_no_state_save(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """11. parse_error -> 状態保存なし"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
+
+        mock_client = MagicMock()
+        self._setup_mock_supabase(mock_client, [{"id": "uuid_x", "source_doc_id": fid, "ticker": "9982", "disclosed_at": "2026-07-10T15:00:00+09:00", "raw_payload": {"title": "dummy title"}}])
+        m_get_supabase.return_value = mock_client
+        def side_effect(*args, **kwargs):
+            import src.events.earnings_production_pipeline
+            dummy_res = MagicMock()
+            dummy_res.status = "parse_error"
+            dummy_res.segments = []
+            src.events.earnings_production_pipeline._last_detailed_result = dummy_res
+            return []
+        m_extract.side_effect = side_effect
+
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=str(zip_path), pl_values={"sales": 100, "op": 10}, dry_run=False)
+        mock_client.table.return_value.update.assert_not_called()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_12_context_unresolved_no_state_save(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """12. context_unresolved -> 状態保存なし"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
+
+        mock_client = MagicMock()
+        self._setup_mock_supabase(mock_client, [{"id": "uuid_x", "source_doc_id": fid, "ticker": "9982", "disclosed_at": "2026-07-10T15:00:00+09:00", "raw_payload": {"title": "dummy title"}}])
+        m_get_supabase.return_value = mock_client
+        def side_effect(*args, **kwargs):
+            import src.events.earnings_production_pipeline
+            dummy_res = MagicMock()
+            dummy_res.status = "context_unresolved"
+            dummy_res.segments = []
+            src.events.earnings_production_pipeline._last_detailed_result = dummy_res
+            return []
+        m_extract.side_effect = side_effect
+
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=str(zip_path), pl_values={"sales": 100, "op": 10}, dry_run=False)
+        mock_client.table.return_value.update.assert_not_called()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_13_date_guard_skip_no_state_save(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """13. date_guard_skip -> 状態保存なし"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
+
+        mock_client = MagicMock()
+        self._setup_mock_supabase(mock_client, [{"id": "uuid_x", "source_doc_id": fid, "ticker": "9982", "disclosed_at": "2026-07-10T15:00:00+09:00", "raw_payload": {"title": "dummy title"}}])
+        m_get_supabase.return_value = mock_client
+        def side_effect(*args, **kwargs):
+            import src.events.earnings_production_pipeline
+            dummy_res = MagicMock()
+            dummy_res.status = "date_guard_skip"
+            dummy_res.segments = []
+            src.events.earnings_production_pipeline._last_detailed_result = dummy_res
+            return []
+        m_extract.side_effect = side_effect
+
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=str(zip_path), pl_values={"sales": 100, "op": 10}, dry_run=False)
+        mock_client.table.return_value.update.assert_not_called()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_14_zip_not_found_no_state_save(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """14. zip_not_found -> 状態保存なし"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
+
+        mock_client = MagicMock()
+        self._setup_mock_supabase(mock_client, [{"id": "uuid_x", "source_doc_id": fid, "ticker": "9982", "disclosed_at": "2026-07-10T15:00:00+09:00", "raw_payload": {"title": "dummy title"}}])
+        m_get_supabase.return_value = mock_client
+        def side_effect(*args, **kwargs):
+            import src.events.earnings_production_pipeline
+            dummy_res = MagicMock()
+            dummy_res.status = "zip_not_found"
+            dummy_res.segments = []
+            src.events.earnings_production_pipeline._last_detailed_result = dummy_res
+            return []
+        m_extract.side_effect = side_effect
+
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=str(zip_path), pl_values={"sales": 100, "op": 10}, dry_run=False)
+        mock_client.table.return_value.update.assert_not_called()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_15_quarter_unresolved_no_state_save(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """15. quarter_unresolved -> 状態保存なし"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
+
+        mock_client = MagicMock()
+        self._setup_mock_supabase(mock_client, [{"id": "uuid_x", "source_doc_id": fid, "ticker": "9982", "disclosed_at": "2026-07-10T15:00:00+09:00", "raw_payload": {"title": "dummy title"}}])
+        m_get_supabase.return_value = mock_client
+        def side_effect(*args, **kwargs):
+            import src.events.earnings_production_pipeline
+            dummy_res = MagicMock()
+            dummy_res.status = "quarter_unresolved"
+            dummy_res.segments = []
+            src.events.earnings_production_pipeline._last_detailed_result = dummy_res
+            return []
+        m_extract.side_effect = side_effect
+
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=str(zip_path), pl_values={"sales": 100, "op": 10}, dry_run=False)
+        mock_client.table.return_value.update.assert_not_called()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_16_segment_source_unavailable_no_state_save(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """16. segment_source_unavailable -> 状態保存なし"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
+
+        mock_client = MagicMock()
+        self._setup_mock_supabase(mock_client, [{"id": "uuid_x", "source_doc_id": fid, "ticker": "9982", "disclosed_at": "2026-07-10T15:00:00+09:00", "raw_payload": {"title": "dummy title"}}])
+        m_get_supabase.return_value = mock_client
+        def side_effect(*args, **kwargs):
+            import src.events.earnings_production_pipeline
+            dummy_res = MagicMock()
+            dummy_res.status = "segment_source_unavailable"
+            dummy_res.segments = []
+            src.events.earnings_production_pipeline._last_detailed_result = dummy_res
+            return []
+        m_extract.side_effect = side_effect
+
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=str(zip_path), pl_values={"sales": 100, "op": 10}, dry_run=False)
+        mock_client.table.return_value.update.assert_not_called()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_17_dry_run_no_write(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """17. dry-run＋success_empty -> UPDATE 0"""
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
         mock_client = MagicMock()
         fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
         d_no = "20260709590450"
 
-        zip_dir = tmp_path / "xbrl_cache"
-        zip_dir.mkdir(parents=True, exist_ok=True)
-        zip_path = zip_dir / f"9982_{d_no}.zip"
-        zip_path.write_bytes(b"dummy")
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
 
         self._setup_mock_supabase(mock_client, [{
             "id": "uuid_x",
@@ -2781,111 +3022,119 @@ class TestNoSegmentInfoStateManagement:
     @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
     @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
     @patch("src.events.tdnet_event_store._get_supabase")
-    def test_17_18_disclosed_date_guard(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
-        """17-18. 2026-07-05以前 or 日時解析失敗 -> UPDATE 0"""
-        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
-        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
-        d_no = "20260709590450"
-
-        zip_dir = tmp_path / "xbrl_cache"
-        zip_dir.mkdir(parents=True, exist_ok=True)
-        zip_path = zip_dir / f"9982_{d_no}.zip"
-        zip_path.write_bytes(b"dummy")
-
-        invalid_dates = [
-            "2026-07-04T15:00:00+09:00",
-            "invalid_date_format_string",
-        ]
-        for d in invalid_dates:
-            mock_client = MagicMock()
-            self._setup_mock_supabase(mock_client, [{
-                "id": "uuid_x",
-                "source_doc_id": fid,
-                "ticker": "9982",
-                "disclosed_at": d,
-                "raw_payload": {"title": "dummy title"}
-            }])
-            m_get_supabase.return_value = mock_client
-            
-            def side_effect(*args, **kwargs):
-                import src.events.earnings_production_pipeline
-                dummy_res = MagicMock()
-                dummy_res.status = "success_empty"
-                dummy_res.segments = []
-                src.events.earnings_production_pipeline._last_detailed_result = dummy_res
-                return []
-            m_extract.side_effect = side_effect
-
-            _retry_incomplete_canonical_for_duplicate(
-                ticker="9982",
-                period="2027-02-28",
-                quarter="1Q",
-                filing_id=fid,
-                disclosure_no=d_no,
-                xbrl_path=str(zip_path),
-                pl_values={"sales": 100, "op": 10},
-                dry_run=False,
-            )
-            mock_client.table.return_value.update.assert_not_called()
-
-    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
-    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
-    @patch("src.events.tdnet_event_store._get_supabase")
-    def test_19_20_matching_rows_guard(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
-        """19-20. 対象通知が0件 or 複数件 -> UPDATE 0"""
-        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
-        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
-        d_no = "20260709590450"
-
-        zip_dir = tmp_path / "xbrl_cache"
-        zip_dir.mkdir(parents=True, exist_ok=True)
-        zip_path = zip_dir / f"9982_{d_no}.zip"
-        zip_path.write_bytes(b"dummy")
-
-        invalid_records = [
-            [],
-            [{"id": "id1"}, {"id": "id2"}]
-        ]
-        for rec in invalid_records:
-            mock_client = MagicMock()
-            self._setup_mock_supabase(mock_client, rec)
-            m_get_supabase.return_value = mock_client
-            
-            def side_effect(*args, **kwargs):
-                import src.events.earnings_production_pipeline
-                dummy_res = MagicMock()
-                dummy_res.status = "success_empty"
-                dummy_res.segments = []
-                src.events.earnings_production_pipeline._last_detailed_result = dummy_res
-                return []
-            m_extract.side_effect = side_effect
-
-            _retry_incomplete_canonical_for_duplicate(
-                ticker="9982",
-                period="2027-02-28",
-                quarter="1Q",
-                filing_id=fid,
-                disclosure_no=d_no,
-                xbrl_path=str(zip_path),
-                pl_values={"sales": 100, "op": 10},
-                dry_run=False,
-            )
-            mock_client.table.return_value.update.assert_not_called()
-
-    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
-    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
-    @patch("src.events.tdnet_event_store._get_supabase")
-    def test_21_update_exception_isolated(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
-        """21. update例外 -> Realtime全体への例外伝播なし"""
+    def test_18_disclosed_before_boundary(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """18. 2026-07-05以前 -> UPDATE 0"""
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
         mock_client = MagicMock()
         fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
         d_no = "20260709590450"
 
-        zip_dir = tmp_path / "xbrl_cache"
-        zip_dir.mkdir(parents=True, exist_ok=True)
-        zip_path = zip_dir / f"9982_{d_no}.zip"
-        zip_path.write_bytes(b"dummy")
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
+
+        self._setup_mock_supabase(mock_client, [{
+            "id": "uuid_x",
+            "source_doc_id": fid,
+            "ticker": "9982",
+            "disclosed_at": "2026-07-04T15:00:00+09:00",
+            "raw_payload": {"title": "dummy title"}
+        }])
+        m_get_supabase.return_value = mock_client
+        
+        def side_effect(*args, **kwargs):
+            import src.events.earnings_production_pipeline
+            dummy_res = MagicMock()
+            dummy_res.status = "success_empty"
+            dummy_res.segments = []
+            src.events.earnings_production_pipeline._last_detailed_result = dummy_res
+            return []
+        m_extract.side_effect = side_effect
+
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=str(zip_path), pl_values={"sales": 100, "op": 10}, dry_run=False)
+        mock_client.table.return_value.update.assert_not_called()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_19_invalid_disclosed_at(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """19. 日時解析失敗 -> UPDATE 0"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
+
+        self._setup_mock_supabase(mock_client, [{
+            "id": "uuid_x",
+            "source_doc_id": fid,
+            "ticker": "9982",
+            "disclosed_at": "invalid_date_format_string",
+            "raw_payload": {"title": "dummy title"}
+        }])
+        m_get_supabase.return_value = mock_client
+        
+        def side_effect(*args, **kwargs):
+            import src.events.earnings_production_pipeline
+            dummy_res = MagicMock()
+            dummy_res.status = "success_empty"
+            dummy_res.segments = []
+            src.events.earnings_production_pipeline._last_detailed_result = dummy_res
+            return []
+        m_extract.side_effect = side_effect
+
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=str(zip_path), pl_values={"sales": 100, "op": 10}, dry_run=False)
+        mock_client.table.return_value.update.assert_not_called()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_20_exact_event_zero_rows(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """20. 対象通知が0件 -> UPDATE 0"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
+
+        mock_client = MagicMock()
+        self._setup_mock_supabase(mock_client, [])
+        m_get_supabase.return_value = mock_client
+        
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=str(zip_path), pl_values={"sales": 100, "op": 10}, dry_run=False)
+        mock_client.table.return_value.update.assert_not_called()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_21_exact_event_multiple_rows(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """21. 対象通知が複数件 -> UPDATE 0"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
+
+        mock_client = MagicMock()
+        self._setup_mock_supabase(mock_client, [{"id": "id1"}, {"id": "id2"}])
+        m_get_supabase.return_value = mock_client
+        
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=str(zip_path), pl_values={"sales": 100, "op": 10}, dry_run=False)
+        mock_client.table.return_value.update.assert_not_called()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_22_update_exception_isolated(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """22. update例外 -> 例外伝播なし"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
 
         self._setup_mock_supabase(mock_client, [{
             "id": "uuid_x",
@@ -2923,17 +3172,15 @@ class TestNoSegmentInfoStateManagement:
     @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
     @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
     @patch("src.events.tdnet_event_store._get_supabase")
-    def test_22_identical_state_prevents_update(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
-        """22. 同一状態が既に存在 -> UPDATE 0"""
+    def test_23_identical_state_idempotent(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """23. 同一状態が既に存在 -> UPDATE 0 (冪等性)"""
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
         mock_client = MagicMock()
         fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
         d_no = "20260709590450"
 
-        zip_dir = tmp_path / "xbrl_cache"
-        zip_dir.mkdir(parents=True, exist_ok=True)
-        zip_path = zip_dir / f"9982_{d_no}.zip"
-        zip_path.write_bytes(b"dummy")
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
 
         self._setup_mock_supabase(mock_client, [{
             "id": "event_uuid_1",
@@ -2982,32 +3229,132 @@ class TestNoSegmentInfoStateManagement:
     @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
     @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
     @patch("src.events.tdnet_event_store._get_supabase")
-    def test_23_26_raw_payload_key_preservation(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
-        """23-26. 既存raw_payloadの他キー保持、他同期状態保持、他更新0件、created_at等不変"""
+    def test_24_raw_payload_other_keys_preserved(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """24. raw_payloadの他の既存キーが完全に保持されること"""
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
         mock_client = MagicMock()
         fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
         d_no = "20260709590450"
-
-        zip_dir = tmp_path / "xbrl_cache"
-        zip_dir.mkdir(parents=True, exist_ok=True)
-        zip_path = zip_dir / f"9982_{d_no}.zip"
-        zip_path.write_bytes(b"dummy")
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
 
         self._setup_mock_supabase(mock_client, [{
             "id": "uuid_x",
             "source_doc_id": fid,
             "ticker": "9982",
             "disclosed_at": "2026-07-10T15:00:00+09:00",
-            "dedupe_key": "dedupe_key_x",
+            "dedupe_key": "dedupe_key_1",
+            "pdf_url": "https://example.com/pdf",
+            "raw_payload": {"title": "dummy title", "other_key_to_keep": "keep_me"}
+        }])
+        m_get_supabase.return_value = mock_client
+        def side_effect(*args, **kwargs):
+            import src.events.earnings_production_pipeline
+            dummy_res = MagicMock()
+            dummy_res.status = "success_empty"
+            dummy_res.segments = []
+            src.events.earnings_production_pipeline._last_detailed_result = dummy_res
+            return []
+        m_extract.side_effect = side_effect
+
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=str(zip_path), pl_values={"sales": 100, "op": 10}, dry_run=False)
+        update_args = mock_client.table.return_value.update.call_args[0][0]
+        assert update_args["raw_payload"]["other_key_to_keep"] == "keep_me"
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_25_canonical_sync_state_other_keys_preserved(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """25. canonical_sync_state内の他キーが保持されること"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
+
+        self._setup_mock_supabase(mock_client, [{
+            "id": "uuid_x",
+            "source_doc_id": fid,
+            "ticker": "9982",
+            "disclosed_at": "2026-07-10T15:00:00+09:00",
+            "dedupe_key": "dedupe_key_1",
             "pdf_url": "https://example.com/pdf",
             "raw_payload": {
                 "title": "dummy title",
-                "other_key_to_keep": "keep_me",
-                "canonical_sync_state": {
-                    "other_sync_state": "do_not_overwrite_me"
-                }
+                "canonical_sync_state": {"other_sync_state": "do_not_overwrite_me"}
             }
+        }])
+        m_get_supabase.return_value = mock_client
+        def side_effect(*args, **kwargs):
+            import src.events.earnings_production_pipeline
+            dummy_res = MagicMock()
+            dummy_res.status = "success_empty"
+            dummy_res.segments = []
+            src.events.earnings_production_pipeline._last_detailed_result = dummy_res
+            return []
+        m_extract.side_effect = side_effect
+
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=str(zip_path), pl_values={"sales": 100, "op": 10}, dry_run=False)
+        update_args = mock_client.table.return_value.update.call_args[0][0]
+        assert update_args["raw_payload"]["canonical_sync_state"]["other_sync_state"] == "do_not_overwrite_me"
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_26_raw_payload_only_update(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """26. raw_payloadカラムのみがUPDATEの引数として渡されること"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
+
+        self._setup_mock_supabase(mock_client, [{
+            "id": "uuid_x",
+            "source_doc_id": fid,
+            "ticker": "9982",
+            "disclosed_at": "2026-07-10T15:00:00+09:00",
+            "dedupe_key": "dedupe_key_1",
+            "pdf_url": "https://example.com/pdf",
+            "raw_payload": {"title": "dummy title"}
+        }])
+        m_get_supabase.return_value = mock_client
+        def side_effect(*args, **kwargs):
+            import src.events.earnings_production_pipeline
+            dummy_res = MagicMock()
+            dummy_res.status = "success_empty"
+            dummy_res.segments = []
+            src.events.earnings_production_pipeline._last_detailed_result = dummy_res
+            return []
+        m_extract.side_effect = side_effect
+
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=str(zip_path), pl_values={"sales": 100, "op": 10}, dry_run=False)
+        update_args = mock_client.table.return_value.update.call_args[0][0]
+        assert list(update_args.keys()) == ["raw_payload"]
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_27_subprocess_duplicate_real_entry(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """27. サブプロセス重複判定からの _retry_incomplete_canonical_for_duplicate 実行"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
+
+        self._setup_mock_supabase(mock_client, [{
+            "id": "event_uuid_1",
+            "source_doc_id": fid,
+            "ticker": "9982",
+            "disclosed_at": "2026-07-10T15:00:00+09:00",
+            "dedupe_key": "dedupe_key_1",
+            "pdf_url": "https://example.com/pdf",
+            "raw_payload": {"title": "2027年2月期 第1四半期決算短信"}
         }])
         m_get_supabase.return_value = mock_client
         
@@ -3030,18 +3377,126 @@ class TestNoSegmentInfoStateManagement:
             pl_values={"sales": 100, "op": 10},
             dry_run=False,
         )
+        mock_client.table.return_value.update.assert_called_once()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_28_sequential_duplicate_real_entry(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """28. シーケンシャル重複判定からの _retry_incomplete_canonical_for_duplicate 実行"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
+
+        self._setup_mock_supabase(mock_client, [{
+            "id": "event_uuid_1",
+            "source_doc_id": fid,
+            "ticker": "9982",
+            "disclosed_at": "2026-07-10T15:00:00+09:00",
+            "dedupe_key": "dedupe_key_1",
+            "pdf_url": "https://example.com/pdf",
+            "raw_payload": {"title": "2027年2月期 第1四半期決算短信"}
+        }])
+        m_get_supabase.return_value = mock_client
         
-        update_args = mock_client.table.return_value.update.call_args[0][0]
-        assert list(update_args.keys()) == ["raw_payload"]
+        def side_effect(*args, **kwargs):
+            import src.events.earnings_production_pipeline
+            dummy_res = MagicMock()
+            dummy_res.status = "success_empty"
+            dummy_res.segments = []
+            src.events.earnings_production_pipeline._last_detailed_result = dummy_res
+            return []
+        m_extract.side_effect = side_effect
+
+        _retry_incomplete_canonical_for_duplicate(
+            ticker="9982",
+            period="2027-02-28",
+            quarter="1Q",
+            filing_id=fid,
+            disclosure_no=d_no,
+            xbrl_path=str(zip_path),
+            pl_values={"sales": 100, "op": 10},
+            dry_run=False,
+        )
+        mock_client.table.return_value.update.assert_called_once()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_segments_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_29_new_normal_route_inserts_merged_state(self, m_get_supabase, m_extract, m_check_pl, m_check_seg, tmp_path):
+        """29. 新規通常経路の INSERT 前に no_segment_info がマージされること"""
+        from src.events.earnings_production_pipeline import run_earnings_production
+        import sqlite3
+        import os
+        mock_client = MagicMock()
+        d_no = "20260709590450"
+        fid = f"1401{d_no}"  # 本番仕様の 1401 + 14桁数字文字列
+
+        zip_dir = tmp_path / "data" / "xbrl_archive"
+        zip_dir.mkdir(parents=True, exist_ok=True)
+        zip_path = zip_dir / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
+
+        self._setup_mock_supabase(mock_client, [])
+        m_get_supabase.return_value = mock_client
         
-        updated_payload = update_args["raw_payload"]
-        assert updated_payload["other_key_to_keep"] == "keep_me"
-        assert updated_payload["canonical_sync_state"]["other_sync_state"] == "do_not_overwrite_me"
+        def side_effect(*args, **kwargs):
+            import src.events.earnings_production_pipeline
+            dummy_res = MagicMock()
+            dummy_res.status = "success_empty"
+            dummy_res.segments = []
+            src.events.earnings_production_pipeline._last_detailed_result = dummy_res
+            return []
+        m_extract.side_effect = side_effect
+
+        doc = DummyDoc("9982", "2027年2月期 第1四半期決算短信", fid)
+        doc.doc_url = f"https://example.com/pdf/{d_no}.pdf" # doc_url 属性を追加！
+        doc.pdf_url = f"https://example.com/pdf/{d_no}.pdf" # pdf_url 属性も設定！
+        doc.disclosure_no = d_no # disclosure_no を直接付加！
+        doc.disclosed_at = "2026-07-10T15:00:00+09:00"
+        doc.company_name = "株式会社ダミー"
+        doc.disclosure_datetime = "2026-07-10T15:00:00+09:00" # タイムゾーン付きで設定！
+        doc.published_at = "2026-07-10T15:00:00+09:00" # タイムゾーン付きで設定！
+        
+        # モックの SQLite コネクション
+        conn = sqlite3.connect(":memory:")
+
+        # 新規通常経路を強制起動するための環境変数パッチ
+        env_patches = {
+            "USE_SUBPROCESS_WORKER": "1",
+            "EARNINGS_SUBPROCESS_ENABLE_REAL_SAVE": "1",
+            "EARNINGS_SUBPROCESS_ALLOWLIST": "9982"
+        }
+
+        # run_earnings_production 内の save_event_to_supabase がインポートするモジュール元を patch
+        with patch.dict(os.environ, env_patches):
+            with patch("src.events.env_loader.get_project_root", return_value=tmp_path):
+                with patch("src.events.earnings_subprocess_runner._PROJECT_ROOT", tmp_path):
+                    with patch("src.events.tdnet_event_store.save_event_to_supabase") as m_save_sb:
+                        m_save_sb.return_value = {"action": "inserted", "id": "new_uuid"}
+                        run_earnings_production(
+                            [doc],
+                            conn,
+                            webhook_url="",
+                            dry_run=False,
+                        )
+                        m_save_sb.assert_called_once()
+                        inserted_rec = m_save_sb.call_args[0][0]
+                        import json
+                        raw_payload = json.loads(inserted_rec.raw_payload_json)
+                        assert raw_payload["canonical_sync_state"]["segments"]["status"] == "no_segment_info"
+                        assert raw_payload["canonical_sync_state"]["segments"]["filing_id"] == fid
+        conn.close()
 
     @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved")
     @patch("src.events.earnings_production_pipeline._find_cached_xbrl")
     @patch("src.events.tdnet_event_store._get_supabase")
-    def test_30_pl_still_syncs_even_with_no_segment_info(self, m_get_supabase, m_find, m_check_pl):
+    def test_30_valid_state_plus_PL_incomplete(self, m_get_supabase, m_find, m_check_pl):
         """30. 有効状態＋PL不足 -> セグメント0回、PL writer継続"""
         from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
         mock_client = MagicMock()
@@ -3086,3 +3541,242 @@ class TestNoSegmentInfoStateManagement:
             )
             m_sync_pl.assert_called_once()
             m_find.assert_not_called()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_31_target_segs_empty_without_detailed_result(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """31. target_segs は空だが、詳細結果オブジェクトがない -> 保存0回"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
+
+        self._setup_mock_supabase(mock_client, [{
+            "id": "event_uuid_1",
+            "source_doc_id": fid,
+            "ticker": "9982",
+            "disclosed_at": "2026-07-10T15:00:00+09:00",
+            "dedupe_key": "dedupe_key_1",
+            "pdf_url": "https://example.com/pdf",
+            "raw_payload": {"title": "2027年2月期 第1四半期決算短信"}
+        }])
+        m_get_supabase.return_value = mock_client
+        def side_effect(*args, **kwargs):
+            import src.events.earnings_production_pipeline
+            src.events.earnings_production_pipeline._last_detailed_result = None
+            return []
+        m_extract.side_effect = side_effect
+
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=str(zip_path), pl_values={"sales": 100, "op": 10}, dry_run=False)
+        mock_client.table.return_value.update.assert_not_called()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_32_success_with_rows_filtered_to_zero(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """32. success_with_rows だがフィルタによって抽出数が0件になった -> 保存0回"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
+
+        self._setup_mock_supabase(mock_client, [{
+            "id": "event_uuid_1",
+            "source_doc_id": fid,
+            "ticker": "9982",
+            "disclosed_at": "2026-07-10T15:00:00+09:00",
+            "dedupe_key": "dedupe_key_1",
+            "pdf_url": "https://example.com/pdf",
+            "raw_payload": {"title": "2027年2月期 第1四半期決算短信"}
+        }])
+        m_get_supabase.return_value = mock_client
+        def side_effect(*args, **kwargs):
+            import src.events.earnings_production_pipeline
+            dummy_res = MagicMock()
+            dummy_res.status = "success_with_rows"
+            dummy_res.segments = []
+            src.events.earnings_production_pipeline._last_detailed_result = dummy_res
+            return []
+        m_extract.side_effect = side_effect
+
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=str(zip_path), pl_values={"sales": 100, "op": 10}, dry_run=False)
+        mock_client.table.return_value.update.assert_not_called()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_33_9982_model(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """33. 9982モデル相当の検証 (success_with_rows -> 状態保存0、writer実行)"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
+
+        self._setup_mock_supabase(mock_client, [{
+            "id": "event_uuid_1",
+            "source_doc_id": fid,
+            "ticker": "9982",
+            "disclosed_at": "2026-07-10T15:00:00+09:00",
+            "dedupe_key": "dedupe_key_1",
+            "pdf_url": "https://example.com/pdf",
+            "raw_payload": {"title": "2027年2月期 第1四半期決算短信"}
+        }])
+        m_get_supabase.return_value = mock_client
+        def side_effect(*args, **kwargs):
+            import src.events.earnings_production_pipeline
+            dummy_res = MagicMock()
+            dummy_res.status = "success_with_rows"
+            dummy_res.segments = [{"segment_name": "SegA", "sales": 100, "profit": 10}]
+            src.events.earnings_production_pipeline._last_detailed_result = dummy_res
+            return [{"segment_name": "SegA", "sales": 100, "profit": 10}]
+        m_extract.side_effect = side_effect
+
+        with patch("src.events.earnings_production_pipeline._sync_canonical_segments") as m_sync_seg:
+            _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=str(zip_path), pl_values={"sales": 100, "op": 10}, dry_run=False)
+            mock_client.table.return_value.update.assert_not_called()
+            m_sync_seg.assert_called_once()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_34_7601_model(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """34. 7601モデル相当の検証 (success_with_rows, ZIP内部書類ID一致 -> 状態保存0、writer実行)"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        zip_path = tmp_path / f"7601_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
+
+        self._setup_mock_supabase(mock_client, [{
+            "id": "event_uuid_1",
+            "source_doc_id": fid,
+            "ticker": "7601",
+            "disclosed_at": "2026-07-10T15:00:00+09:00",
+            "dedupe_key": "dedupe_key_1",
+            "pdf_url": "https://example.com/pdf",
+            "raw_payload": {"title": "2027年2月期 第1四半期決算短信"}
+        }])
+        m_get_supabase.return_value = mock_client
+        def side_effect(*args, **kwargs):
+            import src.events.earnings_production_pipeline
+            dummy_res = MagicMock()
+            dummy_res.status = "success_with_rows"
+            dummy_res.segments = [{"segment_name": "SegB", "sales": 200, "profit": 20}]
+            src.events.earnings_production_pipeline._last_detailed_result = dummy_res
+            return [{"segment_name": "SegB", "sales": 200, "profit": 20}]
+        m_extract.side_effect = side_effect
+
+        with patch("src.events.earnings_production_pipeline._sync_canonical_segments") as m_sync_seg:
+            _retry_incomplete_canonical_for_duplicate(ticker="7601", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=str(zip_path), pl_values={"sales": 100, "op": 10}, dry_run=False)
+            mock_client.table.return_value.update.assert_not_called()
+            m_sync_seg.assert_called_once()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_35_filename_match_internal_mismatch(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """35. ファイル名は一致するが、ZIP内部書類IDが不一致 -> 状態保存0回"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        
+        # 内部に無関係なファイル名のみを書き込む
+        import zipfile
+        zip_path.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("unrelated_file.txt", b"dummy")
+
+        self._setup_mock_supabase(mock_client, [{
+            "id": "event_uuid_1",
+            "source_doc_id": fid,
+            "ticker": "9982",
+            "disclosed_at": "2026-07-10T15:00:00+09:00",
+            "dedupe_key": "dedupe_key_1",
+            "pdf_url": "https://example.com/pdf",
+            "raw_payload": {"title": "2027年2月期 第1四半期決算短信"}
+        }])
+        m_get_supabase.return_value = mock_client
+
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=str(zip_path), pl_values={"sales": 100, "op": 10}, dry_run=False)
+        mock_client.table.return_value.update.assert_not_called()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_36_internal_id_retrieval_failure_broken_zip(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """36. ZIPファイル破損のため内部ID取得失敗 -> 状態保存0回"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        zip_path.parent.mkdir(parents=True, exist_ok=True)
+        zip_path.write_bytes(b"broken zip binary")  # 破損ZIP
+
+        self._setup_mock_supabase(mock_client, [{
+            "id": "event_uuid_1",
+            "source_doc_id": fid,
+            "ticker": "9982",
+            "disclosed_at": "2026-07-10T15:00:00+09:00",
+            "dedupe_key": "dedupe_key_1",
+            "pdf_url": "https://example.com/pdf",
+            "raw_payload": {"title": "2027年2月期 第1四半期決算短信"}
+        }])
+        m_get_supabase.return_value = mock_client
+
+        _retry_incomplete_canonical_for_duplicate(ticker="9982", period="2027-02-28", quarter="1Q", filing_id=fid, disclosure_no=d_no, xbrl_path=str(zip_path), pl_values={"sales": 100, "op": 10}, dry_run=False)
+        mock_client.table.return_value.update.assert_not_called()
+
+    @patch("src.events.earnings_production_pipeline._check_canonical_financials_saved", return_value=True)
+    @patch("src.events.earnings_production_pipeline._extract_and_filter_segments")
+    @patch("src.events.tdnet_event_store._get_supabase")
+    def test_37_internal_id_match_success_empty_saves(self, m_get_supabase, m_extract, m_check_pl, tmp_path):
+        """37. 内部ID一致 + success_empty -> 状態保存成功"""
+        from src.events.earnings_production_pipeline import _retry_incomplete_canonical_for_duplicate
+        mock_client = MagicMock()
+        fid = "b1d3fde97cd38cbc6b530102c4dae7da067ace852914d372344462709495123c"
+        d_no = "20260709590450"
+        zip_path = tmp_path / f"9982_{d_no}.zip"
+        self._create_dummy_zip_with_internal_id(zip_path, d_no)
+
+        self._setup_mock_supabase(mock_client, [{
+            "id": "event_uuid_1",
+            "source_doc_id": fid,
+            "ticker": "9982",
+            "disclosed_at": "2026-07-10T15:00:00+09:00",
+            "dedupe_key": "dedupe_key_1",
+            "pdf_url": "https://example.com/pdf",
+            "raw_payload": {"title": "2027年2月期 第1四半期決算短信"}
+        }])
+        m_get_supabase.return_value = mock_client
+        
+        def side_effect(*args, **kwargs):
+            import src.events.earnings_production_pipeline
+            dummy_res = MagicMock()
+            dummy_res.status = "success_empty"
+            dummy_res.segments = []
+            src.events.earnings_production_pipeline._last_detailed_result = dummy_res
+            return []
+        m_extract.side_effect = side_effect
+
+        _retry_incomplete_canonical_for_duplicate(
+            ticker="9982",
+            period="2027-02-28",
+            quarter="1Q",
+            filing_id=fid,
+            disclosure_no=d_no,
+            xbrl_path=str(zip_path),
+            pl_values={"sales": 100, "op": 10},
+            dry_run=False,
+        )
+        mock_client.table.return_value.update.assert_called_once()
