@@ -842,7 +842,7 @@ def _retry_incomplete_canonical_for_duplicate(
                     # 抽出 (最大1回制限)
                     if target_segs is None:
                         target_segs = _extract_and_filter_segments(
-                            resolved_zip, period, quarter
+                            resolved_zip, period, quarter, include_context_evidence=True
                         )
                     detailed_result = _last_detailed_result
 
@@ -1075,7 +1075,7 @@ def _sync_canonical_segments(
 
     # 5. target_segsが渡されていなければ抽出とフィルタリングを実行
     if target_segs is None:
-        target_segs = _extract_and_filter_segments(xbrl_path, period, quarter)
+        target_segs = _extract_and_filter_segments(xbrl_path, period, quarter, include_context_evidence=True)
 
     if not target_segs:
         logger.info("[EARNINGS][SEGMENT_CANONICAL] %s segment情報なし", ticker)
@@ -2334,6 +2334,22 @@ def run_earnings_production(
                     if not _seq_disclosure_no:
                         _seq_disclosure_no = extract_common_disclosure_no(getattr(doc, "pdf_url", "")) or ""
 
+                    _seq_identity_passed = False
+                    if xbrl_path and os.path.exists(xbrl_path):
+                        from src.segment.zip_identity_verifier import verify_zip_identity as _verify_seq
+                        _seq_identity_verdict = _verify_seq(
+                            zip_path=xbrl_path,
+                            requested_disclosure_no=_seq_disclosure_no,
+                            expected_ticker=ticker,
+                            expected_period=_seq_period,
+                            expected_quarter=quarter,
+                            trusted_provenance=_seq_provenance,
+                        )
+                        _seq_identity_passed = (
+                            _seq_identity_verdict.passed
+                            and _seq_identity_verdict.verdict in ("exact_document_id_match", "official_linked_xbrl_match")
+                        )
+
                     # 通常ルートでの no_segment_info 先行判定
                     _pre_target_segs = None
                     _pre_detailed_result = None
@@ -2344,9 +2360,7 @@ def run_earnings_production(
                             and xbrl_path and os.path.exists(xbrl_path)
                             and not dry_run
                         ):
-                            zip_basename = os.path.basename(xbrl_path)
-                            zip_no = extract_common_disclosure_no(zip_basename)
-                            if zip_no and zip_no == _seq_disclosure_no:
+                            if _seq_identity_passed:
                                 _pre_target_segs = _extract_and_filter_segments(
                                     xbrl_path, _seq_period, quarter, include_context_evidence=True
                                 )
@@ -2396,10 +2410,7 @@ def run_earnings_production(
                     _target_segs = _pre_target_segs
                     _expected_segment_metrics = []
                     if xbrl_path and os.path.exists(xbrl_path):
-                        # xbrl_pathの書類IDがcommon_disclosure_noと一致するか確認 (ガード)
-                        zip_basename = os.path.basename(xbrl_path)
-                        zip_no = extract_common_disclosure_no(zip_basename)
-                        if zip_no and zip_no == _seq_disclosure_no:
+                        if _seq_identity_passed:
                             try:
                                 if _target_segs is None:
                                     _target_segs = _extract_and_filter_segments(

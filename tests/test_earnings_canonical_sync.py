@@ -4181,3 +4181,222 @@ class TestNoSegmentInfoStateManagement:
 
         # 5. 無効なdisclosure_no
         assert _verify_zip_internal_document_id(str(ok_zip_path), "invalid_no") is False
+
+# =====================================================================
+# Phase 10A-R2 Context Evidence & Sequential Strict Identity Tests
+# =====================================================================
+
+class TestPhase10AR2SequentialContextEvidence:
+    @pytest.fixture
+    def setup_db(self):
+        import sqlite3
+        conn = sqlite3.connect(":memory:")
+        from src.events.earnings_summary_storage import ensure_earnings_summary_table
+        ensure_earnings_summary_table(conn)
+        return conn
+
+    @pytest.fixture
+    def mock_deps(self):
+        from src.events.summary_financials import EarningsSummaryData
+        with patch("src.events.earnings_production_pipeline._find_cached_xbrl") as m_cache, \
+             patch("src.events.earnings_production_pipeline.run_shadow_write_plan") as m_shadow, \
+             patch("src.events.earnings_production_pipeline._save_earnings_to_tdnet_events") as m_save_events, \
+             patch("src.events.earnings_production_pipeline.send_earnings_discord") as m_discord, \
+             patch("src.events.earnings_production_pipeline._sync_canonical_financials") as m_sync, \
+             patch("src.events.earnings_production_pipeline._sync_canonical_segments") as m_sync_seg:
+
+            m_cache.return_value = "dummy.zip"
+            e = EarningsSummaryData(sales_current=1000, op_current=100)
+            m_save_events.return_value = {"action": "inserted", "dedupe_key": "123"}
+            m_discord.return_value = True
+
+            yield {
+                "cache": m_cache,
+                "save_events": m_save_events,
+                "sync": m_sync,
+                "sync_seg": m_sync_seg,
+                "e": e,
+            }
+
+    def test_7601_nominal_seq_test(self, setup_db, mock_deps, monkeypatch, tmp_path):
+        monkeypatch.setenv("USE_SUBPROCESS_WORKER", "0")
+        
+        import os
+        zip_path = tmp_path / "xbrl.zip"
+        import shutil
+        actual_7601_zip = r"C:\Users\takuy\OneDrive\tdnet-excel-input\data\tdnet_cache\20260709590505\xbrl.zip"
+        if os.path.exists(actual_7601_zip):
+            shutil.copy2(actual_7601_zip, str(zip_path))
+        else:
+            pytest.skip("No actual 7601 zip for full context evidence test")
+
+        from src.segment.segment_zip_resolver import ZipResolveResult
+        with patch("src.segment.segment_zip_resolver.resolve_xbrl_zip") as m_resolve, \
+             patch("src.events.earnings_production_pipeline.load_json") as m_fetch:
+            
+            m_resolve.return_value = ZipResolveResult(
+                zip_path=str(zip_path),
+                source="tdnet_cache",
+                status="FOUND_CACHE",
+                error_reason="",
+                cache_hit=True,
+                downloaded=False,
+                requested_disclosure_no="20260709590505",
+                zip_sha256="dummy",
+                trusted_provenance=None,
+                resolution_kind="exact_cache"
+            )
+            
+            import dataclasses
+            m_fetch.return_value = {
+                "earnings": dataclasses.asdict(mock_deps["e"]),
+                "company_name": "Poplar",
+                "fiscal_year": "2026",
+                "quarter": "1Q",
+                "summary_line": "",
+                "segment_lines": [],
+                "company_reasons": [],
+                "segment_reasons": [],
+                "full_message": "",
+                "guidance": None,
+                "is_4q": False,
+                "fy_reason": ""
+            }
+            
+            doc = DummyDoc("7601", "2027年2月期 第1四半期決算短信", "1234567890123456789012345678901234567890123456789012345678901234")
+            doc.disclosure_no = "20260709590505"
+            
+            run_earnings_production([doc], setup_db, webhook_url="")
+            
+        assert mock_deps["sync_seg"].call_count == 1
+        kwargs = mock_deps["sync_seg"].call_args[1]
+        target_segs = kwargs["target_segs"]
+        
+        assert target_segs is not None
+        assert len(target_segs) == 3
+        expected_segs = {
+            "Smartstore": {"sales": 1242, "profit": -90},
+            "Lawson Poplar": {"sales": 1529, "profit": 248},
+            "Other": {"sales": 167, "profit": -5},
+        }
+        actual_segs = {s["segment_name"]: s for s in target_segs}
+        assert set(actual_segs.keys()) == set(expected_segs.keys())
+        for name, expected in expected_segs.items():
+            assert actual_segs[name]["sales"] == expected["sales"]
+            assert actual_segs[name]["profit"] == expected["profit"]
+
+
+    def test_9982_linked_xbrl_seq_test(self, setup_db, mock_deps, monkeypatch, tmp_path):
+        monkeypatch.setenv("USE_SUBPROCESS_WORKER", "0")
+        
+        import os
+        zip_path = tmp_path / "xbrl.zip"
+        
+        import shutil
+        actual_9982_zip = r"C:\Users\takuy\OneDrive\tdnet-excel-input\data\tdnet_cache\20260709590450\xbrl.zip"
+        if os.path.exists(actual_9982_zip):
+            shutil.copy2(actual_9982_zip, str(zip_path))
+        else:
+            pytest.skip("No actual 9982 zip for full context evidence test")
+
+        from src.segment.segment_zip_resolver import ZipResolveResult
+        from src.segment.zip_identity_verifier import TrustedProvenance
+        with patch("src.segment.segment_zip_resolver.resolve_xbrl_zip") as m_resolve, \
+             patch("src.events.earnings_production_pipeline.load_json") as m_fetch:
+            
+            import hashlib
+            with open(actual_9982_zip, "rb") as f:
+                sha = hashlib.sha256(f.read()).hexdigest()
+                
+            prov = TrustedProvenance(
+                source="jquants",
+                requested_disclosure_no="20260709590450",
+                requested_file_type="x",
+                resolved_by_function="test",
+                official_request_succeeded=True,
+                response_status=200,
+                downloaded_size=1000,
+                downloaded_sha256=sha,
+                internal_document_id="20260710399820",
+                ticker="9982",
+                period="2027-02-28",
+                quarter="1Q",
+                document_type="attachment_xbrl",
+                resolved_at="2026-07-10T12:00:00Z"
+            )
+            
+            m_resolve.return_value = ZipResolveResult(
+                zip_path=str(zip_path),
+                source="jquants",
+                status="FOUND",
+                error_reason="",
+                cache_hit=False,
+                downloaded=True,
+                requested_disclosure_no="20260709590450",
+                zip_sha256=sha,
+                trusted_provenance=prov,
+                resolution_kind="official_linked_xbrl"
+            )
+            
+            import dataclasses
+            m_fetch.return_value = {
+                "earnings": dataclasses.asdict(mock_deps["e"]),
+                "company_name": "Takihyo",
+                "fiscal_year": "2026",
+                "quarter": "1Q",
+                "summary_line": "",
+                "segment_lines": [],
+                "company_reasons": [],
+                "segment_reasons": [],
+                "full_message": "",
+                "guidance": None,
+                "is_4q": False,
+                "fy_reason": ""
+            }
+            
+            doc = DummyDoc("9982", "2027年2月期 第1四半期決算短信", "A"*64)
+            doc.disclosure_no = "20260709590450"
+            
+            run_earnings_production([doc], setup_db, webhook_url="")
+            
+        assert mock_deps["sync_seg"].call_count == 1
+        kwargs = mock_deps["sync_seg"].call_args[1]
+        target_segs = kwargs["target_segs"]
+        
+        assert target_segs is not None
+        assert len(target_segs) == 4
+        expected_segs = {
+            "Apparel And Textile": {"sales": 15388, "profit": 447},
+            "Rental Business": {"sales": 249, "profit": 140},
+            "Material": {"sales": 1775, "profit": 211},
+            "Other": {"sales": 263, "profit": 16},
+        }
+        actual_segs = {s["segment_name"]: s for s in target_segs}
+        assert set(actual_segs.keys()) == set(expected_segs.keys())
+        for name, expected in expected_segs.items():
+            assert actual_segs[name]["sales"] == expected["sales"]
+            assert actual_segs[name]["profit"] == expected["profit"]
+
+
+    def test_fallback_includes_context_evidence(self):
+        with patch("src.events.earnings_production_pipeline._extract_and_filter_segments") as m_ext, \
+             patch("src.segment.zip_identity_verifier.verify_zip_identity") as m_ver:
+             
+             m_ext.return_value = [{"segment_name": "Test"}]
+             from src.segment.zip_identity_verifier import ZipIdentityVerdict
+             m_ver.return_value = ZipIdentityVerdict(True, "exact_document_id_match", "", "", "", "", "")
+             
+             from src.events.earnings_production_pipeline import _sync_canonical_segments
+             _sync_canonical_segments(
+                 ticker="9999",
+                 period="2026-03-31",
+                 quarter="1Q",
+                 canonical_filing_id="A"*64,
+                 common_disclosure_no="12345678901234",
+                 xbrl_path="dummy.zip",
+                 dry_run=True,
+                 route="sequential",
+                 target_segs=None,
+             )
+             
+             m_ext.assert_called_once_with("dummy.zip", "2026-03-31", "1Q", include_context_evidence=True)
