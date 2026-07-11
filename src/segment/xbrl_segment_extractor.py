@@ -37,17 +37,17 @@ def _calculate_expected_context_end(period_str: str, quarter: str) -> Optional[d
         fy_end = datetime.datetime.strptime(period_str[:10], "%Y-%m-%d").date()
     except ValueError:
         return None
-        
+
     months_to_subtract = 0
     if quarter == "1Q": months_to_subtract = 9
     elif quarter == "2Q": months_to_subtract = 6
     elif quarter == "3Q": months_to_subtract = 3
     elif quarter == "FY": months_to_subtract = 0
     elif quarter == "4Q": months_to_subtract = 0
-    
+
     if months_to_subtract == 0:
         return fy_end
-        
+
     d = fy_end - relativedelta(months=months_to_subtract)
     _, last_day = calendar.monthrange(d.year, d.month)
     return datetime.date(d.year, d.month, min(d.day, last_day))
@@ -267,14 +267,14 @@ def _parse_context_periods(soup: BeautifulSoup) -> dict[str, dict]:
         cid = ctx.get("id")
         if not cid:
             continue
-        
+
         info = {}
         period = ctx.find(lambda t: t.name and t.name.endswith("period"))
         if period:
             start = period.find(lambda t: t.name and t.name.endswith("startdate"))
             end = period.find(lambda t: t.name and t.name.endswith("enddate"))
             instant = period.find(lambda t: t.name and t.name.endswith("instant"))
-            
+
             if start and end:
                 info["type"] = "duration"
                 s_str = start.get_text(strip=True).split("T")[0]
@@ -291,7 +291,7 @@ def _parse_context_periods(soup: BeautifulSoup) -> dict[str, dict]:
             elif instant:
                 info["type"] = "instant"
                 info["instant"] = instant.get_text(strip=True).split("T")[0]
-        
+
         contexts[cid] = info
     return contexts
 
@@ -319,11 +319,11 @@ def _parse_ixbrl_number(text: str, sign_attr: str | None = None) -> Optional[int
     """
     if not text or text.strip() in ("－", "-", "―", "—", ""):
         return None
-    
+
     negative = False
     if sign_attr == "-":
         negative = True
-    
+
     s = text.strip()
     if "△" in s:
         negative = True
@@ -331,9 +331,9 @@ def _parse_ixbrl_number(text: str, sign_attr: str | None = None) -> Optional[int
     if s.startswith("(") and s.endswith(")"):
         negative = True
         s = s[1:-1]
-    
+
     s = s.replace(",", "").replace("，", "").replace(" ", "").strip()
-    
+
     try:
         val = int(float(s))
         return -val if negative else val
@@ -364,11 +364,11 @@ def _parse_quarter_from_title(title: str) -> str:
     # 訂正の除去
     t = re.sub(r'[\(（]訂正[\)）]', '', t)
     t = t.replace('訂正', '')
-    
+
     if '第3四半期' in t: return '3Q'
     if '第2四半期' in t or '中間' in t: return '2Q'
     if '第1四半期' in t: return '1Q'
-    
+
     if '決算短信' in t:
         if not re.search(r'第[1234]四半期', t) and '中間' not in t:
             return 'FY'
@@ -542,7 +542,13 @@ def extract_segments_from_xbrl_zip_detailed(
                 try:
                     unit = _detect_unit_from_html(content)
                     soup = BeautifulSoup(content, "html.parser")
-                    rows = _extract_ixbrl_segment_data(soup, accounting_standard, estimated_quarter, global_context_map)
+                    rows = _extract_ixbrl_segment_data(
+                        soup,
+                        accounting_standard,
+                        estimated_quarter,
+                        global_context_map,
+                        expected_end=expected_end,
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to parse BeautifulSoup or rows in {seg_file}: {e}")
                     parse_error_count += 1
@@ -863,7 +869,7 @@ def _find_segment_files(zf: zipfile.ZipFile) -> list[str]:
             seg_files.append(name)
     if seg_files:
         return seg_files
-    
+
     # fallback: Attachment 内でセグメントテキストを含むファイル
     for name in zf.namelist():
         if "Attachment" in name and name.endswith((".htm", ".html")):
@@ -892,7 +898,7 @@ def _get_profit_priority(name: str) -> int:
     return 1
 
 def _extract_ixbrl_segment_data(
-    soup: BeautifulSoup, accounting_standard: str, estimated_quarter: str = "UNKNOWN", global_context_map: Optional[dict] = None
+    soup: BeautifulSoup, accounting_standard: str, estimated_quarter: str = "UNKNOWN", global_context_map: Optional[dict] = None, expected_end: Optional[datetime.date] = None
 ) -> dict[tuple[str, str], dict]:
     """iXBRL タグからセグメント別の売上/利益を抽出。
 
@@ -1038,7 +1044,7 @@ def _extract_ixbrl_segment_data(
                 diff_duration = 9999
 
             # 2. 期待終了日差の算出
-            expected_end_date = reference_end
+            expected_end_date = expected_end if expected_end is not None else reference_end
             if expected_end_date and period_type == "previous":
                 try:
                     if expected_end_date.month == 2 and expected_end_date.day == 29:

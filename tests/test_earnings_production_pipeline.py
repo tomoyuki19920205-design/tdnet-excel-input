@@ -1472,3 +1472,192 @@ class TestOutlookTocReject:
         assert _is_toc_junk(text) is True
 
 
+def create_7601_mock_zip(zip_path, title):
+    ctx_xml = """
+    <xbrli:context id="CurrentYTDDuration_tse-qcedjpfr-76010SmartstoreReportableSegmentsMember">
+      <xbrli:period>
+        <xbrli:startDate>2026-03-01</xbrli:startDate>
+        <xbrli:endDate>2026-05-31</xbrli:endDate>
+      </xbrli:period>
+    </xbrli:context>
+    <xbrli:context id="CurrentYTDDuration_tse-qcedjpfr-76010LawsonPoplarReportableSegmentsMember">
+      <xbrli:period>
+        <xbrli:startDate>2026-03-01</xbrli:startDate>
+        <xbrli:endDate>2026-05-31</xbrli:endDate>
+      </xbrli:period>
+    </xbrli:context>
+    <xbrli:context id="CurrentYTDDuration_OperatingSegmentsNotIncludedInReportableSegmentsAndOtherRevenueGeneratingBusinessActivitiesMember">
+      <xbrli:period>
+        <xbrli:startDate>2026-03-01</xbrli:startDate>
+        <xbrli:endDate>2026-05-31</xbrli:endDate>
+      </xbrli:period>
+    </xbrli:context>
+    <xbrli:context id="PriorYearYTDDuration_tse-qcedjpfr-76010SmartstoreReportableSegmentsMember">
+      <xbrli:period>
+        <xbrli:startDate>2025-03-01</xbrli:startDate>
+        <xbrli:endDate>2025-05-31</xbrli:endDate>
+      </xbrli:period>
+    </xbrli:context>
+    <xbrli:context id="PriorYearYTDDuration_tse-qcedjpfr-76010LawsonPoplarReportableSegmentsMember">
+      <xbrli:period>
+        <xbrli:startDate>2025-03-01</xbrli:startDate>
+        <xbrli:endDate>2025-05-31</xbrli:endDate>
+      </xbrli:period>
+    </xbrli:context>
+    <xbrli:context id="PriorYearYTDDuration_OperatingSegmentsNotIncludedInReportableSegmentsAndOtherRevenueGeneratingBusinessActivitiesMember">
+      <xbrli:period>
+        <xbrli:startDate>2025-03-01</xbrli:startDate>
+        <xbrli:endDate>2025-05-31</xbrli:endDate>
+      </xbrli:period>
+    </xbrli:context>
+    <xbrli:context id="CurrentYearDuration">
+      <xbrli:period>
+        <xbrli:startDate>2026-03-01</xbrli:startDate>
+        <xbrli:endDate>2027-02-28</xbrli:endDate>
+      </xbrli:period>
+    </xbrli:context>
+    """
+
+    fact_xml = """
+    <ix:nonfraction name="jppfs_cor:netsales" contextref="CurrentYTDDuration_tse-qcedjpfr-76010SmartstoreReportableSegmentsMember" unitref="JPY" decimals="-3" scale="3">1242325</ix:nonfraction>
+    <ix:nonfraction name="jppfs_cor:netsales" contextref="CurrentYTDDuration_tse-qcedjpfr-76010LawsonPoplarReportableSegmentsMember" unitref="JPY" decimals="-3" scale="3">1529912</ix:nonfraction>
+    <ix:nonfraction name="jppfs_cor:netsales" contextref="CurrentYTDDuration_OperatingSegmentsNotIncludedInReportableSegmentsAndOtherRevenueGeneratingBusinessActivitiesMember" unitref="JPY" decimals="-3" scale="3">167612</ix:nonfraction>
+    <ix:nonfraction name="jppfs_cor:operatingincome" contextref="CurrentYTDDuration_tse-qcedjpfr-76010SmartstoreReportableSegmentsMember" sign="-" unitref="JPY" decimals="-3" scale="3">89191</ix:nonfraction>
+    <ix:nonfraction name="jppfs_cor:operatingincome" contextref="CurrentYTDDuration_tse-qcedjpfr-76010LawsonPoplarReportableSegmentsMember" unitref="JPY" decimals="-3" scale="3">248684</ix:nonfraction>
+    <ix:nonfraction name="jppfs_cor:operatingincome" contextref="CurrentYTDDuration_OperatingSegmentsNotIncludedInReportableSegmentsAndOtherRevenueGeneratingBusinessActivitiesMember" sign="-" unitref="JPY" decimals="-3" scale="3">4651</ix:nonfraction>
+    <ix:nonfraction name="jppfs_cor:netsales" contextref="PriorYearYTDDuration_tse-qcedjpfr-76010SmartstoreReportableSegmentsMember" unitref="JPY" decimals="-3" scale="3">1299000</ix:nonfraction>
+    <ix:nonfraction name="jppfs_cor:netsales" contextref="PriorYearYTDDuration_tse-qcedjpfr-76010LawsonPoplarReportableSegmentsMember" unitref="JPY" decimals="-3" scale="3">1494000</ix:nonfraction>
+    <ix:nonfraction name="jppfs_cor:netsales" contextref="PriorYearYTDDuration_OperatingSegmentsNotIncludedInReportableSegmentsAndOtherRevenueGeneratingBusinessActivitiesMember" unitref="JPY" decimals="-3" scale="3">176000</ix:nonfraction>
+    <ix:nonfraction name="jppfs_cor:operatingincome" contextref="PriorYearYTDDuration_tse-qcedjpfr-76010SmartstoreReportableSegmentsMember" sign="-" unitref="JPY" decimals="-3" scale="3">63000</ix:nonfraction>
+    <ix:nonfraction name="jppfs_cor:operatingincome" contextref="PriorYearYTDDuration_tse-qcedjpfr-76010LawsonPoplarReportableSegmentsMember" unitref="JPY" decimals="-3" scale="3">234000</ix:nonfraction>
+    <ix:nonfraction name="jppfs_cor:operatingincome" contextref="PriorYearYTDDuration_OperatingSegmentsNotIncludedInReportableSegmentsAndOtherRevenueGeneratingBusinessActivitiesMember" unitref="JPY" decimals="-3" scale="3">2000</ix:nonfraction>
+    """
+
+    main_html = f"""
+    <html>
+    <body>
+      <ix:nonNumeric name="jpcrp_cor:DocumentTitle">{title}</ix:nonNumeric>
+      {ctx_xml}
+    </body>
+    </html>
+    """
+
+    sg_html = f"""
+    <html>
+    <body>
+      {fact_xml}
+    </body>
+    </html>
+    """
+
+    import zipfile
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("ixbrl-main-7601.htm", main_html)
+        zf.writestr("ixbrl-qcsg-7601.htm", sg_html)
+
+
+class TestEarningsProductionPipelineSegmentSecondBug:
+    """第2バグの再現および修正後の挙動検証テスト"""
+
+    def test_7601_second_bug_reproduction(self, tmp_path):
+        # 第2バグ修正後の正常な回帰テスト (include_context_evidence=True で正しく3行抽出されることを確認)
+        zip_path = tmp_path / "7601_mock.zip"
+        create_7601_mock_zip(zip_path, "2027年2月期 第1四半期決算短信［日本基準］(連結)")
+
+        from src.events.earnings_production_pipeline import _extract_and_filter_segments_detailed
+
+        # include_context_evidence=True を指定して本番経路呼び出し
+        segs, detailed_res = _extract_and_filter_segments_detailed(
+            str(zip_path), period="2027-02-28", quarter="1Q", include_context_evidence=True
+        )
+
+        # 1) 詳細版結果は 6 行 (当期3行、前期3行) 抽出されること
+        assert detailed_res.status == "success_with_rows"
+        assert len(detailed_res.segments) == 6
+
+        # 2) 当期フィルタ後は 3 件になること
+        assert len(segs) == 3
+        current_names = {s["segment_name"] for s in segs}
+        assert current_names == {"Smartstore", "Lawson Poplar", "Other"}
+
+        # 3) 数値が期待値と完全一致すること
+        segs_by_name = {s["segment_name"]: s for s in segs}
+        assert segs_by_name["Smartstore"]["sales"] == 1242325
+        assert segs_by_name["Smartstore"]["profit"] == -89191
+        assert segs_by_name["Lawson Poplar"]["sales"] == 1529912
+        assert segs_by_name["Lawson Poplar"]["profit"] == 248684
+        assert segs_by_name["Other"]["sales"] == 167612
+        assert segs_by_name["Other"]["profit"] == -4651
+
+    def test_7601_production_final_filter_success(self, tmp_path):
+        # A. 本番最終フィルタテスト & B. 前年除外テスト
+        zip_path = tmp_path / "7601_mock.zip"
+        create_7601_mock_zip(zip_path, "2027年2月期 第1四半期決算短信［日本基準］(連結)")
+
+        from src.events.earnings_production_pipeline import _extract_and_filter_segments_detailed
+
+        # include_context_evidence=True を指定して本番経路を呼び出し
+        segs, detailed_res = _extract_and_filter_segments_detailed(
+            str(zip_path), period="2027-02-28", quarter="1Q", include_context_evidence=True
+        )
+
+        assert detailed_res.status == "success_with_rows"
+        assert len(detailed_res.segments) == 6
+
+        # 当期 3 行だけが抽出されていること (前年3行は除外)
+        assert len(segs) == 3
+        current_names = {s["segment_name"] for s in segs}
+        assert current_names == {"Smartstore", "Lawson Poplar", "Other"}
+
+        # 数値が期待値と完全一致すること
+        segs_by_name = {s["segment_name"]: s for s in segs}
+        assert segs_by_name["Smartstore"]["sales"] == 1242325
+        assert segs_by_name["Smartstore"]["profit"] == -89191
+        assert segs_by_name["Lawson Poplar"]["sales"] == 1529912
+        assert segs_by_name["Lawson Poplar"]["profit"] == 248684
+        assert segs_by_name["Other"]["sales"] == 167612
+        assert segs_by_name["Other"]["profit"] == -4651
+
+    def test_7601_context_evidence_removal(self, tmp_path):
+        # C. context情報非保存テスト
+        zip_path = tmp_path / "7601_mock.zip"
+        create_7601_mock_zip(zip_path, "2027年2月期 第1四半期決算短信［日本基準］(連結)")
+
+        from src.events.earnings_production_pipeline import _extract_and_filter_segments_detailed
+        segs, _ = _extract_and_filter_segments_detailed(
+            str(zip_path), period="2027-02-28", quarter="1Q", include_context_evidence=True
+        )
+
+        # 内部判定用のキーが最終保存候補に一切残っていないこと
+        forbidden_keys = {
+            "_context_evidence", "context_evidence", "context_ref", "context_start", "context_end",
+            "context_id", "start_date", "end_date", "duration_days", "duration", "selection_reason"
+        }
+        for s in segs:
+            for fk in forbidden_keys:
+                assert fk not in s, f"Forbidden key '{fk}' leaked into final save segments: {s}"
+
+    def test_7601_no_segment_info_bypass(self, tmp_path):
+        # D. no_segment_info回帰テスト
+        zip_path = tmp_path / "7601_mock.zip"
+        create_7601_mock_zip(zip_path, "2027年2月期 第1四半期決算短信［日本基準］(連結)")
+
+        from src.events.earnings_production_pipeline import _extract_and_filter_segments_detailed
+        segs, detailed_res = _extract_and_filter_segments_detailed(
+            str(zip_path), period="2027-02-28", quarter="1Q", include_context_evidence=True
+        )
+        assert len(segs) == 3
+        # status が success_with_rows になり、success_empty や no_segment_info が誘発されないこと
+        assert detailed_res.status == "success_with_rows"
+
+    def test_7601_existing_path_backward_compatibility(self, tmp_path):
+        # E. 既存経路回帰テスト
+        zip_path = tmp_path / "7601_mock.zip"
+        create_7601_mock_zip(zip_path, "2027年2月期 第1四半期決算短信［日本基準］(連結)")
+
+        from src.events.earnings_production_pipeline import _extract_and_filter_segments
+        # 引数を指定しない呼び出し
+        res = _extract_and_filter_segments(str(zip_path), period="2027-02-28", quarter="1Q")
+        assert isinstance(res, list)
+
+

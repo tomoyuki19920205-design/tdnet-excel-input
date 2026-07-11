@@ -268,11 +268,13 @@ def _extract_and_filter_segments(
     xbrl_path: str,
     period: str,
     quarter: str,
+    *,
+    include_context_evidence: bool = False,
 ) -> list[dict]:
     """既存テストの後方互換性を維持するためのラッパー関数"""
     global _last_detailed_result
     target_segs, detailed_result = _extract_and_filter_segments_detailed(
-        xbrl_path, period, quarter
+        xbrl_path, period, quarter, include_context_evidence=include_context_evidence
     )
     _last_detailed_result = detailed_result
     return target_segs
@@ -281,6 +283,8 @@ def _extract_and_filter_segments_detailed(
     xbrl_path: str,
     period: str,
     quarter: str,
+    *,
+    include_context_evidence: bool = False,
 ) -> tuple[list[dict], Optional[object]]:
     from src.segment.xbrl_segment_extractor import extract_segments_from_xbrl_zip_detailed
     try:
@@ -288,6 +292,7 @@ def _extract_and_filter_segments_detailed(
             zip_path=xbrl_path,
             period=period,
             quarter=quarter,
+            include_context_evidence=include_context_evidence,
         )
         raw_rows = detailed_result.segments if detailed_result else []
     except Exception as e:
@@ -929,10 +934,14 @@ def _extract_and_filter_segments(
     xbrl_path: str,
     period: str,
     quarter: str,
+    *,
+    include_context_evidence: bool = False,
 ) -> list[dict]:
     global _last_detailed_result
     _last_detailed_result = None
-    segs, detailed_result = _extract_and_filter_segments_detailed(xbrl_path, period, quarter)
+    segs, detailed_result = _extract_and_filter_segments_detailed(
+        xbrl_path, period, quarter, include_context_evidence=include_context_evidence
+    )
     _last_detailed_result = detailed_result
     return segs
 
@@ -1576,7 +1585,7 @@ def run_earnings_production(
                             zip_no = extract_common_disclosure_no(zip_basename)
                             if zip_no and zip_no == _disclosure_no:
                                 _pre_target_segs = _extract_and_filter_segments(
-                                    _resolved_zip, _period, _q
+                                    _resolved_zip, _period, _q, include_context_evidence=True
                                 )
                                 _pre_detailed_result = _last_detailed_result
                                 # success_empty かつ 2026-07-05 境界確認
@@ -1689,6 +1698,7 @@ def run_earnings_production(
                                         xbrl_path=_resolved_zip,
                                         period=_period,
                                         quarter=_q,
+                                        include_context_evidence=True,
                                     )
                                 if _target_segs:
                                     _expected_set = _build_expected_segment_metrics_from_canonical_rows(
@@ -2301,7 +2311,7 @@ def run_earnings_production(
                             zip_no = extract_common_disclosure_no(zip_basename)
                             if zip_no and zip_no == _seq_disclosure_no:
                                 _pre_target_segs = _extract_and_filter_segments(
-                                    xbrl_path, _seq_period, quarter
+                                    xbrl_path, _seq_period, quarter, include_context_evidence=True
                                 )
                                 _pre_detailed_result = _last_detailed_result
 
@@ -2359,6 +2369,7 @@ def run_earnings_production(
                                         xbrl_path=xbrl_path,
                                         period=_seq_period,
                                         quarter=quarter,
+                                        include_context_evidence=True,
                                     )
                                 if _target_segs:
                                     _expected_set = _build_expected_segment_metrics_from_canonical_rows(
