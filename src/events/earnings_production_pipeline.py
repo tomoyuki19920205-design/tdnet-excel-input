@@ -997,9 +997,10 @@ def _sync_canonical_segments(
     route: str,
     run_id: str = "",
     target_segs: list[dict] | None = None,
+    trusted_provenance=None,
 ):
     import os
-    from .common_normalizers import extract_common_disclosure_no
+    from src.segment.zip_identity_verifier import verify_zip_identity
 
     # 開始時ログ (秘密情報を含まない)
     logger.info(
@@ -1030,23 +1031,22 @@ def _sync_canonical_segments(
         )
         return
 
-    # 3. xbrl_pathの存在確認
-    if not xbrl_path or not os.path.exists(xbrl_path):
+    # 3-4. verify_zip_identity で ZIP identity を検証する (経路A/B 共通ゲート)
+    verdict = verify_zip_identity(
+        zip_path=xbrl_path or "",
+        requested_disclosure_no=common_disclosure_no,
+        expected_ticker=ticker,
+        expected_period=period,
+        expected_quarter=quarter,
+        trusted_provenance=trusted_provenance,
+    )
+    if not verdict.passed:
         logger.error(
-            "[EARNINGS][SEGMENT_CANONICAL][ERROR] %s stage=identity reason=zip_not_found",
-            ticker
-        )
-        return
-
-    # 4. xbrl_pathの書類IDがcommon_disclosure_noと一致するか確認
-    zip_basename = os.path.basename(xbrl_path)
-    zip_no = extract_common_disclosure_no(zip_basename)
-    if not zip_no or zip_no != common_disclosure_no:
-        logger.error(
-            "[EARNINGS][SEGMENT_CANONICAL][ERROR] %s stage=identity reason=zip_doc_id_mismatch expected=%s actual=%s",
+            "[EARNINGS][SEGMENT_CANONICAL][ERROR] %s stage=identity reason=%s requested=%s internal=%s",
             ticker,
+            verdict.rejection_reason,
             common_disclosure_no,
-            zip_no or "",
+            verdict.internal_id,
         )
         return
 
