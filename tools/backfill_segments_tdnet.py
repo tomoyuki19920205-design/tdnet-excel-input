@@ -303,6 +303,8 @@ def run_backfill(
     reset_target: bool = False,
     force_done: bool = False,
     dry_run_only: bool = True,
+    manifest_dir: str = "logs",
+    isolated_worker_dry_run: bool = False,
 ) -> dict:
     """バックフィルを実行する (Phase 1 / Phase 2 自動選択)。"""
     run_id = generate_run_id()
@@ -394,7 +396,7 @@ def run_backfill(
     filings = accepted
 
     # ── 1c. Manifest 保存 ──
-    _save_manifest(filings, run_id)
+    _save_manifest(filings, run_id, log_dir=manifest_dir)
 
     if not filings:
         logger.warning("[backfill] listing returned 0 filings — nothing to do")
@@ -547,6 +549,7 @@ def run_backfill(
             flush_every_seconds=flush_every_seconds,
             flush_callback=_flush,
             dry_run_only=dry_run_only,
+            isolated_worker_dry_run=isolated_worker_dry_run,
         )
     elif use_v2:
         from lib.backfill.phase2_runner import run_phase2_v2
@@ -1041,12 +1044,41 @@ def main():
                         help="Worker version: v1 (legacy PDF-only) / v2 (XBRL-first) / v4 (XBRL-first + V4 PDF fallback, default)")
     parser.add_argument("--dry-run", action="store_true",
                         help="集計のみ。download・extract・upsert しない")
+    parser.add_argument("--isolated-worker-dry-run", action="store_true",
+                        help="V4 worker をrun-root配下だけでoffline実行する")
+    parser.add_argument("--run-root", type=str, default=None,
+                        help="--isolated-worker-dry-run の隔離成果物ルート")
     parser.add_argument("--force-done", action="store_true",
                         help="done/partial/skipped_normal/quarantined を全て再実行対象にする (upsert 更新)")
     parser.add_argument("--apply", action="store_true",
                         help="実際にDBに書き込む (ALLOW_BACKFILL_XBRL_WRITE=1 環境変数も必要)")
 
     args = parser.parse_args()
+
+    manifest_dir = "logs"
+    if args.isolated_worker_dry_run:
+        if args.apply or args.dry_run or args.worker_version != "v4" or args.workers != 1:
+            parser.error("--isolated-worker-dry-run requires V4, --workers 1, and neither --apply nor --dry-run")
+        if not args.filing_list or not args.run_root:
+            parser.error("--isolated-worker-dry-run requires --filing-list and --run-root")
+        run_root = Path(args.run_root).resolve()
+        production_roots = (Path("logs").resolve(), Path("data").resolve())
+        if any(run_root == root or root in run_root.parents for root in production_roots):
+            parser.error("--run-root must not be inside production logs or data")
+        filing_list = Path(args.filing_list).resolve()
+        input_dir = run_root / "input"
+        if input_dir not in filing_list.parents:
+            parser.error("--filing-list must be under <run-root>/input in isolated mode")
+        if run_root.exists() and any(path != input_dir and path not in input_dir.parents for path in run_root.iterdir()):
+            parser.error("--run-root must be empty except for its input directory")
+        run_root.mkdir(parents=True, exist_ok=True)
+        for directory in (input_dir, run_root / "manifest", run_root / "state", run_root / "cache", run_root / "logs", run_root / "output", run_root / "metadata"):
+            directory.mkdir(parents=True, exist_ok=True)
+        args.state_db = str(run_root / "state" / "state.db")
+        args.decision_db = str(run_root / "state" / "decision.db")
+        args.cache_root = str(run_root / "cache")
+        args.log_jsonl = str(run_root / "logs" / "run.jsonl")
+        manifest_dir = str(run_root / "manifest")
 
     # ── 実行禁止ガード ──
     dry_run_only = True
@@ -1095,6 +1127,8 @@ def main():
             reset_target=args.reset_target,
             force_done=args.force_done,
             dry_run_only=dry_run_only,
+            manifest_dir=manifest_dir,
+            isolated_worker_dry_run=args.isolated_worker_dry_run,
         )
     except Exception:
         import traceback

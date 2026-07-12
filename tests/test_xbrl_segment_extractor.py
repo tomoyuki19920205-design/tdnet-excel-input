@@ -151,6 +151,30 @@ def create_7601_mock_zip(zip_path, title):
         zf.writestr("ixbrl-qcsg-7601.htm", sg_html)
 
 
+def create_fiscal_period_contract_zip(zip_path):
+    main_html = """
+    <html><body>
+      <ix:nonNumeric name="jpcrp_cor:DocumentTitle">2027年2月期 第1四半期決算短信［日本基準］(連結)</ix:nonNumeric>
+      <xbrli:context id="CurrentYearDuration">
+        <xbrli:period><xbrli:startDate>2026-03-01</xbrli:startDate><xbrli:endDate>2027-02-28</xbrli:endDate></xbrli:period>
+      </xbrli:context>
+      <xbrli:context id="CurrentYTDDuration_tse-qcedjpfr-76010SmartstoreReportableSegmentsMember">
+        <xbrli:entity><xbrli:identifier scheme="tse">7601</xbrli:identifier></xbrli:entity>
+        <xbrli:period><xbrli:startDate>2026-03-01</xbrli:startDate><xbrli:endDate>2026-05-31</xbrli:endDate></xbrli:period>
+        <xbrli:scenario><xbrldi:explicitMember dimension="jpcrp_cor:OperatingSegmentsAxis">tse-qcedjpfr-76010:SmartstoreReportableSegmentsMember</xbrldi:explicitMember></xbrli:scenario>
+      </xbrli:context>
+    </body></html>
+    """
+    segment_html = """
+    <html><body>
+      <ix:nonfraction name="jpcrp_cor:revenuesfromexternalcustomers" contextref="CurrentYTDDuration_tse-qcedjpfr-76010SmartstoreReportableSegmentsMember" unitref="JPY" decimals="0" scale="0">1242325</ix:nonfraction>
+    </body></html>
+    """
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("ixbrl-main-7601.htm", main_html)
+        zf.writestr("ixbrl-qcsg-7601.htm", segment_html)
+
+
 class TestXBRLSegmentContextSelection:
     # 8. 本物の抽出器テスト
     # 決算期末日 2027-02-28 に対する検証
@@ -705,6 +729,27 @@ class TestSegmentExtractionDetailed:
         assert key in res_with
         assert res_with[key]["sales"] == 1242325
         assert res_with[key]["context_ref"] == "CurrentYTDDuration_tse-qcedjpfr-76010SmartstoreReportableSegmentsMember"
+
+    def test_fiscal_year_end_period_selects_current_1q_scenario_fact(self, tmp_path):
+        zip_path = tmp_path / "fiscal-period-contract.zip"
+        create_fiscal_period_contract_zip(zip_path)
+
+        wrong_rows = extract_segments_from_xbrl_zip(
+            str(zip_path), period="2026-05-31", quarter="1Q",
+        )
+        result = extract_segments_from_xbrl_zip_detailed(
+            str(zip_path), period="2027-02-28", quarter="1Q", include_context_evidence=True,
+        )
+
+        assert wrong_rows == []
+        assert result.status == "success_with_rows"
+        assert len(result.segments) == 1
+        row = result.segments[0]
+        assert row.sales == 1242325
+        assert row.raw_segment_name == "Smartstore"
+        assert row.raw_json["_context_evidence"]["context_end"] == "2026-05-31"
+        assert row.raw_json["_context_evidence"]["expected_context_end"] == "2026-05-28"
+        assert row.raw_json["_context_evidence"]["date_guard_status"] == "PASS"
 
     def test_negative_sign_parsing(self):
         # C. 負号テスト

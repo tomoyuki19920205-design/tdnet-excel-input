@@ -518,7 +518,12 @@ def _try_xbrl_source(
 
     try:
         from src.segment.xbrl_segment_extractor import extract_segments_from_xbrl_zip
-        xbrl_rows = extract_segments_from_xbrl_zip(xbrl_path, title=getattr(filing, "title", None))
+        xbrl_rows = extract_segments_from_xbrl_zip(
+            xbrl_path,
+            period=getattr(filing, "expected_period", None) or None,
+            quarter=getattr(filing, "expected_quarter", None) or None,
+            title=getattr(filing, "title", None),
+        )
     except Exception as e:
         logger.debug(f"[v2] XBRL extraction error: fid={fid} err={e}")
         return SourceCandidate(

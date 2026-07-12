@@ -421,6 +421,7 @@ def run_phase2_v4(
     flush_every_seconds: int = 300,
     flush_callback=None,
     dry_run_only: bool = False,
+    isolated_worker_dry_run: bool = False,
 ) -> list:
     """V4 worker 経路: XBRL-first → V4 PDF fallback を1パスで実行。
 
@@ -457,6 +458,7 @@ def run_phase2_v4(
             timeout_pdf=timeout_pdf,
             run_id=run_id,
             dry_run_only=dry_run_only,
+            isolated_worker_dry_run=isolated_worker_dry_run,
         )
 
     with ThreadPoolExecutor(max_workers=workers) as executor:

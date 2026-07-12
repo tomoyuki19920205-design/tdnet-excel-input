@@ -724,6 +724,7 @@ def process_one_filing_v4(
     run_id: str | None = None,
     sleep_fn=None,
     dry_run_only: bool = False,
+    isolated_worker_dry_run: bool = False,
 ) -> FilingResultV2:
     """V4 パイプライン: XBRL-first → V4 PDF fallback。V1 fallback なし。"""
     _ensure_imports()
@@ -807,7 +808,7 @@ def process_one_filing_v4(
     doc_path, _ = _download_originals(
         filing, paths, metrics,
         retry_download=retry_download, timeout_download=timeout_download, sleep_fn=_sleep,
-        include_xbrl=False,
+        include_xbrl=False, offline_mode=isolated_worker_dry_run,
     )
 
     if not doc_path and not xbrl_path:
@@ -889,7 +890,7 @@ def process_one_filing_v4(
         metrics["xbrl_partial_suspicious"] = _suspicious
         metrics["xbrl_partial_reason"] = _partial_reason
 
-        if _suspicious and doc_path:
+        if _suspicious and doc_path and not isolated_worker_dry_run:
             logger.info(
                 "[v4] XBRL partial suspicious: ticker=%s fid=%s reason=%s → try PDF V4",
                 filing.ticker, fid, _partial_reason,
@@ -960,6 +961,13 @@ def process_one_filing_v4(
                 skip_reason="xbrl_succeeded",
             )
             candidates.append(pdf_candidate)
+    elif isolated_worker_dry_run:
+        pdf_candidate = SourceCandidate(
+            source="pdf", attempted=False, available=False,
+            skip_reason="isolated_worker_dry_run_offline",
+        )
+        candidates.append(pdf_candidate)
+        best = xbrl_candidate
     else:
         # XBRL 失敗 or なし → V4 PDF fallback
         fallback_used = True

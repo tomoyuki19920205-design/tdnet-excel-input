@@ -53,6 +53,53 @@ def test_accepted_identity_uses_same_zip_and_pdf_only(monkeypatch, verdict):
     assert all(v != "ANY" and v != "" for v in (verifier.call_args.kwargs["expected_ticker"], verifier.call_args.kwargs["expected_period"], verifier.call_args.kwargs["expected_quarter"]))
 
 
+def test_v2_xbrl_source_uses_filing_canonical_fiscal_period(monkeypatch):
+    import lib.backfill.worker_v2 as worker_v2
+
+    extracted = Mock(return_value=[SimpleNamespace(
+        normalized_segment_name="Smartstore", raw_segment_name="Smartstore",
+        period="2026-05-31", quarter="1Q", sales=1242325, profit=-89191,
+    )])
+    monkeypatch.setattr("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip", extracted)
+    filing = _filing(title="title-derived-value")
+    pl_zip_path = "verified.zip"
+
+    result = worker_v2._try_xbrl_source(
+        pl_zip_path, None, filing,
+        {"period": "2026-05-31", "quarter": "1Q"},
+        filing.requested_disclosure_no, None, None,
+        retry_xbrl=1, timeout_xbrl=1, sleep_fn=lambda _: None,
+    )
+
+    extracted.assert_called_once_with(
+        pl_zip_path, period="2027-02-28", quarter="1Q", title="title-derived-value",
+    )
+    assert extracted.call_args.kwargs["period"] != "2026-05-31"
+    assert filing.requested_disclosure_no == "20260709590505"
+    assert result.source == "xbrl"
+
+
+@pytest.mark.parametrize(
+    ("expected_period", "expected_quarter"),
+    [("", ""), (None, None)],
+)
+def test_v2_xbrl_source_missing_canonical_values_preserves_defaults(monkeypatch, expected_period, expected_quarter):
+    import lib.backfill.worker_v2 as worker_v2
+
+    extracted = Mock(return_value=[])
+    monkeypatch.setattr("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip", extracted)
+    filing = _filing(expected_period=expected_period, expected_quarter=expected_quarter)
+
+    result = worker_v2._try_xbrl_source(
+        "verified.zip", None, filing, {"period": "2026-05-31", "quarter": "1Q"},
+        filing.requested_disclosure_no, None, None,
+        retry_xbrl=1, timeout_xbrl=1, sleep_fn=lambda _: None,
+    )
+
+    extracted.assert_called_once_with("verified.zip", period=None, quarter=None, title="title")
+    assert result.error == "xbrl_no_segment_facts"
+
+
 @pytest.mark.parametrize("mode,expected", [(True, False), (False, True)])
 def test_dry_run_flags(monkeypatch, mode, expected):
     resolver = Mock(return_value=SimpleNamespace(zip_path=None, status="SKIPPED_NO_FETCH_ALLOWED", error_reason="", trusted_provenance=None)); verifier = Mock(); w, _ = _patch_gate(monkeypatch, resolver, verifier)
@@ -82,6 +129,35 @@ def test_pdf_only_skips_archive_and_xbrl_download(monkeypatch):
     copy_file.assert_not_called()
 
 
+def test_offline_pdf_only_does_not_call_network(monkeypatch):
+    import lib.backfill.worker as worker
+    import lib.backfill.cache as cache
+
+    paths = SimpleNamespace(source_pdf="pdf", cache_dir="cache", xbrl_zip="xbrl-zip")
+    monkeypatch.setattr(cache, "has_pdf", lambda _: False)
+    pdf_download = Mock(); monkeypatch.setattr("src.downloader.download_document", pdf_download)
+
+    result = worker._download_originals(_filing(), paths, {"attempts": {}}, retry_download=1, timeout_download=1, sleep_fn=lambda _: None, include_xbrl=False, offline_mode=True)
+
+    assert result == (None, None)
+    pdf_download.assert_not_called()
+
+
+def test_isolated_worker_passes_offline_mode_after_identity_gate(monkeypatch):
+    resolver = Mock(return_value=SimpleNamespace(zip_path="verified.zip", status="FOUND_CACHE", error_reason="", trusted_provenance=None))
+    verifier = Mock(return_value=SimpleNamespace(passed=True, verdict="exact_document_id_match", rejection_reason=""))
+    w, _ = _patch_gate(monkeypatch, resolver, verifier)
+    download = Mock(side_effect=RuntimeError("download boundary"))
+    monkeypatch.setattr(w, "_download_originals", download)
+
+    with pytest.raises(RuntimeError, match="download boundary"):
+        w.process_one_filing_v4(_filing(), cache_root="isolated-cache", dry_run_only=True, isolated_worker_dry_run=True)
+
+    assert download.call_args.kwargs["include_xbrl"] is False
+    assert download.call_args.kwargs["offline_mode"] is True
+    verifier.assert_called_once()
+
+
 @pytest.mark.parametrize("mode", [True, False])
 def test_runner_passes_dry_run_to_worker(monkeypatch, mode):
     import lib.backfill.phase2_runner as runner
@@ -98,3 +174,23 @@ def test_runner_passes_dry_run_to_worker(monkeypatch, mode):
     store = SimpleNamespace(mark_done=Mock()); metrics = SimpleNamespace(record_v2_result=Mock()); log = SimpleNamespace(log_filing_result_v2=Mock())
     runner.run_phase2_v4([{"filing_id": "fid"}], {"fid": _filing()}, store=store, metrics=metrics, run_logger=log, run_id="r", dry_run_only=mode)
     assert called.call_args.kwargs["dry_run_only"] is mode
+
+
+def test_runner_passes_isolated_worker_dry_run_to_worker(monkeypatch):
+    import lib.backfill.phase2_runner as runner
+
+    called = Mock(return_value=SimpleNamespace(status="skipped_normal", metrics={"total_ms": 0}))
+    monkeypatch.setattr("lib.backfill.worker_v4.process_one_filing_v4", called)
+    class Future:
+        def result(self): return called.return_value
+    class Executor:
+        def __init__(self, **_): pass
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def submit(self, fn, arg): fn(arg); return Future()
+    monkeypatch.setattr(runner, "ThreadPoolExecutor", Executor); monkeypatch.setattr(runner, "as_completed", lambda futures: list(futures))
+    store = SimpleNamespace(mark_done=Mock()); metrics = SimpleNamespace(record_v2_result=Mock()); log = SimpleNamespace(log_filing_result_v2=Mock())
+
+    runner.run_phase2_v4([{"filing_id": "fid"}], {"fid": _filing()}, store=store, metrics=metrics, run_logger=log, run_id="r", isolated_worker_dry_run=True)
+
+    assert called.call_args.kwargs["isolated_worker_dry_run"] is True

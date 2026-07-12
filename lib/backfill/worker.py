@@ -68,7 +68,7 @@ def _ensure_imports():
         sys.path.insert(0, project_root)
 
 
-def _download_originals(filing, paths, metrics, *, retry_download, timeout_download, sleep_fn, include_xbrl: bool = True):
+def _download_originals(filing, paths, metrics, *, retry_download, timeout_download, sleep_fn, include_xbrl: bool = True, offline_mode: bool = False):
     """原本 (PDF/XBRL) をダウンロードする。cache があれば skip。"""
     from lib.backfill.cache import has_pdf, has_xbrl
     from lib.backfill.retry import retry_with_backoff
@@ -81,7 +81,7 @@ def _download_originals(filing, paths, metrics, *, retry_download, timeout_downl
     if has_pdf(paths):
         doc_path = str(paths.source_pdf)
         metrics["pdf_cache_hit"] = True
-    elif filing.doc_url:
+    elif filing.doc_url and not offline_mode:
         def _dl_pdf():
             from src.downloader import download_document
             p = download_document(filing.doc_url, str(paths.cache_dir))
