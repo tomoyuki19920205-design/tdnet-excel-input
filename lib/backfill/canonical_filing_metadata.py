@@ -40,7 +40,7 @@ def load_canonical_filing_metadata_index(db_path: str = "data/jquants.db") -> di
                 continue
             if not isinstance(disc_no, str) or len(disc_no) != 14 or not disc_no.isdigit():
                 continue
-            current_period_end = payload.get("CurPerEnd") or payload.get("CurrentPeriodEndDate")
+            current_period_end = payload.get("CurPerEn") or payload.get("CurrentPeriodEndDate")
             normalized_quarter = _normalize_quarter(str(period_type or ""))
             if _is_invalid(str(fiscal_end or "")) or _is_invalid(str(current_period_end or "")):
                 item = CanonicalFilingMetadata(

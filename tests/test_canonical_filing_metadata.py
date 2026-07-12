@@ -14,7 +14,7 @@ def _db(tmp_path, rows):
 
 
 def _row(disc, code="76010", fy="2027-02-28", q="1Q", raw=None):
-    return (code, "2026-07-10", fy, q, json.dumps(raw if raw is not None else {"DiscNo": disc, "CurPerEnd": "2026-05-31"}))
+    return (code, "2026-07-10", fy, q, json.dumps(raw if raw is not None else {"DiscNo": disc, "CurPerEn": "2026-05-31", "CurFYEn": fy, "CurPerType": q}))
 
 
 def test_exact_canaries_not_found_and_fuzzy_rejection(tmp_path):
@@ -59,6 +59,24 @@ def test_ticker_conflict_and_fuzzy_disc_no_are_not_rescued(tmp_path):
     assert conflict.normalized_ticker == "9982"
     assert conflict.expected_period == "2027-02-28"
     assert index.get("20260709590504") is None
+
+
+def test_curperen_is_required_and_curperend_is_not_a_fallback(tmp_path):
+    path = _db(tmp_path, [
+        _row("20260709590505", "76010"),
+        _row("20260709590450", "99820"),
+        _row("20260709590506", raw={"DiscNo": "20260709590506", "CurPerEnd": "2026-05-31", "CurFYEn": "2027-02-28", "CurPerType": "1Q"}),
+        _row("20260709590507", raw={"DiscNo": "20260709590507", "CurFYEn": "2027-02-28", "CurPerType": "1Q"}),
+        _row("20260709590508", raw={"DiscNo": "20260709590508", "CurPerEn": "UNKNOWN", "CurFYEn": "2027-02-28", "CurPerType": "1Q"}),
+    ])
+    index = metadata.load_canonical_filing_metadata_index(str(path))
+
+    assert (index["20260709590505"].match_status, index["20260709590505"].normalized_ticker, index["20260709590505"].expected_period, index["20260709590505"].expected_quarter) == ("exact_requested_disclosure_match", "7601", "2027-02-28", "1Q")
+    assert (index["20260709590450"].match_status, index["20260709590450"].normalized_ticker, index["20260709590450"].expected_period, index["20260709590450"].expected_quarter) == ("exact_requested_disclosure_match", "9982", "2027-02-28", "1Q")
+    assert index["20260709590506"].match_status == "invalid_period"
+    assert index["20260709590506"].expected_period == ""
+    assert index["20260709590507"].match_status == "invalid_period"
+    assert index["20260709590508"].match_status == "invalid_period"
 
 
 def test_ticker_conflict_does_not_mutate_or_rescue_other_disclosure():
