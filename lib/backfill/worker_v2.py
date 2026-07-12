@@ -555,7 +555,7 @@ def _try_xbrl_source(
     records = []
     for idx, row in enumerate(xbrl_rows):
         seg_name = row.normalized_segment_name or row.raw_segment_name
-        records.append({
+        record = {
             "ticker": filing.ticker,
             "period": row.period or period,   # prior rows は xbrl_rows 側の前期 period を優先
             "quarter": row.quarter or quarter,
@@ -571,7 +571,11 @@ def _try_xbrl_source(
             "disclosure_date": filing.disclosure_date,
             "tdnet_doc_id": fid,
             "row_type": _classify_row_type(seg_name),
-        })
+        }
+        record["_segment_period_role"] = (getattr(row, "raw_json", None) or {}).get(
+            "_segment_period_role", "unknown"
+        )
+        records.append(record)
 
     validation = validate_extraction_result(records, source="xbrl")
     return SourceCandidate(

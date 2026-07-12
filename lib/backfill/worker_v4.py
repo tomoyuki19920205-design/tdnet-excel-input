@@ -858,6 +858,18 @@ def process_one_filing_v4(
 
     if xbrl_ok:
         best = xbrl_candidate
+        for record in best.segment_records:
+            record.update({
+                "_identity_verified": True,
+                "_identity_verdict": identity.verdict,
+                "_requested_disclosure_no": filing.requested_disclosure_no,
+                "_internal_document_id": identity.internal_id,
+                "_canonical_expected_period": filing.expected_period,
+                "_canonical_expected_quarter": filing.expected_quarter,
+                "_resolved_zip_sha256": identity.zip_sha256,
+                "_verified_xbrl_same_zip": xbrl_path == resolved.zip_path,
+                "_worker_version": "v4",
+            })
         logger.debug(f"[v4] XBRL succeeded: fid={fid} n={len(best.segment_records)}")
 
         # ── Partial-success チェック: suspicious な場合は PDF V4 fallback を試みる ──

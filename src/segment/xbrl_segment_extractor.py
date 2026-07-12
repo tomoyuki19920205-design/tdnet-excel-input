@@ -657,9 +657,9 @@ def extract_segments_from_xbrl_zip_detailed(
                         row_period = loop_period or ""
 
                     profit_tag = data.get("profit_tag")
-                    row_raw_json = None
+                    row_raw_json = {"_segment_period_role": period_type}
                     if profit_tag:
-                        row_raw_json = {"profit_tag": profit_tag}
+                        row_raw_json["profit_tag"] = profit_tag
 
                     if include_context_evidence:
                         row_raw_json = row_raw_json or {}

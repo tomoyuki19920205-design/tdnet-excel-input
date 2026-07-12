@@ -25,7 +25,25 @@ class BatchUpsertStats:
         return self.total_records / max(self.total_batches, 1)
 
 
-def normalize_and_validate_rec(conn, rec: dict) -> tuple[bool, str, str]:
+def _has_earnings_summaries_table(conn) -> bool:
+    return bool(conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'earnings_summaries' LIMIT 1"
+    ).fetchone())
+
+
+def _has_documents_table(conn) -> bool:
+    return bool(conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'documents' LIMIT 1"
+    ).fetchone())
+
+
+def normalize_and_validate_rec(
+    conn,
+    rec: dict,
+    *,
+    earnings_summaries_available: bool | None = None,
+    documents_available: bool | None = None,
+) -> tuple[bool, str, str]:
     """
     レコードの period を通期決算期末日型に正規化し、チェックする。
     Returns:
@@ -48,12 +66,46 @@ def normalize_and_validate_rec(conn, rec: dict) -> tuple[bool, str, str]:
     if quarter not in ("1Q", "2Q", "3Q", "FY"):
         return False, f"invalid_quarter:{quarter}", "none"
 
+    role = rec.get("_segment_period_role", "")
+    verified = (
+        rec.get("_identity_verified") is True
+        and rec.get("_identity_verdict") in {"exact_document_id_match", "official_linked_xbrl_match"}
+        and bool(rec.get("_requested_disclosure_no"))
+        and bool(rec.get("_internal_document_id"))
+        and bool(rec.get("_canonical_expected_period"))
+        and rec.get("_canonical_expected_quarter") in ("1Q", "2Q", "3Q", "FY")
+        and bool(rec.get("_resolved_zip_sha256"))
+        and rec.get("_verified_xbrl_same_zip") is True
+        and rec.get("_worker_version") == "v4"
+        and rec.get("source") == "backfill_xbrl"
+        and rec.get("extractor_route") == "xbrl"
+    )
+    if rec.get("_identity_verified") is True and not verified:
+        return False, "verified_xbrl_provenance_incomplete", "none"
+    if verified and not ("7921" in ticker and quarter == "3Q"):
+        expected_period = rec["_canonical_expected_period"]
+        expected_quarter = rec["_canonical_expected_quarter"]
+        if role == "current":
+            if original_period != expected_period or quarter != expected_quarter:
+                return False, "verified_current_period_contract_mismatch", "none"
+            return True, "ok", "verified_current_xbrl"
+        if role == "previous":
+            if not original_period or original_period >= expected_period or quarter != expected_quarter:
+                return False, "verified_previous_period_contract_mismatch", "none"
+            return True, "ok", "verified_previous_xbrl"
+        return False, "verified_unknown_period_role", "none"
+
+    if earnings_summaries_available is None:
+        earnings_summaries_available = _has_earnings_summaries_table(conn)
+    if documents_available is None:
+        documents_available = _has_documents_table(conn)
+
     cur = conn.cursor()
     resolved_period = None
     applied_source = "none"
 
     # 優先順位 1: 同日・同quarterの earnings_summaries から解決
-    if disclosure_date:
+    if earnings_summaries_available and disclosure_date:
         clean_date = disclosure_date.replace("-", "")
         hyphen_date = f"{clean_date[:4]}-{clean_date[4:6]}-{clean_date[6:8]}" if len(clean_date) == 8 else disclosure_date
         
@@ -97,8 +149,16 @@ def normalize_and_validate_rec(conn, rec: dict) -> tuple[bool, str, str]:
                     except Exception:
                         pass
 
+    if not resolved_period and quarter == "FY":
+        resolved_period = original_period
+        applied_source = "fy_default"
+
     # 優先順位 2: documents の title から year_parser で抽出
     if not resolved_period and tdnet_doc_id:
+        if not documents_available:
+            if "7921" in ticker and quarter == "3Q":
+                return False, "7921_quarter_skew_unverifiable_without_documents", "none"
+            return False, "documents_unavailable_for_period_resolution", "none"
         doc_res = cur.execute(
             "SELECT title FROM documents WHERE tdnet_doc_id = ? LIMIT 1",
             (tdnet_doc_id,)
@@ -120,7 +180,7 @@ def normalize_and_validate_rec(conn, rec: dict) -> tuple[bool, str, str]:
         if quarter == "FY":
             resolved_period = original_period
             applied_source = "fy_default"
-        else:
+        elif earnings_summaries_available:
             # 優先順位 3: 最終フォールバックとして、同 ticker の直近の他Qレコードなどから推定
             fy_month_res = cur.execute(
                 "SELECT fiscal_year FROM earnings_summaries WHERE ticker = ? AND quarter = 'FY' LIMIT 1",
@@ -194,7 +254,7 @@ def normalize_and_validate_rec(conn, rec: dict) -> tuple[bool, str, str]:
         rec["period"] = resolved_period
 
     # 最終検証: quarter != FY の場合に period が四半期末日のままになっていないか
-    if quarter != "FY" and rec["period"] == original_period:
+    if earnings_summaries_available and quarter != "FY" and rec["period"] == original_period:
         fy_month_res = cur.execute(
             "SELECT fiscal_year FROM earnings_summaries WHERE ticker = ? AND quarter = 'FY' LIMIT 1",
             (ticker,)
@@ -217,11 +277,18 @@ def dry_run_upsert_segments(records: list[dict], decision_db) -> BatchUpsertStat
     print("    SEGMENT BACKFILL DRY RUN VERIFICATION REPORT")
     print("  ==========================================================================")
     
+    earnings_summaries_available = _has_earnings_summaries_table(decision_db._conn)
+    documents_available = _has_documents_table(decision_db._conn)
     seen_keys = set()
     for rec in records:
         orig_period = rec.get("period", "")
         # documents からタイトルや情報を引くために本番DBを参照
-        is_ok, reason, source_info = normalize_and_validate_rec(decision_db._conn, rec)
+        is_ok, reason, source_info = normalize_and_validate_rec(
+            decision_db._conn,
+            rec,
+            earnings_summaries_available=earnings_summaries_available,
+            documents_available=documents_available,
+        )
         
         # 重複チェック (同一ticker/period/quarter/segment_name)
         key = (rec["ticker"], rec["period"], rec["quarter"], rec["segment_name"])
@@ -243,19 +310,21 @@ def dry_run_upsert_segments(records: list[dict], decision_db) -> BatchUpsertStat
         title = "No Document Title Found"
         cur = decision_db._conn.cursor()
         
-        summary_row = cur.execute(
-            "SELECT company_name FROM earnings_summaries WHERE ticker = ? LIMIT 1",
-            (rec["ticker"],)
-        ).fetchone()
-        if summary_row and summary_row[0]:
-            company_name = summary_row[0]
+        if earnings_summaries_available:
+            summary_row = cur.execute(
+                "SELECT company_name FROM earnings_summaries WHERE ticker = ? LIMIT 1",
+                (rec["ticker"],)
+            ).fetchone()
+            if summary_row and summary_row[0]:
+                company_name = summary_row[0]
             
-        doc_row = cur.execute(
-            "SELECT title FROM documents WHERE tdnet_doc_id = ? LIMIT 1",
-            (rec.get("tdnet_doc_id", ""),)
-        ).fetchone()
-        if doc_row and doc_row[0]:
-            title = doc_row[0]
+        if documents_available:
+            doc_row = cur.execute(
+                "SELECT title FROM documents WHERE tdnet_doc_id = ? LIMIT 1",
+                (rec.get("tdnet_doc_id", ""),)
+            ).fetchone()
+            if doc_row and doc_row[0]:
+                title = doc_row[0]
 
         print(
             f"  [VERIFY] Ticker: {rec['ticker']:<5} | Company: {company_name:<10} | "
@@ -288,6 +357,9 @@ def batch_upsert_segments(
 
     if not records:
         return stats
+
+    earnings_summaries_available = _has_earnings_summaries_table(decision_db._conn)
+    documents_available = _has_documents_table(decision_db._conn)
 
     # ── _xbrl_cleanup_meta の自動検出 ──
     _auto_cleanup = xbrl_cleanup_keys
@@ -347,7 +419,12 @@ def batch_upsert_segments(
                 rec.pop("_xbrl_cleanup_meta", None)
                 
                 # 正規化と検証
-                is_ok, reason, _ = normalize_and_validate_rec(decision_db._conn, rec)
+                is_ok, reason, _ = normalize_and_validate_rec(
+                    decision_db._conn,
+                    rec,
+                    earnings_summaries_available=earnings_summaries_available,
+                    documents_available=documents_available,
+                )
                 if not is_ok:
                     logger.warning(
                         "[upsert_skip] Ticker:%s | OrigPeriod:%s | Q:%s | Reason:%s | tdnet_doc_id:%s",
