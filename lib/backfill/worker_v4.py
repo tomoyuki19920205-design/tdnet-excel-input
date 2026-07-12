@@ -723,6 +723,7 @@ def process_one_filing_v4(
     timeout_download: int = 30, timeout_xbrl: int = 60, timeout_pdf: int = 120,
     run_id: str | None = None,
     sleep_fn=None,
+    dry_run_only: bool = False,
 ) -> FilingResultV2:
     """V4 パイプライン: XBRL-first → V4 PDF fallback。V1 fallback なし。"""
     _ensure_imports()
@@ -740,13 +741,73 @@ def process_one_filing_v4(
     paths = ensure_cache_layout(cache_root, fid)
     write_metadata(paths, filing)
 
+    def _quarantine_now(reason: str) -> FilingResultV2:
+        elapsed = int((time.monotonic() - t0) * 1000)
+        metrics["total_ms"] = elapsed
+        quarantine = {
+            "filing_id": fid, "ticker": getattr(filing, "ticker", ""),
+            "stage": "identity_gate_v4", "review_hint": reason,
+            "hard_fail_reason": reason, "selected_source": "identity_gate",
+            "candidate_summary": "identity_gate:rejected",
+        }
+        save_quarantine(paths, quarantine)
+        append_filing_log(paths, {"event": "quarantined", "via": "identity_gate", "reason": reason, "pipeline": "v4"})
+        return FilingResultV2(
+            filing_id=fid, status="quarantined", source="", selected_path="none",
+            confidence=0.0, reason=reason, hard_fail_reason=reason,
+            quarantine_reason=reason, fallback_used=False, fallback_reason="",
+            raw_segment_count=0, valid_segment_count=0, invalid_segment_count=0,
+            sales_non_null_count=0, profit_non_null_count=0,
+            metrics=metrics, cache_paths={"cache_dir": str(paths.cache_dir)},
+            quarantine=quarantine, route_mode="identity_gate",
+        )
+
+    for attr, reason in (
+        ("requested_disclosure_no", "missing_requested_disclosure_no"),
+        ("ticker", "missing_expected_ticker"),
+        ("expected_period", "missing_expected_period"),
+        ("expected_quarter", "missing_expected_quarter"),
+    ):
+        if not getattr(filing, attr, ""):
+            return _quarantine_now(reason)
+
+    from src.segment.segment_zip_resolver import resolve_xbrl_zip
+    from src.segment.zip_identity_verifier import verify_zip_identity
+    resolved = resolve_xbrl_zip(
+        doc_id=filing.requested_disclosure_no,
+        ticker=filing.ticker,
+        expected_quarter=filing.expected_quarter,
+        expected_period=filing.expected_period,
+        allow_jquants_fetch=not dry_run_only,
+        persist_provenance=not dry_run_only,
+    )
+    success_statuses = {
+        "FOUND_CACHE", "FOUND_CACHE_LINKED", "FOUND_CACHE_LINKED_VERIFIED",
+        "DOWNLOADED_FROM_JQUANTS",
+    }
+    if not resolved.zip_path or resolved.error_reason or resolved.status not in success_statuses:
+        return _quarantine_now(resolved.error_reason or resolved.status)
+
+    identity = verify_zip_identity(
+        zip_path=resolved.zip_path,
+        requested_disclosure_no=filing.requested_disclosure_no,
+        expected_ticker=filing.ticker,
+        expected_period=filing.expected_period,
+        expected_quarter=filing.expected_quarter,
+        trusted_provenance=resolved.trusted_provenance,
+    )
+    if not (identity.passed and identity.verdict in {"exact_document_id_match", "official_linked_xbrl_match"}):
+        return _quarantine_now(identity.rejection_reason or identity.verdict)
+    xbrl_path = resolved.zip_path
+
     _update_state(state_store, fid, "running", stage="downloading_v4")
     append_filing_log(paths, {"event": "v4_start", "ticker": filing.ticker, "run_id": run_id})
 
     # Step 1: Download
-    doc_path, xbrl_path = _download_originals(
+    doc_path, _ = _download_originals(
         filing, paths, metrics,
         retry_download=retry_download, timeout_download=timeout_download, sleep_fn=_sleep,
+        include_xbrl=False,
     )
 
     if not doc_path and not xbrl_path:

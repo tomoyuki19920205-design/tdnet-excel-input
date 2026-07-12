@@ -26,6 +26,9 @@ class FilingInfo:
     listing_source: str         # "tdnet_html" / "tdnet_api" 等
     has_xbrl: bool              # XBRL 有無 (確認済み)
     xbrl_url_inferred: bool = False  # xbrl_url が PDF URL からの推定値か
+    requested_disclosure_no: str = ""
+    expected_period: str = ""
+    expected_quarter: str = ""
 
 
 def normalize_title(title: str) -> str:

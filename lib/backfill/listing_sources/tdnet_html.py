@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 
 from .base import FilingInfo, make_filing_id
 from lib.backfill.xbrl_url_inference import infer_xbrl_url_from_pdf
+from src.events.common_normalizers import extract_common_disclosure_no
 
 logger = logging.getLogger("backfill.listing.html")
 
@@ -236,6 +237,7 @@ class TdnetHtmlListingProvider:
                         title=title,
                         disclosure_date=date_iso,
                         doc_url=href,
+                        requested_disclosure_no=extract_common_disclosure_no(href) or "",
                         xbrl_url=inferred_xbrl,
                         doc_type=doc_type,
                         company_name=company_name,

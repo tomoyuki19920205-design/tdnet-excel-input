@@ -132,6 +132,9 @@ def _load_filing_list(path: str) -> list:
     for rec in raw_records:
         fi = FilingInfo(
             filing_id=rec["filing_id"],
+            requested_disclosure_no=rec.get("requested_disclosure_no", ""),
+            expected_period=rec.get("expected_period", ""),
+            expected_quarter=rec.get("expected_quarter", ""),
             ticker=rec.get("ticker", ""),
             title=rec.get("title", ""),
             disclosure_date=rec.get("disclosure_date", ""),
@@ -164,6 +167,9 @@ def _save_manifest(filings: list, run_id: str, log_dir: str = "logs") -> str:
     for fi in filings:
         records.append({
             "filing_id": fi.filing_id,
+            "requested_disclosure_no": fi.requested_disclosure_no,
+            "expected_period": fi.expected_period,
+            "expected_quarter": fi.expected_quarter,
             "ticker": fi.ticker,
             "disclosure_date": fi.disclosure_date,
             "title": fi.title,
@@ -223,6 +229,41 @@ def _make_result(metrics, run_id, start_date, end_date, phase2, xbrl_workers, pd
         "pdf_workers": pdf_workers,
         "workers": workers,
     }
+
+
+def _apply_canonical_metadata_to_filings(filings, canonical_index):
+    canonical_counts = {
+        "canonical_metadata_matched": 0,
+        "canonical_metadata_not_found": 0,
+        "canonical_metadata_duplicate": 0,
+        "canonical_metadata_invalid": 0,
+        "canonical_metadata_conflict": 0,
+        "canonical_metadata_ticker_conflict": 0,
+    }
+    for fi in filings:
+        metadata = canonical_index.get(fi.requested_disclosure_no)
+        if metadata is None:
+            canonical_counts["canonical_metadata_not_found"] += 1
+            continue
+        if metadata.match_status == "duplicate":
+            canonical_counts["canonical_metadata_duplicate"] += 1
+            continue
+        if metadata.match_status.startswith("invalid"):
+            canonical_counts["canonical_metadata_invalid"] += 1
+            continue
+        if metadata.normalized_ticker != fi.ticker:
+            canonical_counts["canonical_metadata_ticker_conflict"] += 1
+            continue
+        if fi.expected_period or fi.expected_quarter:
+            if (fi.expected_period, fi.expected_quarter) != (metadata.expected_period, metadata.expected_quarter):
+                canonical_counts["canonical_metadata_conflict"] += 1
+                continue
+        fi.expected_period = metadata.expected_period
+        fi.expected_quarter = metadata.expected_quarter
+        canonical_counts["canonical_metadata_matched"] += 1
+    logger.info("[backfill] canonical metadata: %s", canonical_counts)
+    return canonical_counts
+
 
 
 def run_backfill(
@@ -306,6 +347,15 @@ def run_backfill(
         )
         logger.info(f"[backfill] listing done (pre-selector): total={len(filings)}")
         print(f"[backfill] listing done (pre-selector): total={len(filings)}")
+
+    from lib.backfill.canonical_filing_metadata import load_canonical_filing_metadata_index
+    try:
+        canonical_index = load_canonical_filing_metadata_index()
+    except Exception as exc:
+        logger.warning("[backfill] canonical metadata index unavailable: %s", exc)
+        canonical_index = {}
+    canonical_counts = _apply_canonical_metadata_to_filings(filings, canonical_index)
+
 
     # ── 1b. filing_selector による最終判定 ──
     # 固定母集団モードでは selector をスキップ (manifest は既にフィルタ済み)
@@ -496,6 +546,7 @@ def run_backfill(
             db_batch_size=db_batch_size,
             flush_every_seconds=flush_every_seconds,
             flush_callback=_flush,
+            dry_run_only=dry_run_only,
         )
     elif use_v2:
         from lib.backfill.phase2_runner import run_phase2_v2

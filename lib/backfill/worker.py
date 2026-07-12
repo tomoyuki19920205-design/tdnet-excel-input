@@ -68,7 +68,7 @@ def _ensure_imports():
         sys.path.insert(0, project_root)
 
 
-def _download_originals(filing, paths, metrics, *, retry_download, timeout_download, sleep_fn):
+def _download_originals(filing, paths, metrics, *, retry_download, timeout_download, sleep_fn, include_xbrl: bool = True):
     """原本 (PDF/XBRL) をダウンロードする。cache があれば skip。"""
     from lib.backfill.cache import has_pdf, has_xbrl
     from lib.backfill.retry import retry_with_backoff
@@ -106,6 +106,15 @@ def _download_originals(filing, paths, metrics, *, retry_download, timeout_downl
             metrics["download_error"] = r.last_error
             metrics["download_timed_out"] = r.timed_out
     metrics["download_ms"] = int((time.monotonic() - t_dl) * 1000)
+
+    if not include_xbrl:
+        metrics["xbrl_source"] = "disabled"
+        metrics["xbrl_archive_hit"] = False
+        metrics["xbrl_resolved"] = False
+        metrics["xbrl_download_attempted"] = False
+        metrics["xbrl_url_inferred"] = False
+        metrics["xbrl_download_error_class"] = ""
+        return doc_path, None
 
     # XBRL — 解決順: cache → archive → download (inferred URL 含む)
     from lib.backfill.cache import resolve_xbrl_from_archive

@@ -420,6 +420,7 @@ def run_phase2_v4(
     db_batch_size: int = 200,
     flush_every_seconds: int = 300,
     flush_callback=None,
+    dry_run_only: bool = False,
 ) -> list:
     """V4 worker 経路: XBRL-first → V4 PDF fallback を1パスで実行。
 
@@ -455,6 +456,7 @@ def run_phase2_v4(
             timeout_xbrl=timeout_xbrl,
             timeout_pdf=timeout_pdf,
             run_id=run_id,
+            dry_run_only=dry_run_only,
         )
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -572,5 +574,4 @@ def _handle_failed_v4(result, fid, store):
         )
     except Exception as e:
         logger.warning(f"[phase2_v4] mark_failed failed {fid}: {e}")
-
 
