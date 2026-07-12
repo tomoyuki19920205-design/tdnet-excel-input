@@ -141,7 +141,11 @@ def _extract_internal_ids_from_zip(zip_path: str) -> list[str]:
     return ids
 
 
-def extract_actual_metadata_from_zip(zip_path: str) -> dict[str, str]:
+def extract_actual_metadata_from_zip(
+    zip_path: str,
+    expected_period: str = "",
+    expected_quarter: str = "",
+) -> dict[str, str]:
     """ZIPファイルの実体（エントリ名、マニフェスト、およびSummary HTML等）からメタデータを安全に抽出する。
     
     戻り値キー: ticker, period, quarter, document_type, internal_document_id
@@ -208,7 +212,18 @@ def extract_actual_metadata_from_zip(zip_path: str) -> dict[str, str]:
                 # period (endDate または instant 日付の最大値)
                 dates = re.findall(r'<(?:xbrli:endDate|xbrli:instant)>(\d{4}-\d{2}-\d{2})</', content)
                 if dates:
-                    meta["period"] = max(dates)
+                    # FY のSummaryには実績FY末と翌期forecast末が併存する。
+                    # expected_periodがZIP内候補に完全一致する場合だけ実績として
+                    # 優先し、存在しない場合は従来どおりの最大日付を返して
+                    # 後段の厳格なperiod照合で拒否させる。
+                    if (
+                        expected_quarter == "FY"
+                        and expected_period
+                        and expected_period in dates
+                    ):
+                        meta["period"] = expected_period
+                    else:
+                        meta["period"] = max(dates)
                 
                 # quarter の抽出 (QuarterlyPeriod 要素値)
                 m = re.search(r'name="tse-ed-t:QuarterlyPeriod"[^>]*>(\d+)</', content)
@@ -226,6 +241,18 @@ def extract_actual_metadata_from_zip(zip_path: str) -> dict[str, str]:
                         meta["quarter"] = "3Q"
                     else:
                         meta["quarter"] = "FY"
+
+                # FY Summaryにはforecast context名としてAccumulatedQ2等が
+                # 含まれ得る。actual periodの完全一致と年次markerを確認できる
+                # 場合だけ、context非依存の文字列fallbackを上書きする。
+                if (
+                    expected_quarter == "FY"
+                    and expected_period
+                    and meta["period"] == expected_period
+                    and meta["document_type"] == "attachment_xbrl"
+                    and ("AnnualMember" in content or "YearEndMember" in content)
+                ):
+                    meta["quarter"] = "FY"
     except Exception as e:
         logger.warning("[ZIP_METADATA] Failed to extract metadata from zip: %s", e)
         
@@ -327,7 +354,11 @@ def verify_zip_identity(
         return _FAIL("multiple_internal_document_ids", details={"internal_ids": internal_ids})
 
     # ── ZIP 実体からメタデータを安全に抽出（独立抽出） ──
-    meta = extract_actual_metadata_from_zip(zip_path)
+    meta = extract_actual_metadata_from_zip(
+        zip_path,
+        expected_period=expected_period,
+        expected_quarter=expected_quarter,
+    )
     
     # 抽出できない項目があればexpected値で補わずSTOP (不合格判定)
     if (not meta["ticker"] or not meta["period"] or not meta["quarter"] or 
