@@ -251,19 +251,19 @@ def update_market_caps(conn: sqlite3.Connection) -> int:
     sql = """
         UPDATE market_data
         SET market_cap = close * (
-            SELECT COALESCE(p.shares_outstanding, 0) - COALESCE(p.treasury_stock, 0)
+            SELECT p.shares_outstanding - COALESCE(p.treasury_stock, 0)
             FROM per_share_data p
             WHERE p.ticker = market_data.ticker
+              AND p.shares_outstanding > 0
             ORDER BY p.period DESC, p.quarter DESC
             LIMIT 1
         )
-        WHERE close IS NOT NULL
-          AND market_cap IS NULL
-          AND EXISTS (
+        WHERE market_cap IS NOT NULL
+           OR (close IS NOT NULL AND EXISTS (
             SELECT 1 FROM per_share_data p
             WHERE p.ticker = market_data.ticker
-              AND p.shares_outstanding IS NOT NULL
-          )
+              AND p.shares_outstanding > 0
+          ))
     """
     cursor = conn.execute(sql)
     conn.commit()
