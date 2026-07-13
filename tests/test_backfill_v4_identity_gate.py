@@ -194,3 +194,98 @@ def test_runner_passes_isolated_worker_dry_run_to_worker(monkeypatch):
     runner.run_phase2_v4([{"filing_id": "fid"}], {"fid": _filing()}, store=store, metrics=metrics, run_logger=log, run_id="r", isolated_worker_dry_run=True)
 
     assert called.call_args.kwargs["isolated_worker_dry_run"] is True
+
+
+@pytest.mark.parametrize("skip_pdf", [True, False])
+def test_runner_passes_skip_pdf_to_worker(monkeypatch, skip_pdf):
+    import lib.backfill.phase2_runner as runner
+
+    called = Mock(return_value=SimpleNamespace(status="skipped_normal", metrics={"total_ms": 0}))
+    monkeypatch.setattr("lib.backfill.worker_v4.process_one_filing_v4", called)
+    class Future:
+        def result(self): return called.return_value
+    class Executor:
+        def __init__(self, **_): pass
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def submit(self, fn, arg): fn(arg); return Future()
+    monkeypatch.setattr(runner, "ThreadPoolExecutor", Executor); monkeypatch.setattr(runner, "as_completed", lambda futures: list(futures))
+    store = SimpleNamespace(mark_done=Mock()); metrics = SimpleNamespace(record_v2_result=Mock()); log = SimpleNamespace(log_filing_result_v2=Mock())
+
+    runner.run_phase2_v4([{"filing_id": "fid"}], {"fid": _filing()}, store=store, metrics=metrics, run_logger=log, run_id="r", skip_pdf=skip_pdf)
+
+    assert called.call_args.kwargs["skip_pdf"] is skip_pdf
+
+
+def _successful_xbrl_candidate(w):
+    validation = SimpleNamespace(
+        status=SimpleNamespace(value="success"), confidence=0.95, reason="ok",
+        hard_fail_reason=SimpleNamespace(value=""), raw_segment_count=1,
+        valid_segment_count=1, invalid_segment_count=0, sales_non_null_count=1,
+        profit_non_null_count=1, invalid_names=[], account_like_ratio=0.0,
+        narrative_contamination=False,
+    )
+    return w.SourceCandidate(
+        source="xbrl", attempted=True, available=True,
+        segment_records=[{"ticker": "7601", "period": "2027-02-28", "quarter": "1Q", "segment_name": "Core", "segment_sales": 1, "segment_profit": 1}],
+        validation=validation,
+    )
+
+
+def _prepare_skip_pdf_worker(monkeypatch, *, xbrl_success):
+    resolver = Mock(return_value=SimpleNamespace(zip_path="verified.zip", status="FOUND_CACHE", error_reason="", trusted_provenance=None))
+    verifier = Mock(return_value=SimpleNamespace(passed=True, verdict="exact_document_id_match", rejection_reason="", internal_id="20260709590505", zip_sha256="sha"))
+    w, cache = _patch_gate(monkeypatch, resolver, verifier)
+    monkeypatch.setattr(cache, "save_extract_financials_result", Mock())
+    monkeypatch.setattr(cache, "save_extract_segments_result", Mock())
+    monkeypatch.setattr(w, "_extract_financials_data", Mock(return_value=({"period": "2027-02-28", "quarter": "1Q"}, "xbrl")))
+    if xbrl_success:
+        monkeypatch.setattr(w, "_try_xbrl_source", Mock(return_value=_successful_xbrl_candidate(w)))
+    else:
+        monkeypatch.setattr(w, "_try_xbrl_source", Mock(return_value=w.SourceCandidate(source="xbrl", attempted=True, available=True, error="xbrl_no_segment_facts")))
+    return w
+
+
+def test_skip_pdf_keeps_suspicious_xbrl_and_never_calls_pdf(monkeypatch):
+    w = _prepare_skip_pdf_worker(monkeypatch, xbrl_success=True)
+    download = Mock(); pdf = Mock(); ai = Mock()
+    monkeypatch.setattr(w, "_download_originals", download)
+    monkeypatch.setattr(w, "_try_pdf_source_v4", pdf)
+    monkeypatch.setattr(w, "extract_segments_with_ai", ai)
+    monkeypatch.setattr("lib.backfill.segment_partial_check.check_xbrl_partial_segments", Mock(return_value=(True, "suspicious", {"xbrl_count": 1, "edinet_hist_count": None, "other_ratio": 0.0})))
+
+    result = w.process_one_filing_v4(_filing(), cache_root="tmp", skip_pdf=True)
+
+    assert result.selected_path == "xbrl"
+    assert result.fallback_used is False
+    assert "partial_check_skipped_by_skip_pdf" in result.candidate_summary
+    download.assert_not_called(); pdf.assert_not_called(); ai.assert_not_called()
+
+
+def test_skip_pdf_xbrl_failure_never_calls_pdf_or_ai(monkeypatch):
+    w = _prepare_skip_pdf_worker(monkeypatch, xbrl_success=False)
+    download = Mock(); pdf = Mock(); ai = Mock()
+    monkeypatch.setattr(w, "_download_originals", download)
+    monkeypatch.setattr(w, "_try_pdf_source_v4", pdf)
+    monkeypatch.setattr(w, "extract_segments_with_ai", ai)
+
+    result = w.process_one_filing_v4(_filing(), cache_root="tmp", skip_pdf=True)
+
+    assert result.status == "quarantined"
+    assert result.reason == "xbrl_no_segment_facts"
+    assert result.selected_path == "none"
+    download.assert_not_called(); pdf.assert_not_called(); ai.assert_not_called()
+
+
+def test_skip_pdf_false_keeps_partial_pdf_comparison(monkeypatch):
+    w = _prepare_skip_pdf_worker(monkeypatch, xbrl_success=True)
+    monkeypatch.setattr(w, "_download_originals", Mock(return_value=("cached.pdf", None)))
+    pdf = Mock(return_value=w.SourceCandidate(source="pdf", attempted=True, available=True, segment_records=[]))
+    monkeypatch.setattr(w, "_try_pdf_source_v4", pdf)
+    monkeypatch.setattr("lib.backfill.segment_partial_check.check_xbrl_partial_segments", Mock(return_value=(True, "suspicious", {"xbrl_count": 1, "edinet_hist_count": None, "other_ratio": 0.0})))
+    monkeypatch.setattr("lib.backfill.segment_partial_check.decide_fallback_adoption", Mock(return_value=(False, "keep_xbrl")))
+
+    result = w.process_one_filing_v4(_filing(), cache_root="tmp", skip_pdf=False)
+
+    assert result.selected_path == "xbrl"
+    pdf.assert_called_once()

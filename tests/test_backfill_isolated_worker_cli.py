@@ -64,3 +64,18 @@ def test_isolated_cli_routes_all_mutable_paths_under_run_root(monkeypatch, tmp_p
     assert captured["cache_root"] == str(run_root / "cache")
     assert captured["log_jsonl_path"] == str(run_root / "logs" / "run.jsonl")
     assert captured["manifest_dir"] == str(run_root / "manifest")
+
+
+def test_isolated_cli_passes_skip_pdf_to_run_backfill(monkeypatch, tmp_path):
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    filing_list.parent.mkdir(parents=True); filing_list.write_text("[]", encoding="utf-8")
+    captured = {}
+
+    def run_backfill(**kwargs):
+        captured.update(kwargs)
+        return {"summary": {}}
+
+    _invoke(monkeypatch, ["--isolated-worker-dry-run", "--run-root", str(run_root), "--filing-list", str(filing_list), "--workers", "1", "--skip-pdf"], run_backfill)
+
+    assert captured["skip_pdf"] is True

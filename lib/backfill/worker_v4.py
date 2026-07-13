@@ -725,6 +725,7 @@ def process_one_filing_v4(
     sleep_fn=None,
     dry_run_only: bool = False,
     isolated_worker_dry_run: bool = False,
+    skip_pdf: bool = False,
 ) -> FilingResultV2:
     """V4 パイプライン: XBRL-first → V4 PDF fallback。V1 fallback なし。"""
     _ensure_imports()
@@ -805,11 +806,15 @@ def process_one_filing_v4(
     append_filing_log(paths, {"event": "v4_start", "ticker": filing.ticker, "run_id": run_id})
 
     # Step 1: Download
-    doc_path, _ = _download_originals(
-        filing, paths, metrics,
-        retry_download=retry_download, timeout_download=timeout_download, sleep_fn=_sleep,
-        include_xbrl=False, offline_mode=isolated_worker_dry_run,
-    )
+    if skip_pdf:
+        doc_path = None
+        metrics["pdf_skip_reason"] = "skip_pdf"
+    else:
+        doc_path, _ = _download_originals(
+            filing, paths, metrics,
+            retry_download=retry_download, timeout_download=timeout_download, sleep_fn=_sleep,
+            include_xbrl=False, offline_mode=isolated_worker_dry_run,
+        )
 
     if not doc_path and not xbrl_path:
         elapsed = int((time.monotonic() - t0) * 1000)
@@ -902,7 +907,7 @@ def process_one_filing_v4(
         metrics["xbrl_partial_suspicious"] = _suspicious
         metrics["xbrl_partial_reason"] = _partial_reason
 
-        if _suspicious and doc_path and not isolated_worker_dry_run:
+        if _suspicious and doc_path and not isolated_worker_dry_run and not skip_pdf:
             logger.info(
                 "[v4] XBRL partial suspicious: ticker=%s fid=%s reason=%s → try PDF V4",
                 filing.ticker, fid, _partial_reason,
@@ -969,14 +974,23 @@ def process_one_filing_v4(
                 metrics["xbrl_partial_fallback_decision"] = "keep_xbrl"
         else:
             pdf_candidate = SourceCandidate(
-                source="pdf", attempted=False, available=bool(doc_path),
-                skip_reason="xbrl_succeeded",
+                source="pdf", attempted=False, available=bool(doc_path) and not skip_pdf,
+                skip_reason="partial_check_skipped_by_skip_pdf" if skip_pdf else "xbrl_succeeded",
             )
             candidates.append(pdf_candidate)
+            if _suspicious and skip_pdf:
+                metrics["xbrl_partial_fallback_decision"] = "skipped_by_skip_pdf"
     elif isolated_worker_dry_run:
         pdf_candidate = SourceCandidate(
             source="pdf", attempted=False, available=False,
             skip_reason="isolated_worker_dry_run_offline",
+        )
+        candidates.append(pdf_candidate)
+        best = xbrl_candidate
+    elif skip_pdf:
+        pdf_candidate = SourceCandidate(
+            source="pdf", attempted=False, available=False,
+            skip_reason="skipped_by_skip_pdf",
         )
         candidates.append(pdf_candidate)
         best = xbrl_candidate

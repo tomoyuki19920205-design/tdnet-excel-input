@@ -544,6 +544,7 @@ def run_backfill(
             workers=workers,
             retry_download=retry_download, retry_xbrl=retry_xbrl, retry_pdf=retry_pdf,
             timeout_download=timeout_download, timeout_xbrl=timeout_xbrl, timeout_pdf=timeout_pdf,
+            skip_pdf=skip_pdf,
             segment_buffer=segment_buffer, fid_buffer=fid_buffer,
             db_batch_size=db_batch_size,
             flush_every_seconds=flush_every_seconds,
