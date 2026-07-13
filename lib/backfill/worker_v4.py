@@ -800,6 +800,9 @@ def process_one_filing_v4(
     )
     if not (identity.passed and identity.verdict in {"exact_document_id_match", "official_linked_xbrl_match"}):
         return _quarantine_now(identity.rejection_reason or identity.verdict)
+    internal_document_id = str(getattr(identity, "internal_id", "") or "").strip()
+    if not internal_document_id:
+        return _quarantine_now("verified_xbrl_provenance_incomplete")
     xbrl_path = resolved.zip_path
 
     _update_state(state_store, fid, "running", stage="downloading_v4")
@@ -868,7 +871,8 @@ def process_one_filing_v4(
                 "_identity_verified": True,
                 "_identity_verdict": identity.verdict,
                 "_requested_disclosure_no": filing.requested_disclosure_no,
-                "_internal_document_id": identity.internal_id,
+                "_internal_document_id": internal_document_id,
+                "tdnet_doc_id": internal_document_id,
                 "_canonical_expected_period": filing.expected_period,
                 "_canonical_expected_quarter": filing.expected_quarter,
                 "_resolved_zip_sha256": identity.zip_sha256,

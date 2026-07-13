@@ -48,6 +48,54 @@ from lib.backfill.filing_selector import should_process_for_segment_backfill
 logger = logging.getLogger("backfill")
 
 
+_ISOLATED_PATH_ERROR = "STOP_ISOLATED_SQLITE_PATH_ESCAPE"
+
+
+def _validate_isolated_write_paths(
+    *,
+    run_root: str,
+    decision_db_path: str,
+    state_db_path: str,
+    log_jsonl_path: str,
+    filing_list_path: str,
+) -> dict[str, Path]:
+    """Resolve every mutable isolated path and reject escapes before opening it."""
+    if not all((run_root, decision_db_path, state_db_path, log_jsonl_path, filing_list_path)):
+        raise RuntimeError(f"{_ISOLATED_PATH_ERROR}: missing isolated path")
+
+    root = Path(run_root).resolve(strict=False)
+    project_root = Path(_PROJECT_ROOT).resolve(strict=False)
+    production_roots = (
+        (project_root / "logs").resolve(strict=False),
+        (project_root / "data").resolve(strict=False),
+    )
+    if root in production_roots or any(prod in root.parents for prod in production_roots):
+        raise RuntimeError(f"{_ISOLATED_PATH_ERROR}: run-root is under production storage")
+
+    resolved = {
+        "run_root": root,
+        "decision_db": Path(decision_db_path).resolve(strict=False),
+        "state_db": Path(state_db_path).resolve(strict=False),
+        "log_jsonl": Path(log_jsonl_path).resolve(strict=False),
+        "filing_list": Path(filing_list_path).resolve(strict=False),
+    }
+    for label in ("decision_db", "state_db", "log_jsonl"):
+        if root not in resolved[label].parents:
+            raise RuntimeError(f"{_ISOLATED_PATH_ERROR}: {label} escapes run-root")
+
+    input_root = (root / "input").resolve(strict=False)
+    if input_root not in resolved["filing_list"].parents:
+        raise RuntimeError(f"{_ISOLATED_PATH_ERROR}: filing-list escapes run-root/input")
+
+    production_decision_db = (project_root / "decision_db.db").resolve(strict=False)
+    production_state_db = (project_root / "data" / "backfill_state.db").resolve(strict=False)
+    if resolved["decision_db"] == production_decision_db:
+        raise RuntimeError(f"{_ISOLATED_PATH_ERROR}: production decision DB")
+    if resolved["state_db"] == production_state_db:
+        raise RuntimeError(f"{_ISOLATED_PATH_ERROR}: production state DB")
+    return resolved
+
+
 # ============================================================
 # PRO Market 除外判定
 # ============================================================
@@ -305,8 +353,17 @@ def run_backfill(
     dry_run_only: bool = True,
     manifest_dir: str = "logs",
     isolated_worker_dry_run: bool = False,
+    isolated_run_root: str | None = None,
 ) -> dict:
     """バックフィルを実行する (Phase 1 / Phase 2 自動選択)。"""
+    if isolated_worker_dry_run:
+        _validate_isolated_write_paths(
+            run_root=isolated_run_root or "",
+            decision_db_path=decision_db_path or "",
+            state_db_path=state_db,
+            log_jsonl_path=log_jsonl_path or "",
+            filing_list_path=filing_list_path or "",
+        )
     run_id = generate_run_id()
     use_v2 = worker_version == "v2"
     use_v4 = worker_version == "v4"
@@ -530,7 +587,15 @@ def run_backfill(
     fid_buffer: list[str] = []
 
     def _flush(buf, fid_buf):
-        _flush_buffer(buf, fid_buf, decision_db_path, db_batch_size, metrics, store, run_logger, dry_run_only=dry_run_only, isolated_worker_dry_run=isolated_worker_dry_run)
+        _flush_buffer(
+            buf, fid_buf, decision_db_path, db_batch_size, metrics, store, run_logger,
+            dry_run_only=dry_run_only,
+            isolated_worker_dry_run=isolated_worker_dry_run,
+            isolated_run_root=isolated_run_root,
+            state_db_path=state_db,
+            log_jsonl_path=log_jsonl_path,
+            filing_list_path=filing_list_path,
+        )
 
     logger.info(f"[backfill] phase={mode} stage start: input_count={len(pending)}")
     print(f"[backfill] {mode} start: {len(pending)} filings")
@@ -691,9 +756,26 @@ def _run_phase1(
                 logger.info(f"[backfill] progress: {i}/{len(futures)} ok={metrics.ok_count} q={metrics.quarantined_count} f={metrics.failed_count}")
 
 
-def _flush_buffer(buffer, fid_buffer, decision_db_path, batch_size, metrics, store, run_logger, dry_run_only: bool = True, isolated_worker_dry_run: bool = False):
+def _flush_buffer(
+    buffer, fid_buffer, decision_db_path, batch_size, metrics, store, run_logger,
+    dry_run_only: bool = True,
+    isolated_worker_dry_run: bool = False,
+    isolated_run_root: str | None = None,
+    state_db_path: str | None = None,
+    log_jsonl_path: str | None = None,
+    filing_list_path: str | None = None,
+):
     """segment バッファを DB に flush し、state を mark_upserted する。"""
-    if dry_run_only or not decision_db_path:
+    if isolated_worker_dry_run:
+        _validate_isolated_write_paths(
+            run_root=isolated_run_root or "",
+            decision_db_path=decision_db_path or "",
+            state_db_path=state_db_path or "",
+            log_jsonl_path=log_jsonl_path or "",
+            filing_list_path=filing_list_path or "",
+        )
+    report_only = dry_run_only and not isolated_worker_dry_run
+    if report_only or not decision_db_path:
         # DB書き込みが指定されていない(dry-runモード)場合でも、
         # 本番のDBを読み取り専用で開いて検証レポートをコンソールに表示する。
         try:
@@ -713,8 +795,19 @@ def _flush_buffer(buffer, fid_buffer, decision_db_path, batch_size, metrics, sto
         db = MigrationDB(decision_db_path)
         stats = batch_upsert_segments(buffer, db, batch_size=batch_size)
         metrics.record_upsert(stats)
-        run_logger.log_upsert("batch", {"records": len(buffer), "inserted": stats.inserted, "updated": stats.updated, "failed_batches": stats.failed_batches})
-        if stats.failed_batches == 0 and stats.canonical_sync_ids and not isolated_worker_dry_run:
+        run_logger.log_upsert("batch", {
+            "records": len(buffer),
+            "inserted": stats.inserted,
+            "updated": stats.updated,
+            "no_change": stats.no_change,
+            "rejected_lower_priority": stats.rejected_lower_priority,
+            "rejected_filing_conflict": stats.rejected_filing_conflict,
+            "rejected_filing_identity_unresolved": stats.rejected_filing_identity_unresolved,
+            "failed_batches": stats.failed_batches,
+            "canonical_sync_ids": stats.canonical_sync_ids,
+        })
+        canonical_sync_enabled = not dry_run_only and not isolated_worker_dry_run
+        if stats.failed_batches == 0 and stats.canonical_sync_ids and canonical_sync_enabled:
             from lib.pipeline.db import load_env, get_supabase_write_config
             from tools.sync_segments import sync_sqlite_segment_ids
             load_env()
@@ -1146,6 +1239,7 @@ def main():
             dry_run_only=dry_run_only,
             manifest_dir=manifest_dir,
             isolated_worker_dry_run=args.isolated_worker_dry_run,
+            isolated_run_root=str(run_root) if args.isolated_worker_dry_run else None,
         )
     except Exception:
         import traceback

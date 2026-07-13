@@ -40,6 +40,7 @@ def test_resolver_and_verifier_rejections_stop_before_download(monkeypatch):
 @pytest.mark.parametrize("verdict", ["exact_document_id_match", "official_linked_xbrl_match"])
 def test_accepted_identity_uses_same_zip_and_pdf_only(monkeypatch, verdict):
     provenance = object(); resolver = Mock(return_value=SimpleNamespace(zip_path="verified.zip", status="FOUND_CACHE", error_reason="", trusted_provenance=provenance)); verifier = Mock(return_value=SimpleNamespace(passed=True, verdict=verdict, rejection_reason=""))
+    verifier.return_value.internal_id = "20260709590505"
     w, _ = _patch_gate(monkeypatch, resolver, verifier)
     download = Mock(return_value=(None, None)); monkeypatch.setattr(w, "_download_originals", download)
     seen = []
@@ -145,7 +146,7 @@ def test_offline_pdf_only_does_not_call_network(monkeypatch):
 
 def test_isolated_worker_passes_offline_mode_after_identity_gate(monkeypatch):
     resolver = Mock(return_value=SimpleNamespace(zip_path="verified.zip", status="FOUND_CACHE", error_reason="", trusted_provenance=None))
-    verifier = Mock(return_value=SimpleNamespace(passed=True, verdict="exact_document_id_match", rejection_reason=""))
+    verifier = Mock(return_value=SimpleNamespace(passed=True, verdict="exact_document_id_match", rejection_reason="", internal_id="20260709590505"))
     w, _ = _patch_gate(monkeypatch, resolver, verifier)
     download = Mock(side_effect=RuntimeError("download boundary"))
     monkeypatch.setattr(w, "_download_originals", download)
@@ -232,9 +233,12 @@ def _successful_xbrl_candidate(w):
     )
 
 
-def _prepare_skip_pdf_worker(monkeypatch, *, xbrl_success):
+def _prepare_skip_pdf_worker(
+    monkeypatch, *, xbrl_success, verdict="exact_document_id_match",
+    internal_id="20260709590505",
+):
     resolver = Mock(return_value=SimpleNamespace(zip_path="verified.zip", status="FOUND_CACHE", error_reason="", trusted_provenance=None))
-    verifier = Mock(return_value=SimpleNamespace(passed=True, verdict="exact_document_id_match", rejection_reason="", internal_id="20260709590505", zip_sha256="sha"))
+    verifier = Mock(return_value=SimpleNamespace(passed=True, verdict=verdict, rejection_reason="", internal_id=internal_id, zip_sha256="sha"))
     w, cache = _patch_gate(monkeypatch, resolver, verifier)
     monkeypatch.setattr(cache, "save_extract_financials_result", Mock())
     monkeypatch.setattr(cache, "save_extract_segments_result", Mock())
@@ -244,6 +248,79 @@ def _prepare_skip_pdf_worker(monkeypatch, *, xbrl_success):
     else:
         monkeypatch.setattr(w, "_try_xbrl_source", Mock(return_value=w.SourceCandidate(source="xbrl", attempted=True, available=True, error="xbrl_no_segment_facts")))
     return w
+
+
+@pytest.mark.parametrize(
+    ("verdict", "requested_id", "internal_id"),
+    [
+        ("exact_document_id_match", "20260709590505", "20260709590505"),
+        ("official_linked_xbrl_match", "20260713591788", "20260713340570"),
+    ],
+)
+def test_verified_v4_xbrl_uses_internal_id_for_business_column(
+    monkeypatch, verdict, requested_id, internal_id,
+):
+    w = _prepare_skip_pdf_worker(
+        monkeypatch, xbrl_success=True, verdict=verdict,
+        internal_id=internal_id,
+    )
+    monkeypatch.setattr(
+        "lib.backfill.segment_partial_check.check_xbrl_partial_segments",
+        Mock(return_value=(False, "", {"xbrl_count": 1, "edinet_hist_count": None, "other_ratio": 0.0})),
+    )
+
+    result = w.process_one_filing_v4(
+        _filing(filing_id="862b70fdccda143c86712d70", requested_disclosure_no=requested_id),
+        cache_root="tmp", skip_pdf=True,
+    )
+
+    record = result.segment_records[0]
+    assert record["_requested_disclosure_no"] == requested_id
+    assert record["_internal_document_id"] == internal_id
+    assert record["tdnet_doc_id"] == internal_id
+    assert record["tdnet_doc_id"] != "862b70fdccda143c86712d70"
+
+
+def test_verified_identity_without_internal_id_is_rejected_without_fallback(monkeypatch):
+    w = _prepare_skip_pdf_worker(monkeypatch, xbrl_success=True, internal_id="")
+    download = Mock(); xbrl = Mock(); pdf = Mock(); ai = Mock()
+    monkeypatch.setattr(w, "_download_originals", download)
+    monkeypatch.setattr(w, "_try_xbrl_source", xbrl)
+    monkeypatch.setattr(w, "_try_pdf_source_v4", pdf)
+    monkeypatch.setattr(w, "extract_segments_with_ai", ai)
+
+    result = w.process_one_filing_v4(
+        _filing(filing_id="manifest-filing-id"), cache_root="tmp",
+    )
+
+    assert result.status == "quarantined"
+    assert result.quarantine_reason == "verified_xbrl_provenance_incomplete"
+    download.assert_not_called(); xbrl.assert_not_called(); pdf.assert_not_called(); ai.assert_not_called()
+
+
+def test_pdf_fallback_tdnet_doc_id_is_not_overwritten_by_verified_xbrl_identity(monkeypatch):
+    w = _prepare_skip_pdf_worker(
+        monkeypatch, xbrl_success=True,
+        verdict="official_linked_xbrl_match", internal_id="official-internal-id",
+    )
+    monkeypatch.setattr(w, "_download_originals", Mock(return_value=("cached.pdf", None)))
+    pdf_candidate = _successful_xbrl_candidate(w)
+    pdf_candidate.source = "pdf"
+    pdf_candidate.segment_records[0]["tdnet_doc_id"] = "pdf-filing-id"
+    monkeypatch.setattr(w, "_try_pdf_source_v4", Mock(return_value=pdf_candidate))
+    monkeypatch.setattr(
+        "lib.backfill.segment_partial_check.check_xbrl_partial_segments",
+        Mock(return_value=(True, "suspicious", {"xbrl_count": 1, "edinet_hist_count": None, "other_ratio": 0.0})),
+    )
+    monkeypatch.setattr(
+        "lib.backfill.segment_partial_check.decide_fallback_adoption",
+        Mock(return_value=(True, "use_pdf_v4")),
+    )
+
+    result = w.process_one_filing_v4(_filing(), cache_root="tmp", skip_pdf=False)
+
+    assert result.selected_path == "pdf"
+    assert result.segment_records[0]["tdnet_doc_id"] == "pdf-filing-id"
 
 
 def test_skip_pdf_keeps_suspicious_xbrl_and_never_calls_pdf(monkeypatch):
