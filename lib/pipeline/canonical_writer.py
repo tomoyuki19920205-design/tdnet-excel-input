@@ -120,6 +120,18 @@ def normalize_segment_key(name: str) -> str:
 
 
 _DISPLAY_SEGMENT_ALIASES: dict[str, dict[str, str]] = {
+    "4057": {
+        "CloudCommercePlatform": "Cloud Commerce Platform",
+        "Cloud Commerce Platform": "Cloud Commerce Platform",
+        "クラウドコマースプラットフォーム事業": "Cloud Commerce Platform",
+        "EcBusinessGrowth": "Ec Business Growth",
+        "Ec Business Growth": "Ec Business Growth",
+        "EC Business Growth": "Ec Business Growth",
+        "ECビジネス成長支援事業": "Ec Business Growth",
+        "Datautillization": "Datautillization",
+        "datautillization": "Datautillization",
+        "データ利活用プラットフォーム事業": "Datautillization",
+    },
     "8908": {
         "Real Estate Solution": "Real Estate Solution",
         "不動産ソリューション事業": "Real Estate Solution",
@@ -128,6 +140,11 @@ _DISPLAY_SEGMENT_ALIASES: dict[str, dict[str, str]] = {
         "学生生活ソリューション事業": "School Life Support",
     },
 }
+
+
+def has_segment_display_aliases(ticker: str) -> bool:
+    """Return whether ticker-scoped, taxonomy-backed display aliases exist."""
+    return str(ticker).strip() in _DISPLAY_SEGMENT_ALIASES
 
 
 def normalize_segment_display_key(ticker: str, name: str) -> str:

@@ -32,7 +32,12 @@ from src.segment.normalize import (
     resolve_segment_key_with_jp,
     is_english_dominant,
 )
-from lib.pipeline.canonical_writer import normalize_segment_display_key
+from lib.pipeline.canonical_writer import (
+    expand_segments_rows,
+    has_segment_display_aliases,
+    normalize_segment_display_key,
+)
+from lib.pipeline.source_priority import get_priority
 
 logger = logging.getLogger("sync_seg")
 JST = timezone(timedelta(hours=9))
@@ -489,6 +494,306 @@ def count_sqlite_valid_rows(db_path: str) -> int:
     return sum(1 for r in rows if _is_valid_sqlite_segment(dict(r)))
 
 
+def _empty_layered_stats(segment_ids: list[int]) -> dict:
+    return {
+        "sqlite_total": 0, "sqlite_valid": 0, "sqlite_upserted": 0,
+        "sqlite_errors": 0, "requested_segment_ids": sorted(set(segment_ids)),
+        "synced_segment_ids": [], "sync_error": "", "payloads": [],
+        "wide_inserted": 0, "wide_updated": 0, "wide_unchanged": 0,
+        "wide_skipped_alias_equivalent_existing": 0, "wide_conflict": 0,
+        "eav_inserted": 0, "eav_updated": 0, "eav_unchanged": 0,
+        "eav_skipped_alias_equivalent_existing": 0, "eav_conflict": 0,
+        "row_results": [], "conflicts": [],
+    }
+
+
+def _read_segment_id_rows(db_path: str, segment_ids: list[int]) -> tuple[list[dict], str]:
+    requested_ids = sorted({int(value) for value in segment_ids})
+    if not os.path.isfile(db_path):
+        return [], "segment_sync_db_missing"
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        placeholders = ",".join("?" for _ in requested_ids)
+        rows = [dict(row) for row in conn.execute(
+            "SELECT id, company_code, fiscal_year_end, quarter, segment_name, "
+            "segment_sales, segment_profit, data_source "
+            f"FROM segment_financials WHERE id IN ({placeholders})",
+            requested_ids,
+        ).fetchall()]
+    finally:
+        conn.close()
+    if {int(row["id"]) for row in rows} != set(requested_ids):
+        return rows, "segment_sync_requested_ids_missing"
+    return rows, ""
+
+
+def _get_layer_rows(rest_url: str, headers: dict, table: str, key: tuple[str, str, str]) -> list[dict]:
+    ticker, period, quarter = key
+    response = requests.get(
+        f"{rest_url}/{table}", headers=headers,
+        params={
+            "select": "*", "ticker": f"eq.{ticker}",
+            "period": f"eq.{period}", "quarter": f"eq.{quarter}",
+        },
+        timeout=30,
+    )
+    if response.status_code != 200:
+        raise RuntimeError(f"segment_alias_plan_read_failed:{table}:{response.status_code}")
+    payload = response.json()
+    if not isinstance(payload, list):
+        raise RuntimeError(f"segment_alias_plan_read_invalid:{table}")
+    return payload
+
+
+def _null_safe_value_equal(left, right) -> bool:
+    if left is None or right is None:
+        return left is None and right is None
+    return float(left) == float(right)
+
+
+def _existing_eav_alias_key(ticker: str, row: dict) -> str:
+    source_name = str(row.get("segment_name") or "").strip()
+    if source_name:
+        return normalize_segment_display_key(ticker, source_name)
+    return str(row.get("segment_key") or "")
+
+
+def plan_alias_aware_segment_ids(
+    db_path: str, segment_ids: list[int], rest_url: str, headers: dict,
+    *, live_read: bool = True,
+) -> dict:
+    """Plan alias-aware wide/EAV actions without issuing any write request."""
+    requested_ids = sorted({int(value) for value in segment_ids})
+    plan = _empty_layered_stats(requested_ids)
+    rows, error = _read_segment_id_rows(db_path, requested_ids)
+    plan["sqlite_total"] = len(rows)
+    if error:
+        plan["sync_error"] = error
+        return plan
+
+    valid_rows = [row for row in rows if not _classify_skip_reason(row)]
+    plan["sqlite_valid"] = len(valid_rows)
+    plan["payloads"] = []
+    groups = {
+        (str(row["company_code"]), str(row["fiscal_year_end"]),
+         _QUARTER_MAP.get(str(row["quarter"]), str(row["quarter"])))
+        for row in valid_rows
+    }
+    wide_existing: dict[tuple[str, str, str], list[dict]] = {key: [] for key in groups}
+    eav_existing: dict[tuple[str, str, str], list[dict]] = {key: [] for key in groups}
+    if live_read:
+        try:
+            for key in sorted(groups):
+                wide_existing[key] = _get_layer_rows(rest_url, headers, "segment_canonical", key)
+                eav_existing[key] = _get_layer_rows(rest_url, headers, "canonical_segments", key)
+        except RuntimeError as exc:
+            plan["sync_error"] = str(exc)
+            return plan
+
+    for row in valid_rows:
+        row_id = int(row["id"])
+        ticker = str(row["company_code"])
+        period = str(row["fiscal_year_end"])
+        quarter = _QUARTER_MAP.get(str(row["quarter"]), str(row["quarter"]))
+        source = str(row.get("data_source") or "excel_legacy")
+        segment_name = str(row["segment_name"]).strip()
+        segment_key = normalize_segment_display_key(ticker, segment_name)
+        sales = int(row["segment_sales"]) if row["segment_sales"] is not None else None
+        profit = int(row["segment_profit"]) if row["segment_profit"] is not None else None
+        group = (ticker, period, quarter)
+        wide_payload = {
+            "ticker": ticker, "period": period, "quarter": quarter,
+            "segment_name": segment_name, "segment_key": segment_key,
+            "sales": sales, "profit": profit, "source": source,
+            "updated_at": datetime.now(JST).isoformat(),
+        }
+        plan["payloads"].append(wide_payload)
+        result = {
+            "sqlite_row_id": row_id, "alias_key": segment_key,
+            "wide_action": "", "wide_reason": "", "wide_existing": [],
+            "eav_actions": [], "source_priority": get_priority(source),
+        }
+
+        wide_matches = [
+            existing for existing in wide_existing[group]
+            if normalize_segment_display_key(ticker, str(existing.get("segment_name") or "")) == segment_key
+        ]
+        result["wide_existing"] = wide_matches
+        if not wide_matches:
+            result["wide_action"] = "wide_upsert"
+            result["wide_reason"] = "alias_equivalent_existing_not_found"
+            plan["wide_inserted"] += 1
+        elif any(
+            not _null_safe_value_equal(existing.get("sales"), sales)
+            or not _null_safe_value_equal(existing.get("profit"), profit)
+            for existing in wide_matches
+        ):
+            result["wide_action"] = "wide_conflict"
+            result["wide_reason"] = "segment_wide_alias_value_conflict"
+            plan["wide_conflict"] += 1
+            plan["conflicts"].append({"sqlite_row_id": row_id, "reason": result["wide_reason"]})
+        else:
+            best_existing_priority = min(get_priority(str(existing.get("source") or "")) for existing in wide_matches)
+            if best_existing_priority > get_priority(source):
+                result["wide_action"] = "wide_conflict"
+                result["wide_reason"] = "segment_wide_alias_priority_upgrade_requires_review"
+                plan["wide_conflict"] += 1
+                plan["conflicts"].append({"sqlite_row_id": row_id, "reason": result["wide_reason"]})
+            elif any(str(existing.get("segment_name") or "") == segment_name for existing in wide_matches):
+                result["wide_action"] = "wide_unchanged"
+                result["wide_reason"] = "exact_existing_value_match"
+                plan["wide_unchanged"] += 1
+            else:
+                result["wide_action"] = "wide_skipped_alias_equivalent_existing"
+                result["wide_reason"] = "alias_equivalent_existing_value_match"
+                plan["wide_skipped_alias_equivalent_existing"] += 1
+
+        eav_payloads, _ = expand_segments_rows(
+            ticker=ticker, period=period, quarter=quarter,
+            segments=[{"segment_name": segment_name, "sales": sales, "profit": profit}],
+            source=source,
+        )
+        for eav_payload in eav_payloads:
+            logical_matches = [
+                existing for existing in eav_existing[group]
+                if _existing_eav_alias_key(ticker, existing) == segment_key
+                and str(existing.get("metric") or "") == str(eav_payload["metric"])
+            ]
+            action = {
+                "metric": eav_payload["metric"], "value": eav_payload["value"],
+                "action": "", "reason": "", "payload": eav_payload,
+                "existing": logical_matches,
+            }
+            if not logical_matches:
+                action["action"] = "eav_upsert"
+                action["reason"] = "alias_equivalent_existing_not_found"
+                plan["eav_inserted"] += 1
+            elif any(not _null_safe_value_equal(existing.get("value"), eav_payload["value"]) for existing in logical_matches):
+                action["action"] = "eav_conflict"
+                action["reason"] = "segment_eav_alias_value_conflict"
+                plan["eav_conflict"] += 1
+                plan["conflicts"].append({
+                    "sqlite_row_id": row_id, "metric": eav_payload["metric"],
+                    "reason": action["reason"],
+                })
+            else:
+                best_existing_priority = min(
+                    int(existing.get("source_priority"))
+                    if existing.get("source_priority") is not None
+                    else get_priority(str(existing.get("source") or ""))
+                    for existing in logical_matches
+                )
+                if best_existing_priority > get_priority(source):
+                    action["action"] = "eav_conflict"
+                    action["reason"] = "segment_eav_alias_priority_upgrade_requires_review"
+                    plan["eav_conflict"] += 1
+                    plan["conflicts"].append({
+                        "sqlite_row_id": row_id, "metric": eav_payload["metric"],
+                        "reason": action["reason"],
+                    })
+                else:
+                    action["action"] = "eav_skipped_alias_equivalent_existing"
+                    action["reason"] = "alias_equivalent_existing_value_match"
+                    plan["eav_skipped_alias_equivalent_existing"] += 1
+            result["eav_actions"].append(action)
+        plan["row_results"].append(result)
+
+    if plan["conflicts"]:
+        plan["sync_error"] = plan["conflicts"][0]["reason"]
+    return plan
+
+
+def _alias_plan_readback_matches(plan: dict, rest_url: str, headers: dict) -> bool:
+    groups = {
+        (payload["ticker"], payload["period"], payload["quarter"])
+        for payload in plan["payloads"]
+    }
+    try:
+        wide = {key: _get_layer_rows(rest_url, headers, "segment_canonical", key) for key in groups}
+        eav = {key: _get_layer_rows(rest_url, headers, "canonical_segments", key) for key in groups}
+    except RuntimeError:
+        return False
+    for row_result, payload in zip(plan["row_results"], plan["payloads"]):
+        key = (payload["ticker"], payload["period"], payload["quarter"])
+        alias_key = row_result["alias_key"]
+        if not any(
+            normalize_segment_display_key(payload["ticker"], str(existing.get("segment_name") or "")) == alias_key
+            and _null_safe_value_equal(existing.get("sales"), payload["sales"])
+            and _null_safe_value_equal(existing.get("profit"), payload["profit"])
+            for existing in wide[key]
+        ):
+            return False
+        for action in row_result["eav_actions"]:
+            if not any(
+                _existing_eav_alias_key(str(payload["ticker"]), existing) == alias_key
+                and str(existing.get("metric") or "") == action["metric"]
+                and _null_safe_value_equal(existing.get("value"), action["value"])
+                for existing in eav[key]
+            ):
+                return False
+    return True
+
+
+def _execute_alias_aware_plan(plan: dict, rest_url: str, headers: dict, *, dry_run: bool) -> dict:
+    if plan["sync_error"]:
+        return plan
+    if dry_run:
+        plan["sqlite_upserted"] = plan["sqlite_valid"]
+        plan["synced_segment_ids"] = sorted(row["sqlite_row_id"] for row in plan["row_results"])
+        return plan
+
+    plan["planned_wide_inserted"] = plan["wide_inserted"]
+    plan["planned_eav_inserted"] = plan["eav_inserted"]
+    plan["wide_inserted"] = 0
+    plan["eav_inserted"] = 0
+    failed_ids: set[int] = set()
+    for row_result, payload in zip(plan["row_results"], plan["payloads"]):
+        if row_result["wide_action"] == "wide_upsert":
+            response = requests.post(
+                f"{rest_url}/segment_canonical", json=payload,
+                headers={**headers, "Prefer": "resolution=merge-duplicates,return=minimal"},
+                timeout=30,
+            )
+            if response.status_code not in (200, 201):
+                failed_ids.add(row_result["sqlite_row_id"])
+            else:
+                plan["wide_inserted"] += 1
+                row_result["wide_action"] = "wide_inserted"
+
+    eav_payloads = [
+        action["payload"]
+        for row in plan["row_results"] for action in row["eav_actions"]
+        if action["action"] == "eav_upsert"
+    ]
+    if eav_payloads:
+        response = requests.post(
+            f"{rest_url}/canonical_segments",
+            params={"on_conflict": "source_row_key"}, json=eav_payloads,
+            headers={**headers, "Prefer": "resolution=merge-duplicates,return=minimal"},
+            timeout=30,
+        )
+        if response.status_code not in (200, 201):
+            failed_ids.update(row["sqlite_row_id"] for row in plan["row_results"])
+        else:
+            plan["eav_inserted"] += len(eav_payloads)
+            for row in plan["row_results"]:
+                for action in row["eav_actions"]:
+                    if action["action"] == "eav_upsert":
+                        action["action"] = "eav_inserted"
+
+    if failed_ids:
+        plan["sqlite_errors"] = len(failed_ids)
+        plan["sync_error"] = "segment_canonical_sync_failed_after_sqlite_commit"
+        return plan
+    if not _alias_plan_readback_matches(plan, rest_url, headers):
+        plan["sync_error"] = "segment_canonical_sync_readback_mismatch"
+        return plan
+    plan["sqlite_upserted"] = plan["sqlite_valid"]
+    plan["synced_segment_ids"] = sorted(row["sqlite_row_id"] for row in plan["row_results"])
+    return plan
+
+
 def sync_sqlite_segments(
     db_path: str, rest_url: str, headers: dict, dry_run: bool,
     *, segment_ids: list[int] | None = None,
@@ -739,6 +1044,23 @@ def sync_sqlite_segment_ids(
     db_path: str, segment_ids: list[int], rest_url: str, headers: dict, dry_run: bool,
 ) -> dict:
     """Explicit SQLite row-ID scoped canonical sync; never broadens to ticker/date scope."""
+    rows, error = _read_segment_id_rows(db_path, segment_ids)
+    if error:
+        stats = _empty_layered_stats(segment_ids)
+        stats["sqlite_total"] = len(rows)
+        stats["sync_error"] = error
+        return stats
+    alias_flags = {has_segment_display_aliases(str(row["company_code"])) for row in rows}
+    if True in alias_flags:
+        if alias_flags != {True}:
+            stats = _empty_layered_stats(segment_ids)
+            stats["sqlite_total"] = len(rows)
+            stats["sync_error"] = "segment_alias_mixed_scope_requires_review"
+            return stats
+        plan = plan_alias_aware_segment_ids(
+            db_path, segment_ids, rest_url, headers, live_read=not dry_run,
+        )
+        return _execute_alias_aware_plan(plan, rest_url, headers, dry_run=dry_run)
     return sync_sqlite_segments(
         db_path, rest_url, headers, dry_run, segment_ids=segment_ids,
     )

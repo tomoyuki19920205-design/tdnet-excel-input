@@ -310,6 +310,7 @@ def test_id_scoped_dry_run_selects_only_requested_rows_and_never_posts(tmp_path,
     post = pytest.MonkeyPatch()
     try:
         post.setattr(sync_segments.requests, "post", lambda *args, **kwargs: pytest.fail("dry-run must not call Supabase"))
+        post.setattr(sync_segments.requests, "get", lambda *args, **kwargs: pytest.fail("dry-run must not call Supabase"))
         stats = sync_segments.sync_sqlite_segment_ids(db_path, [2, 1, 2], "http://test/rest/v1", {}, True)
     finally:
         post.undo()
@@ -327,6 +328,7 @@ def test_8908_dry_run_payload_uses_display_keys_without_mutating_names(tmp_path,
     ])
     from tools import sync_segments
     monkeypatch.setattr(sync_segments.requests, "post", lambda *args, **kwargs: pytest.fail("dry-run must not call Supabase"))
+    monkeypatch.setattr(sync_segments.requests, "get", lambda *args, **kwargs: pytest.fail("dry-run must not call Supabase"))
 
     stats = sync_segments.sync_sqlite_segment_ids(db_path, [1, 2], "http://test/rest/v1", {}, True)
 
@@ -344,6 +346,195 @@ def test_id_scoped_sync_rejects_missing_id_without_post(tmp_path, monkeypatch):
     monkeypatch.setattr(sync_segments.requests, "post", lambda *args, **kwargs: pytest.fail("missing IDs must not call Supabase"))
     stats = sync_segments.sync_sqlite_segment_ids(db_path, [1, 9], "http://test/rest/v1", {}, True)
     assert stats["sync_error"] == "segment_sync_requested_ids_missing"
+
+
+class _LayerResponse:
+    def __init__(self, rows=None, status_code=200):
+        self._rows = rows or []
+        self.status_code = status_code
+        self.ok = status_code == 200
+        self.text = ""
+
+    def json(self):
+        return self._rows
+
+
+def _layer_get(wide_rows, eav_rows):
+    def fake_get(url, **kwargs):
+        params = kwargs.get("params", {})
+        ticker = str(params.get("ticker", "")).removeprefix("eq.")
+        period = str(params.get("period", "")).removeprefix("eq.")
+        quarter = str(params.get("quarter", "")).removeprefix("eq.")
+        source = wide_rows if url.endswith("/segment_canonical") else eav_rows
+        return _LayerResponse([
+            row for row in source
+            if row.get("ticker") == ticker and row.get("period") == period
+            and row.get("quarter") == quarter
+        ])
+    return fake_get
+
+
+def _rows_4057():
+    common = {"company_code": "4057", "quarter": "FY", "data_source": "backfill_xbrl"}
+    return [
+        {**common, "fiscal_year_end": "2025-05-31", "segment_name": "Cloud Commerce Platform", "segment_sales": 2617, "segment_profit": 867},
+        {**common, "fiscal_year_end": "2025-05-31", "segment_name": "Ec Business Growth", "segment_sales": 247, "segment_profit": -13},
+        {**common, "fiscal_year_end": "2025-05-31", "segment_name": "Datautillization", "segment_sales": None, "segment_profit": -29},
+        {**common, "fiscal_year_end": "2026-05-31", "segment_name": "Cloud Commerce Platform", "segment_sales": 2731, "segment_profit": 840},
+        {**common, "fiscal_year_end": "2026-05-31", "segment_name": "Ec Business Growth", "segment_sales": 129, "segment_profit": 4},
+        {**common, "fiscal_year_end": "2026-05-31", "segment_name": "Datautillization", "segment_sales": 0, "segment_profit": -59},
+    ]
+
+
+def _wide_previous_4057():
+    common = {"ticker": "4057", "period": "2025-05-31", "quarter": "FY", "source": "edinet_xbrl"}
+    return [
+        {**common, "segment_name": "クラウドコマースプラットフォーム事業", "sales": 2617, "profit": 867},
+        {**common, "segment_name": "ECビジネス成長支援事業", "sales": 247, "profit": -13},
+        {**common, "segment_name": "データ利活用プラットフォーム事業", "sales": None, "profit": -29},
+    ]
+
+
+def test_4057_layered_plan_skips_previous_wide_and_continues_all_eav(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "segments.db")
+    _create_segment_db_with_datasource(db_path, _rows_4057())
+    from tools import sync_segments
+    monkeypatch.setattr(sync_segments.requests, "get", _layer_get(_wide_previous_4057(), []))
+
+    plan = sync_segments.plan_alias_aware_segment_ids(
+        db_path, [1, 2, 3, 4, 5, 6], "http://test/rest/v1", {}, live_read=True,
+    )
+
+    assert plan["sync_error"] == ""
+    assert plan["wide_skipped_alias_equivalent_existing"] == 3
+    assert plan["wide_inserted"] == 3
+    assert plan["wide_conflict"] == 0
+    assert plan["eav_inserted"] == 11
+    assert plan["eav_conflict"] == 0
+    previous = [row for row in plan["row_results"] if row["sqlite_row_id"] <= 3]
+    current = [row for row in plan["row_results"] if row["sqlite_row_id"] >= 4]
+    assert {row["wide_action"] for row in previous} == {"wide_skipped_alias_equivalent_existing"}
+    assert {row["wide_action"] for row in current} == {"wide_upsert"}
+    assert sum(len(row["eav_actions"]) for row in previous) == 5
+    assert sum(len(row["eav_actions"]) for row in current) == 6
+
+
+def test_wide_alias_value_conflict_stops_before_all_posts(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "segments.db")
+    _create_segment_db_with_datasource(db_path, [_rows_4057()[0]])
+    from tools import sync_segments
+    conflict = _wide_previous_4057()
+    conflict[0] = {**conflict[0], "sales": 9999}
+    monkeypatch.setattr(sync_segments.requests, "get", _layer_get(conflict, []))
+    monkeypatch.setattr(sync_segments.requests, "post", lambda *a, **k: pytest.fail("conflict must stop before POST"))
+
+    stats = sync_segments.sync_sqlite_segment_ids(db_path, [1], "http://test/rest/v1", {}, False)
+
+    assert stats["sync_error"] == "segment_wide_alias_value_conflict"
+    assert stats["wide_conflict"] == 1
+    assert stats["synced_segment_ids"] == []
+
+
+def test_wide_alias_lower_priority_existing_requires_review(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "segments.db")
+    _create_segment_db_with_datasource(db_path, [_rows_4057()[0]])
+    from tools import sync_segments
+    existing = [{**_wide_previous_4057()[0], "source": "excel_legacy"}]
+    monkeypatch.setattr(sync_segments.requests, "get", _layer_get(existing, []))
+
+    plan = sync_segments.plan_alias_aware_segment_ids(db_path, [1], "http://test/rest/v1", {}, live_read=True)
+
+    assert plan["sync_error"] == "segment_wide_alias_priority_upgrade_requires_review"
+    assert plan["wide_conflict"] == 1
+
+
+def test_eav_logical_duplicate_skips_even_when_source_row_key_differs(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "segments.db")
+    row = _rows_4057()[3]
+    _create_segment_db_with_datasource(db_path, [row])
+    from tools import sync_segments
+    eav = [
+        {"ticker": "4057", "period": "2026-05-31", "quarter": "FY", "segment_name": "クラウドコマースプラットフォーム事業", "segment_key": "cloudcommerceplatform", "metric": "sales", "value": 2731, "source": "edinet_xbrl", "source_row_key": "different-sales"},
+        {"ticker": "4057", "period": "2026-05-31", "quarter": "FY", "segment_name": "クラウドコマースプラットフォーム事業", "segment_key": "cloudcommerceplatform", "metric": "profit", "value": 840, "source": "edinet_xbrl", "source_row_key": "different-profit"},
+    ]
+    monkeypatch.setattr(sync_segments.requests, "get", _layer_get([], eav))
+
+    plan = sync_segments.plan_alias_aware_segment_ids(db_path, [1], "http://test/rest/v1", {}, live_read=True)
+
+    assert plan["eav_skipped_alias_equivalent_existing"] == 2
+    assert plan["eav_inserted"] == 0
+    assert plan["sync_error"] == ""
+
+
+def test_eav_alias_value_conflict_in_last_record_prevents_partial_posts(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "segments.db")
+    _create_segment_db_with_datasource(db_path, _rows_4057())
+    from tools import sync_segments
+    eav = [{
+        "ticker": "4057", "period": "2026-05-31", "quarter": "FY",
+        "segment_name": "データ利活用プラットフォーム事業",
+        "segment_key": "datautillization", "metric": "profit", "value": -999,
+        "source": "edinet_xbrl", "source_row_key": "different",
+    }]
+    monkeypatch.setattr(sync_segments.requests, "get", _layer_get(_wide_previous_4057(), eav))
+    monkeypatch.setattr(sync_segments.requests, "post", lambda *a, **k: pytest.fail("late conflict must stop before POST"))
+
+    stats = sync_segments.sync_sqlite_segment_ids(
+        db_path, [1, 2, 3, 4, 5, 6], "http://test/rest/v1", {}, False,
+    )
+
+    assert stats["sync_error"] == "segment_eav_alias_value_conflict"
+    assert stats["eav_conflict"] == 1
+    assert stats["synced_segment_ids"] == []
+
+
+def test_alias_plan_readback_matches_logical_keys(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "segments.db")
+    _create_segment_db_with_datasource(db_path, [_rows_4057()[0]])
+    from tools import sync_segments
+    eav = [
+        {"ticker": "4057", "period": "2025-05-31", "quarter": "FY", "segment_name": "Cloud Commerce Platform", "segment_key": "cloud commerce platform", "metric": "sales", "value": 2617, "source": "backfill_xbrl"},
+        {"ticker": "4057", "period": "2025-05-31", "quarter": "FY", "segment_name": "Cloud Commerce Platform", "segment_key": "cloud commerce platform", "metric": "profit", "value": 867, "source": "backfill_xbrl"},
+    ]
+    monkeypatch.setattr(sync_segments.requests, "get", _layer_get(_wide_previous_4057(), eav))
+    plan = sync_segments.plan_alias_aware_segment_ids(db_path, [1], "http://test/rest/v1", {}, live_read=True)
+
+    assert plan["wide_skipped_alias_equivalent_existing"] == 1
+    assert plan["eav_skipped_alias_equivalent_existing"] == 2
+    assert sync_segments._alias_plan_readback_matches(plan, "http://test/rest/v1", {}) is True
+
+
+def test_wide_alias_skip_still_executes_eav_and_marks_row_synced(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "segments.db")
+    _create_segment_db_with_datasource(db_path, [_rows_4057()[0]])
+    from tools import sync_segments
+    wide = _wide_previous_4057()
+    eav = []
+    post_urls = []
+
+    monkeypatch.setattr(sync_segments.requests, "get", _layer_get(wide, eav))
+
+    def fake_post(url, **kwargs):
+        post_urls.append(url)
+        if url.endswith("/segment_canonical"):
+            pytest.fail("alias-equivalent wide row must not be posted")
+        assert url.endswith("/canonical_segments")
+        eav.extend(kwargs["json"])
+        return _LayerResponse(status_code=201)
+
+    monkeypatch.setattr(sync_segments.requests, "post", fake_post)
+
+    stats = sync_segments.sync_sqlite_segment_ids(
+        db_path, [1], "http://test/rest/v1", {}, False,
+    )
+
+    assert stats["sync_error"] == ""
+    assert stats["wide_skipped_alias_equivalent_existing"] == 1
+    assert stats["eav_inserted"] == 2
+    assert stats["row_results"][0]["wide_action"] == "wide_skipped_alias_equivalent_existing"
+    assert {action["action"] for action in stats["row_results"][0]["eav_actions"]} == {"eav_inserted"}
+    assert stats["synced_segment_ids"] == [1]
+    assert post_urls == ["http://test/rest/v1/canonical_segments"]
 
 
 class TestBackfillV4PdfSourcePassthrough:

@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib.pipeline.canonical_writer import (
     _make_financials_row_key,
     _make_segments_row_key,
+    has_segment_display_aliases,
     normalize_segment_display_key,
     normalize_segment_key,
     write_financials_canonical,
@@ -82,6 +83,51 @@ class TestNormalizeSegmentKey:
 
 
 class TestNormalizeSegmentDisplayKey:
+    @pytest.mark.parametrize(
+        "name,expected",
+        [
+            ("CloudCommercePlatform", "cloud commerce platform"),
+            ("Cloud Commerce Platform", "cloud commerce platform"),
+            ("クラウドコマースプラットフォーム事業", "cloud commerce platform"),
+            ("EcBusinessGrowth", "ec business growth"),
+            ("Ec Business Growth", "ec business growth"),
+            ("EC Business Growth", "ec business growth"),
+            ("ＥＣビジネス成長支援事業", "ec business growth"),
+            ("ECビジネス成長支援事業", "ec business growth"),
+            ("Datautillization", "datautillization"),
+            ("datautillization", "datautillization"),
+            ("データ利活用プラットフォーム事業", "datautillization"),
+        ],
+    )
+    def test_4057_taxonomy_aliases_share_display_keys(self, name, expected):
+        assert normalize_segment_display_key("4057", name) == expected
+
+    def test_4057_aliases_are_ticker_scoped(self):
+        assert normalize_segment_display_key("9999", "CloudCommercePlatform") == "cloudcommerceplatform"
+        assert normalize_segment_display_key("9999", "ＥＣビジネス成長支援事業") == "ecビジネス成長支援事業"
+        assert has_segment_display_aliases("4057") is True
+        assert has_segment_display_aliases("9999") is False
+
+    def test_4057_expand_preserves_source_names(self):
+        rows, skipped = expand_segments_rows(
+            ticker="4057",
+            period="2026-05-31",
+            quarter="FY",
+            segments=[
+                {"segment_name": "Cloud Commerce Platform", "sales": 1, "profit": 2},
+                {"segment_name": "ＥＣビジネス成長支援事業", "sales": 3, "profit": 4},
+                {"segment_name": "Datautillization", "sales": 5, "profit": 6},
+            ],
+            source="backfill_xbrl",
+        )
+        assert skipped == 0
+        assert {row["segment_name"] for row in rows} == {
+            "Cloud Commerce Platform", "ECビジネス成長支援事業", "Datautillization",
+        }
+        assert {row["segment_key"] for row in rows} == {
+            "cloud commerce platform", "ec business growth", "datautillization",
+        }
+
     def test_8908_aliases_share_two_display_keys(self):
         assert normalize_segment_display_key("8908", "Real Estate Solution") == "real estate solution"
         assert normalize_segment_display_key("8908", "不動産ソリューション事業") == "real estate solution"
