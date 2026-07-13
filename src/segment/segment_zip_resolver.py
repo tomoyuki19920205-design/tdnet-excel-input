@@ -43,7 +43,12 @@ def _sha256_file(path: str) -> str:
     return h.hexdigest()
 
 
-def _load_sidecar_provenance(zip_path: str) -> Optional[TrustedProvenance]:
+def _load_sidecar_provenance(
+    zip_path: str,
+    requested_disclosure_no: str,
+    expected_period: str = "",
+    expected_quarter: str = "",
+) -> Optional[TrustedProvenance]:
     """sidecar (方式B) ファイルから TrustedProvenance を復元する。
 
     ZIP 実体との完全一致検証 (schema, hash, size, ticker, period, quarter, internal_id) を行う。
@@ -63,6 +68,9 @@ def _load_sidecar_provenance(zip_path: str) -> Optional[TrustedProvenance]:
         if data.get("source") != "jquants":
             logger.warning("[RESOLVER] Sidecar source mismatch: %s", data.get("source"))
             return None
+        if data.get("requested_disclosure_no") != requested_disclosure_no:
+            logger.warning("[RESOLVER] Sidecar requested disclosure mismatch")
+            return None
 
         # 現在の ZIP 実体の hash と size 照合
         curr_hash = _sha256_file(zip_path)
@@ -72,13 +80,27 @@ def _load_sidecar_provenance(zip_path: str) -> Optional[TrustedProvenance]:
             return None
 
         # ZIP から抽出した実メタデータと sidecar の照合
-        meta = extract_actual_metadata_from_zip(zip_path)
+        meta = extract_actual_metadata_from_zip(
+            zip_path,
+            expected_period=expected_period,
+            expected_quarter=expected_quarter,
+        )
         if (data.get("internal_document_id") != meta["internal_document_id"] or
                 data.get("ticker") != meta["ticker"] or
-                data.get("period") != meta["period"] or
-                data.get("quarter") != meta["quarter"] or
                 data.get("document_type") != meta["document_type"]):
             logger.warning("[RESOLVER] Sidecar metadata mismatch with ZIP content")
+            return None
+        if not expected_period and data.get("period") != meta["period"]:
+            logger.warning("[RESOLVER] Sidecar period mismatch with ZIP content")
+            return None
+        if not expected_quarter and data.get("quarter") != meta["quarter"]:
+            logger.warning("[RESOLVER] Sidecar quarter mismatch with ZIP content")
+            return None
+        if expected_period and meta["period"] != expected_period:
+            logger.warning("[RESOLVER] ZIP expected period mismatch")
+            return None
+        if expected_quarter and meta["quarter"] != expected_quarter:
+            logger.warning("[RESOLVER] ZIP expected quarter mismatch")
             return None
 
         # 信頼に足る provenance を構築して返却
@@ -191,7 +213,11 @@ def resolve_xbrl_zip(
     # 既存の候補パスを評価
     for path, src in candidate_paths:
         try:
-            meta = extract_actual_metadata_from_zip(path)
+            meta = extract_actual_metadata_from_zip(
+                path,
+                expected_period=expected_period,
+                expected_quarter=expected_quarter,
+            )
             # Path A: exact match cache
             if meta.get("internal_document_id") == doc_id:
                 return ZipResolveResult(
@@ -208,7 +234,12 @@ def resolve_xbrl_zip(
                 )
             
             # Path B: linked cache (sidecar 読み込み検証)
-            prov = _load_sidecar_provenance(path)
+            prov = _load_sidecar_provenance(
+                path,
+                requested_disclosure_no=doc_id,
+                expected_period=expected_period,
+                expected_quarter=expected_quarter,
+            )
             if prov:
                 return ZipResolveResult(
                     zip_path=path,
@@ -262,7 +293,11 @@ def resolve_xbrl_zip(
                             f.write(chunk)
                     
                     # 正常性検証とメタデータ抽出
-                    meta = extract_actual_metadata_from_zip(tmp_zip_path)
+                    meta = extract_actual_metadata_from_zip(
+                        tmp_zip_path,
+                        expected_period=expected_period,
+                        expected_quarter=expected_quarter,
+                    )
                     if (not meta["ticker"] or not meta["period"] or not meta["quarter"] or
                             not meta["document_type"] or not meta["internal_document_id"]):
                         raise ValueError(
