@@ -233,7 +233,57 @@ def main() -> int:
         else:
             logger.warning(f"[PER_SHARE] extract done rc={step.rc} status={step.status}")
 
-        # ── Step 5b: sync_per_share_data（per_share_data → Supabase） ──
+        # ── Step 5b: fetch_jquants_prices（J-Quants → jquants.db prices） ──
+        logger.info("[MARKET_DATA] step=market-price-fetch START")
+        market_fetch_step = run_step("market-price-fetch", [
+            PYTHON, "-X", "utf8",
+            "tools/fetch_jquants_prices.py",
+            "--recent",
+        ], timeout_sec=900)
+        steps.append(market_fetch_step)
+        if market_fetch_step.rc == 0:
+            logger.info(
+                f"[MARKET_DATA] step=market-price-fetch OK rc={market_fetch_step.rc}"
+            )
+        else:
+            logger.error(
+                f"[MARKET_DATA] step=market-price-fetch FAIL rc={market_fetch_step.rc} "
+                f"status={market_fetch_step.status}"
+            )
+
+        # ── Step 5c: sync_market_data（jquants.db prices → Supabase market_data） ──
+        if market_fetch_step.rc != 0:
+            logger.warning(
+                "[MARKET_DATA] step=market-data-sync SKIP "
+                f"reason=market-price-fetch-failed rc={market_fetch_step.rc}"
+            )
+            market_sync_step = StepResult("market-data-sync")
+            market_sync_step.rc = -1
+            market_sync_step.status = "warning"
+            market_sync_step.duration = 0.0
+            market_sync_step.stdout_tail = (
+                f"SKIPPED: market-price-fetch failed rc={market_fetch_step.rc}"
+            )
+            steps.append(market_sync_step)
+        else:
+            logger.info("[MARKET_DATA] step=market-data-sync START")
+            market_sync_step = run_step("market-data-sync", [
+                PYTHON, "-X", "utf8",
+                "tools/sync_market_data.py",
+                *([] if args.dry_run else ["--apply"]),
+            ], timeout_sec=300)
+            steps.append(market_sync_step)
+            if market_sync_step.rc == 0:
+                logger.info(
+                    f"[MARKET_DATA] step=market-data-sync OK rc={market_sync_step.rc}"
+                )
+            else:
+                logger.error(
+                    f"[MARKET_DATA] step=market-data-sync FAIL rc={market_sync_step.rc} "
+                    f"status={market_sync_step.status} (later steps unaffected)"
+                )
+
+        # ── Step 5d: sync_per_share_data（per_share_data → Supabase） ──
         logger.info("[PER_SHARE] sync start")
         step = run_step("per-share-sync", [
             PYTHON, "-X", "utf8",
