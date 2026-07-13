@@ -63,50 +63,144 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _ids_in_value(value: Any) -> set[str]:
-    found: set[str] = set()
-    if isinstance(value, dict):
-        for key, item in value.items():
-            if key in {"requested_disclosure_no", "disclosure_no", "common_disclosure_no"}:
-                text = str(item or "")
-                if re.fullmatch(r"\d{14}", text):
-                    found.add(text)
-            found.update(_ids_in_value(item))
-    elif isinstance(value, list):
-        for item in value:
-            found.update(_ids_in_value(item))
-    elif isinstance(value, str):
-        for pdf_id in re.findall(r"(?<!\d)1401(\d{14})(?!\d)", value):
-            found.add(pdf_id)
-        for direct in re.findall(r"(?<!\d)(20\d{12})(?!\d)", value):
-            found.add(direct)
-    return found
+def _event_identity(row: dict) -> dict[str, set[str]]:
+    """Extract only identities written by the production event pipeline."""
+    from src.events.common_normalizers import extract_common_disclosure_no
+    from src.events.tdnet_event_store import _nested_get, _safe_json
+
+    payload = _safe_json(row.get("raw_payload"))
+    raw = _safe_json(payload.get("raw"))
+    extracted = _safe_json(payload.get("extracted"))
+    containers = (payload, raw, extracted)
+
+    requested: set[str] = set()
+    for container in containers:
+        for key in ("requested_disclosure_no", "disclosure_no", "common_disclosure_no"):
+            value = str(container.get(key) or "")
+            if re.fullmatch(r"[0-9]{14}", value):
+                requested.add(value)
+
+    urls = (
+        row.get("source_url"), row.get("pdf_url"),
+        _nested_get(payload, "raw", "source_url"),
+        _nested_get(payload, "raw", "pdf_url"),
+        _nested_get(payload, "extracted", "source_url"),
+        _nested_get(payload, "extracted", "pdf_url"),
+    )
+    for url in urls:
+        url_text = str(url or "")
+        disclosure_no = extract_common_disclosure_no(url_text)
+        exact_token = (
+            disclosure_no
+            and re.search(
+                rf"(?<![0-9])(?:1401|0812)?{re.escape(disclosure_no)}(?![0-9])",
+                url_text,
+            )
+        )
+        if exact_token and re.fullmatch(r"[0-9]{14}", disclosure_no):
+            requested.add(disclosure_no)
+
+    canonical = {
+        str(container.get("source_doc_id") or "").lower()
+        for container in containers
+        if re.fullmatch(r"[0-9a-fA-F]{64}", str(container.get("source_doc_id") or ""))
+    }
+    internal = {
+        str(container.get(key) or "")
+        for container in containers
+        for key in ("xbrl_doc_id", "external_document_id", "internal_document_id")
+        if re.fullmatch(r"[0-9]{14}", str(container.get(key) or ""))
+    }
+    return {"requested": requested, "canonical": canonical, "internal": internal}
+
+
+def _metadata_query_failed(*, status: int | None, pg_code: str, classification: str) -> RepairStop:
+    safe_code = pg_code if re.fullmatch(r"[0-9A-Z]{3,10}", pg_code or "") else "none"
+    safe_status = str(status) if status is not None else "none"
+    return RepairStop(
+        "STOP_SINGLE_SEGMENT_REPAIR_METADATA_QUERY_FAILED",
+        f"operation=select_tdnet_events http_status={safe_status} "
+        f"postgres_code={safe_code} classification={classification}",
+    )
 
 
 def _default_load_metadata(args: argparse.Namespace) -> dict:
-    from lib.pipeline.db import load_env, supabase_select
+    import requests
+
+    from lib.pipeline.db import get_supabase_read_config, load_env
 
     load_env(str(_ROOT))
-    rows = supabase_select(
-        "tdnet_events",
-        params={
-            "source_doc_id": f"eq.{args.expected_canonical_filing_id}",
-            "ticker": f"eq.{args.expected_ticker}",
-            "event_type": "eq.earnings",
-            "select": (
-                "id,ticker,company_name,headline,disclosed_at,event_type,event_subtype,"
-                "source_doc_id,source_url,pdf_url,raw_payload"
-            ),
-        },
-    )
-    exact = [row for row in rows if args.requested_id in _ids_in_value(row)]
+    config = get_supabase_read_config()
+    params = {
+        "ticker": f"eq.{args.expected_ticker}",
+        "event_type": "eq.earnings",
+        "or": (
+            f"(source_url.ilike.*{args.requested_id}*,"
+            f"pdf_url.ilike.*{args.requested_id}*)"
+        ),
+        "select": (
+            "id,ticker,company_name,headline,disclosed_at,event_type,event_subtype,"
+            "source_url,pdf_url,raw_payload"
+        ),
+        "limit": "25",
+    }
+    try:
+        response = requests.get(
+            f"{config['rest_url']}/tdnet_events",
+            params=params,
+            headers=config["headers"],
+            timeout=30,
+        )
+    except Exception:
+        raise _metadata_query_failed(
+            status=None, pg_code="", classification="connection_error",
+        ) from None
+
+    if response.status_code != 200:
+        pg_code = ""
+        try:
+            body = response.json()
+            if isinstance(body, dict):
+                pg_code = str(body.get("code") or "")
+        except Exception:
+            pass
+        classification = "schema_error" if pg_code == "42703" else "http_error"
+        raise _metadata_query_failed(
+            status=response.status_code, pg_code=pg_code, classification=classification,
+        )
+    try:
+        rows = response.json()
+    except Exception:
+        raise _metadata_query_failed(
+            status=200, pg_code="", classification="invalid_response",
+        ) from None
+    if not isinstance(rows, list):
+        raise _metadata_query_failed(
+            status=200, pg_code="", classification="invalid_response",
+        )
+    if len(rows) >= 25:
+        raise RepairStop("STOP_SINGLE_SEGMENT_REPAIR_METADATA_QUERY_SCOPE_UNSAFE")
+
+    exact = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        identity = _event_identity(row)
+        if (
+            str(row.get("ticker") or "") == args.expected_ticker
+            and args.requested_id in identity["requested"]
+            and args.expected_internal_id in identity["internal"]
+            and args.expected_canonical_filing_id.lower() in identity["canonical"]
+        ):
+            exact.append(row)
     if not exact:
         raise RepairStop("STOP_SINGLE_SEGMENT_REPAIR_FILING_NOT_FOUND")
     if len(exact) != 1:
         raise RepairStop("STOP_SINGLE_SEGMENT_REPAIR_FILING_NOT_UNIQUE", f"matches={len(exact)}")
     row = dict(exact[0])
     row["requested_disclosure_no"] = args.requested_id
-    row["canonical_filing_id"] = row.get("source_doc_id") or ""
+    row["internal_document_id"] = args.expected_internal_id
+    row["canonical_filing_id"] = args.expected_canonical_filing_id.lower()
     row["document_type"] = row.get("event_type") or ""
     row["cache_path"] = str(_ROOT / "data" / "tdnet_cache" / args.requested_id / "xbrl.zip")
     return row
@@ -144,6 +238,7 @@ def _validate_metadata(metadata: dict, args: argparse.Namespace) -> None:
     checks = {
         "requested_disclosure_no": args.requested_id,
         "ticker": args.expected_ticker,
+        "internal_document_id": args.expected_internal_id,
         "canonical_filing_id": args.expected_canonical_filing_id,
     }
     mismatches = {

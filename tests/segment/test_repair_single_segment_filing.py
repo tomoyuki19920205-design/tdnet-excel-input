@@ -13,7 +13,14 @@ import pytest
 
 from lib.pipeline.canonical_writer import expand_segments_rows
 from src.segment.models import SegmentRawRow
-from tools.repair_single_segment_filing import RepairDeps, RepairStop, main, run_repair
+from tools.repair_single_segment_filing import (
+    RepairDeps,
+    RepairStop,
+    _default_load_metadata,
+    _event_identity,
+    main,
+    run_repair,
+)
 
 
 REQUESTED = "20260713591788"
@@ -77,6 +84,54 @@ def _logical():
     ]
 
 
+def _event_row(**overrides):
+    row = {
+        "id": "event-id",
+        "ticker": "4057",
+        "company_name": "Ｇ－インタファクトリ",
+        "headline": "2026年５月期 決算短信",
+        "disclosed_at": "2026-07-13T11:30:00+09:00",
+        "event_type": "earnings",
+        "event_subtype": "FY",
+        "source_url": f"https://example.invalid/1401{REQUESTED}.pdf",
+        "pdf_url": f"https://example.invalid/1401{REQUESTED}.pdf",
+        "raw_payload": {
+            "raw": {
+                "source_doc_id": CANONICAL,
+                "xbrl_doc_id": INTERNAL,
+                "requested_disclosure_no": REQUESTED,
+            }
+        },
+    }
+    row.update(overrides)
+    return row
+
+
+class _Response:
+    def __init__(self, status_code=200, payload=None, text=""):
+        self.status_code = status_code
+        self._payload = [] if payload is None else payload
+        self.text = text
+
+    def json(self):
+        if isinstance(self._payload, BaseException):
+            raise self._payload
+        return self._payload
+
+
+def _load_metadata(cache_zip, response=None, side_effect=None):
+    config = {
+        "rest_url": "https://example.invalid/rest/v1",
+        "headers": {"apikey": "secret", "Authorization": "Bearer secret"},
+    }
+    with (
+        patch("lib.pipeline.db.get_supabase_read_config", return_value=config),
+        patch("requests.get", return_value=response, side_effect=side_effect) as get,
+    ):
+        result = _default_load_metadata(_args(cache_zip))
+    return result, get
+
+
 class Repo:
     def __init__(self):
         self.rows = []
@@ -134,6 +189,152 @@ def cache_zip(tmp_path):
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr("dummy", b"fixture")
     return path
+
+
+def test_event_identity_uses_production_raw_payload_contract():
+    identity = _event_identity(_event_row(source_doc_id=None))
+    assert identity == {
+        "requested": {REQUESTED}, "canonical": {CANONICAL}, "internal": {INTERNAL},
+    }
+
+
+@pytest.mark.parametrize("container", ["payload", "raw", "extracted"])
+def test_event_identity_reads_requested_id_from_formal_structure(container):
+    payload = {"raw": {}, "extracted": {}}
+    target = payload if container == "payload" else payload[container]
+    target["requested_disclosure_no"] = REQUESTED
+    row = _event_row(source_url="", pdf_url="", raw_payload=payload)
+    assert _event_identity(row)["requested"] == {REQUESTED}
+
+
+def test_metadata_load_succeeds_without_tdnet_events_source_doc_id(cache_zip):
+    result, _ = _load_metadata(cache_zip, _Response(payload=[_event_row(source_doc_id=None)]))
+    assert result["requested_disclosure_no"] == REQUESTED
+    assert result["internal_document_id"] == INTERNAL
+    assert result["canonical_filing_id"] == CANONICAL
+
+
+def test_event_identity_uses_existing_url_disclosure_helper():
+    row = _event_row(raw_payload={
+        "raw": {"source_doc_id": CANONICAL, "xbrl_doc_id": INTERNAL},
+    })
+    assert _event_identity(row)["requested"] == {REQUESTED}
+
+
+def test_metadata_query_is_read_only_and_uses_real_columns(cache_zip):
+    with (
+        patch("requests.post") as post,
+        patch("requests.patch") as patch_request,
+        patch("requests.delete") as delete,
+    ):
+        _, get = _load_metadata(cache_zip, _Response(payload=[_event_row()]))
+    params = get.call_args.kwargs["params"]
+    assert get.call_count == 1
+    assert params["ticker"] == "eq.4057" and params["event_type"] == "eq.earnings"
+    assert "source_doc_id" not in params and "source_doc_id" not in params["select"]
+    post.assert_not_called(); patch_request.assert_not_called(); delete.assert_not_called()
+
+
+def test_metadata_candidate_zero_is_filing_not_found(cache_zip):
+    with pytest.raises(RepairStop) as exc_info:
+        _load_metadata(cache_zip, _Response(payload=[]))
+    assert exc_info.value.judgment == "STOP_SINGLE_SEGMENT_REPAIR_FILING_NOT_FOUND"
+
+
+@pytest.mark.parametrize("field", ["requested", "ticker", "internal", "canonical"])
+def test_metadata_candidate_identity_mismatch_is_not_found(cache_zip, field):
+    row = _event_row()
+    if field == "requested":
+        other = "20260713590000"
+        row["source_url"] = f"https://example.invalid/1401{other}.pdf"
+        row["pdf_url"] = row["source_url"]
+        row["raw_payload"]["raw"]["requested_disclosure_no"] = other
+    elif field == "ticker":
+        row["ticker"] = "9999"
+    elif field == "internal":
+        row["raw_payload"]["raw"]["xbrl_doc_id"] = "20260713000000"
+    else:
+        row["raw_payload"]["raw"]["source_doc_id"] = "f" * 64
+    with pytest.raises(RepairStop) as exc_info:
+        _load_metadata(cache_zip, _Response(payload=[row]))
+    assert exc_info.value.judgment == "STOP_SINGLE_SEGMENT_REPAIR_FILING_NOT_FOUND"
+
+
+def test_metadata_two_exact_matches_are_not_unique(cache_zip):
+    with pytest.raises(RepairStop) as exc_info:
+        _load_metadata(cache_zip, _Response(payload=[_event_row(), _event_row(id="event-2")]))
+    assert exc_info.value.judgment == "STOP_SINGLE_SEGMENT_REPAIR_FILING_NOT_UNIQUE"
+    assert exc_info.value.detail == "matches=2"
+
+
+@pytest.mark.parametrize(
+    ("status", "code", "classification"),
+    [(400, "PGRST100", "http_error"), (400, "42703", "schema_error")],
+)
+def test_metadata_http_and_postgres_errors_are_query_failed(cache_zip, status, code, classification):
+    response = _Response(status_code=status, payload={"code": code, "message": "unsafe detail"})
+    with pytest.raises(RepairStop) as exc_info:
+        _load_metadata(cache_zip, response)
+    assert exc_info.value.judgment == "STOP_SINGLE_SEGMENT_REPAIR_METADATA_QUERY_FAILED"
+    assert f"http_status={status}" in exc_info.value.detail
+    assert f"postgres_code={code}" in exc_info.value.detail
+    assert f"classification={classification}" in exc_info.value.detail
+    assert "unsafe detail" not in exc_info.value.detail
+
+
+def test_metadata_connection_error_is_query_failed(cache_zip):
+    with pytest.raises(RepairStop) as exc_info:
+        _load_metadata(cache_zip, side_effect=ConnectionError("secret endpoint"))
+    assert exc_info.value.judgment == "STOP_SINGLE_SEGMENT_REPAIR_METADATA_QUERY_FAILED"
+    assert exc_info.value.detail == (
+        "operation=select_tdnet_events http_status=none "
+        "postgres_code=none classification=connection_error"
+    )
+
+
+def test_metadata_invalid_response_is_query_failed(cache_zip):
+    with pytest.raises(RepairStop) as exc_info:
+        _load_metadata(cache_zip, _Response(payload=ValueError("bad json")))
+    assert exc_info.value.judgment == "STOP_SINGLE_SEGMENT_REPAIR_METADATA_QUERY_FAILED"
+    assert "classification=invalid_response" in exc_info.value.detail
+
+
+def test_malformed_raw_payload_is_safe_and_not_found(cache_zip):
+    row = _event_row(raw_payload="{malformed", source_url="", pdf_url="")
+    with pytest.raises(RepairStop) as exc_info:
+        _load_metadata(cache_zip, _Response(payload=[row]))
+    assert exc_info.value.judgment == "STOP_SINGLE_SEGMENT_REPAIR_FILING_NOT_FOUND"
+
+
+def test_url_partial_numeric_match_is_not_accepted(cache_zip):
+    row = _event_row(
+        source_url=f"https://example.invalid/{REQUESTED}0.pdf",
+        pdf_url="",
+        raw_payload={"raw": {"source_doc_id": CANONICAL, "xbrl_doc_id": INTERNAL}},
+    )
+    with pytest.raises(RepairStop) as exc_info:
+        _load_metadata(cache_zip, _Response(payload=[row]))
+    assert exc_info.value.judgment == "STOP_SINGLE_SEGMENT_REPAIR_FILING_NOT_FOUND"
+
+
+def test_metadata_query_error_stops_before_resolver_and_writer(cache_zip):
+    deps, repo = _deps(cache_zip)
+    deps.load_metadata = _default_load_metadata
+    config = {
+        "rest_url": "https://example.invalid/rest/v1",
+        "headers": {"apikey": "secret", "Authorization": "Bearer secret"},
+    }
+    with (
+        patch("lib.pipeline.db.get_supabase_read_config", return_value=config),
+        patch("requests.get", return_value=_Response(
+            status_code=400, payload={"code": "42703"},
+        )),
+        pytest.raises(RepairStop) as exc_info,
+    ):
+        run_repair(_args(cache_zip), deps)
+    assert exc_info.value.judgment == "STOP_SINGLE_SEGMENT_REPAIR_METADATA_QUERY_FAILED"
+    deps.resolve.assert_not_called()
+    assert repo.writer_calls == 0
 
 
 def test_dry_run_writer_zero_and_payload_six(cache_zip):
@@ -282,6 +483,7 @@ def test_readback_mismatch_stops(cache_zip):
 def test_only_metadata_loader_receives_single_requested_id(cache_zip):
     loader = Mock(return_value={
         "requested_disclosure_no": REQUESTED, "ticker": "4057", "canonical_filing_id": CANONICAL,
+        "internal_document_id": INTERNAL,
         "cache_path": str(cache_zip), "disclosed_at": "2026-07-13T11:30:00+09:00",
     })
     deps, _ = _deps(cache_zip, load_metadata=loader)
