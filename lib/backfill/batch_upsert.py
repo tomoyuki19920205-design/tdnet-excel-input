@@ -5,7 +5,7 @@ worker は DB に触らず、ここで explicit transaction 単位で upsert す
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 logger = logging.getLogger("backfill.upsert")
 
@@ -19,6 +19,7 @@ class BatchUpsertStats:
     inserted: int = 0
     updated: int = 0
     no_change: int = 0
+    canonical_sync_ids: list[int] = field(default_factory=list)
 
     @property
     def average_batch_size(self) -> float:
@@ -460,6 +461,16 @@ def batch_upsert_segments(
                 else:
                     batch_no_change += 1
 
+                row_id = decision_db.get_segment_id(
+                    company_code=rec["ticker"],
+                    fiscal_year_end=rec["period"],
+                    quarter=rec["quarter"],
+                    segment_name=rec["segment_name"],
+                )
+                if row_id is None:
+                    raise RuntimeError("segment_sync_candidate_id_unresolved")
+                stats.canonical_sync_ids.append(row_id)
+
             decision_db._conn.execute("COMMIT")
             stats.succeeded_batches += 1
             stats.inserted += batch_inserted
@@ -483,4 +494,5 @@ def batch_upsert_segments(
                 f"({len(chunk)} records lost)"
             )
 
+    stats.canonical_sync_ids = sorted(set(stats.canonical_sync_ids))
     return stats

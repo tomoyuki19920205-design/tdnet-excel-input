@@ -88,6 +88,13 @@ class MockDB:
     def close(self):
         self._conn.close()
 
+    def get_segment_id(self, *, company_code, fiscal_year_end, quarter, segment_name):
+        row = self._conn.execute(
+            "SELECT rowid FROM segment_financials WHERE company_code=? AND fiscal_year_end=? AND quarter=? AND segment_name=?",
+            (company_code, fiscal_year_end, quarter, segment_name),
+        ).fetchone()
+        return row[0] if row else None
+
 
 def _make_records(count: int) -> list[dict]:
     return [
@@ -164,6 +171,7 @@ class TestBatchUpsert:
         assert stats.succeeded_batches == 1
         assert stats.inserted == 5
         assert stats.failed_batches == 0
+        assert len(stats.canonical_sync_ids) == 5
         db.close()
 
     def test_multiple_batches(self, tmp_path):
@@ -188,6 +196,7 @@ class TestBatchUpsert:
         stats = batch_upsert_segments(records, db, batch_size=100)
         assert stats.updated == 3
         assert stats.inserted == 0
+        assert len(stats.canonical_sync_ids) == 3
         db.close()
 
     def test_empty_records(self, tmp_path):

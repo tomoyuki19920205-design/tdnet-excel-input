@@ -740,6 +740,23 @@ class MigrationDB:
                     )
         return "updated"
 
+    def get_segment_id(
+        self,
+        *,
+        company_code: str,
+        fiscal_year_end: str,
+        quarter: str,
+        segment_name: str,
+    ) -> int | None:
+        row = self._conn.execute(
+            """
+            SELECT id FROM segment_financials
+            WHERE company_code=? AND fiscal_year_end=? AND quarter=? AND segment_name=?
+            """,
+            (company_code, fiscal_year_end, quarter, segment_name),
+        ).fetchone()
+        return int(row[0]) if row else None
+
     # ----------------------------------------------------------
     # migration_log (Phase0用 — 変更なし)
     # ----------------------------------------------------------

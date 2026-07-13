@@ -530,7 +530,7 @@ def run_backfill(
     fid_buffer: list[str] = []
 
     def _flush(buf, fid_buf):
-        _flush_buffer(buf, fid_buf, decision_db_path, db_batch_size, metrics, store, run_logger, dry_run_only=dry_run_only)
+        _flush_buffer(buf, fid_buf, decision_db_path, db_batch_size, metrics, store, run_logger, dry_run_only=dry_run_only, isolated_worker_dry_run=isolated_worker_dry_run)
 
     logger.info(f"[backfill] phase={mode} stage start: input_count={len(pending)}")
     print(f"[backfill] {mode} start: {len(pending)} filings")
@@ -684,14 +684,14 @@ def _run_phase1(
 
             now_t = time.monotonic()
             if (len(segment_buffer) >= db_batch_size or (now_t - last_flush > flush_every_seconds and segment_buffer)):
-                _flush_buffer(segment_buffer, fid_buffer, decision_db_path, db_batch_size, metrics, store, run_logger, dry_run_only=dry_run_only)
+                _flush_buffer(segment_buffer, fid_buffer, decision_db_path, db_batch_size, metrics, store, run_logger, dry_run_only=dry_run_only, isolated_worker_dry_run=isolated_worker_dry_run)
                 last_flush = time.monotonic()
 
             if i % 10 == 0 or i == len(futures):
                 logger.info(f"[backfill] progress: {i}/{len(futures)} ok={metrics.ok_count} q={metrics.quarantined_count} f={metrics.failed_count}")
 
 
-def _flush_buffer(buffer, fid_buffer, decision_db_path, batch_size, metrics, store, run_logger, dry_run_only: bool = True):
+def _flush_buffer(buffer, fid_buffer, decision_db_path, batch_size, metrics, store, run_logger, dry_run_only: bool = True, isolated_worker_dry_run: bool = False):
     """segment バッファを DB に flush し、state を mark_upserted する。"""
     if dry_run_only or not decision_db_path:
         # DB書き込みが指定されていない(dry-runモード)場合でも、
@@ -714,6 +714,22 @@ def _flush_buffer(buffer, fid_buffer, decision_db_path, batch_size, metrics, sto
         stats = batch_upsert_segments(buffer, db, batch_size=batch_size)
         metrics.record_upsert(stats)
         run_logger.log_upsert("batch", {"records": len(buffer), "inserted": stats.inserted, "updated": stats.updated, "failed_batches": stats.failed_batches})
+        if stats.failed_batches == 0 and stats.canonical_sync_ids and not isolated_worker_dry_run:
+            from lib.pipeline.db import load_env, get_supabase_write_config
+            from tools.sync_segments import sync_sqlite_segment_ids
+            load_env()
+            config = get_supabase_write_config()
+            if not config:
+                raise RuntimeError("segment_canonical_sync_failed_after_sqlite_commit")
+            sync_result = sync_sqlite_segment_ids(
+                decision_db_path,
+                stats.canonical_sync_ids,
+                config["rest_url"],
+                config["headers"],
+                dry_run=False,
+            )
+            if sync_result.get("sync_error") or set(sync_result.get("synced_segment_ids", [])) != set(stats.canonical_sync_ids):
+                raise RuntimeError("segment_canonical_sync_failed_after_sqlite_commit")
         if stats.failed_batches == 0:
             for fid in fid_buffer:
                 try:

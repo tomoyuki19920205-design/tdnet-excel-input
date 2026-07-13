@@ -453,6 +453,28 @@ def _is_valid_sqlite_segment(row: dict) -> bool:
     return _classify_skip_reason(row) == ""
 
 
+def _canonical_readback_matches(config: dict, *, ticker: str, period: str, quarter: str, source: str, segments: list[dict]) -> bool:
+    """Confirm the canonical long rows contain each just-written sales/profit pair."""
+    from lib.pipeline.db import supabase_select
+    rows = supabase_select(
+        "canonical_segments",
+        params={
+            "select": "segment_name,metric,value",
+            "ticker": f"eq.{ticker}", "period": f"eq.{period}",
+            "quarter": f"eq.{quarter}", "source": f"eq.{source}",
+        },
+        config=config,
+    )
+    actual = {(r.get("segment_name"), r.get("metric"), r.get("value")) for r in rows}
+    expected = set()
+    for segment in segments:
+        if segment.get("sales") is not None:
+            expected.add((segment["segment_name"], "sales", segment["sales"]))
+        if segment.get("profit") is not None:
+            expected.add((segment["segment_name"], "profit", segment["profit"]))
+    return expected.issubset(actual)
+
+
 def count_sqlite_valid_rows(db_path: str) -> int:
     """SQLite に有効セグメント行が何件あるか返す (guard 用)。"""
     if not os.path.isfile(db_path):
@@ -469,6 +491,7 @@ def count_sqlite_valid_rows(db_path: str) -> int:
 
 def sync_sqlite_segments(
     db_path: str, rest_url: str, headers: dict, dry_run: bool,
+    *, segment_ids: list[int] | None = None,
 ) -> dict:
     """SQLite segment_financials -> segment_canonical / canonical_segments に push.
 
@@ -487,20 +510,39 @@ def sync_sqlite_segments(
         "sqlite_skip_quarter": 0,
         "sqlite_skip_ratio": 0,
         "sqlite_skip_empty": 0,
+        "requested_segment_ids": [],
+        "synced_segment_ids": [],
+        "sync_error": "",
+        "payloads": [],
     }
 
     if not os.path.isfile(db_path):
         logger.warning(f"[SQLITE] DB not found: {db_path}")
         return stats
 
+    requested_ids = sorted({int(value) for value in (segment_ids or [])})
+    stats["requested_segment_ids"] = requested_ids
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-
-    rows = conn.execute(
-        "SELECT company_code, fiscal_year_end, quarter, segment_name, "
-        "segment_sales, segment_profit, data_source "
-        "FROM segment_financials"
-    ).fetchall()
+    if requested_ids:
+        placeholders = ",".join("?" for _ in requested_ids)
+        rows = conn.execute(
+            "SELECT id, company_code, fiscal_year_end, quarter, segment_name, "
+            "segment_sales, segment_profit, data_source "
+            f"FROM segment_financials WHERE id IN ({placeholders})",
+            requested_ids,
+        ).fetchall()
+        actual_ids = {int(row["id"]) for row in rows}
+        if actual_ids != set(requested_ids):
+            conn.close()
+            stats["sync_error"] = "segment_sync_requested_ids_missing"
+            return stats
+    else:
+        rows = conn.execute(
+            "SELECT id, company_code, fiscal_year_end, quarter, segment_name, "
+            "segment_sales, segment_profit, data_source "
+            "FROM segment_financials"
+        ).fetchall()
 
     stats["sqlite_total"] = len(rows)
     logger.info(f"[SQLITE] segment_financials: {len(rows):,} rows")
@@ -534,8 +576,12 @@ def sync_sqlite_segments(
             "source": rdict.get("data_source") or "excel_legacy",
             "updated_at": datetime.now(JST).isoformat(),
         }
+        if requested_ids:
+            stats["payloads"].append(payload)
         if dry_run:
             stats["sqlite_upserted"] += 1
+            if requested_ids:
+                stats["synced_segment_ids"].append(int(rdict["id"]))
             continue
 
         r = requests.post(
@@ -546,6 +592,8 @@ def sync_sqlite_segments(
         )
         if r.status_code in (200, 201):
             stats["sqlite_upserted"] += 1
+            if requested_ids:
+                stats["synced_segment_ids"].append(int(rdict["id"]))
         else:
             stats["sqlite_errors"] += 1
             logger.warning(f"[SQLITE] upsert failed: {r.status_code} {r.text[:200]}")
@@ -563,13 +611,7 @@ def sync_sqlite_segments(
                 # per-(ticker, period, quarter, data_source) batch に再構成
                 # data_source ごとに分けることで source が正しく引き継がれる
                 ticker_batches: dict[tuple, list[dict]] = {}
-                conn2 = sqlite3.connect(db_path)
-                conn2.row_factory = sqlite3.Row
-                for row in conn2.execute(
-                    "SELECT company_code, fiscal_year_end, quarter, segment_name, "
-                    "segment_sales, segment_profit, data_source "
-                    "FROM segment_financials"
-                ).fetchall():
+                for row in rows:
                     rdict = dict(row)
                     if _classify_skip_reason(rdict):
                         continue
@@ -586,7 +628,6 @@ def sync_sqlite_segments(
                         "sales": int(raw_sales) if raw_sales is not None else None,
                         "profit": int(raw_profit) if raw_profit is not None else None,
                     })
-                conn2.close()
 
                 canonical_total = 0
                 canonical_errors = 0
@@ -604,12 +645,19 @@ def sync_sqlite_segments(
                     )
                     canonical_total += cw_result["written"]
                     canonical_errors += cw_result["errors"]
+                    if requested_ids and not cw_result["errors"] and not _canonical_readback_matches(
+                        canonical_config,
+                        ticker=ticker, period=period, quarter=quarter, source=ds, segments=segs,
+                    ):
+                        canonical_errors += 1
                     if ds == "backfill_v4_pdf" and len(segs) >= 2:
                         _v4pdf_keys.add((ticker, period, quarter))
                 logger.info(
                     f"[CANONICAL] segments dual-write: "
                     f"written={canonical_total} errors={canonical_errors}"
                 )
+                if requested_ids and canonical_errors:
+                    stats["sync_error"] = "segment_canonical_sync_readback_mismatch"
 
                 # ── backfill_v4_pdf 採用済みキーの xbrl:Other only 行を削除 ──
                 # canonical_segments に xbrl source で segment_name = 'Other'/'other' のみの
@@ -670,13 +718,29 @@ def sync_sqlite_segments(
                 logger.warning(
                     "[CANONICAL] segments dual-write skipped: no write config"
                 )
+                if requested_ids:
+                    stats["sync_error"] = "segment_canonical_sync_failed_after_sqlite_commit"
         except Exception as _cw_err:
             logger.warning(
                 f"[CANONICAL] segments dual-write failed "
                 f"(best-effort, legacy unaffected): {_cw_err}"
             )
+            if requested_ids:
+                stats["sync_error"] = "segment_canonical_sync_failed_after_sqlite_commit"
 
+    stats["synced_segment_ids"] = sorted(set(stats["synced_segment_ids"]))
+    if requested_ids and stats["sqlite_errors"]:
+        stats["sync_error"] = "segment_canonical_sync_failed_after_sqlite_commit"
     return stats
+
+
+def sync_sqlite_segment_ids(
+    db_path: str, segment_ids: list[int], rest_url: str, headers: dict, dry_run: bool,
+) -> dict:
+    """Explicit SQLite row-ID scoped canonical sync; never broadens to ticker/date scope."""
+    return sync_sqlite_segments(
+        db_path, rest_url, headers, dry_run, segment_ids=segment_ids,
+    )
 
 
 # ============================================================
@@ -696,6 +760,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help=argparse.SUPPRESS)
     parser.add_argument("--db", default="decision_db.db",
                         help="SQLite DB パス")
+    parser.add_argument("--segment-ids", default="",
+                        help="segment_financials.id のCSV。指定時はID限定同期（dry-run既定）")
     return parser
 
 
@@ -733,6 +799,23 @@ def main(args: list[str] | None = None) -> int:
         "Authorization": f"Bearer {supabase_key}",
         "Content-Type": "application/json",
     }
+
+    if opts.segment_ids:
+        if opts.xbrl_only:
+            parser.error("--segment-ids cannot be combined with --xbrl-only")
+        try:
+            segment_ids = [int(value) for value in opts.segment_ids.split(",") if value.strip()]
+        except ValueError:
+            parser.error("--segment-ids must be a comma-separated integer list")
+        if not segment_ids:
+            parser.error("--segment-ids must not be empty")
+        if opts.apply and os.environ.get("ALLOW_SEGMENT_CANONICAL_SYNC") != "1":
+            parser.error("--segment-ids --apply requires ALLOW_SEGMENT_CANONICAL_SYNC=1")
+        result = sync_sqlite_segment_ids(
+            os.path.join(_PROJECT_ROOT, opts.db), segment_ids, rest_url, headers, dry_run,
+        )
+        print(result)
+        return 0 if not result["sync_error"] else 1
     
     # テーブル存在チェック (apply モードのみ)
     if not dry_run:
