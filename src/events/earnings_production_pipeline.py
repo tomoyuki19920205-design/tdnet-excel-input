@@ -1881,6 +1881,21 @@ def run_earnings_production(
 
         try:
             # ---- XBRL取得 (resolver 一本化) ----
+            # 後段の Identity Gate と同じ正式 helper で、resolver 呼出し前に
+            # 実績期と四半期を確定する。FY 短信内の翌期予想 context を
+            # provenance period として採用しないため、この値を resolver と
+            # 後段検証で共有する。
+            _resolver_expected_period = _derive_fiscal_year_end_period(doc.title) or ""
+            _, _resolver_expected_quarter = _parse_fiscal_info(
+                doc.title,
+                EarningsSummaryData(),
+                disclosed_at=(
+                    getattr(doc, "disclosure_datetime", "")
+                    or getattr(doc, "published_at", "")
+                    or ""
+                ),
+            )
+
             _temp_disclosure_no = ""
             for attr_name in ("disclosure_no", "common_disclosure_no", "doc_id", "tdnet_id"):
                 val = str(getattr(doc, attr_name, ""))
@@ -1904,8 +1919,8 @@ def run_earnings_production(
             resolved = resolve_xbrl_zip(
                 doc_id=_temp_disclosure_no,
                 ticker=ticker,
-                expected_quarter="",  # この段階では未確定なので空文字で渡し、メタデータを実体から自動抽出させる
-                expected_period="",
+                expected_quarter=_resolver_expected_quarter,
+                expected_period=_resolver_expected_period,
                 persist_provenance=(not dry_run),
             )
             xbrl_path = resolved.zip_path
@@ -2316,7 +2331,7 @@ def run_earnings_production(
                         result.saved_tickers.append(ticker)
 
                     # ---- tdnet_events へ earnings イベントを best-effort 保存 ----
-                    _seq_period = _derive_fiscal_year_end_period(doc.title)
+                    _seq_period = _resolver_expected_period or _derive_fiscal_year_end_period(doc.title)
                     _seq_doc_id = str(getattr(doc, "disclosure_id", "") or "").strip()
                     _seq_external_doc_id = str(getattr(doc, "source_doc_id", "") or getattr(doc, "doc_id", "") or "").strip()
 
@@ -2342,7 +2357,7 @@ def run_earnings_production(
                             requested_disclosure_no=_seq_disclosure_no,
                             expected_ticker=ticker,
                             expected_period=_seq_period,
-                            expected_quarter=quarter,
+                            expected_quarter=_resolver_expected_quarter or quarter,
                             trusted_provenance=_seq_provenance,
                         )
                         _seq_identity_passed = (

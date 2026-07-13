@@ -178,6 +178,50 @@ def test_ag_sequential_resolve_once(m_resolve, m_load, m_save, m_cache, m_sync_f
         run_earnings_production([doc], conn, webhook_url="")
         
     assert m_resolve.call_count == 1
+    assert m_resolve.call_args.kwargs["expected_period"] == "2027-02-28"
+    assert m_resolve.call_args.kwargs["expected_quarter"] == "1Q"
+
+
+def test_ag_fy_resolver_uses_actual_period_before_identity(tmp_path):
+    """FY短信の翌期予想日ではなく、タイトルの実績期をresolverへ渡す。"""
+    from src.events.earnings_production_pipeline import run_earnings_production
+    from src.segment.segment_zip_resolver import ZipResolveResult
+    from tests.test_earnings_canonical_sync import DummyDoc
+    import sqlite3
+
+    conn = sqlite3.connect(":memory:")
+    from src.events.earnings_summary_storage import ensure_earnings_summary_table
+    ensure_earnings_summary_table(conn)
+
+    doc = DummyDoc(
+        "4057",
+        "2026年５月期 決算短信〔日本基準〕（非連結）",
+        "4ee4e4cb3e3aaba10376497b5cd1f04ae66f4b51d64d3bde859f00fd46298483",
+    )
+    doc.doc_url = "https://www.release.tdnet.info/inbs/140120260713591788.pdf"
+
+    with patch("src.segment.segment_zip_resolver.resolve_xbrl_zip") as m_resolve, \
+         patch("src.events.earnings_production_pipeline._find_cached_xbrl"), \
+         patch("src.events.earnings_production_pipeline.load_json", return_value=None):
+        m_resolve.return_value = ZipResolveResult(
+            zip_path=None,
+            source="jquants",
+            status="NOT_FOUND",
+            error_reason="fixture stops after resolver contract assertion",
+            cache_hit=False,
+            downloaded=False,
+            requested_disclosure_no="20260713591788",
+            zip_sha256="",
+            trusted_provenance=None,
+            resolution_kind="",
+        )
+
+        with patch.dict(os.environ, {"USE_SUBPROCESS_WORKER": "0"}):
+            run_earnings_production([doc], conn, webhook_url="")
+
+    assert m_resolve.call_count == 1
+    assert m_resolve.call_args.kwargs["expected_period"] == "2026-05-31"
+    assert m_resolve.call_args.kwargs["expected_quarter"] == "FY"
 
 
 # ==============================================================================
