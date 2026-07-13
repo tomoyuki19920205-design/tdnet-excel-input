@@ -119,6 +119,27 @@ def normalize_segment_key(name: str) -> str:
     return s
 
 
+_DISPLAY_SEGMENT_ALIASES: dict[str, dict[str, str]] = {
+    "8908": {
+        "Real Estate Solution": "Real Estate Solution",
+        "不動産ソリューション事業": "Real Estate Solution",
+        "School Life Support": "School Life Support",
+        "School Life Solution": "School Life Support",
+        "学生生活ソリューション事業": "School Life Support",
+    },
+}
+
+
+def normalize_segment_display_key(ticker: str, name: str) -> str:
+    """Viewer column alignment key; preserves the source segment name separately."""
+    normalized_name = normalize_segment_name(name)
+    canonical_name = _DISPLAY_SEGMENT_ALIASES.get(str(ticker).strip(), {}).get(
+        normalized_name,
+        normalized_name,
+    )
+    return normalize_segment_key(canonical_name)
+
+
 # ================================================================
 # Financials: 展開ヘルパー (HTTP なし)
 # ================================================================
@@ -271,7 +292,7 @@ def expand_segments_rows(
             continue
 
         seg_name = normalize_segment_name(raw_name)
-        seg_key = normalize_segment_key(raw_name)
+        seg_key = normalize_segment_display_key(ticker, raw_name)
 
         for metric in ("sales", "profit"):
             value = seg.get(metric)

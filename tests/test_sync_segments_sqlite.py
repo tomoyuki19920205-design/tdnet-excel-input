@@ -319,6 +319,24 @@ def test_id_scoped_dry_run_selects_only_requested_rows_and_never_posts(tmp_path,
     assert stats["sync_error"] == ""
 
 
+def test_8908_dry_run_payload_uses_display_keys_without_mutating_names(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "segments.db")
+    _create_segment_db_with_datasource(db_path, [
+        {"company_code": "8908", "fiscal_year_end": "2025-05-31", "quarter": "FY", "segment_name": "不動産ソリューション事業", "segment_sales": 17839, "segment_profit": 3145, "data_source": "edinet_xbrl"},
+        {"company_code": "8908", "fiscal_year_end": "2026-05-31", "quarter": "FY", "segment_name": "School Life Solution", "segment_sales": 4653, "segment_profit": 393, "data_source": "backfill_xbrl"},
+    ])
+    from tools import sync_segments
+    monkeypatch.setattr(sync_segments.requests, "post", lambda *args, **kwargs: pytest.fail("dry-run must not call Supabase"))
+
+    stats = sync_segments.sync_sqlite_segment_ids(db_path, [1, 2], "http://test/rest/v1", {}, True)
+
+    assert stats["sqlite_upserted"] == 2
+    assert [(row["segment_name"], row["segment_key"]) for row in stats["payloads"]] == [
+        ("不動産ソリューション事業", "real estate solution"),
+        ("School Life Solution", "school life support"),
+    ]
+
+
 def test_id_scoped_sync_rejects_missing_id_without_post(tmp_path, monkeypatch):
     db_path = str(tmp_path / "segments.db")
     _create_segment_db_with_datasource(db_path, [{"company_code": "8908", "fiscal_year_end": "2026-05-31", "quarter": "FY", "segment_name": "Current", "segment_sales": 3, "segment_profit": 4, "data_source": "backfill_xbrl"}])

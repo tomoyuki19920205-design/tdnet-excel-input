@@ -32,6 +32,7 @@ from src.segment.normalize import (
     resolve_segment_key_with_jp,
     is_english_dominant,
 )
+from lib.pipeline.canonical_writer import normalize_segment_display_key
 
 logger = logging.getLogger("sync_seg")
 JST = timezone(timedelta(hours=9))
@@ -214,8 +215,7 @@ def _upsert_segment_canonical(
     import requests
     seg_name = row.normalized_segment_name or ""
 
-    # segment_key: 日英統合なし — segment_name を直接 normalize するのみ
-    seg_key = normalize_segment_key(seg_name)
+    seg_key = normalize_segment_display_key(row.normalized_ticker, seg_name)
     logger.debug(
         f"[sync_seg] seg_key ticker={row.normalized_ticker}"
         f" period={row.period} name={seg_name!r} key={seg_key!r}"
@@ -571,6 +571,7 @@ def sync_sqlite_segments(
             "period": rdict["fiscal_year_end"],
             "quarter": quarter,
             "segment_name": seg_name,
+            "segment_key": normalize_segment_display_key(rdict["company_code"], seg_name),
             "sales": sales,
             "profit": profit,
             "source": rdict.get("data_source") or "excel_legacy",

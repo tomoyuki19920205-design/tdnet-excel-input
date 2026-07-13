@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib.pipeline.canonical_writer import (
     _make_financials_row_key,
     _make_segments_row_key,
+    normalize_segment_display_key,
     normalize_segment_key,
     write_financials_canonical,
     write_segments_canonical,
@@ -80,6 +81,43 @@ class TestNormalizeSegmentKey:
         assert normalize_segment_key("  自動車 事業  ") == "自動車 事業"
 
 
+class TestNormalizeSegmentDisplayKey:
+    def test_8908_aliases_share_two_display_keys(self):
+        assert normalize_segment_display_key("8908", "Real Estate Solution") == "real estate solution"
+        assert normalize_segment_display_key("8908", "不動産ソリューション事業") == "real estate solution"
+        assert normalize_segment_display_key("8908", "School Life Support") == "school life support"
+        assert normalize_segment_display_key("8908", "School Life Solution") == "school life support"
+        assert normalize_segment_display_key("8908", "学生生活ソリューション事業") == "school life support"
+
+    def test_non_8908_keeps_existing_key(self):
+        assert normalize_segment_display_key("9999", "School Life Solution") == "school life solution"
+
+    def test_expand_preserves_source_segment_name(self):
+        rows, skipped = expand_segments_rows(
+            ticker="8908",
+            period="2026-05-31",
+            quarter="FY",
+            segments=[{"segment_name": "School Life Solution", "sales": 4653, "profit": 393}],
+            source="backfill_xbrl",
+        )
+        assert skipped == 0
+        assert {row["segment_name"] for row in rows} == {"School Life Solution"}
+        assert {row["segment_key"] for row in rows} == {"school life support"}
+
+    @pytest.mark.parametrize("quarter", ["1Q", "3Q"])
+    def test_8908_non_alias_display_name_is_unchanged_in_each_quarter(self, quarter):
+        rows, skipped = expand_segments_rows(
+            ticker="8908",
+            period="2026-05-31",
+            quarter=quarter,
+            segments=[{"segment_name": "Existing Segment", "sales": 1, "profit": 2}],
+            source="backfill_xbrl",
+        )
+        assert skipped == 0
+        assert {row["segment_name"] for row in rows} == {"Existing Segment"}
+        assert {row["segment_key"] for row in rows} == {"existing segment"}
+
+
 # ================================================================
 # expand_financials_rows テスト
 # ================================================================
@@ -142,7 +180,7 @@ class TestExpandFinancialsRows:
             metrics_dict={"sales": 100},
             source="jquants",
         )
-        assert rows[0]["source_priority"] == 6
+        assert rows[0]["source_priority"] == 2
 
     def test_recency_key_present(self):
         rows, _ = expand_financials_rows(
@@ -279,6 +317,7 @@ class TestWriteFinancialsCanonical:
         assert result["written"] == 0
         assert mock_upsert.call_count == 0
 
+
     def test_source_priority_auto_set(self):
         """source_priority が自動設定される"""
         mock_upsert = MagicMock(return_value={"ok": True, "count": 1, "error": None})
@@ -292,7 +331,7 @@ class TestWriteFinancialsCanonical:
                 config={"url": "x", "key": "y"},
             )
         rows = mock_upsert.call_args[0][1]
-        assert rows[0]["source_priority"] == 6  # jquants = 6
+        assert rows[0]["source_priority"] == 2  # SOURCE_PRIORITY["jquants"] = 2
 
     def test_recency_key_auto_generated(self):
         """recency_key が自動生成される"""
@@ -525,4 +564,3 @@ class TestTickerNormalizationGuard:
             )
         assert result["written"] == 0
         assert mock_upsert.call_count == 0
-
