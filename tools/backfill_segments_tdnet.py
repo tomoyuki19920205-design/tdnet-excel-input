@@ -49,6 +49,7 @@ logger = logging.getLogger("backfill")
 
 
 _ISOLATED_PATH_ERROR = "STOP_ISOLATED_SQLITE_PATH_ESCAPE"
+_PENDING_SET_MISMATCH = "STOP_MANIFEST_PENDING_SET_MISMATCH"
 
 
 def _validate_isolated_write_paths(
@@ -199,6 +200,54 @@ def _load_filing_list(path: str) -> list:
     logger.info(f"[backfill] loaded {len(filings)} filings from manifest: {path}")
     print(f"[backfill] loaded {len(filings)} filings from manifest: {path}")
     return filings
+
+
+def _run_requeue_only(
+    *,
+    filing_list_path: str,
+    state_db_path: str,
+    requested_disclosure_no: str,
+    expected_stage: str | None = None,
+    expected_error: str | None = None,
+) -> dict:
+    """Requeue exactly one existing manifest filing without starting workers."""
+    filings = _load_filing_list(filing_list_path)
+    matches = [
+        filing for filing in filings
+        if str(filing.requested_disclosure_no) == str(requested_disclosure_no)
+    ]
+    if not matches:
+        raise RuntimeError("STOP_REQUEUE_REQUESTED_ID_NOT_IN_MANIFEST")
+    if len(matches) != 1:
+        raise RuntimeError("STOP_REQUEUE_REQUESTED_ID_NOT_UNIQUE")
+
+    filing = matches[0]
+    store = BackfillStateStore(state_db_path)
+    try:
+        result = store.requeue_single_filing(
+            filing.filing_id,
+            expected_status="quarantined",
+            expected_stage=expected_stage,
+            expected_error=expected_error,
+        )
+    finally:
+        store.close()
+
+    detail = {
+        "event": "requeue_only",
+        "requested_disclosure_no": str(requested_disclosure_no),
+        "filing_id": filing.filing_id,
+        "before_status": result["before"]["status"],
+        "after_status": result["after"]["status"],
+        "changed_fields": [
+            "status", "stage", "last_error", "last_error_stage", "review_hint",
+            "started_at", "finished_at", "duration_ms",
+        ],
+        "preserved_attempt_count": result["after"]["attempt_count"],
+    }
+    logger.info("[backfill] requeue-only %s", json.dumps(detail, ensure_ascii=False))
+    print(json.dumps(detail, ensure_ascii=False))
+    return detail
 
 
 def _save_manifest(filings: list, run_id: str, log_dir: str = "logs") -> str:
@@ -354,8 +403,23 @@ def run_backfill(
     manifest_dir: str = "logs",
     isolated_worker_dry_run: bool = False,
     isolated_run_root: str | None = None,
+    scope_pending_to_manifest: bool = False,
+    require_all_manifest_pending: bool = False,
 ) -> dict:
     """バックフィルを実行する (Phase 1 / Phase 2 自動選択)。"""
+    if scope_pending_to_manifest and not filing_list_path:
+        raise RuntimeError(f"{_PENDING_SET_MISMATCH}: scoped pending requires --filing-list")
+    if require_all_manifest_pending and not scope_pending_to_manifest:
+        raise RuntimeError(f"{_PENDING_SET_MISMATCH}: require-all requires scoped pending")
+    if require_all_manifest_pending and limit:
+        raise RuntimeError(f"{_PENDING_SET_MISMATCH}: require-all forbids --limit")
+    if scope_pending_to_manifest and any((
+        retry_quarantine, retry_failed, reset_target, force_done,
+        resume, repair_extracted,
+    )):
+        raise RuntimeError(
+            f"{_PENDING_SET_MISMATCH}: scoped pending cannot use global retry/reset modes"
+        )
     if isolated_worker_dry_run:
         _validate_isolated_write_paths(
             run_root=isolated_run_root or "",
@@ -452,6 +516,12 @@ def run_backfill(
 
     filings = accepted
 
+    manifest_filing_ids: list[str] = []
+    if scope_pending_to_manifest:
+        manifest_filing_ids = [str(filing.filing_id) for filing in filings]
+        if not manifest_filing_ids or len(manifest_filing_ids) != len(set(manifest_filing_ids)):
+            raise RuntimeError(f"{_PENDING_SET_MISMATCH}: manifest filing IDs must be unique")
+
     # ── 1c. Manifest 保存 ──
     _save_manifest(filings, run_id, log_dir=manifest_dir)
 
@@ -490,7 +560,7 @@ def run_backfill(
         store.close()
         raise RuntimeError(msg)
 
-    stale = store.reset_stale_running(max_age_hours=2)
+    stale = 0 if scope_pending_to_manifest else store.reset_stale_running(max_age_hours=2)
     if stale > 0:
         logger.info(f"[backfill] reset {stale} stale running entries")
 
@@ -551,7 +621,19 @@ def run_backfill(
         f"[backfill] get_candidates start: resume={resume} "
         f"retry_quarantine={retry_quarantine} applied_limit={applied_limit or 'unlimited'}"
     )
-    if resume:
+    if scope_pending_to_manifest:
+        statuses = ["queued", "running", "needs_pdf", "done"] if resume else ["queued"]
+        if retry_quarantine:
+            statuses.append("quarantined")
+        if retry_failed:
+            statuses.append("failed")
+        pending = store.get_pending_for_filing_ids(
+            manifest_filing_ids,
+            limit=_limit_for_query,
+            tickers=tickers,
+            statuses=statuses,
+        )
+    elif resume:
         # resume モード: queued/running/needs_pdf + オプションの quarantined/failed も含める
         pending = store.get_resume_candidates(
             limit=_limit_for_query, tickers=tickers,
@@ -561,6 +643,33 @@ def run_backfill(
     else:
         # 通常モード: queued のみ（retry_quarantine 時は上で reset_for_retry 済み）
         pending = store.get_pending(limit=_limit_for_query, tickers=tickers)
+
+    if scope_pending_to_manifest:
+        manifest_id_set = set(manifest_filing_ids)
+        pending_ids = [str(row["filing_id"]) for row in pending]
+        pending_id_set = set(pending_ids)
+        missing_ids = sorted(manifest_id_set - pending_id_set)
+        outside_ids = sorted(pending_id_set - manifest_id_set)
+        duplicate_count = len(pending_ids) - len(pending_id_set)
+        logger.info(
+            "[backfill] manifest pending scope: manifest=%s pending=%s missing=%s outside=%s duplicates=%s",
+            len(manifest_id_set), len(pending_id_set), len(missing_ids),
+            len(outside_ids), duplicate_count,
+        )
+        print(
+            f"[backfill] manifest pending scope: manifest={len(manifest_id_set)} "
+            f"pending={len(pending_id_set)} missing={len(missing_ids)} "
+            f"outside={len(outside_ids)} duplicates={duplicate_count}"
+        )
+        if outside_ids or duplicate_count or (
+            require_all_manifest_pending and pending_id_set != manifest_id_set
+        ):
+            store.close()
+            run_logger.close()
+            raise RuntimeError(
+                f"{_PENDING_SET_MISMATCH}: missing={missing_ids} "
+                f"outside={outside_ids} duplicates={duplicate_count}"
+            )
 
     metrics.total_filings = len(pending)
     logger.info(
@@ -1130,7 +1239,19 @@ def main():
     parser.add_argument("--filing-list", type=str, default=None,
                         help="固定母集団 manifest (JSON/JSONL/CSV)。listing provider をスキップ")
     parser.add_argument("--reset-target", action="store_true",
-                        help="対象 filing を強制的に queued にリセットして再処理")
+                        help="manifest内の全 filing を queued にリセットして再処理")
+    parser.add_argument("--scope-pending-to-manifest", action="store_true",
+                        help="pending取得を--filing-list内のfiling IDだけに限定")
+    parser.add_argument("--require-all-manifest-pending", action="store_true",
+                        help="worker開始前にmanifest ID集合とpending集合の完全一致を要求")
+    parser.add_argument("--requeue-requested-id", type=str, default=None,
+                        help="--requeue-onlyで再キューするmanifest内requested disclosure ID")
+    parser.add_argument("--requeue-only", action="store_true",
+                        help="指定requested IDの既存state 1行だけを再キューして終了")
+    parser.add_argument("--requeue-expected-stage", type=str, default=None,
+                        help="requeue元stageの完全一致条件")
+    parser.add_argument("--requeue-expected-error", type=str, default=None,
+                        help="requeue元last_errorの完全一致条件")
     # Step 4
     parser.add_argument("--phase2", action="store_true", help="Phase 2: XBRL/PDF 分離実行")
     parser.add_argument("--xbrl-workers", type=int, default=6, help="Phase 2 XBRL 並列数")
@@ -1164,6 +1285,41 @@ def main():
                         help="実際にDBに書き込む (ALLOW_BACKFILL_XBRL_WRITE=1 環境変数も必要)")
 
     args = parser.parse_args()
+
+    if args.requeue_only:
+        incompatible = any((
+            args.apply, args.isolated_worker_dry_run, args.dry_run,
+            args.retry_quarantine, args.retry_failed, args.reset_target,
+            args.force_done, args.resume, args.repair_extracted,
+            args.scope_pending_to_manifest, args.require_all_manifest_pending,
+            args.phase2, args.benchmark,
+        ))
+        if incompatible:
+            parser.error("--requeue-only cannot be combined with worker/apply/retry modes")
+        if not args.filing_list or not args.requeue_requested_id:
+            parser.error("--requeue-only requires --filing-list and --requeue-requested-id")
+        _run_requeue_only(
+            filing_list_path=args.filing_list,
+            state_db_path=args.state_db,
+            requested_disclosure_no=args.requeue_requested_id,
+            expected_stage=args.requeue_expected_stage,
+            expected_error=args.requeue_expected_error,
+        )
+        return
+    if args.requeue_requested_id or args.requeue_expected_stage or args.requeue_expected_error:
+        parser.error("requeue arguments require --requeue-only")
+    if args.scope_pending_to_manifest:
+        if not args.filing_list:
+            parser.error("--scope-pending-to-manifest requires --filing-list")
+        if any((
+            args.retry_quarantine, args.retry_failed, args.reset_target,
+            args.force_done, args.resume, args.repair_extracted,
+        )):
+            parser.error("manifest-scoped mode cannot be combined with global retry/reset modes")
+    if args.require_all_manifest_pending and not args.scope_pending_to_manifest:
+        parser.error("--require-all-manifest-pending requires --scope-pending-to-manifest")
+    if args.require_all_manifest_pending and args.limit:
+        parser.error("--require-all-manifest-pending cannot be combined with --limit")
 
     manifest_dir = "logs"
     if args.isolated_worker_dry_run:
@@ -1240,6 +1396,8 @@ def main():
             manifest_dir=manifest_dir,
             isolated_worker_dry_run=args.isolated_worker_dry_run,
             isolated_run_root=str(run_root) if args.isolated_worker_dry_run else None,
+            scope_pending_to_manifest=args.scope_pending_to_manifest,
+            require_all_manifest_pending=args.require_all_manifest_pending,
         )
     except Exception:
         import traceback

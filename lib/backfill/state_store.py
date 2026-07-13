@@ -160,6 +160,52 @@ class BackfillStateStore:
         rows = self.conn.execute(sql, params).fetchall()
         return [dict(row) for row in rows]
 
+    def get_pending_for_filing_ids(
+        self,
+        filing_ids: list[str] | set[str] | tuple[str, ...],
+        *,
+        limit: int = 0,
+        tickers: list[str] | None = None,
+        statuses: list[str] | None = None,
+    ) -> list[dict]:
+        """Return pending rows restricted to an explicit filing-ID set.
+
+        The filing-ID restriction is applied by SQLite, not by filtering an
+        unscoped pending result in Python. IDs are chunked for large manifests.
+        """
+        unique_ids = list(dict.fromkeys(str(fid) for fid in filing_ids if str(fid)))
+        if not unique_ids:
+            return []
+
+        statuses = statuses or ["queued"]
+        rows_by_id: dict[str, dict] = {}
+        id_chunk_size = 500
+        for offset in range(0, len(unique_ids), id_chunk_size):
+            id_chunk = unique_ids[offset:offset + id_chunk_size]
+            status_ph = ",".join("?" * len(statuses))
+            id_ph = ",".join("?" * len(id_chunk))
+            sql = f"""
+                SELECT * FROM filing_state
+                WHERE status IN ({status_ph})
+                  AND filing_id IN ({id_ph})
+            """
+            params: list[Any] = [*statuses, *id_chunk]
+            if tickers:
+                ticker_ph = ",".join("?" * len(tickers))
+                sql += f" AND ticker IN ({ticker_ph})"
+                params.extend(tickers)
+            for row in self.conn.execute(sql, params).fetchall():
+                row_dict = dict(row)
+                rows_by_id[row_dict["filing_id"]] = row_dict
+
+        rows = sorted(
+            rows_by_id.values(),
+            key=lambda row: (row.get("disclosure_date") or "", row.get("ticker") or ""),
+        )
+        if limit and limit > 0:
+            rows = rows[:limit]
+        return rows
+
     def get_resume_candidates(
         self,
         *,
@@ -416,6 +462,84 @@ class BackfillStateStore:
         count = self.conn.execute("SELECT changes()").fetchone()[0]
         self.conn.commit()
         return count > 0
+
+    def requeue_single_filing(
+        self,
+        filing_id: str,
+        *,
+        expected_status: str = "quarantined",
+        expected_stage: str | None = None,
+        expected_error: str | None = None,
+    ) -> dict[str, dict]:
+        """Atomically requeue one exact filing while preserving audit history."""
+        with self.transaction():
+            before_row = self.conn.execute(
+                "SELECT * FROM filing_state WHERE filing_id = ?",
+                (filing_id,),
+            ).fetchone()
+            if before_row is None:
+                raise RuntimeError("STOP_REQUEUE_SOURCE_STATE_CHANGED: state row not found")
+            before = dict(before_row)
+            if before.get("status") != expected_status:
+                raise RuntimeError(
+                    "STOP_REQUEUE_SOURCE_STATE_CHANGED: "
+                    f"expected status={expected_status}, actual={before.get('status')}"
+                )
+            if expected_stage is not None and before.get("stage") != expected_stage:
+                raise RuntimeError(
+                    "STOP_REQUEUE_SOURCE_STATE_CHANGED: "
+                    f"expected stage={expected_stage}, actual={before.get('stage')}"
+                )
+            if expected_error is not None and before.get("last_error") != expected_error:
+                raise RuntimeError(
+                    "STOP_REQUEUE_SOURCE_STATE_CHANGED: "
+                    f"expected error={expected_error}, actual={before.get('last_error')}"
+                )
+
+            cursor = self.conn.execute(
+                "UPDATE filing_state SET status='queued', stage='listing', "
+                "last_error=NULL, last_error_stage=NULL, review_hint=NULL, "
+                "started_at=NULL, finished_at=NULL, duration_ms=NULL "
+                "WHERE filing_id = ? AND status = ?",
+                (filing_id, expected_status),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError(
+                    "STOP_REQUEUE_SOURCE_STATE_CHANGED: "
+                    f"expected one updated row, actual={cursor.rowcount}"
+                )
+
+            after_row = self.conn.execute(
+                "SELECT * FROM filing_state WHERE filing_id = ?",
+                (filing_id,),
+            ).fetchone()
+            if after_row is None:
+                raise RuntimeError("STOP_REQUEUE_SOURCE_STATE_CHANGED: readback missing")
+            after = dict(after_row)
+            expected_cleared = (
+                "last_error", "last_error_stage", "review_hint",
+                "started_at", "finished_at", "duration_ms",
+            )
+            if after.get("status") != "queued" or after.get("stage") != "listing":
+                raise RuntimeError("STOP_REQUEUE_SOURCE_STATE_CHANGED: readback status mismatch")
+            if any(after.get(field) is not None for field in expected_cleared):
+                raise RuntimeError("STOP_REQUEUE_SOURCE_STATE_CHANGED: readback clear mismatch")
+            if after.get("attempt_count") != before.get("attempt_count"):
+                raise RuntimeError("STOP_REQUEUE_SOURCE_STATE_CHANGED: attempt_count changed")
+
+        logger.info(
+            "[state] requeue_single_filing: filing_id=%s before=%s after=%s "
+            "changed=%s attempt_count=%s",
+            filing_id,
+            before.get("status"),
+            after.get("status"),
+            [
+                "status", "stage", "last_error", "last_error_stage", "review_hint",
+                "started_at", "finished_at", "duration_ms",
+            ],
+            after.get("attempt_count"),
+        )
+        return {"before": before, "after": after}
 
     # ================================================================
     # Stats
