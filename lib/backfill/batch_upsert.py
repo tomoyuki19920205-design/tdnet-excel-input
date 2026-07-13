@@ -19,6 +19,9 @@ class BatchUpsertStats:
     inserted: int = 0
     updated: int = 0
     no_change: int = 0
+    rejected_lower_priority: int = 0
+    rejected_filing_conflict: int = 0
+    rejected_filing_identity_unresolved: int = 0
     canonical_sync_ids: list[int] = field(default_factory=list)
 
     @property
@@ -414,6 +417,10 @@ def batch_upsert_segments(
             batch_inserted = 0
             batch_updated = 0
             batch_no_change = 0
+            batch_rejected_lower_priority = 0
+            batch_rejected_filing_conflict = 0
+            batch_rejected_filing_identity_unresolved = 0
+            batch_sync_ids: list[int] = []
 
             for rec in chunk:
                 # _xbrl_cleanup_meta は DB スキーマ外のサイドバンドキー → 除去
@@ -433,7 +440,7 @@ def batch_upsert_segments(
                     )
                     continue
 
-                result = decision_db.upsert_segment(
+                result = decision_db.upsert_segment_provenance_aware(
                     company_code=rec["ticker"],
                     fiscal_year_end=rec["period"],
                     quarter=rec["quarter"],
@@ -454,33 +461,51 @@ def batch_upsert_segments(
                     tdnet_doc_id=rec.get("tdnet_doc_id"),
                     row_type=rec.get("row_type"),
                 )
-                if result == "inserted":
+                if result.status == "inserted":
                     batch_inserted += 1
-                elif result == "updated":
+                elif result.status == "updated":
                     batch_updated += 1
-                else:
+                elif result.status == "no_change":
                     batch_no_change += 1
+                elif result.status == "rejected_lower_priority":
+                    batch_rejected_lower_priority += 1
+                elif result.status == "rejected_filing_conflict":
+                    batch_rejected_filing_conflict += 1
+                elif result.status == "rejected_filing_identity_unresolved":
+                    batch_rejected_filing_identity_unresolved += 1
+                else:
+                    raise RuntimeError(f"segment_upsert_status_unknown:{result.status}")
 
-                row_id = decision_db.get_segment_id(
-                    company_code=rec["ticker"],
-                    fiscal_year_end=rec["period"],
-                    quarter=rec["quarter"],
-                    segment_name=rec["segment_name"],
-                )
-                if row_id is None:
+                if not result.accepted:
+                    logger.warning(
+                        "[upsert_policy_reject] ticker=%s period=%s quarter=%s "
+                        "segment=%s status=%s reason=%s existing_source=%s incoming_source=%s",
+                        rec["ticker"], rec["period"], rec["quarter"], rec["segment_name"],
+                        result.status, result.reason, result.existing_source, result.incoming_source,
+                    )
+                    continue
+
+                if result.row_id is None:
                     raise RuntimeError("segment_sync_candidate_id_unresolved")
-                stats.canonical_sync_ids.append(row_id)
+                batch_sync_ids.append(result.row_id)
 
             decision_db._conn.execute("COMMIT")
             stats.succeeded_batches += 1
             stats.inserted += batch_inserted
             stats.updated += batch_updated
             stats.no_change += batch_no_change
+            stats.rejected_lower_priority += batch_rejected_lower_priority
+            stats.rejected_filing_conflict += batch_rejected_filing_conflict
+            stats.rejected_filing_identity_unresolved += batch_rejected_filing_identity_unresolved
+            stats.canonical_sync_ids.extend(batch_sync_ids)
 
             logger.info(
                 f"[upsert] batch {batch_idx + 1}/{len(chunks)}: "
                 f"inserted={batch_inserted} updated={batch_updated} "
-                f"no_change={batch_no_change}"
+                f"no_change={batch_no_change} "
+                f"rejected_lower_priority={batch_rejected_lower_priority} "
+                f"rejected_filing_conflict={batch_rejected_filing_conflict} "
+                f"rejected_filing_identity_unresolved={batch_rejected_filing_identity_unresolved}"
             )
 
         except Exception as e:

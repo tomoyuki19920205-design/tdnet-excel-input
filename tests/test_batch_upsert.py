@@ -20,6 +20,7 @@ from lib.backfill.batch_upsert import (
     dry_run_upsert_segments,
     normalize_and_validate_rec,
 )
+from src.migration.migration_db import MigrationDB, SegmentUpsertResult
 
 
 class MockDB:
@@ -84,6 +85,23 @@ class MockDB:
                 (segment_sales, segment_profit, company_code, fiscal_year_end, quarter, segment_name),
             )
             return "updated"
+
+    def upsert_segment_provenance_aware(self, *args, **kwargs) -> SegmentUpsertResult:
+        status = self.upsert_segment(*args, **kwargs)
+        row_id = self.get_segment_id(
+            company_code=kwargs["company_code"],
+            fiscal_year_end=kwargs["fiscal_year_end"],
+            quarter=kwargs["quarter"],
+            segment_name=kwargs["segment_name"],
+        )
+        return SegmentUpsertResult(
+            status=status,
+            row_id=row_id,
+            accepted=True,
+            reason=f"mock_{status}",
+            existing_source="",
+            incoming_source=kwargs.get("data_source", ""),
+        )
 
     def close(self):
         self._conn.close()
@@ -228,7 +246,7 @@ class TestBatchUpsertFailed:
         db = MockDB(str(tmp_path / "test.db"))
 
         # 最初のバッチは成功させ、2番目で例外
-        original_upsert = db.upsert_segment
+        original_upsert = db.upsert_segment_provenance_aware
         call_count = [0]
 
         def failing_upsert(*args, **kwargs):
@@ -237,7 +255,7 @@ class TestBatchUpsertFailed:
                 raise RuntimeError("simulated DB error")
             return original_upsert(*args, **kwargs)
 
-        db.upsert_segment = failing_upsert
+        db.upsert_segment_provenance_aware = failing_upsert
 
         records = _make_records(6)
         stats = batch_upsert_segments(records, db, batch_size=3)
@@ -249,6 +267,205 @@ class TestBatchUpsertFailed:
         # batch 1 の 3 件のみ DB に入っている
         count = db._conn.execute("SELECT COUNT(*) FROM segment_financials").fetchone()[0]
         assert count == 3
+        assert len(stats.canonical_sync_ids) == 3
+        db.close()
+
+
+class TestProvenanceAwareBatchUpsert:
+    @staticmethod
+    def _record(segment_name="Core", **overrides):
+        record = {
+            "ticker": "4057",
+            "period": "2026-05-31",
+            "quarter": "FY",
+            "segment_name": segment_name,
+            "segment_order": 1,
+            "segment_sales": 100.0,
+            "segment_profit": 20.0,
+            "raw_profit_label": "営業利益",
+            "source": "backfill_xbrl",
+            "segment_name_norm": segment_name.lower(),
+            "extractor_route": "xbrl",
+            "source_doc_type": "earnings_summary",
+            "disclosure_date": "2026-07-13",
+            "tdnet_doc_id": "20260713340570",
+            "row_type": "business",
+            "_identity_verified": True,
+            "_identity_verdict": "official_linked_xbrl_match",
+            "_requested_disclosure_no": "20260713591788",
+            "_internal_document_id": "20260713340570",
+            "_canonical_expected_period": "2026-05-31",
+            "_canonical_expected_quarter": "FY",
+            "_resolved_zip_sha256": "a" * 64,
+            "_verified_xbrl_same_zip": True,
+            "_worker_version": "v4",
+            "_segment_period_role": "current",
+        }
+        record.update(overrides)
+        return record
+
+    @staticmethod
+    def _legacy(db: MigrationDB, segment_name="Core", **overrides):
+        values = {
+            "company_code": "4057",
+            "fiscal_year_end": "2026-05-31",
+            "quarter": "FY",
+            "segment_name": segment_name,
+            "segment_order": 1,
+            "segment_sales": 80.0,
+            "segment_profit": 15.0,
+            "data_source": "excel_legacy",
+        }
+        values.update(overrides)
+        db.upsert_segment(**values)
+        db.commit()
+        return db.get_segment_id(
+            company_code="4057",
+            fiscal_year_end="2026-05-31",
+            quarter="FY",
+            segment_name=segment_name,
+        )
+
+    def test_legacy_promotion_id_is_sync_candidate_and_final_row_is_backfill(self, tmp_path):
+        db = MigrationDB(str(tmp_path / "promotion.db"))
+        row_id = self._legacy(db)
+
+        stats = batch_upsert_segments([self._record()], db)
+        payload_source = db._conn.execute(
+            "SELECT data_source FROM segment_financials WHERE id=?", (row_id,)
+        ).fetchone()[0]
+
+        assert stats.updated == 1
+        assert stats.canonical_sync_ids == [row_id]
+        assert payload_source == "backfill_xbrl"
+        db.close()
+
+    @pytest.mark.parametrize(
+        ("existing_source", "existing_doc_id", "incoming", "counter"),
+        [
+            (
+                "xbrl",
+                "20260713340570",
+                {"source": "pdf", "segment_sales": 999.0, "_identity_verified": False},
+                "rejected_lower_priority",
+            ),
+            (
+                "backfill_xbrl",
+                "other-filing",
+                {"segment_sales": 999.0},
+                "rejected_filing_conflict",
+            ),
+            (
+                "excel_legacy",
+                None,
+                {"tdnet_doc_id": None, "segment_sales": 999.0, "_identity_verified": False},
+                "rejected_filing_identity_unresolved",
+            ),
+        ],
+    )
+    def test_policy_rejection_is_not_canonical_candidate(
+        self, tmp_path, existing_source, existing_doc_id, incoming, counter,
+    ):
+        db = MigrationDB(str(tmp_path / f"{counter}.db"))
+        row_id = self._legacy(
+            db,
+            data_source=existing_source,
+            tdnet_doc_id=existing_doc_id,
+            extractor_route="xbrl" if existing_doc_id else None,
+            source_doc_type="earnings_summary" if existing_doc_id else None,
+            disclosure_date="2026-07-13" if existing_doc_id else None,
+            row_type="business" if existing_doc_id else None,
+        )
+        before = db._conn.execute(
+            "SELECT segment_sales, data_source, tdnet_doc_id FROM segment_financials WHERE id=?",
+            (row_id,),
+        ).fetchone()
+
+        stats = batch_upsert_segments([self._record(**incoming)], db)
+
+        assert getattr(stats, counter) == 1
+        assert stats.canonical_sync_ids == []
+        assert db._conn.execute(
+            "SELECT segment_sales, data_source, tdnet_doc_id FROM segment_financials WHERE id=?",
+            (row_id,),
+        ).fetchone() == before
+        db.close()
+
+    def test_mixed_batch_continues_accepted_records_and_excludes_rejection(self, tmp_path):
+        db = MigrationDB(str(tmp_path / "mixed.db"))
+        promoted_id = self._legacy(db, "Promoted")
+        rejected_id = self._legacy(
+            db,
+            "Rejected",
+            data_source="xbrl",
+            tdnet_doc_id="20260713340570",
+            extractor_route="xbrl",
+            source_doc_type="earnings_summary",
+            disclosure_date="2026-07-13",
+            row_type="business",
+        )
+        identical = self._record("Identical")
+        inserted = db.upsert_segment_provenance_aware(
+            company_code=identical["ticker"],
+            fiscal_year_end=identical["period"],
+            quarter=identical["quarter"],
+            segment_name=identical["segment_name"],
+            segment_order=identical["segment_order"],
+            segment_sales=identical["segment_sales"],
+            segment_profit=identical["segment_profit"],
+            raw_profit_label=identical["raw_profit_label"],
+            data_source=identical["source"],
+            segment_name_norm=identical["segment_name_norm"],
+            extractor_route=identical["extractor_route"],
+            source_doc_type=identical["source_doc_type"],
+            disclosure_date=identical["disclosure_date"],
+            tdnet_doc_id=identical["tdnet_doc_id"],
+            row_type=identical["row_type"],
+        )
+        db.commit()
+
+        stats = batch_upsert_segments(
+            [
+                self._record("Promoted"),
+                self._record("Rejected", source="pdf", _identity_verified=False),
+                identical,
+                self._record("New"),
+            ],
+            db,
+        )
+
+        new_id = db.get_segment_id(
+            company_code="4057", fiscal_year_end="2026-05-31", quarter="FY", segment_name="New"
+        )
+        assert stats.updated == 1
+        assert stats.no_change == 1
+        assert stats.inserted == 1
+        assert stats.rejected_lower_priority == 1
+        assert stats.failed_batches == 0
+        assert stats.canonical_sync_ids == sorted([promoted_id, inserted.row_id, new_id])
+        assert rejected_id not in stats.canonical_sync_ids
+        db.close()
+
+    def test_validation_rejection_never_reuses_existing_row_id(self, tmp_path):
+        db = MigrationDB(str(tmp_path / "validation.db"))
+        row_id = self._legacy(db)
+        invalid = self._record(quarter="INVALID")
+
+        stats = batch_upsert_segments([invalid], db)
+
+        assert stats.canonical_sync_ids == []
+        assert row_id not in stats.canonical_sync_ids
+        db.close()
+
+    def test_dry_run_performs_no_sqlite_write(self, tmp_path):
+        db = MigrationDB(str(tmp_path / "dry-run.db"))
+        changes_before = db._conn.total_changes
+
+        stats = dry_run_upsert_segments([self._record()], db)
+
+        assert stats.inserted == 1
+        assert db._conn.total_changes == changes_before
+        assert db._conn.execute("SELECT COUNT(*) FROM segment_financials").fetchone()[0] == 0
         db.close()
 
 

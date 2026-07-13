@@ -148,6 +148,185 @@ class TestSegmentFinancials:
         assert result == "no_change"
 
 
+class TestSegmentProvenanceAwareUpsert:
+    @staticmethod
+    def _values(**overrides):
+        values = {
+            "company_code": "4057",
+            "fiscal_year_end": "2026-05-31",
+            "quarter": "FY",
+            "segment_name": "EC支援",
+            "segment_order": 1,
+            "segment_sales": 100.0,
+            "segment_profit": 20.0,
+            "raw_profit_label": "営業利益",
+            "data_source": "backfill_xbrl",
+            "segment_name_norm": "ec支援",
+            "extractor_route": "xbrl",
+            "source_doc_type": "earnings_summary",
+            "disclosure_date": "2026-07-13",
+            "tdnet_doc_id": "20260713340570",
+            "row_type": "business",
+        }
+        values.update(overrides)
+        return values
+
+    @staticmethod
+    def _call(db: MigrationDB, **overrides):
+        return db.upsert_segment_provenance_aware(
+            **TestSegmentProvenanceAwareUpsert._values(**overrides)
+        )
+
+    def _insert_legacy(self, db: MigrationDB, **overrides):
+        values = self._values(
+            segment_sales=80.0,
+            segment_profit=15.0,
+            raw_profit_label="",
+            data_source="excel_legacy",
+            segment_name_norm=None,
+            extractor_route=None,
+            source_doc_type=None,
+            disclosure_date=None,
+            tdnet_doc_id=None,
+            row_type=None,
+        )
+        values.update(overrides)
+        db.upsert_segment(**values)
+        db.commit()
+        return db.get_segment_id(
+            company_code=values["company_code"],
+            fiscal_year_end=values["fiscal_year_end"],
+            quarter=values["quarter"],
+            segment_name=values["segment_name"],
+        )
+
+    def test_promotes_legacy_values_and_provenance_without_changing_row_id(self, db):
+        row_id = self._insert_legacy(db)
+        result = self._call(db)
+        saved = db._conn.execute(
+            "SELECT id, segment_sales, segment_profit, data_source, tdnet_doc_id, extractor_route "
+            "FROM segment_financials"
+        ).fetchone()
+
+        assert result.status == "updated"
+        assert result.accepted is True
+        assert result.row_id == row_id
+        assert saved == (row_id, 100.0, 20.0, "backfill_xbrl", "20260713340570", "xbrl")
+        assert db._conn.execute("SELECT COUNT(*) FROM segment_financials").fetchone()[0] == 1
+
+    def test_promotes_provenance_when_numbers_are_identical(self, db):
+        self._insert_legacy(db, segment_sales=100.0, segment_profit=20.0)
+        result = self._call(db)
+
+        assert result.status == "updated"
+        assert db._conn.execute(
+            "SELECT data_source, tdnet_doc_id FROM segment_financials"
+        ).fetchone() == ("backfill_xbrl", "20260713340570")
+
+    def test_identical_retry_is_no_change_and_preserves_updated_at(self, db):
+        first = self._call(db)
+        before = db._conn.execute(
+            "SELECT updated_at FROM segment_financials WHERE id=?", (first.row_id,)
+        ).fetchone()[0]
+        changes_before = db._conn.total_changes
+
+        second = self._call(db)
+
+        assert second.status == "no_change"
+        assert second.row_id == first.row_id
+        assert db._conn.total_changes == changes_before
+        assert db._conn.execute(
+            "SELECT updated_at FROM segment_financials WHERE id=?", (first.row_id,)
+        ).fetchone()[0] == before
+
+    def test_rejects_lower_priority_without_mutation(self, db):
+        first = self._call(db, data_source="xbrl")
+        before = db._conn.execute(
+            "SELECT segment_sales, data_source, tdnet_doc_id FROM segment_financials WHERE id=?",
+            (first.row_id,),
+        ).fetchone()
+
+        result = self._call(db, data_source="pdf", segment_sales=999.0)
+
+        assert result.status == "rejected_lower_priority"
+        assert result.accepted is False
+        assert db._conn.execute(
+            "SELECT segment_sales, data_source, tdnet_doc_id FROM segment_financials WHERE id=?",
+            (first.row_id,),
+        ).fetchone() == before
+
+    def test_same_priority_same_filing_allows_update(self, db):
+        first = self._call(db, data_source="backfill_xbrl")
+        result = self._call(db, data_source="backfill_xbrl", segment_sales=130.0)
+
+        assert result.status == "updated"
+        assert result.row_id == first.row_id
+        assert db._conn.execute(
+            "SELECT segment_sales, data_source FROM segment_financials WHERE id=?", (first.row_id,)
+        ).fetchone() == (130.0, "backfill_xbrl")
+
+    def test_same_priority_different_filing_is_rejected(self, db):
+        first = self._call(db)
+        result = self._call(db, tdnet_doc_id="different-filing", segment_sales=130.0)
+
+        assert result.status == "rejected_filing_conflict"
+        assert result.reason == "segment_natural_key_filing_conflict"
+        assert db._conn.execute(
+            "SELECT segment_sales, tdnet_doc_id FROM segment_financials WHERE id=?", (first.row_id,)
+        ).fetchone() == (100.0, "20260713340570")
+
+    def test_both_filing_ids_empty_with_difference_is_rejected(self, db):
+        self._insert_legacy(db)
+        result = self._call(db, tdnet_doc_id=None)
+
+        assert result.status == "rejected_filing_identity_unresolved"
+        assert result.accepted is False
+
+    def test_empty_existing_filing_is_promoted_when_priority_allows(self, db):
+        row_id = self._insert_legacy(db)
+        result = self._call(db)
+
+        assert result.status == "updated"
+        assert result.row_id == row_id
+        assert db._conn.execute(
+            "SELECT tdnet_doc_id FROM segment_financials WHERE id=?", (row_id,)
+        ).fetchone()[0] == "20260713340570"
+
+    def test_sql_failure_rolls_back_numbers_and_provenance_together(self, db):
+        row_id = self._insert_legacy(db)
+        before = db._conn.execute(
+            "SELECT segment_sales, data_source, tdnet_doc_id FROM segment_financials WHERE id=?",
+            (row_id,),
+        ).fetchone()
+        db._conn.execute(
+            "CREATE TRIGGER reject_segment_update BEFORE UPDATE ON segment_financials "
+            "BEGIN SELECT RAISE(ABORT, 'simulated update failure'); END"
+        )
+
+        with pytest.raises(Exception, match="simulated update failure"):
+            self._call(db)
+        db._conn.rollback()
+
+        assert db._conn.execute(
+            "SELECT segment_sales, data_source, tdnet_doc_id FROM segment_financials WHERE id=?",
+            (row_id,),
+        ).fetchone() == before
+
+    def test_readback_matches_all_saved_fields(self, db):
+        result = self._call(db)
+        saved = db._conn.execute(
+            "SELECT segment_order, segment_sales, segment_profit, raw_profit_label, data_source, "
+            "segment_name_norm, extractor_route, source_doc_type, disclosure_date, tdnet_doc_id, row_type "
+            "FROM segment_financials WHERE id=?",
+            (result.row_id,),
+        ).fetchone()
+
+        assert saved == (
+            1, 100.0, 20.0, "営業利益", "backfill_xbrl", "ec支援", "xbrl",
+            "earnings_summary", "2026-07-13", "20260713340570", "business",
+        )
+
+
 class TestMigrationLog:
     def test_insert_and_get(self, db: MigrationDB):
         db.insert_log(

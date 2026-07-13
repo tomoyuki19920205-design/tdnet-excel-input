@@ -16,8 +16,11 @@ import logging
 import re
 import sqlite3
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+
+from lib.pipeline.source_priority import get_priority
 
 from ..persist_policy import should_persist_intermediates
 
@@ -76,6 +79,18 @@ def _to_millions(
         val, unit_raw, mult, context,
     )
     return val
+
+
+@dataclass(frozen=True)
+class SegmentUpsertResult:
+    """provenance-aware segment upsert の判定結果。"""
+
+    status: str
+    row_id: int | None
+    accepted: bool
+    reason: str
+    existing_source: str
+    incoming_source: str
 
 # ------------------------------------------------------------------
 # テーブル作成 SQL
@@ -739,6 +754,243 @@ class MigrationDB:
                         run_id=run_id,
                     )
         return "updated"
+
+    def upsert_segment_provenance_aware(
+        self,
+        company_code: str,
+        fiscal_year_end: str,
+        quarter: str,
+        segment_name: str,
+        segment_order: int,
+        segment_sales: float | None = None,
+        segment_profit: float | None = None,
+        *,
+        unit_raw: str | None = None,
+        unit_multiplier: int | None = None,
+        raw_profit_label: str = "",
+        data_source: str = "migration",
+        actor: str = "migration",
+        source: str = "migration",
+        tdnet_disclosure_id: str | None = None,
+        run_id: str | None = None,
+        segment_name_norm: str | None = None,
+        extractor_route: str | None = None,
+        source_doc_type: str | None = None,
+        disclosure_date: str | None = None,
+        tdnet_doc_id: str | None = None,
+        row_type: str | None = None,
+    ) -> SegmentUpsertResult:
+        """自然キー衝突時に filing identity と source priority を検証する。"""
+        now = _now_jst()
+        context = (
+            f"ticker={company_code} period={fiscal_year_end} "
+            f"q={quarter} seg={segment_name}"
+        )
+        segment_sales = _to_millions(
+            segment_sales, unit_raw, unit_multiplier, context=context,
+        )
+        segment_profit = _to_millions(
+            segment_profit, unit_raw, unit_multiplier, context=context,
+        )
+
+        saved_columns = (
+            "segment_order",
+            "segment_sales",
+            "segment_profit",
+            "raw_profit_label",
+            "data_source",
+            "segment_name_norm",
+            "extractor_route",
+            "source_doc_type",
+            "disclosure_date",
+            "tdnet_doc_id",
+            "row_type",
+        )
+        incoming_values = (
+            segment_order,
+            segment_sales,
+            segment_profit,
+            raw_profit_label,
+            data_source,
+            segment_name_norm,
+            extractor_route,
+            source_doc_type,
+            disclosure_date,
+            tdnet_doc_id,
+            row_type,
+        )
+        incoming_source = str(data_source or "")
+        incoming_filing_id = str(tdnet_doc_id or "").strip()
+
+        existing = self._conn.execute(
+            f"""
+            SELECT id, {', '.join(saved_columns)}
+            FROM segment_financials
+            WHERE company_code=? AND fiscal_year_end=? AND quarter=?
+              AND segment_name=?
+            """,
+            (company_code, fiscal_year_end, quarter, segment_name),
+        ).fetchone()
+
+        if existing is None:
+            cursor = self._exec_retry(
+                f"""
+                INSERT INTO segment_financials
+                    (company_code, fiscal_year_end, quarter, segment_name,
+                     {', '.join(saved_columns)}, created_at, updated_at)
+                VALUES ({', '.join('?' for _ in range(4 + len(saved_columns) + 2))})
+                """,
+                (
+                    company_code,
+                    fiscal_year_end,
+                    quarter,
+                    segment_name,
+                    *incoming_values,
+                    now,
+                    now,
+                ),
+            )
+            row_id = int(cursor.lastrowid)
+            self._verify_segment_readback(row_id, saved_columns, incoming_values)
+            return SegmentUpsertResult(
+                status="inserted",
+                row_id=row_id,
+                accepted=True,
+                reason="segment_inserted",
+                existing_source="",
+                incoming_source=incoming_source,
+            )
+
+        row_id = int(existing[0])
+        existing_values = tuple(existing[1:])
+        existing_by_column = dict(zip(saved_columns, existing_values))
+        existing_source = str(existing_by_column["data_source"] or "")
+        existing_filing_id = str(existing_by_column["tdnet_doc_id"] or "").strip()
+
+        if existing_filing_id and incoming_filing_id:
+            if existing_filing_id != incoming_filing_id:
+                return SegmentUpsertResult(
+                    status="rejected_filing_conflict",
+                    row_id=row_id,
+                    accepted=False,
+                    reason="segment_natural_key_filing_conflict",
+                    existing_source=existing_source,
+                    incoming_source=incoming_source,
+                )
+        elif not existing_filing_id and not incoming_filing_id:
+            if existing_values == incoming_values:
+                return SegmentUpsertResult(
+                    status="no_change",
+                    row_id=row_id,
+                    accepted=True,
+                    reason="segment_saved_fields_identical",
+                    existing_source=existing_source,
+                    incoming_source=incoming_source,
+                )
+            return SegmentUpsertResult(
+                status="rejected_filing_identity_unresolved",
+                row_id=row_id,
+                accepted=False,
+                reason="segment_filing_identity_unresolved",
+                existing_source=existing_source,
+                incoming_source=incoming_source,
+            )
+        elif existing_filing_id and not incoming_filing_id:
+            return SegmentUpsertResult(
+                status="rejected_filing_identity_unresolved",
+                row_id=row_id,
+                accepted=False,
+                reason="segment_incoming_filing_identity_missing",
+                existing_source=existing_source,
+                incoming_source=incoming_source,
+            )
+
+        if existing_values == incoming_values:
+            return SegmentUpsertResult(
+                status="no_change",
+                row_id=row_id,
+                accepted=True,
+                reason="segment_saved_fields_identical",
+                existing_source=existing_source,
+                incoming_source=incoming_source,
+            )
+
+        required_provenance = (
+            incoming_source,
+            incoming_filing_id,
+            str(extractor_route or "").strip(),
+            str(source_doc_type or "").strip(),
+            str(disclosure_date or "").strip(),
+            str(row_type or "").strip(),
+        )
+        if not all(required_provenance):
+            return SegmentUpsertResult(
+                status="rejected_filing_identity_unresolved",
+                row_id=row_id,
+                accepted=False,
+                reason="segment_incoming_provenance_incomplete",
+                existing_source=existing_source,
+                incoming_source=incoming_source,
+            )
+
+        if get_priority(incoming_source) > get_priority(existing_source):
+            return SegmentUpsertResult(
+                status="rejected_lower_priority",
+                row_id=row_id,
+                accepted=False,
+                reason="segment_source_priority_downgrade",
+                existing_source=existing_source,
+                incoming_source=incoming_source,
+            )
+
+        set_clause = ", ".join(f"{column}=?" for column in saved_columns)
+        self._exec_retry(
+            f"UPDATE segment_financials SET {set_clause}, updated_at=? WHERE id=?",
+            (*incoming_values, now, row_id),
+        )
+        self._verify_segment_readback(row_id, saved_columns, incoming_values)
+
+        if source != "migration":
+            for field in ("segment_sales", "segment_profit"):
+                index = saved_columns.index(field)
+                old_value = existing_values[index]
+                new_value = incoming_values[index]
+                if old_value != new_value:
+                    self._record_audit(
+                        actor=actor,
+                        source=source,
+                        entity_type="segment",
+                        company_code=company_code,
+                        fiscal_year_end=fiscal_year_end,
+                        quarter=quarter,
+                        field_name=f"{segment_name}.{field}",
+                        old_value=str(old_value) if old_value is not None else None,
+                        new_value=str(new_value) if new_value is not None else None,
+                        tdnet_disclosure_id=tdnet_disclosure_id,
+                        run_id=run_id,
+                    )
+
+        return SegmentUpsertResult(
+            status="updated",
+            row_id=row_id,
+            accepted=True,
+            reason="segment_provenance_aware_update",
+            existing_source=existing_source,
+            incoming_source=incoming_source,
+        )
+
+    def _verify_segment_readback(
+        self,
+        row_id: int,
+        columns: tuple[str, ...],
+        expected: tuple,
+    ) -> None:
+        actual = self._conn.execute(
+            f"SELECT {', '.join(columns)} FROM segment_financials WHERE id=?",
+            (row_id,),
+        ).fetchone()
+        if actual is None or tuple(actual) != expected:
+            raise RuntimeError("segment_provenance_readback_mismatch")
 
     def get_segment_id(
         self,
