@@ -24,6 +24,7 @@ import re
 import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import PurePosixPath
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -100,6 +101,11 @@ class ZipIdentityVerdict:
 _DISCLOSURE_NO_RE = re.compile(r"(?:1401|0812)(\d{14})")
 _DISCLOSURE_NO_RE2 = re.compile(r"(20\d{12})")
 _DISCLOSURE_NO_RE3 = re.compile(r"(\d{14})")
+_ALPHA_INTERNAL_ID_FROM_SUMMARY_RE = re.compile(
+    r"^tse-[^-]+-(?P<entry_ticker>[A-Za-z0-9]{5})-"
+    r"(?P<candidate>(?P<date>20\d{6})\d(?P<candidate_ticker>[A-Za-z0-9]{5}))"
+    r"(?=[-_.])"
+)
 
 
 def _extract_disclosure_no_from_str(value: str) -> Optional[str]:
@@ -116,6 +122,47 @@ def _extract_disclosure_no_from_str(value: str) -> Optional[str]:
     if m:
         return m.group(1)
     return None
+
+
+def _normalize_ticker(value: str) -> str:
+    if len(value) == 5 and value.endswith("0"):
+        return value[:-1]
+    return value
+
+
+def _extract_alpha_internal_id_from_names(
+    names: list[str], metadata_ticker: str
+) -> str:
+    """Summary エントリ名の英字入り内部書類 ID を限定的に抽出する。"""
+    candidates: set[str] = set()
+    normalized_metadata_ticker = _normalize_ticker(metadata_ticker)
+
+    for name in names:
+        path = PurePosixPath(name)
+        if path.parent.name != "Summary":
+            continue
+
+        match = _ALPHA_INTERNAL_ID_FROM_SUMMARY_RE.match(path.name)
+        if not match:
+            continue
+
+        candidate = match.group("candidate")
+        candidate_ticker = match.group("candidate_ticker")
+        if not any(char.isalpha() for char in candidate_ticker):
+            continue
+        try:
+            datetime.strptime(match.group("date"), "%Y%m%d")
+        except ValueError:
+            continue
+
+        entry_ticker = _normalize_ticker(match.group("entry_ticker"))
+        candidate_ticker = _normalize_ticker(candidate_ticker)
+        if (
+            entry_ticker == candidate_ticker == normalized_metadata_ticker
+        ):
+            candidates.add(candidate)
+
+    return next(iter(candidates)) if len(candidates) == 1 else ""
 
 
 def _sha256_file(path: str) -> str:
@@ -179,6 +226,11 @@ def extract_actual_metadata_from_zip(
                     tk = m.group(1)
                     meta["ticker"] = tk[:-1] if len(tk) == 5 and tk.endswith("0") else tk
                     break
+
+            if not meta["internal_document_id"]:
+                meta["internal_document_id"] = _extract_alpha_internal_id_from_names(
+                    names, meta["ticker"]
+                )
             
             # 3. document_type (Summaryフォルダがある場合は attachment_xbrl とする)
             for name in names:

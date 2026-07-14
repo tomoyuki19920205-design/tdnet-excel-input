@@ -163,3 +163,90 @@ def test_non_fy_quarter_regressions(tmp_path):
         assert meta["period"] == "2024-03-31"
         assert meta["quarter"] == expected
         assert verdict.passed is True
+
+
+def _write_alpha_zip(path, entries):
+    with zipfile.ZipFile(path, "w") as zf:
+        for name, content in entries:
+            zf.writestr(name, content)
+
+
+def test_extracts_internal_document_id_for_alpha_ticker(tmp_path):
+    path = tmp_path / "alpha.zip"
+    prefix = "XBRLData/Summary/tse-acedjpsm-581A0-202607143581A0"
+    _write_alpha_zip(
+        path,
+        [
+            (f"{prefix}-def.xml", ""),
+            (f"{prefix}.xsd", ""),
+            (
+                f"{prefix}-ixbrl.htm",
+                "<html xmlns:xbrli='http://www.xbrl.org/2003/instance'>"
+                "<xbrli:endDate>2026-05-31</xbrli:endDate>"
+                "AnnualMember</html>",
+            ),
+        ],
+    )
+
+    meta = extract_actual_metadata_from_zip(
+        str(path), expected_period="2026-05-31", expected_quarter="FY"
+    )
+
+    assert meta["ticker"] == "581A"
+    assert meta["period"] == "2026-05-31"
+    assert meta["quarter"] == "FY"
+    assert meta["document_type"] == "attachment_xbrl"
+    assert meta["internal_document_id"] == "202607143581A0"
+
+
+def test_rejects_internal_document_id_for_mismatched_alpha_ticker(tmp_path):
+    path = tmp_path / "mismatched-alpha.zip"
+    _write_alpha_zip(
+        path,
+        [
+            ("XBRLData/Summary/tse-acedjpsm-581A0-202607143472A0.xsd", ""),
+            (
+                "XBRLData/Summary/tse-acedjpsm-581A0-no-id-ixbrl.htm",
+                "<html xmlns:xbrli='http://www.xbrl.org/2003/instance'>"
+                "<xbrli:endDate>2026-05-31</xbrli:endDate>AnnualMember</html>",
+            ),
+        ],
+    )
+
+    meta = extract_actual_metadata_from_zip(str(path))
+
+    assert meta["ticker"] == "581A"
+    assert meta["internal_document_id"] == ""
+
+
+def test_rejects_ambiguous_internal_document_ids_for_alpha_ticker(tmp_path):
+    path = tmp_path / "ambiguous-alpha.zip"
+    _write_alpha_zip(
+        path,
+        [
+            ("XBRLData/Summary/tse-acedjpsm-581A0-202607143581A0.xsd", ""),
+            ("XBRLData/Summary/tse-acedjpsm-581A0-202607144581A0-def.xml", ""),
+        ],
+    )
+
+    meta = extract_actual_metadata_from_zip(str(path))
+
+    assert meta["internal_document_id"] == ""
+
+
+def test_does_not_use_html_title_timestamp_as_internal_document_id(tmp_path):
+    path = tmp_path / "html-title.zip"
+    _write_alpha_zip(
+        path,
+        [
+            ("XBRLData/Summary/tse-acedjpsm-581A0-no-id.xsd", ""),
+            (
+                "XBRLData/Summary/tse-acedjpsm-581A0-no-id-ixbrl.htm",
+                "<html><title>決算短信_20260714124604</title></html>",
+            ),
+        ],
+    )
+
+    meta = extract_actual_metadata_from_zip(str(path))
+
+    assert meta["internal_document_id"] == ""
