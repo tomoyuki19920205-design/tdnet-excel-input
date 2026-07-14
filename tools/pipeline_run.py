@@ -187,6 +187,34 @@ def _run_reconcile(dry_run: bool) -> StepResult:
     return step
 
 
+def _reconcile_exit_code(step: StepResult) -> int:
+    """Return the reconcile CLI exit code from its validated summary."""
+    if step.status == "failed":
+        return EXIT_RECONCILE_CRITICAL
+
+    summary = step.detail
+    if not isinstance(summary, dict):
+        return EXIT_RECONCILE_CRITICAL
+
+    status = summary.get("status")
+    new_critical = summary.get("new_critical")
+    issues_total = summary.get("issues_total")
+    if (
+        not isinstance(status, str)
+        or not isinstance(new_critical, int)
+        or isinstance(new_critical, bool)
+        or not isinstance(issues_total, int)
+        or isinstance(issues_total, bool)
+        or new_critical < 0
+        or issues_total < 0
+    ):
+        return EXIT_RECONCILE_CRITICAL
+
+    if status != "success" or new_critical >= 1 or issues_total >= 10:
+        return EXIT_RECONCILE_CRITICAL
+    return EXIT_OK
+
+
 def _run_retry(dry_run: bool, target_id: str | None = None) -> StepResult:
     step = StepResult("retry")
     st = time.monotonic()
@@ -636,10 +664,7 @@ def main():
         step = _run_subcommand_with_logging(
             "reconcile", lambda: _run_reconcile(args.dry_run), trigger_type=trigger,
         )
-        issues = step.detail.get("issues_total", 0)
-        if step.status == "failed" or issues >= 10:
-            sys.exit(EXIT_RECONCILE_CRITICAL)
-        sys.exit(EXIT_OK)
+        sys.exit(_reconcile_exit_code(step))
 
     elif cmd == "retry-failed":
         step = _run_subcommand_with_logging(

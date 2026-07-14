@@ -103,6 +103,70 @@ def _run_process_batch_main(*, result=None, error=None):
     return exc_info.value.code, mock_process_mod.run_batch
 
 
+def _run_reconcile_main(*, result=None, step_status="success"):
+    """Run the reconcile CLI branch with no external connections."""
+    from tools import pipeline_run
+
+    mock_pipeline_run = MagicMock()
+    mock_pipeline_run.__enter__.return_value = MagicMock()
+    mock_pipeline_run.__exit__.return_value = False
+
+    reconcile_return = pipeline_run.StepResult("reconcile")
+    reconcile_return.status = step_status
+    reconcile_return.detail = result
+
+    with patch.object(pipeline_run, "load_env"), \
+         patch.object(pipeline_run, "PipelineRun", return_value=mock_pipeline_run), \
+         patch("lib.pipeline.logging_utils.cleanup_stale_runs"), \
+         patch.object(pipeline_run, "_run_reconcile", return_value=reconcile_return), \
+         patch.object(sys, "argv", ["pipeline_run.py", "reconcile"]):
+        with pytest.raises(SystemExit) as exc_info:
+            pipeline_run.main()
+
+    return exc_info.value.code
+
+
+@pytest.mark.parametrize(
+    ("summary", "expected"),
+    [
+        ({"status": "success", "existing_backlog": 201, "new_critical": 0, "issues_total": 0}, 0),
+        ({"status": "success", "existing_backlog": 201, "new_critical": 1, "issues_total": 1}, 3),
+        ({"status": "success", "new_critical": 9, "issues_total": 9}, 3),
+        ({"status": "success", "new_critical": 0, "issues_total": 9}, 0),
+        ({"status": "success", "new_critical": 0, "issues_total": 10}, 3),
+        ({"status": "failed", "new_critical": 0, "issues_total": 0}, 3),
+        (None, 3),
+        ({"new_critical": 0, "issues_total": 0}, 3),
+        ({"status": "success", "issues_total": 0}, 3),
+        ({"status": "success", "new_critical": 0}, 3),
+        ({"status": "success", "new_critical": None, "issues_total": 0}, 3),
+        ({"status": "success", "new_critical": True, "issues_total": 0}, 3),
+        ({"status": "success", "new_critical": -1, "issues_total": 0}, 3),
+        ({"status": "success", "new_critical": 0, "issues_total": -1}, 3),
+        ({"status": "success", "new_critical": 0, "issues_total": "invalid"}, 3),
+        ({"status": "success", "new_critical": 0, "issues_total": 0}, 0),
+    ],
+)
+def test_reconcile_cli_exit_code_contract(summary, expected):
+    assert _run_reconcile_main(result=summary) == expected
+
+
+def test_reconcile_cli_failed_step_exits_critical():
+    assert _run_reconcile_main(result={"error": "reconcile failed"}, step_status="failed") == 3
+
+
+def test_reconcile_run_exception_is_critical():
+    from tools import pipeline_run
+
+    mock_reconcile_mod = MagicMock()
+    mock_reconcile_mod.run.side_effect = RuntimeError("reconcile failed")
+    with patch.dict("sys.modules", {"tools.daily_reconcile": mock_reconcile_mod}):
+        step = pipeline_run._run_reconcile(dry_run=True)
+
+    assert step.status == "failed"
+    assert pipeline_run._reconcile_exit_code(step) == 3
+
+
 def test_process_batch_success_exits_zero():
     exit_code, mock_run_batch = _run_process_batch_main(
         result={"push": {"errors": 0}, "canonical": {"status": "ok"}},
