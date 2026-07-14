@@ -314,10 +314,126 @@ def _compute_date_range(args) -> tuple[str, str]:
     return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
 
 
+def _validation_rejection_summary(metrics) -> dict:
+    filing_ids = list(getattr(metrics, "_validation_rejected_filing_ids", []))
+    return {
+        "validation_rejected_record_count": getattr(
+            metrics, "_validation_rejected_record_count", 0
+        ),
+        "validation_rejected_filing_count": len(filing_ids),
+        "validation_rejected_filing_ids": filing_ids,
+        "validation_reasons_by_filing": {
+            filing_id: dict(reason_counts)
+            for filing_id, reason_counts in getattr(
+                metrics, "_validation_reasons_by_filing", {}
+            ).items()
+        },
+        "validation_rejection_filing_unresolved": bool(
+            getattr(metrics, "_validation_rejection_filing_unresolved", False)
+        ),
+    }
+
+
+def _summary_with_validation_rejections(metrics) -> dict:
+    summary = metrics.summary_dict()
+    summary.update(_validation_rejection_summary(metrics))
+    return summary
+
+
+def _build_validation_filing_id_map(filings) -> dict[str, str]:
+    """Map existing worker identifiers to the caller's manifest filing ID."""
+    mapping: dict[str, str] = {}
+    for filing in filings:
+        filing_id = str(filing.filing_id).strip()
+        for value in (
+            filing_id,
+            getattr(filing, "requested_disclosure_no", None),
+            getattr(filing, "internal_document_id", None),
+            getattr(filing, "tdnet_doc_id", None),
+        ):
+            if value is None or not str(value).strip():
+                continue
+            identifier = str(value).strip()
+            existing = mapping.get(identifier)
+            if existing is not None and existing != filing_id:
+                raise RuntimeError(
+                    "STOP_BACKFILL_REJECTION_CALLER_ID_MAPPING_UNRESOLVED"
+                )
+            mapping[identifier] = filing_id
+    return mapping
+
+
+def _merge_validation_rejections(
+    metrics,
+    stats,
+    filing_id_map: dict[str, str],
+) -> tuple[list[str], dict[str, dict[str, int]]]:
+    record_count = int(getattr(stats, "validation_rejected_record_count", 0) or 0)
+    raw_filing_ids = [
+        str(value) for value in getattr(stats, "validation_rejected_filing_ids", [])
+    ]
+    raw_reasons = getattr(stats, "validation_reasons_by_filing", {}) or {}
+    reported_filing_count = int(
+        getattr(stats, "validation_rejected_filing_count", len(raw_filing_ids)) or 0
+    )
+
+    metrics._validation_rejected_record_count = getattr(
+        metrics, "_validation_rejected_record_count", 0
+    ) + record_count
+
+    reason_record_count = sum(
+        int(count)
+        for reason_counts in raw_reasons.values()
+        for count in reason_counts.values()
+    )
+    has_rejection_info = bool(
+        record_count or raw_filing_ids or raw_reasons or reported_filing_count
+    )
+    if (
+        has_rejection_info
+        and (
+            record_count <= 0
+            or not raw_filing_ids
+            or reported_filing_count != len(set(raw_filing_ids))
+            or set(raw_reasons) != set(raw_filing_ids)
+            or reason_record_count != record_count
+        )
+    ):
+        metrics._validation_rejection_filing_unresolved = True
+        raise RuntimeError("validation_rejection_filing_unresolved")
+
+    aggregate_ids = getattr(metrics, "_validation_rejected_filing_ids", None)
+    if aggregate_ids is None:
+        aggregate_ids = []
+        metrics._validation_rejected_filing_ids = aggregate_ids
+    aggregate_reasons = getattr(metrics, "_validation_reasons_by_filing", None)
+    if aggregate_reasons is None:
+        aggregate_reasons = {}
+        metrics._validation_reasons_by_filing = aggregate_reasons
+
+    flush_ids: list[str] = []
+    flush_reasons: dict[str, dict[str, int]] = {}
+    for raw_filing_id in raw_filing_ids:
+        filing_id = filing_id_map.get(raw_filing_id)
+        if filing_id is None:
+            metrics._validation_rejection_filing_unresolved = True
+            raise RuntimeError("validation_rejection_filing_unresolved")
+        if filing_id not in flush_ids:
+            flush_ids.append(filing_id)
+        if filing_id not in aggregate_ids:
+            aggregate_ids.append(filing_id)
+        filing_aggregate = aggregate_reasons.setdefault(filing_id, {})
+        filing_flush = flush_reasons.setdefault(filing_id, {})
+        for reason, count in raw_reasons[raw_filing_id].items():
+            filing_aggregate[reason] = filing_aggregate.get(reason, 0) + int(count)
+            filing_flush[reason] = filing_flush.get(reason, 0) + int(count)
+    return flush_ids, flush_reasons
+
+
 def _make_result(metrics, run_id, start_date, end_date, phase2, xbrl_workers, pdf_workers, workers):
     """統一戻り値を構築。early return でも benchmark でも同じ形式。"""
     return {
-        "summary": metrics.summary_dict(),
+        "summary": _summary_with_validation_rejections(metrics),
         "metrics": metrics,
         "run_id": run_id,
         "date_range": f"{start_date}~{end_date}",
@@ -529,7 +645,7 @@ def run_backfill(
         logger.warning("[backfill] listing returned 0 filings — nothing to do")
         print("[backfill] WARNING: listing returned 0 filings")
         metrics.finalize()
-        run_logger.log_summary(metrics.summary_dict())
+        run_logger.log_summary(_summary_with_validation_rejections(metrics))
         run_logger.close()
         return _result()
 
@@ -555,7 +671,7 @@ def run_backfill(
         print(f"[backfill] ERROR: {msg}")
         run_logger.log_fatal(msg)
         metrics.finalize()
-        run_logger.log_summary(metrics.summary_dict())
+        run_logger.log_summary(_summary_with_validation_rejections(metrics))
         run_logger.close()
         store.close()
         raise RuntimeError(msg)
@@ -684,12 +800,13 @@ def run_backfill(
         store_stats = store.stats()
         logger.info(f"[backfill] state_store stats: {store_stats}")
         metrics.finalize()
-        run_logger.log_summary(metrics.summary_dict())
+        run_logger.log_summary(_summary_with_validation_rejections(metrics))
         run_logger.close()
         store.close()
         return _result()
 
     filing_map = {f.filing_id: f for f in filings}
+    validation_filing_id_map = _build_validation_filing_id_map(filings)
 
     # ── 4. 実行 (Phase 1 or Phase 2) ──
     segment_buffer: list[dict] = []
@@ -704,6 +821,7 @@ def run_backfill(
             state_db_path=state_db,
             log_jsonl_path=log_jsonl_path,
             filing_list_path=filing_list_path,
+            validation_filing_id_map=validation_filing_id_map,
         )
 
     logger.info(f"[backfill] phase={mode} stage start: input_count={len(pending)}")
@@ -766,6 +884,7 @@ def run_backfill(
             db_batch_size=db_batch_size, decision_db_path=decision_db_path,
             flush_every_seconds=flush_every_seconds,
             dry_run_only=dry_run_only,
+            validation_filing_id_map=validation_filing_id_map,
         )
 
     logger.info(f"[backfill] {mode} done")
@@ -784,7 +903,7 @@ def run_backfill(
     store.close()
 
     logger.info(f"[backfill] state_store stats: {store_stats}")
-    run_logger.log_summary(metrics.summary_dict())
+    run_logger.log_summary(_summary_with_validation_rejections(metrics))
     run_logger.close()
     metrics.print_summary()
     logger.info(f"[backfill] summary done, report={log_jsonl_path}")
@@ -800,6 +919,7 @@ def _run_phase1(
     segment_buffer, fid_buffer, db_batch_size, decision_db_path,
     flush_every_seconds,
     dry_run_only: bool = True,
+    validation_filing_id_map: dict[str, str] | None = None,
 ):
     """Phase 1: 従来の ThreadPoolExecutor。"""
     last_flush = time.monotonic()
@@ -858,7 +978,12 @@ def _run_phase1(
 
             now_t = time.monotonic()
             if (len(segment_buffer) >= db_batch_size or (now_t - last_flush > flush_every_seconds and segment_buffer)):
-                _flush_buffer(segment_buffer, fid_buffer, decision_db_path, db_batch_size, metrics, store, run_logger, dry_run_only=dry_run_only, isolated_worker_dry_run=isolated_worker_dry_run)
+                _flush_buffer(
+                    segment_buffer, fid_buffer, decision_db_path, db_batch_size,
+                    metrics, store, run_logger, dry_run_only=dry_run_only,
+                    isolated_worker_dry_run=isolated_worker_dry_run,
+                    validation_filing_id_map=validation_filing_id_map,
+                )
                 last_flush = time.monotonic()
 
             if i % 10 == 0 or i == len(futures):
@@ -873,6 +998,7 @@ def _flush_buffer(
     state_db_path: str | None = None,
     log_jsonl_path: str | None = None,
     filing_list_path: str | None = None,
+    validation_filing_id_map: dict[str, str] | None = None,
 ):
     """segment バッファを DB に flush し、state を mark_upserted する。"""
     if isolated_worker_dry_run:
@@ -904,6 +1030,24 @@ def _flush_buffer(
         db = MigrationDB(decision_db_path)
         stats = batch_upsert_segments(buffer, db, batch_size=batch_size)
         metrics.record_upsert(stats)
+        effective_filing_id_map = dict(validation_filing_id_map or {})
+        for fid in fid_buffer:
+            effective_filing_id_map.setdefault(str(fid), str(fid))
+        try:
+            rejected_filing_ids, rejected_reasons = _merge_validation_rejections(
+                metrics,
+                stats,
+                effective_filing_id_map,
+            )
+        except RuntimeError as exc:
+            if str(exc) == "validation_rejection_filing_unresolved":
+                for fid in dict.fromkeys(fid_buffer):
+                    store.mark_failed(
+                        fid,
+                        error="validation_rejection_filing_unresolved",
+                        stage="validation_rejected",
+                    )
+            raise
         run_logger.log_upsert("batch", {
             "records": len(buffer),
             "inserted": stats.inserted,
@@ -914,6 +1058,12 @@ def _flush_buffer(
             "rejected_filing_identity_unresolved": stats.rejected_filing_identity_unresolved,
             "failed_batches": stats.failed_batches,
             "canonical_sync_ids": stats.canonical_sync_ids,
+            "validation_rejected_record_count": getattr(
+                stats, "validation_rejected_record_count", 0
+            ),
+            "validation_rejected_filing_count": len(rejected_filing_ids),
+            "validation_rejected_filing_ids": rejected_filing_ids,
+            "validation_reasons_by_filing": rejected_reasons,
         })
         canonical_sync_enabled = not dry_run_only and not isolated_worker_dry_run
         if stats.failed_batches == 0 and stats.canonical_sync_ids and canonical_sync_enabled:
@@ -932,8 +1082,21 @@ def _flush_buffer(
             )
             if sync_result.get("sync_error") or set(sync_result.get("synced_segment_ids", [])) != set(stats.canonical_sync_ids):
                 raise RuntimeError("segment_canonical_sync_failed_after_sqlite_commit")
+        for fid in rejected_filing_ids:
+            store.mark_failed(
+                fid,
+                error=json.dumps(
+                    rejected_reasons[fid],
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                stage="validation_rejected",
+            )
         if stats.failed_batches == 0:
-            for fid in fid_buffer:
+            rejected_filing_id_set = set(rejected_filing_ids)
+            for fid in dict.fromkeys(fid_buffer):
+                if fid in rejected_filing_id_set:
+                    continue
                 try:
                     store.mark_upserted(fid)
                     metrics.upserted_count += 1
@@ -1350,7 +1513,6 @@ def main():
     dry_run_only = True
     if args.apply:
         if os.environ.get("ALLOW_BACKFILL_XBRL_WRITE") != "1":
-            import sys
             print("[ERROR] backfill_xbrl write mode is disabled by default. Use dry-run or explicitly enable ALLOW_BACKFILL_XBRL_WRITE=1 after GPT approval.", file=sys.stderr)
             sys.exit(1)
         dry_run_only = False
@@ -1424,7 +1586,12 @@ def main():
             print("[backfill] WARNING: benchmark report failed", file=sys.stderr)
 
     summary = result.get("summary", result) if isinstance(result, dict) else result
-    if summary.get("failed", 0) > 0 or summary.get("upsert_failed_batches", 0) > 0:
+    if (
+        summary.get("failed", 0) > 0
+        or summary.get("upsert_failed_batches", 0) > 0
+        or summary.get("validation_rejected_filing_count", 0) > 0
+        or summary.get("validation_rejection_filing_unresolved", False)
+    ):
         sys.exit(1)
 
 

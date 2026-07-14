@@ -13,17 +13,25 @@ from lib.backfill.state_store import BackfillStateStore
 class _Metrics:
     def __init__(self):
         self.stats = None
+        self.upserted_count = 0
 
     def record_upsert(self, stats):
         self.stats = stats
+
+    def summary_dict(self):
+        return {"upserted": self.upserted_count, "upsert_failed_batches": 0}
 
 
 class _Store:
     def __init__(self):
         self.upserted = []
+        self.failed = []
 
     def mark_upserted(self, filing_id):
         self.upserted.append(filing_id)
+
+    def mark_failed(self, filing_id, *, error="", stage="unknown"):
+        self.failed.append((filing_id, error, stage))
 
 
 class _RunLogger:
@@ -32,6 +40,41 @@ class _RunLogger:
 
     def log_upsert(self, filing_id, detail):
         self.events.append((filing_id, detail))
+
+
+def _upsert_stats(**overrides):
+    values = {
+        "inserted": 0,
+        "updated": 0,
+        "no_change": 0,
+        "rejected_lower_priority": 0,
+        "rejected_filing_conflict": 0,
+        "rejected_filing_identity_unresolved": 0,
+        "failed_batches": 0,
+        "canonical_sync_ids": [],
+        "validation_rejected_record_count": 0,
+        "validation_rejected_filing_count": 0,
+        "validation_rejected_filing_ids": [],
+        "validation_reasons_by_filing": {},
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def _mock_flush_batch(monkeypatch, stats_or_callable):
+    class DB:
+        def __init__(self, path):
+            self.path = path
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("src.migration.migration_db.MigrationDB", DB)
+    if callable(stats_or_callable):
+        batch = stats_or_callable
+    else:
+        batch = lambda records, db, batch_size: stats_or_callable
+    monkeypatch.setattr(cli, "batch_upsert_segments", batch)
 
 
 def _isolated_paths(tmp_path):
@@ -214,7 +257,15 @@ def test_isolated_flush_uses_real_upsert_and_never_canonical_sync(monkeypatch, t
     assert calls == {"batch": 1, "dry": 0, "sync": 0}
     assert metrics.stats is stats
     assert store.upserted == ["filing-1"]
+    assert store.failed == []
     assert run_logger.events[0][1]["canonical_sync_ids"] == [41]
+    assert cli._validation_rejection_summary(metrics) == {
+        "validation_rejected_record_count": 0,
+        "validation_rejected_filing_count": 0,
+        "validation_rejected_filing_ids": [],
+        "validation_reasons_by_filing": {},
+        "validation_rejection_filing_unresolved": False,
+    }
 
 
 def test_isolated_sqlite_persists_verified_internal_id(monkeypatch, tmp_path):
@@ -320,6 +371,253 @@ def test_production_apply_keeps_sqlite_and_canonical_sync(monkeypatch, tmp_path)
     )
 
     assert calls == {"batch": 1, "sync": 1}
+
+
+def test_validation_rejected_filing_is_failed_and_not_upserted(monkeypatch, tmp_path):
+    paths = _isolated_paths(tmp_path)
+    stats = _upsert_stats(
+        validation_rejected_record_count=2,
+        validation_rejected_filing_count=1,
+        validation_rejected_filing_ids=["requested-B"],
+        validation_reasons_by_filing={
+            "requested-B": {"invalid_quarter:INVALID": 2},
+        },
+    )
+    _mock_flush_batch(monkeypatch, stats)
+    metrics, store, run_logger = _Metrics(), _Store(), _RunLogger()
+
+    cli._flush_buffer(
+        [{"segment_name": "Rejected 1"}, {"segment_name": "Rejected 2"}],
+        ["filing-B"],
+        batch_size=100,
+        metrics=metrics,
+        store=store,
+        run_logger=run_logger,
+        dry_run_only=True,
+        isolated_worker_dry_run=True,
+        validation_filing_id_map={"requested-B": "filing-B"},
+        **paths,
+    )
+
+    assert store.upserted == []
+    assert store.failed == [
+        ("filing-B", '{"invalid_quarter:INVALID": 2}', "validation_rejected")
+    ]
+    assert run_logger.events[0][1]["validation_rejected_filing_ids"] == ["filing-B"]
+    assert cli._validation_rejection_summary(metrics)["validation_rejected_record_count"] == 2
+
+
+def test_multi_filing_rejection_preserves_normal_success_and_canonical_sync(monkeypatch, tmp_path):
+    stats = _upsert_stats(
+        inserted=1,
+        canonical_sync_ids=[51],
+        validation_rejected_record_count=1,
+        validation_rejected_filing_count=1,
+        validation_rejected_filing_ids=["requested-B"],
+        validation_reasons_by_filing={
+            "requested-B": {"verified_current_period_contract_mismatch": 1},
+        },
+    )
+    _mock_flush_batch(monkeypatch, stats)
+    monkeypatch.setattr("lib.pipeline.db.load_env", lambda: None)
+    monkeypatch.setattr(
+        "lib.pipeline.db.get_supabase_write_config",
+        lambda: {"rest_url": "https://example.invalid", "headers": {}},
+    )
+    synced = []
+
+    def sync(db_path, ids, rest_url, headers, dry_run):
+        synced.extend(ids)
+        return {"synced_segment_ids": ids}
+
+    monkeypatch.setattr("tools.sync_segments.sync_sqlite_segment_ids", sync)
+    metrics, store = _Metrics(), _Store()
+
+    cli._flush_buffer(
+        [{"segment_name": "Accepted"}, {"segment_name": "Rejected"}],
+        ["filing-A", "filing-B"],
+        str(tmp_path / "apply.db"),
+        100,
+        metrics,
+        store,
+        _RunLogger(),
+        dry_run_only=False,
+        isolated_worker_dry_run=False,
+        validation_filing_id_map={"requested-B": "filing-B"},
+    )
+
+    assert synced == [51]
+    assert store.upserted == ["filing-A"]
+    assert store.failed == [
+        (
+            "filing-B",
+            '{"verified_current_period_contract_mismatch": 1}',
+            "validation_rejected",
+        )
+    ]
+
+
+def test_partial_rejection_syncs_accepted_row_but_does_not_upsert_filing(monkeypatch, tmp_path):
+    stats = _upsert_stats(
+        inserted=1,
+        canonical_sync_ids=[52],
+        validation_rejected_record_count=1,
+        validation_rejected_filing_count=1,
+        validation_rejected_filing_ids=["requested-A"],
+        validation_reasons_by_filing={
+            "requested-A": {"verified_previous_period_contract_mismatch": 1},
+        },
+    )
+    _mock_flush_batch(monkeypatch, stats)
+    monkeypatch.setattr("lib.pipeline.db.load_env", lambda: None)
+    monkeypatch.setattr(
+        "lib.pipeline.db.get_supabase_write_config",
+        lambda: {"rest_url": "https://example.invalid", "headers": {}},
+    )
+    synced = []
+    monkeypatch.setattr(
+        "tools.sync_segments.sync_sqlite_segment_ids",
+        lambda db_path, ids, rest_url, headers, dry_run: (
+            synced.extend(ids) or {"synced_segment_ids": ids}
+        ),
+    )
+    metrics, store = _Metrics(), _Store()
+
+    cli._flush_buffer(
+        [{"segment_name": "Accepted"}, {"segment_name": "Rejected"}],
+        ["filing-A"],
+        str(tmp_path / "partial.db"),
+        100,
+        metrics,
+        store,
+        _RunLogger(),
+        dry_run_only=False,
+        isolated_worker_dry_run=False,
+        validation_filing_id_map={"requested-A": "filing-A"},
+    )
+
+    assert synced == [52]
+    assert store.upserted == []
+    assert store.failed[0][0] == "filing-A"
+
+
+def test_validation_rejections_are_aggregated_across_flushes(monkeypatch, tmp_path):
+    paths = _isolated_paths(tmp_path)
+    pending_stats = [
+        _upsert_stats(
+            validation_rejected_record_count=1,
+            validation_rejected_filing_count=1,
+            validation_rejected_filing_ids=["requested-A"],
+            validation_reasons_by_filing={
+                "requested-A": {"invalid_quarter:INVALID": 1},
+            },
+        ),
+        _upsert_stats(
+            validation_rejected_record_count=2,
+            validation_rejected_filing_count=2,
+            validation_rejected_filing_ids=["requested-A", "requested-B"],
+            validation_reasons_by_filing={
+                "requested-A": {"invalid_quarter:INVALID": 1},
+                "requested-B": {"verified_unknown_period_role": 1},
+            },
+        ),
+    ]
+
+    def batch(records, db, batch_size):
+        return pending_stats.pop(0)
+
+    _mock_flush_batch(monkeypatch, batch)
+    metrics, store = _Metrics(), _Store()
+    id_map = {"requested-A": "filing-A", "requested-B": "filing-B"}
+
+    cli._flush_buffer(
+        [{"segment_name": "A1"}], ["filing-A"], batch_size=100,
+        metrics=metrics, store=store, run_logger=_RunLogger(),
+        dry_run_only=True, isolated_worker_dry_run=True,
+        validation_filing_id_map=id_map, **paths,
+    )
+    cli._flush_buffer(
+        [{"segment_name": "A2"}, {"segment_name": "B"}],
+        ["filing-A", "filing-B"], batch_size=100,
+        metrics=metrics, store=store, run_logger=_RunLogger(),
+        dry_run_only=True, isolated_worker_dry_run=True,
+        validation_filing_id_map=id_map, **paths,
+    )
+
+    summary = cli._validation_rejection_summary(metrics)
+    assert summary["validation_rejected_record_count"] == 3
+    assert summary["validation_rejected_filing_count"] == 2
+    assert summary["validation_rejected_filing_ids"] == ["filing-A", "filing-B"]
+    assert summary["validation_reasons_by_filing"] == {
+        "filing-A": {"invalid_quarter:INVALID": 2},
+        "filing-B": {"verified_unknown_period_role": 1},
+    }
+
+
+def test_unresolved_validation_filing_fails_every_buffer_filing(monkeypatch, tmp_path):
+    paths = _isolated_paths(tmp_path)
+    stats = _upsert_stats(
+        validation_rejected_record_count=1,
+        validation_rejected_filing_count=0,
+        validation_rejected_filing_ids=[],
+        validation_reasons_by_filing={},
+    )
+    _mock_flush_batch(monkeypatch, stats)
+    metrics, store = _Metrics(), _Store()
+
+    cli._flush_buffer(
+        [{"segment_name": "Unknown rejection"}], ["filing-A"],
+        batch_size=100, metrics=metrics, store=store,
+        run_logger=_RunLogger(), dry_run_only=True,
+        isolated_worker_dry_run=True, **paths,
+    )
+
+    assert store.upserted == []
+    assert store.failed == [
+        (
+            "filing-A",
+            "validation_rejection_filing_unresolved",
+            "validation_rejected",
+        )
+    ]
+    summary = cli._validation_rejection_summary(metrics)
+    assert summary["validation_rejected_record_count"] == 1
+    assert summary["validation_rejection_filing_unresolved"] is True
+
+
+def test_existing_failed_batch_still_prevents_all_upserted_updates(monkeypatch, tmp_path):
+    paths = _isolated_paths(tmp_path)
+    _mock_flush_batch(monkeypatch, _upsert_stats(failed_batches=1))
+    metrics, store = _Metrics(), _Store()
+
+    cli._flush_buffer(
+        [{"segment_name": "Batch failure"}], ["filing-A"],
+        batch_size=100, metrics=metrics, store=store,
+        run_logger=_RunLogger(), dry_run_only=True,
+        isolated_worker_dry_run=True, **paths,
+    )
+
+    assert store.upserted == []
+    assert store.failed == []
+
+
+def test_duplicate_requested_id_mapping_is_rejected_without_ticker_fallback():
+    filings = [
+        SimpleNamespace(
+            filing_id="filing-A",
+            requested_disclosure_no="requested-same",
+        ),
+        SimpleNamespace(
+            filing_id="filing-B",
+            requested_disclosure_no="requested-same",
+        ),
+    ]
+
+    with pytest.raises(
+        RuntimeError,
+        match="STOP_BACKFILL_REJECTION_CALLER_ID_MAPPING_UNRESOLVED",
+    ):
+        cli._build_validation_filing_id_map(filings)
 
 
 @pytest.mark.parametrize("escaped", ["decision_db", "state_db", "log_jsonl", "filing_list"])
@@ -615,6 +913,28 @@ def test_cli_passes_manifest_scope_and_require_all_flags(monkeypatch, tmp_path):
     )
     assert captured["scope_pending_to_manifest"] is True
     assert captured["require_all_manifest_pending"] is True
+
+
+def test_cli_exits_nonzero_when_validation_rejection_is_reported(monkeypatch, tmp_path):
+    manifest = tmp_path / "chunk.json"
+    _write_manifest(manifest, [_manifest_record(1)])
+
+    def run_backfill(**kwargs):
+        return {
+            "summary": {
+                "validation_rejected_record_count": 1,
+                "validation_rejected_filing_count": 1,
+                "validation_rejected_filing_ids": ["manifest-001"],
+                "validation_reasons_by_filing": {
+                    "manifest-001": {"invalid_quarter:INVALID": 1},
+                },
+            }
+        }
+
+    with pytest.raises(SystemExit) as exc_info:
+        _invoke(monkeypatch, ["--filing-list", str(manifest)], run_backfill)
+
+    assert exc_info.value.code == 1
 
 
 def test_cli_rejects_require_all_without_manifest_scope(monkeypatch, tmp_path):
