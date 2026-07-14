@@ -228,3 +228,131 @@ def test_current_cutoff_is_captured_once(monkeypatch):
     monkeypatch.setattr(reconcile, "_get_previous_reconcile_cutoff", lambda *_: None)
     reconcile.run(dry_run=True)
     assert len(calls) == 1
+
+
+def _run_summary(
+    monkeypatch,
+    *,
+    existing: int,
+    new: int,
+    stuck: int = 0,
+    rebuild: int = 0,
+    duplicates: int = 0,
+    created: int = 0,
+    reused: int = 0,
+    duplicate_open: int = 0,
+    classification_status: str = "complete",
+):
+    failed_status = "success" if classification_status == "complete" else "failed"
+    failed = {
+        "status": failed_status,
+        "failed_jobs_total": existing + new,
+        "reconcile_scanned": existing + new,
+        "existing_backlog": existing,
+        "new_critical": new,
+        "unclassified_failed": 0 if classification_status == "complete" else 1,
+        "issue_rows_created": created,
+        "issue_rows_reused": reused,
+        "duplicate_open_issues": duplicate_open,
+        "classification_status": classification_status,
+        "issue_write_status": "success",
+        "has_more": False,
+        "oldest_failed_at": PREVIOUS.isoformat(),
+        "latest_failed_at": CURRENT.isoformat(),
+        "reason_counts": {},
+    }
+    monkeypatch.setattr(reconcile, "_utc_now", lambda: CURRENT)
+    monkeypatch.setattr(reconcile, "load_env", lambda *_: None)
+    monkeypatch.setattr(reconcile, "get_supabase_config", lambda: {})
+    monkeypatch.setattr(reconcile, "_get_previous_reconcile_cutoff", lambda *_: PREVIOUS)
+    monkeypatch.setattr(reconcile, "check_stuck_jobs", lambda *_: stuck)
+    monkeypatch.setattr(reconcile, "check_failed_jobs", lambda *args, **kwargs: failed)
+    monkeypatch.setattr(reconcile, "check_rebuild_backlog", lambda *_: rebuild)
+    monkeypatch.setattr(reconcile, "check_financials_duplicates", lambda *_: duplicates)
+    monkeypatch.setattr(reconcile, "check_quarantine_spike", lambda *_: 999)
+    return reconcile.run(dry_run=True)
+
+
+def test_issue_total_excludes_existing_100(monkeypatch):
+    result = _run_summary(monkeypatch, existing=100, new=0)
+    assert result["existing_backlog"] == 100
+    assert result["new_critical"] == 0
+    assert result["non_failed_issues_total"] == 0
+    assert result["failed_issue_contribution"] == 0
+    assert result["issues_total"] == 0
+
+
+def test_issue_total_excludes_existing_201(monkeypatch):
+    result = _run_summary(monkeypatch, existing=201, new=0)
+    assert result["issues_total"] == 0
+
+
+def test_one_new_critical_contributes_one(monkeypatch):
+    result = _run_summary(monkeypatch, existing=100, new=1)
+    assert result["failed_issue_contribution"] == 1
+    assert result["issues_total"] == 1
+
+
+def test_new_three_plus_other_two_totals_five(monkeypatch):
+    result = _run_summary(monkeypatch, existing=100, new=3, stuck=1, rebuild=1)
+    assert result["non_failed_issues_total"] == 2
+    assert result["issues_total"] == 5
+
+
+def test_other_nine_remains_nine(monkeypatch):
+    result = _run_summary(monkeypatch, existing=100, new=0, stuck=9)
+    assert result["issues_total"] == 9
+
+
+def test_other_ten_remains_ten(monkeypatch):
+    result = _run_summary(monkeypatch, existing=100, new=0, rebuild=10)
+    assert result["issues_total"] == 10
+
+
+def test_created_issue_rows_do_not_affect_total(monkeypatch):
+    result = _run_summary(monkeypatch, existing=100, new=1, created=7)
+    assert result["issue_rows_created"] == 7
+    assert result["issues_total"] == 1
+
+
+def test_reused_issue_rows_do_not_affect_total(monkeypatch):
+    result = _run_summary(monkeypatch, existing=100, new=1, reused=8)
+    assert result["issue_rows_reused"] == 8
+    assert result["issues_total"] == 1
+
+
+def test_duplicate_open_issues_do_not_affect_total(monkeypatch):
+    result = _run_summary(monkeypatch, existing=100, new=1, duplicate_open=12)
+    assert result["duplicate_open_issues"] == 12
+    assert result["issues_total"] == 1
+
+
+def test_unknown_classification_keeps_failed_status(monkeypatch):
+    result = _run_summary(
+        monkeypatch,
+        existing=100,
+        new=0,
+        classification_status="unknown",
+    )
+    assert result["classification_status"] == "unknown"
+    assert result["status"] == "failed"
+
+
+def test_each_existing_non_failed_component_is_included(monkeypatch):
+    result = _run_summary(
+        monkeypatch,
+        existing=100,
+        new=0,
+        stuck=2,
+        rebuild=3,
+        duplicates=4,
+    )
+    assert result["non_failed_issues_total"] == 9
+    assert result["issues_total"] == 9
+    assert result["checks"] == {
+        "stuck_jobs": 2,
+        "failed_jobs": 100,
+        "rebuild_backlog": 3,
+        "financials_duplicates": 4,
+        "quarantine_today": 999,
+    }

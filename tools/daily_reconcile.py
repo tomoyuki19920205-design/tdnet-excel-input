@@ -464,9 +464,12 @@ def run(*, dry_run: bool = False) -> dict:
     current_cutoff = _utc_now()
     results = {}
     issues_total = 0
+    non_failed_issues_total = 0
     summary = {
         "status": "failed",
         "issues_total": 0,
+        "non_failed_issues_total": 0,
+        "failed_issue_contribution": 0,
         "checks": results,
         "failed_jobs_total": None,
         "reconcile_scanned": None,
@@ -498,7 +501,8 @@ def run(*, dry_run: bool = False) -> dict:
 
         n = check_stuck_jobs(config, dry_run)
         results["stuck_jobs"] = n
-        issues_total += n
+        non_failed_issues_total += n
+        summary["non_failed_issues_total"] = non_failed_issues_total
 
         failed = check_failed_jobs(
             config,
@@ -507,7 +511,6 @@ def run(*, dry_run: bool = False) -> dict:
             current_cutoff=current_cutoff,
         )
         results["failed_jobs"] = failed["failed_jobs_total"]
-        issues_total += failed["failed_jobs_total"]
         for key in (
             "failed_jobs_total", "reconcile_scanned", "existing_backlog",
             "new_critical", "unclassified_failed", "issue_rows_created",
@@ -516,17 +519,23 @@ def run(*, dry_run: bool = False) -> dict:
             "latest_failed_at", "reason_counts",
         ):
             summary[key] = failed[key]
+        summary["failed_issue_contribution"] = failed["new_critical"]
+        issues_total = non_failed_issues_total + failed["new_critical"]
         if failed["status"] == "failed":
             summary["issues_total"] = issues_total
             return summary
 
         n = check_rebuild_backlog(config, dry_run)
         results["rebuild_backlog"] = n
-        issues_total += n
+        non_failed_issues_total += n
+        summary["non_failed_issues_total"] = non_failed_issues_total
+        issues_total = non_failed_issues_total + summary["failed_issue_contribution"]
 
         n = check_financials_duplicates(config, dry_run)
         results["financials_duplicates"] = n
-        issues_total += n
+        non_failed_issues_total += n
+        summary["non_failed_issues_total"] = non_failed_issues_total
+        issues_total = non_failed_issues_total + summary["failed_issue_contribution"]
 
         n = check_quarantine_spike(config, dry_run)
         results["quarantine_today"] = n
