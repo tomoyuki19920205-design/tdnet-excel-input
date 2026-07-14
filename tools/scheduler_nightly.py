@@ -363,7 +363,7 @@ def main() -> int:
         elapsed = time.monotonic() - t_start
         _print_summary(steps, elapsed)
 
-        failed = [s for s in steps if s.status in ("error", "timeout")]
+        failed = [s for s in steps if s.status in ("warning", "error", "timeout")]
         return 1 if failed else 0
 
 

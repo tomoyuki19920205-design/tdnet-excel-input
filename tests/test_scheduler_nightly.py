@@ -83,7 +83,7 @@ def test_failed_price_fetch_skips_sync_and_later_steps_continue():
 
     names = _names(calls)
     sync_result = next(step for step in summary if step.name == "market-data-sync")
-    assert return_code == 0
+    assert return_code == 1
     assert "market-data-sync" not in names
     assert sync_result.status == "warning"
     assert sync_result.stdout_tail == "SKIPPED: market-price-fetch failed rc=1"
@@ -97,7 +97,7 @@ def test_failed_market_data_sync_does_not_stop_later_steps():
     )
 
     names = _names(calls)
-    assert return_code == 0
+    assert return_code == 1
     assert names.index("market-data-sync") < names.index("per-share-sync")
     assert "edinet-order-extract-nightly" in names
 
@@ -141,7 +141,37 @@ def test_existing_edinet_extract_failure_still_skips_event_step():
     event_result = next(
         step for step in summary if step.name == "edinet-order-event-nightly"
     )
-    assert return_code == 0
+    assert return_code == 1
     assert "edinet-order-event-nightly" not in names
     assert event_result.status == "warning"
     assert event_result.stdout_tail == "SKIPPED: extract step failed"
+
+
+def test_scheduler_returns_nonzero_when_step_status_is_error():
+    original_result = _result
+
+    def result_with_error(name, rc=0):
+        result = original_result(name, rc)
+        if name == "ingest":
+            result.status = "error"
+        return result
+
+    with patch(f"{__name__}._result", side_effect=result_with_error):
+        return_code, _calls, _summary = _run_nightly()
+
+    assert return_code == 1
+
+
+def test_scheduler_returns_nonzero_when_step_status_is_timeout():
+    original_result = _result
+
+    def result_with_timeout(name, rc=0):
+        result = original_result(name, rc)
+        if name == "ingest":
+            result.status = "timeout"
+        return result
+
+    with patch(f"{__name__}._result", side_effect=result_with_timeout):
+        return_code, _calls, _summary = _run_nightly()
+
+    assert return_code == 1
