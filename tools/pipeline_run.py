@@ -105,7 +105,8 @@ def _run_process(dry_run: bool, skip_jquants: bool, mode: str = "nightly",
         )
         step.detail = result
         push_errors = result.get("push", {}).get("errors", 0)
-        step.status = "success" if push_errors == 0 else "failed"
+        canonical_status = (result.get("canonical") or {}).get("status")
+        step.status = "success" if push_errors == 0 and canonical_status == "ok" else "failed"
     except Exception as e:
         step.status = "failed"
         step.detail = {"error": str(e)}

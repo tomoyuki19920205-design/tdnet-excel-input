@@ -46,7 +46,7 @@ def _run_pipeline_mocked(
         mock_process_mod.run_batch.side_effect = process_error
     else:
         mock_process_mod.run_batch.return_value = process_return or {
-            "push": {"errors": 0}, "jquants": None
+            "push": {"errors": 0}, "canonical": {"status": "ok"}, "jquants": None
         }
 
     if serving_error:
@@ -105,7 +105,7 @@ def _run_process_batch_main(*, result=None, error=None):
 
 def test_process_batch_success_exits_zero():
     exit_code, mock_run_batch = _run_process_batch_main(
-        result={"push": {"errors": 0}},
+        result={"push": {"errors": 0}, "canonical": {"status": "ok"}},
     )
 
     assert exit_code == 0
@@ -114,7 +114,25 @@ def test_process_batch_success_exits_zero():
 
 def test_process_batch_push_errors_exit_nonzero():
     exit_code, mock_run_batch = _run_process_batch_main(
-        result={"push": {"errors": 1}},
+        result={"push": {"errors": 1}, "canonical": {"status": "ok"}},
+    )
+
+    assert exit_code == 1
+    mock_run_batch.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "canonical_result",
+    [
+        {"status": "warning"},
+        {"status": "error"},
+        {},
+        None,
+    ],
+)
+def test_process_batch_canonical_non_ok_exits_nonzero(canonical_result):
+    exit_code, mock_run_batch = _run_process_batch_main(
+        result={"push": {"errors": 0}, "canonical": canonical_result},
     )
 
     assert exit_code == 1
