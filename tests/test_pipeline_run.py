@@ -43,9 +43,9 @@ def _run_pipeline_mocked(
         }
 
     if process_error:
-        mock_process_mod.run.side_effect = process_error
+        mock_process_mod.run_batch.side_effect = process_error
     else:
-        mock_process_mod.run.return_value = process_return or {
+        mock_process_mod.run_batch.return_value = process_return or {
             "push": {"errors": 0}, "jquants": None
         }
 
@@ -76,6 +76,58 @@ def _run_pipeline_mocked(
         )
 
     return result, mock_ingest_mod, mock_process_mod, mock_serving_mod, mock_notify_mod
+
+
+def _run_process_batch_main(*, result=None, error=None):
+    """process-batch CLI を外部接続なしで実行し、終了コードを返す。"""
+    from tools import pipeline_run
+
+    mock_process_mod = MagicMock()
+    if error is not None:
+        mock_process_mod.run_batch.side_effect = error
+    else:
+        mock_process_mod.run_batch.return_value = result
+
+    mock_pipeline_run = MagicMock()
+    mock_pipeline_run.__enter__.return_value = MagicMock()
+    mock_pipeline_run.__exit__.return_value = False
+
+    with patch.dict("sys.modules", {"tools.filings_process": mock_process_mod}), \
+         patch.object(pipeline_run, "load_env"), \
+         patch.object(pipeline_run, "PipelineRun", return_value=mock_pipeline_run), \
+         patch("lib.pipeline.logging_utils.cleanup_stale_runs"), \
+         patch.object(sys, "argv", ["pipeline_run.py", "process-batch"]):
+        with pytest.raises(SystemExit) as exc_info:
+            pipeline_run.main()
+
+    return exc_info.value.code, mock_process_mod.run_batch
+
+
+def test_process_batch_success_exits_zero():
+    exit_code, mock_run_batch = _run_process_batch_main(
+        result={"push": {"errors": 0}},
+    )
+
+    assert exit_code == 0
+    mock_run_batch.assert_called_once()
+
+
+def test_process_batch_push_errors_exit_nonzero():
+    exit_code, mock_run_batch = _run_process_batch_main(
+        result={"push": {"errors": 1}},
+    )
+
+    assert exit_code == 1
+    mock_run_batch.assert_called_once()
+
+
+def test_process_batch_exception_exits_nonzero():
+    exit_code, mock_run_batch = _run_process_batch_main(
+        error=RuntimeError("test process batch failure"),
+    )
+
+    assert exit_code == 1
+    mock_run_batch.assert_called_once()
 
 
 # ============================================================
