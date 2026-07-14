@@ -457,6 +457,162 @@ class TestProvenanceAwareBatchUpsert:
         assert row_id not in stats.canonical_sync_ids
         db.close()
 
+    def test_all_valid_records_report_zero_validation_rejections(self, tmp_path):
+        db = MigrationDB(str(tmp_path / "all-valid.db"))
+
+        stats = batch_upsert_segments(
+            [
+                self._record("Current"),
+                self._record(
+                    "Previous",
+                    period="2025-05-31",
+                    _segment_period_role="previous",
+                ),
+            ],
+            db,
+        )
+
+        assert stats.validation_rejected_record_count == 0
+        assert stats.validation_rejected_filing_count == 0
+        assert stats.validation_rejected_filing_ids == []
+        assert stats.validation_reasons_by_filing == {}
+        assert stats.inserted == 2
+        assert len(stats.canonical_sync_ids) == 2
+        db.close()
+
+    def test_single_validation_rejection_reports_filing_and_reason(self, tmp_path):
+        db = MigrationDB(str(tmp_path / "single-rejection.db"))
+        rejected = self._record(quarter="INVALID")
+
+        stats = batch_upsert_segments([rejected], db)
+
+        filing_id = rejected["_requested_disclosure_no"]
+        assert stats.validation_rejected_record_count == 1
+        assert stats.validation_rejected_filing_count == 1
+        assert stats.validation_rejected_filing_ids == [filing_id]
+        assert stats.validation_reasons_by_filing == {
+            filing_id: {"invalid_quarter:INVALID": 1},
+        }
+        assert stats.canonical_sync_ids == []
+        assert db._conn.execute("SELECT COUNT(*) FROM segment_financials").fetchone()[0] == 0
+        db.close()
+
+    def test_validation_reasons_count_duplicates_and_keep_distinct_codes(self, tmp_path):
+        db = MigrationDB(str(tmp_path / "reason-counts.db"))
+        filing_id = "requested-reason-counts"
+        records = [
+            self._record(
+                "Invalid quarter 1",
+                quarter="INVALID",
+                _requested_disclosure_no=filing_id,
+            ),
+            self._record(
+                "Invalid quarter 2",
+                quarter="INVALID",
+                _requested_disclosure_no=filing_id,
+            ),
+            self._record(
+                "Current mismatch",
+                period="2026-06-30",
+                _requested_disclosure_no=filing_id,
+            ),
+        ]
+
+        stats = batch_upsert_segments(records, db)
+
+        assert stats.validation_rejected_record_count == 3
+        assert stats.validation_rejected_filing_count == 1
+        assert stats.validation_reasons_by_filing[filing_id] == {
+            "invalid_quarter:INVALID": 2,
+            "verified_current_period_contract_mismatch": 1,
+        }
+        assert stats.canonical_sync_ids == []
+        db.close()
+
+    def test_mixed_filings_preserve_accepted_ids_and_report_rejected_filing(self, tmp_path):
+        db = MigrationDB(str(tmp_path / "mixed-filings.db"))
+        accepted = self._record(
+            "Accepted filing",
+            _requested_disclosure_no="requested-A",
+            _internal_document_id="internal-A",
+            tdnet_doc_id="internal-A",
+        )
+        rejected = self._record(
+            "Rejected filing",
+            quarter="INVALID",
+            _requested_disclosure_no="requested-B",
+            _internal_document_id="internal-B",
+            tdnet_doc_id="internal-B",
+        )
+
+        stats = batch_upsert_segments([accepted, rejected], db)
+
+        accepted_id = db.get_segment_id(
+            company_code=accepted["ticker"],
+            fiscal_year_end=accepted["period"],
+            quarter=accepted["quarter"],
+            segment_name=accepted["segment_name"],
+        )
+        assert stats.inserted == 1
+        assert stats.canonical_sync_ids == [accepted_id]
+        assert stats.validation_rejected_filing_ids == ["requested-B"]
+        assert stats.validation_reasons_by_filing == {
+            "requested-B": {"invalid_quarter:INVALID": 1},
+        }
+        assert db._conn.execute("SELECT COUNT(*) FROM segment_financials").fetchone()[0] == 1
+        db.close()
+
+    def test_partial_rejection_is_reported_for_same_filing(self, tmp_path):
+        db = MigrationDB(str(tmp_path / "partial-filing.db"))
+        filing_id = "requested-partial"
+        accepted = self._record("Accepted", _requested_disclosure_no=filing_id)
+        rejected = self._record(
+            "Rejected",
+            quarter="INVALID",
+            _requested_disclosure_no=filing_id,
+        )
+
+        stats = batch_upsert_segments([accepted, rejected], db)
+
+        accepted_id = db.get_segment_id(
+            company_code=accepted["ticker"],
+            fiscal_year_end=accepted["period"],
+            quarter=accepted["quarter"],
+            segment_name=accepted["segment_name"],
+        )
+        assert stats.validation_rejected_record_count == 1
+        assert stats.validation_rejected_filing_count == 1
+        assert stats.validation_rejected_filing_ids == [filing_id]
+        assert stats.validation_reasons_by_filing[filing_id]["invalid_quarter:INVALID"] == 1
+        assert stats.canonical_sync_ids == [accepted_id]
+        db.close()
+
+    def test_validation_tracking_fields_are_not_persisted(self, tmp_path):
+        db = MigrationDB(str(tmp_path / "tracking-fields.db"))
+        accepted = self._record(
+            "Accepted",
+            filing_id="manifest-filing-A",
+            _requested_disclosure_no="requested-A",
+        )
+        rejected = self._record(
+            "Rejected",
+            quarter="INVALID",
+            filing_id="manifest-filing-B",
+            _requested_disclosure_no="requested-B",
+        )
+
+        stats = batch_upsert_segments([accepted, rejected], db)
+
+        columns = {
+            row[1] for row in db._conn.execute("PRAGMA table_info(segment_financials)")
+        }
+        assert stats.validation_rejected_filing_ids == ["manifest-filing-B"]
+        assert "filing_id" not in columns
+        assert "_requested_disclosure_no" not in columns
+        assert "_internal_document_id" not in columns
+        assert db._conn.execute("SELECT COUNT(*) FROM segment_financials").fetchone()[0] == 1
+        db.close()
+
     def test_dry_run_performs_no_sqlite_write(self, tmp_path):
         db = MigrationDB(str(tmp_path / "dry-run.db"))
         changes_before = db._conn.total_changes
@@ -574,12 +730,13 @@ class TestOptionalEarningsSummaries:
 
     def test_non_fy_without_documents_is_rejected_without_stopping_apply(self, tmp_path):
         db = MockDB(str(tmp_path / "non-fy.db"), with_documents=False)
-        rejected = _make_1q_segment()
+        rejected = _make_1q_segment(tdnet_doc_id="rejected-filing")
         accepted = _make_fy_segment(segment_name="Accepted")
 
         stats = batch_upsert_segments([rejected, accepted], db)
 
         assert stats.inserted == 1
+        assert stats.validation_rejected_filing_ids == ["rejected-filing"]
         assert rejected["period"] == "2023-06-30"
         assert db._conn.execute("SELECT COUNT(*) FROM segment_financials").fetchone()[0] == 1
         db.close()

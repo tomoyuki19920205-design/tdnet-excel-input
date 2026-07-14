@@ -23,10 +23,44 @@ class BatchUpsertStats:
     rejected_filing_conflict: int = 0
     rejected_filing_identity_unresolved: int = 0
     canonical_sync_ids: list[int] = field(default_factory=list)
+    validation_rejected_record_count: int = 0
+    validation_rejected_filing_count: int = 0
+    validation_rejected_filing_ids: list[str] = field(default_factory=list)
+    validation_reasons_by_filing: dict[str, dict[str, int]] = field(default_factory=dict)
 
     @property
     def average_batch_size(self) -> float:
         return self.total_records / max(self.total_batches, 1)
+
+
+def _validation_filing_id(rec: dict) -> str:
+    """Return the existing filing identifier carried by a worker record."""
+    for field_name in (
+        "filing_id",
+        "_requested_disclosure_no",
+        "requested_disclosure_no",
+        "_internal_document_id",
+        "tdnet_doc_id",
+    ):
+        value = rec.get(field_name)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    raise ValueError("validation_rejected_filing_id_unresolved")
+
+
+def _record_validation_rejection(
+    stats: BatchUpsertStats,
+    rec: dict,
+    reason: str,
+) -> None:
+    filing_id = _validation_filing_id(rec)
+    if filing_id not in stats.validation_reasons_by_filing:
+        stats.validation_reasons_by_filing[filing_id] = {}
+        stats.validation_rejected_filing_ids.append(filing_id)
+    reason_counts = stats.validation_reasons_by_filing[filing_id]
+    reason_counts[reason] = reason_counts.get(reason, 0) + 1
+    stats.validation_rejected_record_count += 1
+    stats.validation_rejected_filing_count = len(stats.validation_rejected_filing_ids)
 
 
 def _has_earnings_summaries_table(conn) -> bool:
@@ -308,6 +342,7 @@ def dry_run_upsert_segments(records: list[dict], decision_db) -> BatchUpsertStat
         if is_ok:
             stats.inserted += 1
         else:
+            _record_validation_rejection(stats, rec, reason)
             stats.failed_batches += 1
 
         company_name = "Unknown"
@@ -434,6 +469,7 @@ def batch_upsert_segments(
                     documents_available=documents_available,
                 )
                 if not is_ok:
+                    _record_validation_rejection(stats, rec, reason)
                     logger.warning(
                         "[upsert_skip] Ticker:%s | OrigPeriod:%s | Q:%s | Reason:%s | tdnet_doc_id:%s",
                         rec.get("ticker"), rec.get("period"), rec.get("quarter"), reason, rec.get("tdnet_doc_id")
