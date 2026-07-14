@@ -431,6 +431,11 @@ def test_multi_filing_rejection_preserves_normal_success_and_canonical_sync(monk
         return {"synced_segment_ids": ids}
 
     monkeypatch.setattr("tools.sync_segments.sync_sqlite_segment_ids", sync)
+    monkeypatch.setattr(
+        cli,
+        "_canonical_sync_ids_by_filing",
+        lambda *args, **kwargs: {"filing-A": [51]},
+    )
     metrics, store = _Metrics(), _Store()
 
     cli._flush_buffer(
@@ -928,6 +933,404 @@ def test_cli_exits_nonzero_when_validation_rejection_is_reported(monkeypatch, tm
                 "validation_reasons_by_filing": {
                     "manifest-001": {"invalid_quarter:INVALID": 1},
                 },
+            }
+        }
+
+    with pytest.raises(SystemExit) as exc_info:
+        _invoke(monkeypatch, ["--filing-list", str(manifest)], run_backfill)
+
+    assert exc_info.value.code == 1
+
+
+def test_canonical_sync_exception_fails_filing_after_sqlite_commit(monkeypatch, tmp_path):
+    stats = _upsert_stats(inserted=2, canonical_sync_ids=[61, 62])
+    _mock_flush_batch(monkeypatch, stats)
+    monkeypatch.setattr(
+        cli,
+        "_canonical_sync_ids_by_filing",
+        lambda *args, **kwargs: {"filing-A": [61, 62]},
+    )
+    monkeypatch.setattr("lib.pipeline.db.load_env", lambda: None)
+    monkeypatch.setattr(
+        "lib.pipeline.db.get_supabase_write_config",
+        lambda: {"rest_url": "https://example.invalid", "headers": {}},
+    )
+
+    def fail_sync(*args, **kwargs):
+        raise RuntimeError("secret remote detail must not enter summary")
+
+    monkeypatch.setattr("tools.sync_segments.sync_sqlite_segment_ids", fail_sync)
+    metrics, store = _Metrics(), _Store()
+
+    cli._flush_buffer(
+        [{"_requested_disclosure_no": "requested-A"}],
+        ["filing-A"],
+        str(tmp_path / "apply.db"),
+        100,
+        metrics,
+        store,
+        _RunLogger(),
+        dry_run_only=False,
+        validation_filing_id_map={"requested-A": "filing-A"},
+    )
+
+    assert metrics.stats is stats
+    assert store.upserted == []
+    assert store.failed == [
+        ("filing-A", "canonical_sync_exception", "canonical_sync_failed")
+    ]
+    assert cli._canonical_sync_failure_summary(metrics) == {
+        "canonical_sync_failed_record_count": 2,
+        "canonical_sync_failed_filing_count": 1,
+        "canonical_sync_failed_filing_ids": ["filing-A"],
+        "canonical_sync_failures_by_filing": {
+            "filing-A": {"canonical_sync_exception": 2}
+        },
+        "canonical_sync_filing_unresolved": False,
+    }
+
+
+def test_canonical_sync_exception_preserves_real_sqlite_accepted_row(
+    monkeypatch, tmp_path
+):
+    requested_id = "20260713591788"
+    internal_id = "20260713340570"
+    record = {
+        "ticker": "4057", "period": "2026-05-31", "quarter": "FY",
+        "segment_name": "Core", "segment_order": 1,
+        "segment_sales": 100.0, "segment_profit": 20.0,
+        "raw_profit_label": "operating profit", "source": "backfill_xbrl",
+        "segment_name_norm": "core", "extractor_route": "xbrl",
+        "source_doc_type": "earnings_summary", "disclosure_date": "2026-07-13",
+        "tdnet_doc_id": internal_id, "row_type": "segment",
+        "_identity_verified": True,
+        "_identity_verdict": "official_linked_xbrl_match",
+        "_requested_disclosure_no": requested_id,
+        "_internal_document_id": internal_id,
+        "_canonical_expected_period": "2026-05-31",
+        "_canonical_expected_quarter": "FY",
+        "_resolved_zip_sha256": "a" * 64,
+        "_verified_xbrl_same_zip": True,
+        "_worker_version": "v4", "_segment_period_role": "current",
+    }
+    db_path = tmp_path / "apply.db"
+    monkeypatch.setattr("lib.pipeline.db.load_env", lambda: None)
+    monkeypatch.setattr(
+        "lib.pipeline.db.get_supabase_write_config",
+        lambda: {"rest_url": "https://example.invalid", "headers": {}},
+    )
+    monkeypatch.setattr(
+        "tools.sync_segments.sync_sqlite_segment_ids",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("remote failed")),
+    )
+    metrics, store = _Metrics(), _Store()
+
+    cli._flush_buffer(
+        [record], ["manifest-A"], str(db_path), 100,
+        metrics, store, _RunLogger(), dry_run_only=False,
+        validation_filing_id_map={requested_id: "manifest-A"},
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        saved = conn.execute(
+            "SELECT id, tdnet_doc_id FROM segment_financials "
+            "WHERE company_code='4057'"
+        ).fetchall()
+    assert len(saved) == 1
+    assert saved[0][1] == internal_id
+    assert metrics.stats.canonical_sync_ids == [saved[0][0]]
+    assert store.upserted == []
+    assert store.failed == [
+        ("manifest-A", "canonical_sync_exception", "canonical_sync_failed")
+    ]
+
+
+def test_canonical_sync_separates_success_and_failure_by_filing(monkeypatch, tmp_path):
+    stats = _upsert_stats(inserted=2, canonical_sync_ids=[71, 72])
+    _mock_flush_batch(monkeypatch, stats)
+    monkeypatch.setattr(
+        cli,
+        "_canonical_sync_ids_by_filing",
+        lambda *args, **kwargs: {"filing-A": [71], "filing-B": [72]},
+    )
+    monkeypatch.setattr("lib.pipeline.db.load_env", lambda: None)
+    monkeypatch.setattr(
+        "lib.pipeline.db.get_supabase_write_config",
+        lambda: {"rest_url": "https://example.invalid", "headers": {}},
+    )
+    calls = []
+
+    def sync(db_path, ids, rest_url, headers, dry_run):
+        calls.append(list(ids))
+        if ids == [72]:
+            return {"sync_error": "remote detail", "synced_segment_ids": []}
+        return {"synced_segment_ids": ids}
+
+    monkeypatch.setattr("tools.sync_segments.sync_sqlite_segment_ids", sync)
+    metrics, store = _Metrics(), _Store()
+
+    cli._flush_buffer(
+        [{"segment_name": "A"}, {"segment_name": "B"}],
+        ["filing-A", "filing-B"],
+        str(tmp_path / "apply.db"),
+        100,
+        metrics,
+        store,
+        _RunLogger(),
+        dry_run_only=False,
+    )
+
+    assert calls == [[71], [72]]
+    assert store.upserted == ["filing-A"]
+    assert store.failed == [
+        ("filing-B", "canonical_sync_error", "canonical_sync_failed")
+    ]
+    assert cli._canonical_sync_failure_summary(metrics)[
+        "canonical_sync_failed_filing_ids"
+    ] == ["filing-B"]
+
+
+@pytest.mark.parametrize(
+    ("sync_result", "expected_reason"),
+    [
+        ({"sync_error": "remote detail", "synced_segment_ids": []}, "canonical_sync_error"),
+        ({"synced_segment_ids": []}, "canonical_sync_readback_mismatch"),
+    ],
+)
+def test_canonical_sync_formal_failure_signals_are_propagated(
+    monkeypatch, tmp_path, sync_result, expected_reason
+):
+    _mock_flush_batch(monkeypatch, _upsert_stats(inserted=1, canonical_sync_ids=[81]))
+    monkeypatch.setattr(
+        cli,
+        "_canonical_sync_ids_by_filing",
+        lambda *args, **kwargs: {"filing-A": [81]},
+    )
+    monkeypatch.setattr("lib.pipeline.db.load_env", lambda: None)
+    monkeypatch.setattr(
+        "lib.pipeline.db.get_supabase_write_config",
+        lambda: {"rest_url": "https://example.invalid", "headers": {}},
+    )
+    monkeypatch.setattr(
+        "tools.sync_segments.sync_sqlite_segment_ids",
+        lambda *args, **kwargs: sync_result,
+    )
+    metrics, store = _Metrics(), _Store()
+
+    cli._flush_buffer(
+        [{}], ["filing-A"], str(tmp_path / "apply.db"), 100,
+        metrics, store, _RunLogger(), dry_run_only=False,
+    )
+
+    assert store.upserted == []
+    assert store.failed == [("filing-A", expected_reason, "canonical_sync_failed")]
+
+
+def test_canonical_sync_failures_aggregate_across_flushes(monkeypatch, tmp_path):
+    pending_stats = [
+        _upsert_stats(inserted=1, canonical_sync_ids=[91]),
+        _upsert_stats(inserted=2, canonical_sync_ids=[92, 93]),
+    ]
+    _mock_flush_batch(monkeypatch, lambda *args, **kwargs: pending_stats.pop(0))
+    monkeypatch.setattr(
+        cli,
+        "_canonical_sync_ids_by_filing",
+        lambda db, ids, *args, **kwargs: {
+            "filing-A" if ids == [91] else "filing-B": list(ids)
+        },
+    )
+    monkeypatch.setattr("lib.pipeline.db.load_env", lambda: None)
+    monkeypatch.setattr(
+        "lib.pipeline.db.get_supabase_write_config",
+        lambda: {"rest_url": "https://example.invalid", "headers": {}},
+    )
+    monkeypatch.setattr(
+        "tools.sync_segments.sync_sqlite_segment_ids",
+        lambda *args, **kwargs: {"sync_error": "remote detail"},
+    )
+    metrics, store = _Metrics(), _Store()
+
+    for filing_id in ("filing-A", "filing-B"):
+        cli._flush_buffer(
+            [{}], [filing_id], str(tmp_path / "apply.db"), 100,
+            metrics, store, _RunLogger(), dry_run_only=False,
+        )
+
+    summary = cli._canonical_sync_failure_summary(metrics)
+    assert summary["canonical_sync_failed_record_count"] == 3
+    assert summary["canonical_sync_failed_filing_count"] == 2
+    assert summary["canonical_sync_failed_filing_ids"] == ["filing-A", "filing-B"]
+    assert summary["canonical_sync_failures_by_filing"] == {
+        "filing-A": {"canonical_sync_error": 1},
+        "filing-B": {"canonical_sync_error": 2},
+    }
+
+
+def test_same_filing_failure_in_one_flush_blocks_later_success(monkeypatch, tmp_path):
+    pending_stats = [
+        _upsert_stats(inserted=1, canonical_sync_ids=[94]),
+        _upsert_stats(no_change=1, canonical_sync_ids=[95]),
+    ]
+    _mock_flush_batch(monkeypatch, lambda *args, **kwargs: pending_stats.pop(0))
+    monkeypatch.setattr(
+        cli,
+        "_canonical_sync_ids_by_filing",
+        lambda db, ids, *args, **kwargs: {"filing-A": list(ids)},
+    )
+    monkeypatch.setattr("lib.pipeline.db.load_env", lambda: None)
+    monkeypatch.setattr(
+        "lib.pipeline.db.get_supabase_write_config",
+        lambda: {"rest_url": "https://example.invalid", "headers": {}},
+    )
+    results = [
+        {"sync_error": "first flush failed", "synced_segment_ids": []},
+        {"synced_segment_ids": [95]},
+    ]
+    monkeypatch.setattr(
+        "tools.sync_segments.sync_sqlite_segment_ids",
+        lambda *args, **kwargs: results.pop(0),
+    )
+    metrics, store = _Metrics(), _Store()
+
+    for _ in range(2):
+        cli._flush_buffer(
+            [{}], ["filing-A"], str(tmp_path / "apply.db"), 100,
+            metrics, store, _RunLogger(), dry_run_only=False,
+        )
+
+    assert store.upserted == []
+    assert store.failed == [
+        ("filing-A", "canonical_sync_error", "canonical_sync_failed")
+    ]
+    assert cli._canonical_sync_failure_summary(metrics)[
+        "canonical_sync_failed_filing_count"
+    ] == 1
+
+
+def test_later_filing_failure_does_not_rollback_prior_success(monkeypatch, tmp_path):
+    pending_stats = [
+        _upsert_stats(inserted=1, canonical_sync_ids=[96]),
+        _upsert_stats(inserted=1, canonical_sync_ids=[97]),
+    ]
+    _mock_flush_batch(monkeypatch, lambda *args, **kwargs: pending_stats.pop(0))
+    monkeypatch.setattr(
+        cli,
+        "_canonical_sync_ids_by_filing",
+        lambda db, ids, records, mapping, fids: {fids[0]: list(ids)},
+    )
+    monkeypatch.setattr("lib.pipeline.db.load_env", lambda: None)
+    monkeypatch.setattr(
+        "lib.pipeline.db.get_supabase_write_config",
+        lambda: {"rest_url": "https://example.invalid", "headers": {}},
+    )
+
+    def sync(db_path, ids, rest_url, headers, dry_run):
+        if ids == [97]:
+            raise RuntimeError("failure B")
+        return {"synced_segment_ids": ids}
+
+    monkeypatch.setattr("tools.sync_segments.sync_sqlite_segment_ids", sync)
+    metrics, store = _Metrics(), _Store()
+
+    for filing_id in ("filing-A", "filing-B"):
+        cli._flush_buffer(
+            [{}], [filing_id], str(tmp_path / "apply.db"), 100,
+            metrics, store, _RunLogger(), dry_run_only=False,
+        )
+
+    assert store.upserted == ["filing-A"]
+    assert store.failed == [
+        ("filing-B", "canonical_sync_exception", "canonical_sync_failed")
+    ]
+
+
+def test_unresolved_canonical_sync_filing_fails_all_buffer_filings(monkeypatch, tmp_path):
+    _mock_flush_batch(monkeypatch, _upsert_stats(inserted=1, canonical_sync_ids=[101]))
+    monkeypatch.setattr(
+        cli,
+        "_canonical_sync_ids_by_filing",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("canonical_sync_filing_unresolved")
+        ),
+    )
+    sync_calls = []
+    monkeypatch.setattr(
+        "tools.sync_segments.sync_sqlite_segment_ids",
+        lambda *args, **kwargs: sync_calls.append(args),
+    )
+    metrics, store = _Metrics(), _Store()
+
+    cli._flush_buffer(
+        [{}, {}], ["filing-A", "filing-B"], str(tmp_path / "apply.db"), 100,
+        metrics, store, _RunLogger(), dry_run_only=False,
+    )
+
+    assert sync_calls == []
+    assert store.upserted == []
+    assert store.failed == [
+        ("filing-A", "canonical_sync_filing_unresolved", "canonical_sync_failed"),
+        ("filing-B", "canonical_sync_filing_unresolved", "canonical_sync_failed"),
+    ]
+    summary = cli._canonical_sync_failure_summary(metrics)
+    assert summary["canonical_sync_failed_record_count"] == 1
+    assert summary["canonical_sync_failed_filing_count"] == 2
+    assert summary["canonical_sync_filing_unresolved"] is True
+
+
+def test_canonical_sync_row_ids_resolve_only_through_formal_identifiers():
+    class Cursor:
+        def fetchall(self):
+            return [(111, "internal-A"), (112, "internal-B")]
+
+    class Conn:
+        def execute(self, sql, params):
+            assert "tdnet_doc_id" in sql
+            assert params == [111, 112]
+            return Cursor()
+
+    db = SimpleNamespace(_conn=Conn())
+    records = [
+        {
+            "ticker": "same",
+            "period": "2026-05-31",
+            "_requested_disclosure_no": "requested-A",
+            "_internal_document_id": "internal-A",
+            "tdnet_doc_id": "internal-A",
+        },
+        {
+            "ticker": "same",
+            "period": "2026-05-31",
+            "_requested_disclosure_no": "requested-B",
+            "_internal_document_id": "internal-B",
+            "tdnet_doc_id": "internal-B",
+        },
+    ]
+
+    assert cli._canonical_sync_ids_by_filing(
+        db,
+        [111, 112],
+        records,
+        {"requested-A": "filing-A", "requested-B": "filing-B"},
+        ["filing-A", "filing-B"],
+    ) == {"filing-A": [111], "filing-B": [112]}
+
+
+def test_cli_exits_nonzero_when_canonical_sync_failure_is_reported(
+    monkeypatch, tmp_path
+):
+    manifest = tmp_path / "chunk.json"
+    _write_manifest(manifest, [_manifest_record(1)])
+
+    def run_backfill(**kwargs):
+        return {
+            "summary": {
+                "canonical_sync_failed_record_count": 1,
+                "canonical_sync_failed_filing_count": 1,
+                "canonical_sync_failed_filing_ids": ["manifest-001"],
+                "canonical_sync_failures_by_filing": {
+                    "manifest-001": {"canonical_sync_exception": 1}
+                },
+                "canonical_sync_filing_unresolved": False,
             }
         }
 

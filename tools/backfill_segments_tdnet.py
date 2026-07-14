@@ -337,7 +337,116 @@ def _validation_rejection_summary(metrics) -> dict:
 def _summary_with_validation_rejections(metrics) -> dict:
     summary = metrics.summary_dict()
     summary.update(_validation_rejection_summary(metrics))
+    summary.update(_canonical_sync_failure_summary(metrics))
     return summary
+
+
+def _canonical_sync_failure_summary(metrics) -> dict:
+    filing_ids = list(getattr(metrics, "_canonical_sync_failed_filing_ids", []))
+    return {
+        "canonical_sync_failed_record_count": int(
+            getattr(metrics, "_canonical_sync_failed_record_count", 0) or 0
+        ),
+        "canonical_sync_failed_filing_count": len(filing_ids),
+        "canonical_sync_failed_filing_ids": filing_ids,
+        "canonical_sync_failures_by_filing": {
+            filing_id: dict(reason_counts)
+            for filing_id, reason_counts in getattr(
+                metrics, "_canonical_sync_failures_by_filing", {}
+            ).items()
+        },
+        "canonical_sync_filing_unresolved": bool(
+            getattr(metrics, "_canonical_sync_filing_unresolved", False)
+        ),
+    }
+
+
+def _record_canonical_sync_failure(
+    metrics, filing_id: str, record_count: int, reason: str
+) -> None:
+    filing_ids = getattr(metrics, "_canonical_sync_failed_filing_ids", None)
+    if filing_ids is None:
+        filing_ids = []
+        metrics._canonical_sync_failed_filing_ids = filing_ids
+    if filing_id not in filing_ids:
+        filing_ids.append(filing_id)
+    metrics._canonical_sync_failed_record_count = int(
+        getattr(metrics, "_canonical_sync_failed_record_count", 0) or 0
+    ) + int(record_count)
+    failures = getattr(metrics, "_canonical_sync_failures_by_filing", None)
+    if failures is None:
+        failures = {}
+        metrics._canonical_sync_failures_by_filing = failures
+    reason_counts = failures.setdefault(filing_id, {})
+    reason_counts[reason] = reason_counts.get(reason, 0) + int(record_count)
+
+
+def _extend_filing_id_map_from_records(
+    records: list[dict], filing_id_map: dict[str, str]
+) -> dict[str, str]:
+    """Connect requested/internal IDs using only identifiers carried by one record."""
+    mapping = dict(filing_id_map)
+    identifier_fields = (
+        "filing_id",
+        "requested_disclosure_no",
+        "_requested_disclosure_no",
+        "internal_document_id",
+        "_internal_document_id",
+        "tdnet_doc_id",
+    )
+    for record in records:
+        identifiers = [
+            str(record[field]).strip()
+            for field in identifier_fields
+            if record.get(field) is not None and str(record[field]).strip()
+        ]
+        owners = {mapping[value] for value in identifiers if value in mapping}
+        if len(owners) > 1:
+            raise RuntimeError("canonical_sync_filing_unresolved")
+        if not owners:
+            continue
+        filing_id = owners.pop()
+        for identifier in identifiers:
+            existing = mapping.get(identifier)
+            if existing is not None and existing != filing_id:
+                raise RuntimeError("canonical_sync_filing_unresolved")
+            mapping[identifier] = filing_id
+    return mapping
+
+
+def _canonical_sync_ids_by_filing(
+    db,
+    canonical_sync_ids: list[int],
+    records: list[dict],
+    filing_id_map: dict[str, str],
+    fid_buffer: list[str],
+) -> dict[str, list[int]]:
+    """Resolve accepted SQLite row IDs to manifest filings via formal document IDs."""
+    row_ids = [int(value) for value in canonical_sync_ids]
+    if not row_ids:
+        return {}
+    mapping = _extend_filing_id_map_from_records(records, filing_id_map)
+    unique_fids = list(dict.fromkeys(str(value) for value in fid_buffer))
+    conn = getattr(db, "_conn", None)
+    if conn is None:
+        if len(unique_fids) == 1:
+            return {unique_fids[0]: row_ids}
+        raise RuntimeError("canonical_sync_filing_unresolved")
+    placeholders = ",".join("?" for _ in row_ids)
+    rows = conn.execute(
+        f"SELECT id, tdnet_doc_id FROM segment_financials WHERE id IN ({placeholders})",
+        row_ids,
+    ).fetchall()
+    doc_id_by_row_id = {int(row_id): str(doc_id).strip() for row_id, doc_id in rows}
+    if set(doc_id_by_row_id) != set(row_ids):
+        raise RuntimeError("canonical_sync_filing_unresolved")
+    grouped: dict[str, list[int]] = {}
+    for row_id in row_ids:
+        filing_id = mapping.get(doc_id_by_row_id[row_id])
+        if filing_id is None:
+            raise RuntimeError("canonical_sync_filing_unresolved")
+        grouped.setdefault(filing_id, []).append(row_id)
+    return grouped
 
 
 def _build_validation_filing_id_map(filings) -> dict[str, str]:
@@ -1048,7 +1157,7 @@ def _flush_buffer(
                         stage="validation_rejected",
                     )
             raise
-        run_logger.log_upsert("batch", {
+        upsert_detail = {
             "records": len(buffer),
             "inserted": stats.inserted,
             "updated": stats.updated,
@@ -1064,24 +1173,91 @@ def _flush_buffer(
             "validation_rejected_filing_count": len(rejected_filing_ids),
             "validation_rejected_filing_ids": rejected_filing_ids,
             "validation_reasons_by_filing": rejected_reasons,
-        })
+        }
         canonical_sync_enabled = not dry_run_only and not isolated_worker_dry_run
         if stats.failed_batches == 0 and stats.canonical_sync_ids and canonical_sync_enabled:
-            from lib.pipeline.db import load_env, get_supabase_write_config
-            from tools.sync_segments import sync_sqlite_segment_ids
-            load_env()
-            config = get_supabase_write_config()
-            if not config:
-                raise RuntimeError("segment_canonical_sync_failed_after_sqlite_commit")
-            sync_result = sync_sqlite_segment_ids(
-                decision_db_path,
-                stats.canonical_sync_ids,
-                config["rest_url"],
-                config["headers"],
-                dry_run=False,
-            )
-            if sync_result.get("sync_error") or set(sync_result.get("synced_segment_ids", [])) != set(stats.canonical_sync_ids):
-                raise RuntimeError("segment_canonical_sync_failed_after_sqlite_commit")
+            try:
+                sync_ids_by_filing = _canonical_sync_ids_by_filing(
+                    db,
+                    stats.canonical_sync_ids,
+                    buffer,
+                    effective_filing_id_map,
+                    fid_buffer,
+                )
+            except Exception:
+                metrics._canonical_sync_filing_unresolved = True
+                metrics._canonical_sync_failed_record_count = int(
+                    getattr(metrics, "_canonical_sync_failed_record_count", 0) or 0
+                ) + len(stats.canonical_sync_ids)
+                aggregate_ids = getattr(
+                    metrics, "_canonical_sync_failed_filing_ids", None
+                )
+                if aggregate_ids is None:
+                    aggregate_ids = []
+                    metrics._canonical_sync_failed_filing_ids = aggregate_ids
+                for fid in dict.fromkeys(str(value) for value in fid_buffer):
+                    already_failed = fid in aggregate_ids
+                    if fid not in aggregate_ids:
+                        aggregate_ids.append(fid)
+                    if not already_failed:
+                        store.mark_failed(
+                            fid,
+                            error="canonical_sync_filing_unresolved",
+                            stage="canonical_sync_failed",
+                        )
+                sync_ids_by_filing = {}
+            if sync_ids_by_filing:
+                from lib.pipeline.db import load_env, get_supabase_write_config
+                from tools.sync_segments import sync_sqlite_segment_ids
+                load_env()
+                config = get_supabase_write_config()
+                for filing_id, filing_sync_ids in sync_ids_by_filing.items():
+                    reason = None
+                    if not config:
+                        reason = "canonical_sync_exception"
+                    else:
+                        try:
+                            sync_result = sync_sqlite_segment_ids(
+                                decision_db_path,
+                                filing_sync_ids,
+                                config["rest_url"],
+                                config["headers"],
+                                dry_run=False,
+                            )
+                            if sync_result.get("sync_error"):
+                                reason = "canonical_sync_error"
+                            elif set(sync_result.get("synced_segment_ids", [])) != set(
+                                filing_sync_ids
+                            ):
+                                reason = "canonical_sync_readback_mismatch"
+                        except Exception:
+                            logger.exception(
+                                "[backfill] canonical sync exception: "
+                                f"filing_id={filing_id} "
+                                f"record_count={len(filing_sync_ids)}"
+                            )
+                            reason = "canonical_sync_exception"
+                    if reason is None:
+                        continue
+                    already_failed = filing_id in getattr(
+                        metrics, "_canonical_sync_failed_filing_ids", []
+                    )
+                    _record_canonical_sync_failure(
+                        metrics, filing_id, len(filing_sync_ids), reason
+                    )
+                    if not already_failed:
+                        store.mark_failed(
+                            filing_id,
+                            error=reason,
+                            stage="canonical_sync_failed",
+                        )
+                    logger.error(
+                        "[backfill] canonical sync failed: "
+                        f"filing_id={filing_id} record_count={len(filing_sync_ids)} "
+                        f"reason={reason}"
+                    )
+        upsert_detail.update(_canonical_sync_failure_summary(metrics))
+        run_logger.log_upsert("batch", upsert_detail)
         for fid in rejected_filing_ids:
             store.mark_failed(
                 fid,
@@ -1094,8 +1270,14 @@ def _flush_buffer(
             )
         if stats.failed_batches == 0:
             rejected_filing_id_set = set(rejected_filing_ids)
+            canonical_failed_filing_id_set = set(
+                getattr(metrics, "_canonical_sync_failed_filing_ids", [])
+            )
             for fid in dict.fromkeys(fid_buffer):
-                if fid in rejected_filing_id_set:
+                if (
+                    fid in rejected_filing_id_set
+                    or fid in canonical_failed_filing_id_set
+                ):
                     continue
                 try:
                     store.mark_upserted(fid)
@@ -1591,6 +1773,8 @@ def main():
         or summary.get("upsert_failed_batches", 0) > 0
         or summary.get("validation_rejected_filing_count", 0) > 0
         or summary.get("validation_rejection_filing_unresolved", False)
+        or summary.get("canonical_sync_failed_filing_count", 0) > 0
+        or summary.get("canonical_sync_filing_unresolved", False)
     ):
         sys.exit(1)
 
