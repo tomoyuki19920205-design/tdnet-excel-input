@@ -280,7 +280,13 @@ def derive_archive_date(doc: dict, zip_path: str, xbrl_doc_id: str) -> tuple[str
 
     raise ValueError("invalid_archive_date")
 
-def find_zip_for_doc(doc: dict, source_doc_id: str, xbrl_doc_id: str, archive_date: str) -> tuple[str, str]:
+def find_zip_for_doc(
+    doc: dict,
+    source_doc_id: str,
+    xbrl_doc_id: str,
+    archive_date: str,
+    archive_root: Path | None = None,
+) -> tuple[str, str]:
     """共通14桁の開示番号で ZIP を安全に特定する。失敗時は ValueError を送出する。"""
     from .common_normalizers import extract_common_disclosure_no
 
@@ -288,8 +294,7 @@ def find_zip_for_doc(doc: dict, source_doc_id: str, xbrl_doc_id: str, archive_da
     if not ticker or ticker == "None":
         raise ValueError("invalid_required_field: ticker is missing")
     
-    base = _PROJECT_ROOT / "data" / "xbrl_archive"
-    d = Path(base)
+    d = Path(archive_root) if archive_root is not None else _PROJECT_ROOT / "data" / "xbrl_archive"
     if not d.is_dir():
         raise ValueError(f"file_not_found: XBRL_ARCHIVE_DIR missing {d}")
         
@@ -324,7 +329,7 @@ def find_zip_for_doc(doc: dict, source_doc_id: str, xbrl_doc_id: str, archive_da
     raise ValueError(f"file_not_found: No matching ZIP for {common_id}")
 
 # ── worker 入力 JSON 構築 ──────────────────────────────────────────────────────────────────────────────────
-def build_worker_input(doc: dict) -> dict:
+def build_worker_input(doc: dict, archive_root: Path | None = None) -> dict:
     """doc → worker stdin JSON を構築する。失敗時は ValueError を送出する。"""
     # 1. title
     title = str(doc.get("title") or "").strip()
@@ -347,7 +352,9 @@ def build_worker_input(doc: dict) -> dict:
     archive_date, ad_reason = derive_archive_date(doc, doc_zip, xbrl_doc_id)
 
     # 7. zip_path (最終決定)
-    zip_path, zip_reason = find_zip_for_doc(doc, source_doc_id, xbrl_doc_id, archive_date)
+    zip_path, zip_reason = find_zip_for_doc(
+        doc, source_doc_id, xbrl_doc_id, archive_date, archive_root=archive_root
+    )
 
     return {
         "zip_path":      zip_path,
@@ -561,6 +568,7 @@ def run_earnings_subprocess_dry_run(
     docs: list[dict],
     worker_count: int = 4,
     timeout_sec: float = 30.0,
+    archive_root: Path | None = None,
 ) -> dict[str, Any]:
     """docs を worker_count 並列で処理し、集計サマリーを返す。
 
@@ -605,7 +613,7 @@ def run_earnings_subprocess_dry_run(
         ticker = str(doc.get("ticker", f"[{i}]"))
         
         try:
-            input_json = build_worker_input(doc)
+            input_json = build_worker_input(doc, archive_root=archive_root)
             runnable.append((i, doc, input_json))
         except ValueError as e:
             msg = str(e)
