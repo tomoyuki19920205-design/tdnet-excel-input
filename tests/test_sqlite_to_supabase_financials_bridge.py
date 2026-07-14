@@ -15,12 +15,17 @@ Note: quarterly_results の金額は extractor が iXBRL scale 適用済みで
 """
 import sys
 import math
+import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import tools.sqlite_to_supabase as sqlite_bridge
 from tools.sqlite_to_supabase import (
+    _parse_quarter,
     _coerce_numeric,
     _normalize_financials_quarter,
     _convert_tdnet_amount,
@@ -82,6 +87,149 @@ class TestQuarterNormalization:
     def test_lowercase(self):
         """小文字の 1q も 1Q に変換"""
         assert _normalize_financials_quarter("1q") == "1Q"
+
+
+class TestLegacyQuarterParsing:
+    """legacy periods/disclosures/facts 用quarter正規化テスト。"""
+
+    @pytest.mark.parametrize("value", ["FY", "fy", " Fy "])
+    def test_fy_variants_become_four(self, value):
+        assert _parse_quarter(value) == 4
+
+    @pytest.mark.parametrize("value", [1, 2, 3, 4])
+    def test_integer_quarters_are_preserved(self, value):
+        assert _parse_quarter(value) == value
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("1", 1), ("2", 2), ("3", 3), ("4", 4),
+            ("1Q", 1), ("2Q", 2), ("3Q", 3), ("4Q", 4),
+        ],
+    )
+    def test_existing_string_formats_are_preserved(self, value, expected):
+        assert _parse_quarter(value) == expected
+
+    @pytest.mark.parametrize(
+        "value",
+        [None, "", "   ", 0, 5, "0", "5", "Q4", "invalid", True, False],
+    )
+    def test_invalid_and_bool_inputs_return_none(self, value):
+        assert _parse_quarter(value) is None
+
+
+def test_fy_row_reaches_legacy_period_disclosure_and_facts(tmp_path, monkeypatch):
+    """FY行がlegacy経路で除外されず、3 metricがfactsになる。"""
+    db_path = tmp_path / "isolated.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE companies (
+            ticker_code TEXT PRIMARY KEY,
+            name_ja TEXT
+        );
+        CREATE TABLE quarterly_results (
+            id INTEGER PRIMARY KEY,
+            company_code TEXT,
+            fiscal_year_end TEXT,
+            quarter,
+            sales REAL,
+            gross_profit REAL,
+            operating_profit REAL,
+            unit TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            source_doc_id TEXT,
+            source_url TEXT,
+            zip_hash TEXT,
+            parser_version TEXT,
+            field_sources TEXT
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO companies (ticker_code, name_ja) VALUES (?, ?)",
+        ("1930", "テスト企業"),
+    )
+    conn.execute(
+        """
+        INSERT INTO quarterly_results (
+            id, company_code, fiscal_year_end, quarter,
+            sales, gross_profit, operating_profit, unit,
+            created_at, updated_at, source_doc_id, source_url,
+            zip_hash, parser_version, field_sources
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            115794, "1930", "2026-03-31", "FY",
+            61028, 11576, 5121, "百万円",
+            "2026-05-02", "2026-05-02", "isolated-doc", "",
+            "isolated-hash", "cache_inject_v1", None,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    captured = {}
+
+    class FakeAPI:
+        def __init__(self, *_args, **_kwargs):
+            self.session = MagicMock()
+
+        def upsert_batch(self, table, rows, *, on_conflict):
+            payloads = [dict(row) for row in rows]
+            captured.setdefault(table, []).extend(payloads)
+            if table == "companies":
+                return [{**row, "company_id": 1} for row in payloads]
+            if table == "periods":
+                return [{**row, "period_id": 2} for row in payloads]
+            if table == "disclosures":
+                return [{**row, "disclosure_id": 3} for row in payloads]
+            raise AssertionError(f"unexpected table: {table}")
+
+        def select_by_keys(self, *_args, **_kwargs):
+            return []
+
+        def upsert_batch_fast(self, table, rows, *, on_conflict):
+            payloads = [dict(row) for row in rows]
+            captured.setdefault(table, []).extend(payloads)
+            return len(payloads)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sqlite_bridge, "_SupabaseAPI", FakeAPI)
+    monkeypatch.setattr(
+        sqlite_bridge, "_QUARANTINE_DB", str(tmp_path / "quarantine.db")
+    )
+    monkeypatch.setattr(
+        "lib.pipeline.db.get_supabase_write_config", lambda: None
+    )
+
+    stats = sqlite_bridge.push_sqlite_to_supabase(
+        str(db_path),
+        supabase_url="https://example.invalid",
+        supabase_key="isolated-test-key",
+        checkpoint_path=str(tmp_path / "checkpoint.json"),
+    )
+
+    assert stats["errors"] == 0
+    assert stats["periods_upserted"] == 1
+    assert stats["disclosures_upserted"] == 1
+    assert stats["facts_pushed"] == 3
+    assert captured["periods"][0]["quarter"] == 4
+    assert captured["disclosures"][0]["sha256"].endswith("-Q4")
+    facts_by_metric = {
+        fact["metric"]: fact["value"] for fact in captured["facts"]
+    }
+    assert set(facts_by_metric) == {
+        "NET_SALES", "GROSS_PROFIT", "OP_INCOME",
+    }
+    assert facts_by_metric == {
+        "NET_SALES": 61_028_000_000,
+        "GROSS_PROFIT": 11_576_000_000,
+        "OP_INCOME": 5_121_000_000,
+    }
 
 
 # ============================================================

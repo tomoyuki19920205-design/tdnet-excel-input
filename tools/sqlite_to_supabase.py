@@ -597,10 +597,21 @@ def _chunks(lst: list, n: int):
         yield lst[i:i + n]
 
 
-def _parse_quarter(q_str: str) -> int | None:
+def _parse_quarter(q_str: object) -> int | None:
+    if isinstance(q_str, bool):
+        return None
+    if isinstance(q_str, int):
+        return q_str if 1 <= q_str <= 4 else None
+
     try:
-        return int(q_str.replace("Q", "").strip())
-    except (ValueError, AttributeError):
+        normalized = str(q_str).strip().upper()
+        if normalized == "FY":
+            return 4
+        if normalized.endswith("Q"):
+            normalized = normalized[:-1]
+        quarter = int(normalized)
+        return quarter if 1 <= quarter <= 4 else None
+    except (ValueError, TypeError):
         return None
 
 
