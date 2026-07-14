@@ -111,6 +111,20 @@ def _patch_env_and_config():
     return stack
 
 
+def test_missing_write_config_returns_warning_status():
+    with patch("lib.pipeline.canonical_sync.load_env"), \
+         patch("lib.pipeline.canonical_sync.get_supabase_write_config", return_value=None), \
+         patch("lib.pipeline.canonical_sync.supabase_upsert") as mock_upsert:
+        from lib.pipeline.canonical_sync import sync_canonical
+        result = sync_canonical(db_path="unused.db", dry_run=False)
+
+    assert result["status"] == "warning"
+    assert result["summary"] == "canonical write configuration is unavailable"
+    assert "financials" in result
+    assert "segments" in result
+    mock_upsert.assert_not_called()
+
+
 # ============================================================
 # 既存テスト (バッチ化対応)
 # ============================================================

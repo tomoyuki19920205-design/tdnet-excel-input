@@ -469,7 +469,12 @@ def sync_canonical(
     config = get_supabase_write_config()
     if not config:
         logger.error("[canonical] no write config available (SUPABASE_SERVICE_ROLE_KEY missing)")
-        return {"financials": _init_sub_stats(), "segments": _init_sub_stats()}
+        return {
+            "status": "warning",
+            "financials": _init_sub_stats(),
+            "segments": _init_sub_stats(),
+            "summary": "canonical write configuration is unavailable",
+        }
 
     fin_stats = _init_sub_stats()
     seg_stats = _init_sub_stats()
