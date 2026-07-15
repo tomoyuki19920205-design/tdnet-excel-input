@@ -17,8 +17,12 @@ import os
 
 import argparse
 import csv
+import hashlib
 import json
 import logging
+import shutil
+import sqlite3
+import stat
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -50,6 +54,529 @@ logger = logging.getLogger("backfill")
 
 _ISOLATED_PATH_ERROR = "STOP_ISOLATED_SQLITE_PATH_ESCAPE"
 _PENDING_SET_MISMATCH = "STOP_MANIFEST_PENDING_SET_MISMATCH"
+_ISOLATED_SEED_INVALID_MODE = "STOP_BACKFILL_ISOLATED_SEED_INVALID_MODE"
+_ISOLATED_SEED_DB_INVALID = "STOP_BACKFILL_ISOLATED_SEED_DB_INVALID"
+_ISOLATED_SEED_CACHE_MISSING = "STOP_BACKFILL_ISOLATED_SEED_CACHE_MISSING"
+_ISOLATED_SEED_UNSAFE_PATH = "STOP_BACKFILL_ISOLATED_SEED_UNSAFE_PATH"
+_ISOLATED_SEED_COPY_MISMATCH = "STOP_BACKFILL_ISOLATED_SEED_COPY_MISMATCH"
+_ISOLATED_SEED_SOURCE_MUTATED = "STOP_BACKFILL_ISOLATED_SEED_SOURCE_MUTATED"
+_ISOLATED_SEED_MANIFEST_ID_UNRESOLVED = (
+    "STOP_BACKFILL_ISOLATED_SEED_MANIFEST_ID_UNRESOLVED"
+)
+_ISOLATED_SEED_STOP_CODES = frozenset({
+    _ISOLATED_SEED_INVALID_MODE,
+    _ISOLATED_SEED_DB_INVALID,
+    _ISOLATED_SEED_CACHE_MISSING,
+    _ISOLATED_SEED_UNSAFE_PATH,
+    _ISOLATED_SEED_COPY_MISMATCH,
+    _ISOLATED_SEED_MANIFEST_ID_UNRESOLVED,
+    _ISOLATED_SEED_SOURCE_MUTATED,
+})
+
+
+class IsolatedSeedStop(RuntimeError):
+    """A recognized isolated-seed stop that is safe to expose from the CLI."""
+
+    def __init__(self, code: str, stage: str, detail: dict[str, object] | None = None):
+        self.code = code
+        self.stage = stage
+        self.detail = detail or {}
+        super().__init__(code)
+
+
+def _safe_isolated_seed_stop_detail(code: str, message: str) -> dict[str, object]:
+    """Keep only allowlisted, machine-readable detail from an existing STOP string."""
+    detail: dict[str, object] = {}
+    for key in ("path_role", "reason", "change_kind"):
+        marker = f"{key}="
+        if marker in message:
+            value = message.split(marker, 1)[1].split(";", 1)[0].split()[0]
+            if value.replace("_", "").replace("-", "").isalnum():
+                detail[key] = value
+    if "source_type=" in message:
+        value = message.split("source_type=", 1)[1].split(";", 1)[0].split()[0]
+        if value.replace("_", "").replace("-", "").isalnum():
+            detail["source_kind"] = value
+    if "identifiers=" in message:
+        value = message.split("identifiers=", 1)[1].split(";", 1)[0].split()[0]
+        if value and not any(token in value for token in ("\\", ":", "..")):
+            detail["safe_identifier"] = value
+    if "target_count=" in message:
+        value = message.split("target_count=", 1)[1].split(";", 1)[0].split()[0]
+        if value.isdigit():
+            detail["affected_count"] = int(value)
+    if code == _ISOLATED_SEED_INVALID_MODE:
+        detail["reason"] = "invalid_mode"
+    return detail
+
+
+def _as_isolated_seed_stop(exc: RuntimeError, *, stage: str) -> IsolatedSeedStop | None:
+    """Classify only the established isolated-seed STOP code prefix."""
+    message = str(exc)
+    for code in _ISOLATED_SEED_STOP_CODES:
+        if message == code or message.startswith(f"{code}:"):
+            return IsolatedSeedStop(
+                code,
+                stage,
+                _safe_isolated_seed_stop_detail(code, message),
+            )
+    return None
+
+
+def _emit_isolated_seed_stop(stop: IsolatedSeedStop) -> None:
+    print(
+        json.dumps(
+            {
+                "status": "stopped",
+                "stop_code": stop.code,
+                "stage": stop.stage,
+                "detail": stop.detail,
+                "worker_started": False,
+                "canonical_sync_enabled": False,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        file=sys.stderr,
+    )
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _file_snapshot(path: Path) -> tuple[int, int, str]:
+    info = path.stat()
+    return info.st_size, info.st_mtime_ns, _sha256_file(path)
+
+
+def _path_has_reparse_component(path: Path) -> bool:
+    current = path
+    while True:
+        try:
+            info = os.lstat(current)
+        except (FileNotFoundError, OSError):
+            return True
+        attributes = getattr(info, "st_file_attributes", None)
+        if attributes is None:
+            return True
+        try:
+            is_symlink = current.is_symlink()
+        except OSError:
+            return True
+        if is_symlink or attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+            return True
+        if current.parent == current:
+            return False
+        current = current.parent
+
+
+def _assert_isolated_path_safe(raw_path: Path, *, path_role: str) -> None:
+    """Fail closed when an existing raw path component is a reparse point."""
+    current = Path(raw_path)
+    while True:
+        try:
+            info = os.lstat(current)
+        except FileNotFoundError:
+            if current.parent == current:
+                raise RuntimeError(
+                    f"{_ISOLATED_SEED_UNSAFE_PATH}: path_role={path_role}; reason=missing_root"
+                )
+            current = current.parent
+            continue
+        except OSError:
+            raise RuntimeError(
+                f"{_ISOLATED_SEED_UNSAFE_PATH}: path_role={path_role}; reason=inspection_failed"
+            ) from None
+
+        attributes = getattr(info, "st_file_attributes", None)
+        if attributes is None:
+            raise RuntimeError(
+                f"{_ISOLATED_SEED_UNSAFE_PATH}: path_role={path_role}; reason=attributes_unavailable"
+            )
+        try:
+            is_symlink = current.is_symlink()
+        except OSError:
+            raise RuntimeError(
+                f"{_ISOLATED_SEED_UNSAFE_PATH}: path_role={path_role}; reason=inspection_failed"
+            ) from None
+        if is_symlink or attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+            raise RuntimeError(
+                f"{_ISOLATED_SEED_UNSAFE_PATH}: path_role={path_role}; reason=reparse_component"
+            )
+        if current.parent == current:
+            return
+        current = current.parent
+
+
+def _assert_isolated_destination_safe(
+    destination: Path,
+    *,
+    run_root: Path,
+    path_role: str,
+) -> None:
+    """Recheck a raw isolated destination immediately before it is opened or created."""
+    _assert_isolated_path_safe(run_root, path_role="run_root")
+    _assert_isolated_path_safe(destination.parent, path_role=f"{path_role}_parent")
+    _assert_isolated_path_safe(destination, path_role=path_role)
+    root = run_root.resolve(strict=True)
+    resolved_destination = destination.resolve(strict=False)
+    if root not in resolved_destination.parents or destination.exists():
+        raise RuntimeError(
+            f"{_ISOLATED_SEED_UNSAFE_PATH}: path_role={path_role}; reason=unsafe_destination"
+        )
+
+
+def _validate_seed_source_path(
+    raw_path: str,
+    *,
+    run_root: Path,
+    require_file: bool,
+    missing_code: str,
+) -> Path:
+    source_path = Path(raw_path)
+    if not source_path.is_absolute():
+        raise RuntimeError(f"{_ISOLATED_SEED_UNSAFE_PATH}: seed path must be absolute")
+    if not source_path.exists():
+        raise RuntimeError(f"{missing_code}: seed source does not exist")
+    if _path_has_reparse_component(source_path):
+        raise RuntimeError(f"{_ISOLATED_SEED_UNSAFE_PATH}: reparse seed path")
+    if require_file and not source_path.is_file():
+        raise RuntimeError(f"{missing_code}: seed source is not a normal file")
+    if not require_file and not source_path.is_dir():
+        raise RuntimeError(f"{missing_code}: seed source is not a directory")
+    source = source_path.resolve(strict=True)
+    root = run_root.resolve(strict=True)
+    if source == root or root in source.parents or source in root.parents:
+        raise RuntimeError(f"{_ISOLATED_SEED_UNSAFE_PATH}: seed overlaps run-root")
+    return source
+
+
+def _sqlite_source_snapshot(source: Path) -> dict[str, tuple[int, int, str] | None]:
+    snapshots: dict[str, tuple[int, int, str] | None] = {}
+    for suffix in ("", "-wal", "-shm"):
+        candidate = Path(f"{source}{suffix}")
+        snapshots[suffix] = _file_snapshot(candidate) if candidate.exists() else None
+    return snapshots
+
+
+def _source_snapshot_changes(
+    path: Path,
+    before: tuple[int, int, str] | None,
+) -> set[str]:
+    try:
+        exists = path.exists()
+    except OSError:
+        return {"existence"}
+    if (before is None) != (not exists):
+        return {"existence"}
+    if before is None:
+        return set()
+    try:
+        after = _file_snapshot(path)
+    except OSError:
+        return {"sha"}
+    changes = set()
+    if before[0] != after[0]:
+        changes.add("size")
+    if before[1] != after[1]:
+        changes.add("mtime")
+    if before[2] != after[2]:
+        changes.add("sha")
+    return changes
+
+
+def _raise_source_mutated(
+    source_type: str,
+    changes_by_identifier: dict[str, set[str]],
+) -> None:
+    changed = {
+        identifier: changes
+        for identifier, changes in changes_by_identifier.items()
+        if changes
+    }
+    if not changed:
+        return
+    identifiers = ",".join(sorted(changed))
+    change_types = ",".join(sorted({item for values in changed.values() for item in values}))
+    raise RuntimeError(
+        f"{_ISOLATED_SEED_SOURCE_MUTATED}: "
+        f"source_type={source_type} identifiers={identifiers} "
+        f"change_types={change_types} target_count={len(changed)}"
+    )
+
+
+def _assert_sqlite_source_unchanged(
+    source: Path,
+    before: dict[str, tuple[int, int, str] | None],
+) -> None:
+    identifiers = {"": "database", "-wal": "wal", "-shm": "shm"}
+    _raise_source_mutated(
+        "decision_db",
+        {
+            identifiers[suffix]: _source_snapshot_changes(
+                Path(f"{source}{suffix}"), snapshot
+            )
+            for suffix, snapshot in before.items()
+        },
+    )
+
+
+def _assert_cache_sources_unchanged(
+    copy_plan: list[tuple[Path, Path, tuple[int, int, str]]],
+) -> None:
+    _raise_source_mutated(
+        "cache",
+        {
+            f"{destination_file.parent.name}/{destination_file.name}":
+                _source_snapshot_changes(source_file, before)
+            for source_file, destination_file, before in copy_plan
+        },
+    )
+
+
+def _validate_isolated_decision_db_seed(
+    source_path: str,
+    *,
+    run_root: Path,
+) -> tuple[Path, dict[str, tuple[int, int, str] | None]]:
+    source = _validate_seed_source_path(
+        source_path,
+        run_root=run_root,
+        require_file=True,
+        missing_code=_ISOLATED_SEED_DB_INVALID,
+    )
+    before = _sqlite_source_snapshot(source)
+    source_conn = None
+    try:
+        source_conn = sqlite3.connect(f"{source.as_uri()}?mode=ro", uri=True)
+        source_conn.execute("PRAGMA schema_version").fetchone()
+    except (OSError, sqlite3.Error) as exc:
+        raise RuntimeError(f"{_ISOLATED_SEED_DB_INVALID}: {exc}") from exc
+    finally:
+        try:
+            if source_conn is not None:
+                source_conn.close()
+        finally:
+            _assert_sqlite_source_unchanged(source, before)
+    return source, before
+
+
+def _copy_isolated_decision_db(
+    source: Path,
+    before: dict[str, tuple[int, int, str] | None],
+    *,
+    destination: Path,
+    run_root: Path,
+) -> tuple[str, str]:
+    _assert_isolated_destination_safe(
+        destination,
+        run_root=run_root,
+        path_role="decision_db",
+    )
+    destination = destination.resolve(strict=False)
+    root = run_root.resolve(strict=True)
+    if root not in destination.parents or source == destination or destination.exists():
+        raise RuntimeError(f"{_ISOLATED_SEED_UNSAFE_PATH}: unsafe decision DB destination")
+
+    source_conn = destination_conn = None
+    try:
+        source_conn = sqlite3.connect(f"{source.as_uri()}?mode=ro", uri=True)
+        destination_conn = sqlite3.connect(str(destination))
+        source_conn.backup(destination_conn)
+        integrity = destination_conn.execute("PRAGMA integrity_check").fetchone()
+        if not integrity or integrity[0] != "ok":
+            raise RuntimeError(f"{_ISOLATED_SEED_COPY_MISMATCH}: SQLite integrity check")
+    except RuntimeError:
+        raise
+    except (OSError, sqlite3.Error) as exc:
+        raise RuntimeError(f"{_ISOLATED_SEED_DB_INVALID}: {exc}") from exc
+    finally:
+        try:
+            if destination_conn is not None:
+                destination_conn.close()
+        finally:
+            try:
+                if source_conn is not None:
+                    source_conn.close()
+            finally:
+                _assert_sqlite_source_unchanged(source, before)
+
+    if not destination.is_file():
+        raise RuntimeError(f"{_ISOLATED_SEED_COPY_MISMATCH}: decision DB destination missing")
+    return before[""][2], _sha256_file(destination)
+
+
+def _manifest_requested_ids(filing_list_path: str) -> list[str]:
+    filings = _load_filing_list(filing_list_path)
+    requested_ids = [str(getattr(filing, "requested_disclosure_no", "") or "") for filing in filings]
+    if (
+        not requested_ids
+        or any(
+            not requested_id
+            or Path(requested_id).name != requested_id
+            or requested_id in {".", ".."}
+            for requested_id in requested_ids
+        )
+        or len(set(requested_ids)) != len(requested_ids)
+    ):
+        raise RuntimeError(
+            f"{_ISOLATED_SEED_MANIFEST_ID_UNRESOLVED}: requested disclosure ID"
+        )
+    return requested_ids
+
+
+def _validate_isolated_cache_seed(
+    source_path: str,
+    *,
+    destination_root: Path,
+    run_root: Path,
+    requested_ids: list[str],
+) -> list[tuple[Path, Path, tuple[int, int, str]]]:
+    source_root = _validate_seed_source_path(
+        source_path,
+        run_root=run_root,
+        require_file=False,
+        missing_code=_ISOLATED_SEED_CACHE_MISSING,
+    )
+    required_names = ("xbrl.zip", "xbrl.zip.provenance.json")
+    copy_plan: list[tuple[Path, Path, tuple[int, int, str]]] = []
+    for requested_id in requested_ids:
+        source_dir = source_root / requested_id
+        if not source_dir.is_dir():
+            raise RuntimeError(
+                f"{_ISOLATED_SEED_CACHE_MISSING}: {requested_id} cache directory"
+            )
+        if _path_has_reparse_component(source_dir):
+            raise RuntimeError(
+                f"{_ISOLATED_SEED_UNSAFE_PATH}: {requested_id} cache directory"
+            )
+        destination_dir = destination_root / requested_id
+        if destination_dir.exists():
+            raise RuntimeError(f"{_ISOLATED_SEED_UNSAFE_PATH}: cache destination exists")
+        for name in required_names:
+            source_file = source_dir / name
+            if not source_file.is_file():
+                raise RuntimeError(
+                    f"{_ISOLATED_SEED_CACHE_MISSING}: {requested_id}/{name}"
+                )
+            if _path_has_reparse_component(source_file):
+                raise RuntimeError(
+                    f"{_ISOLATED_SEED_UNSAFE_PATH}: {requested_id}/{name}"
+                )
+            copy_plan.append((source_file, destination_dir / name, _file_snapshot(source_file)))
+    return copy_plan
+
+
+def _copy_isolated_cache(
+    copy_plan: list[tuple[Path, Path, tuple[int, int, str]]],
+    *,
+    destination_root: Path,
+    requested_ids: list[str],
+    run_root: Path,
+) -> None:
+    try:
+        for requested_id in requested_ids:
+            destination_dir = destination_root / requested_id
+            _assert_isolated_destination_safe(
+                destination_dir,
+                run_root=run_root,
+                path_role="filing_cache",
+            )
+            destination_dir.mkdir(parents=True, exist_ok=False)
+        for source_file, destination_file, before in copy_plan:
+            _assert_isolated_destination_safe(
+                destination_file,
+                run_root=run_root,
+                path_role=("xbrl_zip" if destination_file.name == "xbrl.zip" else "sidecar"),
+            )
+            shutil.copyfile(source_file, destination_file)
+            if _sha256_file(destination_file) != before[2]:
+                raise RuntimeError(
+                    f"{_ISOLATED_SEED_COPY_MISMATCH}: {source_file.name}"
+                )
+    except RuntimeError:
+        raise
+    except OSError as exc:
+        raise RuntimeError(
+            f"{_ISOLATED_SEED_COPY_MISMATCH}: cache copy failed"
+        ) from exc
+    finally:
+        _assert_cache_sources_unchanged(copy_plan)
+
+
+def _prepare_isolated_seeds(
+    *,
+    decision_db_source: str | None,
+    cache_root_source: str | None,
+    decision_db_destination: Path,
+    cache_destination_root: Path,
+    run_root: Path,
+    filing_list_path: str,
+) -> dict:
+    summary = {
+        "isolated_seed_decision_db_used": False,
+        "isolated_seed_decision_db_source_sha256": None,
+        "isolated_seed_decision_db_destination_sha256": None,
+        "isolated_seed_cache_used": False,
+        "isolated_seed_cache_filing_count": 0,
+        "isolated_seed_cache_requested_ids": [],
+        "isolated_seed_copy_verified": False,
+    }
+    if not decision_db_source and not cache_root_source:
+        return summary
+
+    requested_ids = _manifest_requested_ids(filing_list_path) if cache_root_source else []
+    decision_seed = (
+        _validate_isolated_decision_db_seed(decision_db_source, run_root=run_root)
+        if decision_db_source
+        else None
+    )
+    cache_copy_plan = (
+        _validate_isolated_cache_seed(
+            cache_root_source,
+            destination_root=cache_destination_root,
+            run_root=run_root,
+            requested_ids=requested_ids,
+        )
+        if cache_root_source
+        else None
+    )
+
+    if decision_db_source:
+        source_sha, destination_sha = _copy_isolated_decision_db(
+            decision_seed[0],
+            decision_seed[1],
+            destination=decision_db_destination,
+            run_root=run_root,
+        )
+        summary.update({
+            "isolated_seed_decision_db_used": True,
+            "isolated_seed_decision_db_source_sha256": source_sha,
+            "isolated_seed_decision_db_destination_sha256": destination_sha,
+        })
+    if cache_root_source:
+        _copy_isolated_cache(
+            cache_copy_plan,
+            destination_root=cache_destination_root,
+            requested_ids=requested_ids,
+            run_root=run_root,
+        )
+        summary.update({
+            "isolated_seed_cache_used": True,
+            "isolated_seed_cache_filing_count": len(requested_ids),
+            "isolated_seed_cache_requested_ids": requested_ids,
+        })
+    if decision_seed:
+        _assert_sqlite_source_unchanged(decision_seed[0], decision_seed[1])
+    if cache_copy_plan:
+        _assert_cache_sources_unchanged(cache_copy_plan)
+    summary["isolated_seed_copy_verified"] = True
+    return summary
 
 
 def _validate_isolated_write_paths(
@@ -64,7 +591,11 @@ def _validate_isolated_write_paths(
     if not all((run_root, decision_db_path, state_db_path, log_jsonl_path, filing_list_path)):
         raise RuntimeError(f"{_ISOLATED_PATH_ERROR}: missing isolated path")
 
-    root = Path(run_root).resolve(strict=False)
+    raw_root = Path(run_root)
+    if not raw_root.is_absolute():
+        raise RuntimeError(f"{_ISOLATED_SEED_UNSAFE_PATH}: path_role=run_root; reason=not_absolute")
+    _assert_isolated_path_safe(raw_root, path_role="run_root")
+    root = raw_root.resolve(strict=False)
     project_root = Path(_PROJECT_ROOT).resolve(strict=False)
     production_roots = (
         (project_root / "logs").resolve(strict=False),
@@ -72,6 +603,15 @@ def _validate_isolated_write_paths(
     )
     if root in production_roots or any(prod in root.parents for prod in production_roots):
         raise RuntimeError(f"{_ISOLATED_PATH_ERROR}: run-root is under production storage")
+
+    raw_paths = {
+        "decision_db": Path(decision_db_path),
+        "state_db": Path(state_db_path),
+        "log_jsonl": Path(log_jsonl_path),
+        "filing_list": Path(filing_list_path),
+    }
+    for label, raw_path in raw_paths.items():
+        _assert_isolated_path_safe(raw_path, path_role=label)
 
     resolved = {
         "run_root": root,
@@ -338,6 +878,7 @@ def _summary_with_validation_rejections(metrics) -> dict:
     summary = metrics.summary_dict()
     summary.update(_validation_rejection_summary(metrics))
     summary.update(_canonical_sync_failure_summary(metrics))
+    summary.update(getattr(metrics, "_isolated_seed_summary", {}))
     return summary
 
 
@@ -630,6 +1171,7 @@ def run_backfill(
     isolated_run_root: str | None = None,
     scope_pending_to_manifest: bool = False,
     require_all_manifest_pending: bool = False,
+    isolated_seed_summary: dict | None = None,
 ) -> dict:
     """バックフィルを実行する (Phase 1 / Phase 2 自動選択)。"""
     if scope_pending_to_manifest and not filing_list_path:
@@ -657,6 +1199,7 @@ def run_backfill(
     use_v2 = worker_version == "v2"
     use_v4 = worker_version == "v4"
     metrics = BackfillMetricsV2() if (use_v2 or use_v4) else BackfillMetrics()
+    metrics._isolated_seed_summary = dict(isolated_seed_summary or {})
 
     if log_jsonl_path is None:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1624,12 +2167,31 @@ def main():
                         help="V4 worker をrun-root配下だけでoffline実行する")
     parser.add_argument("--run-root", type=str, default=None,
                         help="--isolated-worker-dry-run の隔離成果物ルート")
+    parser.add_argument("--isolated-seed-decision-db", type=str, default=None,
+                        help="隔離decision DBへread-only SQLite backupする絶対パス")
+    parser.add_argument("--isolated-seed-cache-root", type=str, default=None,
+                        help="manifest対象cacheだけを隔離rootへ複製する絶対パス")
     parser.add_argument("--force-done", action="store_true",
                         help="done/partial/skipped_normal/quarantined を全て再実行対象にする (upsert 更新)")
     parser.add_argument("--apply", action="store_true",
                         help="実際にDBに書き込む (ALLOW_BACKFILL_XBRL_WRITE=1 環境変数も必要)")
 
     args = parser.parse_args()
+
+    isolated_seed_requested = bool(
+        args.isolated_seed_decision_db or args.isolated_seed_cache_root
+    )
+    if isolated_seed_requested and (
+        not args.isolated_worker_dry_run or args.apply or args.dry_run
+    ):
+        _emit_isolated_seed_stop(
+            IsolatedSeedStop(
+                _ISOLATED_SEED_INVALID_MODE,
+                "isolated_seed_mode",
+                {"reason": "invalid_mode"},
+            )
+        )
+        raise SystemExit(1)
 
     if args.requeue_only:
         incompatible = any((
@@ -1667,29 +2229,56 @@ def main():
         parser.error("--require-all-manifest-pending cannot be combined with --limit")
 
     manifest_dir = "logs"
+    isolated_seed_summary = None
     if args.isolated_worker_dry_run:
-        if args.apply or args.dry_run or args.worker_version != "v4" or args.workers != 1:
-            parser.error("--isolated-worker-dry-run requires V4, --workers 1, and neither --apply nor --dry-run")
-        if not args.filing_list or not args.run_root:
-            parser.error("--isolated-worker-dry-run requires --filing-list and --run-root")
-        run_root = Path(args.run_root).resolve()
-        production_roots = (Path("logs").resolve(), Path("data").resolve())
-        if any(run_root == root or root in run_root.parents for root in production_roots):
-            parser.error("--run-root must not be inside production logs or data")
-        filing_list = Path(args.filing_list).resolve()
-        input_dir = run_root / "input"
-        if input_dir not in filing_list.parents:
-            parser.error("--filing-list must be under <run-root>/input in isolated mode")
-        if run_root.exists() and any(path != input_dir and path not in input_dir.parents for path in run_root.iterdir()):
-            parser.error("--run-root must be empty except for its input directory")
-        run_root.mkdir(parents=True, exist_ok=True)
-        for directory in (input_dir, run_root / "manifest", run_root / "state", run_root / "cache", run_root / "logs", run_root / "output", run_root / "metadata"):
-            directory.mkdir(parents=True, exist_ok=True)
-        args.state_db = str(run_root / "state" / "state.db")
-        args.decision_db = str(run_root / "state" / "decision.db")
-        args.cache_root = str(run_root / "cache")
-        args.log_jsonl = str(run_root / "logs" / "run.jsonl")
-        manifest_dir = str(run_root / "manifest")
+        try:
+            if args.apply or args.dry_run or args.worker_version != "v4" or args.workers != 1:
+                raise RuntimeError(_ISOLATED_SEED_INVALID_MODE)
+            if not args.filing_list or not args.run_root:
+                parser.error("--isolated-worker-dry-run requires --filing-list and --run-root")
+            raw_run_root = Path(args.run_root)
+            if not raw_run_root.is_absolute():
+                parser.error("--run-root must be an absolute path in isolated mode")
+            _assert_isolated_path_safe(raw_run_root, path_role="run_root")
+            run_root = raw_run_root.resolve()
+            production_roots = (Path("logs").resolve(), Path("data").resolve())
+            if any(run_root == root or root in run_root.parents for root in production_roots):
+                parser.error("--run-root must not be inside production logs or data")
+            filing_list = Path(args.filing_list).resolve()
+            input_dir = run_root / "input"
+            if input_dir not in filing_list.parents:
+                parser.error("--filing-list must be under <run-root>/input in isolated mode")
+            if run_root.exists() and any(path != input_dir and path not in input_dir.parents for path in run_root.iterdir()):
+                parser.error("--run-root must be empty except for its input directory")
+            run_root.mkdir(parents=True, exist_ok=True)
+            for directory in (input_dir, run_root / "manifest", run_root / "state", run_root / "cache", run_root / "logs", run_root / "output", run_root / "metadata"):
+                directory.mkdir(parents=True, exist_ok=True)
+            args.state_db = str(run_root / "state" / "state.db")
+            args.decision_db = str(run_root / "state" / "decision.db")
+            args.cache_root = str(run_root / "cache")
+            args.log_jsonl = str(run_root / "logs" / "run.jsonl")
+            manifest_dir = str(run_root / "manifest")
+            _validate_isolated_write_paths(
+                run_root=str(run_root),
+                decision_db_path=args.decision_db,
+                state_db_path=args.state_db,
+                log_jsonl_path=args.log_jsonl,
+                filing_list_path=args.filing_list,
+            )
+            isolated_seed_summary = _prepare_isolated_seeds(
+                decision_db_source=args.isolated_seed_decision_db,
+                cache_root_source=args.isolated_seed_cache_root,
+                decision_db_destination=Path(args.decision_db),
+                cache_destination_root=Path(args.cache_root),
+                run_root=run_root,
+                filing_list_path=args.filing_list,
+            )
+        except RuntimeError as exc:
+            stop = _as_isolated_seed_stop(exc, stage="isolated_seed_prepare")
+            if stop is None:
+                raise
+            _emit_isolated_seed_stop(stop)
+            raise SystemExit(1) from None
 
     # ── 実行禁止ガード ──
     dry_run_only = True
@@ -1742,6 +2331,7 @@ def main():
             isolated_run_root=str(run_root) if args.isolated_worker_dry_run else None,
             scope_pending_to_manifest=args.scope_pending_to_manifest,
             require_all_manifest_pending=args.require_all_manifest_pending,
+            isolated_seed_summary=isolated_seed_summary,
         )
     except Exception:
         import traceback

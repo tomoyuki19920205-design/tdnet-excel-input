@@ -2,6 +2,9 @@ from types import SimpleNamespace
 from pathlib import Path
 import json
 import sqlite3
+import stat
+import subprocess
+import sys
 import tempfile
 
 import pytest
@@ -145,6 +148,823 @@ def _write_manifest(path, records):
     path.write_text(json.dumps(records), encoding="utf-8")
 
 
+def _seed_cli_args(run_root, filing_list, *extra):
+    return [
+        "--isolated-worker-dry-run",
+        "--run-root", str(run_root),
+        "--filing-list", str(filing_list),
+        "--workers", "1",
+        *extra,
+    ]
+
+
+def _create_seed_db(path):
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE seed_rows (id INTEGER PRIMARY KEY, value TEXT NOT NULL)")
+        conn.execute("INSERT INTO seed_rows(value) VALUES ('source')")
+
+
+def _create_seed_cache(root, requested_id, *, zip_file=True, sidecar=True):
+    filing_root = root / requested_id
+    filing_root.mkdir(parents=True, exist_ok=True)
+    if zip_file:
+        (filing_root / "xbrl.zip").write_bytes(b"verified-xbrl")
+    if sidecar:
+        (filing_root / "xbrl.zip.provenance.json").write_text(
+            '{"verified": true}', encoding="utf-8"
+        )
+    return filing_root
+
+
+@pytest.mark.parametrize("isolated,apply", [(False, False), (True, True)])
+def test_isolated_seed_rejects_invalid_modes(
+    monkeypatch, tmp_path, capsys, isolated, apply
+):
+    source_db = tmp_path / "source.db"
+    _create_seed_db(source_db)
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    _write_manifest(filing_list, [_manifest_record(1)])
+    args = ["--isolated-seed-decision-db", str(source_db)]
+    if isolated:
+        args = _seed_cli_args(run_root, filing_list, *args)
+    if apply:
+        args.append("--apply")
+
+    with pytest.raises(SystemExit):
+        _invoke(monkeypatch, args)
+
+    assert "STOP_BACKFILL_ISOLATED_SEED_INVALID_MODE" in capsys.readouterr().err
+
+
+def test_isolated_seed_db_uses_readonly_backup_and_preserves_source(
+    monkeypatch, tmp_path
+):
+    source_db = tmp_path / "source.db"
+    _create_seed_db(source_db)
+    source_before = cli._file_snapshot(source_db)
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    _write_manifest(filing_list, [_manifest_record(1)])
+    captured = {}
+    connect_calls = []
+    real_connect = cli.sqlite3.connect
+
+    def connect(database, *args, **kwargs):
+        connect_calls.append((str(database), kwargs.get("uri", False)))
+        return real_connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(cli.sqlite3, "connect", connect)
+
+    def run_backfill(**kwargs):
+        captured.update(kwargs)
+        return {"summary": {}}
+
+    _invoke(
+        monkeypatch,
+        _seed_cli_args(
+            run_root, filing_list, "--isolated-seed-decision-db", str(source_db)
+        ),
+        run_backfill,
+    )
+
+    destination = run_root / "state" / "decision.db"
+    assert destination.is_file()
+    assert source_before == cli._file_snapshot(source_db)
+    assert any("?mode=ro" in database and uri for database, uri in connect_calls)
+    summary = captured["isolated_seed_summary"]
+    assert summary["isolated_seed_decision_db_used"] is True
+    assert summary["isolated_seed_decision_db_source_sha256"] == source_before[2]
+    assert summary["isolated_seed_decision_db_destination_sha256"] == cli._sha256_file(destination)
+    assert summary["isolated_seed_copy_verified"] is True
+    assert str(source_db) not in json.dumps(summary)
+
+    with sqlite3.connect(destination) as conn:
+        conn.execute("UPDATE seed_rows SET value='destination'")
+    with sqlite3.connect(source_db) as conn:
+        assert conn.execute("SELECT value FROM seed_rows").fetchone() == ("source",)
+
+
+@pytest.mark.parametrize(
+    "source_factory,expected_code",
+    [
+        (lambda path: None, "STOP_BACKFILL_ISOLATED_SEED_DB_INVALID"),
+        (
+            lambda path: path.write_text("not sqlite", encoding="utf-8"),
+            "STOP_BACKFILL_ISOLATED_SEED_DB_INVALID",
+        ),
+    ],
+)
+def test_isolated_seed_db_rejects_missing_or_invalid_source(
+    monkeypatch, tmp_path, source_factory, expected_code
+):
+    source_db = tmp_path / "source.db"
+    source_factory(source_db)
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    _write_manifest(filing_list, [_manifest_record(1)])
+    called = []
+
+    with pytest.raises(SystemExit) as exc_info:
+        _invoke(
+            monkeypatch,
+            _seed_cli_args(
+                run_root, filing_list,
+                "--isolated-seed-decision-db", str(source_db),
+            ),
+            lambda **kwargs: called.append(kwargs),
+        )
+
+    assert exc_info.value.code != 0
+    assert called == []
+
+
+def test_isolated_seed_rejects_relative_and_reparse_sources(monkeypatch, tmp_path):
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    _write_manifest(filing_list, [_manifest_record(1)])
+    with pytest.raises(SystemExit):
+        _invoke(
+            monkeypatch,
+            _seed_cli_args(
+                run_root, filing_list,
+                "--isolated-seed-decision-db", "relative.db",
+            ),
+            lambda **kwargs: pytest.fail("worker must not start"),
+        )
+
+    real_db = tmp_path / "real.db"
+    link_db = tmp_path / "link.db"
+    _create_seed_db(real_db)
+    try:
+        link_db.symlink_to(real_db)
+    except OSError:
+        link_db = real_db
+        original_reparse_check = cli._path_has_reparse_component
+        monkeypatch.setattr(
+            cli,
+            "_path_has_reparse_component",
+            lambda path: Path(path).resolve() == real_db.resolve()
+            or original_reparse_check(path),
+        )
+    fresh_root = tmp_path / "run-link"
+    fresh_manifest = fresh_root / "input" / "filings.json"
+    _write_manifest(fresh_manifest, [_manifest_record(1)])
+    with pytest.raises(SystemExit):
+        _invoke(
+            monkeypatch,
+            _seed_cli_args(
+                fresh_root, fresh_manifest,
+                "--isolated-seed-decision-db", str(link_db),
+            ),
+            lambda **kwargs: pytest.fail("worker must not start"),
+        )
+
+
+def test_isolated_seed_cache_copies_manifest_whitelist_only(monkeypatch, tmp_path):
+    requested_ids = ["20260713000001", "20260713000002"]
+    seed_cache = tmp_path / "seed-cache"
+    source_files = []
+    for requested_id in requested_ids:
+        source_root = _create_seed_cache(seed_cache, requested_id)
+        (source_root / "document.pdf").write_bytes(b"do-not-copy")
+        (source_root / "logs.jsonl").write_text("do-not-copy", encoding="utf-8")
+        source_files.extend(
+            [source_root / "xbrl.zip", source_root / "xbrl.zip.provenance.json"]
+        )
+    _create_seed_cache(seed_cache, "manifest-outside")
+    before = {path: cli._file_snapshot(path) for path in source_files}
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    _write_manifest(
+        filing_list,
+        [
+            _manifest_record(index, requested_id=requested_id)
+            for index, requested_id in enumerate(requested_ids, 1)
+        ],
+    )
+    captured = {}
+
+    _invoke(
+        monkeypatch,
+        _seed_cli_args(
+            run_root, filing_list,
+            "--isolated-seed-cache-root", str(seed_cache),
+        ),
+        lambda **kwargs: (captured.update(kwargs) or {"summary": {}}),
+    )
+
+    assert {path: cli._file_snapshot(path) for path in source_files} == before
+    assert sorted(path.relative_to(run_root / "cache").as_posix() for path in (run_root / "cache").rglob("*") if path.is_file()) == [
+        f"{requested_ids[0]}/xbrl.zip",
+        f"{requested_ids[0]}/xbrl.zip.provenance.json",
+        f"{requested_ids[1]}/xbrl.zip",
+        f"{requested_ids[1]}/xbrl.zip.provenance.json",
+    ]
+    for source_file, snapshot in before.items():
+        destination = run_root / "cache" / source_file.relative_to(seed_cache)
+        assert cli._sha256_file(destination) == snapshot[2]
+    summary = captured["isolated_seed_summary"]
+    assert summary["isolated_seed_cache_used"] is True
+    assert summary["isolated_seed_cache_filing_count"] == 2
+    assert summary["isolated_seed_cache_requested_ids"] == requested_ids
+    assert summary["isolated_seed_copy_verified"] is True
+    assert str(seed_cache) not in json.dumps(summary)
+
+
+def test_isolated_seed_combined_fixture_is_verified_before_worker(monkeypatch, tmp_path):
+    requested_id = "20260713591788"
+    source_db = tmp_path / "source.db"
+    _create_seed_db(source_db)
+    source_db_before = cli._file_snapshot(source_db)
+    seed_cache = tmp_path / "seed-cache"
+    source_cache = _create_seed_cache(seed_cache, requested_id)
+    source_cache_before = {
+        path.name: cli._file_snapshot(path)
+        for path in source_cache.iterdir()
+    }
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    _write_manifest(filing_list, [_manifest_record(1, requested_id=requested_id)])
+    calls = []
+
+    def run_backfill(**kwargs):
+        calls.append(kwargs)
+        destination_db = run_root / "state" / "decision.db"
+        assert destination_db.is_file()
+        for name, snapshot in source_cache_before.items():
+            destination = run_root / "cache" / requested_id / name
+            assert cli._sha256_file(destination) == snapshot[2]
+        assert kwargs["isolated_seed_summary"]["isolated_seed_copy_verified"] is True
+        return {"summary": {}}
+
+    _invoke(
+        monkeypatch,
+        _seed_cli_args(
+            run_root, filing_list,
+            "--isolated-seed-decision-db", str(source_db),
+            "--isolated-seed-cache-root", str(seed_cache),
+        ),
+        run_backfill,
+    )
+
+    assert len(calls) == 1
+    assert cli._file_snapshot(source_db) == source_db_before
+    assert {
+        path.name: cli._file_snapshot(path)
+        for path in source_cache.iterdir()
+    } == source_cache_before
+    summary = calls[0]["isolated_seed_summary"]
+    assert summary["isolated_seed_decision_db_used"] is True
+    assert summary["isolated_seed_cache_used"] is True
+    assert summary["isolated_seed_cache_requested_ids"] == [requested_id]
+
+
+@pytest.mark.parametrize("missing_name", ["xbrl.zip", "xbrl.zip.provenance.json"])
+def test_isolated_seed_cache_requires_both_verified_files(
+    monkeypatch, tmp_path, missing_name
+):
+    requested_id = "20260713000001"
+    seed_cache = tmp_path / "seed-cache"
+    source_root = _create_seed_cache(seed_cache, requested_id)
+    (source_root / missing_name).unlink()
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    _write_manifest(filing_list, [_manifest_record(1, requested_id=requested_id)])
+    called = []
+
+    with pytest.raises(SystemExit):
+        _invoke(
+            monkeypatch,
+            _seed_cli_args(
+                run_root, filing_list,
+                "--isolated-seed-cache-root", str(seed_cache),
+            ),
+            lambda **kwargs: called.append(kwargs),
+        )
+
+    assert called == []
+
+
+def test_isolated_seed_cache_rejects_unresolved_manifest_id(monkeypatch, tmp_path):
+    seed_cache = tmp_path / "seed-cache"
+    seed_cache.mkdir()
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    record = _manifest_record(1)
+    record["requested_disclosure_no"] = ""
+    _write_manifest(filing_list, [record])
+
+    with pytest.raises(SystemExit):
+        _invoke(
+            monkeypatch,
+            _seed_cli_args(
+                run_root, filing_list,
+                "--isolated-seed-cache-root", str(seed_cache),
+            ),
+            lambda **kwargs: pytest.fail("worker must not start"),
+        )
+
+
+def test_isolated_seed_validates_all_sources_before_copy(monkeypatch, tmp_path):
+    requested_id = "20260713000001"
+    source_db = tmp_path / "source.db"
+    _create_seed_db(source_db)
+    seed_cache = tmp_path / "seed-cache"
+    _create_seed_cache(seed_cache, requested_id, sidecar=False)
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    _write_manifest(filing_list, [_manifest_record(1, requested_id=requested_id)])
+
+    with pytest.raises(SystemExit):
+        _invoke(
+            monkeypatch,
+            _seed_cli_args(
+                run_root, filing_list,
+                "--isolated-seed-decision-db", str(source_db),
+                "--isolated-seed-cache-root", str(seed_cache),
+            ),
+            lambda **kwargs: pytest.fail("worker must not start"),
+        )
+
+    assert not (run_root / "state" / "decision.db").exists()
+    assert list((run_root / "cache").iterdir()) == []
+
+
+def test_isolated_seed_cache_reparse_path_is_unsafe(monkeypatch, tmp_path):
+    requested_id = "20260713000001"
+    seed_cache = tmp_path / "seed-cache"
+    source_root = _create_seed_cache(seed_cache, requested_id)
+    original_reparse_check = cli._path_has_reparse_component
+    monkeypatch.setattr(
+        cli,
+        "_path_has_reparse_component",
+        lambda path: Path(path) == source_root or original_reparse_check(path),
+    )
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    _write_manifest(filing_list, [_manifest_record(1, requested_id=requested_id)])
+
+    with pytest.raises(SystemExit):
+        _invoke(
+            monkeypatch,
+            _seed_cli_args(
+                run_root, filing_list,
+                "--isolated-seed-cache-root", str(seed_cache),
+            ),
+            lambda **kwargs: pytest.fail("worker must not start"),
+        )
+
+
+def test_isolated_seed_copy_mismatch_stops_before_worker(monkeypatch, tmp_path):
+    requested_id = "20260713000001"
+    seed_cache = tmp_path / "seed-cache"
+    _create_seed_cache(seed_cache, requested_id)
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    _write_manifest(filing_list, [_manifest_record(1, requested_id=requested_id)])
+    called = []
+
+    def corrupt_copy(source, destination):
+        Path(destination).write_bytes(b"corrupt")
+
+    monkeypatch.setattr(cli.shutil, "copyfile", corrupt_copy)
+    with pytest.raises(SystemExit):
+        _invoke(
+            monkeypatch,
+            _seed_cli_args(
+                run_root, filing_list,
+                "--isolated-seed-cache-root", str(seed_cache),
+            ),
+            lambda **kwargs: called.append(kwargs),
+        )
+
+    assert called == []
+
+
+def test_isolated_run_root_validation_precedes_seed_access(monkeypatch, tmp_path):
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    _write_manifest(filing_list, [_manifest_record(1)])
+    (run_root / "unexpected").write_text("occupied", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc_info:
+        _invoke(
+            monkeypatch,
+            _seed_cli_args(
+                run_root, filing_list,
+                "--isolated-seed-decision-db", str(tmp_path / "missing.db"),
+            ),
+            lambda **kwargs: pytest.fail("worker must not start"),
+        )
+
+    assert exc_info.value.code == 2
+
+
+def test_isolated_seed_defaults_are_additive_and_do_not_change_existing_mode(
+    monkeypatch, tmp_path
+):
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    _write_manifest(filing_list, [])
+    captured = {}
+
+    _invoke(
+        monkeypatch,
+        _seed_cli_args(run_root, filing_list),
+        lambda **kwargs: (captured.update(kwargs) or {"summary": {}}),
+    )
+
+    assert captured["isolated_seed_summary"] == {
+        "isolated_seed_decision_db_used": False,
+        "isolated_seed_decision_db_source_sha256": None,
+        "isolated_seed_decision_db_destination_sha256": None,
+        "isolated_seed_cache_used": False,
+        "isolated_seed_cache_filing_count": 0,
+        "isolated_seed_cache_requested_ids": [],
+        "isolated_seed_copy_verified": False,
+    }
+    assert captured["dry_run_only"] is True
+    assert captured["isolated_worker_dry_run"] is True
+
+
+def test_isolated_seed_summary_is_included_in_run_summary():
+    metrics = _Metrics()
+    metrics._isolated_seed_summary = {
+        "isolated_seed_decision_db_used": True,
+        "isolated_seed_copy_verified": True,
+    }
+
+    summary = cli._summary_with_validation_rejections(metrics)
+
+    assert summary["isolated_seed_decision_db_used"] is True
+    assert summary["isolated_seed_copy_verified"] is True
+
+
+def _create_seed_db_snapshot_files(path):
+    _create_seed_db(path)
+    wal = Path(f"{path}-wal")
+    shm = Path(f"{path}-shm")
+    wal.write_bytes(b"test-wal-snapshot")
+    shm.write_bytes(b"test-shm-snapshot")
+    return [path, wal, shm]
+
+
+def _install_db_failure(monkeypatch, source_db, stage, *, mutate_source=False):
+    class Cursor:
+        def __init__(self, value):
+            self.value = value
+
+        def fetchone(self):
+            return self.value
+
+    class Connection:
+        def __init__(self, source):
+            self.source = source
+
+        def execute(self, sql):
+            if self.source and stage == "schema" and "schema_version" in sql:
+                raise sqlite3.DatabaseError("schema failure")
+            if not self.source and stage == "integrity" and "integrity_check" in sql:
+                raise sqlite3.DatabaseError("integrity failure")
+            return Cursor((1,) if self.source else ("ok",))
+
+        def backup(self, destination):
+            if stage == "backup":
+                if mutate_source:
+                    source_db.write_bytes(source_db.read_bytes() + b"mutated")
+                raise sqlite3.OperationalError("backup failure")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        cli.sqlite3,
+        "connect",
+        lambda database, *args, **kwargs: Connection(bool(kwargs.get("uri"))),
+    )
+
+
+@pytest.mark.parametrize("stage", ["schema", "backup", "integrity"])
+def test_isolated_seed_db_exception_revalidates_db_wal_shm_and_preserves_stop(
+    monkeypatch, tmp_path, stage
+):
+    source_db = tmp_path / "source.db"
+    source_files = _create_seed_db_snapshot_files(source_db)
+    before = {path: cli._file_snapshot(path) for path in source_files}
+    real_snapshot = cli._file_snapshot
+    snapshot_calls = {path: 0 for path in source_files}
+
+    def tracked_snapshot(path):
+        path = Path(path)
+        if path in snapshot_calls:
+            snapshot_calls[path] += 1
+        return real_snapshot(path)
+
+    monkeypatch.setattr(cli, "_file_snapshot", tracked_snapshot)
+    _install_db_failure(monkeypatch, source_db, stage)
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    _write_manifest(filing_list, [_manifest_record(1)])
+    workers = []
+
+    with pytest.raises(SystemExit):
+        _invoke(
+            monkeypatch,
+            _seed_cli_args(
+                run_root, filing_list,
+                "--isolated-seed-decision-db", str(source_db),
+            ),
+            lambda **kwargs: workers.append(kwargs),
+        )
+
+    assert workers == []
+    assert {path: real_snapshot(path) for path in source_files} == before
+    assert all(count >= 2 for count in snapshot_calls.values())
+
+
+def test_isolated_seed_db_exception_prioritizes_source_mutated(monkeypatch, tmp_path, capsys):
+    source_db = tmp_path / "source.db"
+    source_files = _create_seed_db_snapshot_files(source_db)
+    wal_shm_before = {
+        path: cli._file_snapshot(path)
+        for path in source_files[1:]
+    }
+    _install_db_failure(
+        monkeypatch, source_db, "backup", mutate_source=True
+    )
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    _write_manifest(filing_list, [_manifest_record(1)])
+    workers = []
+
+    with pytest.raises(SystemExit) as exc_info:
+        _invoke(
+            monkeypatch,
+            _seed_cli_args(
+                run_root, filing_list,
+                "--isolated-seed-decision-db", str(source_db),
+            ),
+            lambda **kwargs: workers.append(kwargs),
+        )
+
+    payload, captured = _read_isolated_seed_stop(capsys)
+    assert exc_info.value.code != 0
+    assert payload["stop_code"] == "STOP_BACKFILL_ISOLATED_SEED_SOURCE_MUTATED"
+    assert payload["detail"] == {
+        "source_kind": "decision_db",
+        "safe_identifier": "database",
+        "affected_count": 1,
+    }
+    assert str(tmp_path) not in captured.err
+    assert "backup failure" not in captured.err
+    assert workers == []
+    assert {
+        path: cli._file_snapshot(path)
+        for path in source_files[1:]
+    } == wal_shm_before
+
+
+def test_isolated_seed_db_revalidation_failure_stops_before_worker(
+    monkeypatch, tmp_path
+):
+    source_db = tmp_path / "source.db"
+    _create_seed_db_snapshot_files(source_db)
+    real_snapshot = cli._file_snapshot
+    database_snapshot_calls = 0
+
+    def fail_database_revalidation(path):
+        nonlocal database_snapshot_calls
+        path = Path(path)
+        if path == source_db:
+            database_snapshot_calls += 1
+            if database_snapshot_calls > 1:
+                raise OSError("revalidation unavailable")
+        return real_snapshot(path)
+
+    monkeypatch.setattr(cli, "_file_snapshot", fail_database_revalidation)
+    _install_db_failure(monkeypatch, source_db, "none")
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    _write_manifest(filing_list, [_manifest_record(1)])
+    workers = []
+
+    with pytest.raises(SystemExit):
+        _invoke(
+            monkeypatch,
+            _seed_cli_args(
+                run_root, filing_list,
+                "--isolated-seed-decision-db", str(source_db),
+            ),
+            lambda **kwargs: workers.append(kwargs),
+        )
+
+    assert workers == []
+    assert database_snapshot_calls == 2
+
+
+def _cache_exception_fixture(tmp_path):
+    requested_ids = ["20260713000101", "20260713000102"]
+    seed_cache = tmp_path / "seed-cache"
+    source_files = []
+    for requested_id in requested_ids:
+        source_root = _create_seed_cache(seed_cache, requested_id)
+        (source_root / "document.pdf").write_bytes(b"untouched-pdf")
+        (source_root / "logs.jsonl").write_bytes(b"untouched-log")
+        source_files.extend(
+            [source_root / "xbrl.zip", source_root / "xbrl.zip.provenance.json"]
+        )
+    outside = _create_seed_cache(seed_cache, "manifest-outside")
+    extras = [
+        seed_cache / requested_ids[0] / "document.pdf",
+        seed_cache / requested_ids[0] / "logs.jsonl",
+        outside / "xbrl.zip",
+        outside / "xbrl.zip.provenance.json",
+    ]
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    _write_manifest(
+        filing_list,
+        [
+            _manifest_record(index, requested_id=requested_id)
+            for index, requested_id in enumerate(requested_ids, 1)
+        ],
+    )
+    return requested_ids, seed_cache, source_files, extras, run_root, filing_list
+
+
+@pytest.mark.parametrize("failure_name", ["xbrl.zip", "xbrl.zip.provenance.json"])
+def test_isolated_seed_cache_copy_exception_revalidates_all_sources(
+    monkeypatch, tmp_path, failure_name
+):
+    requested_ids, seed_cache, source_files, extras, run_root, filing_list = (
+        _cache_exception_fixture(tmp_path)
+    )
+    real_snapshot = cli._file_snapshot
+    before = {path: real_snapshot(path) for path in source_files + extras}
+    snapshot_calls = {path: 0 for path in source_files + extras}
+
+    def tracked_snapshot(path):
+        path = Path(path)
+        if path in snapshot_calls:
+            snapshot_calls[path] += 1
+        return real_snapshot(path)
+
+    real_copy = cli.shutil.copyfile
+
+    def failing_copy(source, destination):
+        source = Path(source)
+        if source.parent.name == requested_ids[0] and source.name == failure_name:
+            raise OSError("copy failure")
+        return real_copy(source, destination)
+
+    monkeypatch.setattr(cli, "_file_snapshot", tracked_snapshot)
+    monkeypatch.setattr(cli.shutil, "copyfile", failing_copy)
+    workers = []
+
+    with pytest.raises(SystemExit):
+        _invoke(
+            monkeypatch,
+            _seed_cli_args(
+                run_root, filing_list,
+                "--isolated-seed-cache-root", str(seed_cache),
+            ),
+            lambda **kwargs: workers.append(kwargs),
+        )
+
+    assert workers == []
+    assert {path: real_snapshot(path) for path in source_files + extras} == before
+    assert all(snapshot_calls[path] >= 2 for path in source_files)
+    assert all(snapshot_calls[path] == 0 for path in extras)
+
+
+@pytest.mark.parametrize("failure_name", ["xbrl.zip", "xbrl.zip.provenance.json"])
+def test_isolated_seed_cache_hash_mismatch_revalidates_all_sources(
+    monkeypatch, tmp_path, failure_name
+):
+    requested_ids, seed_cache, source_files, extras, run_root, filing_list = (
+        _cache_exception_fixture(tmp_path)
+    )
+    real_snapshot = cli._file_snapshot
+    before = {path: real_snapshot(path) for path in source_files + extras}
+    snapshot_calls = {path: 0 for path in source_files}
+    real_copy = cli.shutil.copyfile
+
+    def tracked_snapshot(path):
+        path = Path(path)
+        if path in snapshot_calls:
+            snapshot_calls[path] += 1
+        return real_snapshot(path)
+
+    def corrupt_destination(source, destination):
+        source = Path(source)
+        if source.parent.name == requested_ids[0] and source.name == failure_name:
+            Path(destination).write_bytes(b"corrupt-destination")
+            return destination
+        return real_copy(source, destination)
+
+    monkeypatch.setattr(cli, "_file_snapshot", tracked_snapshot)
+    monkeypatch.setattr(cli.shutil, "copyfile", corrupt_destination)
+    workers = []
+
+    with pytest.raises(SystemExit):
+        _invoke(
+            monkeypatch,
+            _seed_cli_args(
+                run_root, filing_list,
+                "--isolated-seed-cache-root", str(seed_cache),
+            ),
+            lambda **kwargs: workers.append(kwargs),
+        )
+
+    assert workers == []
+    assert {path: real_snapshot(path) for path in source_files + extras} == before
+    assert all(count >= 2 for count in snapshot_calls.values())
+
+
+def test_isolated_seed_cache_multi_filing_failure_revalidates_every_source(
+    monkeypatch, tmp_path
+):
+    requested_ids, seed_cache, source_files, extras, run_root, filing_list = (
+        _cache_exception_fixture(tmp_path)
+    )
+    real_snapshot = cli._file_snapshot
+    before = {path: real_snapshot(path) for path in source_files + extras}
+    snapshot_calls = {path: 0 for path in source_files}
+    real_copy = cli.shutil.copyfile
+
+    def tracked_snapshot(path):
+        path = Path(path)
+        if path in snapshot_calls:
+            snapshot_calls[path] += 1
+        return real_snapshot(path)
+
+    def fail_second_filing(source, destination):
+        source = Path(source)
+        if source.parent.name == requested_ids[1] and source.name == "xbrl.zip":
+            raise OSError("second filing failure")
+        return real_copy(source, destination)
+
+    monkeypatch.setattr(cli, "_file_snapshot", tracked_snapshot)
+    monkeypatch.setattr(cli.shutil, "copyfile", fail_second_filing)
+    workers = []
+
+    with pytest.raises(SystemExit):
+        _invoke(
+            monkeypatch,
+            _seed_cli_args(
+                run_root, filing_list,
+                "--isolated-seed-cache-root", str(seed_cache),
+            ),
+            lambda **kwargs: workers.append(kwargs),
+        )
+
+    assert workers == []
+    assert {path: real_snapshot(path) for path in source_files + extras} == before
+    assert all(count >= 2 for count in snapshot_calls.values())
+
+
+def test_isolated_seed_cache_exception_prioritizes_source_mutated(
+    monkeypatch, tmp_path, capsys
+):
+    requested_ids, seed_cache, source_files, _extras, run_root, filing_list = (
+        _cache_exception_fixture(tmp_path)
+    )
+    real_copy = cli.shutil.copyfile
+
+    def mutate_then_fail(source, destination):
+        source = Path(source)
+        if source.parent.name == requested_ids[0] and source.name == "xbrl.zip":
+            source.write_bytes(source.read_bytes() + b"mutated")
+            raise OSError("copy failure")
+        return real_copy(source, destination)
+
+    monkeypatch.setattr(cli.shutil, "copyfile", mutate_then_fail)
+    workers = []
+
+    with pytest.raises(SystemExit) as exc_info:
+        _invoke(
+            monkeypatch,
+            _seed_cli_args(
+                run_root, filing_list,
+                "--isolated-seed-cache-root", str(seed_cache),
+            ),
+            lambda **kwargs: workers.append(kwargs),
+        )
+
+    payload, captured = _read_isolated_seed_stop(capsys)
+    assert exc_info.value.code != 0
+    assert payload["stop_code"] == "STOP_BACKFILL_ISOLATED_SEED_SOURCE_MUTATED"
+    assert payload["detail"] == {
+        "source_kind": "cache",
+        "safe_identifier": f"{requested_ids[0]}/xbrl.zip",
+        "affected_count": 1,
+    }
+    assert str(tmp_path) not in captured.err
+    assert "copy failure" not in captured.err
+    assert workers == []
+
+
 @pytest.mark.parametrize("extra", [
     [],
     ["--apply"],
@@ -197,6 +1017,288 @@ def test_isolated_cli_routes_all_mutable_paths_under_run_root(monkeypatch, tmp_p
     assert captured["cache_root"] == str(run_root / "cache")
     assert captured["log_jsonl_path"] == str(run_root / "logs" / "run.jsonl")
     assert captured["manifest_dir"] == str(run_root / "manifest")
+
+
+def _mark_reparse_component(monkeypatch, target):
+    target = Path(target)
+    real_lstat = cli.os.lstat
+
+    def lstat(path):
+        if Path(path) == target:
+            return SimpleNamespace(
+                st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT,
+            )
+        return real_lstat(path)
+
+    monkeypatch.setattr(cli.os, "lstat", lstat)
+
+
+@pytest.mark.parametrize("component", ["run_root", "run_root_parent"])
+def test_isolated_raw_run_root_rejects_reparse_before_resolve(
+    monkeypatch, tmp_path, component
+):
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    run_root = parent / "run"
+    target = run_root if component == "run_root" else parent
+    if target == run_root:
+        run_root.mkdir()
+    _mark_reparse_component(monkeypatch, target)
+
+    with pytest.raises(RuntimeError, match="STOP_BACKFILL_ISOLATED_SEED_UNSAFE_PATH"):
+        cli._assert_isolated_path_safe(run_root, path_role="run_root")
+
+
+def test_isolated_raw_run_root_rejects_real_symlink_parent(monkeypatch, tmp_path):
+    target_parent = tmp_path / "target"
+    target_parent.mkdir()
+    link_parent = tmp_path / "link-parent"
+    try:
+        link_parent.symlink_to(target_parent, target_is_directory=True)
+    except OSError:
+        _mark_reparse_component(monkeypatch, target_parent)
+        link_parent = target_parent
+
+    with pytest.raises(RuntimeError, match="STOP_BACKFILL_ISOLATED_SEED_UNSAFE_PATH"):
+        cli._assert_isolated_path_safe(link_parent / "new-run", path_role="run_root")
+
+
+def test_isolated_reparse_attributes_unavailable_fails_closed(monkeypatch, tmp_path):
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    real_lstat = cli.os.lstat
+
+    def lstat(path):
+        if Path(path) == run_root:
+            return SimpleNamespace()
+        return real_lstat(path)
+
+    monkeypatch.setattr(cli.os, "lstat", lstat)
+    with pytest.raises(RuntimeError, match="STOP_BACKFILL_ISOLATED_SEED_UNSAFE_PATH"):
+        cli._assert_isolated_path_safe(run_root, path_role="run_root")
+
+
+@pytest.mark.parametrize(
+    ("path_role", "destination_name"),
+    [
+        ("decision_db", "state/decision.db"),
+        ("state_db", "state/state.db"),
+        ("log_jsonl", "logs/run.jsonl"),
+        ("filing_cache", "cache/20260713000001"),
+        ("xbrl_zip", "cache/20260713000001/xbrl.zip"),
+        ("sidecar", "cache/20260713000001/xbrl.zip.provenance.json"),
+    ],
+)
+def test_isolated_destination_guard_rejects_reparse_before_write(
+    monkeypatch, tmp_path, path_role, destination_name
+):
+    run_root = tmp_path / "run"
+    destination = run_root / destination_name
+    destination.parent.mkdir(parents=True)
+    _mark_reparse_component(monkeypatch, destination.parent)
+
+    with pytest.raises(RuntimeError, match="STOP_BACKFILL_ISOLATED_SEED_UNSAFE_PATH"):
+        cli._assert_isolated_destination_safe(
+            destination,
+            run_root=run_root,
+            path_role=path_role,
+        )
+    assert not destination.exists()
+
+
+def test_isolated_layout_recheck_stops_before_seed_source_access(monkeypatch, tmp_path):
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    _write_manifest(filing_list, [_manifest_record(1)])
+    source_db = tmp_path / "source.db"
+    _create_seed_db(source_db)
+    source_accesses = []
+
+    def reject_layout(*_args, **_kwargs):
+        raise RuntimeError("STOP_BACKFILL_ISOLATED_SEED_UNSAFE_PATH: path_role=state_db; reason=reparse_component")
+
+    monkeypatch.setattr(cli, "_validate_isolated_write_paths", reject_layout)
+    monkeypatch.setattr(
+        cli,
+        "_validate_isolated_decision_db_seed",
+        lambda *_args, **_kwargs: source_accesses.append(True),
+    )
+
+    with pytest.raises(SystemExit):
+        _invoke(
+            monkeypatch,
+            _seed_cli_args(
+                run_root, filing_list,
+                "--isolated-seed-decision-db", str(source_db),
+            ),
+            lambda **_kwargs: pytest.fail("worker must not start"),
+        )
+    assert source_accesses == []
+
+
+_ISOLATED_SEED_STOP_CODES = (
+    "STOP_BACKFILL_ISOLATED_SEED_INVALID_MODE",
+    "STOP_BACKFILL_ISOLATED_SEED_DB_INVALID",
+    "STOP_BACKFILL_ISOLATED_SEED_CACHE_MISSING",
+    "STOP_BACKFILL_ISOLATED_SEED_UNSAFE_PATH",
+    "STOP_BACKFILL_ISOLATED_SEED_COPY_MISMATCH",
+    "STOP_BACKFILL_ISOLATED_SEED_MANIFEST_ID_UNRESOLVED",
+    "STOP_BACKFILL_ISOLATED_SEED_SOURCE_MUTATED",
+)
+
+
+def _read_isolated_seed_stop(capsys):
+    captured = capsys.readouterr()
+    payloads = [
+        json.loads(line)
+        for line in captured.err.splitlines()
+        if line.startswith("{") and line.endswith("}")
+    ]
+    assert len(payloads) == 1
+    return payloads[0], captured
+
+
+@pytest.mark.parametrize("stop_code", _ISOLATED_SEED_STOP_CODES)
+def test_isolated_seed_stops_emit_structured_nonzero_json(
+    monkeypatch, tmp_path, capsys, stop_code
+):
+    worker_calls = []
+    if stop_code == "STOP_BACKFILL_ISOLATED_SEED_INVALID_MODE":
+        args = ["--isolated-seed-decision-db", str(tmp_path / "source.db")]
+    else:
+        run_root = tmp_path / "run"
+        filing_list = run_root / "input" / "filings.json"
+        _write_manifest(filing_list, [_manifest_record(1)])
+        monkeypatch.setattr(
+            cli,
+            "_prepare_isolated_seeds",
+            lambda **_kwargs: (_ for _ in ()).throw(
+                RuntimeError(f"{stop_code}: C:/Users/private/secret.db raw failure")
+            ),
+        )
+        args = _seed_cli_args(run_root, filing_list)
+
+    with pytest.raises(SystemExit) as exc_info:
+        _invoke(monkeypatch, args, lambda **_kwargs: worker_calls.append(True))
+
+    payload, captured = _read_isolated_seed_stop(capsys)
+    assert exc_info.value.code != 0
+    assert payload == {
+        "status": "stopped",
+        "stop_code": stop_code,
+        "stage": "isolated_seed_mode" if stop_code.endswith("INVALID_MODE") else "isolated_seed_prepare",
+        "detail": {"reason": "invalid_mode"} if stop_code.endswith("INVALID_MODE") else {},
+        "worker_started": False,
+        "canonical_sync_enabled": False,
+    }
+    assert "Traceback" not in captured.err
+    assert "C:/Users/private" not in captured.err
+    assert "raw failure" not in captured.err
+    assert worker_calls == []
+
+
+def test_isolated_seed_stop_preserves_allowlisted_safe_detail(monkeypatch, tmp_path, capsys):
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    _write_manifest(filing_list, [_manifest_record(1)])
+    monkeypatch.setattr(
+        cli,
+        "_prepare_isolated_seeds",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            RuntimeError(
+                "STOP_BACKFILL_ISOLATED_SEED_UNSAFE_PATH: "
+                "path_role=decision_db; reason=reparse_component; C:/Users/private"
+            )
+        ),
+    )
+
+    with pytest.raises(SystemExit):
+        _invoke(monkeypatch, _seed_cli_args(run_root, filing_list))
+
+    payload, captured = _read_isolated_seed_stop(capsys)
+    assert payload["detail"] == {
+        "path_role": "decision_db",
+        "reason": "reparse_component",
+    }
+    assert str(tmp_path) not in captured.err
+
+
+def test_unexpected_seed_prepare_runtime_error_is_not_converted(monkeypatch, tmp_path, capsys):
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    _write_manifest(filing_list, [_manifest_record(1)])
+    monkeypatch.setattr(
+        cli,
+        "_prepare_isolated_seeds",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("unexpected seed failure")),
+    )
+
+    with pytest.raises(RuntimeError, match="unexpected seed failure"):
+        _invoke(monkeypatch, _seed_cli_args(run_root, filing_list))
+
+    assert capsys.readouterr().err == ""
+
+
+def _run_isolated_cli_subprocess(*args):
+    return subprocess.run(
+        [sys.executable, str(Path(cli.__file__)), *args],
+        cwd=Path(cli.__file__).parent.parent,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected_code"),
+    [
+        ("invalid", "STOP_BACKFILL_ISOLATED_SEED_INVALID_MODE"),
+        ("unsafe", "STOP_BACKFILL_ISOLATED_SEED_UNSAFE_PATH"),
+        ("db_invalid", "STOP_BACKFILL_ISOLATED_SEED_DB_INVALID"),
+    ],
+)
+def test_isolated_seed_stops_are_machine_readable_in_subprocess(
+    tmp_path, kind, expected_code
+):
+    if kind == "invalid":
+        result = _run_isolated_cli_subprocess(
+            "--isolated-seed-decision-db", str(tmp_path / "source.db")
+        )
+    else:
+        run_root = tmp_path / f"run-{kind}"
+        filing_list = run_root / "input" / "filings.json"
+        _write_manifest(filing_list, [_manifest_record(1)])
+        source = tmp_path / ("relative.db" if kind == "unsafe" else "invalid.db")
+        if kind == "db_invalid":
+            source.write_text("not sqlite", encoding="utf-8")
+        result = _run_isolated_cli_subprocess(
+            "--isolated-worker-dry-run", "--run-root", str(run_root),
+            "--filing-list", str(filing_list), "--workers", "1",
+            "--isolated-seed-decision-db", "relative.db" if kind == "unsafe" else str(source),
+        )
+
+    payloads = [json.loads(line) for line in result.stderr.splitlines() if line.startswith("{")]
+    assert result.returncode != 0
+    assert len(payloads) == 1
+    assert payloads[0]["stop_code"] == expected_code
+    assert payloads[0]["worker_started"] is False
+    assert payloads[0]["canonical_sync_enabled"] is False
+    assert "Traceback" not in result.stderr
+
+
+def test_isolated_cli_subprocess_normal_path_keeps_summary_contract(tmp_path):
+    run_root = tmp_path / "run-normal"
+    filing_list = run_root / "input" / "filings.json"
+    _write_manifest(filing_list, [])
+
+    result = _run_isolated_cli_subprocess(
+        "--isolated-worker-dry-run", "--run-root", str(run_root),
+        "--filing-list", str(filing_list), "--workers", "1",
+    )
+
+    assert result.returncode == 0
+    assert "stop_code" not in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 def test_isolated_cli_passes_skip_pdf_to_run_backfill(monkeypatch, tmp_path):
