@@ -93,6 +93,10 @@ def _safe_isolated_seed_stop_detail(code: str, message: str) -> dict[str, object
             value = message.split(marker, 1)[1].split(";", 1)[0].split()[0]
             if value.replace("_", "").replace("-", "").isalnum():
                 detail[key] = value
+    if "change_kind" not in detail and "change_types=" in message:
+        value = message.split("change_types=", 1)[1].split(";", 1)[0].split()[0]
+        if value in {"created", "deleted", "unsafe_path"}:
+            detail["change_kind"] = value
     if "source_type=" in message:
         value = message.split("source_type=", 1)[1].split(";", 1)[0].split()[0]
         if value.replace("_", "").replace("-", "").isalnum():
@@ -256,12 +260,47 @@ def _validate_seed_source_path(
     return source
 
 
-def _sqlite_source_snapshot(source: Path) -> dict[str, tuple[int, int, str] | None]:
-    snapshots: dict[str, tuple[int, int, str] | None] = {}
-    for suffix in ("", "-wal", "-shm"):
-        candidate = Path(f"{source}{suffix}")
-        snapshots[suffix] = _file_snapshot(candidate) if candidate.exists() else None
-    return snapshots
+def _sqlite_shm_snapshot(source: Path) -> dict[str, object]:
+    """Capture only the safety properties of SQLite's ephemeral shared memory."""
+    candidate = Path(f"{source}-shm")
+    try:
+        exists = candidate.exists()
+    except OSError:
+        return {"exists": None, "safe": False, "size": None}
+    if not exists:
+        return {"exists": False, "safe": True, "size": None}
+    try:
+        return {
+            "exists": True,
+            "safe": candidate.is_file() and not _path_has_reparse_component(candidate),
+            "size": candidate.stat().st_size,
+        }
+    except OSError:
+        return {"exists": True, "safe": False, "size": None}
+
+
+def _assert_sqlite_shm_snapshot_safe(snapshot: dict[str, object]) -> None:
+    if snapshot["exists"] is None or not snapshot["safe"]:
+        _raise_source_mutated(
+            "decision_db_shm", {"shm": {"unsafe_path"}}
+        )
+
+
+def _sqlite_source_snapshot(source: Path) -> dict[str, object]:
+    """Keep persistent DB/WAL audits separate from SQLite's ephemeral SHM."""
+    shm = _sqlite_shm_snapshot(source)
+    _assert_sqlite_shm_snapshot_safe(shm)
+    return {
+        "persistent": {
+            "database": _file_snapshot(source),
+            "wal": (
+                _file_snapshot(Path(f"{source}-wal"))
+                if Path(f"{source}-wal").exists()
+                else None
+            ),
+        },
+        "ephemeral": {"shm": shm},
+    }
 
 
 def _source_snapshot_changes(
@@ -312,18 +351,29 @@ def _raise_source_mutated(
 
 def _assert_sqlite_source_unchanged(
     source: Path,
-    before: dict[str, tuple[int, int, str] | None],
+    before: dict[str, object],
 ) -> None:
-    identifiers = {"": "database", "-wal": "wal", "-shm": "shm"}
+    persistent = before["persistent"]
     _raise_source_mutated(
         "decision_db",
         {
-            identifiers[suffix]: _source_snapshot_changes(
-                Path(f"{source}{suffix}"), snapshot
-            )
-            for suffix, snapshot in before.items()
+            "database": _source_snapshot_changes(source, persistent["database"]),
+            "wal": _source_snapshot_changes(
+                Path(f"{source}-wal"), persistent["wal"]
+            ),
         },
     )
+    shm_before = before["ephemeral"]["shm"]
+    shm_after = _sqlite_shm_snapshot(source)
+    if shm_before["exists"] != shm_after["exists"]:
+        change_kind = "created" if shm_after["exists"] else "deleted"
+        _raise_source_mutated(
+            "decision_db_shm", {"shm": {change_kind}}
+        )
+    if not shm_after["safe"]:
+        _raise_source_mutated(
+            "decision_db_shm", {"shm": {"unsafe_path"}}
+        )
 
 
 def _assert_cache_sources_unchanged(
@@ -343,7 +393,7 @@ def _validate_isolated_decision_db_seed(
     source_path: str,
     *,
     run_root: Path,
-) -> tuple[Path, dict[str, tuple[int, int, str] | None]]:
+) -> tuple[Path, dict[str, object]]:
     source = _validate_seed_source_path(
         source_path,
         run_root=run_root,
@@ -368,7 +418,7 @@ def _validate_isolated_decision_db_seed(
 
 def _copy_isolated_decision_db(
     source: Path,
-    before: dict[str, tuple[int, int, str] | None],
+    before: dict[str, object],
     *,
     destination: Path,
     run_root: Path,
@@ -408,7 +458,7 @@ def _copy_isolated_decision_db(
 
     if not destination.is_file():
         raise RuntimeError(f"{_ISOLATED_SEED_COPY_MISMATCH}: decision DB destination missing")
-    return before[""][2], _sha256_file(destination)
+    return before["persistent"]["database"][2], _sha256_file(destination)
 
 
 def _manifest_requested_ids(filing_list_path: str) -> list[str]:

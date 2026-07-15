@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from pathlib import Path
 import json
+import os
 import sqlite3
 import stat
 import subprocess
@@ -654,6 +655,8 @@ def test_isolated_seed_db_exception_revalidates_db_wal_shm_and_preserves_stop(
     before = {path: cli._file_snapshot(path) for path in source_files}
     real_snapshot = cli._file_snapshot
     snapshot_calls = {path: 0 for path in source_files}
+    real_shm_snapshot = cli._sqlite_shm_snapshot
+    shm_snapshot_calls = 0
 
     def tracked_snapshot(path):
         path = Path(path)
@@ -661,7 +664,13 @@ def test_isolated_seed_db_exception_revalidates_db_wal_shm_and_preserves_stop(
             snapshot_calls[path] += 1
         return real_snapshot(path)
 
+    def tracked_shm_snapshot(path):
+        nonlocal shm_snapshot_calls
+        shm_snapshot_calls += 1
+        return real_shm_snapshot(path)
+
     monkeypatch.setattr(cli, "_file_snapshot", tracked_snapshot)
+    monkeypatch.setattr(cli, "_sqlite_shm_snapshot", tracked_shm_snapshot)
     _install_db_failure(monkeypatch, source_db, stage)
     run_root = tmp_path / "run"
     filing_list = run_root / "input" / "filings.json"
@@ -680,7 +689,10 @@ def test_isolated_seed_db_exception_revalidates_db_wal_shm_and_preserves_stop(
 
     assert workers == []
     assert {path: real_snapshot(path) for path in source_files} == before
-    assert all(count >= 2 for count in snapshot_calls.values())
+    assert snapshot_calls[source_db] >= 2
+    assert snapshot_calls[Path(f"{source_db}-wal")] >= 2
+    assert snapshot_calls[Path(f"{source_db}-shm")] == 0
+    assert shm_snapshot_calls >= 2
 
 
 def test_isolated_seed_db_exception_prioritizes_source_mutated(monkeypatch, tmp_path, capsys):
@@ -761,6 +773,177 @@ def test_isolated_seed_db_revalidation_failure_stops_before_worker(
 
     assert workers == []
     assert database_snapshot_calls == 2
+
+
+@pytest.mark.parametrize("change", ["mtime", "sha", "mtime_and_sha", "size"])
+def test_sqlite_shm_metadata_changes_are_ephemeral(monkeypatch, tmp_path, change):
+    source_db = tmp_path / "source.db"
+    _create_seed_db(source_db)
+    shm = Path(f"{source_db}-shm")
+    shm.write_bytes(b"original-shm")
+    before = cli._sqlite_source_snapshot(source_db)
+
+    if change == "mtime":
+        info = shm.stat()
+        os.utime(shm, ns=(info.st_atime_ns, info.st_mtime_ns + 1))
+    elif change == "sha":
+        shm.write_bytes(b"changed-shm")
+    elif change == "mtime_and_sha":
+        shm.write_bytes(b"changed-shm")
+        info = shm.stat()
+        os.utime(shm, ns=(info.st_atime_ns, info.st_mtime_ns + 1))
+    else:
+        shm.write_bytes(b"changed-shm-with-a-different-size")
+
+    cli._assert_sqlite_source_unchanged(source_db, before)
+
+
+@pytest.mark.parametrize("change_kind", ["created", "deleted"])
+def test_sqlite_shm_creation_or_deletion_stops_seed_source(monkeypatch, tmp_path, change_kind):
+    source_db = tmp_path / "source.db"
+    _create_seed_db(source_db)
+    shm = Path(f"{source_db}-shm")
+    if change_kind == "deleted":
+        shm.write_bytes(b"original-shm")
+    before = cli._sqlite_source_snapshot(source_db)
+    if change_kind == "created":
+        shm.write_bytes(b"created-shm")
+    else:
+        shm.unlink()
+
+    with pytest.raises(RuntimeError) as exc_info:
+        cli._assert_sqlite_source_unchanged(source_db, before)
+
+    assert str(exc_info.value).startswith(
+        "STOP_BACKFILL_ISOLATED_SEED_SOURCE_MUTATED: "
+        "source_type=decision_db_shm identifiers=shm "
+        f"change_types={change_kind} target_count=1"
+    )
+
+
+def test_sqlite_shm_unsafe_path_stops_seed_source(monkeypatch, tmp_path):
+    source_db = tmp_path / "source.db"
+    _create_seed_db(source_db)
+    shm = Path(f"{source_db}-shm")
+    shm.write_bytes(b"original-shm")
+    before = cli._sqlite_source_snapshot(source_db)
+    monkeypatch.setattr(
+        cli,
+        "_sqlite_shm_snapshot",
+        lambda _source: {"exists": True, "safe": False, "size": 1},
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        cli._assert_sqlite_source_unchanged(source_db, before)
+
+    assert "source_type=decision_db_shm identifiers=shm " in str(exc_info.value)
+    assert "change_types=unsafe_path" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("target", "change"),
+    [
+        ("database", "mtime"),
+        ("database", "sha"),
+        ("wal", "mtime"),
+        ("wal", "sha"),
+    ],
+)
+def test_sqlite_database_and_wal_remain_strict(monkeypatch, tmp_path, target, change):
+    source_db = tmp_path / "source.db"
+    _create_seed_db(source_db)
+    wal = Path(f"{source_db}-wal")
+    wal.write_bytes(b"original-wal")
+    before = cli._sqlite_source_snapshot(source_db)
+    target_path = source_db if target == "database" else wal
+    if change == "mtime":
+        info = target_path.stat()
+        os.utime(target_path, ns=(info.st_atime_ns, info.st_mtime_ns + 2_000_000_000))
+    else:
+        target_path.write_bytes(target_path.read_bytes() + b"changed")
+
+    with pytest.raises(RuntimeError) as exc_info:
+        cli._assert_sqlite_source_unchanged(source_db, before)
+
+    assert "source_type=decision_db" in str(exc_info.value)
+    assert f"identifiers={target}" in str(exc_info.value)
+    assert change in str(exc_info.value).split("change_types=", 1)[1].split()[0].split(",")
+
+
+def test_shm_ephemeral_change_allows_seed_and_worker_start(monkeypatch, tmp_path):
+    source_db = tmp_path / "source.db"
+    _create_seed_db(source_db)
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    _write_manifest(filing_list, [_manifest_record(1)])
+    snapshot_calls = 0
+
+    def changing_shm_snapshot(_source):
+        nonlocal snapshot_calls
+        snapshot_calls += 1
+        return {"exists": True, "safe": True, "size": snapshot_calls}
+
+    monkeypatch.setattr(cli, "_sqlite_shm_snapshot", changing_shm_snapshot)
+    calls = []
+
+    _invoke(
+        monkeypatch,
+        _seed_cli_args(
+            run_root, filing_list, "--isolated-seed-decision-db", str(source_db)
+        ),
+        lambda **kwargs: (calls.append(kwargs) or {"summary": {}}),
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["isolated_worker_dry_run"] is True
+    assert calls[0]["dry_run_only"] is True
+    assert calls[0]["isolated_seed_summary"]["isolated_seed_copy_verified"] is True
+    assert (run_root / "state" / "decision.db").is_file()
+    assert snapshot_calls >= 4
+
+
+def test_shm_creation_keeps_structured_source_mutated_stop(monkeypatch, tmp_path, capsys):
+    source_db = tmp_path / "source.db"
+    _create_seed_db(source_db)
+    run_root = tmp_path / "run"
+    filing_list = run_root / "input" / "filings.json"
+    _write_manifest(filing_list, [_manifest_record(1)])
+    snapshots = iter(
+        [
+            {"exists": False, "safe": True, "size": None},
+            {"exists": True, "safe": True, "size": 1},
+        ]
+    )
+    monkeypatch.setattr(cli, "_sqlite_shm_snapshot", lambda _source: next(snapshots))
+    workers = []
+
+    with pytest.raises(SystemExit) as exc_info:
+        _invoke(
+            monkeypatch,
+            _seed_cli_args(
+                run_root, filing_list,
+                "--isolated-seed-decision-db", str(source_db),
+            ),
+            lambda **kwargs: workers.append(kwargs),
+        )
+
+    payload, captured = _read_isolated_seed_stop(capsys)
+    assert exc_info.value.code != 0
+    assert payload == {
+        "status": "stopped",
+        "stop_code": "STOP_BACKFILL_ISOLATED_SEED_SOURCE_MUTATED",
+        "stage": "isolated_seed_prepare",
+        "detail": {
+            "source_kind": "decision_db_shm",
+            "safe_identifier": "shm",
+            "change_kind": "created",
+            "affected_count": 1,
+        },
+        "worker_started": False,
+        "canonical_sync_enabled": False,
+    }
+    assert "Traceback" not in captured.err
+    assert workers == []
 
 
 def _cache_exception_fixture(tmp_path):
