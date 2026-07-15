@@ -1999,4 +1999,68 @@ class TestSingleEarningsApplyContract:
         assert not result.get("partial_failure", False)
         assert not any(result.get(key) for key in ("sqlite_saved", "supabase_saved", "state_updated"))
 
+    def test_single_apply_returns_worker_period_and_internal_document_id_on_success(self, tmp_path):
+        pipeline, apply = _require_single_apply_entrypoint()
+        calls = {"sqlite": [], "supabase": [], "state": []}
+
+        class FakeState:
+            def get_log(self, _document_id):
+                return {"status": "parse_failed"}
+
+            def record(self, document_id, **kwargs):
+                calls["state"].append((document_id, kwargs))
+
+        monkeypatch = pytest.MonkeyPatch()
+        try:
+            monkeypatch.setattr(pipeline, "run_earnings_subprocess_dry_run", lambda *_args, **_kwargs: _single_apply_dry_run_summary())
+            monkeypatch.setattr(pipeline, "save_earnings_summary", lambda *_args: calls["sqlite"].append(True))
+            monkeypatch.setattr(pipeline, "save_event_to_supabase", lambda _event: calls["supabase"].append(True) or {"action": "inserted"})
+            result = apply(
+                _single_apply_doc(), archive_root=tmp_path / "archive",
+                source_url=_SINGLE_APPLY_SOURCE_URL, state_db=FakeState(),
+            )
+        finally:
+            monkeypatch.undo()
+
+        assert result["status"] == "success"
+        assert result["ticker"] == "581A"
+        assert result["period"] == "2026-05-31"
+        assert result["internal_document_id"] == "202607143581A0"
+        assert len(calls["sqlite"]) == len(calls["supabase"]) == len(calls["state"]) == 1
+
+    def test_single_apply_preserves_worker_provenance_on_supabase_partial_failure(self, tmp_path):
+        pipeline, apply = _require_single_apply_entrypoint()
+        calls = {"sqlite": [], "supabase": [], "state": []}
+
+        class FakeState:
+            def get_log(self, _document_id):
+                return {"status": "parse_failed"}
+
+            def record(self, *args, **kwargs):
+                calls["state"].append((args, kwargs))
+
+        monkeypatch = pytest.MonkeyPatch()
+        try:
+            monkeypatch.setattr(pipeline, "run_earnings_subprocess_dry_run", lambda *_args, **_kwargs: _single_apply_dry_run_summary())
+            monkeypatch.setattr(pipeline, "save_earnings_summary", lambda *_args: calls["sqlite"].append(True))
+            monkeypatch.setattr(pipeline, "save_event_to_supabase", lambda _event: calls["supabase"].append(True) or {"action": "error", "error": "test"})
+            result = apply(
+                _single_apply_doc(), archive_root=tmp_path / "archive",
+                source_url=_SINGLE_APPLY_SOURCE_URL, state_db=FakeState(),
+            )
+        finally:
+            monkeypatch.undo()
+
+        assert result["status"] == "failed"
+        assert result["partial_failure"] is True
+        assert result["sqlite_saved"] is True
+        assert result["supabase_saved"] is False
+        assert result["state_updated"] is False
+        assert result["ticker"] == "581A"
+        assert result["source_doc_id"] == _SINGLE_APPLY_CANONICAL_ID
+        assert result["period"] == "2026-05-31"
+        assert result["internal_document_id"] == "202607143581A0"
+        assert len(calls["sqlite"]) == len(calls["supabase"]) == 1
+        assert calls["state"] == []
+
 

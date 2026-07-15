@@ -1278,6 +1278,14 @@ def _single_apply_failure_result(
     }
 
 
+def _single_apply_worker_provenance(worker_result: dict) -> dict:
+    """Return the bounded worker provenance exposed by single-apply results."""
+    return {
+        "internal_document_id": worker_result.get("internal_document_id", ""),
+        "period": worker_result.get("period", ""),
+    }
+
+
 def run_single_earnings_apply(
     doc: dict,
     *,
@@ -1432,6 +1440,7 @@ def run_single_earnings_apply(
             "sqlite_saved": sqlite_saved, "supabase_saved": False,
             "state_updated": False, "discord_sent": False,
             "canonical_synced": False, "segment_synced": False,
+            **_single_apply_worker_provenance(worker_result),
         }
 
     if enable_discord:
@@ -1454,8 +1463,7 @@ def run_single_earnings_apply(
         "segment_synced": False, "partial_failure": False,
         "sqlite_saved": sqlite_saved,
         "supabase_saved": has_real_dependencies,
-        "internal_document_id": worker_result.get("internal_document_id", ""),
-        "period": worker_result.get("period", ""),
+        **_single_apply_worker_provenance(worker_result),
     }
 
 
