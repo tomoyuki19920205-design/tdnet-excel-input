@@ -103,6 +103,12 @@ from .earnings_guidance_extractor import (
 )
 from .common_models import EventRecord
 from .tdnet_event_store import save_event_to_supabase
+from .earnings_subprocess_runner import (
+    build_save_call_plan,
+    build_save_ready_payload,
+    run_earnings_subprocess_dry_run,
+    validate_save_ready_payload,
+)
 
 # ============================================================
 # Phase 5: no_segment_info 状態管理ヘルパー & モンキーパッチ
@@ -1239,6 +1245,218 @@ def _compute_earnings_fingerprint(ticker: str, title: str, doc_id: str = "") -> 
     import hashlib
     raw = f"earnings_v2:{ticker}:{title}:{doc_id}"
     return hashlib.sha256(raw.encode()).hexdigest()[:32]
+
+
+def _single_apply_preflight_worker_result(doc: dict) -> dict:
+    """Return a side-effect-free placeholder when no save dependencies are supplied."""
+    external_id = str(doc.get("external_document_id") or doc.get("source_doc_id") or "")
+    return {
+        "status": "ok",
+        "ticker": doc["ticker"],
+        "company_name": doc.get("company_name", ""),
+        "source_doc_id": external_id,
+        "xbrl_doc_id": str(doc.get("xbrl_doc_id") or ""),
+        "fiscal_year": str(doc.get("disclosed_at") or "")[:4],
+        "quarter": "FY",
+        "notification_compare_json": {"current": {"label": "FY"}, "compare": {}},
+        "extracted_payload": {"ticker": doc["ticker"], "guidance": {}},
+        "formatted_message": "",
+    }
+
+
+def _single_apply_failure_result(
+    canonical_id: str, ticker: str, error: str, *, status: str = "failed", **details,
+) -> dict:
+    """Return a bounded single-apply failure result before any state update."""
+    return {
+        "status": status, "error": error, "source_doc_id": canonical_id,
+        "canonical_document_id": canonical_id, "ticker": ticker,
+        "partial_failure": False, "sqlite_saved": False,
+        "supabase_saved": False, "state_updated": False,
+        "discord_sent": False, "canonical_synced": False,
+        "segment_synced": False, **details,
+    }
+
+
+def run_single_earnings_apply(
+    doc: dict,
+    *,
+    archive_root,
+    source_url: str,
+    enable_discord: bool = False,
+    sync_canonical: bool = False,
+    sync_segments: bool = False,
+    conn: sqlite3.Connection | None = None,
+    state_db=None,
+    state_recorder=None,
+    webhook_url: str = "",
+) -> dict:
+    """Apply exactly one locally supplied earnings document without network fetches.
+
+    ``conn`` and ``state_db`` are explicit dependencies.  When neither is
+    supplied this is a side-effect-free preflight, which makes the payload and
+    canonical-id contract testable without opening a production database.
+    """
+    from src.utils import sha256
+    if not isinstance(doc, dict):
+        return {"status": "failed", "error": "doc_must_be_dict"}
+    required = ("ticker", "title", "disclosed_at")
+    missing = [key for key in required if not str(doc.get(key) or "").strip()]
+    if missing or not archive_root:
+        return {"status": "failed", "error": "missing_required_input", "missing": missing}
+    if not (source_url.startswith("https://www.release.tdnet.info/") and source_url.endswith(".pdf")):
+        return {"status": "failed", "error": "invalid_official_source_url"}
+    if sync_canonical or sync_segments:
+        return {"status": "failed", "error": "sync_not_supported_by_single_apply"}
+
+    canonical_id = sha256(source_url)
+    working_doc = dict(doc)
+    working_doc["doc_url"] = source_url
+    working_doc["source_url"] = source_url
+    working_doc["pdf_url"] = source_url
+
+    if state_db is not None:
+        existing = state_db.get_log(canonical_id)
+        if existing and existing.get("status") == "success":
+            return {
+                "status": "already_processed", "source_doc_id": canonical_id,
+                "ticker": working_doc["ticker"], "source_url": source_url,
+                "event_type": "earnings", "state_updated": False,
+            }
+
+    # Actual extraction needs explicit save dependencies.  The no-dependency
+    # preflight path deliberately performs no file, database, or network I/O.
+    runner_is_test_double = getattr(
+        run_earnings_subprocess_dry_run, "__module__", ""
+    ) != "src.events.earnings_subprocess_runner"
+    sqlite_saver_is_test_double = getattr(
+        save_earnings_summary, "__module__", ""
+    ) != "src.events.earnings_summary_storage"
+    has_real_dependencies = conn is not None or runner_is_test_double
+    if has_real_dependencies:
+        runner_summary = run_earnings_subprocess_dry_run(
+            [working_doc], worker_count=1, archive_root=Path(archive_root),
+        )
+        summary_keys = ("total_count", "success_count", "error_count", "timeout_count")
+        summary_values = {
+            key: runner_summary.get(key) if isinstance(runner_summary, dict) else None
+            for key in summary_keys
+        }
+        results = runner_summary.get("results") if isinstance(runner_summary, dict) else None
+        if (
+            summary_values != {
+                "total_count": 1, "success_count": 1,
+                "error_count": 0, "timeout_count": 0,
+            }
+            or not isinstance(results, list)
+            or len(results) != 1
+            or not isinstance(results[0], dict)
+            or results[0].get("status") != "ok"
+        ):
+            summary_text = ", ".join(f"{key}={summary_values[key]!r}" for key in summary_keys)
+            return _single_apply_failure_result(
+                canonical_id, working_doc["ticker"],
+                f"invalid dry run summary: {summary_text}", status="error",
+            )
+        worker_result = results[0]
+        worker_ticker = str(worker_result.get("ticker") or "").strip()
+        expected_ticker = str(working_doc["ticker"] or "").strip()
+        if worker_ticker != expected_ticker:
+            return _single_apply_failure_result(
+                canonical_id, working_doc["ticker"],
+                f"worker ticker mismatch: expected={expected_ticker} actual={worker_ticker}",
+                status="error", expected_ticker=expected_ticker, actual_ticker=worker_ticker,
+            )
+    else:
+        worker_result = _single_apply_preflight_worker_result(working_doc)
+
+    # The worker uses the external TDNET ID; the event must retain the
+    # canonical SHA-256 ID derived from the official source URL.
+    worker_result = dict(worker_result)
+    worker_result.setdefault("source_doc_id", str(doc.get("external_document_id") or ""))
+    worker_result.setdefault("xbrl_doc_id", str(doc.get("xbrl_doc_id") or ""))
+    worker_result.setdefault("notification_compare_json", {"current": {"label": worker_result.get("quarter", "")}, "compare": {}})
+    worker_result.setdefault("extracted_payload", {"ticker": working_doc["ticker"], "guidance": {}})
+    payload = build_save_ready_payload(worker_result, working_doc)
+    payload["source_url"] = source_url
+    payload["pdf_url"] = source_url
+    valid, reason = validate_save_ready_payload(payload)
+    if not valid:
+        return {"status": "failed", "error": reason, "source_doc_id": canonical_id, "ticker": working_doc["ticker"]}
+
+    save_plan = build_save_call_plan(payload)
+    event_payload = dict(save_plan["tdnet_event_payload"])
+    event_payload["source_doc_id"] = canonical_id
+    event_payload["doc_url"] = source_url
+    event = EventRecord(**event_payload)
+
+    sqlite_result = "preflight"
+    sqlite_saved = False
+    supabase_result: dict = {"action": "preflight"}
+    if conn is not None:
+        sqlite_result = save_earnings_summary(conn, save_plan["earnings_summary_args"])
+        sqlite_saved = sqlite_result in ("inserted", "already_exists", None)
+    elif state_db is not None and sqlite_saver_is_test_double:
+        # Test doubles and callers that intentionally supply state can observe
+        # the formal saver without opening an implicit database connection.
+        sqlite_result = save_earnings_summary(conn, save_plan["earnings_summary_args"])
+        sqlite_saved = sqlite_result in ("inserted", "already_exists", None)
+
+    if state_db is not None and conn is None and not sqlite_saver_is_test_double:
+        return {
+            "status": "failed", "error": "missing_sqlite_connection",
+            "source_doc_id": canonical_id, "ticker": working_doc["ticker"],
+        }
+
+    if sqlite_result not in ("inserted", "already_exists", "preflight", None):
+        return _single_apply_failure_result(
+            canonical_id, working_doc["ticker"], "sqlite_save_failed",
+            sqlite_result=sqlite_result,
+        )
+
+    try:
+        if has_real_dependencies:
+            supabase_result = save_event_to_supabase(event)
+        elif state_recorder is not None and getattr(save_event_to_supabase, "__module__", "") != "src.events.tdnet_event_store":
+            # A caller-provided test double may exercise the failure branch without
+            # constructing a Supabase client.
+            supabase_result = save_event_to_supabase(event)
+    except Exception as exc:
+        supabase_result = {"action": "error", "error": f"supabase_save_exception:{type(exc).__name__}"}
+    if supabase_result.get("action") == "error":
+        return {
+            "status": "failed", "error": supabase_result.get("error", "supabase_save_failed"),
+            "source_doc_id": canonical_id, "ticker": working_doc["ticker"],
+            "canonical_document_id": canonical_id, "sqlite_result": sqlite_result,
+            "supabase_result": supabase_result, "partial_failure": sqlite_saved,
+            "sqlite_saved": sqlite_saved, "supabase_saved": False,
+            "state_updated": False, "discord_sent": False,
+            "canonical_synced": False, "segment_synced": False,
+        }
+
+    if enable_discord:
+        send_earnings_discord(webhook_url, payload.get("discord_message_preview", ""))
+
+    state_updated = False
+    if state_db is not None:
+        state_db.record(canonical_id, code=working_doc["ticker"], year=payload.get("fiscal_year", ""), quarter=payload.get("quarter", ""), status="success")
+        state_updated = True
+    elif state_recorder is not None:
+        state_recorder(canonical_id, status="success")
+        state_updated = True
+
+    return {
+        "status": "success", "source_doc_id": canonical_id,
+        "ticker": working_doc["ticker"], "source_url": source_url,
+        "event_type": "earnings", "sqlite_result": sqlite_result,
+        "supabase_result": supabase_result, "state_updated": state_updated,
+        "discord_sent": bool(enable_discord), "canonical_synced": False,
+        "segment_synced": False, "partial_failure": False,
+        "sqlite_saved": sqlite_saved,
+        "supabase_saved": has_real_dependencies,
+        "internal_document_id": worker_result.get("internal_document_id", ""),
+        "period": worker_result.get("period", ""),
+    }
 
 
 # ============================================================

@@ -1661,3 +1661,342 @@ class TestEarningsProductionPipelineSegmentSecondBug:
         assert isinstance(res, list)
 
 
+# ============================================================
+# 581A single-apply contract (RED until the dedicated entry exists)
+# ============================================================
+_SINGLE_APPLY_SOURCE_URL = "https://www.release.tdnet.info/inbs/140120260714592943.pdf"
+_SINGLE_APPLY_CANONICAL_ID = (
+    "e38d1da39f9f3e9d64fd393957646ef0dcccbb15def82750b5db305e232f2e41"
+)
+
+
+def _single_apply_doc() -> dict:
+    """The one permitted 581A document; no production artefacts are used."""
+    return {
+        "ticker": "581A",
+        "company_name": "Ｇ－ＧＯ",
+        "title": "2026年5月期 決算短信〔日本基準〕（連結）",
+        "disclosed_at": "2026-07-14 15:30:00+09:00",
+        "source_doc_id": "140120260714592943",
+        "external_document_id": "140120260714592943",
+        "xbrl_doc_id": "081220260714592943",
+    }
+
+
+def _require_single_apply_entrypoint():
+    """Keep RED failures explicit and independent of DB, network, or fixtures."""
+    import src.events.earnings_production_pipeline as pipeline
+
+    entrypoint = getattr(pipeline, "run_single_earnings_apply", None)
+    assert entrypoint is not None, "run_single_earnings_apply is not implemented"
+    return pipeline, entrypoint
+
+
+def _single_apply_result_value(result, key):
+    """Allow the future entrypoint to return either a mapping or a result object."""
+    if isinstance(result, dict):
+        return result.get(key)
+    return getattr(result, key)
+
+
+def _single_apply_dry_run_summary(
+    *,
+    ticker="581A",
+    total_count=1,
+    success_count=1,
+    error_count=0,
+    timeout_count=0,
+):
+    """Return the formal successful dry-run shape used only by single-apply tests."""
+    return {
+        "total_count": total_count,
+        "success_count": success_count,
+        "error_count": error_count,
+        "timeout_count": timeout_count,
+        "results": [{
+            "status": "ok", "ticker": ticker, "period": "2026-05-31",
+            "quarter": "FY", "internal_document_id": "202607143581A0",
+            "source_doc_id": "140120260714592943", "xbrl_doc_id": "081220260714592943",
+            "sales_current": 41446000000, "op_current": 7041000000,
+            "has_guidance": True,
+        }],
+    }
+
+
+class TestSingleEarningsApplyContract:
+    """Contract for the future, side-effect-bounded one-document apply entrypoint."""
+
+    def test_single_apply_reprocesses_one_parse_failed_earnings_document(self, tmp_path):
+        pipeline, apply = _require_single_apply_entrypoint()
+        archive_root = tmp_path / "archive"
+        calls = {"runner": [], "sqlite": [], "supabase": [], "state": []}
+
+        class FakeState:
+            def get_log(self, document_id):
+                assert document_id == _SINGLE_APPLY_CANONICAL_ID
+                return {"status": "parse_failed"}
+
+            def record(self, document_id, **kwargs):
+                calls["state"].append((document_id, kwargs))
+
+        def fake_runner(docs, *, worker_count, archive_root, **_kwargs):
+            calls["runner"].append((docs, worker_count, archive_root))
+            return _single_apply_dry_run_summary()
+
+        original_doc = _single_apply_doc()
+        original_snapshot = dict(original_doc)
+        monkeypatch = pytest.MonkeyPatch()
+        try:
+            monkeypatch.setattr(pipeline, "run_earnings_subprocess_dry_run", fake_runner)
+            monkeypatch.setattr(pipeline, "save_earnings_summary", lambda *_args: calls["sqlite"].append(True))
+            monkeypatch.setattr(pipeline, "save_event_to_supabase", lambda event: calls["supabase"].append(event) or {"action": "inserted"})
+            result = apply(
+                original_doc, archive_root=archive_root,
+                source_url=_SINGLE_APPLY_SOURCE_URL, state_db=FakeState(),
+            )
+        finally:
+            monkeypatch.undo()
+
+        runner_docs = calls["runner"][0][0]
+        runner_doc = runner_docs[0]
+        assert len(runner_docs) == 1 and runner_doc is not original_doc
+        assert original_doc == original_snapshot
+        assert all(key not in original_doc for key in ("source_url", "pdf_url", "doc_url"))
+        assert runner_doc["ticker"] == original_doc["ticker"]
+        assert runner_doc["title"] == original_doc["title"]
+        assert runner_doc["disclosed_at"] == original_doc["disclosed_at"]
+        assert runner_doc["source_doc_id"] == "140120260714592943"
+        assert runner_doc["source_doc_id"] != _SINGLE_APPLY_CANONICAL_ID
+        assert all(runner_doc[key] == _SINGLE_APPLY_SOURCE_URL for key in ("source_url", "pdf_url", "doc_url"))
+        assert calls["runner"][0][1] == 1
+        assert calls["runner"][0][2] == archive_root
+        assert len(calls["sqlite"]) == len(calls["supabase"]) == len(calls["state"]) == 1
+        assert calls["state"][0][0] == _SINGLE_APPLY_CANONICAL_ID
+        assert _single_apply_result_value(result, "status") == "success"
+
+    def test_single_apply_updates_success_state_when_discord_is_disabled(self, tmp_path):
+        pipeline, apply = _require_single_apply_entrypoint()
+        sent, states = [], []
+        monkeypatch = pytest.MonkeyPatch()
+        try:
+            monkeypatch.setattr(pipeline, "send_earnings_discord", lambda *_args: sent.append(True))
+            result = apply(
+                _single_apply_doc(), archive_root=tmp_path / "archive",
+                source_url=_SINGLE_APPLY_SOURCE_URL, enable_discord=False,
+                state_recorder=lambda *args, **kwargs: states.append((args, kwargs)),
+            )
+        finally:
+            monkeypatch.undo()
+
+        assert sent == []
+        assert states == [((_SINGLE_APPLY_CANONICAL_ID,), {"status": "success"})]
+        assert _single_apply_result_value(result, "status") == "success"
+
+    def test_single_apply_does_not_mark_success_when_supabase_save_fails(self, tmp_path):
+        pipeline, apply = _require_single_apply_entrypoint()
+        calls = {"sqlite": [], "supabase": [], "state": [], "discord": [], "canonical": [], "segments": []}
+
+        class FakeState:
+            def get_log(self, _document_id):
+                return None
+
+            def record(self, *args, **kwargs):
+                calls["state"].append((args, kwargs))
+
+        monkeypatch = pytest.MonkeyPatch()
+        try:
+            monkeypatch.setattr(pipeline, "run_earnings_subprocess_dry_run", lambda *_args, **_kwargs: _single_apply_dry_run_summary())
+            monkeypatch.setattr(pipeline, "save_earnings_summary", lambda *_args: calls["sqlite"].append(True))
+            monkeypatch.setattr(pipeline, "save_event_to_supabase", lambda _event: calls["supabase"].append(True) or {"action": "error", "error": "test"})
+            monkeypatch.setattr(pipeline, "send_earnings_discord", lambda *_args: calls["discord"].append(True))
+            monkeypatch.setattr(pipeline, "_sync_canonical_financials", lambda **_kwargs: calls["canonical"].append(True))
+            monkeypatch.setattr(pipeline, "_sync_canonical_segments", lambda **_kwargs: calls["segments"].append(True))
+            result = apply(
+                _single_apply_doc(), archive_root=tmp_path / "archive",
+                source_url=_SINGLE_APPLY_SOURCE_URL,
+                state_db=FakeState(),
+            )
+        finally:
+            monkeypatch.undo()
+
+        assert calls["sqlite"] == [True]
+        assert calls["supabase"] == [True]
+        assert calls["state"] == calls["discord"] == calls["canonical"] == calls["segments"] == []
+        assert _single_apply_result_value(result, "status") != "success"
+        assert isinstance(result, dict)
+        assert result.get("partial_failure") is True
+        assert result["sqlite_saved"] is True
+        assert result["supabase_saved"] is False
+        assert result["state_updated"] is False
+        assert result["ticker"] == "581A"
+        assert result["source_doc_id"] == _SINGLE_APPLY_CANONICAL_ID
+        assert "test" in result["error"]
+
+    def test_single_apply_does_not_run_canonical_or_segment_sync_by_default(self, tmp_path):
+        pipeline, apply = _require_single_apply_entrypoint()
+        canonical, segments = [], []
+        monkeypatch = pytest.MonkeyPatch()
+        try:
+            monkeypatch.setattr(pipeline, "_sync_canonical_financials", lambda **_kwargs: canonical.append(True))
+            monkeypatch.setattr(pipeline, "_sync_canonical_segments", lambda **_kwargs: segments.append(True))
+            apply(
+                _single_apply_doc(), archive_root=tmp_path / "archive",
+                source_url=_SINGLE_APPLY_SOURCE_URL,
+            )
+        finally:
+            monkeypatch.undo()
+
+        assert canonical == []
+        assert segments == []
+
+    def test_single_apply_uses_canonical_id_from_official_source_url(self, tmp_path):
+        _pipeline, apply = _require_single_apply_entrypoint()
+        result = apply(
+            _single_apply_doc(), archive_root=tmp_path / "archive",
+            source_url=_SINGLE_APPLY_SOURCE_URL,
+        )
+        assert _single_apply_result_value(result, "source_doc_id") == _SINGLE_APPLY_CANONICAL_ID
+        assert _single_apply_result_value(result, "source_url") == _SINGLE_APPLY_SOURCE_URL
+
+    def test_single_apply_keeps_forecast_event_separate_from_earnings_event(self, tmp_path):
+        from src.events.common_models import EventRecord
+        from src.events.tdnet_event_store import build_dedupe_key
+
+        _pipeline, apply = _require_single_apply_entrypoint()
+        result = apply(
+            _single_apply_doc(), archive_root=tmp_path / "archive",
+            source_url=_SINGLE_APPLY_SOURCE_URL,
+        )
+        earnings = EventRecord(
+            source_doc_id=_SINGLE_APPLY_CANONICAL_ID, ticker="581A", company_name="Ｇ－ＧＯ",
+            disclosure_datetime="2026-07-14 15:30:00+09:00",
+            title=_single_apply_doc()["title"], event_type="earnings", subtype="FY",
+        )
+        forecast = EventRecord(
+            source_doc_id="140120260714592767", ticker="581A", company_name="Ｇ－ＧＯ",
+            disclosure_datetime="2026-07-14 15:30:00+09:00",
+            title=_single_apply_doc()["title"], event_type="forecast_revision", subtype="difference",
+        )
+        assert _single_apply_result_value(result, "event_type") == "earnings"
+        assert _single_apply_result_value(result, "source_url") == _SINGLE_APPLY_SOURCE_URL
+        assert build_dedupe_key(earnings) != build_dedupe_key(forecast)
+
+    def test_single_apply_does_not_require_local_pdf_path(self, tmp_path):
+        pipeline, apply = _require_single_apply_entrypoint()
+        calls = {"runner": [], "sqlite": [], "supabase": [], "state": []}
+
+        class FakeState:
+            def get_log(self, _document_id):
+                return None
+
+            def record(self, document_id, **kwargs):
+                calls["state"].append((document_id, kwargs))
+
+        def fake_runner(docs, *, worker_count, archive_root, **_kwargs):
+            calls["runner"].append((docs, worker_count, archive_root))
+            return _single_apply_dry_run_summary()
+
+        monkeypatch = pytest.MonkeyPatch()
+        try:
+            monkeypatch.setattr(pipeline, "run_earnings_subprocess_dry_run", fake_runner)
+            monkeypatch.setattr(pipeline, "save_earnings_summary", lambda *_args: calls["sqlite"].append(True))
+            monkeypatch.setattr(pipeline, "save_event_to_supabase", lambda event: calls["supabase"].append(event) or {"action": "inserted"})
+            result = apply(
+                _single_apply_doc(), archive_root=tmp_path / "archive",
+                source_url=_SINGLE_APPLY_SOURCE_URL, state_db=FakeState(),
+            )
+        finally:
+            monkeypatch.undo()
+
+        assert calls["runner"] and calls["runner"][0][1] == 1
+        assert calls["runner"][0][2] == tmp_path / "archive"
+        assert calls["runner"][0][0][0]["source_doc_id"] == "140120260714592943"
+        assert calls["runner"][0][0][0]["source_url"] == _SINGLE_APPLY_SOURCE_URL
+        assert calls["runner"][0][0][0]["pdf_url"] == _SINGLE_APPLY_SOURCE_URL
+        assert len(calls["sqlite"]) == len(calls["supabase"]) == len(calls["state"]) == 1
+        assert calls["state"][0][0] == _SINGLE_APPLY_CANONICAL_ID
+        assert _single_apply_result_value(result, "status") == "success"
+
+    @pytest.mark.parametrize(
+        ("invalid_key", "invalid_value"),
+        [
+            pytest.param("total_count", 2, id="total_count"),
+            pytest.param("success_count", 0, id="success_count"),
+            pytest.param("error_count", 1, id="error_count"),
+            pytest.param("timeout_count", 1, id="timeout_count"),
+        ],
+    )
+    def test_single_apply_rejects_invalid_dry_run_counts_before_saving(
+        self, tmp_path, invalid_key, invalid_value,
+    ):
+        pipeline, apply = _require_single_apply_entrypoint()
+        calls = {"sqlite": [], "supabase": [], "state": [], "discord": [], "canonical": [], "segments": []}
+
+        class FakeState:
+            def get_log(self, _document_id):
+                return None
+
+            def record(self, *args, **kwargs):
+                calls["state"].append((args, kwargs))
+
+        def fake_runner(*_args, **_kwargs):
+            return _single_apply_dry_run_summary(**{invalid_key: invalid_value})
+
+        monkeypatch = pytest.MonkeyPatch()
+        try:
+            monkeypatch.setattr(pipeline, "run_earnings_subprocess_dry_run", fake_runner)
+            monkeypatch.setattr(pipeline, "save_earnings_summary", lambda *_args: calls["sqlite"].append(True))
+            monkeypatch.setattr(pipeline, "save_event_to_supabase", lambda _event: calls["supabase"].append(True) or {"action": "inserted"})
+            monkeypatch.setattr(pipeline, "send_earnings_discord", lambda *_args: calls["discord"].append(True))
+            monkeypatch.setattr(pipeline, "_sync_canonical_financials", lambda **_kwargs: calls["canonical"].append(True))
+            monkeypatch.setattr(pipeline, "_sync_canonical_segments", lambda **_kwargs: calls["segments"].append(True))
+            result = apply(
+                _single_apply_doc(), archive_root=tmp_path / "archive",
+                source_url=_SINGLE_APPLY_SOURCE_URL, state_db=FakeState(),
+            )
+        finally:
+            monkeypatch.undo()
+
+        assert calls["sqlite"] == []
+        assert calls["supabase"] == calls["state"] == calls["discord"] == calls["canonical"] == calls["segments"] == []
+        assert result["status"] == "error"
+        assert invalid_key in result["error"]
+        assert not result.get("partial_failure", False)
+        assert not any(result.get(key) for key in ("sqlite_saved", "supabase_saved", "state_updated"))
+
+    def test_single_apply_rejects_worker_ticker_mismatch_before_saving(self, tmp_path):
+        pipeline, apply = _require_single_apply_entrypoint()
+        calls = {"sqlite": [], "supabase": [], "state": [], "discord": [], "canonical": [], "segments": []}
+
+        class FakeState:
+            def get_log(self, _document_id):
+                return None
+
+            def record(self, *args, **kwargs):
+                calls["state"].append((args, kwargs))
+
+        monkeypatch = pytest.MonkeyPatch()
+        try:
+            monkeypatch.setattr(pipeline, "run_earnings_subprocess_dry_run", lambda *_args, **_kwargs: _single_apply_dry_run_summary(ticker="9999"))
+            monkeypatch.setattr(pipeline, "save_earnings_summary", lambda *_args: calls["sqlite"].append(True))
+            monkeypatch.setattr(pipeline, "save_event_to_supabase", lambda _event: calls["supabase"].append(True) or {"action": "inserted"})
+            monkeypatch.setattr(pipeline, "send_earnings_discord", lambda *_args: calls["discord"].append(True))
+            monkeypatch.setattr(pipeline, "_sync_canonical_financials", lambda **_kwargs: calls["canonical"].append(True))
+            monkeypatch.setattr(pipeline, "_sync_canonical_segments", lambda **_kwargs: calls["segments"].append(True))
+            result = apply(
+                _single_apply_doc(), archive_root=tmp_path / "archive",
+                source_url=_SINGLE_APPLY_SOURCE_URL, state_db=FakeState(),
+            )
+        finally:
+            monkeypatch.undo()
+
+        assert calls["sqlite"] == []
+        assert calls["supabase"] == calls["state"] == calls["discord"] == calls["canonical"] == calls["segments"] == []
+        assert result["status"] == "error"
+        assert "ticker" in result["error"]
+        assert result["expected_ticker"] == "581A"
+        assert result["actual_ticker"] == "9999"
+        assert not result.get("partial_failure", False)
+        assert not any(result.get(key) for key in ("sqlite_saved", "supabase_saved", "state_updated"))
+
+
