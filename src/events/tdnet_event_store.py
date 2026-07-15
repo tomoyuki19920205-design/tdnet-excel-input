@@ -687,6 +687,18 @@ def _merge_compare_json(new_row_dict: dict, existing_payload_str: str) -> None:
     except Exception:
         pass
 
+def _remove_xbrl_path_from_json(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _remove_xbrl_path_from_json(child)
+            for key, child in value.items()
+            if key != "xbrl_path"
+        }
+    if isinstance(value, list):
+        return [_remove_xbrl_path_from_json(item) for item in value]
+    return value
+
+
 def build_supabase_row(event: EventRecord, client=None) -> tuple[dict, dict, str, str, str | None]:
     """
     EventRecordからSupabaseのtdnet_eventsテーブルに保存するrowを生成する。
@@ -766,6 +778,8 @@ def build_supabase_row(event: EventRecord, client=None) -> tuple[dict, dict, str
         comp_json = _calculate_notification_compare(event.ticker or "", extracted, client=client)
         if comp_json:
             raw_payload["notification_compare_json"] = comp_json
+
+    raw_payload = _remove_xbrl_path_from_json(raw_payload)
 
     sort_key = _build_sort_key(priority_rank, detected_at, event.ticker or "")
 
