@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
 import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -28,6 +29,40 @@ def _json_bytes(value: object, *, newline: bool = False) -> bytes:
 
 def _sha_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+def _git_command(repo_root: Path, args: list[str]) -> bytes:
+    try:
+        completed = subprocess.run(
+            ["git", *args], cwd=str(repo_root), check=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError("STOP_V4_CAMPAIGN_GIT_PROVENANCE_UNAVAILABLE") from exc
+    return completed.stdout
+
+
+def _git_provenance(*, repo_root: Path, code_sha: str) -> dict[str, object]:
+    head = _git_command(repo_root, ["rev-parse", "HEAD"]).decode("ascii", errors="strict").strip()
+    branch = _git_command(repo_root, ["branch", "--show-current"]).decode("utf-8").strip()
+    unstaged = _git_command(repo_root, ["diff", "--binary", "--no-ext-diff"])
+    staged = _git_command(repo_root, ["diff", "--cached", "--binary", "--no-ext-diff"])
+    if head != code_sha:
+        raise RuntimeError("STOP_V4_CAMPAIGN_CODE_SHA_HEAD_MISMATCH")
+    tracked_present = bool(unstaged)
+    staged_present = bool(staged)
+    diff_sha = None
+    if tracked_present or staged_present:
+        diff_sha = _sha_bytes(unstaged + b"\n--STAGED-DIFF--\n" + staged)
+    return {
+        "git_head": head,
+        "git_branch": branch,
+        "working_tree_code_present": tracked_present or staged_present,
+        "working_tree_diff_sha256": diff_sha,
+        "tracked_diff_present": tracked_present,
+        "staged_diff_present": staged_present,
+        "code_sha": code_sha,
+    }
 
 
 def _write_json(path: Path, value: object) -> bytes:
@@ -144,6 +179,7 @@ def _assert_output_dir(path: Path) -> None:
 
 def run_dry_run(*, manifest: Path, manifest_sha256: str, campaign_id: str, campaign_name: str, code_sha: str, worker_version: str, output_dir: Path, expected_count: int | None = None, working_tree_diff_sha256: str | None = None) -> dict:
     _assert_output_dir(output_dir)
+    provenance = _git_provenance(repo_root=Path(__file__).resolve().parents[1], code_sha=code_sha)
     actual_sha = hashlib.sha256(manifest.read_bytes()).hexdigest()
     if actual_sha.lower() != manifest_sha256.lower():
         raise ValueError("manifest SHA-256 mismatch")
@@ -182,7 +218,7 @@ def run_dry_run(*, manifest: Path, manifest_sha256: str, campaign_id: str, campa
         digests[name] = _sha_bytes(data)
     digests["semantic_digest"] = _sha_bytes(_json_bytes({k: digests[k] for k in sorted(digests) if k != "semantic_digest"}))
     _write_json(output_dir / "digests.json", digests)
-    _write_json(output_dir / "execution.json", {"dry_run": True, "working_tree_code_present": True, "working_tree_diff_sha256": working_tree_diff_sha256, "network_calls": 0, "db_connections": 0, "cache_access": 0, "input_count": len(rows), "output_count": len(candidates)})
+    _write_json(output_dir / "execution.json", {"dry_run": True, **provenance, "network_calls": 0, "db_connections": 0, "cache_access": 0, "input_count": len(rows), "output_count": len(candidates)})
     return {"summary": summary, "digests": digests, "output_dir": str(output_dir)}
 
 
