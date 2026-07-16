@@ -78,6 +78,12 @@ _MANIFEST_REPLAY_STATE_MISMATCH = "STOP_BACKFILL_MANIFEST_REPLAY_STATE_MISMATCH"
 _MANIFEST_REPLAY_TRANSACTION_FAILED = "STOP_BACKFILL_MANIFEST_REPLAY_TRANSACTION_FAILED"
 _MANIFEST_REPLAY_SCOPE_BREACH = "STOP_BACKFILL_MANIFEST_REPLAY_SCOPE_BREACH"
 _MANIFEST_REPLAY_PENDING_SCOPE_MISMATCH = "STOP_BACKFILL_MANIFEST_REPLAY_PENDING_SCOPE_MISMATCH"
+_MANIFEST_FAILED_RETRY_INVALID_MODE = "STOP_BACKFILL_MANIFEST_FAILED_RETRY_INVALID_MODE"
+_MANIFEST_FAILED_RETRY_MANIFEST_INVALID = "STOP_BACKFILL_MANIFEST_FAILED_RETRY_MANIFEST_INVALID"
+_MANIFEST_FAILED_RETRY_STATE_MISMATCH = "STOP_BACKFILL_MANIFEST_FAILED_RETRY_STATE_MISMATCH"
+_MANIFEST_FAILED_RETRY_TRANSACTION_FAILED = "STOP_BACKFILL_MANIFEST_FAILED_RETRY_TRANSACTION_FAILED"
+_MANIFEST_FAILED_RETRY_SCOPE_BREACH = "STOP_BACKFILL_MANIFEST_FAILED_RETRY_SCOPE_BREACH"
+_MANIFEST_FAILED_RETRY_PENDING_SCOPE_MISMATCH = "STOP_BACKFILL_MANIFEST_FAILED_RETRY_PENDING_SCOPE_MISMATCH"
 
 
 class IsolatedSeedStop(RuntimeError):
@@ -114,6 +120,11 @@ def _emit_manifest_replay_stop(stop: ManifestReplayStop) -> None:
         ),
         file=sys.stderr,
     )
+
+
+def _manifest_failed_retry_stop(code: str, detail: dict[str, object] | None = None) -> ManifestReplayStop:
+    """Create a structured STOP for manifest-scoped failed retries."""
+    return ManifestReplayStop(code, detail)
 
 
 def _safe_isolated_seed_stop_detail(code: str, message: str) -> dict[str, object]:
@@ -951,6 +962,109 @@ def _replay_manifest_done(store: BackfillStateStore, filings: list) -> dict[str,
         ) from exc
 
 
+def _retry_manifest_failed(store: BackfillStateStore, filings: list) -> dict[str, object]:
+    """Atomically requeue only manifest rows at failed/canonical_sync_failed."""
+    try:
+        filing_ids, requested_ids = _manifest_replay_targets(filings)
+    except ManifestReplayStop as stop:
+        raise _manifest_failed_retry_stop(
+            _MANIFEST_FAILED_RETRY_MANIFEST_INVALID, stop.detail
+        ) from None
+
+    conn = store.conn
+    summary: dict[str, object] = {
+        "manifest_failed_retry_enabled": True,
+        "manifest_failed_retry_requested_count": len(requested_ids),
+        "manifest_failed_retry_matched_count": 0,
+        "manifest_failed_retry_requeued_count": 0,
+        "manifest_failed_retry_pending_count": 0,
+        "manifest_failed_retry_non_target_changed_count": 0,
+    }
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        placeholders = ",".join("?" * len(filing_ids))
+        rows = conn.execute(
+            "SELECT filing_id, status, stage, retryable FROM filing_state "
+            f"WHERE filing_id IN ({placeholders}) ORDER BY filing_id",
+            filing_ids,
+        ).fetchall()
+        status_counts: dict[str, int] = {}
+        stage_counts: dict[str, int] = {}
+        for row in rows:
+            status_counts[row["status"]] = status_counts.get(row["status"], 0) + 1
+            stage_counts[row["stage"]] = stage_counts.get(row["stage"], 0) + 1
+        summary["manifest_failed_retry_matched_count"] = len(rows)
+        if len(rows) != len(filing_ids) or any(
+            row["status"] != "failed"
+            or row["stage"] != "canonical_sync_failed"
+            or row["retryable"] != 1
+            for row in rows
+        ):
+            conn.rollback()
+            raise _manifest_failed_retry_stop(
+                _MANIFEST_FAILED_RETRY_STATE_MISMATCH,
+                {
+                    "requested_count": len(requested_ids),
+                    "matched_count": len(rows),
+                    "mismatched_count": len(filing_ids) - len(rows) + sum(
+                        row["status"] != "failed"
+                        or row["stage"] != "canonical_sync_failed"
+                        or row["retryable"] != 1
+                        for row in rows
+                    ),
+                    "status_counts": status_counts,
+                    "stage_counts": stage_counts,
+                },
+            )
+        before_count, before_digest = _manifest_replay_non_target_digest(conn, filing_ids)
+        # Keep the field transition identical to reset_for_retry(), but never call its
+        # global status-based form: this UPDATE is constrained to the manifest IDs.
+        conn.execute(
+            "UPDATE filing_state SET status = 'queued', stage = 'listing' "
+            f"WHERE filing_id IN ({placeholders}) AND status = 'failed' "
+            "AND stage = 'canonical_sync_failed' AND retryable = 1",
+            filing_ids,
+        )
+        changed = conn.execute("SELECT changes()").fetchone()[0]
+        if changed != len(filing_ids):
+            conn.rollback()
+            raise _manifest_failed_retry_stop(
+                _MANIFEST_FAILED_RETRY_TRANSACTION_FAILED,
+                {"requested_count": len(requested_ids), "matched_count": len(rows)},
+            )
+        readback = conn.execute(
+            "SELECT filing_id, status, stage FROM filing_state "
+            f"WHERE filing_id IN ({placeholders}) ORDER BY filing_id",
+            filing_ids,
+        ).fetchall()
+        if len(readback) != len(filing_ids) or any(
+            row["status"] != "queued" or row["stage"] != "listing" for row in readback
+        ):
+            conn.rollback()
+            raise _manifest_failed_retry_stop(
+                _MANIFEST_FAILED_RETRY_TRANSACTION_FAILED,
+                {"requested_count": len(requested_ids), "matched_count": len(rows)},
+            )
+        after_count, after_digest = _manifest_replay_non_target_digest(conn, filing_ids)
+        if (before_count, before_digest) != (after_count, after_digest):
+            conn.rollback()
+            raise _manifest_failed_retry_stop(
+                _MANIFEST_FAILED_RETRY_SCOPE_BREACH,
+                {"requested_count": len(requested_ids), "matched_count": len(rows)},
+            )
+        conn.commit()
+        summary["manifest_failed_retry_requeued_count"] = changed
+        return summary
+    except ManifestReplayStop:
+        raise
+    except sqlite3.Error as exc:
+        conn.rollback()
+        raise _manifest_failed_retry_stop(
+            _MANIFEST_FAILED_RETRY_TRANSACTION_FAILED,
+            {"requested_count": len(requested_ids), "reason": type(exc).__name__},
+        ) from exc
+
+
 def _run_requeue_only(
     *,
     filing_list_path: str,
@@ -1095,6 +1209,14 @@ def _summary_with_validation_rejections(metrics) -> dict:
         "manifest_replay_requeued_count": 0,
         "manifest_replay_pending_count": 0,
         "manifest_replay_non_target_changed_count": 0,
+    }))
+    summary.update(getattr(metrics, "_manifest_failed_retry_summary", {
+        "manifest_failed_retry_enabled": False,
+        "manifest_failed_retry_requested_count": 0,
+        "manifest_failed_retry_matched_count": 0,
+        "manifest_failed_retry_requeued_count": 0,
+        "manifest_failed_retry_pending_count": 0,
+        "manifest_failed_retry_non_target_changed_count": 0,
     }))
     return summary
 
@@ -1389,10 +1511,11 @@ def run_backfill(
     scope_pending_to_manifest: bool = False,
     require_all_manifest_pending: bool = False,
     replay_manifest_done: bool = False,
+    retry_manifest_failed: bool = False,
     isolated_seed_summary: dict | None = None,
 ) -> dict:
     """バックフィルを実行する (Phase 1 / Phase 2 自動選択)。"""
-    if replay_manifest_done:
+    if replay_manifest_done or retry_manifest_failed:
         scope_pending_to_manifest = True
         require_all_manifest_pending = True
     if scope_pending_to_manifest and not filing_list_path:
@@ -1428,6 +1551,14 @@ def run_backfill(
         "manifest_replay_requeued_count": 0,
         "manifest_replay_pending_count": 0,
         "manifest_replay_non_target_changed_count": 0,
+    }
+    metrics._manifest_failed_retry_summary = {
+        "manifest_failed_retry_enabled": bool(retry_manifest_failed),
+        "manifest_failed_retry_requested_count": 0,
+        "manifest_failed_retry_matched_count": 0,
+        "manifest_failed_retry_requeued_count": 0,
+        "manifest_failed_retry_pending_count": 0,
+        "manifest_failed_retry_non_target_changed_count": 0,
     }
 
     if log_jsonl_path is None:
@@ -1564,6 +1695,13 @@ def run_backfill(
             store.close()
             run_logger.close()
             raise
+    if retry_manifest_failed:
+        try:
+            metrics._manifest_failed_retry_summary = _retry_manifest_failed(store, filings)
+        except ManifestReplayStop:
+            store.close()
+            run_logger.close()
+            raise
 
     stale = 0 if scope_pending_to_manifest else store.reset_stale_running(max_age_hours=2)
     if stale > 0:
@@ -1680,6 +1818,15 @@ def run_backfill(
                         "mismatched_count": len(manifest_id_set - pending_id_set),
                     },
                 )
+            if retry_manifest_failed:
+                raise _manifest_failed_retry_stop(
+                    _MANIFEST_FAILED_RETRY_PENDING_SCOPE_MISMATCH,
+                    {
+                        "requested_count": len(filings),
+                        "matched_count": len(pending_id_set),
+                        "mismatched_count": len(manifest_id_set - pending_id_set),
+                    },
+                )
             raise RuntimeError(
                 f"{_PENDING_SET_MISMATCH}: missing={missing_ids} "
                 f"outside={outside_ids} duplicates={duplicate_count}"
@@ -1687,6 +1834,8 @@ def run_backfill(
 
     if replay_manifest_done:
         metrics._manifest_replay_summary["manifest_replay_pending_count"] = len(pending)
+    if retry_manifest_failed:
+        metrics._manifest_failed_retry_summary["manifest_failed_retry_pending_count"] = len(pending)
 
     metrics.total_filings = len(pending)
     logger.info(
@@ -2362,6 +2511,8 @@ def main():
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--retry-quarantine", action="store_true")
     parser.add_argument("--retry-failed", action="store_true")
+    parser.add_argument("--retry-manifest-failed", action="store_true",
+                        help="--filing-list内のfailed/canonical_sync_failedだけを原子的に再試行")
     parser.add_argument("--retry-download", type=int, default=3)
     parser.add_argument("--retry-xbrl", type=int, default=2)
     parser.add_argument("--retry-pdf", type=int, default=1)
@@ -2428,6 +2579,34 @@ def main():
                         help="実際にDBに書き込む (ALLOW_BACKFILL_XBRL_WRITE=1 環境変数も必要)")
 
     args = parser.parse_args()
+
+    if args.retry_manifest_failed:
+        invalid_mode = (
+            not args.filing_list
+            or not args.apply
+            or args.worker_version != "v4"
+            or args.workers != 1
+            or args.limit
+            or args.retry_quarantine
+            or args.retry_failed
+            or args.replay_manifest_done
+            or args.resume
+            or args.repair_extracted
+            or args.reset_target
+            or args.force_done
+            or args.scope_pending_to_manifest
+            or args.dry_run
+            or args.isolated_worker_dry_run
+            or args.isolated_seed_decision_db
+            or args.isolated_seed_cache_root
+        )
+        if invalid_mode:
+            _emit_manifest_replay_stop(
+                _manifest_failed_retry_stop(
+                    _MANIFEST_FAILED_RETRY_INVALID_MODE, {"reason": "invalid_mode"}
+                )
+            )
+            raise SystemExit(1)
 
     if args.replay_manifest_done:
         invalid_mode = (
@@ -2603,6 +2782,7 @@ def main():
             scope_pending_to_manifest=args.scope_pending_to_manifest,
             require_all_manifest_pending=args.require_all_manifest_pending,
             replay_manifest_done=args.replay_manifest_done,
+            retry_manifest_failed=args.retry_manifest_failed,
             isolated_seed_summary=isolated_seed_summary,
         )
     except ManifestReplayStop as stop:
