@@ -72,6 +72,12 @@ _ISOLATED_SEED_STOP_CODES = frozenset({
     _ISOLATED_SEED_MANIFEST_ID_UNRESOLVED,
     _ISOLATED_SEED_SOURCE_MUTATED,
 })
+_MANIFEST_REPLAY_INVALID_MODE = "STOP_BACKFILL_MANIFEST_REPLAY_INVALID_MODE"
+_MANIFEST_REPLAY_MANIFEST_INVALID = "STOP_BACKFILL_MANIFEST_REPLAY_MANIFEST_INVALID"
+_MANIFEST_REPLAY_STATE_MISMATCH = "STOP_BACKFILL_MANIFEST_REPLAY_STATE_MISMATCH"
+_MANIFEST_REPLAY_TRANSACTION_FAILED = "STOP_BACKFILL_MANIFEST_REPLAY_TRANSACTION_FAILED"
+_MANIFEST_REPLAY_SCOPE_BREACH = "STOP_BACKFILL_MANIFEST_REPLAY_SCOPE_BREACH"
+_MANIFEST_REPLAY_PENDING_SCOPE_MISMATCH = "STOP_BACKFILL_MANIFEST_REPLAY_PENDING_SCOPE_MISMATCH"
 
 
 class IsolatedSeedStop(RuntimeError):
@@ -82,6 +88,32 @@ class IsolatedSeedStop(RuntimeError):
         self.stage = stage
         self.detail = detail or {}
         super().__init__(code)
+
+
+class ManifestReplayStop(RuntimeError):
+    """A machine-readable stop for the manifest-scoped replay gate."""
+
+    def __init__(self, code: str, detail: dict[str, object] | None = None):
+        self.code = code
+        self.detail = detail or {}
+        super().__init__(code)
+
+
+def _emit_manifest_replay_stop(stop: ManifestReplayStop) -> None:
+    print(
+        json.dumps(
+            {
+                "status": "stopped",
+                "stop_code": stop.code,
+                "detail": stop.detail,
+                "worker_started": False,
+                "canonical_sync_enabled": False,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        file=sys.stderr,
+    )
 
 
 def _safe_isolated_seed_stop_detail(code: str, message: str) -> dict[str, object]:
@@ -794,6 +826,131 @@ def _load_filing_list(path: str) -> list:
     return filings
 
 
+def _manifest_replay_targets(filings: list) -> tuple[list[str], list[str]]:
+    """Validate manifest scope and return (state filing IDs, requested IDs)."""
+    filing_ids = [str(getattr(filing, "filing_id", "") or "") for filing in filings]
+    requested_ids = [str(getattr(filing, "requested_disclosure_no", "") or "") for filing in filings]
+    valid_requested = all(
+        requested_id
+        and Path(requested_id).name == requested_id
+        and requested_id not in {".", ".."}
+        for requested_id in requested_ids
+    )
+    if (
+        not filing_ids
+        or not valid_requested
+        or any(not filing_id for filing_id in filing_ids)
+        or len(set(filing_ids)) != len(filing_ids)
+        or len(set(requested_ids)) != len(requested_ids)
+    ):
+        raise ManifestReplayStop(
+            _MANIFEST_REPLAY_MANIFEST_INVALID,
+            {"requested_count": len(requested_ids)},
+        )
+    return filing_ids, requested_ids
+
+
+def _manifest_replay_non_target_digest(conn: sqlite3.Connection, filing_ids: list[str]) -> tuple[int, str]:
+    """Digest state metadata outside the explicit manifest scope."""
+    placeholders = ",".join("?" * len(filing_ids))
+    rows = conn.execute(
+        "SELECT filing_id, status, stage, attempt_count, "
+        "COALESCE(last_error, ''), COALESCE(last_error_stage, '') "
+        f"FROM filing_state WHERE filing_id NOT IN ({placeholders}) ORDER BY filing_id",
+        filing_ids,
+    ).fetchall()
+    payload = json.dumps([tuple(row) for row in rows], ensure_ascii=False, separators=(",", ":"))
+    return len(rows), hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _replay_manifest_done(store: BackfillStateStore, filings: list) -> dict[str, object]:
+    """Atomically requeue only manifest rows already at done/extracted."""
+    filing_ids, requested_ids = _manifest_replay_targets(filings)
+    conn = store.conn
+    summary: dict[str, object] = {
+        "manifest_replay_enabled": True,
+        "manifest_replay_requested_count": len(requested_ids),
+        "manifest_replay_matched_count": 0,
+        "manifest_replay_requeued_count": 0,
+        "manifest_replay_pending_count": 0,
+        "manifest_replay_non_target_changed_count": 0,
+    }
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        placeholders = ",".join("?" * len(filing_ids))
+        rows = conn.execute(
+            "SELECT filing_id, status, stage FROM filing_state "
+            f"WHERE filing_id IN ({placeholders}) ORDER BY filing_id",
+            filing_ids,
+        ).fetchall()
+        status_counts: dict[str, int] = {}
+        stage_counts: dict[str, int] = {}
+        for row in rows:
+            status_counts[row["status"]] = status_counts.get(row["status"], 0) + 1
+            stage_counts[row["stage"]] = stage_counts.get(row["stage"], 0) + 1
+        summary["manifest_replay_matched_count"] = len(rows)
+        if len(rows) != len(filing_ids) or any(
+            row["status"] != "done" or row["stage"] != "extracted" for row in rows
+        ):
+            conn.rollback()
+            raise ManifestReplayStop(
+                _MANIFEST_REPLAY_STATE_MISMATCH,
+                {
+                    "requested_count": len(requested_ids),
+                    "matched_count": len(rows),
+                    "mismatched_count": len(filing_ids) - len(rows) + sum(
+                        row["status"] != "done" or row["stage"] != "extracted" for row in rows
+                    ),
+                    "status_counts": status_counts,
+                    "stage_counts": stage_counts,
+                },
+            )
+        before_count, before_digest = _manifest_replay_non_target_digest(conn, filing_ids)
+        conn.execute(
+            "UPDATE filing_state SET status = 'queued', stage = 'listing' "
+            f"WHERE filing_id IN ({placeholders}) AND status = 'done' AND stage = 'extracted'",
+            filing_ids,
+        )
+        changed = conn.execute("SELECT changes()").fetchone()[0]
+        if changed != len(filing_ids):
+            conn.rollback()
+            raise ManifestReplayStop(
+                _MANIFEST_REPLAY_TRANSACTION_FAILED,
+                {"requested_count": len(requested_ids), "matched_count": len(rows)},
+            )
+        readback = conn.execute(
+            "SELECT filing_id, status, stage FROM filing_state "
+            f"WHERE filing_id IN ({placeholders}) ORDER BY filing_id",
+            filing_ids,
+        ).fetchall()
+        if len(readback) != len(filing_ids) or any(
+            row["status"] != "queued" or row["stage"] != "listing" for row in readback
+        ):
+            conn.rollback()
+            raise ManifestReplayStop(
+                _MANIFEST_REPLAY_TRANSACTION_FAILED,
+                {"requested_count": len(requested_ids), "matched_count": len(rows)},
+            )
+        after_count, after_digest = _manifest_replay_non_target_digest(conn, filing_ids)
+        if (before_count, before_digest) != (after_count, after_digest):
+            conn.rollback()
+            raise ManifestReplayStop(
+                _MANIFEST_REPLAY_SCOPE_BREACH,
+                {"requested_count": len(requested_ids), "matched_count": len(rows)},
+            )
+        conn.commit()
+        summary["manifest_replay_requeued_count"] = changed
+        return summary
+    except ManifestReplayStop:
+        raise
+    except sqlite3.Error as exc:
+        conn.rollback()
+        raise ManifestReplayStop(
+            _MANIFEST_REPLAY_TRANSACTION_FAILED,
+            {"requested_count": len(requested_ids), "reason": type(exc).__name__},
+        ) from exc
+
+
 def _run_requeue_only(
     *,
     filing_list_path: str,
@@ -931,6 +1088,14 @@ def _summary_with_validation_rejections(metrics) -> dict:
     summary.update(_validation_rejection_summary(metrics))
     summary.update(_canonical_sync_failure_summary(metrics))
     summary.update(getattr(metrics, "_isolated_seed_summary", {}))
+    summary.update(getattr(metrics, "_manifest_replay_summary", {
+        "manifest_replay_enabled": False,
+        "manifest_replay_requested_count": 0,
+        "manifest_replay_matched_count": 0,
+        "manifest_replay_requeued_count": 0,
+        "manifest_replay_pending_count": 0,
+        "manifest_replay_non_target_changed_count": 0,
+    }))
     return summary
 
 
@@ -1223,9 +1388,13 @@ def run_backfill(
     isolated_run_root: str | None = None,
     scope_pending_to_manifest: bool = False,
     require_all_manifest_pending: bool = False,
+    replay_manifest_done: bool = False,
     isolated_seed_summary: dict | None = None,
 ) -> dict:
     """バックフィルを実行する (Phase 1 / Phase 2 自動選択)。"""
+    if replay_manifest_done:
+        scope_pending_to_manifest = True
+        require_all_manifest_pending = True
     if scope_pending_to_manifest and not filing_list_path:
         raise RuntimeError(f"{_PENDING_SET_MISMATCH}: scoped pending requires --filing-list")
     if require_all_manifest_pending and not scope_pending_to_manifest:
@@ -1252,6 +1421,14 @@ def run_backfill(
     use_v4 = worker_version == "v4"
     metrics = BackfillMetricsV2() if (use_v2 or use_v4) else BackfillMetrics()
     metrics._isolated_seed_summary = dict(isolated_seed_summary or {})
+    metrics._manifest_replay_summary = {
+        "manifest_replay_enabled": bool(replay_manifest_done),
+        "manifest_replay_requested_count": 0,
+        "manifest_replay_matched_count": 0,
+        "manifest_replay_requeued_count": 0,
+        "manifest_replay_pending_count": 0,
+        "manifest_replay_non_target_changed_count": 0,
+    }
 
     if log_jsonl_path is None:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1380,6 +1557,14 @@ def run_backfill(
         store.close()
         raise RuntimeError(msg)
 
+    if replay_manifest_done:
+        try:
+            metrics._manifest_replay_summary = _replay_manifest_done(store, filings)
+        except ManifestReplayStop:
+            store.close()
+            run_logger.close()
+            raise
+
     stale = 0 if scope_pending_to_manifest else store.reset_stale_running(max_age_hours=2)
     if stale > 0:
         logger.info(f"[backfill] reset {stale} stale running entries")
@@ -1486,10 +1671,22 @@ def run_backfill(
         ):
             store.close()
             run_logger.close()
+            if replay_manifest_done:
+                raise ManifestReplayStop(
+                    _MANIFEST_REPLAY_PENDING_SCOPE_MISMATCH,
+                    {
+                        "requested_count": len(filings),
+                        "matched_count": len(pending_id_set),
+                        "mismatched_count": len(manifest_id_set - pending_id_set),
+                    },
+                )
             raise RuntimeError(
                 f"{_PENDING_SET_MISMATCH}: missing={missing_ids} "
                 f"outside={outside_ids} duplicates={duplicate_count}"
             )
+
+    if replay_manifest_done:
+        metrics._manifest_replay_summary["manifest_replay_pending_count"] = len(pending)
 
     metrics.total_filings = len(pending)
     logger.info(
@@ -2225,10 +2422,32 @@ def main():
                         help="manifest対象cacheだけを隔離rootへ複製する絶対パス")
     parser.add_argument("--force-done", action="store_true",
                         help="done/partial/skipped_normal/quarantined を全て再実行対象にする (upsert 更新)")
+    parser.add_argument("--replay-manifest-done", action="store_true",
+                        help="--apply の manifest 対象 done/extracted だけを原子的に再処理する")
     parser.add_argument("--apply", action="store_true",
                         help="実際にDBに書き込む (ALLOW_BACKFILL_XBRL_WRITE=1 環境変数も必要)")
 
     args = parser.parse_args()
+
+    if args.replay_manifest_done:
+        invalid_mode = (
+            not args.filing_list
+            or not args.apply
+            or args.worker_version != "v4"
+            or args.workers != 1
+            or args.resume
+            or args.repair_extracted
+            or args.retry_failed
+            or args.dry_run
+            or args.isolated_worker_dry_run
+            or args.isolated_seed_decision_db
+            or args.isolated_seed_cache_root
+        )
+        if invalid_mode:
+            _emit_manifest_replay_stop(
+                ManifestReplayStop(_MANIFEST_REPLAY_INVALID_MODE, {"reason": "invalid_mode"})
+            )
+            raise SystemExit(1)
 
     isolated_seed_requested = bool(
         args.isolated_seed_decision_db or args.isolated_seed_cache_root
@@ -2383,8 +2602,12 @@ def main():
             isolated_run_root=str(run_root) if args.isolated_worker_dry_run else None,
             scope_pending_to_manifest=args.scope_pending_to_manifest,
             require_all_manifest_pending=args.require_all_manifest_pending,
+            replay_manifest_done=args.replay_manifest_done,
             isolated_seed_summary=isolated_seed_summary,
         )
+    except ManifestReplayStop as stop:
+        _emit_manifest_replay_stop(stop)
+        raise SystemExit(1) from None
     except Exception:
         import traceback
         tb = traceback.format_exc()
