@@ -40,8 +40,8 @@ _EXCLUDE_KEYWORDS = ["自己株式", "人事", "訴訟", "資本業務提携", "
 
 def _strip_trailing_zero(code: str) -> str:
     """TDnet の5桁コードから末尾0を除去して4桁にする。common_ticker に委譲。"""
-    from src.common_ticker import normalize_ticker
-    return normalize_ticker(code)
+    from src.common_ticker import strip_tdnet_trailing_zero
+    return strip_tdnet_trailing_zero(str(code).strip().upper())
 
 
 def _normalize_title_simple(title: str) -> str:
