@@ -110,6 +110,83 @@ class TestStatusUpdates:
         store.mark_failed("abc123", error="timeout", stage="downloading")
         rows = store.get_pending(statuses=["failed"])
         assert len(rows) == 1
+        assert rows[0]["last_error"] == "timeout"
+        assert rows[0]["last_error_stage"] == "downloading"
+
+    def test_mark_upserted_clears_stale_failure_details(self, store):
+        store.register_filings([_make_filing()])
+        store.mark_failed(
+            "abc123",
+            error="canonical_sync_readback_mismatch",
+            stage="canonical_sync_failed",
+        )
+
+        store.mark_upserted("abc123")
+
+        row = dict(store.conn.execute(
+            "SELECT status,stage,last_error,last_error_stage,retryable "
+            "FROM filing_state WHERE filing_id = ?",
+            ("abc123",),
+        ).fetchone())
+        assert row == {
+            "status": "upserted",
+            "stage": "completed",
+            "last_error": None,
+            "last_error_stage": None,
+            "retryable": 1,
+        }
+
+    def test_mark_upserted_is_idempotent_when_stale_error_exists(self, store):
+        store.register_filings([_make_filing()])
+        store.conn.execute(
+            "UPDATE filing_state SET status='upserted', stage='completed', "
+            "last_error='old_error', last_error_stage='old_stage' WHERE filing_id = ?",
+            ("abc123",),
+        )
+
+        store.mark_upserted("abc123")
+
+        row = dict(store.conn.execute(
+            "SELECT status,stage,last_error,last_error_stage FROM filing_state WHERE filing_id = ?",
+            ("abc123",),
+        ).fetchone())
+        assert row == {
+            "status": "upserted",
+            "stage": "completed",
+            "last_error": None,
+            "last_error_stage": None,
+        }
+
+    def test_mark_upserted_only_changes_target_filing(self, store):
+        target = _make_filing("target")
+        outside = _make_filing("outside")
+        store.register_filings([target, outside])
+        store.mark_failed("target", error="old", stage="canonical_sync_failed")
+        store.mark_failed("outside", error="outside_error", stage="worker_failed")
+        before_outside = dict(store.conn.execute(
+            "SELECT status,stage,last_error,last_error_stage,retryable "
+            "FROM filing_state WHERE filing_id = ?",
+            ("outside",),
+        ).fetchone())
+
+        store.mark_upserted("target")
+
+        target_row = dict(store.conn.execute(
+            "SELECT status,stage,last_error,last_error_stage FROM filing_state WHERE filing_id = ?",
+            ("target",),
+        ).fetchone())
+        outside_row = dict(store.conn.execute(
+            "SELECT status,stage,last_error,last_error_stage,retryable "
+            "FROM filing_state WHERE filing_id = ?",
+            ("outside",),
+        ).fetchone())
+        assert target_row == {
+            "status": "upserted",
+            "stage": "completed",
+            "last_error": None,
+            "last_error_stage": None,
+        }
+        assert outside_row == before_outside
 
 
 class TestRetry:
@@ -226,4 +303,3 @@ class TestUpdateReviewHint:
         assert len(rows) == 1
         assert rows[0]["status"] == "quarantined"
         assert rows[0]["review_hint"] == "pdf_no_rows_extracted"
-

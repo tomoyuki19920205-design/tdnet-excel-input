@@ -355,7 +355,14 @@ class BackfillStateStore:
 
     def mark_upserted(self, filing_id: str) -> None:
         """DB upsert 完了。done → upserted に昇格。"""
-        self.update_status(filing_id, "upserted", stage="completed")
+        # A successful canonical write supersedes any retryable failure from a
+        # previous attempt.  Keep this as one filing-scoped UPDATE so callers
+        # never observe a successful status paired with stale failure detail.
+        self.conn.execute(
+            "UPDATE filing_state SET status='upserted', stage='completed', "
+            "last_error=NULL, last_error_stage=NULL WHERE filing_id = ?",
+            (filing_id,),
+        )
 
     def mark_needs_pdf(
         self,
