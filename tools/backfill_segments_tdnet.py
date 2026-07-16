@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import os
+import re
 
 import argparse
 import csv
@@ -25,6 +26,9 @@ import sqlite3
 import stat
 import sys
 import time
+import urllib.parse
+import urllib.request
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -84,6 +88,34 @@ _MANIFEST_FAILED_RETRY_STATE_MISMATCH = "STOP_BACKFILL_MANIFEST_FAILED_RETRY_STA
 _MANIFEST_FAILED_RETRY_TRANSACTION_FAILED = "STOP_BACKFILL_MANIFEST_FAILED_RETRY_TRANSACTION_FAILED"
 _MANIFEST_FAILED_RETRY_SCOPE_BREACH = "STOP_BACKFILL_MANIFEST_FAILED_RETRY_SCOPE_BREACH"
 _MANIFEST_FAILED_RETRY_PENDING_SCOPE_MISMATCH = "STOP_BACKFILL_MANIFEST_FAILED_RETRY_PENDING_SCOPE_MISMATCH"
+_CACHE_HYDRATION_INVALID_MODE = "STOP_BACKFILL_CACHE_HYDRATION_INVALID_MODE"
+_CACHE_HYDRATION_MANIFEST_INVALID = "STOP_BACKFILL_CACHE_HYDRATION_MANIFEST_INVALID"
+_CACHE_HYDRATION_REQUESTED_ID_COLLISION = "STOP_BACKFILL_CACHE_HYDRATION_REQUESTED_ID_COLLISION"
+_CACHE_HYDRATION_METADATA_UNRESOLVED = "STOP_BACKFILL_CACHE_HYDRATION_METADATA_UNRESOLVED"
+_CACHE_HYDRATION_TARGET_CONFLICT = "STOP_BACKFILL_CACHE_HYDRATION_TARGET_CONFLICT"
+_CACHE_HYDRATION_IDENTITY_REJECTED = "STOP_BACKFILL_CACHE_HYDRATION_IDENTITY_REJECTED"
+_CACHE_HYDRATION_DOWNLOAD_URL_INVALID = "STOP_BACKFILL_CACHE_HYDRATION_DOWNLOAD_URL_INVALID"
+_CACHE_HYDRATION_LOCKED = "STOP_BACKFILL_CACHE_HYDRATION_LOCKED"
+
+
+class CacheHydrationStop(RuntimeError):
+    """Fail-closed result for the manifest-scoped cache hydration mode."""
+
+    def __init__(self, code: str, detail: dict[str, object] | None = None):
+        self.code = code
+        self.detail = detail or {}
+        super().__init__(code)
+
+
+def _emit_cache_hydration_stop(stop: CacheHydrationStop) -> None:
+    print(json.dumps({
+        "status": "stopped",
+        "stop_code": stop.code,
+        "detail": stop.detail,
+        "worker_started": False,
+        "state_write": False,
+        "canonical_sync_enabled": False,
+    }, ensure_ascii=False, sort_keys=True), file=sys.stderr)
 
 
 class IsolatedSeedStop(RuntimeError):
@@ -835,6 +867,298 @@ def _load_filing_list(path: str) -> list:
     logger.info(f"[backfill] loaded {len(filings)} filings from manifest: {path}")
     print(f"[backfill] loaded {len(filings)} filings from manifest: {path}")
     return filings
+
+
+# ============================================================
+# Manifest-scoped XBRL cache hydration
+# ============================================================
+
+def _load_hydration_manifest(path: str) -> list[dict[str, object]]:
+    """Read an explicit hydration manifest without registering or changing state."""
+    manifest_path = Path(path)
+    if manifest_path.suffix != ".json":
+        raise CacheHydrationStop(_CACHE_HYDRATION_MANIFEST_INVALID, {"reason": "json_required"})
+    try:
+        raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise CacheHydrationStop(_CACHE_HYDRATION_MANIFEST_INVALID, {"reason": "unreadable_manifest"}) from exc
+    if isinstance(raw, dict):
+        raw = raw.get("filings")
+    if not isinstance(raw, list) or not raw:
+        raise CacheHydrationStop(_CACHE_HYDRATION_MANIFEST_INVALID, {"reason": "empty_manifest"})
+    records: list[dict[str, object]] = []
+    seen_filing_ids: set[str] = set()
+    seen_requested_ids: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            raise CacheHydrationStop(_CACHE_HYDRATION_MANIFEST_INVALID, {"reason": "non_object_record"})
+        filing_id = str(item.get("filing_id") or "")
+        requested_id = str(item.get("requested_disclosure_no") or "")
+        ticker = str(item.get("ticker") or item.get("company_code") or "")
+        expected_period = str(item.get("expected_period") or "")
+        expected_quarter = str(item.get("expected_quarter") or "")
+        if (
+            not filing_id or not requested_id.isdigit() or len(requested_id) != 14
+            or not ticker or not expected_period or not expected_quarter
+            or requested_id in seen_requested_ids or filing_id in seen_filing_ids
+            or Path(requested_id).name != requested_id
+        ):
+            raise CacheHydrationStop(_CACHE_HYDRATION_MANIFEST_INVALID, {"reason": "missing_or_duplicate_identity"})
+        record = dict(item)
+        record.update({
+            "filing_id": filing_id,
+            "requested_disclosure_no": requested_id,
+            "ticker": ticker,
+            "expected_period": expected_period,
+            "expected_quarter": expected_quarter,
+        })
+        records.append(record)
+        seen_filing_ids.add(filing_id)
+        seen_requested_ids.add(requested_id)
+    return records
+
+
+def _read_hydration_state(state_db_path: str, filing_ids: list[str]) -> tuple[dict[str, dict[str, object]], dict[str, set[str]]]:
+    """Read only the manifest rows and global requested-ID collision candidates."""
+    try:
+        conn = sqlite3.connect(f"file:{Path(state_db_path).resolve()}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA query_only=ON")
+        rows = conn.execute("SELECT * FROM filing_state").fetchall()
+    except sqlite3.Error as exc:
+        raise CacheHydrationStop(_CACHE_HYDRATION_MANIFEST_INVALID, {"reason": "state_unreadable"}) from exc
+    finally:
+        try:
+            conn.close()
+        except UnboundLocalError:
+            pass
+    wanted = set(filing_ids)
+    by_id = {str(row["filing_id"]): dict(row) for row in rows if str(row["filing_id"]) in wanted}
+    requested_to_state_ids: dict[str, set[str]] = {}
+    # State has no separate requested-ID column.  The official XBRL URL is the
+    # authoritative state-side linkage, so derive a requested ID only from its
+    # TDNET URL token (never from a title, date, or cache directory name).
+    for row in rows:
+        url = str(row["xbrl_url"] or "")
+        match = re.search(r"(?:0812|1401)(20\d{12})", url) or re.search(r"(?<!\d)(20\d{12})(?!\d)", url)
+        if match:
+            requested_to_state_ids.setdefault(match.group(1), set()).add(str(row["filing_id"]))
+    return by_id, requested_to_state_ids
+
+
+def _canonical_metadata_for_hydration(records: list[dict[str, object]]) -> dict[str, object]:
+    from lib.backfill.canonical_filing_metadata import load_canonical_filing_metadata_index
+    from src.common_ticker import normalize_ticker
+
+    try:
+        index = load_canonical_filing_metadata_index()
+    except Exception as exc:
+        raise CacheHydrationStop(_CACHE_HYDRATION_METADATA_UNRESOLVED, {"reason": "index_unavailable"}) from exc
+    resolved: dict[str, object] = {}
+    for rec in records:
+        requested_id = str(rec["requested_disclosure_no"])
+        meta = index.get(requested_id)
+        if (
+            meta is None or meta.match_status != "exact_requested_disclosure_match"
+            or meta.expected_period != rec["expected_period"]
+            or meta.expected_quarter != rec["expected_quarter"]
+            or normalize_ticker(str(meta.normalized_ticker)) != normalize_ticker(str(rec["ticker"]))
+        ):
+            raise CacheHydrationStop(_CACHE_HYDRATION_METADATA_UNRESOLVED, {"requested_disclosure_no": requested_id})
+        resolved[requested_id] = meta
+    return resolved
+
+
+def _trusted_hydration_provenance(zip_path: Path, record: dict[str, object], *, state_filing_id: str):
+    """Build the existing resolver provenance schema from verified ZIP metadata only."""
+    from src.segment.zip_identity_verifier import TrustedProvenance, extract_actual_metadata_from_zip
+
+    meta = extract_actual_metadata_from_zip(
+        str(zip_path),
+        expected_period=str(record["expected_period"]),
+        expected_quarter=str(record["expected_quarter"]),
+    )
+    if (
+        not meta.get("ticker") or not meta.get("internal_document_id")
+        or meta.get("period") != record["expected_period"]
+        or meta.get("quarter") != record["expected_quarter"]
+        or str(meta.get("ticker")) != str(record["ticker"])
+    ):
+        raise CacheHydrationStop(_CACHE_HYDRATION_IDENTITY_REJECTED, {"filing_id": state_filing_id})
+    return TrustedProvenance(
+        source="jquants",
+        requested_disclosure_no=str(record["requested_disclosure_no"]),
+        requested_file_type="x",
+        resolved_by_function=f"manifest_cache_hydration/{state_filing_id}/official_linked_xbrl_match",
+        official_request_succeeded=True,
+        response_status=200,
+        downloaded_size=zip_path.stat().st_size,
+        downloaded_sha256=_sha256_file(zip_path),
+        internal_document_id=str(meta["internal_document_id"]),
+        ticker=str(meta["ticker"]),
+        period=str(meta["period"]),
+        quarter=str(meta["quarter"]),
+        document_type=str(meta["document_type"]),
+        resolved_at=datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+    )
+
+
+def _verify_hydration_zip(zip_path: Path, record: dict[str, object], *, state_filing_id: str):
+    from src.segment.zip_identity_verifier import verify_zip_identity
+    provenance = _trusted_hydration_provenance(zip_path, record, state_filing_id=state_filing_id)
+    verdict = verify_zip_identity(
+        str(zip_path),
+        str(record["requested_disclosure_no"]),
+        str(record["ticker"]),
+        str(record["expected_period"]),
+        str(record["expected_quarter"]),
+        provenance,
+    )
+    if not verdict.passed:
+        raise CacheHydrationStop(_CACHE_HYDRATION_IDENTITY_REJECTED, {
+            "filing_id": state_filing_id,
+            "reason": verdict.rejection_reason,
+        })
+    return provenance, verdict
+
+
+def _official_xbrl_url(url: object) -> str:
+    value = str(url or "")
+    parsed = urllib.parse.urlparse(value)
+    if parsed.scheme != "https" or parsed.hostname not in {"www.release.tdnet.info", "release.tdnet.info"} or not parsed.path.lower().endswith(".zip"):
+        raise CacheHydrationStop(_CACHE_HYDRATION_DOWNLOAD_URL_INVALID, {"reason": "non_official_xbrl_url"})
+    return value
+
+
+def _download_official_xbrl_zip(url: str, destination: Path) -> None:
+    """The only network operation in hydration apply; destination must be a temp file."""
+    with urllib.request.urlopen(url, timeout=60) as response:  # nosec B310: validated official TDNET host above
+        if getattr(response, "status", 200) != 200:
+            raise CacheHydrationStop(_CACHE_HYDRATION_IDENTITY_REJECTED, {"reason": "download_status"})
+        with destination.open("wb") as output:
+            shutil.copyfileobj(response, output)
+            output.flush()
+            os.fsync(output.fileno())
+
+
+def _hydrate_manifest_cache(*, mode: str, filing_list_path: str, state_db_path: str, cache_root: str) -> dict[str, object]:
+    """Plan or atomically hydrate only explicit manifest cache targets.
+
+    This function deliberately never constructs a BackfillStateStore, worker, writer,
+    decision DB, or canonical sync client.
+    """
+    records = _load_hydration_manifest(filing_list_path)
+    state_rows, requested_to_state_ids = _read_hydration_state(
+        state_db_path, [str(r["filing_id"]) for r in records]
+    )
+    from src.common_ticker import normalize_ticker
+
+    for rec in records:
+        filing_id = str(rec["filing_id"])
+        state = state_rows.get(filing_id)
+        if state is None or normalize_ticker(str(state.get("ticker") or "")) != normalize_ticker(str(rec["ticker"])):
+            raise CacheHydrationStop(_CACHE_HYDRATION_MANIFEST_INVALID, {"filing_id": filing_id, "reason": "state_identity_mismatch"})
+        for field in ("period", "quarter"):
+            state_value = str(state.get(field) or "")
+            if state_value and state_value != str(rec[f"expected_{field}"]):
+                raise CacheHydrationStop(_CACHE_HYDRATION_MANIFEST_INVALID, {"filing_id": filing_id, "reason": f"state_{field}_mismatch"})
+
+    # A requested ID must never alias another state filing ID, even outside the manifest.
+    for rec in records:
+        requested_id = str(rec["requested_disclosure_no"])
+        filing_id = str(rec["filing_id"])
+        linked_state_ids = requested_to_state_ids.get(requested_id, set())
+        if linked_state_ids != {filing_id}:
+            raise CacheHydrationStop(_CACHE_HYDRATION_REQUESTED_ID_COLLISION, {"filing_id": filing_id, "requested_disclosure_no": requested_id})
+
+    _canonical_metadata_for_hydration(records)
+    root = Path(cache_root)
+    plans: list[dict[str, object]] = []
+    for rec in records:
+        filing_id = str(rec["filing_id"])
+        requested_id = str(rec["requested_disclosure_no"])
+        source = root / filing_id / "xbrl.zip"
+        target = root / requested_id / "xbrl.zip"
+        if target.exists():
+            sidecar_path = Path(str(target) + ".provenance.json")
+            if sidecar_path.exists():
+                from src.segment.segment_zip_resolver import _load_sidecar_provenance
+                if _load_sidecar_provenance(
+                    str(target), requested_id,
+                    str(rec["expected_period"]), str(rec["expected_quarter"]),
+                ) is None:
+                    raise CacheHydrationStop(_CACHE_HYDRATION_TARGET_CONFLICT, {
+                        "filing_id": filing_id, "target": str(target), "reason": "invalid_sidecar"
+                    })
+            try:
+                _verify_hydration_zip(target, rec, state_filing_id=filing_id)
+            except CacheHydrationStop:
+                raise CacheHydrationStop(_CACHE_HYDRATION_TARGET_CONFLICT, {"filing_id": filing_id, "target": str(target)})
+            action = "ALREADY_READY" if sidecar_path.exists() else "TARGET_ZIP_NEEDS_SIDECAR"
+        elif source.exists():
+            _verify_hydration_zip(source, rec, state_filing_id=filing_id)
+            action = "COPY_FROM_STATE_FILING_CACHE"
+        else:
+            _official_xbrl_url(state_rows[filing_id].get("xbrl_url") or rec.get("xbrl_url"))
+            action = "DOWNLOAD_REQUIRED"
+        plans.append({"filing_id": filing_id, "requested_disclosure_no": requested_id, "action": action, "source": str(source), "target": str(target)})
+
+    if mode == "plan":
+        return {"mode": "plan", "plans": plans, "network_calls": 0, "writes": 0}
+
+    lock_path = root / ".manifest_cache_hydration.lock"
+    root.mkdir(parents=True, exist_ok=True)
+    try:
+        lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError as exc:
+        raise CacheHydrationStop(_CACHE_HYDRATION_LOCKED, {"lock": str(lock_path)}) from exc
+    try:
+        os.write(lock_fd, str(os.getpid()).encode("ascii"))
+        os.close(lock_fd)
+        writes = 0
+        network_calls = 0
+        for plan, rec in zip(plans, records):
+            source = Path(str(plan["source"]))
+            target = Path(str(plan["target"]))
+            action = str(plan["action"])
+            filing_id = str(rec["filing_id"])
+            if action == "ALREADY_READY":
+                continue
+            if action == "TARGET_ZIP_NEEDS_SIDECAR":
+                prov, _ = _verify_hydration_zip(target, rec, state_filing_id=filing_id)
+                from src.segment.segment_zip_resolver import _write_sidecar_provenance
+                _write_sidecar_provenance(str(target), prov)
+                writes += 1
+                continue
+            temp_dir = root / f".{rec['requested_disclosure_no']}.hydrate-{uuid.uuid4().hex}"
+            temp_dir.mkdir()
+            temp_zip = temp_dir / "xbrl.zip"
+            try:
+                if action == "COPY_FROM_STATE_FILING_CACHE":
+                    shutil.copy2(source, temp_zip)
+                else:
+                    _download_official_xbrl_zip(_official_xbrl_url(state_rows[filing_id].get("xbrl_url") or rec.get("xbrl_url")), temp_zip)
+                    network_calls += 1
+                prov, _ = _verify_hydration_zip(temp_zip, rec, state_filing_id=filing_id)
+                from src.segment.segment_zip_resolver import _write_sidecar_provenance
+                _write_sidecar_provenance(str(temp_zip), prov)
+                if target.parent.exists():
+                    raise CacheHydrationStop(_CACHE_HYDRATION_TARGET_CONFLICT, {"filing_id": filing_id, "target": str(target)})
+                os.replace(temp_dir, target.parent)
+                writes += 2
+            except Exception:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                raise
+        return {"mode": "apply", "plans": plans, "network_calls": network_calls, "writes": writes}
+    finally:
+        try:
+            os.close(lock_fd)
+        except OSError:
+            pass
+        try:
+            lock_path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def _manifest_replay_targets(filings: list) -> tuple[list[str], list[str]]:
@@ -2526,6 +2850,8 @@ def main():
     # 固定母集団
     parser.add_argument("--filing-list", type=str, default=None,
                         help="固定母集団 manifest (JSON/JSONL/CSV)。listing provider をスキップ")
+    parser.add_argument("--hydrate-manifest-cache", choices=["plan", "apply"], default=None,
+                        help="manifest限定でXBRL cacheをplan/applyする。worker・state・canonical同期は起動しない")
     parser.add_argument("--reset-target", action="store_true",
                         help="manifest内の全 filing を queued にリセットして再処理")
     parser.add_argument("--scope-pending-to-manifest", action="store_true",
@@ -2579,6 +2905,34 @@ def main():
                         help="実際にDBに書き込む (ALLOW_BACKFILL_XBRL_WRITE=1 環境変数も必要)")
 
     args = parser.parse_args()
+
+    if args.hydrate_manifest_cache:
+        incompatible = any((
+            args.apply, args.dry_run, args.resume, args.repair_extracted,
+            args.retry_quarantine, args.retry_failed, args.retry_manifest_failed,
+            args.replay_manifest_done, args.isolated_worker_dry_run,
+            args.isolated_seed_decision_db, args.isolated_seed_cache_root,
+            args.reset_target, args.requeue_only, args.requeue_requested_id,
+            args.scope_pending_to_manifest, args.require_all_manifest_pending,
+            args.force_done, args.phase2, args.benchmark,
+        ))
+        if incompatible or not args.filing_list or args.workers != 1:
+            _emit_cache_hydration_stop(CacheHydrationStop(
+                _CACHE_HYDRATION_INVALID_MODE, {"reason": "requires_filing_list_workers_1_and_no_worker_modes"}
+            ))
+            raise SystemExit(1)
+        try:
+            result = _hydrate_manifest_cache(
+                mode=args.hydrate_manifest_cache,
+                filing_list_path=args.filing_list,
+                state_db_path=args.state_db,
+                cache_root=args.cache_root,
+            )
+        except CacheHydrationStop as stop:
+            _emit_cache_hydration_stop(stop)
+            raise SystemExit(1)
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        return
 
     if args.retry_manifest_failed:
         invalid_mode = (
