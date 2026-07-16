@@ -39,9 +39,9 @@ class TestClassifySkipReason:
         row = {"segment_name": "UNKNOWN_8", "segment_sales": 100.0, "segment_profit": 10.0, "quarter": "1Q"}
         assert _classify_skip_reason(row) == "unknown"
 
-    def test_zero_value(self):
+    def test_zero_values_are_valid(self):
         row = {"segment_name": "環境システム", "segment_sales": 0, "segment_profit": 0, "quarter": "1Q"}
-        assert _classify_skip_reason(row) == "zero_value"
+        assert _classify_skip_reason(row) == ""
 
     def test_empty_name(self):
         row = {"segment_name": "", "segment_sales": 100.0, "segment_profit": 10.0, "quarter": "1Q"}
@@ -76,9 +76,9 @@ class TestIsValidSqliteSegment:
         row = {"segment_name": "UNKNOWN_8", "segment_sales": 100.0, "segment_profit": 10.0, "quarter": "1Q"}
         assert _is_valid_sqlite_segment(row) is False
 
-    def test_skip_all_zero(self):
+    def test_valid_all_zero(self):
         row = {"segment_name": "環境システム", "segment_sales": 0, "segment_profit": 0, "quarter": "1Q"}
-        assert _is_valid_sqlite_segment(row) is False
+        assert _is_valid_sqlite_segment(row) is True
 
     def test_valid_with_negative_profit(self):
         row = {"segment_name": "管工機材売上(円)", "segment_sales": 2368.0, "segment_profit": -73.0, "quarter": "2Q"}
@@ -337,6 +337,54 @@ def test_8908_dry_run_payload_uses_display_keys_without_mutating_names(tmp_path,
         ("不動産ソリューション事業", "real estate solution"),
         ("School Life Solution", "school life support"),
     ]
+
+
+def test_zero_and_null_rows_preserve_wide_and_eav_contract(tmp_path, monkeypatch):
+    """Validated rows always produce wide; EAV contains exactly non-null metrics."""
+    db_path = str(tmp_path / "segments.db")
+    rows = [
+        {"company_code": "3536", "fiscal_year_end": "2026-08-31", "quarter": "3Q", "segment_name": "Other", "segment_sales": 0, "segment_profit": 0, "data_source": "backfill_xbrl"},
+        {"company_code": "7370", "fiscal_year_end": "2025-05-31", "quarter": "FY", "segment_name": "Real Estate Business", "segment_sales": None, "segment_profit": None, "data_source": "backfill_xbrl"},
+        {"company_code": "7370", "fiscal_year_end": "2025-05-31", "quarter": "FY", "segment_name": "Other", "segment_sales": None, "segment_profit": None, "data_source": "backfill_xbrl"},
+        {"company_code": "9999", "fiscal_year_end": "2026-03-31", "quarter": "FY", "segment_name": "Loss Only", "segment_sales": None, "segment_profit": -10, "data_source": "backfill_xbrl"},
+        {"company_code": "9999", "fiscal_year_end": "2026-03-31", "quarter": "FY", "segment_name": "Core", "segment_sales": 353, "segment_profit": 4, "data_source": "backfill_xbrl"},
+    ]
+    _create_segment_db_with_datasource(db_path, rows)
+    from tools import sync_segments
+    monkeypatch.setattr(sync_segments.requests, "post", lambda *args, **kwargs: pytest.fail("dry-run must not post"))
+    monkeypatch.setattr(sync_segments.requests, "get", lambda *args, **kwargs: pytest.fail("dry-run must not read Supabase"))
+
+    stats = sync_segments.sync_sqlite_segment_ids(
+        db_path, [1, 2, 3, 4, 5], "http://test/rest/v1", {}, True,
+    )
+
+    assert stats["sqlite_valid"] == 5
+    assert len(stats["payloads"]) == 5
+    wide = {(payload["ticker"], payload["segment_name"]): payload for payload in stats["payloads"]}
+    assert wide[("3536", "Other")]["sales"] == 0
+    assert wide[("3536", "Other")]["profit"] == 0
+    assert wide[("7370", "Real Estate Business")]["sales"] is None
+    assert wide[("7370", "Real Estate Business")]["profit"] is None
+
+    plan = sync_segments.plan_alias_aware_segment_ids(
+        db_path, [1, 2, 3, 4, 5], "http://test/rest/v1", {}, live_read=False,
+    )
+    assert len(plan["payloads"]) == 5
+    assert sum(len(result["eav_actions"]) for result in plan["row_results"]) == 5
+    eav = [
+        action["payload"]
+        for result in plan["row_results"]
+        for action in result["eav_actions"]
+    ]
+    assert {(row["segment_name"], row["metric"], row["value"]) for row in eav} == {
+        ("Other", "sales", 0),
+        ("Other", "profit", 0),
+        ("Loss Only", "profit", -10),
+        ("Core", "sales", 353),
+        ("Core", "profit", 4),
+    }
+    monkeypatch.setattr(sync_segments.requests, "get", _layer_get(plan["payloads"], eav))
+    assert sync_segments._alias_plan_readback_matches(plan, "http://test/rest/v1", {}) is True
 
 
 def test_id_scoped_sync_rejects_missing_id_without_post(tmp_path, monkeypatch):

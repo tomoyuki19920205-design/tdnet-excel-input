@@ -438,10 +438,8 @@ def _classify_skip_reason(row: dict) -> str:
         return "header"
     if name.startswith("UNKNOWN_"):
         return "unknown"
-    sales = row.get("segment_sales") or 0
-    profit = row.get("segment_profit") or 0
-    if sales == 0 and profit == 0:
-        return "zero_value"
+    sales = row.get("segment_sales")
+    profit = row.get("segment_profit")
     quarter = (row.get("quarter") or "")
     if quarter == "?Q":
         return "invalid_quarter"
