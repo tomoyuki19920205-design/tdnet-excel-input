@@ -31,6 +31,13 @@ CREATE TABLE IF NOT EXISTS earnings_reactions (
   release_time_source          TEXT,
   release_time_status          TEXT,
   release_time_note            TEXT,
+  outcome_eligible             INTEGER NOT NULL DEFAULT 0,
+  primary_outcome_label        TEXT,
+  primary_outcome_band         TEXT,
+  outcome_label_basis          TEXT,
+  outcome_label_version        TEXT,
+  outcome_labeled_at           TEXT,
+  outcome_exclusion_reason     TEXT,
   created_at                   TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at                   TEXT NOT NULL DEFAULT (datetime('now'))
 );
