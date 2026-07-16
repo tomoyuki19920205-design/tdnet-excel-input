@@ -290,14 +290,16 @@ def _sqlite_source_snapshot(source: Path) -> dict[str, object]:
     """Keep persistent DB/WAL audits separate from SQLite's ephemeral SHM."""
     shm = _sqlite_shm_snapshot(source)
     _assert_sqlite_shm_snapshot_safe(shm)
+    wal_path = Path(f"{source}-wal")
+    wal = None
+    if wal_path.exists():
+        if not wal_path.is_file() or _path_has_reparse_component(wal_path):
+            _raise_source_mutated("decision_db_wal", {"wal": {"unsafe_path"}})
+        wal = _file_snapshot(wal_path)
     return {
         "persistent": {
             "database": _file_snapshot(source),
-            "wal": (
-                _file_snapshot(Path(f"{source}-wal"))
-                if Path(f"{source}-wal").exists()
-                else None
-            ),
+            "wal": wal,
         },
         "ephemeral": {"shm": shm},
     }
@@ -354,22 +356,22 @@ def _assert_sqlite_source_unchanged(
     before: dict[str, object],
 ) -> None:
     persistent = before["persistent"]
-    _raise_source_mutated(
-        "decision_db",
-        {
-            "database": _source_snapshot_changes(source, persistent["database"]),
-            "wal": _source_snapshot_changes(
-                Path(f"{source}-wal"), persistent["wal"]
-            ),
-        },
-    )
+    _raise_source_mutated("decision_db", {
+        "database": _source_snapshot_changes(source, persistent["database"]),
+    })
+    wal_path = Path(f"{source}-wal")
+    wal_before = persistent["wal"]
+    if wal_path.exists() and (not wal_path.is_file() or _path_has_reparse_component(wal_path)):
+        _raise_source_mutated("decision_db_wal", {"wal": {"unsafe_path"}})
+    wal_after = _file_snapshot(wal_path) if wal_path.exists() else None
+    wal_before_empty = wal_before is None or wal_before[0] == 0
+    wal_after_empty = wal_after is None or wal_after[0] == 0
+    if not (wal_before_empty and wal_after_empty):
+        _raise_source_mutated("decision_db_wal", {
+            "wal": _source_snapshot_changes(wal_path, wal_before),
+        })
     shm_before = before["ephemeral"]["shm"]
     shm_after = _sqlite_shm_snapshot(source)
-    if shm_before["exists"] != shm_after["exists"]:
-        change_kind = "created" if shm_after["exists"] else "deleted"
-        _raise_source_mutated(
-            "decision_db_shm", {"shm": {change_kind}}
-        )
     if not shm_after["safe"]:
         _raise_source_mutated(
             "decision_db_shm", {"shm": {"unsafe_path"}}
