@@ -53,6 +53,62 @@ class FreshDownloaderStop(RuntimeError):
     """Structured downloader stop."""
 
 
+class DownloadFailure(FreshDownloaderStop):
+    """A row-scoped failure with secret-free HTTP diagnostic evidence."""
+
+    def __init__(
+        self, stop_code: str, *, failure_code: str, failure_stage: str,
+        attempts: list[dict[str, object]], retryable: bool,
+    ) -> None:
+        super().__init__(stop_code)
+        self.failure_code = failure_code
+        self.failure_stage = failure_stage
+        self.attempts = attempts
+        self.retryable = retryable
+
+    def result(self, row: Mapping[str, object]) -> dict[str, object]:
+        last = self.attempts[-1] if self.attempts else {}
+        return {
+            "manifest_row_id": row["manifest_row_id"],
+            "requested_disclosure_no": row["requested_disclosure_no"],
+            "plan_classification": row["plan_classification"],
+            "status": "FAILED", "error": str(self),
+            "failure_code": self.failure_code,
+            "failure_stage": self.failure_stage,
+            "retryable": self.retryable,
+            "attempt_count": len(self.attempts),
+            "requested_url": last.get("requested_url"),
+            "http_status": last.get("http_status"),
+            "reason_phrase": last.get("reason_phrase"),
+            "final_url": last.get("final_url"),
+            "redirect_history": last.get("redirect_history", []),
+            "response_headers": last.get("response_headers", {}),
+            "content_type": last.get("content_type"),
+            "content_length_header": last.get("content_length_header"),
+            "bytes_received": last.get("bytes_received", 0),
+            "exception_type": last.get("exception_type"),
+            "exception_message": last.get("exception_message"),
+            "download_attempts": self.attempts,
+        }
+
+
+class _RequestDiagnosticError(RuntimeError):
+    def __init__(
+        self, failure_code: str, failure_stage: str, *,
+        redirect_history: list[dict[str, object]] | None = None,
+        http_status: int | None = None, reason_phrase: str | None = None,
+        final_url: str | None = None, response_headers: Mapping[str, object] | None = None,
+    ) -> None:
+        super().__init__(failure_code)
+        self.failure_code = failure_code
+        self.failure_stage = failure_stage
+        self.redirect_history = redirect_history or []
+        self.http_status = http_status
+        self.reason_phrase = reason_phrase
+        self.final_url = final_url
+        self.response_headers = dict(response_headers or {})
+
+
 def _now_utc() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
@@ -221,14 +277,83 @@ def _retry_after_seconds(value: object, now: Callable[[], float] = time.time) ->
             return None
 
 
+_SAFE_RESPONSE_HEADERS = frozenset({
+    "content-type", "content-length", "retry-after", "location", "date", "server",
+})
+
+
+def _safe_response_headers(headers: Mapping[str, object]) -> dict[str, str]:
+    return {
+        str(key).lower(): str(value)
+        for key, value in headers.items()
+        if str(key).lower() in _SAFE_RESPONSE_HEADERS
+    }
+
+
+def _status_failure_code(status: int) -> str:
+    if status in {400, 401, 403, 404, 410, 429}:
+        return f"HTTP_{status}"
+    if 500 <= status <= 599:
+        return "HTTP_5XX"
+    if 300 <= status <= 399:
+        return "HTTP_3XX_REJECTED"
+    return "UNKNOWN_HTTP_FAILURE"
+
+
+def _classify_request_exception(exc: requests.RequestException) -> tuple[str, str, bool]:
+    text = f"{type(exc).__name__}: {exc}".lower()
+    if isinstance(exc, requests.exceptions.ProxyError):
+        return "CONNECT_FAILED", "proxy_connect", True
+    if isinstance(exc, requests.exceptions.SSLError):
+        return "TLS_FAILED", "tls_handshake", False
+    if isinstance(exc, requests.Timeout):
+        return "TIMEOUT", "request", True
+    if any(marker in text for marker in ("nameresolution", "getaddrinfo", "name or service not known", "nodename nor servname")):
+        return "DNS_FAILED", "dns_resolution", True
+    return "CONNECT_FAILED", "request", True
+
+
+def _new_attempt(attempt_number: int, requested_url: str) -> tuple[dict[str, object], float]:
+    return ({
+        "attempt_number": attempt_number,
+        "requested_url": requested_url,
+        "request_started_at": _now_utc(),
+        "request_finished_at": None,
+        "elapsed_seconds": None,
+        "http_status": None,
+        "reason_phrase": None,
+        "final_url": None,
+        "redirect_history": [],
+        "response_headers": {},
+        "content_type": None,
+        "content_length_header": None,
+        "retry_after": None,
+        "bytes_received": 0,
+        "exception_type": None,
+        "exception_message": None,
+        "retryable": False,
+        "failure_stage": None,
+        "failure_code": None,
+        "backoff_seconds": None,
+    }, time.monotonic())
+
+
+def _finish_attempt(record: dict[str, object], started: float) -> None:
+    record["request_finished_at"] = _now_utc()
+    record["elapsed_seconds"] = round(max(0.0, time.monotonic() - started), 6)
+
+
 def _request_following_safe_redirects(
     session: requests.Session,
     url: str,
     requested_id: str,
     timeout_seconds: float,
     network_counter: list[int],
-) -> tuple[requests.Response, list[dict[str, object]]]:
-    current = _validate_http_url(url, requested_id)
+) -> tuple[requests.Response, list[dict[str, object]], str]:
+    try:
+        current = _validate_http_url(url, requested_id)
+    except FreshDownloaderStop as exc:
+        raise _RequestDiagnosticError("URL_PRECHECK_FAILED", "url_precheck") from exc
     redirects: list[dict[str, object]] = []
     for _ in range(MAX_REDIRECTS + 1):
         network_counter[0] += 1
@@ -237,18 +362,39 @@ def _request_following_safe_redirects(
             stream=True, allow_redirects=False,
         )
         if response.status_code not in REDIRECT_STATUS:
-            return response, redirects
+            return response, redirects, current
         location = response.headers.get("Location", "")
-        candidate = urljoin(current, location)
+        resolved = urljoin(current, location)
+        hostname = (urlsplit(resolved).hostname or "").lower()
+        hop = {
+            "status": response.status_code,
+            "from_url": current,
+            "location": location,
+            "resolved_url": resolved,
+            "hostname": hostname,
+            "allowed": False,
+        }
         try:
-            candidate = _validate_http_url(candidate, requested_id)
-        except FreshDownloaderStop:
+            candidate = _validate_http_url(resolved, requested_id)
+        except FreshDownloaderStop as exc:
+            redirects.append(hop)
+            headers = _safe_response_headers(response.headers)
+            reason = str(getattr(response, "reason", "") or "")
             response.close()
-            raise
-        redirects.append({"status": response.status_code, "from_url": current, "to_url": candidate})
+            raise _RequestDiagnosticError(
+                "REDIRECT_OUTSIDE_OFFICIAL_DOMAIN", "redirect_validation",
+                redirect_history=redirects, http_status=response.status_code,
+                reason_phrase=reason, final_url=current, response_headers=headers,
+            ) from exc
+        hop["allowed"] = True
+        hop["resolved_url"] = candidate
+        redirects.append(hop)
         response.close()
         current = candidate
-    raise FreshDownloaderStop(STOP_URL)
+    raise _RequestDiagnosticError(
+        "HTTP_3XX_REJECTED", "redirect_limit", redirect_history=redirects,
+        final_url=current,
+    )
 
 
 def _write_stream(response: requests.Response, temp_path: Path) -> tuple[str, int]:
@@ -364,72 +510,159 @@ def _download_one(
     zip_size = 0
     try:
         for attempt_number in range(1, max_retries + 1):
-            started_utc = _now_utc()
-            record: dict[str, object] = {"attempt": attempt_number, "started_at_utc": started_utc}
+            requested_url = str(row["normalized_xbrl_url"])
+            record, attempt_started = _new_attempt(attempt_number, requested_url)
             try:
-                response, redirects = _request_following_safe_redirects(
-                    session, str(row["normalized_xbrl_url"]), requested, timeout_seconds,
+                response, redirects, final_url = _request_following_safe_redirects(
+                    session, requested_url, requested, timeout_seconds,
                     network_counter,
                 )
-                final_url = _validate_http_url(str(response.url), requested)
-                record.update({"http_status": response.status_code, "redirects": redirects, "final_url": final_url})
+                response_headers = _safe_response_headers(response.headers)
+                content_type = str(response.headers.get("Content-Type", ""))
+                record.update({
+                    "http_status": response.status_code,
+                    "reason_phrase": str(getattr(response, "reason", "") or ""),
+                    "final_url": final_url,
+                    "redirect_history": redirects,
+                    "response_headers": response_headers,
+                    "content_type": content_type or None,
+                    "content_length_header": response.headers.get("Content-Length"),
+                    "retry_after": response.headers.get("Retry-After"),
+                })
                 if response.status_code == 200:
-                    content_type = str(response.headers.get("Content-Type", ""))
                     if "html" in content_type.lower():
-                        record.update({"error": "HTML_RESPONSE", "ended_at_utc": _now_utc()})
+                        record.update({
+                            "failure_stage": "content_type_validation",
+                            "failure_code": "CONTENT_TYPE_REJECTED", "retryable": False,
+                        })
+                        _finish_attempt(record, attempt_started)
                         attempts.append(record)
-                        raise FreshDownloaderStop(STOP_HTTP)
-                    response_headers = dict(response.headers)
+                        raise DownloadFailure(
+                            STOP_HTTP, failure_code="CONTENT_TYPE_REJECTED",
+                            failure_stage="content_type_validation", attempts=attempts,
+                            retryable=False,
+                        )
                     try:
                         zip_sha, zip_size = _write_stream(response, temp_zip)
                     except requests.RequestException as exc:
+                        failure_code, failure_stage, retryable = _classify_request_exception(exc)
                         record.update({
-                            "exception": type(exc).__name__, "error": str(exc),
-                            "ended_at_utc": _now_utc(),
+                            "bytes_received": temp_zip.stat().st_size if temp_zip.exists() else 0,
+                            "exception_type": type(exc).__name__, "exception_message": str(exc),
+                            "failure_stage": "body_stream", "failure_code": "BODY_STREAM_FAILED",
+                            "retryable": retryable,
                         })
+                        _finish_attempt(record, attempt_started)
                         attempts.append(record)
                         response.close(); response = None
                         if temp_zip.exists():
                             temp_zip.unlink()
                         if attempt_number == max_retries:
-                            raise FreshDownloaderStop(STOP_HTTP) from exc
+                            raise DownloadFailure(
+                                STOP_HTTP, failure_code="BODY_STREAM_FAILED",
+                                failure_stage="body_stream", attempts=attempts,
+                                retryable=retryable,
+                            ) from exc
                         delay = float(2 ** (attempt_number - 1))
                         record["backoff_seconds"] = delay
                         sleep(delay)
                         continue
-                    record.update({"bytes": zip_size, "ended_at_utc": _now_utc()})
+                    except FreshDownloaderStop as exc:
+                        record.update({
+                            "bytes_received": temp_zip.stat().st_size if temp_zip.exists() else 0,
+                            "exception_type": type(exc).__name__, "exception_message": str(exc),
+                            "failure_stage": "body_stream", "failure_code": "BODY_STREAM_FAILED",
+                            "retryable": False,
+                        })
+                        _finish_attempt(record, attempt_started)
+                        attempts.append(record)
+                        raise DownloadFailure(
+                            STOP_HTTP, failure_code="BODY_STREAM_FAILED",
+                            failure_stage="body_stream", attempts=attempts,
+                            retryable=False,
+                        ) from exc
+                    record.update({"bytes_received": zip_size, "retryable": False})
+                    _finish_attempt(record, attempt_started)
                     attempts.append(record)
                     response.close(); response = None
                     break
                 retryable = response.status_code in RETRYABLE_STATUS
-                record["error"] = f"HTTP_{response.status_code}"
+                failure_code = _status_failure_code(response.status_code)
                 retry_after = _retry_after_seconds(response.headers.get("Retry-After"))
+                record.update({
+                    "failure_stage": "http_status", "failure_code": failure_code,
+                    "retryable": retryable,
+                })
                 response.close()
                 response = None
                 if not retryable or attempt_number == max_retries:
-                    record["ended_at_utc"] = _now_utc(); attempts.append(record)
-                    raise FreshDownloaderStop(STOP_HTTP)
+                    _finish_attempt(record, attempt_started); attempts.append(record)
+                    raise DownloadFailure(
+                        STOP_HTTP, failure_code=failure_code, failure_stage="http_status",
+                        attempts=attempts, retryable=retryable,
+                    )
                 delay = retry_after if retry_after is not None else float(2 ** (attempt_number - 1))
-                record.update({"retry_after_seconds": retry_after, "backoff_seconds": delay, "ended_at_utc": _now_utc()})
+                record["backoff_seconds"] = delay
+                _finish_attempt(record, attempt_started)
                 attempts.append(record)
                 sleep(delay)
                 continue
-            except FreshDownloaderStop:
-                if record not in attempts:
-                    record["ended_at_utc"] = _now_utc(); attempts.append(record)
+            except DownloadFailure:
                 raise
-            except (requests.Timeout, requests.ConnectionError) as exc:
-                record.update({"exception": type(exc).__name__, "error": str(exc), "ended_at_utc": _now_utc()})
+            except _RequestDiagnosticError as exc:
+                record.update({
+                    "http_status": exc.http_status, "reason_phrase": exc.reason_phrase,
+                    "final_url": exc.final_url, "redirect_history": exc.redirect_history,
+                    "response_headers": exc.response_headers,
+                    "content_type": exc.response_headers.get("content-type"),
+                    "content_length_header": exc.response_headers.get("content-length"),
+                    "retry_after": exc.response_headers.get("retry-after"),
+                    "failure_stage": exc.failure_stage, "failure_code": exc.failure_code,
+                    "retryable": False,
+                })
+                _finish_attempt(record, attempt_started)
+                attempts.append(record)
+                raise DownloadFailure(
+                    STOP_URL, failure_code=exc.failure_code,
+                    failure_stage=exc.failure_stage, attempts=attempts,
+                    retryable=False,
+                ) from exc
+            except requests.RequestException as exc:
+                failure_code, failure_stage, retryable = _classify_request_exception(exc)
+                record.update({
+                    "exception_type": type(exc).__name__, "exception_message": str(exc),
+                    "failure_stage": failure_stage, "failure_code": failure_code,
+                    "retryable": retryable,
+                })
+                _finish_attempt(record, attempt_started)
                 attempts.append(record)
                 if attempt_number == max_retries:
-                    raise FreshDownloaderStop(STOP_HTTP) from exc
+                    raise DownloadFailure(
+                        STOP_HTTP, failure_code=failure_code,
+                        failure_stage=failure_stage, attempts=attempts,
+                        retryable=retryable,
+                    ) from exc
                 delay = float(2 ** (attempt_number - 1))
                 record["backoff_seconds"] = delay
                 sleep(delay)
                 continue
         if not zip_sha:
-            raise FreshDownloaderStop(STOP_HTTP)
-        _zip_integrity(temp_zip)
+            raise DownloadFailure(
+                STOP_HTTP, failure_code="UNKNOWN_HTTP_FAILURE",
+                failure_stage="request", attempts=attempts, retryable=False,
+            )
+        try:
+            _zip_integrity(temp_zip)
+        except FreshDownloaderStop as exc:
+            attempts[-1].update({
+                "failure_stage": "zip_validation", "failure_code": "ZIP_INVALID",
+                "retryable": False,
+            })
+            raise DownloadFailure(
+                STOP_IDENTITY, failure_code="ZIP_INVALID",
+                failure_stage="zip_validation", attempts=attempts,
+                retryable=False,
+            ) from exc
         expected_period = str(row["expected_period"])
         expected_quarter = str(row["expected_quarter"])
         meta = extract_actual_metadata_from_zip(str(temp_zip), expected_period=expected_period, expected_quarter=expected_quarter)
@@ -446,7 +679,15 @@ def _download_one(
             expected_period, expected_quarter, provenance,
         )
         if classification == "STANDARD_FRESH_DOWNLOAD" and not verdict.passed:
-            raise FreshDownloaderStop(STOP_IDENTITY)
+            attempts[-1].update({
+                "failure_stage": "identity_validation",
+                "failure_code": "DOWNLOAD_IDENTITY_MISMATCH", "retryable": False,
+            })
+            raise DownloadFailure(
+                STOP_IDENTITY, failure_code="DOWNLOAD_IDENTITY_MISMATCH",
+                failure_stage="identity_validation", attempts=attempts,
+                retryable=False,
+            )
         auto_ready = bool(verdict.passed and classification == "STANDARD_FRESH_DOWNLOAD")
         if classification == "STANDARD_FRESH_DOWNLOAD":
             identity_status = "DOWNLOAD_IDENTITY_VERIFIED" if verdict.passed else "DOWNLOAD_IDENTITY_MISMATCH"
@@ -463,7 +704,7 @@ def _download_one(
             "final_url": final_url, "downloaded_at": _now_utc(),
             "downloaded_at_utc": _now_utc(), "downloaded_at_jst": _now_jst(),
             "http_status": 200, "content_type": content_type,
-            "content_length": response_headers.get("Content-Length", str(zip_size)),
+            "content_length": response_headers.get("content-length", str(zip_size)),
             "download_attempts": attempts, "zip_sha256": zip_sha, "zip_size": zip_size,
             "internal_document_id": meta.get("internal_document_id", ""),
             "zip_internal_ticker": meta.get("ticker", ""),
@@ -498,6 +739,7 @@ def _download_one(
             "document_type": payload["document_type"], "attempt_count": len(attempts),
             "network_calls": network_counter[0] - initial_network_calls, "auto_ready": auto_ready,
             "quarantine_release_required": payload["quarantine_release_required"],
+            "download_attempts": attempts,
         }, network_counter[0] - initial_network_calls
     finally:
         if response is not None:
@@ -556,6 +798,12 @@ def run_downloads(
                 )
                 results.append(result)
                 consecutive_failures = 0
+            except DownloadFailure as exc:
+                consecutive_failures += 1
+                results.append(exc.result(row))
+                if consecutive_failures >= max_consecutive_failures:
+                    consecutive_failure_stop = True
+                    break
             except FreshDownloaderStop as exc:
                 if str(exc) in {STOP_URL, STOP_TARGET, STOP_INPUT, STOP_UNSAFE_PATH}:
                     raise
