@@ -510,6 +510,9 @@ def test_403_preserves_status_reason_and_safe_headers(tmp_path):
     assert failure["response_headers"] == {
         "content-length": "0", "content-type": "text/html", "server": "edge",
     }
+    assert failure["td_files_http_status"] == 200
+    assert failure["td_files_result_code"] == "TD_FILES_OK"
+    assert failure["file_http_status"] == 403
     assert "secret" not in json.dumps(failure)
 
 
@@ -588,6 +591,9 @@ def test_zip_invalid_has_distinct_failure_code(tmp_path):
     assert failure["failure_code"] == "ZIP_INVALID"
     assert failure["failure_stage"] == "ZIP_VALIDATION"
     assert failure["http_status"] == 200
+    assert failure["td_files_http_status"] == 200
+    assert failure["td_files_result_code"] == "TD_FILES_OK"
+    assert failure["file_http_status"] == 200
 
 
 def test_content_type_rejection_has_distinct_code(tmp_path):
@@ -597,6 +603,40 @@ def test_content_type_rejection_has_distinct_code(tmp_path):
     assert failure["failure_code"] == "SIGNED_URL_DOWNLOAD_FAILED"
     assert failure["failure_stage"] == "SIGNED_URL"
     assert failure["http_status"] == 200
+    assert failure["td_files_http_status"] == 200
+    assert failure["td_files_result_code"] == "TD_FILES_OK"
+    assert failure["xbrl_candidate_count"] == 1
+    assert failure["signed_url_received"] is True
+    assert failure["file_http_status"] == 200
+
+
+def test_stage_a_host_rejection_keeps_stage_a_status(tmp_path):
+    env = _prepare(tmp_path)
+
+    class RejectingHostSession(FakeSession):
+        def get(self, url, **kwargs):
+            if url == TD_FILES_ENDPOINT:
+                self.calls.append((url, kwargs))
+                return FakeResponse(
+                    payload={
+                        "discNo": kwargs["params"]["discNo"],
+                        "files": {"xbrl": "https://example.com/xbrl.zip?signature=x"},
+                    },
+                    headers={"Content-Type": "application/json"},
+                    reason="OK",
+                )
+            return super().get(url, **kwargs)
+
+    result = _run(env, RejectingHostSession([]), max_retries=1)
+    failure = result["results"][0]
+    assert failure["failure_code"] == "SIGNED_URL_HOST_REJECTED"
+    assert failure["td_files_http_status"] == 200
+    assert failure["td_files_reason"] == "OK"
+    assert failure["td_files_result_code"] == "SIGNED_URL_HOST_REJECTED"
+    assert failure["xbrl_candidate_count"] == 1
+    assert failure["signed_url_received"] is True
+    assert failure["file_http_status"] is None
+    assert "example.com/xbrl.zip" not in json.dumps(failure)
 
 
 def test_cli_help_has_all_contract_arguments():

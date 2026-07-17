@@ -10,7 +10,7 @@ import hashlib
 import os
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Mapping
@@ -22,6 +22,8 @@ TD_FILES_ENDPOINT = "https://api.jquants.com/v2/td/files"
 TD_FILES_TYPE = "x"
 SOURCE_ROUTE = "JQUANTS_TD_FILES"
 RETRYABLE_CLASSIFICATIONS = frozenset({"TD_FILES_RATE_LIMITED", "TD_FILES_SERVER_ERROR"})
+R2_HOST_PATTERN = re.compile(r"[a-f0-9]{32}\.r2\.cloudflarestorage\.com")
+_TD_FILES_RESPONSE_ATTESTATION = object()
 
 
 class TdFilesAdapterError(RuntimeError):
@@ -48,6 +50,7 @@ class TdFilesResolution:
 
     signed_url: str
     evidence: dict[str, object]
+    _source_attestation: object | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -117,30 +120,66 @@ def _redacted_url_digest(url: str) -> str:
     return hashlib.sha256(url.encode("utf-8")).hexdigest()
 
 
-def _signed_url_identity(url: object) -> tuple[str, str, str]:
+def _safe_url_evidence(url: object) -> dict[str, object]:
     value = str(url or "")
-    parts = urlsplit(value)
-    host = (parts.hostname or "").lower()
-    if parts.scheme.lower() != "https" or not host or parts.username or parts.password:
+    try:
+        parts = urlsplit(value)
+        host = (parts.hostname or "").lower()
+    except ValueError:
+        return {
+            "signed_url_received": bool(value),
+            "signed_url_scheme": "",
+            "signed_url_host": "",
+        }
+    return {
+        "signed_url_received": bool(value),
+        "signed_url_scheme": parts.scheme.lower(),
+        "signed_url_host": host,
+    }
+
+
+def _signed_url_identity(url: object, *, allow_r2: bool) -> tuple[str, str, str]:
+    value = str(url or "")
+    evidence = _safe_url_evidence(value)
+    try:
+        parts = urlsplit(value)
+        host = (parts.hostname or "").lower()
+        port = parts.port
+    except ValueError as exc:
+        raise TdFilesAdapterError(
+            "SIGNED_URL_HOST_REJECTED", stage="SIGNED_URL", evidence=evidence,
+        ) from exc
+    if (
+        parts.scheme.lower() != "https"
+        or not host
+        or parts.username
+        or parts.password
+        or port not in {None, 443}
+        or bool(parts.fragment)
+        or not parts.path
+        or not parts.query
+    ):
         raise TdFilesAdapterError(
             "SIGNED_URL_HOST_REJECTED",
             stage="SIGNED_URL",
-            evidence={"signed_url_received": bool(value), "signed_url_scheme": parts.scheme.lower(), "signed_url_host": host},
+            evidence=evidence,
         )
-    # J-Quants file URLs are AWS S3 presigned URLs.  Accept only an S3 endpoint,
-    # not an arbitrary HTTPS hostname supplied by a malformed response.
+    # Accept the established AWS S3 endpoints and the exact Cloudflare R2
+    # account-host shape returned directly by the authenticated TD files API.
     is_s3 = (
         host == "s3.amazonaws.com"
         or host.endswith(".s3.amazonaws.com")
         or bool(re.fullmatch(r"[a-z0-9.-]+\.s3[.-][a-z0-9-]+\.amazonaws\.com", host))
     )
-    if not is_s3:
+    is_r2 = bool(R2_HOST_PATTERN.fullmatch(host))
+    if not is_s3 and not (allow_r2 and is_r2):
         raise TdFilesAdapterError(
             "SIGNED_URL_HOST_REJECTED",
             stage="SIGNED_URL",
-            evidence={"signed_url_received": True, "signed_url_scheme": "https", "signed_url_host": host},
+            evidence=evidence,
         )
-    redacted = urlunsplit((parts.scheme.lower(), parts.netloc, parts.path, "", ""))
+    redacted_netloc = host if port is None else f"{host}:{port}"
+    redacted = urlunsplit((parts.scheme.lower(), redacted_netloc, parts.path, "", ""))
     return host, _redacted_url_digest(value), redacted
 
 
@@ -180,6 +219,10 @@ def resolve_xbrl_file(
         "retry_after": None,
         "result_code": None,
         "xbrl_candidate_count": 0,
+        "signed_url_received": False,
+        "signed_url_host": None,
+        "signed_url_scheme": None,
+        "signed_url_redacted_digest": None,
         **credential,
     }
     response: requests.Response | None = None
@@ -194,11 +237,12 @@ def resolve_xbrl_file(
         )
         status = int(response.status_code)
         evidence["http_status"] = status
+        evidence["reason_phrase"] = _safe_text(getattr(response, "reason", "")) or None
         if status != 200:
             classification, retryable = _stage_a_classification(status)
             evidence.update({
                 "result_code": classification,
-                "reason_phrase": _safe_text(getattr(response, "reason", "")),
+                "reason_phrase": evidence["reason_phrase"],
                 "retry_after": _safe_text(response.headers.get("Retry-After")) or None,
             })
             raise TdFilesAdapterError(classification, stage="TD_FILES", evidence=evidence, retryable=retryable)
@@ -226,7 +270,17 @@ def resolve_xbrl_file(
         if len(candidates) != 1:
             evidence["result_code"] = "TD_FILES_MULTIPLE_XBRL_CANDIDATES"
             raise TdFilesAdapterError("TD_FILES_MULTIPLE_XBRL_CANDIDATES", stage="TD_FILES", evidence=evidence)
-        host, digest, _redacted = _signed_url_identity(candidates[0])
+        try:
+            host, digest, _redacted = _signed_url_identity(candidates[0], allow_r2=True)
+        except TdFilesAdapterError as exc:
+            evidence.update(exc.evidence)
+            evidence["result_code"] = exc.classification
+            raise TdFilesAdapterError(
+                exc.classification,
+                stage=exc.stage,
+                evidence=evidence,
+                retryable=exc.retryable,
+            ) from exc
         received_at = _now_utc()
         evidence.update({
             "result_code": "TD_FILES_OK",
@@ -236,7 +290,11 @@ def resolve_xbrl_file(
             "signed_url_received_at": received_at,
             "signed_url_redacted_digest": digest,
         })
-        return TdFilesResolution(signed_url=candidates[0], evidence=evidence)
+        return TdFilesResolution(
+            signed_url=candidates[0],
+            evidence=evidence,
+            _source_attestation=_TD_FILES_RESPONSE_ATTESTATION,
+        )
     except requests.RequestException as exc:
         evidence.update({"result_code": "TD_FILES_SERVER_ERROR", "exception_type": type(exc).__name__})
         raise TdFilesAdapterError("TD_FILES_SERVER_ERROR", stage="TD_FILES", evidence=evidence, retryable=True) from exc
@@ -256,7 +314,13 @@ def download_signed_zip(
     network_counter: list[int],
 ) -> SignedZipDownload:
     """Stream one validated signed URL to a new file and fsync it."""
-    host, digest, _redacted = _signed_url_identity(resolution.signed_url)
+    if resolution._source_attestation is not _TD_FILES_RESPONSE_ATTESTATION:
+        raise TdFilesAdapterError(
+            "SIGNED_URL_HOST_REJECTED",
+            stage="SIGNED_URL",
+            evidence=_safe_url_evidence(resolution.signed_url),
+        )
+    host, digest, _redacted = _signed_url_identity(resolution.signed_url, allow_r2=True)
     started_at = _now_utc()
     started = time.monotonic()
     evidence: dict[str, object] = {

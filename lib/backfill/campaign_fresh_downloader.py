@@ -75,6 +75,14 @@ class DownloadFailure(FreshDownloaderStop):
 
     def result(self, row: Mapping[str, object]) -> dict[str, object]:
         last = self.attempts[-1] if self.attempts else {}
+        stage_a = next(
+            (attempt for attempt in reversed(self.attempts) if attempt.get("stage") == "TD_FILES"),
+            {},
+        )
+        stage_b = next(
+            (attempt for attempt in reversed(self.attempts) if attempt.get("stage") == "SIGNED_URL"),
+            {},
+        )
         return {
             "manifest_row_id": row["manifest_row_id"],
             "requested_disclosure_no": row["requested_disclosure_no"],
@@ -95,6 +103,16 @@ class DownloadFailure(FreshDownloaderStop):
             "bytes_received": last.get("bytes_received", 0),
             "exception_type": last.get("exception_type"),
             "exception_message": last.get("exception_message"),
+            "td_files_http_status": stage_a.get("http_status"),
+            "td_files_reason": stage_a.get("reason_phrase"),
+            "td_files_elapsed": stage_a.get("elapsed_seconds"),
+            "td_files_result_code": stage_a.get("result_code"),
+            "xbrl_candidate_count": stage_a.get("xbrl_candidate_count"),
+            "signed_url_received": stage_a.get("signed_url_received", False),
+            "signed_url_host": stage_a.get("signed_url_host"),
+            "signed_url_scheme": stage_a.get("signed_url_scheme"),
+            "signed_url_redacted_digest": stage_a.get("signed_url_redacted_digest"),
+            "file_http_status": stage_b.get("http_status"),
             "download_attempts": self.attempts,
         }
 
@@ -931,7 +949,10 @@ def _download_one_jquants(
             "source_route": JQUANTS_SOURCE_ROUTE,
             "td_files_type": "x",
             "td_files_http_status": resolution.evidence["http_status"],
+            "td_files_reason": resolution.evidence["reason_phrase"],
+            "td_files_elapsed": resolution.evidence["elapsed_seconds"],
             "td_files_result_code": resolution.evidence["result_code"],
+            "xbrl_candidate_count": resolution.evidence["xbrl_candidate_count"],
             "signed_url_received": resolution.evidence["signed_url_received"],
             "signed_url_host": resolution.evidence["signed_url_host"],
             "signed_url_scheme": resolution.evidence["signed_url_scheme"],

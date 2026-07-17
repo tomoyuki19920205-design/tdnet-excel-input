@@ -17,6 +17,11 @@ SIGNED_URL = (
     "https://fixture-bucket.s3.ap-northeast-1.amazonaws.com/file.zip"
     "?X-Amz-Signature=secret&X-Amz-Expires=900"
 )
+R2_ACCOUNT = "450d912298d9da685fb5742a5ec56b76"
+R2_SIGNED_URL = (
+    f"https://{R2_ACCOUNT}.r2.cloudflarestorage.com/td/xbrl.zip"
+    "?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=secret"
+)
 
 
 class Response:
@@ -174,6 +179,66 @@ def test_signed_url_requires_https():
 def test_signed_url_rejects_non_s3_host():
     with pytest.raises(adapter.TdFilesAdapterError, match="SIGNED_URL_HOST_REJECTED"):
         resolve(Session(Response(payload=ok_payload(xbrl="https://example.com/x.zip?token=x"))))
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        R2_SIGNED_URL,
+        "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com/x.zip?signature=x",
+        "https://450D912298D9DA685FB5742A5EC56B76.R2.CLOUDFLARESTORAGE.COM/x.zip?signature=x",
+    ],
+)
+def test_exact_cloudflare_r2_account_host_is_allowed(url):
+    result, _ = resolve(Session(Response(payload=ok_payload(xbrl=url))))
+    assert result.evidence["signed_url_host"] == url.split("/", 3)[2].lower()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://1234567890abcdef1234567890abcde.r2.cloudflarestorage.com/x.zip?signature=x",
+        "https://1234567890abcdef1234567890abcdef0.r2.cloudflarestorage.com/x.zip?signature=x",
+        "https://g50d912298d9da685fb5742a5ec56b76.r2.cloudflarestorage.com/x.zip?signature=x",
+        "https://cloudflarestorage.com/x.zip?signature=x",
+        "https://r2.cloudflarestorage.com/x.zip?signature=x",
+        "https://450d912298d9da685fb5742a5ec56b76.r2.cloudflarestorage.com.example.com/x.zip?signature=x",
+        "https://450d912298d9da685fb5742a5ec56b76.r2.dev/x.zip?signature=x",
+        "https://downloads.example.net/x.zip?signature=x",
+        "http://450d912298d9da685fb5742a5ec56b76.r2.cloudflarestorage.com/x.zip?signature=x",
+        "https://user@450d912298d9da685fb5742a5ec56b76.r2.cloudflarestorage.com/x.zip?signature=x",
+        "https://450d912298d9da685fb5742a5ec56b76.r2.cloudflarestorage.com:8443/x.zip?signature=x",
+        "https://450d912298d9da685fb5742a5ec56b76.r2.cloudflarestorage.com/x.zip?signature=x#fragment",
+        "https://450d912298d9da685fb5742a5ec56b76.r2.cloudflarestorage.com/x.zip",
+        "https://450d912298d9da685fb5742a5ec56b76.r2.cloudflarestorage.com?signature=x",
+    ],
+)
+def test_cloudflare_r2_near_miss_is_rejected(url):
+    with pytest.raises(adapter.TdFilesAdapterError, match="SIGNED_URL_HOST_REJECTED"):
+        resolve(Session(Response(payload=ok_payload(xbrl=url))))
+
+
+def test_host_rejection_preserves_stage_a_diagnostics():
+    with pytest.raises(adapter.TdFilesAdapterError) as caught:
+        resolve(Session(Response(payload=ok_payload(xbrl="https://example.com/x.zip?token=x"), reason="OK")))
+    evidence = caught.value.evidence
+    assert evidence["stage"] == "TD_FILES"
+    assert evidence["http_status"] == 200
+    assert evidence["reason_phrase"] == "OK"
+    assert evidence["xbrl_candidate_count"] == 1
+    assert evidence["signed_url_received"] is True
+
+
+def test_download_rejects_url_not_attested_by_td_files_response(tmp_path):
+    resolution = adapter.TdFilesResolution(signed_url=R2_SIGNED_URL, evidence={})
+    session = Session(Response(body=b"unused"))
+    counter = [0]
+    with pytest.raises(adapter.TdFilesAdapterError, match="SIGNED_URL_HOST_REJECTED"):
+        adapter.download_signed_zip(
+            resolution=resolution, destination=tmp_path / "x.zip",
+            session=session, timeout_seconds=1, network_counter=counter,
+        )
+    assert session.calls == [] and counter == [0]
 
 
 def test_signed_url_expired_is_distinct(tmp_path):
