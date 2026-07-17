@@ -69,6 +69,10 @@ STOP_PRODUCTION_ARTIFACT = "STOP_V4_FRESH_DOWNLOAD_PRODUCTION_ARTIFACT_CONFLICT"
 STOP_PRODUCTION_COUNT = "STOP_V4_FRESH_DOWNLOAD_PRODUCTION_COUNT_CONTRACT_INVALID"
 
 PLAN_CLASSES = frozenset({"STANDARD_FRESH_DOWNLOAD", "QUARANTINE_FRESH_RECHECK"})
+PRODUCTION_READY_IDENTITY_VERDICTS = frozenset({
+    "exact_document_id_match",
+    "official_linked_xbrl_match",
+})
 OFFICIAL_HOSTS = frozenset({"www.release.tdnet.info", "release.tdnet.info"})
 RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 REDIRECT_STATUS = frozenset({301, 302, 303, 307, 308})
@@ -771,6 +775,17 @@ def load_provenance(zip_path: Path, provenance_path: Path) -> dict[str, object]:
     return payload
 
 
+def is_production_ready_identity_result(payload: Mapping[str, object]) -> bool:
+    """Return whether formally loaded provenance is eligible for production READY."""
+    return bool(
+        payload.get("identity_verdict") in PRODUCTION_READY_IDENTITY_VERDICTS
+        and payload.get("identity_status") == "DOWNLOAD_IDENTITY_VERIFIED"
+        and payload.get("plan_classification") == "STANDARD_FRESH_DOWNLOAD"
+        and payload.get("auto_ready_allowed") is True
+        and payload.get("quarantine_release_required") is False
+    )
+
+
 def _download_one(
     *, row: Mapping[str, object], cache_root: Path, campaign_id: str,
     session: requests.Session, timeout_seconds: float, max_retries: int,
@@ -971,7 +986,15 @@ def _download_one(
             str(temp_zip), requested, str(row["normalized_company_code"]),
             expected_period, expected_quarter, provenance,
         )
-        if classification == "STANDARD_FRESH_DOWNLOAD" and not verdict.passed:
+        readiness = {
+            "identity_verdict": verdict.verdict,
+            "identity_status": "DOWNLOAD_IDENTITY_VERIFIED" if verdict.passed else "DOWNLOAD_IDENTITY_MISMATCH",
+            "plan_classification": classification,
+            "auto_ready_allowed": bool(verdict.passed and classification == "STANDARD_FRESH_DOWNLOAD"),
+            "quarantine_release_required": classification == "QUARANTINE_FRESH_RECHECK",
+        }
+        auto_ready = is_production_ready_identity_result(readiness)
+        if classification == "STANDARD_FRESH_DOWNLOAD" and not auto_ready:
             attempts[-1].update({
                 "failure_stage": "identity_validation",
                 "failure_code": "DOWNLOAD_IDENTITY_MISMATCH", "retryable": False,
@@ -981,7 +1004,6 @@ def _download_one(
                 failure_stage="identity_validation", attempts=attempts,
                 retryable=False,
             )
-        auto_ready = bool(verdict.passed and classification == "STANDARD_FRESH_DOWNLOAD")
         if classification == "STANDARD_FRESH_DOWNLOAD":
             identity_status = "DOWNLOAD_IDENTITY_VERIFIED" if verdict.passed else "DOWNLOAD_IDENTITY_MISMATCH"
         else:
@@ -1181,7 +1203,15 @@ def _download_one_jquants(
             str(temp_zip), requested, str(row["normalized_company_code"]),
             expected_period, expected_quarter, trusted,
         )
-        if classification == "STANDARD_FRESH_DOWNLOAD" and not verdict.passed:
+        readiness = {
+            "identity_verdict": verdict.verdict,
+            "identity_status": "DOWNLOAD_IDENTITY_VERIFIED" if verdict.passed else "DOWNLOAD_IDENTITY_MISMATCH",
+            "plan_classification": classification,
+            "auto_ready_allowed": bool(verdict.passed and classification == "STANDARD_FRESH_DOWNLOAD"),
+            "quarantine_release_required": classification == "QUARANTINE_FRESH_RECHECK",
+        }
+        auto_ready = is_production_ready_identity_result(readiness)
+        if classification == "STANDARD_FRESH_DOWNLOAD" and not auto_ready:
             attempts[-1].update({
                 "failure_stage": "IDENTITY",
                 "failure_code": "DOWNLOAD_IDENTITY_MISMATCH",
@@ -1194,7 +1224,6 @@ def _download_one_jquants(
                 attempts=attempts,
                 retryable=False,
             )
-        auto_ready = bool(verdict.passed and classification == "STANDARD_FRESH_DOWNLOAD")
         identity_status = (
             "DOWNLOAD_IDENTITY_VERIFIED"
             if classification == "STANDARD_FRESH_DOWNLOAD" and verdict.passed
@@ -1314,7 +1343,7 @@ def publish_injected_verified_artifact(
             if (
                 payload.get("manifest_row_id") == row_id
                 and payload.get("requested_disclosure_no") == row["requested_disclosure_no"]
-                and payload.get("auto_ready_allowed") is True
+                and is_production_ready_identity_result(payload)
             ):
                 return _result_from_verified_provenance(payload, zip_path, provenance_path, "ALREADY_COMPLETE")
         raise FreshDownloaderStop(STOP_PRODUCTION_ARTIFACT)
@@ -1323,8 +1352,7 @@ def publish_injected_verified_artifact(
         source.get("manifest_row_id") != row_id
         or source.get("requested_disclosure_no") != row["requested_disclosure_no"]
         or source.get("source_route") != JQUANTS_SOURCE_ROUTE
-        or source.get("auto_ready_allowed") is not True
-        or source.get("identity_verdict") != "official_linked_xbrl_match"
+        or not is_production_ready_identity_result(source)
     ):
         raise FreshDownloaderStop(STOP_PRODUCTION_ARTIFACT)
     directory.mkdir(parents=True, exist_ok=False)
@@ -1595,6 +1623,7 @@ def run_production_downloads(
                     "fresh_db_start_state": str(row.get("fresh_status")),
                     "fresh_db_end_state": None, "db_state": "BEFORE",
                     "network_attempts_started": 0, "failure_code": None,
+                    "artifact_reused": False, "network_attempted": False,
                 }
                 for row_id, row in zip(target_ids, before_rows)
             },
@@ -1642,7 +1671,7 @@ def run_production_downloads(
                     if (
                         payload.get("manifest_row_id") != row_id
                         or payload.get("requested_disclosure_no") != row["requested_disclosure_no"]
-                        or payload.get("auto_ready_allowed") is not True
+                        or not is_production_ready_identity_result(payload)
                     ):
                         raise FreshDownloaderStop(STOP_PRODUCTION_ARTIFACT)
                     if row.get("fresh_status") == "COMPLETE" and any((
@@ -1681,8 +1710,7 @@ def run_production_downloads(
                         result = _result_from_verified_provenance(payload, zip_path, provenance_path, "DB_ONLY_REPAIR")
                 payload = _load_production_provenance(zip_path, provenance_path)
                 if (
-                    payload.get("auto_ready_allowed") is not True
-                    or payload.get("identity_verdict") != "official_linked_xbrl_match"
+                    not is_production_ready_identity_result(payload)
                     or result.get("zip_sha256") != payload.get("zip_sha256")
                 ):
                     raise FreshDownloaderStop(STOP_PRODUCTION_ARTIFACT)
@@ -1694,6 +1722,8 @@ def run_production_downloads(
                     "zip_state": "VERIFIED", "provenance_state": "VERIFIED",
                     "loader_state": "ACCEPTED", "filesystem_state": "ARTIFACTS_READY",
                     "db_state": "PENDING", "network_attempts_started": network_attempts,
+                    "artifact_reused": network_attempts == 0,
+                    "network_attempted": network_attempts > 0,
                     "zip_sha256": payload["zip_sha256"],
                     "internal_document_id": payload["internal_document_id"],
                     "failure_code": None,

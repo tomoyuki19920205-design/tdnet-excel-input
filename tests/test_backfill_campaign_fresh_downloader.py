@@ -258,6 +258,43 @@ def test_exact_identity_is_auto_ready(tmp_path):
     assert result["results"][0]["auto_ready"] is True
 
 
+@pytest.mark.parametrize(
+    ("changes", "expected"),
+    [
+        ({"identity_verdict": "exact_document_id_match"}, True),
+        ({"identity_verdict": "official_linked_xbrl_match"}, True),
+        ({"identity_verdict": ""}, False),
+        ({"identity_verdict": None}, False),
+        ({"identity_verdict": "unknown"}, False),
+        ({"identity_verdict": "ticker_mismatch"}, False),
+        ({"identity_verdict": "period_mismatch"}, False),
+        ({"identity_verdict": "quarter_mismatch"}, False),
+        ({"identity_verdict": "ambiguous"}, False),
+        ({"identity_verdict": "quarantined"}, False),
+        ({"identity_status": "DOWNLOAD_IDENTITY_MISMATCH"}, False),
+        ({"identity_status": "QUARANTINE_RECHECK_MATCH"}, False),
+        ({"identity_status": None}, False),
+        ({"plan_classification": "QUARANTINE_FRESH_RECHECK"}, False),
+        ({"plan_classification": ""}, False),
+        ({"auto_ready_allowed": False}, False),
+        ({"auto_ready_allowed": 1}, False),
+        ({"auto_ready_allowed": None}, False),
+        ({"quarantine_release_required": True}, False),
+        ({"quarantine_release_required": None}, False),
+    ],
+)
+def test_production_ready_identity_contract_is_fail_closed(changes, expected):
+    payload = {
+        "identity_verdict": "official_linked_xbrl_match",
+        "identity_status": "DOWNLOAD_IDENTITY_VERIFIED",
+        "plan_classification": "STANDARD_FRESH_DOWNLOAD",
+        "auto_ready_allowed": True,
+        "quarantine_release_required": False,
+    }
+    payload.update(changes)
+    assert downloader.is_production_ready_identity_result(payload) is expected
+
+
 def test_standard_identity_mismatch_fails(tmp_path, monkeypatch):
     env = _prepare(tmp_path)
     body = _zip_bytes(internal=env["rows"][0]["requested_disclosure_no"])
@@ -1022,6 +1059,60 @@ def test_production_valid_artifacts_enable_database_only_repair(tmp_path):
     assert {row["status"] for row in result["results"]} == {"DB_ONLY_REPAIR"}
     assert result["summary"]["network_calls"] == 0
     assert all(row["attempt_count"] == 0 for row in result["readback"])
+    assert all(row["artifact_reused"] is True for row in result["journal"]["rows"].values())
+    assert all(row["network_attempted"] is False for row in result["journal"]["rows"].values())
+
+
+def test_production_exact_identity_artifacts_enable_database_only_repair(tmp_path):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path)
+    for row in env["rows"]:
+        provider(row, env["cache"], CAMPAIGN_ID)
+        _directory, _zip_path, provenance = downloader._production_target_paths(
+            env["cache"], CAMPAIGN_ID, row["manifest_row_id"]
+        )
+        payload = json.loads(provenance.read_text(encoding="utf-8"))
+        payload["identity_verdict"] = "exact_document_id_match"
+        provenance.write_bytes(downloader._json_bytes(payload))
+
+    def forbidden(*_args):
+        raise AssertionError("provider must not be called")
+
+    result = downloader.run_production_downloads(
+        **_production_kwargs(env, environment, forbidden, runtime)
+    )
+    assert {row["status"] for row in result["results"]} == {"DB_ONLY_REPAIR"}
+    assert {row["identity_verdict"] for row in result["results"]} == {"exact_document_id_match"}
+    assert result["summary"]["network_calls"] == 0
+
+
+@pytest.mark.parametrize("verdict", ["", "ambiguous", "ticker_mismatch"])
+def test_production_non_ready_verdict_artifact_is_fail_closed(tmp_path, verdict):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path)
+    provider(env["rows"][0], env["cache"], CAMPAIGN_ID)
+    _directory, _zip_path, provenance = downloader._production_target_paths(
+        env["cache"], CAMPAIGN_ID, "0000000001"
+    )
+    payload = json.loads(provenance.read_text(encoding="utf-8"))
+    payload["identity_verdict"] = verdict
+    provenance.write_bytes(downloader._json_bytes(payload))
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_ARTIFACT):
+        downloader.run_production_downloads(
+            **_production_kwargs(env, environment, provider, runtime)
+        )
+
+
+def test_exact_verdict_does_not_bypass_formal_loader(tmp_path):
+    env, _environment, provider, _runtime, _checks = _production_fixture(tmp_path)
+    provider(env["rows"][0], env["cache"], CAMPAIGN_ID)
+    _directory, zip_path, provenance = downloader._production_target_paths(
+        env["cache"], CAMPAIGN_ID, "0000000001"
+    )
+    payload = json.loads(provenance.read_text(encoding="utf-8"))
+    payload["identity_verdict"] = "exact_document_id_match"
+    provenance.write_bytes(downloader._json_bytes(payload))
+    zip_path.write_bytes(b"not-a-zip")
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_ARTIFACT):
+        downloader._load_production_provenance(zip_path, provenance)
 
 
 def test_production_protected_field_violation_rolls_back(tmp_path):
