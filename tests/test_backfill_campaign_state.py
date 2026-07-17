@@ -12,6 +12,7 @@ from lib.backfill.campaign_state import (
     connect_db,
     create_campaign,
     create_campaign_filing,
+    create_campaign_filings,
     get_schema_version,
     initialize_schema,
     table_exists,
@@ -137,4 +138,15 @@ def test_transaction_rolls_back_on_error(tmp_path):
             create_campaign(conn, _campaign())
             raise RuntimeError("boom")
     assert conn.execute("SELECT COUNT(*) FROM campaigns").fetchone()[0] == 0
+    conn.close()
+
+
+def test_bulk_insert_rolls_back_on_duplicate_manifest_row(tmp_path):
+    conn = _db(tmp_path)
+    with pytest.raises(sqlite3.IntegrityError):
+        with transaction(conn):
+            create_campaign(conn, _campaign())
+            create_campaign_filings(conn, [_filing("r1"), _filing("r1")])
+    assert conn.execute("SELECT COUNT(*) FROM campaigns").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM campaign_filings").fetchone()[0] == 0
     conn.close()

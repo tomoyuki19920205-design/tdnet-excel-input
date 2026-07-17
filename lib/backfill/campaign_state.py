@@ -83,8 +83,6 @@ def initialize_schema(conn: sqlite3.Connection, *, schema_version: str = SCHEMA_
                 "INSERT INTO campaign_schema_metadata(schema_version, created_at, updated_at) VALUES (?, ?, ?)",
                 (str(schema_version), now, now),
             )
-        else:
-            conn.execute("UPDATE campaign_schema_metadata SET updated_at = ?", (now,))
 
         conn.execute(
             """CREATE TABLE IF NOT EXISTS campaigns (
@@ -207,4 +205,31 @@ def create_campaign_filing(conn: sqlite3.Connection, values: Mapping[str, object
     conn.execute(
         f"INSERT INTO campaign_filings ({columns}) VALUES ({placeholders})",
         [payload.get(column) for column in _FILING_COLUMNS],
+    )
+
+
+def create_campaign_filings(conn: sqlite3.Connection, values_list: list[Mapping[str, object]]) -> None:
+    """Insert campaign filings in bulk; caller owns the transaction boundary."""
+    payloads: list[list[object]] = []
+    now = _now()
+    for values in values_list:
+        payload = dict(values)
+        payload.setdefault("created_at", now)
+        payload.setdefault("updated_at", now)
+        payload.setdefault("registration_status", "REGISTERED")
+        payload.setdefault("identity_status", "UNVERIFIED")
+        payload.setdefault("cache_status", "UNKNOWN")
+        payload.setdefault("extraction_status", "NOT_STARTED")
+        payload.setdefault("sqlite_save_status", "NOT_STARTED")
+        payload.setdefault("canonical_save_status", "NOT_STARTED")
+        payload.setdefault("supabase_save_status", "NOT_STARTED")
+        payload.setdefault("overall_status", "REGISTERED")
+        payload.setdefault("retryable", 1)
+        payloads.append([payload.get(column) for column in _FILING_COLUMNS])
+    if not payloads:
+        return
+    columns = ", ".join(_FILING_COLUMNS)
+    placeholders = ", ".join("?" for _ in _FILING_COLUMNS)
+    conn.executemany(
+        f"INSERT INTO campaign_filings ({columns}) VALUES ({placeholders})", payloads
     )
