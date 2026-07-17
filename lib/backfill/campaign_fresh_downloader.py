@@ -66,6 +66,7 @@ STOP_PRODUCTION_DB_CHANGED = "STOP_V4_FRESH_DOWNLOAD_PRODUCTION_DB_CHANGED_DURIN
 STOP_PRODUCTION_DB_CAS = "STOP_V4_FRESH_DOWNLOAD_PRODUCTION_DB_CAS_FAILED"
 STOP_PRODUCTION_DIVERGENCE = "STOP_V4_FRESH_DOWNLOAD_PRODUCTION_DB_ARTIFACT_DIVERGENCE"
 STOP_PRODUCTION_ARTIFACT = "STOP_V4_FRESH_DOWNLOAD_PRODUCTION_ARTIFACT_CONFLICT"
+STOP_PRODUCTION_COUNT = "STOP_V4_FRESH_DOWNLOAD_PRODUCTION_COUNT_CONTRACT_INVALID"
 
 PLAN_CLASSES = frozenset({"STANDARD_FRESH_DOWNLOAD", "QUARANTINE_FRESH_RECHECK"})
 OFFICIAL_HOSTS = frozenset({"www.release.tdnet.info", "release.tdnet.info"})
@@ -1366,7 +1367,7 @@ def _result_from_verified_provenance(
         "period": str(payload["zip_internal_period"]),
         "quarter": str(payload["zip_internal_quarter"]),
         "document_type": str(payload["document_type"]),
-        "network_calls": 0, "auto_ready": True,
+        "network_calls": 0, "attempt_count": 0, "auto_ready": True,
     }
 
 
@@ -1483,6 +1484,7 @@ def run_production_downloads(
     manifest_list: Path, manifest_byte_sha256: str, manifest_semantic_sha256_value: str,
     cache_root: Path, output_dir: Path, expected_count: int, max_items: int,
     confirm_production_cache_root: str, confirm_campaign_id: str,
+    confirm_production_item_count: int,
     apply: bool, production_apply: bool, source_route: str,
     repo_root: Path, code_sha: str, min_interval_seconds: float = 1.0,
     timeout_seconds: float = 60.0, max_retries: int = 3,
@@ -1497,11 +1499,14 @@ def run_production_downloads(
     env = environment or default_production_environment(repo_root, campaign_id)
     if not apply or not production_apply or source_route != JQUANTS_SOURCE_ROUTE:
         raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
+    counts = (expected_count, max_items, confirm_production_item_count)
     if (
-        expected_count != max_items
+        any(not isinstance(value, int) or isinstance(value, bool) for value in counts)
+        or expected_count != max_items
+        or expected_count != confirm_production_item_count
         or not 1 <= expected_count <= PRODUCTION_MAX_COUNT
     ):
-        raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
+        raise FreshDownloaderStop(STOP_PRODUCTION_COUNT)
     if confirm_campaign_id != campaign_id or confirm_production_cache_root != str(cache_root):
         raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
     validate_production_paths(
@@ -1519,7 +1524,10 @@ def run_production_downloads(
         raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
     if sha256_file(download_plan) != download_plan_sha256.lower():
         raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
-    selected, actual_manifest_sha = load_manifest_list(manifest_list, campaign_id)
+    try:
+        selected, actual_manifest_sha = load_manifest_list(manifest_list, campaign_id)
+    except FreshDownloaderStop as exc:
+        raise FreshDownloaderStop(STOP_PRODUCTION_COUNT) from exc
     if actual_manifest_sha != manifest_byte_sha256.lower():
         raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
     if manifest_semantic_sha256(selected) != manifest_semantic_sha256_value.lower():
@@ -1527,22 +1535,29 @@ def run_production_downloads(
     if len(selected) != expected_count or any(
         row["plan_classification"] != "STANDARD_FRESH_DOWNLOAD" for row in selected
     ):
-        raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
+        raise FreshDownloaderStop(STOP_PRODUCTION_COUNT)
     plan_rows, actual_plan_sha = load_selected_plan(download_plan, selected, campaign_id)
     if actual_plan_sha != download_plan_sha256.lower() or len(plan_rows) != expected_count:
         raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
     before_rows = load_production_rows(campaign_db, campaign_id, plan_rows)
     target_ids = [str(row["manifest_row_id"]) for row in before_rows]
     if len(set(target_ids)) != expected_count:
-        raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
+        raise FreshDownloaderStop(STOP_PRODUCTION_COUNT)
     if any(
         row.get("plan_classification") != "STANDARD_FRESH_DOWNLOAD"
-        or row.get("fresh_status") not in {
-            "NOT_STARTED", "FAILED_RETRYABLE", "COMPLETE",
-        }
+        or row.get("fresh_status") not in {"NOT_STARTED", "FAILED_RETRYABLE"}
         for row in before_rows
     ):
-        raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
+        raise FreshDownloaderStop(STOP_PRODUCTION_COUNT)
+    target_zip_paths = [str(row.get("target_zip_path") or "") for row in before_rows]
+    target_provenance_paths = [str(row.get("target_provenance_path") or "") for row in before_rows]
+    if (
+        "" in target_zip_paths
+        or "" in target_provenance_paths
+        or len(set(target_zip_paths)) != expected_count
+        or len(set(target_provenance_paths)) != expected_count
+    ):
+        raise FreshDownloaderStop(STOP_PRODUCTION_COUNT)
 
     runtime_evidence = [runtime_checker(repo_root)]
     journal_path = output_dir / "journal.json"
@@ -1571,7 +1586,18 @@ def run_production_downloads(
             "campaign_db_start_sha256": campaign_db_sha256.lower(),
             "targets": target_ids, "started_at": _now_utc(),
             "runtime_checks": runtime_evidence, "backup": None,
-            "rows": {row_id: {"filesystem_state": "NOT_STARTED", "db_state": "BEFORE"} for row_id in target_ids},
+            "rows": {
+                row_id: {
+                    "manifest_row_id": row_id,
+                    "stage_a_state": "NOT_STARTED", "stage_b_state": "NOT_STARTED",
+                    "zip_state": "NOT_STARTED", "provenance_state": "NOT_STARTED",
+                    "loader_state": "NOT_STARTED", "filesystem_state": "NOT_STARTED",
+                    "fresh_db_start_state": str(row.get("fresh_status")),
+                    "fresh_db_end_state": None, "db_state": "BEFORE",
+                    "network_attempts_started": 0, "failure_code": None,
+                }
+                for row_id, row in zip(target_ids, before_rows)
+            },
             "current_phase": "CREATED", "failure_code": None, "finished_at": None,
         }
         _journal_write(journal_path, journal)
@@ -1593,6 +1619,7 @@ def run_production_downloads(
                 if index and min_interval_seconds:
                     sleep(min_interval_seconds)
                 row_id = str(row["manifest_row_id"])
+                row_journal = journal["rows"][row_id]
                 _directory, zip_path, provenance_path = _production_target_paths(cache_root, campaign_id, row_id)
                 if (
                     str(row.get("target_zip_path")) != str(zip_path)
@@ -1628,12 +1655,20 @@ def run_production_downloads(
                     )):
                         raise FreshDownloaderStop(STOP_PRODUCTION_DIVERGENCE)
                     result = _result_from_verified_provenance(
-                        payload, zip_path, provenance_path,
-                        "ALREADY_COMPLETE" if row.get("fresh_status") == "COMPLETE" else "DB_ONLY_REPAIR",
+                        payload, zip_path, provenance_path, "DB_ONLY_REPAIR",
                     )
                 elif artifact_provider is not None:
-                    result = artifact_provider(row, cache_root, campaign_id)
+                    row_journal.update(stage_a_state="STARTED", network_attempts_started=1)
+                    _journal_write(journal_path, journal)
+                    result = dict(artifact_provider(row, cache_root, campaign_id))
+                    result.update({
+                        "attempt_count": 1, "network_calls": 2,
+                        "td_files_requests": 1, "signed_url_download_requests": 1,
+                        "static_url_requests": 0,
+                    })
                 else:
+                    row_journal.update(stage_a_state="STARTED", network_attempts_started=1)
+                    _journal_write(journal_path, journal)
                     result, _calls = _download_one_jquants(
                         row=row, cache_root=cache_root, campaign_id=campaign_id,
                         session=client, timeout_seconds=timeout_seconds,
@@ -1652,11 +1687,17 @@ def run_production_downloads(
                 ):
                     raise FreshDownloaderStop(STOP_PRODUCTION_ARTIFACT)
                 results.append(result)
-                journal["rows"][row_id] = {
-                    "filesystem_state": "ARTIFACTS_READY", "db_state": "PENDING",
+                network_attempts = int(result.get("attempt_count", 0) or 0)
+                row_journal.update({
+                    "stage_a_state": "SUCCEEDED" if network_attempts else "NOT_REQUIRED",
+                    "stage_b_state": "SUCCEEDED" if network_attempts else "NOT_REQUIRED",
+                    "zip_state": "VERIFIED", "provenance_state": "VERIFIED",
+                    "loader_state": "ACCEPTED", "filesystem_state": "ARTIFACTS_READY",
+                    "db_state": "PENDING", "network_attempts_started": network_attempts,
                     "zip_sha256": payload["zip_sha256"],
                     "internal_document_id": payload["internal_document_id"],
-                }
+                    "failure_code": None,
+                })
                 _journal_write(journal_path, journal)
         finally:
             if owns_session:
@@ -1708,6 +1749,10 @@ def run_production_downloads(
                         conn, campaign_id=campaign_id, before_rows=pending_rows,
                         verified_results=pending_results, expected_count=len(pending_rows),
                         run_id=run_id, journal_path=str(journal_path),
+                        attempt_increments=[
+                            1 if int(result.get("attempt_count", 0) or 0) > 0 else 0
+                            for result in pending_results
+                        ],
                         after_update=state_after_update,
                     )
                 except (FreshDownloadCASFailed, sqlite3.Error) as exc:
@@ -1728,7 +1773,9 @@ def run_production_downloads(
         if integrity != "ok" or foreign_keys:
             raise FreshDownloaderStop(STOP_PRODUCTION_DB_CAS)
         for row in readback:
-            journal["rows"][str(row["manifest_row_id"])]["db_state"] = "READY"
+            row_journal = journal["rows"][str(row["manifest_row_id"])]
+            row_journal["db_state"] = "READY"
+            row_journal["fresh_db_end_state"] = "COMPLETE"
         _journal_update(
             journal_path, journal, "DB_COMMITTED",
             db_readback_count=len(readback), non_target_digest=non_target_after,
@@ -1739,7 +1786,8 @@ def run_production_downloads(
         summary = {
             "apply": True, "production_apply": True, "campaign_id": campaign_id,
             "run_id": run_id, "selected": len(results), "artifacts_ready": len(results),
-            "db_updated": db_updated_count, "network_calls": network_counter[0],
+            "db_updated": db_updated_count,
+            "network_calls": sum(int(row.get("network_calls", 0) or 0) for row in results),
             "non_target_changed": 0, "integrity_check": integrity,
             "foreign_key_check": foreign_keys, "backup": backup,
         }
@@ -1752,6 +1800,13 @@ def run_production_downloads(
         )
         return {"summary": summary, "results": results, "readback": readback, "journal": journal}
     except FreshDownloaderStop as exc:
+        for row_journal in journal.get("rows", {}).values():
+            if (
+                row_journal.get("stage_a_state") == "STARTED"
+                and row_journal.get("filesystem_state") != "ARTIFACTS_READY"
+            ):
+                row_journal["stage_a_state"] = "FAILED"
+                row_journal["failure_code"] = str(exc)
         if journal.get("current_phase") not in {"DB_PENDING", "DB_COMMITTED"}:
             _journal_update(
                 journal_path, journal, "FAILED", failure_code=str(exc), finished_at=_now_utc(),

@@ -629,11 +629,18 @@ def apply_fresh_download_successes(
     before_rows: Sequence[Mapping[str, object]],
     verified_results: Sequence[Mapping[str, object]], expected_count: int,
     run_id: str, journal_path: str, updated_at: str | None = None,
+    attempt_increments: Sequence[int] | None = None,
     after_update: Callable[[int, sqlite3.Connection], None] | None = None,
 ) -> list[dict[str, object]]:
     """CAS verified artifacts into the dedicated fresh table only."""
     if not 1 <= expected_count <= 100 or len(before_rows) != expected_count or len(verified_results) != expected_count:
         raise FreshDownloadCASFailed("fresh download update count is outside the audited range")
+    increments = list(attempt_increments or [1] * expected_count)
+    if len(increments) != expected_count or any(
+        not isinstance(value, int) or isinstance(value, bool) or value < 0
+        for value in increments
+    ):
+        raise FreshDownloadCASFailed("fresh download attempt increments are invalid")
     before_by_id = {str(row.get("manifest_row_id") or ""): dict(row) for row in before_rows}
     result_by_id = {str(row.get("manifest_row_id") or ""): dict(row) for row in verified_results}
     if "" in before_by_id or set(before_by_id) != set(result_by_id) or len(before_by_id) != expected_count:
@@ -668,7 +675,7 @@ def apply_fresh_download_successes(
                 "artifact_quarter": verified.get("quarter"),
                 "identity_verdict": verified.get("identity_verdict"),
                 "auto_ready_allowed": 1, "quarantine_release_required": 0,
-                "attempt_count": int(before.get("attempt_count") or 0) + 1,
+                "attempt_count": int(before.get("attempt_count") or 0) + increments[index],
                 "last_run_id": run_id, "last_journal_path": journal_path,
                 "last_error_code": None, "last_error_stage": None,
                 "last_error_message": None, "updated_at": timestamp,

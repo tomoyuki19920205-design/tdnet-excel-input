@@ -43,6 +43,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--manifest-semantic-sha256")
     parser.add_argument("--expected-count", type=int)
     parser.add_argument("--max-items", type=int)
+    parser.add_argument(
+        "--confirm-production-item-count", type=int,
+        help=("Required for production: 1-100 and exactly equal to the manifest "
+              "row count, --expected-count, and --max-items; values above 100 are rejected."),
+    )
     parser.add_argument("--confirm-production-cache-root")
     parser.add_argument("--confirm-campaign-id")
     parser.add_argument("--min-interval-seconds", type=float, default=1.0)
@@ -74,6 +79,7 @@ def main(argv: list[str] | None = None) -> int:
                 manifest_byte_sha256=args.manifest_byte_sha256,
                 manifest_semantic_sha256_value=args.manifest_semantic_sha256,
                 expected_count=args.expected_count, max_items=args.max_items,
+                confirm_production_item_count=args.confirm_production_item_count,
                 confirm_production_cache_root=args.confirm_production_cache_root,
                 confirm_campaign_id=args.confirm_campaign_id,
             )

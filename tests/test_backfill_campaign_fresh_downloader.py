@@ -749,6 +749,7 @@ def _production_kwargs(env, environment, provider, runtime):
         "manifest_semantic_sha256_value": downloader.manifest_semantic_sha256(selected),
         "cache_root": env["cache"], "output_dir": env["output"],
         "expected_count": count, "max_items": count,
+        "confirm_production_item_count": count,
         "confirm_production_cache_root": str(env["cache"]),
         "confirm_campaign_id": CAMPAIGN_ID, "apply": True, "production_apply": True,
         "source_route": "JQUANTS_TD_FILES", "repo_root": REPO_ROOT, "code_sha": CODE_SHA,
@@ -761,7 +762,7 @@ def test_production_simulation_publishes_five_then_updates_database(tmp_path):
     env, environment, provider, runtime, checks = _production_fixture(tmp_path)
     result = downloader.run_production_downloads(**_production_kwargs(env, environment, provider, runtime))
     assert result["summary"]["db_updated"] == 5
-    assert result["summary"]["network_calls"] == 0
+    assert result["summary"]["network_calls"] == 10
     assert result["summary"]["non_target_changed"] == 0
     assert result["journal"]["current_phase"] == "COMPLETE"
     assert len(checks) == 4
@@ -787,8 +788,19 @@ def test_production_simulation_accepts_manifest_bound_hundred(tmp_path):
         **_production_kwargs(env, environment, provider, runtime)
     )
     assert result["summary"]["db_updated"] == 100
-    assert result["summary"]["network_calls"] == 0
+    assert result["summary"]["network_calls"] == 200
     assert len(checks) == 4
+    assert all(
+        row["stage_a_state"] == "SUCCEEDED"
+        and row["stage_b_state"] == "SUCCEEDED"
+        and row["zip_state"] == "VERIFIED"
+        and row["provenance_state"] == "VERIFIED"
+        and row["loader_state"] == "ACCEPTED"
+        and row["fresh_db_start_state"] == "NOT_STARTED"
+        and row["fresh_db_end_state"] == "COMPLETE"
+        and row["failure_code"] is None
+        for row in result["journal"]["rows"].values()
+    )
     conn = connect_db(env["db"])
     assert conn.execute(
         "SELECT COUNT(*) FROM campaign_fresh_downloads WHERE fresh_status='COMPLETE'"
@@ -799,9 +811,88 @@ def test_production_simulation_accepts_manifest_bound_hundred(tmp_path):
     conn.close()
 
 
+@pytest.mark.parametrize("count", [1, 37])
+def test_production_count_contract_accepts_arbitrary_in_range_counts(tmp_path, count):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path, count=count)
+    result = downloader.run_production_downloads(
+        **_production_kwargs(env, environment, provider, runtime)
+    )
+    assert result["summary"]["selected"] == count
+    assert result["summary"]["db_updated"] == count
+    assert result["summary"]["network_calls"] == count * 2
+
+
+@pytest.mark.parametrize("count", [0, 101])
+def test_production_count_contract_rejects_out_of_range_before_output(tmp_path, count):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path)
+    kwargs = _production_kwargs(env, environment, provider, runtime)
+    kwargs.update(expected_count=count, max_items=count, confirm_production_item_count=count)
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_COUNT):
+        downloader.run_production_downloads(**kwargs)
+    assert not env["output"].exists()
+    assert not env["cache"].exists()
+
+
+def test_production_count_contract_rejects_missing_confirm_before_output(tmp_path):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path)
+    kwargs = _production_kwargs(env, environment, provider, runtime)
+    kwargs["confirm_production_item_count"] = None
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_COUNT):
+        downloader.run_production_downloads(**kwargs)
+    assert not env["output"].exists()
+    assert not env["cache"].exists()
+
+
+def test_production_count_contract_rejects_duplicate_manifest_before_output(tmp_path):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path)
+    kwargs = _production_kwargs(env, environment, provider, runtime)
+    payload = json.loads(env["manifest"].read_text())
+    payload["rows"][1] = dict(payload["rows"][0])
+    env["manifest"].write_bytes(downloader._json_bytes(payload))
+    kwargs["manifest_byte_sha256"] = _sha(env["manifest"])
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_COUNT):
+        downloader.run_production_downloads(**kwargs)
+    assert not env["output"].exists()
+    assert not env["cache"].exists()
+
+
+def test_production_schema_rejects_duplicate_target_path_before_run(tmp_path):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path)
+    conn = connect_db(env["db"])
+    duplicate = str(env["cache"] / "0000000001" / "xbrl.zip")
+    with pytest.raises(sqlite3.IntegrityError, match="UNIQUE constraint failed"):
+        conn.execute(
+            "UPDATE campaign_fresh_downloads SET target_zip_path=? WHERE manifest_row_id='0000000002'",
+            (duplicate,),
+        )
+    conn.rollback(); conn.close()
+    assert not env["output"].exists()
+    assert not env["cache"].exists()
+
+
+def test_production_hundred_partial_stage_a_failure_keeps_database_unchanged(tmp_path):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path, count=100)
+    before_sha = _sha(env["db"])
+    def fail_at_37(row, cache_root, campaign_id):
+        if row["manifest_row_id"] == "0000000037":
+            raise downloader.FreshDownloaderStop(downloader.STOP_HTTP)
+        return provider(row, cache_root, campaign_id)
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_HTTP):
+        downloader.run_production_downloads(
+            **_production_kwargs(env, environment, fail_at_37, runtime)
+        )
+    assert _sha(env["db"]) == before_sha
+    assert sum(1 for _ in env["cache"].rglob("xbrl.zip")) == 36
+    journal = json.loads((env["output"] / "journal.json").read_text())
+    assert journal["current_phase"] == "FAILED"
+    assert journal["rows"]["0000000037"]["stage_a_state"] == "FAILED"
+    assert journal["rows"]["0000000037"]["failure_code"] == downloader.STOP_HTTP
+
+
 @pytest.mark.parametrize("change", [
     {"production_apply": False}, {"apply": False}, {"expected_count": 4},
-    {"max_items": 6}, {"confirm_campaign_id": "wrong"},
+    {"max_items": 6}, {"confirm_production_item_count": 4},
+    {"confirm_production_item_count": 101}, {"confirm_campaign_id": "wrong"},
     {"campaign_db_sha256": "0" * 64}, {"manifest_byte_sha256": "0" * 64},
     {"manifest_semantic_sha256_value": "0" * 64},
 ])
@@ -905,7 +996,7 @@ def test_production_fresh_complete_without_artifacts_fails_closed(tmp_path):
     conn = connect_db(env["db"])
     conn.execute("UPDATE campaign_fresh_downloads SET fresh_status='COMPLETE'")
     conn.commit(); conn.close()
-    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_DIVERGENCE):
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_COUNT):
         downloader.run_production_downloads(**_production_kwargs(env, environment, provider, runtime))
 
 
@@ -914,7 +1005,7 @@ def test_production_quarantined_rejected_before_output_and_network(tmp_path):
     conn = connect_db(env["db"])
     conn.execute("UPDATE campaign_fresh_downloads SET fresh_status='QUARANTINED'")
     conn.commit(); conn.close()
-    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_GUARD):
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_COUNT):
         downloader.run_production_downloads(**_production_kwargs(env, environment, provider, runtime))
     assert not env["output"].exists()
     assert not env["cache"].exists()
@@ -929,6 +1020,8 @@ def test_production_valid_artifacts_enable_database_only_repair(tmp_path):
     kwargs = _production_kwargs(env, environment, forbidden, runtime)
     result = downloader.run_production_downloads(**kwargs)
     assert {row["status"] for row in result["results"]} == {"DB_ONLY_REPAIR"}
+    assert result["summary"]["network_calls"] == 0
+    assert all(row["attempt_count"] == 0 for row in result["readback"])
 
 
 def test_production_protected_field_violation_rolls_back(tmp_path):
@@ -973,7 +1066,7 @@ def test_production_invalid_provenance_is_artifact_conflict(tmp_path):
         downloader.run_production_downloads(**_production_kwargs(env, environment, provider, runtime))
 
 
-def test_production_already_complete_is_database_no_change(tmp_path):
+def test_production_already_complete_is_rejected_before_new_output(tmp_path):
     env, environment, provider, runtime, _checks = _production_fixture(tmp_path)
     downloader.run_production_downloads(**_production_kwargs(env, environment, provider, runtime))
     before_sha = _sha(env["db"])
@@ -987,9 +1080,9 @@ def test_production_already_complete_is_database_no_change(tmp_path):
     kwargs = _production_kwargs(env, second_environment, forbidden, runtime)
     kwargs["output_dir"] = second_output
     kwargs["campaign_db_sha256"] = before_sha
-    result = downloader.run_production_downloads(**kwargs)
-    assert result["summary"]["db_updated"] == 0
-    assert {row["status"] for row in result["results"]} == {"ALREADY_COMPLETE"}
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_COUNT):
+        downloader.run_production_downloads(**kwargs)
+    assert not second_output.exists()
     assert _sha(env["db"]) == before_sha
 
 
@@ -1010,7 +1103,7 @@ def test_production_complete_with_invalid_artifact_is_divergence(tmp_path):
     kwargs = _production_kwargs(env, next_environment, provider, runtime)
     kwargs["output_dir"] = next_output
     kwargs["campaign_db_sha256"] = _sha(env["db"])
-    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_DIVERGENCE):
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_COUNT):
         downloader.run_production_downloads(**kwargs)
 
 
@@ -1065,5 +1158,6 @@ def test_cli_help_includes_production_contract_arguments():
         "--production-apply", "--campaign-db-sha256", "--download-plan-sha256",
         "--manifest-byte-sha256", "--manifest-semantic-sha256", "--expected-count",
         "--max-items", "--confirm-production-cache-root", "--confirm-campaign-id",
+        "--confirm-production-item-count",
     ):
         assert option in proc.stdout
