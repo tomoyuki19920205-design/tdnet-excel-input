@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import shutil
 import sqlite3
 import sys
 from pathlib import Path
@@ -280,19 +281,22 @@ def test_fresh_status_and_path_constraints(tmp_path):
 
 
 def _legacy_migration_fixture(tmp_path: Path):
-    current = connect_db(tmp_path / "current.db")
-    backup = connect_db(tmp_path / "backup.db")
-    for conn in (current, backup):
-        initialize_schema(conn, schema_version="1")
-        with transaction(conn):
-            create_campaign(conn, {**_campaign(), "manifest_record_count": 6})
-            for index in range(1, 7):
-                filing = _filing(f"{index:010d}", requested=f"20260101{index:06d}", ticker="7203")
-                filing.update({
-                    "internal_document_id": None, "identity_status": "METADATA_RESOLVED",
-                    "cache_status": "MISSING", "overall_status": "IDENTITY_RESOLVED",
-                })
-                create_campaign_filing(conn, filing)
+    current_path, backup_path = tmp_path / "current.db", tmp_path / "backup.db"
+    current = connect_db(current_path)
+    initialize_schema(current, schema_version="1")
+    with transaction(current):
+        create_campaign(current, {**_campaign(), "manifest_record_count": 6})
+        for index in range(1, 7):
+            filing = _filing(f"{index:010d}", requested=f"20260101{index:06d}", ticker="7203")
+            filing.update({
+                "internal_document_id": None, "identity_status": "METADATA_RESOLVED",
+                "cache_status": "MISSING", "overall_status": "IDENTITY_RESOLVED",
+            })
+            create_campaign_filing(current, filing)
+    current.close()
+    shutil.copy2(current_path, backup_path)
+    current = connect_db(current_path)
+    backup = connect_db(backup_path)
     complete = {}
     plan = []
     for index in range(1, 7):
