@@ -9,14 +9,19 @@ import pytest
 
 from lib.backfill.campaign_state import (
     FreshDownloadCASFailed,
+    FreshStateMigrationConflict,
     SCHEMA_VERSION,
     apply_fresh_download_successes,
     connect_db,
     create_campaign,
     create_campaign_filing,
     create_campaign_filings,
+    create_fresh_download,
     get_schema_version,
     initialize_schema,
+    load_fresh_download_rows,
+    migrate_fresh_download_state,
+    select_next_fresh_downloads,
     table_exists,
     transaction,
 )
@@ -51,6 +56,7 @@ def test_schema_creation_and_tables(tmp_path):
     conn = _db(tmp_path)
     assert table_exists(conn, "campaigns")
     assert table_exists(conn, "campaign_filings")
+    assert table_exists(conn, "campaign_fresh_downloads")
     assert get_schema_version(conn) == SCHEMA_VERSION
     conn.close()
 
@@ -165,40 +171,54 @@ def _fresh_download_fixture(conn: sqlite3.Connection):
                 "error_code": "old", "error_stage": "identity", "error_message": "old",
             })
             create_campaign_filing(conn, filing)
-    before = [dict(row) for row in conn.execute(
+            create_fresh_download(conn, {
+                "campaign_id": "c1", "manifest_row_id": f"{index:010d}",
+                "plan_classification": "STANDARD_FRESH_DOWNLOAD",
+                "fresh_status": "NOT_STARTED", "source_route": None,
+                "target_zip_path": f"C:/cache/{index:010d}/xbrl.zip",
+                "target_provenance_path": f"C:/cache/{index:010d}/provenance.json",
+                "auto_ready_allowed": 1, "quarantine_release_required": 0,
+                "attempt_count": 0, "prior_identity_status": "METADATA_RESOLVED",
+                "prior_cache_status": "MISSING", "prior_overall_status": "IDENTITY_RESOLVED",
+                "prior_error_code": "old", "migration_run_id": "migration-1",
+            })
+    filing_rows = {row["manifest_row_id"]: dict(row) for row in conn.execute(
         "SELECT * FROM campaign_filings WHERE campaign_id='c1' ORDER BY manifest_row_id"
+    )}
+    before = [{**filing_rows[row["manifest_row_id"]], **dict(row)} for row in conn.execute(
+        "SELECT * FROM campaign_fresh_downloads WHERE campaign_id='c1' ORDER BY manifest_row_id"
     )]
     results = [{
         "manifest_row_id": row["manifest_row_id"],
         "internal_document_id": f"2026010172030{index}",
         "zip_sha256": f"{index:064x}", "ticker": "7203",
         "period": "2025-12-31", "quarter": "FY",
+        "identity_verdict": "official_linked_xbrl_match",
     } for index, row in enumerate(before, 1)]
     return before, results
 
 
-def test_fresh_download_success_updates_exact_five_and_protects_other_columns(tmp_path):
+def test_fresh_download_success_updates_dedicated_rows_and_preserves_filings(tmp_path):
     conn = _db(tmp_path)
     before, results = _fresh_download_fixture(conn)
+    filing_before = [dict(row) for row in conn.execute(
+        "SELECT * FROM campaign_filings ORDER BY manifest_row_id"
+    )]
     readback = apply_fresh_download_successes(
         conn, campaign_id="c1", before_rows=before, verified_results=results,
+        expected_count=5, run_id="run-1", journal_path="C:/audit/journal.json",
         updated_at="2026-07-17T00:00:00+00:00",
     )
     assert len(readback) == 5
     for old, new, result in zip(before, readback, results):
-        assert new["internal_document_id"] == result["internal_document_id"]
-        assert new["zip_sha256"] == result["zip_sha256"]
-        assert (new["identity_status"], new["cache_status"], new["overall_status"]) == (
-            "VERIFIED", "READY", "IDENTITY_VERIFIED",
-        )
-        assert (new["error_code"], new["error_stage"], new["error_message"]) == (None, None, None)
-        for field in (
-            "campaign_id", "manifest_row_id", "requested_disclosure_no", "company_code",
-            "source_url", "document_type", "registration_status", "created_at",
-            "extraction_status", "sqlite_save_status", "canonical_save_status",
-            "supabase_save_status", "started_at", "completed_at",
-        ):
-            assert new[field] == old[field]
+        assert new["fresh_status"] == "COMPLETE"
+        assert new["artifact_internal_document_id"] == result["internal_document_id"]
+        assert new["artifact_zip_sha256"] == result["zip_sha256"]
+        assert new["attempt_count"] == old["attempt_count"] + 1
+        assert new["last_run_id"] == "run-1"
+    assert [dict(row) for row in conn.execute(
+        "SELECT * FROM campaign_filings ORDER BY manifest_row_id"
+    )] == filing_before
     conn.close()
 
 
@@ -206,14 +226,15 @@ def test_fresh_download_cas_mismatch_rolls_back_all_rows(tmp_path):
     conn = _db(tmp_path)
     before, results = _fresh_download_fixture(conn)
     conn.execute(
-        "UPDATE campaign_filings SET error_message='external' WHERE manifest_row_id='0000000003'"
+        "UPDATE campaign_fresh_downloads SET updated_at='external' WHERE manifest_row_id='0000000003'"
     )
     conn.commit()
-    with pytest.raises(FreshDownloadCASFailed, match="CAS failed"):
+    with pytest.raises(FreshDownloadCASFailed):
         apply_fresh_download_successes(
             conn, campaign_id="c1", before_rows=before, verified_results=results,
+            expected_count=5, run_id="run-1", journal_path="journal.json",
         )
-    assert conn.execute("SELECT COUNT(*) FROM campaign_filings WHERE cache_status='READY'").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM campaign_fresh_downloads WHERE fresh_status='COMPLETE'").fetchone()[0] == 0
     conn.close()
 
 
@@ -226,7 +247,134 @@ def test_fresh_download_mid_transaction_failure_rolls_back_all_rows(tmp_path):
     with pytest.raises(sqlite3.OperationalError, match="injected"):
         apply_fresh_download_successes(
             conn, campaign_id="c1", before_rows=before, verified_results=results,
+            expected_count=5, run_id="run-1", journal_path="journal.json",
             after_update=fail,
         )
-    assert conn.execute("SELECT COUNT(*) FROM campaign_filings WHERE cache_status='READY'").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM campaign_fresh_downloads WHERE fresh_status='COMPLETE'").fetchone()[0] == 0
+    conn.close()
+
+
+def test_fresh_status_and_path_constraints(tmp_path):
+    conn = _db(tmp_path)
+    with transaction(conn):
+        create_campaign(conn, _campaign())
+        create_campaign_filing(conn, _filing("r1"))
+        create_campaign_filing(conn, _filing("r2"))
+    payload = {
+        "campaign_id": "c1", "manifest_row_id": "r1",
+        "plan_classification": "STANDARD_FRESH_DOWNLOAD", "fresh_status": "NOT_STARTED",
+        "target_zip_path": "C:/cache/r1/xbrl.zip",
+        "target_provenance_path": "C:/cache/r1/provenance.json",
+        "auto_ready_allowed": 1, "quarantine_release_required": 0,
+        "prior_identity_status": "UNVERIFIED", "prior_cache_status": "UNKNOWN",
+        "prior_overall_status": "REGISTERED", "migration_run_id": "m1",
+    }
+    create_fresh_download(conn, payload)
+    bad = {**payload, "manifest_row_id": "r2", "fresh_status": "UNKNOWN"}
+    with pytest.raises(ValueError, match="invalid fresh download status"):
+        create_fresh_download(conn, bad)
+    duplicate_path = {**payload, "manifest_row_id": "r2"}
+    with pytest.raises(sqlite3.IntegrityError):
+        create_fresh_download(conn, duplicate_path)
+    conn.close()
+
+
+def _legacy_migration_fixture(tmp_path: Path):
+    current = connect_db(tmp_path / "current.db")
+    backup = connect_db(tmp_path / "backup.db")
+    for conn in (current, backup):
+        initialize_schema(conn, schema_version="1")
+        with transaction(conn):
+            create_campaign(conn, {**_campaign(), "manifest_record_count": 6})
+            for index in range(1, 7):
+                filing = _filing(f"{index:010d}", requested=f"20260101{index:06d}", ticker="7203")
+                filing.update({
+                    "internal_document_id": None, "identity_status": "METADATA_RESOLVED",
+                    "cache_status": "MISSING", "overall_status": "IDENTITY_RESOLVED",
+                })
+                create_campaign_filing(conn, filing)
+    complete = {}
+    plan = []
+    for index in range(1, 7):
+        row_id = f"{index:010d}"
+        classification = "QUARANTINE_FRESH_RECHECK" if index == 6 else "STANDARD_FRESH_DOWNLOAD"
+        plan.append({
+            "campaign_id": "c1", "manifest_row_id": row_id,
+            "plan_classification": classification,
+            "target_zip_path": f"C:/cache/{row_id}/xbrl.zip",
+            "target_provenance_path": f"C:/cache/{row_id}/provenance.json",
+        })
+        if index <= 2:
+            complete[row_id] = {
+                "zip_sha256": f"{index:064x}", "internal_document_id": f"internal-{index}",
+                "zip_internal_ticker": "7203", "zip_internal_period": "2025-12-31",
+                "zip_internal_quarter": "FY", "identity_verdict": "official_linked_xbrl_match",
+                "run_id": "run-1", "downloaded_at_utc": "2026-07-17T00:00:00+00:00",
+            }
+            current.execute(
+                "UPDATE campaign_filings SET internal_document_id=?,zip_sha256=?,zip_internal_ticker='7203',"
+                "zip_internal_period='2025-12-31',zip_internal_quarter='FY',identity_status='VERIFIED',"
+                "cache_status='READY',overall_status='IDENTITY_VERIFIED' WHERE campaign_id='c1' AND manifest_row_id=?",
+                (f"internal-{index}", f"{index:064x}", row_id),
+            )
+    current.commit()
+    return current, backup, plan, complete
+
+
+def test_explicit_v1_to_v2_migration_restores_legacy_and_is_idempotent(tmp_path):
+    current, backup, plan, complete = _legacy_migration_fixture(tmp_path)
+    backup_snapshot = [dict(row) for row in backup.execute(
+        "SELECT * FROM campaign_filings ORDER BY manifest_row_id"
+    )]
+    result = migrate_fresh_download_state(
+        current, backup_conn=backup, campaign_id="c1", plan_rows=plan,
+        complete_artifacts=complete, migration_run_id="migration-1",
+        migrated_at="2026-07-17T01:00:00+00:00", journal_path="journal.json",
+    )
+    assert result == {"status": "MIGRATED", "rows": 6, "restored_rows": 2}
+    assert get_schema_version(current) == "2"
+    assert [dict(row) for row in current.execute(
+        "SELECT * FROM campaign_filings ORDER BY manifest_row_id"
+    )] == backup_snapshot
+    assert dict(current.execute(
+        "SELECT fresh_status,COUNT(*) n FROM campaign_fresh_downloads GROUP BY fresh_status"
+    ).fetchall()) == {"COMPLETE": 2, "NOT_STARTED": 3, "QUARANTINED": 1}
+    again = migrate_fresh_download_state(
+        current, backup_conn=backup, campaign_id="c1", plan_rows=plan,
+        complete_artifacts=complete, migration_run_id="migration-1",
+        migrated_at="2026-07-17T02:00:00+00:00", journal_path="journal.json",
+    )
+    assert again == {"status": "ALREADY_MIGRATED", "rows": 6, "restored_rows": 0}
+    current.execute("UPDATE campaign_fresh_downloads SET fresh_status='CONFLICT' WHERE manifest_row_id='0000000003'")
+    current.commit()
+    with pytest.raises(FreshStateMigrationConflict, match="EXISTING_CONFLICT"):
+        migrate_fresh_download_state(
+            current, backup_conn=backup, campaign_id="c1", plan_rows=plan,
+            complete_artifacts=complete, migration_run_id="migration-1",
+        )
+    current.close(); backup.close()
+
+
+def test_next_hundred_selection_ignores_legacy_cache_status(tmp_path):
+    conn = _db(tmp_path)
+    with transaction(conn):
+        create_campaign(conn, {**_campaign(), "manifest_record_count": 105})
+        for index in range(1, 106):
+            row_id = f"{index:010d}"
+            filing = _filing(row_id, requested=f"20260101{index:06d}")
+            filing["cache_status"] = "SIDECAR_REQUIRED" if index in {2, 10} else "MISSING"
+            create_campaign_filing(conn, filing)
+            create_fresh_download(conn, {
+                "campaign_id": "c1", "manifest_row_id": row_id,
+                "plan_classification": "STANDARD_FRESH_DOWNLOAD",
+                "fresh_status": "COMPLETE" if index <= 5 else "NOT_STARTED",
+                "target_zip_path": f"C:/cache/{row_id}/xbrl.zip",
+                "target_provenance_path": f"C:/cache/{row_id}/provenance.json",
+                "auto_ready_allowed": 1, "quarantine_release_required": 0,
+                "prior_identity_status": "VERIFIED", "prior_cache_status": filing["cache_status"],
+                "prior_overall_status": "IDENTITY_VERIFIED", "migration_run_id": "m1",
+            })
+    selected = select_next_fresh_downloads(conn, "c1", limit=100)
+    assert [row["manifest_row_id"] for row in selected] == [f"{index:010d}" for index in range(6, 106)]
+    assert len(load_fresh_download_rows(conn, "c1", [row["manifest_row_id"] for row in selected])) == 100
     conn.close()

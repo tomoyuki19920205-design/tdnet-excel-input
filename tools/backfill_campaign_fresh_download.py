@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download a manifest-scoped V4 campaign ZIP canary into temporary cache."""
+"""Download a manifest-scoped V4 campaign ZIP batch with dedicated Fresh state."""
 from __future__ import annotations
 
 import argparse
