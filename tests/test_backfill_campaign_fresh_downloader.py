@@ -4,6 +4,9 @@ import hashlib
 import io
 import json
 import os
+import re
+import shutil
+import sqlite3
 import subprocess
 import sys
 import zipfile
@@ -643,4 +646,329 @@ def test_cli_help_has_all_contract_arguments():
     proc = subprocess.run([sys.executable, "tools/backfill_campaign_fresh_download.py", "--help"], cwd=REPO_ROOT, capture_output=True, text=True)
     assert proc.returncode == 0
     for option in ("--campaign-db", "--campaign-id", "--download-plan", "--manifest-list", "--cache-root", "--output-dir", "--source-route", "--apply"):
+        assert option in proc.stdout
+
+
+def _production_fixture(tmp_path: Path):
+    rows = [_row(index) for index in range(1, 6)]
+    env = _prepare(tmp_path, rows)
+    env["cache"] = tmp_path / "repo" / "data" / "v4_campaign_cache" / CAMPAIGN_ID
+    env["output"] = tmp_path / "prod-output"
+    environment = downloader.ProductionEnvironment(
+        campaign_db=env["db"], cache_root=env["cache"], output_parent=tmp_path,
+        output_pattern=re.compile(r"^prod-output$"),
+    )
+    known = tmp_path / "known"
+    known.mkdir()
+    sources = {}
+    for row in rows:
+        row_id = row["manifest_row_id"]
+        directory = known / row_id
+        directory.mkdir()
+        zip_path = directory / "xbrl.zip"
+        zip_path.write_bytes(_zip_bytes(
+            ticker=row["normalized_company_code"], internal=row["requested_disclosure_no"],
+            period=row["expected_period"], quarter=row["expected_quarter"],
+        ))
+        payload = {
+            "schema_version": "1", "campaign_id": CAMPAIGN_ID,
+            "manifest_row_id": row_id, "requested_disclosure_no": row["requested_disclosure_no"],
+            "company_code": row["company_code"], "normalized_company_code": row["normalized_company_code"],
+            "source_url": row["source_url"], "normalized_xbrl_url": row["normalized_xbrl_url"],
+            "source_route": "JQUANTS_TD_FILES", "final_url": None,
+            "downloaded_at": "2026-07-17T00:00:00+00:00",
+            "downloaded_at_utc": "2026-07-17T00:00:00+00:00",
+            "downloaded_at_jst": "2026-07-17T09:00:00+09:00", "http_status": 200,
+            "content_type": "application/zip", "content_length": str(zip_path.stat().st_size),
+            "download_attempts": [], "zip_sha256": _sha(zip_path), "zip_size": zip_path.stat().st_size,
+            "internal_document_id": row["requested_disclosure_no"],
+            "zip_internal_ticker": row["normalized_company_code"],
+            "zip_internal_period": row["expected_period"], "zip_internal_quarter": row["expected_quarter"],
+            "document_type": "attachment_xbrl", "identity_status": "DOWNLOAD_IDENTITY_VERIFIED",
+            "identity_verdict": "official_linked_xbrl_match",
+            "plan_classification": "STANDARD_FRESH_DOWNLOAD", "auto_ready_allowed": True,
+            "quarantine_release_required": False, "code_sha": CODE_SHA, "run_id": "known",
+            "download_tool_version": "1", "error_code": None, "error_message": None,
+        }
+        provenance = directory / "provenance.json"
+        provenance.write_bytes(downloader._json_bytes(payload))
+        sources[row_id] = (zip_path, provenance)
+
+    def provider(row, cache_root, campaign_id):
+        source_zip, source_provenance = sources[row["manifest_row_id"]]
+        return downloader.publish_injected_verified_artifact(
+            row=row, cache_root=cache_root, campaign_id=campaign_id,
+            source_zip=source_zip, source_provenance=source_provenance,
+        )
+    runtime_checks = []
+    def runtime(_repo):
+        evidence = {"checked_at": len(runtime_checks), "active_processes": [], "locks": []}
+        runtime_checks.append(evidence)
+        return evidence
+    return env, environment, provider, runtime, runtime_checks
+
+
+def _production_kwargs(env, environment, provider, runtime):
+    selected, _ = downloader.load_manifest_list(env["manifest"], CAMPAIGN_ID)
+    return {
+        "campaign_db": env["db"], "campaign_id": CAMPAIGN_ID,
+        "campaign_db_sha256": _sha(env["db"]), "download_plan": env["plan"],
+        "download_plan_sha256": _sha(env["plan"]), "manifest_list": env["manifest"],
+        "manifest_byte_sha256": _sha(env["manifest"]),
+        "manifest_semantic_sha256_value": downloader.manifest_semantic_sha256(selected),
+        "cache_root": env["cache"], "output_dir": env["output"],
+        "expected_count": 5, "max_items": 5,
+        "confirm_production_cache_root": str(env["cache"]),
+        "confirm_campaign_id": CAMPAIGN_ID, "apply": True, "production_apply": True,
+        "source_route": "JQUANTS_TD_FILES", "repo_root": REPO_ROOT, "code_sha": CODE_SHA,
+        "min_interval_seconds": 0, "environment": environment,
+        "runtime_checker": runtime, "artifact_provider": provider,
+    }
+
+
+def test_production_simulation_publishes_five_then_updates_database(tmp_path):
+    env, environment, provider, runtime, checks = _production_fixture(tmp_path)
+    result = downloader.run_production_downloads(**_production_kwargs(env, environment, provider, runtime))
+    assert result["summary"]["db_updated"] == 5
+    assert result["summary"]["network_calls"] == 0
+    assert result["summary"]["non_target_changed"] == 0
+    assert result["journal"]["current_phase"] == "COMPLETE"
+    assert len(checks) == 4
+    assert sum(1 for path in env["cache"].rglob("xbrl.zip")) == 5
+    assert sum(1 for path in env["cache"].rglob("provenance.json")) == 5
+    assert not list(env["cache"].rglob("*.tmp"))
+    conn = connect_db(env["db"])
+    rows = conn.execute("SELECT * FROM campaign_filings ORDER BY manifest_row_id").fetchall()
+    assert len(rows) == 5
+    assert all((row["identity_status"], row["cache_status"], row["overall_status"]) == (
+        "VERIFIED", "READY", "IDENTITY_VERIFIED",
+    ) for row in rows)
+    assert all(row["error_code"] is None and row["error_stage"] is None and row["error_message"] is None for row in rows)
+    assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    conn.close()
+
+
+@pytest.mark.parametrize("change", [
+    {"production_apply": False}, {"apply": False}, {"expected_count": 4},
+    {"max_items": 6}, {"confirm_campaign_id": "wrong"},
+    {"campaign_db_sha256": "0" * 64}, {"manifest_byte_sha256": "0" * 64},
+    {"manifest_semantic_sha256_value": "0" * 64},
+])
+def test_production_guard_failures_are_before_output_and_artifacts(tmp_path, change):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path)
+    kwargs = _production_kwargs(env, environment, provider, runtime)
+    kwargs.update(change)
+    with pytest.raises(downloader.FreshDownloaderStop):
+        downloader.run_production_downloads(**kwargs)
+    assert not env["output"].exists()
+    assert not env["cache"].exists()
+
+
+def test_production_allowlist_and_reparse_are_fail_closed(tmp_path, monkeypatch):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path)
+    kwargs = _production_kwargs(env, environment, provider, runtime)
+    kwargs["cache_root"] = tmp_path / "wrong" / CAMPAIGN_ID
+    kwargs["confirm_production_cache_root"] = str(kwargs["cache_root"])
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_PATH):
+        downloader.run_production_downloads(**kwargs)
+    kwargs = _production_kwargs(env, environment, provider, runtime)
+    monkeypatch.setattr(downloader, "_has_reparse_component", lambda _path: True)
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_PATH):
+        downloader.run_production_downloads(**kwargs)
+
+
+def test_production_backup_failure_prevents_artifact_publish(tmp_path, monkeypatch):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path)
+    monkeypatch.setattr(downloader, "create_verified_backup", lambda *_a, **_k: (_ for _ in ()).throw(
+        downloader.FreshDownloaderStop(downloader.STOP_PRODUCTION_BACKUP)
+    ))
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_BACKUP):
+        downloader.run_production_downloads(**_production_kwargs(env, environment, provider, runtime))
+    assert not env["cache"].exists()
+
+
+def test_production_runtime_active_prevents_output(tmp_path):
+    env, environment, provider, _runtime, _checks = _production_fixture(tmp_path)
+    def active(_repo):
+        raise downloader.FreshDownloaderStop(downloader.STOP_PRODUCTION_RUNTIME)
+    kwargs = _production_kwargs(env, environment, provider, active)
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_RUNTIME):
+        downloader.run_production_downloads(**kwargs)
+    assert not env["output"].exists()
+
+
+def test_production_detects_database_change_after_artifacts(tmp_path):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path)
+    def changing_provider(row, cache_root, campaign_id):
+        result = provider(row, cache_root, campaign_id)
+        if row["manifest_row_id"] == "0000000005":
+            conn = connect_db(env["db"])
+            conn.execute("UPDATE campaigns SET updated_at='external' WHERE campaign_id=?", (CAMPAIGN_ID,))
+            conn.commit(); conn.close()
+        return result
+    kwargs = _production_kwargs(env, environment, changing_provider, runtime)
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_DB_CHANGED):
+        downloader.run_production_downloads(**kwargs)
+    assert json.loads((env["output"] / "journal.json").read_text())["current_phase"] == "DB_PENDING"
+
+
+def test_production_transaction_failure_rolls_back_all_five(tmp_path):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path)
+    def fail(index, _conn):
+        if index == 2:
+            raise sqlite3.OperationalError("injected")
+    kwargs = _production_kwargs(env, environment, provider, runtime)
+    kwargs["state_after_update"] = fail
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_DB_CAS):
+        downloader.run_production_downloads(**kwargs)
+    conn = connect_db(env["db"])
+    assert conn.execute("SELECT COUNT(*) FROM campaign_filings WHERE cache_status='READY'").fetchone()[0] == 0
+    conn.close()
+
+
+def test_production_zip_only_and_invalid_provenance_fail_closed(tmp_path):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path)
+    directory, zip_path, _provenance = downloader._production_target_paths(env["cache"], CAMPAIGN_ID, "0000000001")
+    directory.mkdir(parents=True)
+    zip_path.write_bytes(b"partial")
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_ARTIFACT):
+        downloader.run_production_downloads(**_production_kwargs(env, environment, provider, runtime))
+
+
+def test_production_database_ready_without_artifacts_fails_closed(tmp_path):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path)
+    conn = connect_db(env["db"])
+    conn.execute("UPDATE campaign_filings SET identity_status='VERIFIED', cache_status='READY'")
+    conn.commit(); conn.close()
+    kwargs = _production_kwargs(env, environment, provider, runtime)
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_DIVERGENCE):
+        downloader.run_production_downloads(**kwargs)
+
+
+def test_production_valid_artifacts_enable_database_only_repair(tmp_path):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path)
+    for row in env["rows"]:
+        provider(row, env["cache"], CAMPAIGN_ID)
+    def forbidden(*_args):
+        raise AssertionError("provider must not be called")
+    kwargs = _production_kwargs(env, environment, forbidden, runtime)
+    result = downloader.run_production_downloads(**kwargs)
+    assert {row["status"] for row in result["results"]} == {"DB_ONLY_REPAIR"}
+
+
+def test_production_protected_field_violation_rolls_back(tmp_path):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path)
+    def alter_protected(index, conn):
+        if index == 1:
+            conn.execute("UPDATE campaign_filings SET requested_disclosure_no='wrong' WHERE manifest_row_id='0000000002'")
+    kwargs = _production_kwargs(env, environment, provider, runtime)
+    kwargs["state_after_update"] = alter_protected
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_DB_CAS):
+        downloader.run_production_downloads(**kwargs)
+    conn = connect_db(env["db"])
+    assert conn.execute("SELECT COUNT(*) FROM campaign_filings WHERE requested_disclosure_no='wrong'").fetchone()[0] == 0
+    conn.close()
+
+
+def test_production_single_row_cas_mismatch_rolls_back(tmp_path, monkeypatch):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path)
+    original = downloader.apply_fresh_download_successes
+    def stale(conn, **kwargs):
+        conn.execute("UPDATE campaign_filings SET error_message='external' WHERE manifest_row_id='0000000003'")
+        conn.commit()
+        return original(conn, **kwargs)
+    monkeypatch.setattr(downloader, "apply_fresh_download_successes", stale)
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_DB_CAS):
+        downloader.run_production_downloads(**_production_kwargs(env, environment, provider, runtime))
+    conn = connect_db(env["db"])
+    assert conn.execute("SELECT COUNT(*) FROM campaign_filings WHERE cache_status='READY'").fetchone()[0] == 0
+    conn.close()
+
+
+def test_production_invalid_provenance_is_artifact_conflict(tmp_path):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path)
+    provider(env["rows"][0], env["cache"], CAMPAIGN_ID)
+    _directory, _zip_path, provenance = downloader._production_target_paths(
+        env["cache"], CAMPAIGN_ID, "0000000001"
+    )
+    payload = json.loads(provenance.read_text())
+    payload["zip_sha256"] = "0" * 64
+    provenance.write_bytes(downloader._json_bytes(payload))
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_ARTIFACT):
+        downloader.run_production_downloads(**_production_kwargs(env, environment, provider, runtime))
+
+
+def test_production_already_complete_is_database_no_change(tmp_path):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path)
+    downloader.run_production_downloads(**_production_kwargs(env, environment, provider, runtime))
+    before_sha = _sha(env["db"])
+    second_output = tmp_path / "prod-output-2"
+    second_environment = downloader.ProductionEnvironment(
+        campaign_db=env["db"], cache_root=env["cache"], output_parent=tmp_path,
+        output_pattern=re.compile(r"^prod-output-2$"),
+    )
+    def forbidden(*_args):
+        raise AssertionError("provider must not run")
+    kwargs = _production_kwargs(env, second_environment, forbidden, runtime)
+    kwargs["output_dir"] = second_output
+    kwargs["campaign_db_sha256"] = before_sha
+    result = downloader.run_production_downloads(**kwargs)
+    assert result["summary"]["db_updated"] == 0
+    assert {row["status"] for row in result["results"]} == {"ALREADY_COMPLETE"}
+    assert _sha(env["db"]) == before_sha
+
+
+def test_production_non_target_change_is_rolled_back_inside_transaction(tmp_path):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path)
+    conn = connect_db(env["db"])
+    outside = _row(99)
+    outside.pop("plan_classification"); outside.pop("download_allowed")
+    outside.pop("auto_ready_allowed"); outside.pop("quarantine_release_required")
+    with transaction(conn):
+        create_campaign_filing(conn, outside)
+    conn.close()
+    kwargs = _production_kwargs(env, environment, provider, runtime)
+    def alter_outside(index, conn):
+        if index == 1:
+            conn.execute("UPDATE campaign_filings SET error_message='changed' WHERE manifest_row_id='0000000099'")
+    kwargs["state_after_update"] = alter_outside
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_DB_CAS):
+        downloader.run_production_downloads(**kwargs)
+    conn = connect_db(env["db"])
+    assert conn.execute("SELECT error_message FROM campaign_filings WHERE manifest_row_id='0000000099'").fetchone()[0] is None
+    assert conn.execute("SELECT COUNT(*) FROM campaign_filings WHERE cache_status='READY'").fetchone()[0] == 0
+    conn.close()
+
+
+def test_production_resumes_db_pending_journal_without_redownload(tmp_path):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path)
+    def changing_provider(row, cache_root, campaign_id):
+        result = provider(row, cache_root, campaign_id)
+        if row["manifest_row_id"] == "0000000005":
+            conn = connect_db(env["db"])
+            conn.execute("UPDATE campaigns SET updated_at='external' WHERE campaign_id=?", (CAMPAIGN_ID,))
+            conn.commit(); conn.close()
+        return result
+    kwargs = _production_kwargs(env, environment, changing_provider, runtime)
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_DB_CHANGED):
+        downloader.run_production_downloads(**kwargs)
+    backup = env["output"] / "backup" / "backfill_campaign_v4.before.db"
+    shutil.copyfile(backup, env["db"])
+    def forbidden(*_args):
+        raise AssertionError("resume must not redownload")
+    kwargs = _production_kwargs(env, environment, forbidden, runtime)
+    result = downloader.run_production_downloads(**kwargs)
+    assert result["journal"]["current_phase"] == "COMPLETE"
+    assert {row["status"] for row in result["results"]} == {"DB_ONLY_REPAIR"}
+
+
+def test_cli_help_includes_production_contract_arguments():
+    proc = subprocess.run([sys.executable, "tools/backfill_campaign_fresh_download.py", "--help"], cwd=REPO_ROOT, capture_output=True, text=True)
+    assert proc.returncode == 0
+    for option in (
+        "--production-apply", "--campaign-db-sha256", "--download-plan-sha256",
+        "--manifest-byte-sha256", "--manifest-semantic-sha256", "--expected-count",
+        "--max-items", "--confirm-production-cache-root", "--confirm-campaign-id",
+    ):
         assert option in proc.stdout

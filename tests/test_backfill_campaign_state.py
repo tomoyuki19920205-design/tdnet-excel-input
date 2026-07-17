@@ -8,7 +8,9 @@ from pathlib import Path
 import pytest
 
 from lib.backfill.campaign_state import (
+    FreshDownloadCASFailed,
     SCHEMA_VERSION,
+    apply_fresh_download_successes,
     connect_db,
     create_campaign,
     create_campaign_filing,
@@ -149,4 +151,82 @@ def test_bulk_insert_rolls_back_on_duplicate_manifest_row(tmp_path):
             create_campaign_filings(conn, [_filing("r1"), _filing("r1")])
     assert conn.execute("SELECT COUNT(*) FROM campaigns").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM campaign_filings").fetchone()[0] == 0
+    conn.close()
+
+
+def _fresh_download_fixture(conn: sqlite3.Connection):
+    with transaction(conn):
+        create_campaign(conn, _campaign())
+        for index in range(1, 6):
+            filing = _filing(f"{index:010d}", requested=f"20260101{index:06d}", ticker="7203")
+            filing.update({
+                "internal_document_id": None, "identity_status": "METADATA_RESOLVED",
+                "cache_status": "MISSING", "overall_status": "IDENTITY_RESOLVED",
+                "error_code": "old", "error_stage": "identity", "error_message": "old",
+            })
+            create_campaign_filing(conn, filing)
+    before = [dict(row) for row in conn.execute(
+        "SELECT * FROM campaign_filings WHERE campaign_id='c1' ORDER BY manifest_row_id"
+    )]
+    results = [{
+        "manifest_row_id": row["manifest_row_id"],
+        "internal_document_id": f"2026010172030{index}",
+        "zip_sha256": f"{index:064x}", "ticker": "7203",
+        "period": "2025-12-31", "quarter": "FY",
+    } for index, row in enumerate(before, 1)]
+    return before, results
+
+
+def test_fresh_download_success_updates_exact_five_and_protects_other_columns(tmp_path):
+    conn = _db(tmp_path)
+    before, results = _fresh_download_fixture(conn)
+    readback = apply_fresh_download_successes(
+        conn, campaign_id="c1", before_rows=before, verified_results=results,
+        updated_at="2026-07-17T00:00:00+00:00",
+    )
+    assert len(readback) == 5
+    for old, new, result in zip(before, readback, results):
+        assert new["internal_document_id"] == result["internal_document_id"]
+        assert new["zip_sha256"] == result["zip_sha256"]
+        assert (new["identity_status"], new["cache_status"], new["overall_status"]) == (
+            "VERIFIED", "READY", "IDENTITY_VERIFIED",
+        )
+        assert (new["error_code"], new["error_stage"], new["error_message"]) == (None, None, None)
+        for field in (
+            "campaign_id", "manifest_row_id", "requested_disclosure_no", "company_code",
+            "source_url", "document_type", "registration_status", "created_at",
+            "extraction_status", "sqlite_save_status", "canonical_save_status",
+            "supabase_save_status", "started_at", "completed_at",
+        ):
+            assert new[field] == old[field]
+    conn.close()
+
+
+def test_fresh_download_cas_mismatch_rolls_back_all_rows(tmp_path):
+    conn = _db(tmp_path)
+    before, results = _fresh_download_fixture(conn)
+    conn.execute(
+        "UPDATE campaign_filings SET error_message='external' WHERE manifest_row_id='0000000003'"
+    )
+    conn.commit()
+    with pytest.raises(FreshDownloadCASFailed, match="CAS failed"):
+        apply_fresh_download_successes(
+            conn, campaign_id="c1", before_rows=before, verified_results=results,
+        )
+    assert conn.execute("SELECT COUNT(*) FROM campaign_filings WHERE cache_status='READY'").fetchone()[0] == 0
+    conn.close()
+
+
+def test_fresh_download_mid_transaction_failure_rolls_back_all_rows(tmp_path):
+    conn = _db(tmp_path)
+    before, results = _fresh_download_fixture(conn)
+    def fail(index, _conn):
+        if index == 2:
+            raise sqlite3.OperationalError("injected")
+    with pytest.raises(sqlite3.OperationalError, match="injected"):
+        apply_fresh_download_successes(
+            conn, campaign_id="c1", before_rows=before, verified_results=results,
+            after_update=fail,
+        )
+    assert conn.execute("SELECT COUNT(*) FROM campaign_filings WHERE cache_status='READY'").fetchone()[0] == 0
     conn.close()

@@ -5,11 +5,13 @@ It never discovers a database path and has no import-time filesystem effects.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator, Mapping
+from typing import Callable, Iterator, Mapping, Sequence
 
 SCHEMA_VERSION = "1"
 
@@ -35,6 +37,40 @@ _FILING_COLUMNS = (
     "error_message", "retryable", "created_at", "updated_at", "started_at",
     "completed_at",
 )
+
+FRESH_DOWNLOAD_MUTABLE_COLUMNS = (
+    "internal_document_id", "zip_sha256", "zip_internal_ticker",
+    "zip_internal_period", "zip_internal_quarter", "identity_status",
+    "cache_status", "overall_status", "error_code", "error_stage",
+    "error_message", "retryable", "updated_at",
+)
+
+FRESH_DOWNLOAD_SUCCESS_CONSTANTS = {
+    "identity_status": "VERIFIED",
+    "cache_status": "READY",
+    "overall_status": "IDENTITY_VERIFIED",
+    "error_code": None,
+    "error_stage": None,
+    "error_message": None,
+    "retryable": 1,
+}
+
+
+class FreshDownloadCASFailed(RuntimeError):
+    """The production fresh-download compare-and-swap contract did not match."""
+
+
+def _non_target_digest(conn: sqlite3.Connection, campaign_id: str, target_ids: set[str]) -> str:
+    digest = hashlib.sha256()
+    for row in conn.execute(
+        "SELECT * FROM campaign_filings WHERE campaign_id=? ORDER BY manifest_row_id", (campaign_id,)
+    ):
+        current = dict(row)
+        if str(current["manifest_row_id"]) in target_ids:
+            continue
+        encoded = (json.dumps(current, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+        digest.update(encoded)
+    return digest.hexdigest()
 
 
 def _now() -> str:
@@ -233,3 +269,92 @@ def create_campaign_filings(conn: sqlite3.Connection, values_list: list[Mapping[
     conn.executemany(
         f"INSERT INTO campaign_filings ({columns}) VALUES ({placeholders})", payloads
     )
+
+
+def apply_fresh_download_successes(
+    conn: sqlite3.Connection,
+    *,
+    campaign_id: str,
+    before_rows: Sequence[Mapping[str, object]],
+    verified_results: Sequence[Mapping[str, object]],
+    expected_count: int = 5,
+    updated_at: str | None = None,
+    after_update: Callable[[int, sqlite3.Connection], None] | None = None,
+) -> list[dict[str, object]]:
+    """Atomically mark exactly ``expected_count`` verified downloads ready.
+
+    Every column from the read-only starting snapshot participates in the CAS
+    predicate.  Only the audited fresh-download mutable columns may change.
+    The callback is a test-only fault-injection seam; production callers omit it.
+    """
+    if expected_count != 5 or len(before_rows) != expected_count or len(verified_results) != expected_count:
+        raise FreshDownloadCASFailed("fresh download update requires exactly five rows")
+    before_by_id = {str(row.get("manifest_row_id") or ""): dict(row) for row in before_rows}
+    result_by_id = {str(row.get("manifest_row_id") or ""): dict(row) for row in verified_results}
+    if "" in before_by_id or set(before_by_id) != set(result_by_id) or len(before_by_id) != expected_count:
+        raise FreshDownloadCASFailed("fresh download target identity mismatch")
+    if any(str(row.get("campaign_id") or "") != campaign_id for row in before_by_id.values()):
+        raise FreshDownloadCASFailed("fresh download campaign identity mismatch")
+
+    timestamp = str(updated_at or _now())
+    assignments = ", ".join(f"{column}=?" for column in FRESH_DOWNLOAD_MUTABLE_COLUMNS)
+    cas = " AND ".join(f"{column} IS ?" for column in _FILING_COLUMNS)
+    protected = tuple(column for column in _FILING_COLUMNS if column not in FRESH_DOWNLOAD_MUTABLE_COLUMNS)
+    readbacks: list[dict[str, object]] = []
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        non_target_before = _non_target_digest(conn, campaign_id, set(before_by_id))
+        for index, row_id in enumerate(sorted(before_by_id)):
+            before = before_by_id[row_id]
+            verified = result_by_id[row_id]
+            desired = {
+                "internal_document_id": verified.get("internal_document_id"),
+                "zip_sha256": verified.get("zip_sha256"),
+                "zip_internal_ticker": verified.get("ticker"),
+                "zip_internal_period": verified.get("period"),
+                "zip_internal_quarter": verified.get("quarter"),
+                **FRESH_DOWNLOAD_SUCCESS_CONSTANTS,
+                "updated_at": timestamp,
+            }
+            required = (
+                desired["internal_document_id"], desired["zip_sha256"],
+                desired["zip_internal_ticker"], desired["zip_internal_period"],
+                desired["zip_internal_quarter"],
+            )
+            if any(value in {None, ""} for value in required):
+                raise FreshDownloadCASFailed("verified artifact metadata is incomplete")
+            if (
+                str(before.get("expected_period") or "") != str(desired["zip_internal_period"])
+                or str(before.get("expected_quarter") or "") != str(desired["zip_internal_quarter"])
+                or str(before.get("normalized_company_code") or "") != str(desired["zip_internal_ticker"])
+            ):
+                raise FreshDownloadCASFailed("verified artifact metadata does not match campaign row")
+            values = [desired[column] for column in FRESH_DOWNLOAD_MUTABLE_COLUMNS]
+            values.extend(before.get(column) for column in _FILING_COLUMNS)
+            cursor = conn.execute(
+                f"UPDATE campaign_filings SET {assignments} WHERE {cas}", values
+            )
+            if cursor.rowcount != 1:
+                raise FreshDownloadCASFailed(f"fresh download CAS failed for {row_id}")
+            if after_update is not None:
+                after_update(index, conn)
+            current_row = conn.execute(
+                "SELECT * FROM campaign_filings WHERE campaign_id=? AND manifest_row_id=?",
+                (campaign_id, row_id),
+            ).fetchone()
+            if current_row is None:
+                raise FreshDownloadCASFailed(f"fresh download readback missing for {row_id}")
+            current = dict(current_row)
+            if any(current.get(column) != before.get(column) for column in protected):
+                raise FreshDownloadCASFailed(f"protected field changed for {row_id}")
+            if any(current.get(column) != desired[column] for column in FRESH_DOWNLOAD_MUTABLE_COLUMNS):
+                raise FreshDownloadCASFailed(f"fresh download readback mismatch for {row_id}")
+            readbacks.append(current)
+        if _non_target_digest(conn, campaign_id, set(before_by_id)) != non_target_before:
+            raise FreshDownloadCASFailed("non-target campaign row changed")
+    except Exception:
+        conn.rollback()
+        raise
+    else:
+        conn.commit()
+    return readbacks

@@ -12,7 +12,11 @@ from pathlib import Path
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from lib.backfill.campaign_fresh_downloader import FreshDownloaderStop, run_downloads
+from lib.backfill.campaign_fresh_downloader import (
+    FreshDownloaderStop,
+    run_downloads,
+    run_production_downloads,
+)
 
 
 def _git(repo_root: Path, *args: str) -> str:
@@ -32,6 +36,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--source-route", choices=("JQUANTS_TD_FILES",), required=True)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--production-apply", action="store_true")
+    parser.add_argument("--campaign-db-sha256")
+    parser.add_argument("--download-plan-sha256")
+    parser.add_argument("--manifest-byte-sha256")
+    parser.add_argument("--manifest-semantic-sha256")
+    parser.add_argument("--expected-count", type=int)
+    parser.add_argument("--max-items", type=int)
+    parser.add_argument("--confirm-production-cache-root")
+    parser.add_argument("--confirm-campaign-id")
     parser.add_argument("--min-interval-seconds", type=float, default=1.0)
     parser.add_argument("--timeout-seconds", type=float, default=60.0)
     parser.add_argument("--max-retries", type=int, default=3)
@@ -44,16 +57,30 @@ def main(argv: list[str] | None = None) -> int:
     repo_root = Path(__file__).resolve().parents[1]
     try:
         code_sha = _git(repo_root, "rev-parse", "HEAD")
-        result = run_downloads(
-            campaign_db=args.campaign_db, campaign_id=args.campaign_id,
-            download_plan=args.download_plan, manifest_list=args.manifest_list,
-            cache_root=args.cache_root, output_dir=args.output_dir, apply=args.apply,
-            repo_root=repo_root, code_sha=code_sha,
-            min_interval_seconds=args.min_interval_seconds,
-            timeout_seconds=args.timeout_seconds, max_retries=args.max_retries,
-            max_consecutive_failures=args.max_consecutive_failures,
-            source_route=args.source_route,
-        )
+        common = {
+            "campaign_db": args.campaign_db, "campaign_id": args.campaign_id,
+            "download_plan": args.download_plan, "manifest_list": args.manifest_list,
+            "cache_root": args.cache_root, "output_dir": args.output_dir,
+            "apply": args.apply, "repo_root": repo_root, "code_sha": code_sha,
+            "min_interval_seconds": args.min_interval_seconds,
+            "timeout_seconds": args.timeout_seconds, "max_retries": args.max_retries,
+            "source_route": args.source_route,
+        }
+        if args.production_apply:
+            result = run_production_downloads(
+                **common, production_apply=True,
+                campaign_db_sha256=args.campaign_db_sha256,
+                download_plan_sha256=args.download_plan_sha256,
+                manifest_byte_sha256=args.manifest_byte_sha256,
+                manifest_semantic_sha256_value=args.manifest_semantic_sha256,
+                expected_count=args.expected_count, max_items=args.max_items,
+                confirm_production_cache_root=args.confirm_production_cache_root,
+                confirm_campaign_id=args.confirm_campaign_id,
+            )
+        else:
+            result = run_downloads(
+                **common, max_consecutive_failures=args.max_consecutive_failures,
+            )
     except (FreshDownloaderStop, OSError, sqlite3.Error, subprocess.CalledProcessError) as exc:
         print(str(exc), file=sys.stderr)
         return 2

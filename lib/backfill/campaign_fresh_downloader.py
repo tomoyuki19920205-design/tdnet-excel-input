@@ -10,15 +10,18 @@ import email.utils
 import hashlib
 import json
 import os
+import re
+import shutil
 import sqlite3
 import tempfile
 import time
 import uuid
 import zipfile
 from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Mapping
+from typing import Callable, Mapping, Sequence
 from urllib.parse import urljoin, urlsplit
 
 import requests
@@ -31,6 +34,11 @@ from lib.backfill.jquants_td_files_adapter import (
     resolve_xbrl_file,
 )
 from lib.backfill.campaign_fresh_download_plan import validate_download_url
+from lib.backfill.campaign_state import (
+    FreshDownloadCASFailed,
+    apply_fresh_download_successes,
+    connect_db,
+)
 from src.segment.zip_identity_verifier import (
     PROVENANCE_VERSION,
     TrustedProvenance,
@@ -45,6 +53,14 @@ STOP_HTTP = "STOP_V4_CAMPAIGN_FRESH_DOWNLOADER_HTTP_FAILED"
 STOP_IDENTITY = "STOP_V4_CAMPAIGN_FRESH_DOWNLOADER_IDENTITY_MISMATCH"
 STOP_TARGET = "STOP_V4_CAMPAIGN_FRESH_DOWNLOADER_TARGET_CONFLICT"
 STOP_CONSECUTIVE = "STOP_V4_CAMPAIGN_FRESH_DOWNLOADER_CONSECUTIVE_FAILURES"
+STOP_PRODUCTION_GUARD = "STOP_V4_FRESH_DOWNLOAD_PRODUCTION_GUARD_FAILED"
+STOP_PRODUCTION_PATH = "STOP_V4_FRESH_DOWNLOAD_PRODUCTION_PATH_NOT_ALLOWLISTED"
+STOP_PRODUCTION_BACKUP = "STOP_V4_FRESH_DOWNLOAD_PRODUCTION_BACKUP_FAILED"
+STOP_PRODUCTION_RUNTIME = "STOP_V4_FRESH_DOWNLOAD_PRODUCTION_RUNTIME_ACTIVE"
+STOP_PRODUCTION_DB_CHANGED = "STOP_V4_FRESH_DOWNLOAD_PRODUCTION_DB_CHANGED_DURING_RUN"
+STOP_PRODUCTION_DB_CAS = "STOP_V4_FRESH_DOWNLOAD_PRODUCTION_DB_CAS_FAILED"
+STOP_PRODUCTION_DIVERGENCE = "STOP_V4_FRESH_DOWNLOAD_PRODUCTION_DB_ARTIFACT_DIVERGENCE"
+STOP_PRODUCTION_ARTIFACT = "STOP_V4_FRESH_DOWNLOAD_PRODUCTION_ARTIFACT_CONFLICT"
 
 PLAN_CLASSES = frozenset({"STANDARD_FRESH_DOWNLOAD", "QUARANTINE_FRESH_RECHECK"})
 OFFICIAL_HOSTS = frozenset({"www.release.tdnet.info", "release.tdnet.info"})
@@ -54,6 +70,23 @@ TOOL_VERSION = "1"
 USER_AGENT = "tdnet-excel-input/v4-campaign-fresh-downloader/1"
 MAX_REDIRECTS = 5
 PROVENANCE_SCHEMA_VERSION = "1"
+PRODUCTION_CANARY_COUNT = 5
+PRODUCTION_OUTPUT_RE = re.compile(r"^v4-campaign-production-download-\d{8}-\d{6}$")
+
+
+@dataclass(frozen=True)
+class ProductionEnvironment:
+    campaign_db: Path
+    cache_root: Path
+    output_parent: Path = Path(r"C:\tmp")
+    output_pattern: re.Pattern[str] = PRODUCTION_OUTPUT_RE
+
+
+def default_production_environment(repo_root: Path, campaign_id: str) -> ProductionEnvironment:
+    return ProductionEnvironment(
+        campaign_db=repo_root / "data" / "backfill_campaign_v4.db",
+        cache_root=repo_root / "data" / "v4_campaign_cache" / campaign_id,
+    )
 
 
 class FreshDownloaderStop(RuntimeError):
@@ -170,6 +203,68 @@ def validate_temp_write_path(path: Path, repo_root: Path) -> None:
         raise FreshDownloaderStop(STOP_UNSAFE_PATH)
 
 
+def _normalized_path(path: Path) -> str:
+    return os.path.normcase(os.path.normpath(str(path.resolve(strict=False))))
+
+
+def _has_unsafe_raw_path(path: Path) -> bool:
+    raw = str(path)
+    if not path.is_absolute() or ".." in path.parts:
+        return True
+    drive, tail = os.path.splitdrive(raw)
+    return ":" in tail or not drive
+
+
+def _has_reparse_component(path: Path) -> bool:
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current = current / part
+        if not current.exists() and not current.is_symlink():
+            continue
+        try:
+            stat = current.lstat()
+        except OSError:
+            return True
+        attributes = int(getattr(stat, "st_file_attributes", 0))
+        if current.is_symlink() or attributes & int(getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)):
+            return True
+    return False
+
+
+def _require_exact_path(actual: Path, expected: Path) -> None:
+    if _has_unsafe_raw_path(actual) or _normalized_path(actual) != _normalized_path(expected):
+        raise FreshDownloaderStop(STOP_PRODUCTION_PATH)
+    if _has_reparse_component(actual):
+        raise FreshDownloaderStop(STOP_PRODUCTION_PATH)
+
+
+def validate_production_paths(
+    *, campaign_db: Path, cache_root: Path, output_dir: Path,
+    manifest_list: Path, download_plan: Path, environment: ProductionEnvironment,
+    repo_root: Path,
+) -> None:
+    _require_exact_path(campaign_db, environment.campaign_db)
+    _require_exact_path(cache_root, environment.cache_root)
+    if (
+        _has_unsafe_raw_path(output_dir)
+        or _normalized_path(output_dir.parent) != _normalized_path(environment.output_parent)
+        or environment.output_pattern.fullmatch(output_dir.name) is None
+        or _has_reparse_component(output_dir)
+    ):
+        raise FreshDownloaderStop(STOP_PRODUCTION_PATH)
+    for input_path in (manifest_list, download_plan):
+        if _has_unsafe_raw_path(input_path) or not input_path.is_file() or _is_under(input_path, repo_root):
+            raise FreshDownloaderStop(STOP_PRODUCTION_PATH)
+        if _has_reparse_component(input_path):
+            raise FreshDownloaderStop(STOP_PRODUCTION_PATH)
+    forbidden = (
+        repo_root, repo_root / "data", repo_root / "data" / "tdnet_cache",
+        repo_root / "data" / "xbrl_archive",
+    )
+    if any(_normalized_path(cache_root) == _normalized_path(path) for path in forbidden):
+        raise FreshDownloaderStop(STOP_PRODUCTION_PATH)
+
+
 def _validate_manifest_row_id(value: object) -> str:
     row_id = str(value or "")
     if not row_id or row_id in {".", ".."} or Path(row_id).name != row_id or any(c in row_id for c in "\\/:*?\"<>|"):
@@ -179,6 +274,15 @@ def _validate_manifest_row_id(value: object) -> str:
 
 def _target_paths(cache_root: Path, campaign_id: str, row_id: str) -> tuple[Path, Path, Path]:
     directory = cache_root / "cache" / campaign_id / _validate_manifest_row_id(row_id)
+    return directory, directory / "xbrl.zip", directory / "provenance.json"
+
+
+def _production_target_paths(cache_root: Path, campaign_id: str, row_id: str) -> tuple[Path, Path, Path]:
+    if cache_root.name != campaign_id:
+        raise FreshDownloaderStop(STOP_PRODUCTION_PATH)
+    directory = cache_root / _validate_manifest_row_id(row_id)
+    if _has_reparse_component(directory):
+        raise FreshDownloaderStop(STOP_PRODUCTION_PATH)
     return directory, directory / "xbrl.zip", directory / "provenance.json"
 
 
@@ -284,6 +388,123 @@ def load_campaign_rows(path: Path, campaign_id: str, plan_rows: list[dict[str, o
             raise FreshDownloaderStop(STOP_INPUT)
         result.append({**plan_row, **current})
     return result
+
+
+def manifest_semantic_sha256(rows: Sequence[Mapping[str, object]]) -> str:
+    semantic = [
+        {
+            "manifest_row_id": str(row["manifest_row_id"]),
+            "requested_disclosure_no": str(row["requested_disclosure_no"]),
+            "plan_classification": str(row["plan_classification"]),
+        }
+        for row in rows
+    ]
+    return hashlib.sha256(_json_bytes(semantic)).hexdigest()
+
+
+def _copy_file_fsync(source: Path, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with source.open("rb") as incoming, temporary.open("xb") as outgoing:
+            shutil.copyfileobj(incoming, outgoing, length=1024 * 1024)
+            outgoing.flush()
+            os.fsync(outgoing.fileno())
+        os.replace(temporary, destination)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def _sqlite_checks(path: Path) -> dict[str, object]:
+    conn = connect_read_only(path)
+    try:
+        integrity = str(conn.execute("PRAGMA integrity_check").fetchone()[0])
+        foreign_keys = len(conn.execute("PRAGMA foreign_key_check").fetchall())
+    finally:
+        conn.close()
+    return {"integrity_check": integrity, "foreign_key_check": foreign_keys}
+
+
+def create_verified_backup(campaign_db: Path, output_dir: Path) -> dict[str, object]:
+    auxiliaries = [Path(f"{campaign_db}{suffix}") for suffix in ("-wal", "-shm", "-journal")]
+    if any(path.exists() for path in auxiliaries):
+        raise FreshDownloaderStop(STOP_PRODUCTION_BACKUP)
+    source_sha = sha256_file(campaign_db)
+    source_size = campaign_db.stat().st_size
+    source_checks = _sqlite_checks(campaign_db)
+    if source_checks != {"integrity_check": "ok", "foreign_key_check": 0}:
+        raise FreshDownloaderStop(STOP_PRODUCTION_BACKUP)
+    backup = output_dir / "backup" / "backfill_campaign_v4.before.db"
+    if backup.exists():
+        if backup.stat().st_size != source_size or sha256_file(backup) != source_sha:
+            raise FreshDownloaderStop(STOP_PRODUCTION_BACKUP)
+    else:
+        _copy_file_fsync(campaign_db, backup)
+    checks = _sqlite_checks(backup)
+    if backup.stat().st_size != source_size or sha256_file(backup) != source_sha or checks != source_checks:
+        raise FreshDownloaderStop(STOP_PRODUCTION_BACKUP)
+    return {
+        "path": str(backup), "size": source_size, "sha256": source_sha,
+        **checks, "source_auxiliary_files": [],
+    }
+
+
+def _journal_write(path: Path, journal: Mapping[str, object]) -> None:
+    _write_atomic_json(path, journal)
+
+
+def _journal_update(path: Path, journal: dict[str, object], phase: str, **values: object) -> None:
+    journal.update(values)
+    journal["current_phase"] = phase
+    _journal_write(path, journal)
+
+
+def check_production_runtime(repo_root: Path) -> dict[str, object]:
+    locks = [
+        repo_root / "state" / "locks" / "nightly.lock",
+        repo_root / "state" / "locks" / "tdnet_pipeline.lock",
+    ]
+    lock_root = repo_root / "state" / "locks"
+    if lock_root.is_dir():
+        locks.extend(
+            path for path in lock_root.iterdir()
+            if path.is_file() and any(word in path.name.lower() for word in ("backfill", "campaign"))
+        )
+    existing_locks = sorted({str(path) for path in locks if path.exists()})
+    active: list[dict[str, object]] = []
+    try:
+        import psutil
+        process = psutil.Process(os.getpid())
+        excluded = {process.pid, *(parent.pid for parent in process.parents())}
+        patterns = (
+            "tdnet_nightly", "tdnet_realtime", "backfill_segments_tdnet",
+            "sync_segments", "canonical_sync", "backfill_campaign_fresh_download",
+        )
+        for candidate in psutil.process_iter(("pid", "name", "cmdline")):
+            if candidate.info["pid"] in excluded:
+                continue
+            command = " ".join(candidate.info.get("cmdline") or []).lower()
+            if any(pattern in command for pattern in patterns):
+                active.append({"pid": candidate.info["pid"], "name": candidate.info.get("name")})
+    except Exception as exc:
+        raise FreshDownloaderStop(STOP_PRODUCTION_RUNTIME) from exc
+    evidence = {"checked_at": _now_utc(), "active_processes": active, "locks": existing_locks}
+    if active or existing_locks:
+        raise FreshDownloaderStop(STOP_PRODUCTION_RUNTIME)
+    return evidence
+
+
+def _campaign_rows_digest(conn: sqlite3.Connection, campaign_id: str, excluded_ids: set[str]) -> str:
+    digest = hashlib.sha256()
+    for row in conn.execute(
+        "SELECT * FROM campaign_filings WHERE campaign_id=? ORDER BY manifest_row_id", (campaign_id,)
+    ):
+        current = dict(row)
+        if str(current["manifest_row_id"]) in excluded_ids:
+            continue
+        digest.update(_json_bytes(current))
+    return digest.hexdigest()
 
 
 def _retry_after_seconds(value: object, now: Callable[[], float] = time.time) -> float | None:
@@ -779,12 +1000,13 @@ def _download_one_jquants(
     sleep: Callable[[float], None], code_sha: str, run_id: str,
     network_counter: list[int],
     auth_loader: Callable[[], tuple[dict[str, str], dict[str, object]]] | None = None,
+    target_path_builder: Callable[[Path, str, str], tuple[Path, Path, Path]] = _target_paths,
 ) -> tuple[dict[str, object], int]:
     """Download one row through the exact-DiscNo J-Quants TD files route."""
     row_id = str(row["manifest_row_id"])
     requested = str(row["requested_disclosure_no"])
     classification = str(row["plan_classification"])
-    directory, zip_path, provenance_path = _target_paths(cache_root, campaign_id, row_id)
+    directory, zip_path, provenance_path = target_path_builder(cache_root, campaign_id, row_id)
     if zip_path.exists() or provenance_path.exists():
         if zip_path.is_file() and provenance_path.is_file():
             existing = load_provenance(zip_path, provenance_path)
@@ -1032,6 +1254,83 @@ def _download_one_jquants(
             temp_zip.unlink()
 
 
+def publish_injected_verified_artifact(
+    *, row: Mapping[str, object], cache_root: Path, campaign_id: str,
+    source_zip: Path, source_provenance: Path,
+) -> dict[str, object]:
+    """Publish a previously verified artifact pair for an isolated simulation."""
+    row_id = str(row["manifest_row_id"])
+    directory, zip_path, provenance_path = _production_target_paths(cache_root, campaign_id, row_id)
+    if zip_path.exists() or provenance_path.exists():
+        if zip_path.is_file() and provenance_path.is_file():
+            payload = _load_production_provenance(zip_path, provenance_path)
+            if (
+                payload.get("manifest_row_id") == row_id
+                and payload.get("requested_disclosure_no") == row["requested_disclosure_no"]
+                and payload.get("auto_ready_allowed") is True
+            ):
+                return _result_from_verified_provenance(payload, zip_path, provenance_path, "ALREADY_COMPLETE")
+        raise FreshDownloaderStop(STOP_PRODUCTION_ARTIFACT)
+    source = _load_production_provenance(source_zip, source_provenance)
+    if (
+        source.get("manifest_row_id") != row_id
+        or source.get("requested_disclosure_no") != row["requested_disclosure_no"]
+        or source.get("source_route") != JQUANTS_SOURCE_ROUTE
+        or source.get("auto_ready_allowed") is not True
+        or source.get("identity_verdict") != "official_linked_xbrl_match"
+    ):
+        raise FreshDownloaderStop(STOP_PRODUCTION_ARTIFACT)
+    directory.mkdir(parents=True, exist_ok=False)
+    temporary_zip = directory / f".xbrl.zip.{uuid.uuid4().hex}.tmp"
+    try:
+        with source_zip.open("rb") as incoming, temporary_zip.open("xb") as outgoing:
+            shutil.copyfileobj(incoming, outgoing, length=1024 * 1024)
+            outgoing.flush()
+            os.fsync(outgoing.fileno())
+        _zip_integrity(temporary_zip)
+        if sha256_file(temporary_zip) != source["zip_sha256"]:
+            raise FreshDownloaderStop(STOP_PRODUCTION_ARTIFACT)
+        os.replace(temporary_zip, zip_path)
+        if sha256_file(zip_path) != source["zip_sha256"]:
+            raise FreshDownloaderStop(STOP_PRODUCTION_ARTIFACT)
+        _zip_integrity(zip_path)
+        _write_atomic_json(provenance_path, source)
+        loaded = _load_production_provenance(zip_path, provenance_path)
+        if loaded != source:
+            raise FreshDownloaderStop(STOP_PRODUCTION_ARTIFACT)
+        return _result_from_verified_provenance(loaded, zip_path, provenance_path, "READY")
+    finally:
+        if temporary_zip.exists():
+            temporary_zip.unlink()
+
+
+def _result_from_verified_provenance(
+    payload: Mapping[str, object], zip_path: Path, provenance_path: Path, status: str,
+) -> dict[str, object]:
+    return {
+        "manifest_row_id": str(payload["manifest_row_id"]),
+        "requested_disclosure_no": str(payload["requested_disclosure_no"]),
+        "plan_classification": str(payload["plan_classification"]),
+        "status": status, "zip_path": str(zip_path), "provenance_path": str(provenance_path),
+        "zip_sha256": str(payload["zip_sha256"]),
+        "identity_status": str(payload["identity_status"]),
+        "identity_verdict": str(payload["identity_verdict"]),
+        "internal_document_id": str(payload["internal_document_id"]),
+        "ticker": str(payload["zip_internal_ticker"]),
+        "period": str(payload["zip_internal_period"]),
+        "quarter": str(payload["zip_internal_quarter"]),
+        "document_type": str(payload["document_type"]),
+        "network_calls": 0, "auto_ready": True,
+    }
+
+
+def _load_production_provenance(zip_path: Path, provenance_path: Path) -> dict[str, object]:
+    try:
+        return load_provenance(zip_path, provenance_path)
+    except FreshDownloaderStop as exc:
+        raise FreshDownloaderStop(STOP_PRODUCTION_ARTIFACT) from exc
+
+
 def _write_results(output_dir: Path, results: list[dict[str, object]], summary: dict[str, object]) -> dict[str, str]:
     output_dir.mkdir(parents=True, exist_ok=False)
     values = {"download-results.json": results, "download-summary.json": summary}
@@ -1130,3 +1429,242 @@ def run_downloads(
     }
     summary["digests"] = _write_results(output_dir, results, summary)
     return {"summary": summary, "results": results}
+
+
+def run_production_downloads(
+    *, campaign_db: Path, campaign_id: str, campaign_db_sha256: str,
+    download_plan: Path, download_plan_sha256: str,
+    manifest_list: Path, manifest_byte_sha256: str, manifest_semantic_sha256_value: str,
+    cache_root: Path, output_dir: Path, expected_count: int, max_items: int,
+    confirm_production_cache_root: str, confirm_campaign_id: str,
+    apply: bool, production_apply: bool, source_route: str,
+    repo_root: Path, code_sha: str, min_interval_seconds: float = 1.0,
+    timeout_seconds: float = 60.0, max_retries: int = 3,
+    session: requests.Session | None = None, sleep: Callable[[float], None] = time.sleep,
+    auth_loader: Callable[[], tuple[dict[str, str], dict[str, object]]] | None = None,
+    environment: ProductionEnvironment | None = None,
+    runtime_checker: Callable[[Path], dict[str, object]] = check_production_runtime,
+    artifact_provider: Callable[[Mapping[str, object], Path, str], dict[str, object]] | None = None,
+    state_after_update: Callable[[int, sqlite3.Connection], None] | None = None,
+) -> dict[str, object]:
+    """Execute the five-row, filesystem-first production download contract."""
+    env = environment or default_production_environment(repo_root, campaign_id)
+    if not apply or not production_apply or source_route != JQUANTS_SOURCE_ROUTE:
+        raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
+    if expected_count != PRODUCTION_CANARY_COUNT or max_items != PRODUCTION_CANARY_COUNT:
+        raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
+    if confirm_campaign_id != campaign_id or confirm_production_cache_root != str(cache_root):
+        raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
+    validate_production_paths(
+        campaign_db=campaign_db, cache_root=cache_root, output_dir=output_dir,
+        manifest_list=manifest_list, download_plan=download_plan,
+        environment=env, repo_root=repo_root,
+    )
+    required_digests = (
+        campaign_db_sha256, download_plan_sha256,
+        manifest_byte_sha256, manifest_semantic_sha256_value,
+    )
+    if any(re.fullmatch(r"[0-9a-fA-F]{64}", value or "") is None for value in required_digests):
+        raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
+    if sha256_file(campaign_db) != campaign_db_sha256.lower():
+        raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
+    if sha256_file(download_plan) != download_plan_sha256.lower():
+        raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
+    selected, actual_manifest_sha = load_manifest_list(manifest_list, campaign_id)
+    if actual_manifest_sha != manifest_byte_sha256.lower():
+        raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
+    if manifest_semantic_sha256(selected) != manifest_semantic_sha256_value.lower():
+        raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
+    if len(selected) != expected_count or any(
+        row["plan_classification"] != "STANDARD_FRESH_DOWNLOAD" for row in selected
+    ):
+        raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
+    plan_rows, actual_plan_sha = load_selected_plan(download_plan, selected, campaign_id)
+    if actual_plan_sha != download_plan_sha256.lower() or len(plan_rows) != expected_count:
+        raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
+    before_rows = load_campaign_rows(campaign_db, campaign_id, plan_rows)
+    target_ids = [str(row["manifest_row_id"]) for row in before_rows]
+    if len(set(target_ids)) != expected_count:
+        raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
+
+    runtime_evidence = [runtime_checker(repo_root)]
+    journal_path = output_dir / "journal.json"
+    run_id = f"production-fresh-download-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
+    if output_dir.exists():
+        if not journal_path.is_file():
+            raise FreshDownloaderStop(STOP_PRODUCTION_ARTIFACT)
+        journal = json.loads(journal_path.read_text(encoding="utf-8"))
+        if (
+            journal.get("campaign_id") != campaign_id
+            or journal.get("campaign_db_start_sha256") != campaign_db_sha256.lower()
+            or journal.get("manifest_byte_sha256") != actual_manifest_sha
+            or journal.get("manifest_semantic_sha256") != manifest_semantic_sha256_value.lower()
+            or journal.get("targets") != target_ids
+            or journal.get("current_phase") in {"COMPLETE", "DB_COMMITTED"}
+        ):
+            raise FreshDownloaderStop(STOP_PRODUCTION_ARTIFACT)
+        run_id = str(journal["run_id"])
+    else:
+        output_dir.mkdir(parents=False, exist_ok=False)
+        journal = {
+            "run_id": run_id, "campaign_id": campaign_id, "code_sha": code_sha,
+            "manifest_byte_sha256": actual_manifest_sha,
+            "manifest_semantic_sha256": manifest_semantic_sha256_value.lower(),
+            "download_plan_sha256": actual_plan_sha,
+            "campaign_db_start_sha256": campaign_db_sha256.lower(),
+            "targets": target_ids, "started_at": _now_utc(),
+            "runtime_checks": runtime_evidence, "backup": None,
+            "rows": {row_id: {"filesystem_state": "NOT_STARTED", "db_state": "BEFORE"} for row_id in target_ids},
+            "current_phase": "CREATED", "failure_code": None, "finished_at": None,
+        }
+        _journal_write(journal_path, journal)
+
+    try:
+        backup = create_verified_backup(campaign_db, output_dir)
+        journal.setdefault("runtime_checks", runtime_evidence)
+        _journal_update(journal_path, journal, "BACKUP_VERIFIED", backup=backup)
+        runtime_evidence.append(runtime_checker(repo_root))
+        journal["runtime_checks"] = runtime_evidence
+        _journal_update(journal_path, journal, "NETWORK_STARTED")
+
+        client = session or requests.Session()
+        owns_session = session is None
+        network_counter = [0]
+        results: list[dict[str, object]] = []
+        try:
+            for index, row in enumerate(before_rows):
+                if index and min_interval_seconds:
+                    sleep(min_interval_seconds)
+                row_id = str(row["manifest_row_id"])
+                _directory, zip_path, provenance_path = _production_target_paths(cache_root, campaign_id, row_id)
+                if row.get("cache_status") == "READY" or row.get("identity_status") == "VERIFIED":
+                    if not zip_path.is_file() or not provenance_path.is_file():
+                        raise FreshDownloaderStop(STOP_PRODUCTION_DIVERGENCE)
+                if zip_path.exists() != provenance_path.exists():
+                    raise FreshDownloaderStop(STOP_PRODUCTION_ARTIFACT)
+                if zip_path.is_file() and provenance_path.is_file():
+                    payload = _load_production_provenance(zip_path, provenance_path)
+                    if (
+                        payload.get("manifest_row_id") != row_id
+                        or payload.get("requested_disclosure_no") != row["requested_disclosure_no"]
+                        or payload.get("auto_ready_allowed") is not True
+                    ):
+                        raise FreshDownloaderStop(STOP_PRODUCTION_ARTIFACT)
+                    result = _result_from_verified_provenance(
+                        payload, zip_path, provenance_path,
+                        "ALREADY_COMPLETE" if row.get("cache_status") == "READY" else "DB_ONLY_REPAIR",
+                    )
+                elif artifact_provider is not None:
+                    result = artifact_provider(row, cache_root, campaign_id)
+                else:
+                    result, _calls = _download_one_jquants(
+                        row=row, cache_root=cache_root, campaign_id=campaign_id,
+                        session=client, timeout_seconds=timeout_seconds,
+                        max_retries=max_retries, sleep=sleep, code_sha=code_sha,
+                        run_id=run_id, network_counter=network_counter,
+                        auth_loader=auth_loader, target_path_builder=_production_target_paths,
+                    )
+                    if result.get("status") == "ALREADY_COMPLETE":
+                        payload = _load_production_provenance(zip_path, provenance_path)
+                        result = _result_from_verified_provenance(payload, zip_path, provenance_path, "DB_ONLY_REPAIR")
+                payload = _load_production_provenance(zip_path, provenance_path)
+                if (
+                    payload.get("auto_ready_allowed") is not True
+                    or payload.get("identity_verdict") != "official_linked_xbrl_match"
+                    or result.get("zip_sha256") != payload.get("zip_sha256")
+                ):
+                    raise FreshDownloaderStop(STOP_PRODUCTION_ARTIFACT)
+                results.append(result)
+                journal["rows"][row_id] = {
+                    "filesystem_state": "ARTIFACTS_READY", "db_state": "PENDING",
+                    "zip_sha256": payload["zip_sha256"],
+                    "internal_document_id": payload["internal_document_id"],
+                }
+                _journal_write(journal_path, journal)
+        finally:
+            if owns_session:
+                client.close()
+
+        if len(results) != expected_count:
+            raise FreshDownloaderStop(STOP_PRODUCTION_ARTIFACT)
+        _journal_update(journal_path, journal, "ARTIFACTS_READY")
+        _journal_update(journal_path, journal, "DB_PENDING")
+        if sha256_file(campaign_db) != campaign_db_sha256.lower():
+            journal["failure_code"] = STOP_PRODUCTION_DB_CHANGED
+            _journal_write(journal_path, journal)
+            raise FreshDownloaderStop(STOP_PRODUCTION_DB_CHANGED)
+        runtime_evidence.append(runtime_checker(repo_root))
+        journal["runtime_checks"] = runtime_evidence
+
+        conn = connect_db(campaign_db)
+        try:
+            excluded = set(target_ids)
+            non_target_before = _campaign_rows_digest(conn, campaign_id, excluded)
+            result_by_id = {str(row["manifest_row_id"]): row for row in results}
+            already_complete = all(
+                row.get("identity_status") == "VERIFIED"
+                and row.get("cache_status") == "READY"
+                and row.get("overall_status") == "IDENTITY_VERIFIED"
+                and row.get("internal_document_id") == result_by_id[str(row["manifest_row_id"])].get("internal_document_id")
+                and row.get("zip_sha256") == result_by_id[str(row["manifest_row_id"])].get("zip_sha256")
+                and row.get("zip_internal_ticker") == result_by_id[str(row["manifest_row_id"])].get("ticker")
+                and row.get("zip_internal_period") == result_by_id[str(row["manifest_row_id"])].get("period")
+                and row.get("zip_internal_quarter") == result_by_id[str(row["manifest_row_id"])].get("quarter")
+                and row.get("error_code") is None and row.get("error_stage") is None
+                and row.get("error_message") is None and row.get("retryable") == 1
+                for row in before_rows
+            )
+            if already_complete:
+                readback = [dict(row) for row in before_rows]
+                db_updated_count = 0
+            else:
+                try:
+                    readback = apply_fresh_download_successes(
+                        conn, campaign_id=campaign_id, before_rows=before_rows,
+                        verified_results=results, expected_count=expected_count,
+                        after_update=state_after_update,
+                    )
+                except (FreshDownloadCASFailed, sqlite3.Error) as exc:
+                    journal["failure_code"] = STOP_PRODUCTION_DB_CAS
+                    _journal_write(journal_path, journal)
+                    raise FreshDownloaderStop(STOP_PRODUCTION_DB_CAS) from exc
+                db_updated_count = len(readback)
+            non_target_after = _campaign_rows_digest(conn, campaign_id, excluded)
+            integrity = str(conn.execute("PRAGMA integrity_check").fetchone()[0])
+            foreign_keys = len(conn.execute("PRAGMA foreign_key_check").fetchall())
+        finally:
+            conn.close()
+        if non_target_before != non_target_after:
+            raise FreshDownloaderStop(STOP_PRODUCTION_DB_CAS)
+        if integrity != "ok" or foreign_keys:
+            raise FreshDownloaderStop(STOP_PRODUCTION_DB_CAS)
+        for row in readback:
+            journal["rows"][str(row["manifest_row_id"])]["db_state"] = "READY"
+        _journal_update(
+            journal_path, journal, "DB_COMMITTED",
+            db_readback_count=len(readback), non_target_digest=non_target_after,
+            integrity_check=integrity, foreign_key_check=foreign_keys,
+        )
+        runtime_evidence.append(runtime_checker(repo_root))
+        journal["runtime_checks"] = runtime_evidence
+        summary = {
+            "apply": True, "production_apply": True, "campaign_id": campaign_id,
+            "run_id": run_id, "selected": len(results), "artifacts_ready": len(results),
+            "db_updated": db_updated_count, "network_calls": network_counter[0],
+            "non_target_changed": 0, "integrity_check": integrity,
+            "foreign_key_check": foreign_keys, "backup": backup,
+        }
+        results_dir = output_dir / "results"
+        if not results_dir.exists():
+            summary["digests"] = _write_results(results_dir, results, summary)
+        _journal_update(
+            journal_path, journal, "COMPLETE", failure_code=None,
+            finished_at=_now_utc(), summary=summary,
+        )
+        return {"summary": summary, "results": results, "readback": readback, "journal": journal}
+    except FreshDownloaderStop as exc:
+        if journal.get("current_phase") not in {"DB_PENDING", "DB_COMMITTED"}:
+            _journal_update(
+                journal_path, journal, "FAILED", failure_code=str(exc), finished_at=_now_utc(),
+            )
+        raise
