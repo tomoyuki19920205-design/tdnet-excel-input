@@ -30,6 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--manifest-list", type=Path, required=True)
     parser.add_argument("--cache-root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--source-route", choices=("JQUANTS_TD_FILES",), required=True)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--min-interval-seconds", type=float, default=1.0)
     parser.add_argument("--timeout-seconds", type=float, default=60.0)
@@ -51,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
             min_interval_seconds=args.min_interval_seconds,
             timeout_seconds=args.timeout_seconds, max_retries=args.max_retries,
             max_consecutive_failures=args.max_consecutive_failures,
+            source_route=args.source_route,
         )
     except (FreshDownloaderStop, OSError, sqlite3.Error, subprocess.CalledProcessError) as exc:
         print(str(exc), file=sys.stderr)

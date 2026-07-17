@@ -23,6 +23,13 @@ from urllib.parse import urljoin, urlsplit
 
 import requests
 
+from lib.backfill.jquants_td_files_adapter import (
+    SOURCE_ROUTE as JQUANTS_SOURCE_ROUTE,
+    TdFilesAdapterError,
+    contains_secret_material,
+    download_signed_zip,
+    resolve_xbrl_file,
+)
 from lib.backfill.campaign_fresh_download_plan import validate_download_url
 from src.segment.zip_identity_verifier import (
     PROVENANCE_VERSION,
@@ -748,6 +755,262 @@ def _download_one(
             temp_zip.unlink()
 
 
+def _download_one_jquants(
+    *, row: Mapping[str, object], cache_root: Path, campaign_id: str,
+    session: requests.Session, timeout_seconds: float, max_retries: int,
+    sleep: Callable[[float], None], code_sha: str, run_id: str,
+    network_counter: list[int],
+    auth_loader: Callable[[], tuple[dict[str, str], dict[str, object]]] | None = None,
+) -> tuple[dict[str, object], int]:
+    """Download one row through the exact-DiscNo J-Quants TD files route."""
+    row_id = str(row["manifest_row_id"])
+    requested = str(row["requested_disclosure_no"])
+    classification = str(row["plan_classification"])
+    directory, zip_path, provenance_path = _target_paths(cache_root, campaign_id, row_id)
+    if zip_path.exists() or provenance_path.exists():
+        if zip_path.is_file() and provenance_path.is_file():
+            existing = load_provenance(zip_path, provenance_path)
+            if (
+                existing.get("manifest_row_id") == row_id
+                and existing.get("requested_disclosure_no") == requested
+                and existing.get("source_route") == JQUANTS_SOURCE_ROUTE
+            ):
+                return {
+                    "manifest_row_id": row_id,
+                    "requested_disclosure_no": requested,
+                    "plan_classification": classification,
+                    "status": "ALREADY_COMPLETE",
+                    "network_calls": 0,
+                    "provenance": existing,
+                }, 0
+        raise FreshDownloaderStop(STOP_TARGET)
+    directory.mkdir(parents=True, exist_ok=True)
+    temp_zip = directory / f".xbrl.zip.{uuid.uuid4().hex}.tmp"
+    attempts: list[dict[str, object]] = []
+    initial_network_calls = network_counter[0]
+    try:
+        resolution = None
+        for attempt_number in range(1, max_retries + 1):
+            try:
+                resolve_kwargs = {
+                    "requested_disclosure_no": requested,
+                    "session": session,
+                    "timeout_seconds": timeout_seconds,
+                    "network_counter": network_counter,
+                }
+                if auth_loader is not None:
+                    resolve_kwargs["auth_loader"] = auth_loader
+                resolution = resolve_xbrl_file(**resolve_kwargs)
+                evidence = dict(resolution.evidence)
+                evidence["attempt_number"] = attempt_number
+                attempts.append(evidence)
+                break
+            except TdFilesAdapterError as exc:
+                evidence = dict(exc.evidence)
+                evidence["attempt_number"] = attempt_number
+                attempts.append(evidence)
+                if not exc.retryable or attempt_number == max_retries:
+                    raise DownloadFailure(
+                        STOP_HTTP, failure_code=exc.classification,
+                        failure_stage=exc.stage, attempts=attempts,
+                        retryable=exc.retryable,
+                    ) from exc
+                retry_after = _retry_after_seconds(evidence.get("retry_after"))
+                delay = retry_after if retry_after is not None else float(2 ** (attempt_number - 1))
+                evidence["backoff_seconds"] = delay
+                sleep(delay)
+        if resolution is None:
+            raise FreshDownloaderStop(STOP_HTTP)
+        downloaded = None
+        for attempt_number in range(1, max_retries + 1):
+            try:
+                downloaded = download_signed_zip(
+                    resolution=resolution,
+                    destination=temp_zip,
+                    session=session,
+                    timeout_seconds=timeout_seconds,
+                    network_counter=network_counter,
+                )
+                evidence = dict(downloaded.evidence)
+                evidence["attempt_number"] = attempt_number
+                attempts.append(evidence)
+                break
+            except TdFilesAdapterError as exc:
+                evidence = dict(exc.evidence)
+                evidence["attempt_number"] = attempt_number
+                attempts.append(evidence)
+                if temp_zip.exists():
+                    temp_zip.unlink()
+                if not exc.retryable or attempt_number == max_retries:
+                    raise DownloadFailure(
+                        STOP_HTTP, failure_code=exc.classification,
+                        failure_stage=exc.stage, attempts=attempts,
+                        retryable=exc.retryable,
+                    ) from exc
+                retry_after = _retry_after_seconds(evidence.get("retry_after"))
+                delay = retry_after if retry_after is not None else float(2 ** (attempt_number - 1))
+                evidence["backoff_seconds"] = delay
+                sleep(delay)
+        if downloaded is None:
+            raise FreshDownloaderStop(STOP_HTTP)
+
+        try:
+            _zip_integrity(temp_zip)
+        except FreshDownloaderStop as exc:
+            attempts[-1].update({
+                "failure_stage": "ZIP_VALIDATION",
+                "failure_code": "ZIP_INVALID",
+                "retryable": False,
+            })
+            raise DownloadFailure(
+                STOP_IDENTITY, failure_code="ZIP_INVALID",
+                failure_stage="ZIP_VALIDATION", attempts=attempts,
+                retryable=False,
+            ) from exc
+        expected_period = str(row["expected_period"])
+        expected_quarter = str(row["expected_quarter"])
+        meta = extract_actual_metadata_from_zip(
+            str(temp_zip),
+            expected_period=expected_period,
+            expected_quarter=expected_quarter,
+        )
+        trusted = TrustedProvenance(
+            source="jquants",
+            requested_disclosure_no=requested,
+            requested_file_type="x",
+            resolved_by_function="jquants_td_files_adapter",
+            official_request_succeeded=True,
+            response_status=int(resolution.evidence["http_status"]),
+            downloaded_size=downloaded.size,
+            downloaded_sha256=downloaded.sha256,
+            internal_document_id=meta.get("internal_document_id", ""),
+            ticker=meta.get("ticker", ""),
+            period=meta.get("period", ""),
+            quarter=meta.get("quarter", ""),
+            document_type=meta.get("document_type", ""),
+            resolved_at=_now_utc(),
+        )
+        verdict = verify_zip_identity(
+            str(temp_zip), requested, str(row["normalized_company_code"]),
+            expected_period, expected_quarter, trusted,
+        )
+        if classification == "STANDARD_FRESH_DOWNLOAD" and not verdict.passed:
+            attempts[-1].update({
+                "failure_stage": "IDENTITY",
+                "failure_code": "DOWNLOAD_IDENTITY_MISMATCH",
+                "retryable": False,
+            })
+            raise DownloadFailure(
+                STOP_IDENTITY,
+                failure_code="DOWNLOAD_IDENTITY_MISMATCH",
+                failure_stage="IDENTITY",
+                attempts=attempts,
+                retryable=False,
+            )
+        auto_ready = bool(verdict.passed and classification == "STANDARD_FRESH_DOWNLOAD")
+        identity_status = (
+            "DOWNLOAD_IDENTITY_VERIFIED"
+            if classification == "STANDARD_FRESH_DOWNLOAD" and verdict.passed
+            else "DOWNLOAD_IDENTITY_MISMATCH"
+            if classification == "STANDARD_FRESH_DOWNLOAD"
+            else "QUARANTINE_RECHECK_MATCH"
+            if verdict.passed
+            else "QUARANTINE_RECHECK_MISMATCH"
+        )
+        payload: dict[str, object] = {
+            "schema_version": PROVENANCE_SCHEMA_VERSION,
+            "identity_provenance_version": PROVENANCE_VERSION,
+            "campaign_id": campaign_id,
+            "manifest_row_id": row_id,
+            "requested_disclosure_no": requested,
+            "requested_disc_no": requested,
+            "company_code": row["company_code"],
+            "normalized_company_code": row["normalized_company_code"],
+            "source_url": row["source_url"],
+            "normalized_xbrl_url": row["normalized_xbrl_url"],
+            "source_route": JQUANTS_SOURCE_ROUTE,
+            "td_files_type": "x",
+            "td_files_http_status": resolution.evidence["http_status"],
+            "td_files_result_code": resolution.evidence["result_code"],
+            "signed_url_received": resolution.evidence["signed_url_received"],
+            "signed_url_host": resolution.evidence["signed_url_host"],
+            "signed_url_scheme": resolution.evidence["signed_url_scheme"],
+            "signed_url_received_at": resolution.evidence["signed_url_received_at"],
+            "signed_url_redacted_digest": resolution.evidence["signed_url_redacted_digest"],
+            "file_http_status": downloaded.evidence["http_status"],
+            "final_url": None,
+            "downloaded_at": _now_utc(),
+            "downloaded_at_utc": _now_utc(),
+            "downloaded_at_jst": _now_jst(),
+            "http_status": downloaded.evidence["http_status"],
+            "content_type": downloaded.evidence["content_type"],
+            "content_length": downloaded.evidence["content_length"] or str(downloaded.size),
+            "download_attempts": attempts,
+            "zip_sha256": downloaded.sha256,
+            "zip_size": downloaded.size,
+            "internal_document_id": meta.get("internal_document_id", ""),
+            "zip_internal_ticker": meta.get("ticker", ""),
+            "zip_internal_period": meta.get("period", ""),
+            "zip_internal_quarter": meta.get("quarter", ""),
+            "document_type": meta.get("document_type", ""),
+            "official_linkage_status": verdict.verdict,
+            "identity_status": identity_status,
+            "identity_verdict": verdict.verdict,
+            "identity_rejection_reason": verdict.rejection_reason,
+            "plan_classification": classification,
+            "auto_ready_allowed": auto_ready,
+            "quarantine_release_required": classification == "QUARANTINE_FRESH_RECHECK",
+            "code_sha": code_sha,
+            "run_id": run_id,
+            "download_tool_version": TOOL_VERSION,
+            "error_code": None if verdict.passed else verdict.rejection_reason,
+            "error_message": None if verdict.passed else verdict.rejection_reason,
+        }
+        if contains_secret_material(payload):
+            raise FreshDownloaderStop(STOP_HTTP)
+        os.replace(temp_zip, zip_path)
+        if sha256_file(zip_path) != downloaded.sha256:
+            raise FreshDownloaderStop(STOP_IDENTITY)
+        _zip_integrity(zip_path)
+        published_meta = extract_actual_metadata_from_zip(
+            str(zip_path), expected_period=expected_period,
+            expected_quarter=expected_quarter,
+        )
+        if published_meta != meta:
+            raise FreshDownloaderStop(STOP_IDENTITY)
+        _write_atomic_json(provenance_path, payload)
+        loaded = load_provenance(zip_path, provenance_path)
+        if loaded != payload or contains_secret_material(loaded):
+            raise FreshDownloaderStop(STOP_IDENTITY)
+        return {
+            "manifest_row_id": row_id,
+            "requested_disclosure_no": requested,
+            "plan_classification": classification,
+            "status": "READY" if auto_ready else "QUARANTINED",
+            "zip_path": str(zip_path),
+            "provenance_path": str(provenance_path),
+            "zip_sha256": downloaded.sha256,
+            "identity_status": identity_status,
+            "identity_verdict": verdict.verdict,
+            "internal_document_id": payload["internal_document_id"],
+            "ticker": payload["zip_internal_ticker"],
+            "period": payload["zip_internal_period"],
+            "quarter": payload["zip_internal_quarter"],
+            "document_type": payload["document_type"],
+            "attempt_count": len(attempts),
+            "network_calls": network_counter[0] - initial_network_calls,
+            "td_files_requests": 1,
+            "signed_url_download_requests": 1,
+            "static_url_requests": 0,
+            "auto_ready": auto_ready,
+            "quarantine_release_required": payload["quarantine_release_required"],
+            "download_attempts": attempts,
+        }, network_counter[0] - initial_network_calls
+    finally:
+        if temp_zip.exists():
+            temp_zip.unlink()
+
+
 def _write_results(output_dir: Path, results: list[dict[str, object]], summary: dict[str, object]) -> dict[str, str]:
     output_dir.mkdir(parents=True, exist_ok=False)
     values = {"download-results.json": results, "download-summary.json": summary}
@@ -765,10 +1028,14 @@ def run_downloads(
     timeout_seconds: float = 60.0, max_retries: int = 3,
     max_consecutive_failures: int = 10, session: requests.Session | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    source_route: str | None = None,
+    auth_loader: Callable[[], tuple[dict[str, str], dict[str, object]]] | None = None,
 ) -> dict[str, object]:
     validate_temp_write_path(cache_root, repo_root)
     validate_temp_write_path(output_dir, repo_root)
     validate_temp_write_path(manifest_list, repo_root)
+    if source_route != JQUANTS_SOURCE_ROUTE:
+        raise FreshDownloaderStop(STOP_URL)
     if min_interval_seconds < 0 or timeout_seconds <= 0 or max_retries < 1 or max_consecutive_failures < 1:
         raise FreshDownloaderStop(STOP_INPUT)
     selected, manifest_sha = load_manifest_list(manifest_list, campaign_id)
@@ -790,11 +1057,13 @@ def run_downloads(
             if index and min_interval_seconds:
                 sleep(min_interval_seconds)
             try:
-                result, _calls = _download_one(
+                result, _calls = _download_one_jquants(
                     row=row, cache_root=cache_root, campaign_id=campaign_id,
-                    session=client, timeout_seconds=timeout_seconds, max_retries=max_retries,
-                    sleep=sleep, code_sha=code_sha, run_id=run_id,
+                    session=client, timeout_seconds=timeout_seconds,
+                    max_retries=max_retries, sleep=sleep,
+                    code_sha=code_sha, run_id=run_id,
                     network_counter=network_counter,
+                    auth_loader=auth_loader,
                 )
                 results.append(result)
                 consecutive_failures = 0
@@ -833,6 +1102,10 @@ def run_downloads(
         "network_calls": network_counter[0], "manifest_sha256": manifest_sha,
         "download_plan_sha256": plan_sha, "code_sha": code_sha,
         "production_db_writes": 0, "supabase_calls": 0,
+        "source_route": JQUANTS_SOURCE_ROUTE,
+        "td_files_requests": sum(int(row.get("td_files_requests", 0)) for row in results),
+        "signed_url_download_requests": sum(int(row.get("signed_url_download_requests", 0)) for row in results),
+        "static_url_requests": 0,
     }
     summary["digests"] = _write_results(output_dir, results, summary)
     return {"summary": summary, "results": results}

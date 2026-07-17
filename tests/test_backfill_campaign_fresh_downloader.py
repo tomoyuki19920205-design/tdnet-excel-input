@@ -13,6 +13,7 @@ import pytest
 import requests
 
 import lib.backfill.campaign_fresh_downloader as downloader
+from lib.backfill.jquants_td_files_adapter import TD_FILES_ENDPOINT
 from lib.backfill.campaign_state import (
     connect_db, create_campaign, create_campaign_filing, initialize_schema, transaction,
 )
@@ -44,7 +45,7 @@ def _zip_bytes(*, ticker="7203", internal="20260717100001", period="2026-05-31",
 
 
 class FakeResponse:
-    def __init__(self, status=200, body=b"", *, url="", headers=None, chunks=None, reason=""):
+    def __init__(self, status=200, body=b"", *, url="", headers=None, chunks=None, reason="", payload=None):
         self.status_code = status
         self.body = body
         self.url = url
@@ -54,6 +55,12 @@ class FakeResponse:
         self._chunks = chunks
         self.reason = reason
         self.closed = False
+        self.payload = payload
+
+    def json(self):
+        if isinstance(self.payload, BaseException):
+            raise self.payload
+        return self.payload
 
     def iter_content(self, chunk_size=65536):
         if self._chunks is not None:
@@ -74,6 +81,15 @@ class FakeSession:
 
     def get(self, url, **kwargs):
         self.calls.append((url, kwargs))
+        if url == TD_FILES_ENDPOINT:
+            disc_no = kwargs["params"]["discNo"]
+            return FakeResponse(
+                payload={
+                    "discNo": disc_no,
+                    "files": {"xbrl": "https://fixture-bucket.s3.ap-northeast-1.amazonaws.com/xbrl.zip?X-Amz-Signature=test"},
+                },
+                headers={"Content-Type": "application/json"},
+            )
         if not self.values:
             raise AssertionError("unexpected GET")
         value = self.values.pop(0)
@@ -150,7 +166,10 @@ def _run(env, session, *, apply=True, output=None, **kwargs):
         code_sha=CODE_SHA, min_interval_seconds=0, timeout_seconds=1,
         max_retries=kwargs.pop("max_retries", 3),
         max_consecutive_failures=kwargs.pop("max_consecutive_failures", 10),
-        session=session, sleep=kwargs.pop("sleep", lambda _: None), **kwargs,
+        session=session, sleep=kwargs.pop("sleep", lambda _: None),
+        source_route="JQUANTS_TD_FILES",
+        auth_loader=lambda: ({"x-api-key": "test"}, {"credential_present": True, "credential_source_type": "test"}),
+        **kwargs,
     )
 
 
@@ -162,10 +181,13 @@ def _target(env, index=0):
 def test_normal_download_publishes_zip_and_provenance(tmp_path):
     env = _prepare(tmp_path)
     body = _zip_bytes(internal=env["rows"][0]["requested_disclosure_no"])
-    result = _run(env, FakeSession([FakeResponse(body=body)]))
+    session = FakeSession([FakeResponse(body=body)])
+    result = _run(env, session)
     _, zip_path, provenance = _target(env)
     assert result["summary"]["status_counts"] == {"READY": 1}
     assert zip_path.read_bytes() == body and provenance.is_file()
+    assert all("release.tdnet.info" not in url for url, _kwargs in session.calls)
+    assert result["summary"]["static_url_requests"] == 0
 
 
 def test_streaming_chunks_are_written_exactly(tmp_path):
@@ -254,8 +276,8 @@ def test_404_is_not_retried(tmp_path):
     session = FakeSession([FakeResponse(status=404)])
     result = _run(env, session)
     failure = result["results"][0]
-    assert len(session.calls) == 1 and result["summary"]["failed"] == 1
-    assert failure["http_status"] == 404 and failure["failure_code"] == "HTTP_404"
+    assert len(session.calls) == 2 and result["summary"]["failed"] == 1
+    assert failure["http_status"] == 404 and failure["failure_code"] == "SIGNED_URL_DOWNLOAD_FAILED"
     assert failure["retryable"] is False
 
 
@@ -265,9 +287,9 @@ def test_429_is_retried_with_retry_after(tmp_path):
     sleeps = []
     session = FakeSession([FakeResponse(status=429, headers={"Retry-After": "3"}), FakeResponse(body=body)])
     result = _run(env, session, sleep=sleeps.append)
-    assert len(session.calls) == 2 and sleeps == [3.0] and result["summary"]["failed"] == 0
-    assert result["results"][0]["download_attempts"][0]["http_status"] == 429
-    assert result["results"][0]["download_attempts"][0]["retry_after"] == "3"
+    assert len(session.calls) == 3 and sleeps == [3.0] and result["summary"]["failed"] == 0
+    assert result["results"][0]["download_attempts"][1]["http_status"] == 429
+    assert result["results"][0]["download_attempts"][1]["retry_after"] == "3"
 
 
 def test_503_retry_after_is_respected(tmp_path):
@@ -276,7 +298,7 @@ def test_503_retry_after_is_respected(tmp_path):
     sleeps = []
     result = _run(env, FakeSession([FakeResponse(status=503, headers={"Retry-After": "7"}), FakeResponse(body=body)]), sleep=sleeps.append)
     assert sleeps == [7.0]
-    assert result["results"][0]["download_attempts"][0]["failure_code"] == "HTTP_5XX"
+    assert result["results"][0]["download_attempts"][1]["result_code"] == "SIGNED_URL_DOWNLOAD_FAILED"
 
 
 def test_timeout_is_retried_with_exponential_backoff(tmp_path):
@@ -285,15 +307,15 @@ def test_timeout_is_retried_with_exponential_backoff(tmp_path):
     sleeps = []
     result = _run(env, FakeSession([requests.Timeout("slow"), FakeResponse(body=body)]), sleep=sleeps.append)
     assert result["summary"]["failed"] == 0 and sleeps == [1.0]
-    first = result["results"][0]["download_attempts"][0]
-    assert first["failure_code"] == "TIMEOUT" and first["exception_type"] == "Timeout"
+    first = result["results"][0]["download_attempts"][1]
+    assert first["result_code"] == "SIGNED_URL_DOWNLOAD_FAILED" and first["exception_type"] == "Timeout"
 
 
 def test_maximum_attempts_is_three(tmp_path):
     env = _prepare(tmp_path)
     session = FakeSession([FakeResponse(status=500), FakeResponse(status=502), FakeResponse(status=504)])
     result = _run(env, session, max_retries=3)
-    assert len(session.calls) == 3 and result["summary"]["failed"] == 1
+    assert len(session.calls) == 4 and result["summary"]["failed"] == 1
 
 
 def test_consecutive_failure_limit_stops_remaining_rows(tmp_path):
@@ -309,18 +331,19 @@ def test_off_domain_redirect_is_fail_closed(tmp_path):
     response = FakeResponse(status=302, headers={"Location": "https://example.com/file.zip"})
     result = _run(env, FakeSession([response]))
     failure = result["results"][0]
-    assert failure["failure_code"] == "REDIRECT_OUTSIDE_OFFICIAL_DOMAIN"
-    assert failure["redirect_history"][0]["allowed"] is False
-    assert failure["redirect_history"][0]["hostname"] == "example.com"
+    assert failure["failure_code"] == "SIGNED_URL_DOWNLOAD_FAILED"
+    assert len(failure["download_attempts"]) == 2
+    assert failure["download_attempts"][1]["http_status"] == 302
 
 
-def test_safe_redirect_is_followed_with_get_only(tmp_path):
+def test_signed_url_redirect_is_not_followed(tmp_path):
     env = _prepare(tmp_path)
     row = env["rows"][0]
     url = row["normalized_xbrl_url"]
     body = _zip_bytes(internal=row["requested_disclosure_no"])
     session = FakeSession([FakeResponse(status=302, headers={"Location": url}), FakeResponse(body=body)])
-    result = _run(env, session)
+    result = _run(env, session, max_retries=1)
+    assert result["summary"]["failed"] == 1
     assert result["summary"]["network_calls"] == 2
     assert all(call[1]["allow_redirects"] is False for call in session.calls)
 
@@ -334,7 +357,7 @@ def test_partial_stream_failure_retries_and_leaves_no_provenance(tmp_path):
     session = FakeSession([BrokenResponse(body=b""), BrokenResponse(body=b""), BrokenResponse(body=b"")])
     result = _run(env, session)
     assert result["summary"]["failed"] == 1
-    assert len(session.calls) == 3
+    assert len(session.calls) == 4
     assert not _target(env)[2].exists() and not _target(env)[1].exists()
 
 
@@ -382,6 +405,20 @@ def test_without_apply_has_zero_network_and_zero_writes(tmp_path):
     result = _run(env, session, apply=False)
     assert result == {"apply": False, "selected": 1, "network_calls": 0, "cache_writes": 0, "output_writes": 0}
     assert session.calls == [] and not env["cache"].exists() and not env["output"].exists()
+
+
+def test_missing_source_route_fails_without_static_url_fallback(tmp_path):
+    env = _prepare(tmp_path)
+    session = FakeSession([FakeResponse(body=b"unused")])
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_URL):
+        downloader.run_downloads(
+            campaign_db=env["db"], campaign_id=CAMPAIGN_ID,
+            download_plan=env["plan"], manifest_list=env["manifest"],
+            cache_root=env["cache"], output_dir=env["output"], apply=True,
+            repo_root=REPO_ROOT, code_sha=CODE_SHA, session=session,
+        )
+    assert session.calls == []
+    assert not env["cache"].exists() and not env["output"].exists()
 
 
 def test_campaign_database_is_read_only_and_unchanged(tmp_path):
@@ -469,26 +506,23 @@ def test_403_preserves_status_reason_and_safe_headers(tmp_path):
     result = _run(env, FakeSession([response]), max_retries=1)
     failure = result["results"][0]
     assert failure["http_status"] == 403 and failure["reason_phrase"] == "Forbidden"
-    assert failure["failure_code"] == "HTTP_403" and failure["failure_stage"] == "http_status"
+    assert failure["failure_code"] == "SIGNED_URL_EXPIRED" and failure["failure_stage"] == "SIGNED_URL"
     assert failure["response_headers"] == {
         "content-length": "0", "content-type": "text/html", "server": "edge",
     }
     assert "secret" not in json.dumps(failure)
 
 
-def test_relative_official_redirect_history_is_complete(tmp_path):
+def test_relative_signed_url_redirect_is_rejected_without_follow(tmp_path):
     env = _prepare(tmp_path)
     row = env["rows"][0]
     filename = Path(str(row["normalized_xbrl_url"])).name
     body = _zip_bytes(internal=row["requested_disclosure_no"])
     first = FakeResponse(status=302, reason="Found", headers={"Location": filename})
-    result = _run(env, FakeSession([first, FakeResponse(body=body)]))
-    hop = result["results"][0]["download_attempts"][0]["redirect_history"][0]
-    assert hop == {
-        "status": 302, "from_url": row["normalized_xbrl_url"], "location": filename,
-        "resolved_url": row["normalized_xbrl_url"], "hostname": "www.release.tdnet.info",
-        "allowed": True,
-    }
+    session = FakeSession([first, FakeResponse(body=body)])
+    result = _run(env, session, max_retries=1)
+    assert result["summary"]["failed"] == 1
+    assert len(session.calls) == 2
 
 
 def test_tls_exception_is_preserved(tmp_path):
@@ -496,7 +530,7 @@ def test_tls_exception_is_preserved(tmp_path):
     result = _run(env, FakeSession([requests.exceptions.SSLError("certificate verify failed")]), max_retries=1)
     failure = result["results"][0]
     assert failure["http_status"] is None
-    assert failure["failure_code"] == "TLS_FAILED" and failure["failure_stage"] == "tls_handshake"
+    assert failure["failure_code"] == "SIGNED_URL_DOWNLOAD_FAILED" and failure["failure_stage"] == "SIGNED_URL"
     assert failure["exception_type"] == "SSLError"
     assert "certificate verify failed" in failure["exception_message"]
 
@@ -506,7 +540,7 @@ def test_dns_exception_is_preserved(tmp_path):
     error = requests.ConnectionError("NameResolutionError: getaddrinfo failed")
     result = _run(env, FakeSession([error]), max_retries=1)
     failure = result["results"][0]
-    assert failure["failure_code"] == "DNS_FAILED" and failure["failure_stage"] == "dns_resolution"
+    assert failure["failure_code"] == "SIGNED_URL_DOWNLOAD_FAILED" and failure["failure_stage"] == "SIGNED_URL"
     assert failure["exception_type"] == "ConnectionError" and failure["retryable"] is True
 
 
@@ -514,9 +548,9 @@ def test_exception_before_response_has_stage_and_null_status(tmp_path):
     env = _prepare(tmp_path)
     result = _run(env, FakeSession([requests.ConnectionError("connection refused")]), max_retries=1)
     failure = result["results"][0]
-    assert failure["http_status"] is None and failure["failure_stage"] == "request"
-    assert failure["failure_code"] == "CONNECT_FAILED"
-    assert failure["attempt_count"] == 1
+    assert failure["http_status"] is None and failure["failure_stage"] == "SIGNED_URL"
+    assert failure["failure_code"] == "SIGNED_URL_DOWNLOAD_FAILED"
+    assert failure["attempt_count"] == 2
 
 
 def test_failure_details_survive_json_serialization(tmp_path):
@@ -525,7 +559,7 @@ def test_failure_details_survive_json_serialization(tmp_path):
     serialized = json.loads((env["output"] / "download-results.json").read_text(encoding="utf-8"))[0]
     assert serialized["http_status"] == 403
     assert serialized["reason_phrase"] == "Forbidden"
-    assert serialized["failure_code"] == "HTTP_403"
+    assert serialized["failure_code"] == "SIGNED_URL_EXPIRED"
     assert serialized["download_attempts"][0]["request_finished_at"]
 
 
@@ -534,16 +568,17 @@ def test_success_attempt_has_complete_diagnostic_schema(tmp_path):
     row = env["rows"][0]
     body = _zip_bytes(internal=row["requested_disclosure_no"])
     result = _run(env, FakeSession([FakeResponse(body=body, reason="OK")]))
-    attempt = result["results"][0]["download_attempts"][0]
+    attempt = result["results"][0]["download_attempts"][1]
     required = {
-        "attempt_number", "requested_url", "request_started_at", "request_finished_at",
-        "elapsed_seconds", "http_status", "reason_phrase", "final_url", "redirect_history",
-        "content_type", "content_length_header", "retry_after", "bytes_received",
-        "exception_type", "exception_message", "retryable", "failure_stage", "failure_code",
+        "attempt_number", "download_started_at", "download_finished_at",
+        "elapsed_seconds", "http_status", "reason_phrase", "response_headers",
+        "content_type", "content_length", "retry_after", "bytes_received",
+        "signed_url_host", "signed_url_scheme", "signed_url_redacted_digest",
+        "zip_sha256", "result_code",
     }
     assert required.issubset(attempt)
     assert attempt["http_status"] == 200 and attempt["reason_phrase"] == "OK"
-    assert attempt["bytes_received"] == len(body) and attempt["failure_code"] is None
+    assert attempt["bytes_received"] == len(body) and attempt["result_code"] == "SIGNED_URL_DOWNLOAD_OK"
 
 
 def test_zip_invalid_has_distinct_failure_code(tmp_path):
@@ -551,7 +586,7 @@ def test_zip_invalid_has_distinct_failure_code(tmp_path):
     result = _run(env, FakeSession([FakeResponse(body=b"not-a-zip")]), max_retries=1)
     failure = result["results"][0]
     assert failure["failure_code"] == "ZIP_INVALID"
-    assert failure["failure_stage"] == "zip_validation"
+    assert failure["failure_stage"] == "ZIP_VALIDATION"
     assert failure["http_status"] == 200
 
 
@@ -559,13 +594,13 @@ def test_content_type_rejection_has_distinct_code(tmp_path):
     env = _prepare(tmp_path)
     result = _run(env, FakeSession([FakeResponse(body=b"html", headers={"Content-Type": "text/html"})]), max_retries=1)
     failure = result["results"][0]
-    assert failure["failure_code"] == "CONTENT_TYPE_REJECTED"
-    assert failure["failure_stage"] == "content_type_validation"
+    assert failure["failure_code"] == "SIGNED_URL_DOWNLOAD_FAILED"
+    assert failure["failure_stage"] == "SIGNED_URL"
     assert failure["http_status"] == 200
 
 
 def test_cli_help_has_all_contract_arguments():
     proc = subprocess.run([sys.executable, "tools/backfill_campaign_fresh_download.py", "--help"], cwd=REPO_ROOT, capture_output=True, text=True)
     assert proc.returncode == 0
-    for option in ("--campaign-db", "--campaign-id", "--download-plan", "--manifest-list", "--cache-root", "--output-dir", "--apply"):
+    for option in ("--campaign-db", "--campaign-id", "--download-plan", "--manifest-list", "--cache-root", "--output-dir", "--source-route", "--apply"):
         assert option in proc.stdout
