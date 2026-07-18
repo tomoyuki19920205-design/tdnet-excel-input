@@ -10,9 +10,11 @@ import pytest
 
 from lib.backfill.campaign_state import (
     FreshDownloadCASFailed,
+    FreshDownloadQuarantineCASFailed,
     FreshStateMigrationConflict,
     SCHEMA_VERSION,
     apply_fresh_download_successes,
+    apply_fresh_download_quarantine,
     connect_db,
     create_campaign,
     create_campaign_filing,
@@ -295,6 +297,124 @@ def test_fresh_download_mid_transaction_failure_rolls_back_all_rows(tmp_path):
             after_update=fail,
         )
     assert conn.execute("SELECT COUNT(*) FROM campaign_fresh_downloads WHERE fresh_status='COMPLETE'").fetchone()[0] == 0
+    conn.close()
+
+
+def _quarantine_kwargs(**overrides):
+    values = {
+        "campaign_id": "c1", "manifest_row_id": "0000000001",
+        "requested_document_id": "20260101000001",
+        "expected_status": "NOT_STARTED", "expected_attempt_count": 0,
+        "reason_code": "TD_FILES_DISCNO_NOT_FOUND", "failure_stage": "STAGE_A",
+        "source_route": "JQUANTS_TD_FILES", "http_status": 404,
+        "evidence_path": "C:/tmp/evidence", "evidence_sha256": "a" * 64,
+        "run_id": "quarantine-1", "updated_at": "2026-07-18T00:00:00+00:00",
+    }
+    values.update(overrides)
+    return values
+
+
+def test_fresh_runtime_quarantine_cas_preserves_artifact_and_attempt_contract(tmp_path):
+    conn = _db(tmp_path)
+    before, _ = _fresh_download_fixture(conn)
+    filing_before = [dict(row) for row in conn.execute(
+        "SELECT * FROM campaign_filings ORDER BY manifest_row_id"
+    )]
+    result = apply_fresh_download_quarantine(conn, **_quarantine_kwargs())
+    after = result["after"]
+    assert result["before"]["manifest_row_id"] == before[0]["manifest_row_id"]
+    assert result["before"]["fresh_status"] == before[0]["fresh_status"]
+    assert after["fresh_status"] == "QUARANTINED"
+    assert after["source_route"] == "JQUANTS_TD_FILES"
+    assert after["attempt_count"] == 0
+    assert after["auto_ready_allowed"] == 0
+    assert after["quarantine_release_required"] == 1
+    assert after["last_error_code"] == "TD_FILES_DISCNO_NOT_FOUND"
+    assert after["last_error_stage"] == "STAGE_A"
+    detail = __import__("json").loads(after["last_error_message"])
+    assert detail == {
+        "evidence_sha256": "a" * 64, "failure_stage": "STAGE_A",
+        "http_status": 404, "reason_code": "TD_FILES_DISCNO_NOT_FOUND",
+        "requested_document_id": "20260101000001", "source_route": "JQUANTS_TD_FILES",
+    }
+    assert all(after[column] is None for column in (
+        "artifact_zip_sha256", "artifact_internal_document_id", "artifact_ticker",
+        "artifact_period", "artifact_quarter", "identity_verdict", "completed_at",
+    ))
+    assert [dict(row) for row in conn.execute(
+        "SELECT * FROM campaign_filings ORDER BY manifest_row_id"
+    )] == filing_before
+    assert result["invariants"]["non_target_fresh_unchanged"] is True
+    conn.close()
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("reason_code", "OTHER"), ("failure_stage", "STAGE_B"),
+    ("source_route", "OTHER"), ("http_status", 500),
+    ("expected_status", "FAILED_RETRYABLE"), ("expected_attempt_count", 1),
+])
+def test_fresh_runtime_quarantine_rejects_unapproved_contract(tmp_path, field, value):
+    conn = _db(tmp_path)
+    _fresh_download_fixture(conn)
+    with pytest.raises(FreshDownloadQuarantineCASFailed, match="not allowed"):
+        apply_fresh_download_quarantine(conn, **_quarantine_kwargs(**{field: value}))
+    assert conn.execute(
+        "SELECT COUNT(*) FROM campaign_fresh_downloads WHERE fresh_status='QUARANTINED'"
+    ).fetchone()[0] == 0
+    conn.close()
+
+
+def test_fresh_runtime_quarantine_rejects_requested_id_and_double_apply(tmp_path):
+    conn = _db(tmp_path)
+    _fresh_download_fixture(conn)
+    with pytest.raises(FreshDownloadQuarantineCASFailed, match="precondition"):
+        apply_fresh_download_quarantine(
+            conn, **_quarantine_kwargs(requested_document_id="20260101999999")
+        )
+    apply_fresh_download_quarantine(conn, **_quarantine_kwargs())
+    with pytest.raises(FreshDownloadQuarantineCASFailed, match="precondition"):
+        apply_fresh_download_quarantine(conn, **_quarantine_kwargs())
+    assert conn.execute(
+        "SELECT COUNT(*) FROM campaign_fresh_downloads WHERE fresh_status='QUARANTINED'"
+    ).fetchone()[0] == 1
+    conn.close()
+
+
+@pytest.mark.parametrize("column", [
+    "artifact_zip_sha256", "artifact_internal_document_id", "artifact_ticker",
+    "artifact_period", "artifact_quarter", "identity_verdict", "completed_at",
+])
+def test_fresh_runtime_quarantine_rejects_existing_artifact_state(tmp_path, column):
+    conn = _db(tmp_path)
+    _fresh_download_fixture(conn)
+    conn.execute(
+        f"UPDATE campaign_fresh_downloads SET {column}=? WHERE manifest_row_id='0000000001'",
+        ("existing",),
+    )
+    conn.commit()
+    with pytest.raises(FreshDownloadQuarantineCASFailed, match="precondition"):
+        apply_fresh_download_quarantine(conn, **_quarantine_kwargs())
+    conn.close()
+
+
+def test_fresh_runtime_quarantine_rolls_back_target_and_injected_non_target_change(tmp_path):
+    conn = _db(tmp_path)
+    _fresh_download_fixture(conn)
+    before = [dict(row) for row in conn.execute(
+        "SELECT * FROM campaign_fresh_downloads ORDER BY manifest_row_id"
+    )]
+    def mutate_other(current):
+        current.execute(
+            "UPDATE campaign_fresh_downloads SET updated_at='injected' "
+            "WHERE manifest_row_id='0000000002'"
+        )
+    with pytest.raises(FreshDownloadQuarantineCASFailed, match="invariant"):
+        apply_fresh_download_quarantine(
+            conn, **_quarantine_kwargs(after_update=mutate_other)
+        )
+    assert [dict(row) for row in conn.execute(
+        "SELECT * FROM campaign_fresh_downloads ORDER BY manifest_row_id"
+    )] == before
     conn.close()
 
 

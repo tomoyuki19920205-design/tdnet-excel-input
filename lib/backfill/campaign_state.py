@@ -72,6 +72,10 @@ class FreshDownloadCASFailed(RuntimeError):
     """The production fresh-download compare-and-swap contract did not match."""
 
 
+class FreshDownloadQuarantineCASFailed(RuntimeError):
+    """A runtime Fresh quarantine transition failed its fail-closed contract."""
+
+
 class FreshStateMigrationConflict(RuntimeError):
     """An existing fresh-download schema or seed does not match the migration contract."""
 
@@ -728,3 +732,159 @@ def apply_fresh_download_successes(
     else:
         conn.commit()
     return readbacks
+
+
+def apply_fresh_download_quarantine(
+    conn: sqlite3.Connection, *, campaign_id: str, manifest_row_id: str,
+    requested_document_id: str, expected_status: str,
+    expected_attempt_count: int, reason_code: str, failure_stage: str,
+    source_route: str, http_status: int, evidence_path: str,
+    evidence_sha256: str, run_id: str, updated_at: str | None = None,
+    after_update: Callable[[sqlite3.Connection], None] | None = None,
+) -> dict[str, object]:
+    """CAS one untouched STANDARD Fresh row into evidence-backed quarantine.
+
+    This deliberately supports only the exact J-Quants TD Files 404 contract.
+    It does not count the external diagnostic as a production download attempt.
+    """
+    allowed = (
+        expected_status == "NOT_STARTED"
+        and expected_attempt_count == 0
+        and reason_code == "TD_FILES_DISCNO_NOT_FOUND"
+        and failure_stage == "STAGE_A"
+        and source_route == "JQUANTS_TD_FILES"
+        and http_status == 404
+        and bool(campaign_id and manifest_row_id and requested_document_id)
+        and bool(evidence_path and run_id)
+        and len(evidence_sha256) == 64
+        and all(character in "0123456789abcdefABCDEF" for character in evidence_sha256)
+    )
+    if not allowed:
+        raise FreshDownloadQuarantineCASFailed("runtime quarantine contract is not allowed")
+    if get_schema_version(conn) != SCHEMA_VERSION or not table_exists(
+        conn, "campaign_fresh_downloads"
+    ):
+        raise FreshDownloadQuarantineCASFailed("fresh download schema version 2 is required")
+
+    timestamp = updated_at or _now()
+    target_ids = {manifest_row_id}
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        fresh_row = conn.execute(
+            "SELECT * FROM campaign_fresh_downloads "
+            "WHERE campaign_id=? AND manifest_row_id=?",
+            (campaign_id, manifest_row_id),
+        ).fetchone()
+        filing_row = conn.execute(
+            "SELECT * FROM campaign_filings "
+            "WHERE campaign_id=? AND manifest_row_id=?",
+            (campaign_id, manifest_row_id),
+        ).fetchone()
+        if fresh_row is None or filing_row is None:
+            raise FreshDownloadQuarantineCASFailed("runtime quarantine target is missing")
+        before = dict(fresh_row)
+        filing = dict(filing_row)
+        if (
+            filing.get("requested_disclosure_no") != requested_document_id
+            or before.get("plan_classification") != "STANDARD_FRESH_DOWNLOAD"
+            or before.get("fresh_status") != expected_status
+            or before.get("attempt_count") != expected_attempt_count
+            or any(before.get(column) is not None for column in (
+                "artifact_zip_sha256", "artifact_internal_document_id", "artifact_ticker",
+                "artifact_period", "artifact_quarter", "identity_verdict",
+            ))
+            or before.get("completed_at") is not None
+        ):
+            raise FreshDownloadQuarantineCASFailed("runtime quarantine precondition changed")
+
+        filing_digest = _table_digest(conn, "campaign_filings", campaign_id, set())
+        non_target_digest = _table_digest(
+            conn, "campaign_fresh_downloads", campaign_id, target_ids
+        )
+        schema_before = tuple(conn.execute(
+            "SELECT type,name,tbl_name,sql FROM sqlite_master "
+            "WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
+        ).fetchall())
+        fresh_count = int(conn.execute(
+            "SELECT COUNT(*) FROM campaign_fresh_downloads WHERE campaign_id=?",
+            (campaign_id,),
+        ).fetchone()[0])
+        error_detail = json.dumps({
+            "evidence_sha256": evidence_sha256.lower(),
+            "failure_stage": failure_stage,
+            "http_status": http_status,
+            "reason_code": reason_code,
+            "requested_document_id": requested_document_id,
+            "source_route": source_route,
+        }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        desired = {
+            "fresh_status": "QUARANTINED",
+            "source_route": source_route,
+            "auto_ready_allowed": 0,
+            "quarantine_release_required": 1,
+            "attempt_count": 0,
+            "last_run_id": run_id,
+            "last_journal_path": evidence_path,
+            "last_error_code": reason_code,
+            "last_error_stage": failure_stage,
+            "last_error_message": error_detail,
+            "updated_at": timestamp,
+            "completed_at": None,
+        }
+        mutable = tuple(desired)
+        assignments = ",".join(f"{column}=?" for column in mutable)
+        cas = " AND ".join(f"{column} IS ?" for column in _FRESH_DOWNLOAD_COLUMNS)
+        values = [desired[column] for column in mutable]
+        values.extend(before.get(column) for column in _FRESH_DOWNLOAD_COLUMNS)
+        cursor = conn.execute(
+            f"UPDATE campaign_fresh_downloads SET {assignments} WHERE {cas}", values
+        )
+        if cursor.rowcount != 1:
+            raise FreshDownloadQuarantineCASFailed("runtime quarantine CAS rowcount mismatch")
+        if after_update is not None:
+            after_update(conn)
+        current = conn.execute(
+            "SELECT * FROM campaign_fresh_downloads "
+            "WHERE campaign_id=? AND manifest_row_id=?",
+            (campaign_id, manifest_row_id),
+        ).fetchone()
+        if current is None or any(
+            dict(current).get(column) != value for column, value in desired.items()
+        ):
+            raise FreshDownloadQuarantineCASFailed("runtime quarantine readback mismatch")
+        if any(dict(current).get(column) is not None for column in (
+            "artifact_zip_sha256", "artifact_internal_document_id", "artifact_ticker",
+            "artifact_period", "artifact_quarter", "identity_verdict", "completed_at",
+        )):
+            raise FreshDownloadQuarantineCASFailed("runtime quarantine created artifact state")
+        if (
+            _table_digest(conn, "campaign_filings", campaign_id, set()) != filing_digest
+            or _table_digest(conn, "campaign_fresh_downloads", campaign_id, target_ids)
+            != non_target_digest
+            or int(conn.execute(
+                "SELECT COUNT(*) FROM campaign_fresh_downloads WHERE campaign_id=?",
+                (campaign_id,),
+            ).fetchone()[0]) != fresh_count
+            or tuple(conn.execute(
+                "SELECT type,name,tbl_name,sql FROM sqlite_master "
+                "WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
+            ).fetchall()) != schema_before
+            or str(conn.execute("PRAGMA integrity_check").fetchone()[0]) != "ok"
+            or conn.execute("PRAGMA foreign_key_check").fetchone() is not None
+        ):
+            raise FreshDownloadQuarantineCASFailed(
+                "runtime quarantine invariant failed"
+            )
+    except Exception:
+        conn.rollback()
+        raise
+    else:
+        conn.commit()
+    return {"before": before, "after": dict(current), "invariants": {
+        "campaign_filings_unchanged": True,
+        "non_target_fresh_unchanged": True,
+        "schema_unchanged": True,
+        "fresh_count_unchanged": True,
+        "integrity_check": "ok",
+        "foreign_key_check": 0,
+    }}
