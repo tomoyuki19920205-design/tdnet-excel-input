@@ -744,16 +744,19 @@ def apply_fresh_download_quarantine(
 ) -> dict[str, object]:
     """CAS one untouched STANDARD Fresh row into evidence-backed quarantine.
 
-    This deliberately supports only the exact J-Quants TD Files 404 contract.
+    This deliberately supports only the exact J-Quants TD Files 404 contract
+    and the formal ZIP-internal identity-conflict contract.
     It does not count the external diagnostic as a production download attempt.
     """
+    contract = (reason_code, failure_stage, source_route, http_status)
+    allowed_contracts = {
+        ("TD_FILES_DISCNO_NOT_FOUND", "STAGE_A", "JQUANTS_TD_FILES", 404),
+        ("ZIP_INTERNAL_IDENTITY_CONFLICT", "ZIP_IDENTITY", "JQUANTS_TD_FILES", 200),
+    }
     allowed = (
         expected_status == "NOT_STARTED"
         and expected_attempt_count == 0
-        and reason_code == "TD_FILES_DISCNO_NOT_FOUND"
-        and failure_stage == "STAGE_A"
-        and source_route == "JQUANTS_TD_FILES"
-        and http_status == 404
+        and contract in allowed_contracts
         and bool(campaign_id and manifest_row_id and requested_document_id)
         and bool(evidence_path and run_id)
         and len(evidence_sha256) == 64

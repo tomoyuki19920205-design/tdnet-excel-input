@@ -359,7 +359,10 @@ def test_attachment_ixbrl_conflicting_period_fails_closed(tmp_path):
 
     assert meta["period"] == ""
     assert verdict.passed is False
-    assert verdict.rejection_reason == "metadata_unresolved"
+    assert verdict.rejection_reason == "zip_internal_identity_conflict"
+    assert verdict.verdict == "ZIP_INTERNAL_IDENTITY_CONFLICT"
+    assert verdict.details["conflict_fields"] == ["period"]
+    assert verdict.internal_id == ""
 
 
 def test_attachment_ixbrl_conflicting_quarter_fails_closed(tmp_path):
@@ -367,8 +370,13 @@ def test_attachment_ixbrl_conflicting_quarter_fails_closed(tmp_path):
     _write_attachment_zip(path, [_attachment_ixbrl(), _attachment_ixbrl(quarter="3Q")])
 
     meta = extract_actual_metadata_from_zip(str(path), "2025-03-31", "FY")
+    verdict = verify_zip_identity(
+        str(path), "20250521559959", "1332", "2025-03-31", "FY"
+    )
 
     assert meta["quarter"] == ""
+    assert verdict.rejection_reason == "zip_internal_identity_conflict"
+    assert verdict.details["conflict_fields"] == ["quarter"]
 
 
 def test_attachment_ixbrl_conflicting_ticker_fails_closed(tmp_path):
@@ -376,8 +384,13 @@ def test_attachment_ixbrl_conflicting_ticker_fails_closed(tmp_path):
     _write_attachment_zip(path, [_attachment_ixbrl(), _attachment_ixbrl(ticker="99990")])
 
     meta = extract_actual_metadata_from_zip(str(path), "2025-03-31", "FY")
+    verdict = verify_zip_identity(
+        str(path), "20250521559959", "1332", "2025-03-31", "FY"
+    )
 
     assert meta["ticker"] == ""
+    assert verdict.rejection_reason == "zip_internal_identity_conflict"
+    assert verdict.details["conflict_fields"] == ["ticker"]
 
 
 def test_attachment_ixbrl_conflicting_document_type_fails_closed(tmp_path):
@@ -386,7 +399,26 @@ def test_attachment_ixbrl_conflicting_document_type_fails_closed(tmp_path):
         _attachment_ixbrl(),
         _attachment_ixbrl(document_type="QuarterlyFinancialStatements_Consolidated_JP"),
     ])
-    assert extract_actual_metadata_from_zip(str(path))["document_type"] == ""
+    assert extract_actual_metadata_from_zip(str(path))["document_type"] == "attachment_xbrl"
+    verdict = verify_zip_identity(
+        str(path), "20250521559959", "1332", "2025-03-31", "FY"
+    )
+    assert verdict.rejection_reason == "provenance_missing"
+
+
+def test_attachment_non_financial_document_type_is_not_compatible(tmp_path):
+    path = tmp_path / "incompatible-document.zip"
+    _write_attachment_zip(path, [
+        _attachment_ixbrl(document_type="AnnualSecuritiesReport"),
+    ])
+
+    meta = extract_actual_metadata_from_zip(str(path))
+    verdict = verify_zip_identity(
+        str(path), "20250521559959", "1332", "2025-03-31", "FY"
+    )
+
+    assert meta["document_type"] == ""
+    assert verdict.rejection_reason == "metadata_unresolved"
 
 
 def test_attachment_internal_id_conflict_is_rejected(tmp_path):
@@ -400,7 +432,110 @@ def test_attachment_internal_id_conflict_is_rejected(tmp_path):
     verdict = verify_zip_identity(
         str(path), "20250521559959", "1332", "2025-03-31", "FY"
     )
-    assert verdict.rejection_reason == "multiple_internal_document_ids"
+    assert verdict.rejection_reason == "zip_internal_identity_conflict"
+    assert verdict.details["conflict_fields"] == ["internal_document_id"]
+
+
+def _summary_ixbrl(*, ticker="13320", period="2025-03-31", quarter="4"):
+    return (
+        "<html xmlns='http://www.w3.org/1999/xhtml' "
+        "xmlns:ix='http://www.xbrl.org/2008/inlineXBRL' "
+        "xmlns:xbrli='http://www.xbrl.org/2003/instance' "
+        "xmlns:link='http://www.xbrl.org/2003/linkbase' "
+        "xmlns:tse-ed-t='http://www.tse.or.jp/taxonomy/tse-ed-t'>"
+        "<link:schemaRef href='summary.xsd'/>"
+        "<xbrli:context id='c'><xbrli:entity>"
+        f"<xbrli:identifier scheme='http://www.tse.or.jp/sicc'>{ticker}</xbrli:identifier>"
+        "</xbrli:entity><xbrli:period>"
+        f"<xbrli:instant>{period}</xbrli:instant>"
+        "</xbrli:period></xbrli:context>"
+        f"<ix:nonNumeric name='tse-ed-t:QuarterlyPeriod'>{quarter}</ix:nonNumeric>"
+        "</html>"
+    )
+
+
+def _write_summary_attachment_zip(path, *, summary_period, attachment_period, incomplete=False):
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr(
+            "XBRLData/Summary/tse-qnedjpsm-13320-20250521133200-ixbrl.htm",
+            _summary_ixbrl(period=summary_period),
+        )
+        zf.writestr(
+            "XBRLData/Attachment/0500000-qnbs02-tse-qnedjpfr-13320-ixbrl.htm",
+            _attachment_ixbrl(
+                period=attachment_period,
+                include_schema_ref=not incomplete,
+            ),
+        )
+
+
+def test_summary_attachment_period_conflict_precedes_manifest_comparison(tmp_path):
+    path = tmp_path / "summary-attachment-conflict.zip"
+    _write_summary_attachment_zip(
+        path, summary_period="2025-03-31", attachment_period="2024-03-31"
+    )
+
+    verdict = verify_zip_identity(
+        str(path), "20250521559959", "1332", "2024-03-31", "FY"
+    )
+
+    assert verdict.rejection_reason == "zip_internal_identity_conflict"
+    assert verdict.details["conflict_fields"] == ["period"]
+    assert verdict.details["candidate_count"] == 2
+    assert {candidate["format"] for candidate in verdict.details["candidates"]} == {
+        "SUMMARY_IXBRL", "ATTACHMENT_IXBRL",
+    }
+
+
+def test_summary_attachment_consensus_and_incomplete_attachment_compatibility(tmp_path):
+    matching = tmp_path / "matching.zip"
+    _write_summary_attachment_zip(
+        matching, summary_period="2025-03-31", attachment_period="2025-03-31"
+    )
+    incomplete = tmp_path / "incomplete.zip"
+    _write_summary_attachment_zip(
+        incomplete, summary_period="2025-03-31", attachment_period="2024-03-31",
+        incomplete=True,
+    )
+
+    matching_verdict = verify_zip_identity(
+        str(matching), "20250521133200", "1332", "2025-03-31", "FY"
+    )
+    incomplete_verdict = verify_zip_identity(
+        str(incomplete), "20250521133200", "1332", "2025-03-31", "FY"
+    )
+
+    assert matching_verdict.passed is True
+    assert matching_verdict.verdict == "exact_document_id_match"
+    assert incomplete_verdict.passed is True
+    assert incomplete_verdict.verdict == "exact_document_id_match"
+
+
+def test_summary_fiscal_year_end_fact_precedes_forecast_context_date(tmp_path):
+    path = tmp_path / "summary-fiscal-year-end.zip"
+    summary = _summary_ixbrl(period="2025-03-31").replace(
+        "</html>",
+        "<ix:nonNumeric name='tse-ed-t:FiscalYearEnd'>2025-03-31</ix:nonNumeric>"
+        "<xbrli:context id='forecast'><xbrli:entity>"
+        "<xbrli:identifier scheme='http://www.tse.or.jp/sicc'>13320</xbrli:identifier>"
+        "</xbrli:entity><xbrli:period><xbrli:instant>2026-03-31</xbrli:instant>"
+        "</xbrli:period></xbrli:context></html>",
+    )
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr(
+            "XBRLData/Summary/tse-qnedjpsm-13320-20250521133200-ixbrl.htm", summary
+        )
+        zf.writestr(
+            "XBRLData/Attachment/0500000-qnbs02-tse-qnedjpfr-13320-ixbrl.htm",
+            _attachment_ixbrl(period="2025-03-31"),
+        )
+
+    verdict = verify_zip_identity(
+        str(path), "20250521133200", "1332", "2025-03-31", "FY"
+    )
+
+    assert verdict.passed is True
+    assert verdict.verdict == "exact_document_id_match"
 
 
 def test_attachment_xml_and_xbrl_are_not_reclassified_as_inline(tmp_path):

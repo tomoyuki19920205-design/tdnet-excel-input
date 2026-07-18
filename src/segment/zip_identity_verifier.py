@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 # provenance schema version
 # ================================================================
 PROVENANCE_VERSION = "1"
+IDENTITY_CANDIDATE_PARSER_VERSION = "2"
 
 # ================================================================
 # 許可する document type  (決算短信の財務諸表本表 XBRL 種別)
@@ -164,110 +165,239 @@ def _normalize_dei_quarter(value: str) -> str:
     }.get(normalized, "")
 
 
-def _extract_attachment_ixbrl_metadata(
+def _normalize_dei_document_type(value: str) -> str:
+    normalized = value.strip()
+    compact = re.sub(r"[^a-z]", "", normalized.lower())
+    if (
+        "financialstatements" in compact
+        or "参考様式" in normalized
+        or "決算短信" in normalized
+        or ("様式" in normalized and ("通期" in normalized or "四半期" in normalized))
+    ):
+        return "attachment_xbrl"
+    return normalized.lower()
+
+
+def _candidate_internal_id(name: str) -> str:
+    return _extract_disclosure_no_from_str(PurePosixPath(name).name) or ""
+
+
+def _parse_inline_document(
+    zf: zipfile.ZipFile, name: str
+) -> tuple[ElementTree.Element, dict[str, str], list[ElementTree.Element]] | None:
+    try:
+        data = zf.read(name)
+        namespaces: dict[str, str] = {}
+        for _event, item in ElementTree.iterparse(io.BytesIO(data), events=("start-ns",)):
+            namespaces[item[0]] = item[1]
+        root = ElementTree.fromstring(data)
+    except (ElementTree.ParseError, KeyError, OSError, UnicodeError, ValueError) as exc:
+        logger.warning("[ZIP_METADATA] candidate=%s excluded=PARSE_ERROR err=%s", name, exc)
+        return None
+    return root, namespaces, list(root.iter())
+
+
+def _inline_structure(
+    elements: list[ElementTree.Element],
+) -> tuple[list[ElementTree.Element], list[ElementTree.Element], list[ElementTree.Element]]:
+    ix_elements = [
+        element for element in elements
+        if element.tag.startswith("{")
+        and element.tag[1:].split("}", 1)[0] in _INLINE_XBRL_NAMESPACES
+    ]
+    identifiers = [
+        element for element in elements
+        if element.tag == f"{{{_XBRLI_NAMESPACE}}}identifier" and _inline_fact_value(element)
+    ]
+    schema_refs = [element for element in elements if element.tag.rsplit("}", 1)[-1] == "schemaRef"]
+    return ix_elements, identifiers, schema_refs
+
+
+def _attachment_identity_candidates(
     zf: zipfile.ZipFile, names: list[str]
-) -> dict[str, str]:
-    """Parse every Attachment iXBRL candidate and return consensus DEI identity."""
-    candidates = [name for name in names if _ATTACHMENT_IXBRL_RE.search(name)]
-    result = {"ticker": "", "period": "", "quarter": "", "document_type": ""}
-    if not candidates:
-        return result
-
-    tickers: set[str] = set()
-    current_periods: set[str] = set()
-    fiscal_year_ends: set[str] = set()
-    quarters: set[str] = set()
-    document_types: set[str] = set()
-
-    complete_candidates = 0
-    for name in candidates:
-        try:
-            data = zf.read(name)
-            namespaces: dict[str, str] = {}
-            for _event, item in ElementTree.iterparse(io.BytesIO(data), events=("start-ns",)):
-                namespaces[item[0]] = item[1]
-            root = ElementTree.fromstring(data)
-        except (ElementTree.ParseError, KeyError, OSError, UnicodeError, ValueError) as exc:
-            logger.warning("[ZIP_METADATA] candidate=%s excluded=PARSE_ERROR err=%s", name, exc)
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    complete: list[dict[str, str]] = []
+    excluded: list[dict[str, str]] = []
+    for name in (value for value in names if _ATTACHMENT_IXBRL_RE.search(value)):
+        parsed = _parse_inline_document(zf, name)
+        if parsed is None:
+            excluded.append({"path": name, "format": "ATTACHMENT_IXBRL", "reason": "PARSE_ERROR"})
             continue
-
-        elements = list(root.iter())
-        ix_elements = [
-            element for element in elements
-            if element.tag.startswith("{")
-            and element.tag[1:].split("}", 1)[0] in _INLINE_XBRL_NAMESPACES
-        ]
-        contexts = [e for e in elements if e.tag == f"{{{_XBRLI_NAMESPACE}}}context"]
-        identifiers = [
-            e for e in elements
-            if e.tag == f"{{{_XBRLI_NAMESPACE}}}identifier" and _inline_fact_value(e)
-        ]
-        schema_refs = [e for e in elements if e.tag.rsplit("}", 1)[-1] == "schemaRef"]
+        _root, namespaces, elements = parsed
+        ix_elements, identifiers, schema_refs = _inline_structure(elements)
+        contexts = [element for element in elements if element.tag == f"{{{_XBRLI_NAMESPACE}}}context"]
+        missing = []
         if not ix_elements:
-            logger.info("[ZIP_METADATA] candidate=%s excluded=IX_ELEMENTS_MISSING", name)
-            continue
-        if not contexts:
-            logger.info("[ZIP_METADATA] candidate=%s excluded=CONTEXT_MISSING", name)
-            continue
-        if not identifiers:
-            logger.info("[ZIP_METADATA] candidate=%s excluded=ENTITY_IDENTIFIER_MISSING", name)
-            continue
+            missing.append("IX_ELEMENTS_MISSING")
         if not schema_refs:
-            logger.info("[ZIP_METADATA] candidate=%s excluded=SCHEMA_REF_MISSING", name)
-            continue
-
-        candidate_facts: dict[str, set[str]] = {fact: set() for fact in _DEI_FACT_NAMES}
+            missing.append("SCHEMA_REF_MISSING")
+        if not contexts:
+            missing.append("CONTEXT_MISSING")
+        if not identifiers:
+            missing.append("ENTITY_IDENTIFIER_MISSING")
+        facts: dict[str, set[str]] = {fact: set() for fact in _DEI_FACT_NAMES}
         unsupported_namespace = False
         for element in ix_elements:
             namespace_uri, fact_name = _expanded_name(element.attrib.get("name", ""), namespaces)
             if fact_name not in _DEI_FACT_NAMES:
                 continue
             if _DEI_NAMESPACE_RE.fullmatch(namespace_uri) is None:
-                logger.warning(
-                    "[ZIP_METADATA] candidate=%s excluded=DEI_NAMESPACE_UNSUPPORTED uri=%s",
-                    name, namespace_uri,
-                )
                 unsupported_namespace = True
                 break
             value = _inline_fact_value(element)
             if value:
-                candidate_facts[fact_name].add(value)
+                facts[fact_name].add(value)
         if unsupported_namespace:
-            return result
-        if not any(candidate_facts.values()):
-            logger.info("[ZIP_METADATA] candidate=%s excluded=DEI_MISSING", name)
+            missing.append("DEI_NAMESPACE_UNSUPPORTED")
+        tickers = {
+            _normalize_ticker(_inline_fact_value(element)) for element in identifiers
+            if "sicc" in element.attrib.get("scheme", "").lower()
+        }
+        # Fiscal-year end is the identity period. CurrentPeriodEndDate is only
+        # used when the filing does not publish that stronger DEI fact.
+        periods = facts["CurrentFiscalYearEndDateDEI"] or facts["CurrentPeriodEndDateDEI"]
+        quarters = {
+            normalized for raw in facts["TypeOfCurrentPeriodDEI"]
+            if (normalized := _normalize_dei_quarter(raw))
+        }
+        raw_documents = facts["DocumentTypeDEI"]
+        documents = {_normalize_dei_document_type(value) for value in raw_documents}
+        for label, values in (
+            ("TICKER_MISSING", tickers), ("PERIOD_DEI_MISSING", periods),
+            ("QUARTER_DEI_MISSING", quarters), ("DOCUMENT_TYPE_DEI_MISSING", documents),
+        ):
+            if not values:
+                missing.append(label)
+            elif len(values) > 1:
+                missing.append(label.replace("MISSING", "CONFLICT"))
+        if missing:
+            excluded.append({"path": name, "format": "ATTACHMENT_IXBRL", "reason": ",".join(missing)})
             continue
+        complete.append({
+            "path": name,
+            "format": "ATTACHMENT_IXBRL",
+            "ticker": next(iter(tickers)),
+            "period": next(iter(periods)),
+            "quarter": next(iter(quarters)),
+            "document_type": next(iter(documents)),
+            "raw_document_type": next(iter(raw_documents)),
+            "internal_document_id": _candidate_internal_id(name),
+        })
+    return complete, excluded
 
-        candidate_tickers = {
-            _normalize_ticker(_inline_fact_value(e)) for e in identifiers
-            if "sicc" in e.attrib.get("scheme", "").lower()
-        }
-        candidate_periods = candidate_facts["CurrentPeriodEndDateDEI"]
-        if not candidate_periods:
-            candidate_periods = candidate_facts["CurrentFiscalYearEndDateDEI"]
-        candidate_quarters = {
-            value for raw in candidate_facts["TypeOfCurrentPeriodDEI"]
-            if (value := _normalize_dei_quarter(raw))
-        }
-        candidate_documents = candidate_facts["DocumentTypeDEI"]
-        tickers.update(candidate_tickers)
-        current_periods.update(candidate_periods)
-        fiscal_year_ends.update(candidate_facts["CurrentFiscalYearEndDateDEI"])
-        quarters.update(candidate_quarters)
-        document_types.update(candidate_documents)
-        if candidate_tickers and candidate_periods and candidate_quarters and candidate_documents:
-            complete_candidates += 1
 
-    if complete_candidates == 0:
+def _summary_identity_candidates(
+    zf: zipfile.ZipFile, names: list[str]
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    complete: list[dict[str, str]] = []
+    excluded: list[dict[str, str]] = []
+    for name in (
+        value for value in names
+        if PurePosixPath(value).parent.name == "Summary"
+        and PurePosixPath(value).suffix.lower() in {".htm", ".html", ".xhtml"}
+    ):
+        parsed = _parse_inline_document(zf, name)
+        if parsed is None:
+            excluded.append({"path": name, "format": "SUMMARY_IXBRL", "reason": "PARSE_ERROR"})
+            continue
+        _root, namespaces, elements = parsed
+        ix_elements, identifiers, schema_refs = _inline_structure(elements)
+        contexts = [element for element in elements if element.tag == f"{{{_XBRLI_NAMESPACE}}}context"]
+        content = zf.read(name).decode("utf-8", errors="ignore")
+        tickers = {
+            _normalize_ticker(_inline_fact_value(element)) for element in identifiers
+            if "sicc" in element.attrib.get("scheme", "").lower()
+        }
+        dates = set(re.findall(r'<(?:xbrli:endDate|xbrli:instant)>(\d{4}-\d{2}-\d{2})</', content))
+        fiscal_year_ends = {
+            _inline_fact_value(element) for element in ix_elements
+            if _expanded_name(element.attrib.get("name", ""), namespaces)[1] == "FiscalYearEnd"
+            and re.fullmatch(r"\d{4}-\d{2}-\d{2}", _inline_fact_value(element))
+        }
+        quarter_match = re.search(r'(?:tse-ed-t:)?QuarterlyPeriod[^>]*>(\d+)</', content)
+        quarter = (
+            {"1": "1Q", "2": "2Q", "3": "3Q", "4": "FY"}.get(quarter_match.group(1), "")
+            if quarter_match else ""
+        )
+        missing = []
+        if not ix_elements:
+            missing.append("IX_ELEMENTS_MISSING")
+        if not schema_refs:
+            missing.append("SCHEMA_REF_MISSING")
+        if not contexts:
+            missing.append("CONTEXT_MISSING")
+        if not tickers:
+            missing.append("ENTITY_IDENTIFIER_MISSING")
+        if len(tickers) > 1:
+            missing.append("TICKER_CONFLICT")
+        if len(fiscal_year_ends) > 1:
+            missing.append("FISCAL_YEAR_END_CONFLICT")
+        if not fiscal_year_ends and not dates:
+            missing.append("PERIOD_MISSING")
+        if not quarter:
+            missing.append("QUARTER_MISSING")
+        if missing:
+            excluded.append({"path": name, "format": "SUMMARY_IXBRL", "reason": ",".join(missing)})
+            continue
+        complete.append({
+            "path": name,
+            "format": "SUMMARY_IXBRL",
+            "ticker": next(iter(tickers)),
+            "period": next(iter(fiscal_year_ends)) if fiscal_year_ends else max(dates),
+            "quarter": quarter,
+            "document_type": "attachment_xbrl",
+            "internal_document_id": _candidate_internal_id(name),
+        })
+    return complete, excluded
+
+
+def _identity_candidate_audit(zip_path: str) -> dict[str, object]:
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        names = zf.namelist()
+        summary, summary_excluded = _summary_identity_candidates(zf, names)
+        attachments, attachment_excluded = _attachment_identity_candidates(zf, names)
+    candidates = summary + attachments
+    consensus: dict[str, dict[str, object]] = {}
+    conflict_fields: list[str] = []
+    for field_name in ("ticker", "period", "quarter", "document_type", "internal_document_id"):
+        values = sorted({str(item[field_name]) for item in candidates if item.get(field_name)})
+        if not values:
+            status = "MISSING"
+        elif field_name == "document_type" and set(values) <= ALLOWED_DOCUMENT_TYPES:
+            raw_values = {
+                str(item.get("raw_document_type") or item[field_name]) for item in candidates
+                if item.get(field_name)
+            }
+            status = "COMPATIBLE" if len(values) == 1 and len(raw_values) > 1 else "CONSENSUS"
+        elif len(values) == 1:
+            status = "CONSENSUS"
+        else:
+            status = "CONFLICT"
+            conflict_fields.append(field_name)
+        consensus[field_name] = {"status": status, "values": values}
+    return {
+        "parser_version": IDENTITY_CANDIDATE_PARSER_VERSION,
+        "candidate_count": len(candidates),
+        "candidates": candidates,
+        "excluded_candidates": summary_excluded + attachment_excluded,
+        "consensus": consensus,
+        "conflict_fields": conflict_fields,
+    }
+
+
+def _extract_attachment_ixbrl_metadata(
+    zf: zipfile.ZipFile, names: list[str]
+) -> dict[str, str]:
+    """Parse every Attachment iXBRL candidate and return consensus DEI identity."""
+    result = {"ticker": "", "period": "", "quarter": "", "document_type": ""}
+    candidates, _excluded = _attachment_identity_candidates(zf, names)
+    if not candidates:
         logger.warning("[ZIP_METADATA] Attachment iXBRL excluded=COMPLETE_DEI_CANDIDATE_MISSING")
         return result
-
-    result["ticker"] = _consensus(tickers, "ticker")
-    result["period"] = _consensus(
-        current_periods if current_periods else fiscal_year_ends, "period"
-    )
-    result["quarter"] = _consensus(quarters, "quarter")
-    if _consensus(document_types, "document_type"):
+    result["ticker"] = _consensus({item["ticker"] for item in candidates}, "ticker")
+    result["period"] = _consensus({item["period"] for item in candidates}, "period")
+    result["quarter"] = _consensus({item["quarter"] for item in candidates}, "quarter")
+    if _consensus({item["document_type"] for item in candidates}, "document_type") == "attachment_xbrl":
         result["document_type"] = "attachment_xbrl"
     return result
 
@@ -557,6 +687,50 @@ def verify_zip_identity(
             requested_disclosure_no,
         )
         return _FAIL("broken_zip")
+
+    # Compare every complete Summary/Attachment identity before comparing any
+    # one candidate with the manifest.  A conflicting ZIP has no single actual
+    # identity and must never publish a production-ready provenance verdict.
+    try:
+        candidate_audit = _identity_candidate_audit(zip_path)
+    except (OSError, zipfile.BadZipFile, KeyError, ValueError) as exc:
+        logger.warning(
+            "[ZIP_IDENTITY] zip_identity_rejected reason=broken_zip requested=%s err=%s",
+            requested_disclosure_no, exc,
+        )
+        return _FAIL("broken_zip")
+    if candidate_audit["conflict_fields"]:
+        try:
+            conflict_sha = _sha256_file(zip_path)
+        except OSError:
+            conflict_sha = ""
+        details = {
+            **candidate_audit,
+            "requested_document_id": requested_disclosure_no,
+            "manifest_expected_identity": {
+                "ticker": expected_ticker,
+                "period": expected_period,
+                "quarter": expected_quarter,
+            },
+            "jquants_linkage_route": (
+                trusted_provenance.resolved_by_function if trusted_provenance else ""
+            ),
+            "zip_sha256": conflict_sha,
+        }
+        logger.warning(
+            "[ZIP_IDENTITY] zip_identity_rejected "
+            "reason=zip_internal_identity_conflict requested=%s fields=%s",
+            requested_disclosure_no, candidate_audit["conflict_fields"],
+        )
+        return ZipIdentityVerdict(
+            passed=False,
+            verdict="ZIP_INTERNAL_IDENTITY_CONFLICT",
+            rejection_reason="zip_internal_identity_conflict",
+            requested_id=requested_disclosure_no,
+            internal_id="",
+            zip_sha256=conflict_sha,
+            details=details,
+        )
 
     # ── STEP 4-5: 内部 ID 混在チェック ──
     try:

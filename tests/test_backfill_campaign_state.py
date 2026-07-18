@@ -348,6 +348,25 @@ def test_fresh_runtime_quarantine_cas_preserves_artifact_and_attempt_contract(tm
     conn.close()
 
 
+def test_fresh_runtime_quarantine_accepts_identity_conflict_contract(tmp_path):
+    conn = _db(tmp_path)
+    before, _ = _fresh_download_fixture(conn)
+    result = apply_fresh_download_quarantine(
+        conn,
+        **_quarantine_kwargs(
+            reason_code="ZIP_INTERNAL_IDENTITY_CONFLICT",
+            failure_stage="ZIP_IDENTITY",
+            http_status=200,
+        ),
+    )
+    assert before[0]["fresh_status"] == "NOT_STARTED"
+    assert result["after"]["fresh_status"] == "QUARANTINED"
+    assert result["after"]["last_error_code"] == "ZIP_INTERNAL_IDENTITY_CONFLICT"
+    assert result["after"]["last_error_stage"] == "ZIP_IDENTITY"
+    assert result["after"]["attempt_count"] == 0
+    conn.close()
+
+
 @pytest.mark.parametrize(("field", "value"), [
     ("reason_code", "OTHER"), ("failure_stage", "STAGE_B"),
     ("source_route", "OTHER"), ("http_status", 500),

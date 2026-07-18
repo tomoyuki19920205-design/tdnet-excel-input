@@ -170,12 +170,16 @@ def run_quarantine(
     confirm_manifest_row_id: str, apply: bool, production_apply: bool,
     repo_root: Path, command_sanitized: str = "",
 ) -> dict[str, object]:
+    contract = (reason_code, failure_stage, source_route, http_status)
+    allowed_contracts = {
+        ("TD_FILES_DISCNO_NOT_FOUND", "STAGE_A", "JQUANTS_TD_FILES", 404),
+        ("ZIP_INTERNAL_IDENTITY_CONFLICT", "ZIP_IDENTITY", "JQUANTS_TD_FILES", 200),
+    }
     if (
         not apply or not production_apply or campaign_id != confirm_campaign_id
         or manifest_row_id != confirm_manifest_row_id
         or expected_status != "NOT_STARTED" or expected_attempt_count != 0
-        or reason_code != "TD_FILES_DISCNO_NOT_FOUND" or failure_stage != "STAGE_A"
-        or source_route != "JQUANTS_TD_FILES" or http_status != 404
+        or contract not in allowed_contracts
     ):
         raise FreshQuarantineCLIStop(STOP_GUARD)
     database = _safe_database_path(campaign_db, repo_root)

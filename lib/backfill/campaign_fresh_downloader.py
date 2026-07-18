@@ -1047,13 +1047,37 @@ def _download_one(
         }
         auto_ready = is_production_ready_identity_result(readiness)
         if classification == "STANDARD_FRESH_DOWNLOAD" and not auto_ready:
+            conflict = verdict.rejection_reason == "zip_internal_identity_conflict"
             attempts[-1].update({
-                "failure_stage": "identity_validation",
-                "failure_code": "DOWNLOAD_IDENTITY_MISMATCH", "retryable": False,
+                "failure_stage": "ZIP_IDENTITY" if conflict else "identity_validation",
+                "failure_code": (
+                    "ZIP_INTERNAL_IDENTITY_CONFLICT"
+                    if conflict else "DOWNLOAD_IDENTITY_MISMATCH"
+                ),
+                "identity_rejection_reason": verdict.rejection_reason,
+                "identity_conflict_fields": verdict.details.get("conflict_fields", []),
+                "identity_candidates": [
+                    {
+                        key: candidate.get(key)
+                        for key in (
+                            "path", "format", "ticker", "period", "quarter",
+                            "document_type", "internal_document_id",
+                        )
+                    }
+                    for candidate in verdict.details.get("candidates", [])
+                    if isinstance(candidate, dict)
+                ],
+                "zip_sha256": verdict.zip_sha256,
+                "retryable": False,
             })
             raise DownloadFailure(
-                STOP_IDENTITY, failure_code="DOWNLOAD_IDENTITY_MISMATCH",
-                failure_stage="identity_validation", attempts=attempts,
+                STOP_IDENTITY,
+                failure_code=(
+                    "ZIP_INTERNAL_IDENTITY_CONFLICT"
+                    if conflict else "DOWNLOAD_IDENTITY_MISMATCH"
+                ),
+                failure_stage="ZIP_IDENTITY" if conflict else "identity_validation",
+                attempts=attempts,
                 retryable=False,
             )
         if classification == "STANDARD_FRESH_DOWNLOAD":
@@ -1276,15 +1300,36 @@ def _download_one_jquants(
         }
         auto_ready = is_production_ready_identity_result(readiness)
         if classification == "STANDARD_FRESH_DOWNLOAD" and not auto_ready:
+            conflict = verdict.rejection_reason == "zip_internal_identity_conflict"
             attempts[-1].update({
-                "failure_stage": "IDENTITY",
-                "failure_code": "DOWNLOAD_IDENTITY_MISMATCH",
+                "failure_stage": "ZIP_IDENTITY" if conflict else "IDENTITY",
+                "failure_code": (
+                    "ZIP_INTERNAL_IDENTITY_CONFLICT"
+                    if conflict else "DOWNLOAD_IDENTITY_MISMATCH"
+                ),
+                "identity_rejection_reason": verdict.rejection_reason,
+                "identity_conflict_fields": verdict.details.get("conflict_fields", []),
+                "identity_candidates": [
+                    {
+                        key: candidate.get(key)
+                        for key in (
+                            "path", "format", "ticker", "period", "quarter",
+                            "document_type", "internal_document_id",
+                        )
+                    }
+                    for candidate in verdict.details.get("candidates", [])
+                    if isinstance(candidate, dict)
+                ],
+                "zip_sha256": verdict.zip_sha256,
                 "retryable": False,
             })
             raise DownloadFailure(
                 STOP_IDENTITY,
-                failure_code="DOWNLOAD_IDENTITY_MISMATCH",
-                failure_stage="IDENTITY",
+                failure_code=(
+                    "ZIP_INTERNAL_IDENTITY_CONFLICT"
+                    if conflict else "DOWNLOAD_IDENTITY_MISMATCH"
+                ),
+                failure_stage="ZIP_IDENTITY" if conflict else "IDENTITY",
                 attempts=attempts,
                 retryable=False,
             )

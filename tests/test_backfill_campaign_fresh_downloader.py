@@ -339,6 +339,55 @@ def test_standard_identity_mismatch_fails(tmp_path, monkeypatch):
     assert not _target(env)[2].exists()
 
 
+def test_identity_conflict_details_are_preserved_in_failure_journal(tmp_path, monkeypatch):
+    env = _prepare(tmp_path)
+    body = _zip_bytes(internal=env["rows"][0]["requested_disclosure_no"])
+    conflict = ZipIdentityVerdict(
+        False,
+        "ZIP_INTERNAL_IDENTITY_CONFLICT",
+        "zip_internal_identity_conflict",
+        env["rows"][0]["requested_disclosure_no"],
+        "",
+        "a" * 64,
+        details={
+            "conflict_fields": ["period"],
+            "candidates": [
+                {
+                    "path": "XBRLData/Summary/summary.htm",
+                    "format": "SUMMARY_IXBRL",
+                    "ticker": "7203",
+                    "period": "2026-03-31",
+                    "quarter": "FY",
+                    "document_type": "attachment_xbrl",
+                    "internal_document_id": "",
+                },
+                {
+                    "path": "XBRLData/Attachment/attachment.htm",
+                    "format": "ATTACHMENT_IXBRL",
+                    "ticker": "7203",
+                    "period": "2025-03-31",
+                    "quarter": "FY",
+                    "document_type": "attachment_xbrl",
+                    "internal_document_id": "",
+                },
+            ],
+        },
+    )
+    monkeypatch.setattr(downloader, "verify_zip_identity", lambda *a, **k: conflict)
+
+    result = _run(env, FakeSession([FakeResponse(body=body)]))
+
+    failed = result["results"][0]
+    attempt = failed["download_attempts"][-1]
+    assert failed["failure_code"] == "ZIP_INTERNAL_IDENTITY_CONFLICT"
+    assert failed["failure_stage"] == "ZIP_IDENTITY"
+    assert attempt["identity_rejection_reason"] == "zip_internal_identity_conflict"
+    assert attempt["identity_conflict_fields"] == ["period"]
+    assert len(attempt["identity_candidates"]) == 2
+    assert attempt["zip_sha256"] == "a" * 64
+    assert "signed" not in json.dumps(attempt["identity_candidates"]).lower()
+
+
 def test_quarantine_mismatch_is_published_but_not_ready(tmp_path, monkeypatch):
     env = _prepare(tmp_path, [_row(classification="QUARANTINE_FRESH_RECHECK")])
     body = _zip_bytes(internal=env["rows"][0]["requested_disclosure_no"])

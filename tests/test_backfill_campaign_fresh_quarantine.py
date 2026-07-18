@@ -122,6 +122,39 @@ def test_formal_cli_quarantines_one_row_and_writes_complete_audit(tmp_path):
     }
 
 
+def test_formal_cli_accepts_only_identity_conflict_http_200_contract(tmp_path):
+    values = _kwargs(
+        tmp_path,
+        reason_code="ZIP_INTERNAL_IDENTITY_CONFLICT",
+        failure_stage="ZIP_IDENTITY",
+        http_status=200,
+    )
+    result = cli.run_quarantine(**values)
+    after = result["result"]["after"]
+    assert after["fresh_status"] == "QUARANTINED"
+    assert after["attempt_count"] == 0
+    assert after["last_error_code"] == "ZIP_INTERNAL_IDENTITY_CONFLICT"
+    assert after["last_error_stage"] == "ZIP_IDENTITY"
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("http_status", 404),
+    ("http_status", 500),
+    ("failure_stage", "STAGE_A"),
+    ("reason_code", "TD_FILES_DISCNO_NOT_FOUND"),
+])
+def test_identity_conflict_contract_rejects_cross_combinations(tmp_path, field, value):
+    values = _kwargs(
+        tmp_path,
+        reason_code="ZIP_INTERNAL_IDENTITY_CONFLICT",
+        failure_stage="ZIP_IDENTITY",
+        http_status=200,
+    )
+    values[field] = value
+    with pytest.raises(cli.FreshQuarantineCLIStop, match=cli.STOP_GUARD):
+        cli.run_quarantine(**values)
+
+
 def test_parent_dynamic_selection_excludes_runtime_quarantine(tmp_path):
     values = _kwargs(tmp_path)
     cli.run_quarantine(**values)
