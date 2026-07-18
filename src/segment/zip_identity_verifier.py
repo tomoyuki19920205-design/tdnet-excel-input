@@ -112,16 +112,35 @@ _ALPHA_INTERNAL_ID_FROM_SUMMARY_RE = re.compile(
     r"(?=[-_.])"
 )
 _ATTACHMENT_IXBRL_RE = re.compile(
-    r"(?:^|/)XBRLData/Attachment/[^/]+-ixbrl\.htm$", re.IGNORECASE
+    r"(?:^|/)XBRLData/Attachment/[^/]+\.(?:htm|html|xhtml)$", re.IGNORECASE
 )
+_INLINE_XBRL_NAMESPACES = frozenset({
+    "http://www.xbrl.org/2008/inlineXBRL",
+    "http://www.xbrl.org/2013/inlineXBRL",
+})
+_XBRLI_NAMESPACE = "http://www.xbrl.org/2003/instance"
+_DEI_NAMESPACE_RE = re.compile(
+    r"^http://disclosure\.edinet-fsa\.go\.jp/taxonomy/jpdei/"
+    r"\d{4}-\d{2}-\d{2}/jpdei_cor$"
+)
+_DEI_FACT_NAMES = frozenset({
+    "CurrentPeriodEndDateDEI", "CurrentFiscalYearEndDateDEI",
+    "TypeOfCurrentPeriodDEI", "DocumentTypeDEI",
+})
 
 
 def _inline_fact_value(element: ElementTree.Element) -> str:
     return "".join(element.itertext()).strip()
 
 
-def _inline_fact_name(element: ElementTree.Element) -> str:
-    return element.attrib.get("name", "").split(":")[-1]
+def _expanded_name(value: str, namespaces: dict[str, str]) -> tuple[str, str]:
+    if value.startswith("{") and "}" in value:
+        uri, local = value[1:].split("}", 1)
+        return uri, local
+    if ":" in value:
+        prefix, local = value.split(":", 1)
+        return namespaces.get(prefix, ""), local
+    return namespaces.get("", ""), value
 
 
 def _consensus(values: set[str], field_name: str) -> str:
@@ -129,8 +148,8 @@ def _consensus(values: set[str], field_name: str) -> str:
         return next(iter(values))
     if len(values) > 1:
         logger.warning(
-            "[ZIP_METADATA] Attachment iXBRL consensus conflict field=%s values=%s",
-            field_name, sorted(values),
+            "[ZIP_METADATA] Attachment iXBRL %s values=%s",
+            f"{field_name.upper()}_CONFLICT", sorted(values),
         )
     return ""
 
@@ -160,34 +179,87 @@ def _extract_attachment_ixbrl_metadata(
     quarters: set[str] = set()
     document_types: set[str] = set()
 
-    try:
-        for name in candidates:
-            match = re.search(r"tse-[^-]+-([A-Za-z0-9]{4,5})-", name)
-            if match:
-                tickers.add(_normalize_ticker(match.group(1)))
+    complete_candidates = 0
+    for name in candidates:
+        try:
+            data = zf.read(name)
+            namespaces: dict[str, str] = {}
+            for _event, item in ElementTree.iterparse(io.BytesIO(data), events=("start-ns",)):
+                namespaces[item[0]] = item[1]
+            root = ElementTree.fromstring(data)
+        except (ElementTree.ParseError, KeyError, OSError, UnicodeError, ValueError) as exc:
+            logger.warning("[ZIP_METADATA] candidate=%s excluded=PARSE_ERROR err=%s", name, exc)
+            continue
 
-            root = ElementTree.fromstring(zf.read(name))
-            for element in root.iter():
-                local_tag = element.tag.rsplit("}", 1)[-1]
-                value = _inline_fact_value(element)
-                if local_tag == "identifier" and "sicc" in element.attrib.get("scheme", "").lower():
-                    if value:
-                        tickers.add(_normalize_ticker(value))
-                    continue
+        elements = list(root.iter())
+        ix_elements = [
+            element for element in elements
+            if element.tag.startswith("{")
+            and element.tag[1:].split("}", 1)[0] in _INLINE_XBRL_NAMESPACES
+        ]
+        contexts = [e for e in elements if e.tag == f"{{{_XBRLI_NAMESPACE}}}context"]
+        identifiers = [
+            e for e in elements
+            if e.tag == f"{{{_XBRLI_NAMESPACE}}}identifier" and _inline_fact_value(e)
+        ]
+        schema_refs = [e for e in elements if e.tag.rsplit("}", 1)[-1] == "schemaRef"]
+        if not ix_elements:
+            logger.info("[ZIP_METADATA] candidate=%s excluded=IX_ELEMENTS_MISSING", name)
+            continue
+        if not contexts:
+            logger.info("[ZIP_METADATA] candidate=%s excluded=CONTEXT_MISSING", name)
+            continue
+        if not identifiers:
+            logger.info("[ZIP_METADATA] candidate=%s excluded=ENTITY_IDENTIFIER_MISSING", name)
+            continue
+        if not schema_refs:
+            logger.info("[ZIP_METADATA] candidate=%s excluded=SCHEMA_REF_MISSING", name)
+            continue
 
-                fact_name = _inline_fact_name(element)
-                if fact_name == "CurrentPeriodEndDateDEI" and value:
-                    current_periods.add(value)
-                elif fact_name == "CurrentFiscalYearEndDateDEI" and value:
-                    fiscal_year_ends.add(value)
-                elif fact_name == "TypeOfCurrentPeriodDEI" and value:
-                    quarter = _normalize_dei_quarter(value)
-                    if quarter:
-                        quarters.add(quarter)
-                elif fact_name == "DocumentTypeDEI" and value:
-                    document_types.add(value)
-    except (ElementTree.ParseError, KeyError, OSError, UnicodeError) as exc:
-        logger.warning("[ZIP_METADATA] Attachment iXBRL parse failed: %s", exc)
+        candidate_facts: dict[str, set[str]] = {fact: set() for fact in _DEI_FACT_NAMES}
+        unsupported_namespace = False
+        for element in ix_elements:
+            namespace_uri, fact_name = _expanded_name(element.attrib.get("name", ""), namespaces)
+            if fact_name not in _DEI_FACT_NAMES:
+                continue
+            if _DEI_NAMESPACE_RE.fullmatch(namespace_uri) is None:
+                logger.warning(
+                    "[ZIP_METADATA] candidate=%s excluded=DEI_NAMESPACE_UNSUPPORTED uri=%s",
+                    name, namespace_uri,
+                )
+                unsupported_namespace = True
+                break
+            value = _inline_fact_value(element)
+            if value:
+                candidate_facts[fact_name].add(value)
+        if unsupported_namespace:
+            return result
+        if not any(candidate_facts.values()):
+            logger.info("[ZIP_METADATA] candidate=%s excluded=DEI_MISSING", name)
+            continue
+
+        candidate_tickers = {
+            _normalize_ticker(_inline_fact_value(e)) for e in identifiers
+            if "sicc" in e.attrib.get("scheme", "").lower()
+        }
+        candidate_periods = candidate_facts["CurrentPeriodEndDateDEI"]
+        if not candidate_periods:
+            candidate_periods = candidate_facts["CurrentFiscalYearEndDateDEI"]
+        candidate_quarters = {
+            value for raw in candidate_facts["TypeOfCurrentPeriodDEI"]
+            if (value := _normalize_dei_quarter(raw))
+        }
+        candidate_documents = candidate_facts["DocumentTypeDEI"]
+        tickers.update(candidate_tickers)
+        current_periods.update(candidate_periods)
+        fiscal_year_ends.update(candidate_facts["CurrentFiscalYearEndDateDEI"])
+        quarters.update(candidate_quarters)
+        document_types.update(candidate_documents)
+        if candidate_tickers and candidate_periods and candidate_quarters and candidate_documents:
+            complete_candidates += 1
+
+    if complete_candidates == 0:
+        logger.warning("[ZIP_METADATA] Attachment iXBRL excluded=COMPLETE_DEI_CANDIDATE_MISSING")
         return result
 
     result["ticker"] = _consensus(tickers, "ticker")

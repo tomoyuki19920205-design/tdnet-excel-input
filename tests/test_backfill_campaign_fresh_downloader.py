@@ -263,7 +263,7 @@ def test_exact_identity_is_auto_ready(tmp_path):
     [
         ({"identity_verdict": "exact_document_id_match"}, True),
         ({"identity_verdict": "official_linked_xbrl_match"}, True),
-        ({"identity_verdict": "official_linked_xbrl_match_without_internal_id"}, True),
+        ({"identity_verdict": "official_linked_xbrl_match_without_internal_id"}, False),
         ({"identity_verdict": ""}, False),
         ({"identity_verdict": None}, False),
         ({"identity_verdict": "unknown"}, False),
@@ -294,6 +294,40 @@ def test_production_ready_identity_contract_is_fail_closed(changes, expected):
     }
     payload.update(changes)
     assert downloader.is_production_ready_identity_result(payload) is expected
+
+
+def test_production_ready_accepts_fully_attested_missing_internal_id():
+    payload = {
+        "identity_verdict": "official_linked_xbrl_match_without_internal_id",
+        "identity_status": "DOWNLOAD_IDENTITY_VERIFIED",
+        "plan_classification": "STANDARD_FRESH_DOWNLOAD",
+        "auto_ready_allowed": True, "quarantine_release_required": False,
+        "internal_document_id": None,
+        "internal_document_id_status": "absent_in_artifact",
+        "linkage_basis": "jquants_td_files_exact_discno",
+        "source_route": "JQUANTS_TD_FILES", "td_files_type": "x",
+        "td_files_http_status": 200, "td_files_result_code": "TD_FILES_OK",
+        "xbrl_candidate_count": 1, "signed_url_received": True, "file_http_status": 200,
+        "requested_disclosure_no": "20250521559959",
+        "identity_value_sources": dict(downloader.WITHOUT_INTERNAL_ID_VALUE_SOURCES),
+    }
+    assert downloader.is_production_ready_identity_result(payload) is True
+
+
+def test_verified_provenance_result_preserves_null_internal_id(tmp_path):
+    payload = {
+        "manifest_row_id": "0000000051", "requested_disclosure_no": "20250521559959",
+        "plan_classification": "STANDARD_FRESH_DOWNLOAD", "zip_sha256": "a" * 64,
+        "identity_status": "DOWNLOAD_IDENTITY_VERIFIED",
+        "identity_verdict": "official_linked_xbrl_match_without_internal_id",
+        "internal_document_id": None, "zip_internal_ticker": "1332",
+        "zip_internal_period": "2025-03-31", "zip_internal_quarter": "FY",
+        "document_type": "attachment_xbrl",
+    }
+    result = downloader._result_from_verified_provenance(
+        payload, tmp_path / "xbrl.zip", tmp_path / "provenance.json", "READY"
+    )
+    assert result["internal_document_id"] is None
 
 
 def test_standard_identity_mismatch_fails(tmp_path, monkeypatch):
@@ -570,13 +604,19 @@ def test_row51_attachment_formal_loader_is_production_ready(tmp_path):
         "company_code": "13320", "normalized_company_code": "1332",
         "source_url": "jquants://td-files/20250521559959/x",
         "normalized_xbrl_url": "jquants://td-files/20250521559959/x",
-        "source_route": "JQUANTS_TD_FILES", "final_url": None,
+        "source_route": "JQUANTS_TD_FILES", "td_files_type": "x",
+        "td_files_http_status": 200, "td_files_result_code": "TD_FILES_OK",
+        "xbrl_candidate_count": 1, "signed_url_received": True, "file_http_status": 200,
+        "final_url": None,
         "downloaded_at": "2026-07-18T01:00:00+00:00",
         "downloaded_at_utc": "2026-07-18T01:00:00+00:00",
         "downloaded_at_jst": "2026-07-18T10:00:00+09:00", "http_status": 200,
         "content_type": "application/zip", "content_length": str(zip_path.stat().st_size),
         "download_attempts": [], "zip_sha256": _sha(zip_path), "zip_size": zip_path.stat().st_size,
-        "internal_document_id": "", "zip_internal_ticker": "1332",
+        "internal_document_id": None, "internal_document_id_status": "absent_in_artifact",
+        "linkage_basis": "jquants_td_files_exact_discno",
+        "identity_value_sources": dict(downloader.WITHOUT_INTERNAL_ID_VALUE_SOURCES),
+        "zip_internal_ticker": "1332",
         "zip_internal_period": "2025-03-31", "zip_internal_quarter": "FY",
         "document_type": "attachment_xbrl", "identity_status": "DOWNLOAD_IDENTITY_VERIFIED",
         "identity_verdict": "official_linked_xbrl_match_without_internal_id",
@@ -589,7 +629,7 @@ def test_row51_attachment_formal_loader_is_production_ready(tmp_path):
 
     loaded = downloader.load_provenance(zip_path, provenance_path)
 
-    assert loaded["internal_document_id"] == ""
+    assert loaded["internal_document_id"] is None
     assert downloader.is_production_ready_identity_result(loaded) is True
 
 
@@ -607,7 +647,16 @@ def test_formal_loader_rejects_unknown_verified_verdict(tmp_path):
 
 
 @pytest.mark.parametrize("field,value", [
+    ("internal_document_id_status", None),
+    ("linkage_basis", None),
+    ("linkage_basis", "wrong"),
     ("source_route", "STATIC_URL"),
+    ("td_files_type", "pdf"),
+    ("td_files_result_code", None),
+    ("td_files_result_code", "TD_FILES_EMPTY"),
+    ("xbrl_candidate_count", 2),
+    ("signed_url_received", False),
+    ("identity_value_sources", None),
     ("http_status", 206),
     ("requested_disclosure_no", "not-a-disc-no"),
 ])
@@ -626,13 +675,19 @@ def test_row51_missing_internal_id_formal_loader_requires_official_linkage(
         "company_code": "13320", "normalized_company_code": "1332",
         "source_url": "jquants://td-files/20250521559959/x",
         "normalized_xbrl_url": "jquants://td-files/20250521559959/x",
-        "source_route": "JQUANTS_TD_FILES", "final_url": None,
+        "source_route": "JQUANTS_TD_FILES", "td_files_type": "x",
+        "td_files_http_status": 200, "td_files_result_code": "TD_FILES_OK",
+        "xbrl_candidate_count": 1, "signed_url_received": True, "file_http_status": 200,
+        "final_url": None,
         "downloaded_at": "2026-07-18T01:00:00+00:00",
         "downloaded_at_utc": "2026-07-18T01:00:00+00:00",
         "downloaded_at_jst": "2026-07-18T10:00:00+09:00", "http_status": 200,
         "content_type": "application/zip", "content_length": str(zip_path.stat().st_size),
         "download_attempts": [], "zip_sha256": _sha(zip_path), "zip_size": zip_path.stat().st_size,
-        "internal_document_id": "", "zip_internal_ticker": "1332",
+        "internal_document_id": None, "internal_document_id_status": "absent_in_artifact",
+        "linkage_basis": "jquants_td_files_exact_discno",
+        "identity_value_sources": dict(downloader.WITHOUT_INTERNAL_ID_VALUE_SOURCES),
+        "zip_internal_ticker": "1332",
         "zip_internal_period": "2025-03-31", "zip_internal_quarter": "FY",
         "document_type": "attachment_xbrl", "identity_status": "DOWNLOAD_IDENTITY_VERIFIED",
         "identity_verdict": "official_linked_xbrl_match_without_internal_id",

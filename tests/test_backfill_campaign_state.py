@@ -226,7 +226,7 @@ def test_fresh_download_success_updates_dedicated_rows_and_preserves_filings(tmp
 def test_fresh_download_success_accepts_explicit_verified_missing_internal_id(tmp_path):
     conn = _db(tmp_path)
     before, results = _fresh_download_fixture(conn)
-    results[0]["internal_document_id"] = ""
+    results[0]["internal_document_id"] = None
     results[0]["identity_verdict"] = "official_linked_xbrl_match_without_internal_id"
 
     readback = apply_fresh_download_successes(
@@ -234,7 +234,7 @@ def test_fresh_download_success_accepts_explicit_verified_missing_internal_id(tm
         expected_count=5, run_id="run-1", journal_path="journal.json",
     )
 
-    assert readback[0]["artifact_internal_document_id"] == ""
+    assert readback[0]["artifact_internal_document_id"] is None
     assert readback[0]["identity_verdict"] == "official_linked_xbrl_match_without_internal_id"
     conn.close()
 
@@ -242,7 +242,7 @@ def test_fresh_download_success_accepts_explicit_verified_missing_internal_id(tm
 @pytest.mark.parametrize(
     ("internal_id", "verdict"),
     [
-        ("", "official_linked_xbrl_match"),
+        (None, "official_linked_xbrl_match"),
         ("20260101720301", "official_linked_xbrl_match_without_internal_id"),
     ],
 )

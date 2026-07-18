@@ -261,25 +261,40 @@ def test_does_not_use_html_title_timestamp_as_internal_document_id(tmp_path):
     assert meta["internal_document_id"] == ""
 
 
-def _attachment_ixbrl(*, ticker="13320", period="2025-03-31", quarter="FY", document_type="FYFinancialStatements_Consolidated_JP"):
+DEI_NS = "http://disclosure.edinet-fsa.go.jp/taxonomy/jpdei/2013-08-31/jpdei_cor"
+
+
+def _attachment_ixbrl(
+    *, ticker="13320", period="2025-03-31", quarter="FY",
+    document_type="FYFinancialStatements_Consolidated_JP", dei_ns=DEI_NS,
+    dei_prefix="jpdei_cor", include_ix=True, include_context=True,
+    include_dei=True, include_identifier=True, include_schema_ref=True,
+):
+    fact_tag = "ix:nonNumeric" if include_ix else "span"
     return (
         "<html xmlns='http://www.w3.org/1999/xhtml' "
-        "xmlns:ix='http://www.xbrl.org/2013/inlineXBRL' "
-        "xmlns:xbrli='http://www.xbrl.org/2003/instance'>"
-        f"<xbrli:identifier scheme='http://disclosure.edinet-fsa.go.jp/identifier/sicc'>{ticker}</xbrli:identifier>"
-        f"<ix:nonNumeric name='tse-ed-t:CurrentPeriodEndDateDEI'>{period}</ix:nonNumeric>"
-        f"<ix:nonNumeric name='tse-ed-t:CurrentFiscalYearEndDateDEI'>{period}</ix:nonNumeric>"
-        f"<ix:nonNumeric name='tse-ed-t:TypeOfCurrentPeriodDEI'>{quarter}</ix:nonNumeric>"
-        f"<ix:nonNumeric name='tse-ed-t:DocumentTypeDEI'>{document_type}</ix:nonNumeric>"
+        "xmlns:ix='http://www.xbrl.org/2008/inlineXBRL' "
+        "xmlns:xbrli='http://www.xbrl.org/2003/instance' "
+        "xmlns:link='http://www.xbrl.org/2003/linkbase' "
+        f"xmlns:{dei_prefix}='{dei_ns}'>"
+        + ("<link:schemaRef href='schema.xsd'/>" if include_schema_ref else "")
+        + ("<xbrli:context id='c'><xbrli:entity>" if include_context else "")
+        + (f"<xbrli:identifier scheme='http://www.tse.or.jp/sicc'>{ticker}</xbrli:identifier>" if include_identifier else "")
+        + ("</xbrli:entity><xbrli:period><xbrli:instant>2025-03-31</xbrli:instant></xbrli:period></xbrli:context>" if include_context else "")
+        + (f"<{fact_tag} name='{dei_prefix}:CurrentPeriodEndDateDEI'>{period}</{fact_tag}>" if include_dei else "")
+        + (f"<{fact_tag} name='{dei_prefix}:CurrentFiscalYearEndDateDEI'>{period}</{fact_tag}>" if include_dei else "")
+        + (f"<{fact_tag} name='{dei_prefix}:TypeOfCurrentPeriodDEI'>{quarter}</{fact_tag}>" if include_dei else "")
+        + (f"<{fact_tag} name='{dei_prefix}:DocumentTypeDEI'>{document_type}</{fact_tag}>" if include_dei else "")
+        +
         "</html>"
     )
 
 
-def _write_attachment_zip(path, candidates):
+def _write_attachment_zip(path, candidates, extension="htm"):
     with zipfile.ZipFile(path, "w") as zf:
         for index, content in enumerate(candidates):
             zf.writestr(
-                f"XBRLData/Attachment/030000{index}-acbs01-tse-acedjpfr-13320-2025-03-31-01-2025-05-14-ixbrl.htm",
+                f"XBRLData/Attachment/030000{index}-acbs01-tse-acedjpfr-13320-2025-03-31-01-2025-05-14-ixbrl.{extension}",
                 content,
             )
 
@@ -294,6 +309,40 @@ def test_attachment_ixbrl_metadata_without_internal_id(tmp_path):
         "ticker": "1332", "period": "2025-03-31", "quarter": "FY",
         "document_type": "attachment_xbrl", "internal_document_id": "",
     }
+
+
+def test_attachment_inline_extensions_and_prefix_independence(tmp_path):
+    for extension in ("htm", "html", "xhtml"):
+        path = tmp_path / f"attachment-{extension}.zip"
+        _write_attachment_zip(
+            path, [_attachment_ixbrl(dei_prefix="different_prefix")], extension
+        )
+        assert extract_actual_metadata_from_zip(str(path))["period"] == "2025-03-31"
+
+
+def test_attachment_plain_or_structurally_incomplete_html_is_rejected(tmp_path):
+    variants = [
+        "<html><body>plain explanation</body></html>",
+        _attachment_ixbrl(include_ix=False),
+        _attachment_ixbrl(include_context=False),
+        _attachment_ixbrl(include_dei=False),
+        _attachment_ixbrl(include_identifier=False),
+        _attachment_ixbrl(include_schema_ref=False),
+    ]
+    for index, content in enumerate(variants):
+        path = tmp_path / f"invalid-{index}.zip"
+        _write_attachment_zip(path, [content])
+        meta = extract_actual_metadata_from_zip(str(path))
+        assert not meta["period"] and not meta["quarter"]
+
+
+def test_attachment_unknown_dei_namespace_is_rejected(tmp_path):
+    path = tmp_path / "unknown-dei.zip"
+    _write_attachment_zip(path, [_attachment_ixbrl(dei_ns="https://example.test/dei")])
+
+    meta = extract_actual_metadata_from_zip(str(path))
+
+    assert meta["period"] == ""
 
 
 def test_attachment_ixbrl_conflicting_period_fails_closed(tmp_path):
@@ -329,6 +378,42 @@ def test_attachment_ixbrl_conflicting_ticker_fails_closed(tmp_path):
     meta = extract_actual_metadata_from_zip(str(path), "2025-03-31", "FY")
 
     assert meta["ticker"] == ""
+
+
+def test_attachment_ixbrl_conflicting_document_type_fails_closed(tmp_path):
+    path = tmp_path / "conflict-document.zip"
+    _write_attachment_zip(path, [
+        _attachment_ixbrl(),
+        _attachment_ixbrl(document_type="QuarterlyFinancialStatements_Consolidated_JP"),
+    ])
+    assert extract_actual_metadata_from_zip(str(path))["document_type"] == ""
+
+
+def test_attachment_internal_id_conflict_is_rejected(tmp_path):
+    path = tmp_path / "conflict-internal.zip"
+    with zipfile.ZipFile(path, "w") as zf:
+        for internal in ("20250521559959", "20250521559960"):
+            zf.writestr(
+                f"XBRLData/Attachment/tse-acedjpfr-13320-{internal}-ixbrl.htm",
+                _attachment_ixbrl(),
+            )
+    verdict = verify_zip_identity(
+        str(path), "20250521559959", "1332", "2025-03-31", "FY"
+    )
+    assert verdict.rejection_reason == "multiple_internal_document_ids"
+
+
+def test_attachment_xml_and_xbrl_are_not_reclassified_as_inline(tmp_path):
+    for extension in ("xml", "xbrl"):
+        path = tmp_path / f"instance-{extension}.zip"
+        _write_zip(path, ["2025-03-31"])
+        with zipfile.ZipFile(path, "a") as zf:
+            zf.writestr(f"XBRLData/Attachment/instance.{extension}", _attachment_ixbrl())
+        meta = extract_actual_metadata_from_zip(
+            str(path), expected_period="2025-03-31", expected_quarter="FY"
+        )
+        assert meta["internal_document_id"] == "20240101555555"
+        assert meta["ticker"] == "1234"
 
 
 def test_row51_diagnostic_zip_accepts_official_link_without_internal_id():

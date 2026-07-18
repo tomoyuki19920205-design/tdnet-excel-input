@@ -74,6 +74,14 @@ PRODUCTION_READY_IDENTITY_VERDICTS = frozenset({
     "official_linked_xbrl_match",
     "official_linked_xbrl_match_without_internal_id",
 })
+WITHOUT_INTERNAL_ID_VERDICT = "official_linked_xbrl_match_without_internal_id"
+WITHOUT_INTERNAL_ID_STATUS = "absent_in_artifact"
+WITHOUT_INTERNAL_ID_LINKAGE = "jquants_td_files_exact_discno"
+WITHOUT_INTERNAL_ID_VALUE_SOURCES = {
+    "ticker": "xbrli_identifier_sicc", "period": "dei",
+    "quarter": "dei", "document_type": "dei",
+    "internal_document_id": WITHOUT_INTERNAL_ID_STATUS,
+}
 OFFICIAL_HOSTS = frozenset({"www.release.tdnet.info", "release.tdnet.info"})
 RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 REDIRECT_STATUS = frozenset({301, 302, 303, 307, 308})
@@ -765,7 +773,7 @@ def load_provenance(zip_path: Path, provenance_path: Path) -> dict[str, object]:
         expected_quarter=str(payload["zip_internal_quarter"]),
     )
     expected_meta = {
-        "internal_document_id": str(payload["internal_document_id"]),
+        "internal_document_id": str(payload["internal_document_id"] or ""),
         "ticker": str(payload["zip_internal_ticker"]),
         "period": str(payload["zip_internal_period"]),
         "quarter": str(payload["zip_internal_quarter"]),
@@ -777,13 +785,25 @@ def load_provenance(zip_path: Path, provenance_path: Path) -> dict[str, object]:
     if payload.get("identity_status") == "DOWNLOAD_IDENTITY_VERIFIED":
         if verdict not in PRODUCTION_READY_IDENTITY_VERDICTS:
             raise FreshDownloaderStop(STOP_IDENTITY)
-    if verdict == "official_linked_xbrl_match_without_internal_id":
+    if verdict == WITHOUT_INTERNAL_ID_VERDICT:
         if (
-            payload.get("internal_document_id") != ""
+            payload.get("internal_document_id") is not None
             or meta["internal_document_id"] != ""
+            or payload.get("internal_document_id_status") != WITHOUT_INTERNAL_ID_STATUS
+            or payload.get("linkage_basis") != WITHOUT_INTERNAL_ID_LINKAGE
             or payload.get("source_route") != JQUANTS_SOURCE_ROUTE
+            or payload.get("td_files_type") != "x"
+            or payload.get("td_files_http_status") != 200
+            or payload.get("td_files_result_code") != "TD_FILES_OK"
+            or payload.get("xbrl_candidate_count") != 1
+            or payload.get("signed_url_received") is not True
+            or payload.get("file_http_status") != 200
             or payload.get("http_status") != 200
             or re.fullmatch(r"\d{14}", str(payload.get("requested_disclosure_no") or "")) is None
+            or payload.get("plan_classification") != "STANDARD_FRESH_DOWNLOAD"
+            or payload.get("auto_ready_allowed") is not True
+            or payload.get("quarantine_release_required") is not False
+            or payload.get("identity_value_sources") != WITHOUT_INTERNAL_ID_VALUE_SOURCES
         ):
             raise FreshDownloaderStop(STOP_IDENTITY)
     return payload
@@ -791,12 +811,30 @@ def load_provenance(zip_path: Path, provenance_path: Path) -> dict[str, object]:
 
 def is_production_ready_identity_result(payload: Mapping[str, object]) -> bool:
     """Return whether formally loaded provenance is eligible for production READY."""
-    return bool(
+    base_ready = bool(
         payload.get("identity_verdict") in PRODUCTION_READY_IDENTITY_VERDICTS
         and payload.get("identity_status") == "DOWNLOAD_IDENTITY_VERIFIED"
         and payload.get("plan_classification") == "STANDARD_FRESH_DOWNLOAD"
         and payload.get("auto_ready_allowed") is True
         and payload.get("quarantine_release_required") is False
+    )
+    if not base_ready:
+        return False
+    if payload.get("identity_verdict") != WITHOUT_INTERNAL_ID_VERDICT:
+        return True
+    return bool(
+        payload.get("internal_document_id") is None
+        and payload.get("internal_document_id_status") == WITHOUT_INTERNAL_ID_STATUS
+        and payload.get("linkage_basis") == WITHOUT_INTERNAL_ID_LINKAGE
+        and payload.get("source_route") == JQUANTS_SOURCE_ROUTE
+        and payload.get("td_files_type") == "x"
+        and payload.get("td_files_http_status") == 200
+        and payload.get("td_files_result_code") == "TD_FILES_OK"
+        and payload.get("xbrl_candidate_count") == 1
+        and payload.get("signed_url_received") is True
+        and payload.get("file_http_status") == 200
+        and re.fullmatch(r"\d{14}", str(payload.get("requested_disclosure_no") or ""))
+        and payload.get("identity_value_sources") == WITHOUT_INTERNAL_ID_VALUE_SOURCES
     )
 
 
@@ -1223,6 +1261,18 @@ def _download_one_jquants(
             "plan_classification": classification,
             "auto_ready_allowed": bool(verdict.passed and classification == "STANDARD_FRESH_DOWNLOAD"),
             "quarantine_release_required": classification == "QUARANTINE_FRESH_RECHECK",
+            "internal_document_id": None if not meta.get("internal_document_id") else meta["internal_document_id"],
+            "internal_document_id_status": WITHOUT_INTERNAL_ID_STATUS,
+            "linkage_basis": WITHOUT_INTERNAL_ID_LINKAGE,
+            "source_route": JQUANTS_SOURCE_ROUTE,
+            "td_files_result_code": resolution.evidence["result_code"],
+            "xbrl_candidate_count": resolution.evidence["xbrl_candidate_count"],
+            "requested_disclosure_no": requested,
+            "td_files_type": "x",
+            "td_files_http_status": resolution.evidence["http_status"],
+            "signed_url_received": resolution.evidence["signed_url_received"],
+            "file_http_status": downloaded.evidence["http_status"],
+            "identity_value_sources": dict(WITHOUT_INTERNAL_ID_VALUE_SOURCES),
         }
         auto_ready = is_production_ready_identity_result(readiness)
         if classification == "STANDARD_FRESH_DOWNLOAD" and not auto_ready:
@@ -1281,7 +1331,12 @@ def _download_one_jquants(
             "download_attempts": attempts,
             "zip_sha256": downloaded.sha256,
             "zip_size": downloaded.size,
-            "internal_document_id": meta.get("internal_document_id", ""),
+            "internal_document_id": None if verdict.verdict == WITHOUT_INTERNAL_ID_VERDICT else meta.get("internal_document_id", ""),
+            "internal_document_id_status": (
+                WITHOUT_INTERNAL_ID_STATUS if verdict.verdict == WITHOUT_INTERNAL_ID_VERDICT else "present_in_artifact"
+            ),
+            "linkage_basis": WITHOUT_INTERNAL_ID_LINKAGE,
+            "identity_value_sources": readiness["identity_value_sources"],
             "zip_internal_ticker": meta.get("ticker", ""),
             "zip_internal_period": meta.get("period", ""),
             "zip_internal_quarter": meta.get("quarter", ""),
@@ -1404,7 +1459,10 @@ def _result_from_verified_provenance(
         "zip_sha256": str(payload["zip_sha256"]),
         "identity_status": str(payload["identity_status"]),
         "identity_verdict": str(payload["identity_verdict"]),
-        "internal_document_id": str(payload["internal_document_id"]),
+        "internal_document_id": (
+            None if payload["internal_document_id"] is None
+            else str(payload["internal_document_id"])
+        ),
         "ticker": str(payload["zip_internal_ticker"]),
         "period": str(payload["zip_internal_period"]),
         "quarter": str(payload["zip_internal_quarter"]),

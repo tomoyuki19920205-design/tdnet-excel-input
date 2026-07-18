@@ -689,7 +689,7 @@ def apply_fresh_download_successes(
             internal_id = desired["artifact_internal_document_id"]
             verdict = desired["identity_verdict"]
             if (
-                (verdict == "official_linked_xbrl_match_without_internal_id" and internal_id != "")
+                (verdict == "official_linked_xbrl_match_without_internal_id" and internal_id is not None)
                 or (verdict != "official_linked_xbrl_match_without_internal_id" and internal_id in {None, ""})
             ):
                 raise FreshDownloadCASFailed("verified artifact internal identity is inconsistent")
