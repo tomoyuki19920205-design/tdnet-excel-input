@@ -682,10 +682,17 @@ def apply_fresh_download_successes(
                 "completed_at": timestamp,
             }
             if any(desired[column] in {None, ""} for column in (
-                "artifact_zip_sha256", "artifact_internal_document_id", "artifact_ticker",
+                "artifact_zip_sha256", "artifact_ticker",
                 "artifact_period", "artifact_quarter", "identity_verdict",
             )):
                 raise FreshDownloadCASFailed("verified artifact metadata is incomplete")
+            internal_id = desired["artifact_internal_document_id"]
+            verdict = desired["identity_verdict"]
+            if (
+                (verdict == "official_linked_xbrl_match_without_internal_id" and internal_id != "")
+                or (verdict != "official_linked_xbrl_match_without_internal_id" and internal_id in {None, ""})
+            ):
+                raise FreshDownloadCASFailed("verified artifact internal identity is inconsistent")
             if (
                 str(before.get("expected_period") or "") != str(desired["artifact_period"])
                 or str(before.get("expected_quarter") or "") != str(desired["artifact_quarter"])

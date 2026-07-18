@@ -72,6 +72,7 @@ PLAN_CLASSES = frozenset({"STANDARD_FRESH_DOWNLOAD", "QUARANTINE_FRESH_RECHECK"}
 PRODUCTION_READY_IDENTITY_VERDICTS = frozenset({
     "exact_document_id_match",
     "official_linked_xbrl_match",
+    "official_linked_xbrl_match_without_internal_id",
 })
 OFFICIAL_HOSTS = frozenset({"www.release.tdnet.info", "release.tdnet.info"})
 RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
@@ -751,7 +752,7 @@ def load_provenance(zip_path: Path, provenance_path: Path) -> dict[str, object]:
         "final_url", "downloaded_at", "downloaded_at_utc", "downloaded_at_jst", "http_status",
         "content_type", "content_length", "download_attempts", "zip_sha256", "zip_size",
         "internal_document_id", "zip_internal_ticker", "zip_internal_period",
-        "zip_internal_quarter", "document_type", "identity_status", "plan_classification",
+        "zip_internal_quarter", "document_type", "identity_verdict", "identity_status", "plan_classification",
         "auto_ready_allowed", "quarantine_release_required", "code_sha", "run_id",
         "download_tool_version", "error_code", "error_message",
     }
@@ -772,6 +773,19 @@ def load_provenance(zip_path: Path, provenance_path: Path) -> dict[str, object]:
     }
     if meta != expected_meta:
         raise FreshDownloaderStop(STOP_IDENTITY)
+    verdict = payload.get("identity_verdict")
+    if payload.get("identity_status") == "DOWNLOAD_IDENTITY_VERIFIED":
+        if verdict not in PRODUCTION_READY_IDENTITY_VERDICTS:
+            raise FreshDownloaderStop(STOP_IDENTITY)
+    if verdict == "official_linked_xbrl_match_without_internal_id":
+        if (
+            payload.get("internal_document_id") != ""
+            or meta["internal_document_id"] != ""
+            or payload.get("source_route") != JQUANTS_SOURCE_ROUTE
+            or payload.get("http_status") != 200
+            or re.fullmatch(r"\d{14}", str(payload.get("requested_disclosure_no") or "")) is None
+        ):
+            raise FreshDownloaderStop(STOP_IDENTITY)
     return payload
 
 

@@ -2,7 +2,7 @@
 
 ZIP identity 検証モジュール。
 
-2 つの合格経路:
+3 つの合格経路:
   経路A  exact_document_id_match
          ZIP ファイル名から抽出した内部書類 ID が requested_disclosure_no と完全一致する。
          trusted provenance 不要。
@@ -10,6 +10,10 @@ ZIP identity 検証モジュール。
   経路B  official_linked_xbrl_match
          内部 ID が異なる場合、J-Quants 公式取得経路で生成した TrustedProvenance のすべての
          条件を満たした場合に限り合格する。
+
+  経路C  official_linked_xbrl_match_without_internal_id
+         Attachment iXBRLに内部書類IDが存在しない場合でも、J-Quantsの開示番号完全一致、
+         ZIP SHA、ticker、period、quarter、document typeがすべて一致した場合に限り合格する。
 
 このモジュールは純粋関数 (副作用なし) であり、ネットワーク・DB への書き込みは行わない。
 秘密情報 (API token / signed URL / Authorization header) を保存・ログ出力しない。
@@ -22,6 +26,7 @@ import logging
 import os
 import re
 import zipfile
+from xml.etree import ElementTree
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
@@ -106,6 +111,93 @@ _ALPHA_INTERNAL_ID_FROM_SUMMARY_RE = re.compile(
     r"(?P<candidate>(?P<date>20\d{6})\d(?P<candidate_ticker>[A-Za-z0-9]{5}))"
     r"(?=[-_.])"
 )
+_ATTACHMENT_IXBRL_RE = re.compile(
+    r"(?:^|/)XBRLData/Attachment/[^/]+-ixbrl\.htm$", re.IGNORECASE
+)
+
+
+def _inline_fact_value(element: ElementTree.Element) -> str:
+    return "".join(element.itertext()).strip()
+
+
+def _inline_fact_name(element: ElementTree.Element) -> str:
+    return element.attrib.get("name", "").split(":")[-1]
+
+
+def _consensus(values: set[str], field_name: str) -> str:
+    if len(values) == 1:
+        return next(iter(values))
+    if len(values) > 1:
+        logger.warning(
+            "[ZIP_METADATA] Attachment iXBRL consensus conflict field=%s values=%s",
+            field_name, sorted(values),
+        )
+    return ""
+
+
+def _normalize_dei_quarter(value: str) -> str:
+    normalized = value.strip().upper().replace(" ", "")
+    return {
+        "FY": "FY", "4Q": "FY", "4": "FY",
+        "1Q": "1Q", "Q1": "1Q", "1": "1Q",
+        "2Q": "2Q", "Q2": "2Q", "2": "2Q",
+        "3Q": "3Q", "Q3": "3Q", "3": "3Q",
+    }.get(normalized, "")
+
+
+def _extract_attachment_ixbrl_metadata(
+    zf: zipfile.ZipFile, names: list[str]
+) -> dict[str, str]:
+    """Parse every Attachment iXBRL candidate and return consensus DEI identity."""
+    candidates = [name for name in names if _ATTACHMENT_IXBRL_RE.search(name)]
+    result = {"ticker": "", "period": "", "quarter": "", "document_type": ""}
+    if not candidates:
+        return result
+
+    tickers: set[str] = set()
+    current_periods: set[str] = set()
+    fiscal_year_ends: set[str] = set()
+    quarters: set[str] = set()
+    document_types: set[str] = set()
+
+    try:
+        for name in candidates:
+            match = re.search(r"tse-[^-]+-([A-Za-z0-9]{4,5})-", name)
+            if match:
+                tickers.add(_normalize_ticker(match.group(1)))
+
+            root = ElementTree.fromstring(zf.read(name))
+            for element in root.iter():
+                local_tag = element.tag.rsplit("}", 1)[-1]
+                value = _inline_fact_value(element)
+                if local_tag == "identifier" and "sicc" in element.attrib.get("scheme", "").lower():
+                    if value:
+                        tickers.add(_normalize_ticker(value))
+                    continue
+
+                fact_name = _inline_fact_name(element)
+                if fact_name == "CurrentPeriodEndDateDEI" and value:
+                    current_periods.add(value)
+                elif fact_name == "CurrentFiscalYearEndDateDEI" and value:
+                    fiscal_year_ends.add(value)
+                elif fact_name == "TypeOfCurrentPeriodDEI" and value:
+                    quarter = _normalize_dei_quarter(value)
+                    if quarter:
+                        quarters.add(quarter)
+                elif fact_name == "DocumentTypeDEI" and value:
+                    document_types.add(value)
+    except (ElementTree.ParseError, KeyError, OSError, UnicodeError) as exc:
+        logger.warning("[ZIP_METADATA] Attachment iXBRL parse failed: %s", exc)
+        return result
+
+    result["ticker"] = _consensus(tickers, "ticker")
+    result["period"] = _consensus(
+        current_periods if current_periods else fiscal_year_ends, "period"
+    )
+    result["quarter"] = _consensus(quarters, "quarter")
+    if _consensus(document_types, "document_type"):
+        result["document_type"] = "attachment_xbrl"
+    return result
 
 
 def _extract_disclosure_no_from_str(value: str) -> Optional[str]:
@@ -305,6 +397,12 @@ def extract_actual_metadata_from_zip(
                     and ("AnnualMember" in content or "YearEndMember" in content)
                 ):
                     meta["quarter"] = "FY"
+            else:
+                attachment_meta = _extract_attachment_ixbrl_metadata(zf, names)
+                if any(_ATTACHMENT_IXBRL_RE.search(name) for name in names):
+                    # Attachment candidates are evaluated as one identity set.  Do not
+                    # retain a filename-derived value when their consensus conflicts.
+                    meta.update(attachment_meta)
     except Exception as e:
         logger.warning("[ZIP_METADATA] Failed to extract metadata from zip: %s", e)
         
@@ -413,8 +511,8 @@ def verify_zip_identity(
     )
     
     # 抽出できない項目があればexpected値で補わずSTOP (不合格判定)
-    if (not meta["ticker"] or not meta["period"] or not meta["quarter"] or 
-            not meta["document_type"] or not meta["internal_document_id"]):
+    if (not meta["ticker"] or not meta["period"] or not meta["quarter"] or
+            not meta["document_type"]):
         logger.warning(
             "[ZIP_IDENTITY] zip_identity_rejected reason=metadata_unresolved requested=%s got=%s",
             requested_disclosure_no, meta,
@@ -518,6 +616,15 @@ def verify_zip_identity(
         )
         return _FAIL("official_request_failed", internal_id, sha)
 
+    if prov.requested_file_type != "x":
+        return _FAIL("provenance_file_type_mismatch", internal_id, sha)
+    if prov.response_status != 200:
+        return _FAIL("provenance_response_status_mismatch", internal_id, sha)
+    if prov.downloaded_size != os.path.getsize(zip_path):
+        return _FAIL("provenance_size_mismatch", internal_id, sha)
+    if not prov.resolved_by_function:
+        return _FAIL("provenance_resolver_missing", internal_id, sha)
+
     # ── J-Quants 公式来歴情報の偽装防止照合 ──
     # TrustedProvenance 内の属性が、ZIP 実体から抽出した値と完全一致することを確認
     if prov.ticker != meta["ticker"]:
@@ -557,6 +664,15 @@ def verify_zip_identity(
         return _FAIL("internal_id_mismatch", internal_id, sha)
 
     # ── 全条件一致: 経路B PASS ────────────────────────────────
+    if not internal_id:
+        logger.info(
+            "[ZIP_IDENTITY] zip_identity_verified "
+            "verdict=official_linked_xbrl_match_without_internal_id "
+            "requested=%s ticker=%s period=%s quarter=%s doctype=%s sha256=%s",
+            requested_disclosure_no, prov.ticker, prov.period, prov.quarter,
+            prov.document_type, sha,
+        )
+        return _PASS("official_linked_xbrl_match_without_internal_id", "", sha)
     logger.info(
         "[ZIP_IDENTITY] zip_identity_verified verdict=official_linked_xbrl_match "
         "requested=%s internal=%s ticker=%s period=%s quarter=%s doctype=%s sha256=%s",

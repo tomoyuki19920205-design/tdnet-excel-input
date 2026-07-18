@@ -223,6 +223,49 @@ def test_fresh_download_success_updates_dedicated_rows_and_preserves_filings(tmp
     conn.close()
 
 
+def test_fresh_download_success_accepts_explicit_verified_missing_internal_id(tmp_path):
+    conn = _db(tmp_path)
+    before, results = _fresh_download_fixture(conn)
+    results[0]["internal_document_id"] = ""
+    results[0]["identity_verdict"] = "official_linked_xbrl_match_without_internal_id"
+
+    readback = apply_fresh_download_successes(
+        conn, campaign_id="c1", before_rows=before, verified_results=results,
+        expected_count=5, run_id="run-1", journal_path="journal.json",
+    )
+
+    assert readback[0]["artifact_internal_document_id"] == ""
+    assert readback[0]["identity_verdict"] == "official_linked_xbrl_match_without_internal_id"
+    conn.close()
+
+
+@pytest.mark.parametrize(
+    ("internal_id", "verdict"),
+    [
+        ("", "official_linked_xbrl_match"),
+        ("20260101720301", "official_linked_xbrl_match_without_internal_id"),
+    ],
+)
+def test_fresh_download_success_rejects_inconsistent_internal_identity(
+    tmp_path, internal_id, verdict
+):
+    conn = _db(tmp_path)
+    before, results = _fresh_download_fixture(conn)
+    results[0]["internal_document_id"] = internal_id
+    results[0]["identity_verdict"] = verdict
+
+    with pytest.raises(FreshDownloadCASFailed, match="internal identity"):
+        apply_fresh_download_successes(
+            conn, campaign_id="c1", before_rows=before, verified_results=results,
+            expected_count=5, run_id="run-1", journal_path="journal.json",
+        )
+
+    assert conn.execute(
+        "SELECT COUNT(*) FROM campaign_fresh_downloads WHERE fresh_status='COMPLETE'"
+    ).fetchone()[0] == 0
+    conn.close()
+
+
 def test_fresh_download_cas_mismatch_rolls_back_all_rows(tmp_path):
     conn = _db(tmp_path)
     before, results = _fresh_download_fixture(conn)

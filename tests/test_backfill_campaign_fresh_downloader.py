@@ -263,6 +263,7 @@ def test_exact_identity_is_auto_ready(tmp_path):
     [
         ({"identity_verdict": "exact_document_id_match"}, True),
         ({"identity_verdict": "official_linked_xbrl_match"}, True),
+        ({"identity_verdict": "official_linked_xbrl_match_without_internal_id"}, True),
         ({"identity_verdict": ""}, False),
         ({"identity_verdict": None}, False),
         ({"identity_verdict": "unknown"}, False),
@@ -552,6 +553,99 @@ def test_provenance_contains_required_schema_fields(tmp_path):
     assert payload["schema_version"] == "1"
     assert payload["code_sha"] == CODE_SHA and payload["download_tool_version"] == downloader.TOOL_VERSION
     assert payload["download_attempts"][0]["attempt_number"] == 1
+
+
+def test_row51_attachment_formal_loader_is_production_ready(tmp_path):
+    source = Path(
+        r"C:\tmp\v4-fresh-row51-identity-audit-20260718-100133"
+        r"\diagnostic-download\row51-xbrl.zip"
+    )
+    assert source.is_file()
+    assert _sha(source) == "cb555a7cad60fa76e029b94aa4f2d2904e8f4a9691e465c45e4145a0e0f0a5f5"
+    zip_path = tmp_path / "xbrl.zip"
+    shutil.copyfile(source, zip_path)
+    payload = {
+        "schema_version": "1", "campaign_id": CAMPAIGN_ID,
+        "manifest_row_id": "0000000051", "requested_disclosure_no": "20250521559959",
+        "company_code": "13320", "normalized_company_code": "1332",
+        "source_url": "jquants://td-files/20250521559959/x",
+        "normalized_xbrl_url": "jquants://td-files/20250521559959/x",
+        "source_route": "JQUANTS_TD_FILES", "final_url": None,
+        "downloaded_at": "2026-07-18T01:00:00+00:00",
+        "downloaded_at_utc": "2026-07-18T01:00:00+00:00",
+        "downloaded_at_jst": "2026-07-18T10:00:00+09:00", "http_status": 200,
+        "content_type": "application/zip", "content_length": str(zip_path.stat().st_size),
+        "download_attempts": [], "zip_sha256": _sha(zip_path), "zip_size": zip_path.stat().st_size,
+        "internal_document_id": "", "zip_internal_ticker": "1332",
+        "zip_internal_period": "2025-03-31", "zip_internal_quarter": "FY",
+        "document_type": "attachment_xbrl", "identity_status": "DOWNLOAD_IDENTITY_VERIFIED",
+        "identity_verdict": "official_linked_xbrl_match_without_internal_id",
+        "plan_classification": "STANDARD_FRESH_DOWNLOAD", "auto_ready_allowed": True,
+        "quarantine_release_required": False, "code_sha": CODE_SHA, "run_id": "row51",
+        "download_tool_version": "1", "error_code": None, "error_message": None,
+    }
+    provenance_path = tmp_path / "provenance.json"
+    provenance_path.write_bytes(downloader._json_bytes(payload))
+
+    loaded = downloader.load_provenance(zip_path, provenance_path)
+
+    assert loaded["internal_document_id"] == ""
+    assert downloader.is_production_ready_identity_result(loaded) is True
+
+
+def test_formal_loader_rejects_unknown_verified_verdict(tmp_path):
+    env = _prepare(tmp_path)
+    body = _zip_bytes(internal=env["rows"][0]["requested_disclosure_no"])
+    _run(env, FakeSession([FakeResponse(body=body)]))
+    _, zip_path, provenance_path = _target(env)
+    payload = json.loads(provenance_path.read_text())
+    payload["identity_verdict"] = "unknown"
+    provenance_path.write_bytes(downloader._json_bytes(payload))
+
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_IDENTITY):
+        downloader.load_provenance(zip_path, provenance_path)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("source_route", "STATIC_URL"),
+    ("http_status", 206),
+    ("requested_disclosure_no", "not-a-disc-no"),
+])
+def test_row51_missing_internal_id_formal_loader_requires_official_linkage(
+    tmp_path, field, value
+):
+    source = Path(
+        r"C:\tmp\v4-fresh-row51-identity-audit-20260718-100133"
+        r"\diagnostic-download\row51-xbrl.zip"
+    )
+    zip_path = tmp_path / "xbrl.zip"
+    shutil.copyfile(source, zip_path)
+    payload = {
+        "schema_version": "1", "campaign_id": CAMPAIGN_ID,
+        "manifest_row_id": "0000000051", "requested_disclosure_no": "20250521559959",
+        "company_code": "13320", "normalized_company_code": "1332",
+        "source_url": "jquants://td-files/20250521559959/x",
+        "normalized_xbrl_url": "jquants://td-files/20250521559959/x",
+        "source_route": "JQUANTS_TD_FILES", "final_url": None,
+        "downloaded_at": "2026-07-18T01:00:00+00:00",
+        "downloaded_at_utc": "2026-07-18T01:00:00+00:00",
+        "downloaded_at_jst": "2026-07-18T10:00:00+09:00", "http_status": 200,
+        "content_type": "application/zip", "content_length": str(zip_path.stat().st_size),
+        "download_attempts": [], "zip_sha256": _sha(zip_path), "zip_size": zip_path.stat().st_size,
+        "internal_document_id": "", "zip_internal_ticker": "1332",
+        "zip_internal_period": "2025-03-31", "zip_internal_quarter": "FY",
+        "document_type": "attachment_xbrl", "identity_status": "DOWNLOAD_IDENTITY_VERIFIED",
+        "identity_verdict": "official_linked_xbrl_match_without_internal_id",
+        "plan_classification": "STANDARD_FRESH_DOWNLOAD", "auto_ready_allowed": True,
+        "quarantine_release_required": False, "code_sha": CODE_SHA, "run_id": "row51",
+        "download_tool_version": "1", "error_code": None, "error_message": None,
+    }
+    payload[field] = value
+    provenance_path = tmp_path / "provenance.json"
+    provenance_path.write_bytes(downloader._json_bytes(payload))
+
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_IDENTITY):
+        downloader.load_provenance(zip_path, provenance_path)
 
 
 def test_403_preserves_status_reason_and_safe_headers(tmp_path):
