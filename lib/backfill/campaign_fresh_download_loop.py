@@ -23,6 +23,12 @@ from lib.backfill.campaign_fresh_downloader import (
     manifest_semantic_sha256,
     sha256_file,
 )
+from lib.backfill.campaign_fresh_auto_quarantine import (
+    ALLOWED_CONTRACTS,
+    FreshAutoQuarantineStop,
+    prospective_limit_reason,
+    verify_evidence_tree,
+)
 from lib.backfill.campaign_state import SCHEMA_VERSION, get_schema_version, table_exists
 from tools.backfill_campaign_fresh_state_migrate import cache_tree_digest
 
@@ -32,8 +38,12 @@ STOP_CHILD = "STOP_V4_FRESH_LOOP_CHILD_FAILURE"
 STOP_POSTFLIGHT = "STOP_V4_FRESH_LOOP_CHILD_POSTFLIGHT_FAILED"
 STOP_EXTERNAL_DB = "STOP_V4_FRESH_LOOP_DB_CHANGED_BETWEEN_CHUNKS"
 STOP_EXTERNAL_CACHE = "STOP_V4_FRESH_LOOP_CACHE_CHANGED_BETWEEN_CHUNKS"
+STOP_UNKNOWN = "STOP_V4_FRESH_LOOP_UNKNOWN_FAILURE"
+STOP_QUARANTINE = "STOP_V4_FRESH_LOOP_AUTO_QUARANTINE_FAILED"
+STOP_QUARANTINE_LIMIT = "STOP_V4_FRESH_LOOP_AUTO_QUARANTINE_LIMIT"
 PARENT_NAME = re.compile(r"^v4-campaign-production-loop-\d{8}-\d{6}$")
 CHILD_NAME = re.compile(r"^v4-campaign-production-download-\d{8}-\d{6}$")
+QUARANTINE_NAME = re.compile(r"^v4-fresh-quarantine-\d{8}-\d{6}$")
 ELIGIBLE_STATUSES = ("NOT_STARTED", "FAILED_RETRYABLE")
 
 
@@ -183,6 +193,134 @@ def _verify_artifacts(rows: Sequence[Mapping[str, object]]) -> dict[str, object]
     return {"accepted": len(rows), "production_ready": len(rows), "identity_verdicts": dict(verdicts)}
 
 
+def _cache_inventory(root: Path) -> dict[str, dict[str, object]]:
+    return {
+        path.relative_to(root).as_posix(): {"size": path.stat().st_size, "sha256": sha256_file(path)}
+        for path in sorted(root.rglob("*")) if path.is_file()
+    }
+
+
+def _verify_failure_cache(
+    before: Mapping[str, Mapping[str, object]], after: Mapping[str, Mapping[str, object]],
+    selected: Sequence[Mapping[str, object]], failed_row_id: str, cache_root: Path,
+) -> dict[str, object]:
+    if any(path not in after or after[path] != value for path, value in before.items()):
+        raise FreshDownloadLoopStop(STOP_EXTERNAL_CACHE)
+    allowed: set[str] = set()
+    accepted = 0
+    for row in selected:
+        row_id = str(row["manifest_row_id"])
+        zip_path = Path(str(row["target_zip_path"])); provenance_path = Path(str(row["target_provenance_path"]))
+        try:
+            allowed.update((zip_path.relative_to(cache_root).as_posix(), provenance_path.relative_to(cache_root).as_posix()))
+        except ValueError as exc:
+            raise FreshDownloadLoopStop(STOP_EXTERNAL_CACHE) from exc
+        if zip_path.exists() != provenance_path.exists():
+            raise FreshDownloadLoopStop(STOP_EXTERNAL_CACHE)
+        if zip_path.is_file():
+            if row_id == failed_row_id:
+                raise FreshDownloadLoopStop(STOP_EXTERNAL_CACHE)
+            payload = load_provenance(zip_path, provenance_path)
+            if not is_production_ready_identity_result(payload) or payload.get("manifest_row_id") != row_id:
+                raise FreshDownloadLoopStop(STOP_EXTERNAL_CACHE)
+            accepted += 1
+    added = set(after) - set(before)
+    if not added <= allowed:
+        raise FreshDownloadLoopStop(STOP_EXTERNAL_CACHE)
+    return {"added_files": len(added), "accepted_artifact_pairs": accepted}
+
+
+def _fresh_row(campaign_db: Path, campaign_id: str, row_id: str) -> dict[str, object]:
+    conn = _connect_ro(campaign_db)
+    try:
+        row = conn.execute(
+            "SELECT f.*,c.requested_disclosure_no FROM campaign_fresh_downloads f "
+            "JOIN campaign_filings c USING(campaign_id,manifest_row_id) "
+            "WHERE f.campaign_id=? AND f.manifest_row_id=?", (campaign_id, row_id),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        raise FreshDownloadLoopStop(STOP_UNKNOWN)
+    return dict(row)
+
+
+def _quarantine_postflight(
+    campaign_db: Path, campaign_id: str, row_id: str,
+    before: Mapping[str, object], contract: tuple[str, str, str, int],
+) -> dict[str, object]:
+    conn = _connect_ro(campaign_db)
+    try:
+        row = conn.execute(
+            "SELECT * FROM campaign_fresh_downloads WHERE campaign_id=? AND manifest_row_id=?",
+            (campaign_id, row_id),
+        ).fetchone()
+        filings = _rows_digest(conn, "campaign_filings", campaign_id)
+        non_target = _rows_digest(conn, "campaign_fresh_downloads", campaign_id, {row_id})
+        integrity = str(conn.execute("PRAGMA integrity_check").fetchone()[0])
+        foreign_keys = len(conn.execute("PRAGMA foreign_key_check").fetchall())
+    finally:
+        conn.close()
+    current = dict(row) if row is not None else {}
+    valid = (
+        current.get("fresh_status") == "QUARANTINED"
+        and current.get("last_error_code") == contract[0]
+        and current.get("last_error_stage") == contract[1]
+        and filings == before["campaign_filings_digest"]
+        and non_target == before["non_target_fresh_digest"]
+        and integrity == "ok" and foreign_keys == 0
+    )
+    return {"valid": valid, "row": current, "campaign_filings_unchanged": filings == before["campaign_filings_digest"],
+            "non_target_fresh_unchanged": non_target == before["non_target_fresh_digest"],
+            "integrity": integrity, "foreign_keys": foreign_keys}
+
+
+def _known_child_failure(
+    *, child_journal: Mapping[str, object], child_journal_path: Path,
+    campaign_db: Path, campaign_id: str, selected: Sequence[Mapping[str, object]],
+    expected_db_sha: str, manifest_path: Path, manifest_sha: str,
+) -> dict[str, object]:
+    if child_journal.get("current_phase") != "FAILED":
+        raise FreshDownloadLoopStop(STOP_UNKNOWN)
+    failed = [row for row in child_journal.get("rows", {}).values()
+              if isinstance(row, Mapping) and row.get("failure_evidence")]
+    if len(failed) != 1:
+        raise FreshDownloadLoopStop(STOP_UNKNOWN)
+    row_journal = failed[0]; evidence = row_journal["failure_evidence"]
+    if not isinstance(evidence, Mapping):
+        raise FreshDownloadLoopStop(STOP_UNKNOWN)
+    payload = verify_evidence_tree(Path(str(evidence["path"])), str(evidence["tree_sha256"]))
+    failure_payload = payload.get("failure")
+    if not isinstance(failure_payload, Mapping):
+        raise FreshDownloadLoopStop(STOP_UNKNOWN)
+    contract = (
+        str(row_journal.get("failure_code") or ""), str(row_journal.get("failure_stage") or ""),
+        str(row_journal.get("source_route") or ""), int(row_journal.get("http_status") or 0),
+    )
+    row_id = str(payload.get("manifest_row_id") or "")
+    expected = next((row for row in selected if str(row["manifest_row_id"]) == row_id), None)
+    if (
+        contract not in ALLOWED_CONTRACTS or expected is None
+        or payload.get("campaign_id") != campaign_id
+        or payload.get("requested_disclosure_no") != expected["requested_disclosure_no"]
+        or payload.get("campaign_db_start_sha256") != expected_db_sha
+        or payload.get("manifest_path") != str(manifest_path)
+        or payload.get("manifest_sha256") != manifest_sha
+        or payload.get("journal_path") != str(child_journal_path)
+        or tuple(failure_payload.get(key) for key in ("failure_code", "failure_stage", "source_route", "http_status")) != contract
+    ):
+        raise FreshDownloadLoopStop(STOP_UNKNOWN)
+    current = _fresh_row(campaign_db, campaign_id, row_id)
+    if (
+        sha256_file(campaign_db) != expected_db_sha or current.get("fresh_status") != "NOT_STARTED"
+        or int(current.get("attempt_count") or 0) != 0
+        or any(current.get(key) is not None for key in (
+            "artifact_zip_sha256", "artifact_internal_document_id", "completed_at"))
+    ):
+        raise FreshDownloadLoopStop(STOP_UNKNOWN)
+    return {"row": current, "contract": contract, "evidence": evidence, "payload": payload}
+
+
 def _validate_parent_path(path: Path) -> None:
     temp_roots = {Path(tempfile.gettempdir()).resolve(), Path("C:/tmp").resolve()}
     try:
@@ -226,6 +364,16 @@ def run_loop(
     runtime_checker: Callable[[Path], Mapping[str, object]] = check_production_runtime,
     idle_minutes_provider: Callable[[], float] = default_idle_minutes,
     child_output_provider: Callable[[int], Path] | None = None,
+    quarantine_output_provider: Callable[[int], Path] | None = None,
+    quarantine_runner: Callable[[Sequence[str]], subprocess.CompletedProcess[str]] | None = None,
+    auto_quarantine_known_defects: bool = False,
+    confirm_auto_quarantine_known_defects: bool = False,
+    max_auto_quarantines: int | None = None,
+    confirm_max_auto_quarantines: int | None = None,
+    max_consecutive_auto_quarantines: int | None = None,
+    confirm_max_consecutive_auto_quarantines: int | None = None,
+    max_auto_quarantine_rate_percent: int | None = None,
+    confirm_max_auto_quarantine_rate_percent: int | None = None,
     python_executable: str = sys.executable,
 ) -> dict[str, object]:
     if (not apply or not production_apply or source_route != JQUANTS_SOURCE_ROUTE or chunk_size != 100
@@ -233,19 +381,52 @@ def run_loop(
             or min_idle_window_minutes < 20 or confirm_campaign_id != campaign_id
             or confirm_production_cache_root != str(cache_root)):
         raise FreshDownloadLoopStop(STOP_GUARD)
+    if auto_quarantine_known_defects:
+        if (
+            not confirm_auto_quarantine_known_defects
+            or max_auto_quarantines != confirm_max_auto_quarantines
+            or max_consecutive_auto_quarantines != confirm_max_consecutive_auto_quarantines
+            or max_auto_quarantine_rate_percent != confirm_max_auto_quarantine_rate_percent
+            or not isinstance(max_auto_quarantines, int) or not 1 <= max_auto_quarantines <= 10000
+            or not isinstance(max_consecutive_auto_quarantines, int)
+            or not 1 <= max_consecutive_auto_quarantines <= 100
+            or not isinstance(max_auto_quarantine_rate_percent, int)
+            or not 1 <= max_auto_quarantine_rate_percent <= 50
+        ):
+            raise FreshDownloadLoopStop(STOP_GUARD)
+    elif (
+        confirm_auto_quarantine_known_defects
+        or any(value is not None for value in (
+            max_auto_quarantines, confirm_max_auto_quarantines,
+            max_consecutive_auto_quarantines, confirm_max_consecutive_auto_quarantines,
+            max_auto_quarantine_rate_percent, confirm_max_auto_quarantine_rate_percent,
+        ))
+    ):
+        raise FreshDownloadLoopStop(STOP_GUARD)
     _validate_parent_path(parent_output_dir)
     if not campaign_db.is_file() or not download_plan.is_file() or not cache_root.is_dir():
         raise FreshDownloadLoopStop(STOP_GUARD)
     parent_output_dir.mkdir()
     for name in ("chunks", "manifests", "audit"):
         (parent_output_dir / name).mkdir()
-    journal: dict[str, object] = {"phase": "CREATED", "campaign_id": campaign_id, "started_at": _now(), "finished_at": None, "chunks": []}
+    journal: dict[str, object] = {
+        "phase": "CREATED", "campaign_id": campaign_id, "started_at": _now(),
+        "finished_at": None, "chunks": [], "quarantines": [], "phase_history": ["CREATED"],
+        "auto_quarantine_enabled": auto_quarantine_known_defects,
+    }
     journal_path = parent_output_dir / "journal.json"
     atomic_write_json(journal_path, journal)
     expected_db_sha = sha256_file(campaign_db)
     expected_cache_digest = cache_tree_digest(cache_root)
     plan_sha = sha256_file(download_plan)
-    for number in range(1, max_chunks + 1):
+    successful_chunks = 0
+    child_launches = 0
+    auto_quarantines = 0
+    consecutive_quarantines = 0
+    completed_in_run = 0
+    quarantine_exec = quarantine_runner or child_runner
+    while successful_chunks < max_chunks:
+        number = successful_chunks + 1
         runtime = dict(runtime_checker(repo_root))
         idle = float(idle_minutes_provider())
         if idle < min_idle_window_minutes:
@@ -261,14 +442,19 @@ def run_loop(
             journal.update(phase="COMPLETE", finished_at=_now(), campaign_completed=True)
             atomic_write_json(journal_path, journal)
             break
+        child_launches += 1
         ids = [str(row["manifest_row_id"]) for row in selected]
         before = _db_baseline(campaign_db, campaign_id, set(ids))
         payload = _manifest(selected, campaign_id)
-        manifest_path = parent_output_dir / "manifests" / f"chunk-{number:04d}.json"
+        manifest_name = (
+            f"chunk-{number:04d}.json" if child_launches == number
+            else f"chunk-{number:04d}-launch-{child_launches:04d}.json"
+        )
+        manifest_path = parent_output_dir / "manifests" / manifest_name
         atomic_write_json(manifest_path, payload)
         manifest_sha = sha256_file(manifest_path)
         semantic_sha = manifest_semantic_sha256(payload["rows"])
-        child_output = child_output_provider(number) if child_output_provider else Path("C:/tmp") / f"v4-campaign-production-download-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        child_output = child_output_provider(child_launches) if child_output_provider else Path("C:/tmp") / f"v4-campaign-production-download-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         if child_output.exists() or not CHILD_NAME.fullmatch(child_output.name):
             raise FreshDownloadLoopStop(STOP_PATH)
         n = len(selected)
@@ -282,13 +468,15 @@ def run_loop(
             "--source-route", source_route, "--confirm-production-cache-root", str(cache_root),
             "--confirm-campaign-id", campaign_id, "--apply", "--production-apply"]
         journal["phase"] = "RUNNING"
-        chunk = {"chunk_number": number, "first": ids[0], "last": ids[-1], "count": n,
+        chunk = {"chunk_number": number, "child_launch_number": child_launches,
+                 "first": ids[0], "last": ids[-1], "count": n,
                  "manifest": str(manifest_path), "manifest_byte_sha256": manifest_sha,
                  "manifest_semantic_sha256": semantic_sha, "db_start_sha256": expected_db_sha,
                  "cache_start_digest": expected_cache_digest, "child_output": str(child_output),
                  "runtime": runtime, "idle_minutes": idle, "started_at": _now()}
         journal["chunks"].append(chunk)
         atomic_write_json(journal_path, journal)
+        cache_inventory_before = _cache_inventory(cache_root)
         proc = child_runner(command)
         chunk["child_exit_code"] = int(proc.returncode)
         chunk["child_stdout_sha256"] = hashlib.sha256((proc.stdout or "").encode()).hexdigest()
@@ -297,10 +485,123 @@ def run_loop(
         if proc.returncode != 0:
             child_journal = json.loads(child_journal_path.read_text(encoding="utf-8")) if child_journal_path.is_file() else {}
             chunk.update(finished_at=_now(), failure_code=child_journal.get("failure_code"), child_phase=child_journal.get("current_phase"))
-            journal.update(phase="STOPPED_CHILD_FAILURE", finished_at=_now(), failure_chunk=number)
+            if not auto_quarantine_known_defects:
+                journal.update(phase="STOPPED_CHILD_FAILURE", finished_at=_now(), failure_chunk=number)
+                atomic_write_json(journal_path, journal)
+                atomic_write_json(parent_output_dir / "summary.json", {"final_judgment": STOP_CHILD, "chunks_started": child_launches})
+                raise FreshDownloadLoopStop(STOP_CHILD)
+            try:
+                known = _known_child_failure(
+                    child_journal=child_journal, child_journal_path=child_journal_path,
+                    campaign_db=campaign_db, campaign_id=campaign_id, selected=selected,
+                    expected_db_sha=expected_db_sha, manifest_path=manifest_path,
+                    manifest_sha=manifest_sha,
+                )
+                failure_cache = _verify_failure_cache(
+                    cache_inventory_before, _cache_inventory(cache_root), selected,
+                    str(known["row"]["manifest_row_id"]), cache_root,
+                )
+            except (FreshAutoQuarantineStop, FreshDownloadLoopStop, OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+                journal.update(phase="STOPPED_UNKNOWN_FAILURE", finished_at=_now(), failure_chunk=number)
+                atomic_write_json(journal_path, journal)
+                atomic_write_json(parent_output_dir / "summary.json", {
+                    "final_judgment": STOP_UNKNOWN, "child_launches": child_launches,
+                    "successful_chunks": successful_chunks, "unknown_failures": 1,
+                })
+                raise FreshDownloadLoopStop(STOP_UNKNOWN) from exc
+            limit_reason = prospective_limit_reason(
+                auto_quarantines=auto_quarantines, consecutive=consecutive_quarantines,
+                completed_in_run=completed_in_run,
+                max_auto_quarantines=max_auto_quarantines,
+                max_consecutive_quarantines=max_consecutive_auto_quarantines,
+                max_quarantine_rate_percent=max_auto_quarantine_rate_percent,
+            )
+            if limit_reason:
+                journal.update(phase="STOPPED_QUARANTINE_LIMIT", finished_at=_now(), limit_reason=limit_reason)
+                atomic_write_json(journal_path, journal)
+                atomic_write_json(parent_output_dir / "summary.json", {
+                    "final_judgment": STOP_QUARANTINE_LIMIT, "limit_reason": limit_reason,
+                    "child_launches": child_launches, "auto_quarantines": auto_quarantines,
+                })
+                raise FreshDownloadLoopStop(STOP_QUARANTINE_LIMIT)
+            journal["phase"] = "AUTO_QUARANTINE_PENDING"
+            journal["phase_history"].append("AUTO_QUARANTINE_PENDING")
             atomic_write_json(journal_path, journal)
-            atomic_write_json(parent_output_dir / "summary.json", {"final_judgment": STOP_CHILD, "chunks_started": number})
-            raise FreshDownloadLoopStop(STOP_CHILD)
+            runtime_checker(repo_root)
+            idle = float(idle_minutes_provider())
+            if idle < min_idle_window_minutes:
+                journal.update(phase="STOPPED_IDLE_WINDOW", finished_at=_now(), idle_minutes=idle)
+                atomic_write_json(journal_path, journal)
+                break
+            if sha256_file(campaign_db) != expected_db_sha:
+                raise FreshDownloadLoopStop(STOP_EXTERNAL_DB)
+            expected_cache_digest = cache_tree_digest(cache_root)
+            row = known["row"]; contract = known["contract"]; evidence = known["evidence"]
+            quarantine_before = _db_baseline(
+                campaign_db, campaign_id, {str(row["manifest_row_id"])},
+            )
+            quarantine_number = auto_quarantines + 1
+            quarantine_output = (
+                quarantine_output_provider(quarantine_number) if quarantine_output_provider
+                else Path("C:/tmp") / f"v4-fresh-quarantine-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            )
+            if quarantine_output.exists() or QUARANTINE_NAME.fullmatch(quarantine_output.name) is None:
+                raise FreshDownloadLoopStop(STOP_PATH)
+            quarantine_command = [
+                python_executable, "-B", "-m", "tools.backfill_campaign_fresh_quarantine",
+                "--campaign-db", str(campaign_db), "--campaign-db-sha256", expected_db_sha,
+                "--campaign-id", campaign_id, "--manifest-row-id", str(row["manifest_row_id"]),
+                "--requested-document-id", str(row["requested_disclosure_no"]),
+                "--expected-status", "NOT_STARTED", "--expected-attempt-count", "0",
+                "--reason-code", contract[0], "--failure-stage", contract[1],
+                "--source-route", contract[2], "--http-status", str(contract[3]),
+                "--evidence-path", str(evidence["path"]),
+                "--evidence-sha256", str(evidence["tree_sha256"]),
+                "--output-dir", str(quarantine_output), "--confirm-campaign-id", campaign_id,
+                "--confirm-manifest-row-id", str(row["manifest_row_id"]),
+                "--apply", "--production-apply",
+            ]
+            event = {
+                "manifest_row_id": row["manifest_row_id"], "requested_disclosure_no": row["requested_disclosure_no"],
+                "contract": list(contract), "evidence": evidence, "child_output": str(child_output),
+                "quarantine_output": str(quarantine_output), "cache_postflight": failure_cache,
+                "started_at": _now(), "phases": ["AUTO_QUARANTINE_PENDING", "AUTO_QUARANTINING"],
+            }
+            journal["quarantines"].append(event)
+            journal["phase"] = "AUTO_QUARANTINING"
+            journal["phase_history"].append("AUTO_QUARANTINING")
+            atomic_write_json(journal_path, journal)
+            quarantine_proc = quarantine_exec(quarantine_command)
+            quarantine_journal_path = quarantine_output / "journal.json"
+            quarantine_journal = json.loads(quarantine_journal_path.read_text(encoding="utf-8")) if quarantine_journal_path.is_file() else {}
+            quarantine_post = _quarantine_postflight(
+                campaign_db, campaign_id, str(row["manifest_row_id"]), quarantine_before, contract,
+            )
+            after_row = quarantine_post["row"]
+            if (
+                quarantine_proc.returncode != 0 or quarantine_journal.get("current_phase") != "COMPLETE"
+                or after_row.get("fresh_status") != "QUARANTINED"
+                or after_row.get("last_error_code") != contract[0]
+                or not quarantine_post["valid"]
+            ):
+                journal.update(phase="STOPPED_UNKNOWN_FAILURE", finished_at=_now())
+                atomic_write_json(journal_path, journal)
+                raise FreshDownloadLoopStop(STOP_QUARANTINE)
+            auto_quarantines += 1
+            consecutive_quarantines += 1
+            expected_db_sha = sha256_file(campaign_db)
+            expected_cache_digest = cache_tree_digest(cache_root)
+            event["phases"].append("AUTO_QUARANTINED")
+            event.update(finished_at=_now(), quarantine_phase="COMPLETE", db_end_sha256=expected_db_sha,
+                         postflight=quarantine_post)
+            journal["phase"] = "AUTO_QUARANTINED"
+            journal["phase_history"].append("AUTO_QUARANTINED")
+            atomic_write_json(journal_path, journal)
+            journal["phase"] = "CONTINUING"
+            journal["phase_history"].append("CONTINUING")
+            atomic_write_json(parent_output_dir / "chunks" / f"quarantine-{auto_quarantines:04d}.json", event)
+            atomic_write_json(journal_path, journal)
+            continue
         try:
             if not child_journal_path.is_file():
                 raise FreshDownloadLoopStop(STOP_POSTFLIGHT)
@@ -317,6 +618,9 @@ def run_loop(
             raise FreshDownloadLoopStop(STOP_POSTFLIGHT) from exc
         expected_db_sha = sha256_file(campaign_db)
         expected_cache_digest = cache_tree_digest(cache_root)
+        successful_chunks += 1
+        completed_in_run += n
+        consecutive_quarantines = 0
         row_states = list(child_journal.get("rows", {}).values())
         chunk.update(finished_at=_now(), child_phase="COMPLETE", child_run_id=child_journal.get("run_id"),
                      child_final_judgment="PASS_V4_FRESH_CHUNK", db_end_sha256=expected_db_sha,
@@ -326,12 +630,29 @@ def run_loop(
                      fresh_before=before["counts"], fresh_after=post["counts"], postflight=post, artifacts=artifacts)
         atomic_write_json(parent_output_dir / "chunks" / f"chunk-{number:04d}.json", chunk)
         atomic_write_json(journal_path, journal)
-    else:
-        journal.update(phase="COMPLETE", finished_at=_now(), campaign_completed=False)
+    if successful_chunks >= max_chunks and journal["phase"] not in {"STOPPED_IDLE_WINDOW", "COMPLETE"}:
+        journal.update(
+            phase="COMPLETE", finished_at=_now(),
+            campaign_completed=_remaining_count(campaign_db, campaign_id) == 0,
+        )
         atomic_write_json(journal_path, journal)
     remaining = _remaining_count(campaign_db, campaign_id)
+    quarantine_reason_counts = dict(Counter(
+        str(event["contract"][0]) for event in journal["quarantines"]
+    ))
+    quarantine_month_counts = dict(Counter(
+        str(event["requested_disclosure_no"])[:6] for event in journal["quarantines"]
+    ))
     summary = {"final_judgment": "PASS_V4_FRESH_DOWNLOAD_LOOP", "phase": journal["phase"],
-               "chunks_started": len(journal["chunks"]), "chunks_completed": sum(c.get("child_phase") == "COMPLETE" for c in journal["chunks"]),
+               "chunks_started": child_launches, "child_launches": child_launches,
+               "chunks_completed": successful_chunks, "successful_chunks": successful_chunks,
+               "auto_quarantines": auto_quarantines, "unknown_failures": 0,
+               "quarantine_reason_counts": quarantine_reason_counts,
+               "quarantine_month_counts": quarantine_month_counts,
+               "quarantined_requested_disclosure_nos": [
+                   event["requested_disclosure_no"] for event in journal["quarantines"]
+               ],
+               "quarantine_evidence": [event["evidence"] for event in journal["quarantines"]],
                "remaining": remaining, "counts": _counts(campaign_db, campaign_id)}
     atomic_write_json(parent_output_dir / "summary.json", summary)
     digests = {str(path.relative_to(parent_output_dir)): sha256_file(path) for path in sorted(parent_output_dir.rglob("*")) if path.is_file() and path.name != "digests.json"}

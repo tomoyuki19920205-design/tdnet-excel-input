@@ -1124,6 +1124,41 @@ def test_production_hundred_partial_stage_a_failure_keeps_database_unchanged(tmp
     assert journal["rows"]["0000000037"]["failure_code"] == downloader.STOP_HTTP
 
 
+@pytest.mark.parametrize("failure_code,failure_stage,http_status", [
+    ("TD_FILES_DISCNO_NOT_FOUND", "STAGE_A", 404),
+    ("ZIP_INTERNAL_IDENTITY_CONFLICT", "ZIP_IDENTITY", 200),
+])
+def test_production_known_failure_writes_canonical_secret_free_evidence(
+    tmp_path, failure_code, failure_stage, http_status,
+):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path, count=5)
+    before_sha = _sha(env["db"])
+    def fail_at_three(row, cache_root, campaign_id):
+        if row["manifest_row_id"] == "0000000003":
+            raise downloader.DownloadFailure(
+                downloader.STOP_IDENTITY if failure_stage == "ZIP_IDENTITY" else downloader.STOP_HTTP,
+                failure_code=failure_code, failure_stage=failure_stage, retryable=False,
+                attempts=[{"stage":"TD_FILES", "http_status":http_status,
+                    "reason_phrase":"known", "result_code":failure_code,
+                    "requested_url":"https://example.test/?token=must-not-leak"}],
+            )
+        return provider(row, cache_root, campaign_id)
+    with pytest.raises(downloader.DownloadFailure):
+        downloader.run_production_downloads(
+            **_production_kwargs(env, environment, fail_at_three, runtime)
+        )
+    assert _sha(env["db"]) == before_sha
+    journal = json.loads((env["output"] / "journal.json").read_text(encoding="utf-8"))
+    failed = journal["rows"]["0000000003"]
+    evidence = failed["failure_evidence"]
+    assert failed["failure_code"] == failure_code
+    assert failed["failure_stage"] == failure_stage
+    assert failed["http_status"] == http_status
+    raw = Path(evidence["file"]).read_text(encoding="utf-8")
+    assert "token" not in raw.lower() and "example.test" not in raw
+    assert json.loads(raw)["failure"]["failure_code"] == failure_code
+
+
 @pytest.mark.parametrize("change", [
     {"production_apply": False}, {"apply": False}, {"expected_count": 4},
     {"max_items": 6}, {"confirm_production_item_count": 4},

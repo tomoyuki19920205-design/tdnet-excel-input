@@ -29,6 +29,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--confirm-production-cache-root", required=True)
     parser.add_argument("--confirm-campaign-id", required=True)
     parser.add_argument("--confirm-max-chunks", type=int, required=True)
+    parser.add_argument("--auto-quarantine-known-defects", action="store_true")
+    parser.add_argument("--confirm-auto-quarantine-known-defects", action="store_true")
+    parser.add_argument("--max-auto-quarantines", type=int)
+    parser.add_argument("--confirm-max-auto-quarantines", type=int)
+    parser.add_argument("--max-consecutive-auto-quarantines", type=int)
+    parser.add_argument("--confirm-max-consecutive-auto-quarantines", type=int)
+    parser.add_argument("--max-auto-quarantine-rate-percent", type=int)
+    parser.add_argument("--confirm-max-auto-quarantine-rate-percent", type=int)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--production-apply", action="store_true")
     return parser
@@ -44,6 +52,14 @@ def main(argv: list[str] | None = None) -> int:
             max_chunks=args.max_chunks, min_idle_window_minutes=args.min_idle_window_minutes,
             source_route=args.source_route, confirm_production_cache_root=args.confirm_production_cache_root,
             confirm_campaign_id=args.confirm_campaign_id, confirm_max_chunks=args.confirm_max_chunks,
+            auto_quarantine_known_defects=args.auto_quarantine_known_defects,
+            confirm_auto_quarantine_known_defects=args.confirm_auto_quarantine_known_defects,
+            max_auto_quarantines=args.max_auto_quarantines,
+            confirm_max_auto_quarantines=args.confirm_max_auto_quarantines,
+            max_consecutive_auto_quarantines=args.max_consecutive_auto_quarantines,
+            confirm_max_consecutive_auto_quarantines=args.confirm_max_consecutive_auto_quarantines,
+            max_auto_quarantine_rate_percent=args.max_auto_quarantine_rate_percent,
+            confirm_max_auto_quarantine_rate_percent=args.confirm_max_auto_quarantine_rate_percent,
             apply=args.apply, production_apply=args.production_apply,
             repo_root=Path(__file__).resolve().parents[1],
         )

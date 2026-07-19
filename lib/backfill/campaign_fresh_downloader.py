@@ -34,6 +34,7 @@ from lib.backfill.jquants_td_files_adapter import (
     resolve_xbrl_file,
 )
 from lib.backfill.campaign_fresh_download_plan import validate_download_url
+from lib.backfill.campaign_fresh_auto_quarantine import write_known_failure_evidence
 from lib.backfill.campaign_state import (
     FreshDownloadCASFailed,
     FreshStateMigrationConflict,
@@ -1806,7 +1807,26 @@ def run_production_downloads(
                 elif artifact_provider is not None:
                     row_journal.update(stage_a_state="STARTED", network_attempts_started=1)
                     _journal_write(journal_path, journal)
-                    result = dict(artifact_provider(row, cache_root, campaign_id))
+                    try:
+                        result = dict(artifact_provider(row, cache_root, campaign_id))
+                    except DownloadFailure as exc:
+                        failure = exc.result(row)
+                        evidence = write_known_failure_evidence(
+                            output_dir=output_dir, run_id=run_id, campaign_id=campaign_id,
+                            row=row, failure=failure, journal_path=journal_path,
+                            manifest_path=manifest_list, manifest_sha256=actual_manifest_sha,
+                            campaign_db_start_sha256=campaign_db_sha256,
+                        )
+                        if evidence is not None:
+                            contract = evidence["contract"]
+                            row_journal.update(
+                                stage_a_state="FAILED", failure_code=contract[0],
+                                failure_stage=contract[1], source_route=contract[2],
+                                http_status=contract[3], failure_evidence=evidence,
+                            )
+                            journal["failure_code"] = contract[0]
+                            _journal_write(journal_path, journal)
+                        raise
                     result.update({
                         "attempt_count": 1, "network_calls": 2,
                         "td_files_requests": 1, "signed_url_download_requests": 1,
@@ -1815,13 +1835,32 @@ def run_production_downloads(
                 else:
                     row_journal.update(stage_a_state="STARTED", network_attempts_started=1)
                     _journal_write(journal_path, journal)
-                    result, _calls = _download_one_jquants(
-                        row=row, cache_root=cache_root, campaign_id=campaign_id,
-                        session=client, timeout_seconds=timeout_seconds,
-                        max_retries=max_retries, sleep=sleep, code_sha=code_sha,
-                        run_id=run_id, network_counter=network_counter,
-                        auth_loader=auth_loader, target_path_builder=_production_target_paths,
-                    )
+                    try:
+                        result, _calls = _download_one_jquants(
+                            row=row, cache_root=cache_root, campaign_id=campaign_id,
+                            session=client, timeout_seconds=timeout_seconds,
+                            max_retries=max_retries, sleep=sleep, code_sha=code_sha,
+                            run_id=run_id, network_counter=network_counter,
+                            auth_loader=auth_loader, target_path_builder=_production_target_paths,
+                        )
+                    except DownloadFailure as exc:
+                        failure = exc.result(row)
+                        evidence = write_known_failure_evidence(
+                            output_dir=output_dir, run_id=run_id, campaign_id=campaign_id,
+                            row=row, failure=failure, journal_path=journal_path,
+                            manifest_path=manifest_list, manifest_sha256=actual_manifest_sha,
+                            campaign_db_start_sha256=campaign_db_sha256,
+                        )
+                        if evidence is not None:
+                            contract = evidence["contract"]
+                            row_journal.update(
+                                stage_a_state="FAILED", failure_code=contract[0],
+                                failure_stage=contract[1], source_route=contract[2],
+                                http_status=contract[3], failure_evidence=evidence,
+                            )
+                            journal["failure_code"] = contract[0]
+                            _journal_write(journal_path, journal)
+                        raise
                     if result.get("status") == "ALREADY_COMPLETE":
                         payload = _load_production_provenance(zip_path, provenance_path)
                         result = _result_from_verified_provenance(payload, zip_path, provenance_path, "DB_ONLY_REPAIR")
@@ -1956,6 +1995,8 @@ def run_production_downloads(
                 row_journal["failure_code"] = str(exc)
         if journal.get("current_phase") not in {"DB_PENDING", "DB_COMMITTED"}:
             _journal_update(
-                journal_path, journal, "FAILED", failure_code=str(exc), finished_at=_now_utc(),
+                journal_path, journal, "FAILED",
+                failure_code=journal.get("failure_code") or str(exc),
+                finished_at=_now_utc(),
             )
         raise
