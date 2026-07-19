@@ -21,6 +21,11 @@ ROW2283_ZIP = Path(
     r"\download\row2283.zip"
 )
 ROW2283_SHA256 = "121325edc618119df68ef011e070e786ae54952e9826d579c4a5aaa229970041"
+ROW2284_ZIP = Path(
+    r"C:\tmp\v4-row2284-identity-audit-20260719-164605"
+    r"\download\row2284.zip"
+)
+ROW2284_SHA256 = "f4c2a0f20e7632eab40cf92d26901769739a89ad2b8190752b853d872b465573"
 
 
 def _write_zip(path, dates, *, include_summary=True, quarter="4", markers=""):
@@ -437,7 +442,6 @@ def test_ifrs_non_consolidated_quarterly_dei_document_type_is_exactly_normalized
         "四半期（非連結）",
         "四半期 [日本基準]（非連結）",
         "四半期 [IFRS]（連結）",
-        "通期 [IFRS]（非連結）",
         "中間期 [IFRS]（非連結）",
         "第1四半期説明資料",
         "IFRS決算補足資料",
@@ -445,6 +449,33 @@ def test_ifrs_non_consolidated_quarterly_dei_document_type_is_exactly_normalized
     )
     for raw in rejected:
         assert verifier._normalize_dei_document_type(raw) != "attachment_xbrl"
+
+
+def test_ifrs_non_consolidated_annual_dei_document_type_is_exactly_normalized():
+    for raw in ("通期　[IFRS]（非連結）", "通期 [IFRS]（非連結）"):
+        assert verifier._normalize_dei_document_type(raw) == "attachment_xbrl"
+
+    rejected = (
+        "通期 [IFRS]",
+        "通期（非連結）",
+        "通期 [日本基準]（非連結）",
+        "通期 [IFRS]（連結）",
+        "中間期 [IFRS]（非連結）",
+        "FY [IFRS]（非連結）",
+        "通期 IFRS 非連結",
+        "通期決算説明資料 [IFRS]（非連結）",
+        "通期 [IFRS]（非連結）決算補足資料",
+        "前文 通期 [IFRS]（非連結） 後文",
+        "通期 IFRS]（非連結）",
+        "通期 [IFRS（非連結）",
+        "通期 [IFRS](非連結)",
+    )
+    for raw in rejected:
+        assert verifier._normalize_dei_document_type(raw) != "attachment_xbrl"
+
+    assert verifier._normalize_dei_document_type(
+        "四半期 [IFRS]（非連結）"
+    ) == "attachment_xbrl"
 
 
 def test_attachment_internal_id_conflict_is_rejected(tmp_path):
@@ -647,6 +678,54 @@ def test_row2283_diagnostic_zip_accepts_exact_ifrs_non_consolidated_quarterly_ty
         "signed_url_received": True,
         "file_http_status": 200,
         "requested_disclosure_no": "20250130558581",
+        "identity_value_sources": dict(fresh_downloader.WITHOUT_INTERNAL_ID_VALUE_SOURCES),
+    }) is True
+
+
+def test_row2284_diagnostic_zip_accepts_exact_ifrs_non_consolidated_annual_type():
+    assert ROW2284_ZIP.is_file()
+    assert hashlib.sha256(ROW2284_ZIP.read_bytes()).hexdigest() == ROW2284_SHA256
+    meta = extract_actual_metadata_from_zip(str(ROW2284_ZIP), "2025-03-31", "FY")
+    audit = verifier._identity_candidate_audit(str(ROW2284_ZIP))
+    provenance = TrustedProvenance(
+        source="jquants", requested_disclosure_no="20250513546549",
+        requested_file_type="x", resolved_by_function="jquants_td_files_adapter",
+        official_request_succeeded=True, response_status=200,
+        downloaded_size=ROW2284_ZIP.stat().st_size, downloaded_sha256=ROW2284_SHA256,
+        internal_document_id="", ticker="2130", period="2025-03-31", quarter="FY",
+        document_type="attachment_xbrl", resolved_at="2026-07-19T07:46:05+00:00",
+    )
+    verdict = verify_zip_identity(
+        str(ROW2284_ZIP), "20250513546549", "2130", "2025-03-31", "FY", provenance
+    )
+
+    assert audit["candidate_count"] == 1
+    assert len(audit["excluded_candidates"]) == 6
+    assert audit["conflict_fields"] == []
+    assert meta == {
+        "ticker": "2130", "period": "2025-03-31", "quarter": "FY",
+        "document_type": "attachment_xbrl", "internal_document_id": "",
+    }
+    assert verdict.passed is True
+    assert verdict.verdict == "official_linked_xbrl_match_without_internal_id"
+    assert verdict.internal_id == ""
+    assert is_production_ready_identity_result({
+        "identity_verdict": verdict.verdict,
+        "identity_status": "DOWNLOAD_IDENTITY_VERIFIED",
+        "plan_classification": "STANDARD_FRESH_DOWNLOAD",
+        "auto_ready_allowed": True,
+        "quarantine_release_required": False,
+        "internal_document_id": None,
+        "internal_document_id_status": "absent_in_artifact",
+        "linkage_basis": "jquants_td_files_exact_discno",
+        "source_route": "JQUANTS_TD_FILES",
+        "td_files_type": "x",
+        "td_files_http_status": 200,
+        "td_files_result_code": "TD_FILES_OK",
+        "xbrl_candidate_count": 1,
+        "signed_url_received": True,
+        "file_http_status": 200,
+        "requested_disclosure_no": "20250513546549",
         "identity_value_sources": dict(fresh_downloader.WITHOUT_INTERNAL_ID_VALUE_SOURCES),
     }) is True
 
