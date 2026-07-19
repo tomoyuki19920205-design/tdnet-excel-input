@@ -40,7 +40,7 @@ def test_plan_preserves_name_en_and_skips_unchanged(monkeypatch):
     rows = [subject.Company("1771", "日本乾溜工業", "本則", subject.PRIMARY_URL), subject.Company("231A", "Cross Eホールディングス", "Q-Board", subject.PRIMARY_URL)]
     existing = {"1771": {"ticker_code": "1771", "name_ja": "日本乾溜", "name_en": "KEEP", "is_active": True}, "231A": {"ticker_code": "231A", "name_ja": "Cross Eホールディングス", "name_en": "KEEP", "is_active": True}}
     changes, stats = subject.plan(rows, existing, {"rest_url": "", "headers": {}})
-    assert changes == [{"ticker_code": "1771", "name_ja": "日本乾溜工業"}]
+    assert changes == [{"ticker_code": "1771", "name_ja": "日本乾溜工業", "is_active": True}]
     assert stats["name_ja_update"] == 1 and stats["unchanged"] == 1
 
 
@@ -50,3 +50,11 @@ def test_plan_inserts_and_pro_requires_viewer_data(monkeypatch):
     changes, stats = subject.plan(rows, {}, {"rest_url": "", "headers": {}})
     assert {x["ticker_code"] for x in changes} == {"1999", "342A"}
     assert stats["insert"] == 2
+
+
+def test_payload_must_be_homogeneous_and_safe():
+    subject.validate_payload([{"ticker_code": "1771", "name_ja": "日本乾溜工業", "is_active": True}] * 1)
+    with pytest.raises(subject.ValidationError):
+        subject.validate_payload([{"ticker_code": "1771", "name_ja": "日本乾溜工業", "is_active": True}, {"ticker_code": "1999", "name_ja": "サイタ"}])
+    with pytest.raises(subject.ValidationError):
+        subject.validate_payload([{"ticker_code": "1771", "name_ja": "", "is_active": True}])

@@ -35,6 +35,10 @@ class ValidationError(RuntimeError):
     pass
 
 
+class UpsertError(RuntimeError):
+    """Supabaseの秘密情報を含めずにPostgRESTエラーを伝える。"""
+
+
 @dataclass(frozen=True)
 class Company:
     ticker_code: str
@@ -175,29 +179,46 @@ def plan(companies: list[Company], existing: dict[str, dict[str, Any]], read_con
             stats["skip"] += 1
             continue
         old = existing.get(item.ticker_code)
-        payload: dict[str, Any] = {"ticker_code": item.ticker_code}
+        # PostgREST の一括 upsert は全行を同一JSONスキーマで送る。
+        payload: dict[str, Any] = {"ticker_code": item.ticker_code, "name_ja": item.name_ja, "is_active": True}
         if old is None:
             payload.update({"name_ja": item.name_ja, "is_active": True})
             stats["insert"] += 1
         else:
             if clean_text(old.get("name_ja")) != item.name_ja:
-                payload["name_ja"] = item.name_ja
                 stats["name_ja_update"] += 1
             if old.get("is_active") is False:
-                payload["is_active"] = True
                 stats["is_active_update"] += 1
-            if len(payload) == 1:
+            if clean_text(old.get("name_ja")) == item.name_ja and old.get("is_active") is not False:
                 stats["unchanged"] += 1
                 continue
         changes.append(payload)
     return changes, stats
 
 
+def validate_payload(changes: list[dict[str, Any]]) -> None:
+    expected = {"ticker_code", "name_ja", "is_active"}
+    tickers: set[str] = set()
+    for row in changes:
+        if set(row) != expected or not isinstance(row["ticker_code"], str) or not isinstance(row["name_ja"], str) or not row["name_ja"] or not isinstance(row["is_active"], bool):
+            raise ValidationError("invalid homogeneous companies upsert payload")
+        if row["ticker_code"] in tickers:
+            raise ValidationError("duplicate ticker in companies upsert payload")
+        tickers.add(row["ticker_code"])
+
+
 def apply_changes(changes: list[dict[str, Any]], config: dict[str, str]) -> None:
     if not changes:
         return
+    validate_payload(changes)
     response = requests.post(config["rest_url"] + "/companies", headers={**config["headers"], "Prefer": "resolution=merge-duplicates,return=representation"}, params={"on_conflict": "ticker_code"}, json=changes, timeout=60)
-    response.raise_for_status()
+    if not response.ok:
+        try:
+            body = response.json()
+            safe = {key: str(body.get(key, ""))[:500] for key in ("code", "message", "details", "hint")}
+        except ValueError:
+            safe = {"body_type": "non_json", "body_length": len(response.text)}
+        raise UpsertError(f"companies upsert failed: status={response.status_code} rows={len(changes)} keys=ticker_code,name_ja,is_active error={json.dumps(safe, ensure_ascii=False)}")
     if len(response.json()) != len(changes):
         raise RuntimeError("companies upsert returned an unexpected row count")
 
@@ -216,6 +237,7 @@ def main(argv: list[str] | None = None) -> int:
     master, source = fetch_and_validate()
     existing = get_companies(read_config)
     changes, stats = plan(master, existing, read_config)
+    validate_payload(changes)
     report = {"source": source, "markets": {market: sum(x.market == market for x in master) for market in sorted({x.market for x in master})}, "official_count": len(master), "changes": changes, "stats": stats}
     if args.apply:
         write_config = get_supabase_write_config()
