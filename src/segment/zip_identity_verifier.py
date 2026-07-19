@@ -156,6 +156,8 @@ def _consensus(values: set[str], field_name: str) -> str:
 
 
 def _normalize_dei_quarter(value: str) -> str:
+    if value == "HY":
+        return "2Q"
     normalized = value.strip().upper().replace(" ", "")
     return {
         "FY": "FY", "4Q": "FY", "4": "FY",
@@ -175,6 +177,8 @@ def _normalize_dei_document_type(value: str) -> str:
     if whitespace_normalized == "四半期 [IFRS]（非連結）":
         return "attachment_xbrl"
     if whitespace_normalized == "通期 [IFRS]（非連結）":
+        return "attachment_xbrl"
+    if whitespace_normalized == "四半期 [IFRS]（非連結）（一般２Ｑ）":
         return "attachment_xbrl"
     compact = re.sub(r"[^a-z]", "", normalized.lower())
     if (

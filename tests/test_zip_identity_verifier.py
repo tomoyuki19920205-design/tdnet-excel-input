@@ -26,6 +26,16 @@ ROW2284_ZIP = Path(
     r"\download\row2284.zip"
 )
 ROW2284_SHA256 = "f4c2a0f20e7632eab40cf92d26901769739a89ad2b8190752b853d872b465573"
+ROW2286_ZIP = Path(
+    r"C:\tmp\v4-row2286-identity-cluster-audit-20260719-175000"
+    r"\download\row2286.zip"
+)
+ROW2286_SHA256 = "77f8390a3be10fc9bc962313eaf9f4dca447959134bbc03d0cf8a7f80ea2ff3d"
+ROW803_ZIP = Path(
+    r"C:\tmp\v4-row803-identity-audit-20260718-224137"
+    r"\download\row803.zip"
+)
+ROW803_SHA256 = "b8650be6fca67b8e0bbd610447e60a1e0e85b377ecb03ed26e57926aafc631e5"
 
 
 def _write_zip(path, dates, *, include_summary=True, quarter="4", markers=""):
@@ -451,6 +461,36 @@ def test_ifrs_non_consolidated_quarterly_dei_document_type_is_exactly_normalized
         assert verifier._normalize_dei_document_type(raw) != "attachment_xbrl"
 
 
+def test_half_year_dei_quarter_is_exactly_normalized_to_second_quarter():
+    assert verifier._normalize_dei_quarter("HY") == "2Q"
+    for raw in ("hy", "Hy", " HY", "HY ", "H1", "HALF", "1H"):
+        assert verifier._normalize_dei_quarter(raw) == ""
+
+
+def test_ifrs_non_consolidated_general_2q_document_type_is_exactly_normalized():
+    accepted = (
+        "四半期　[IFRS]（非連結）（一般２Ｑ）",
+        "四半期 [IFRS]（非連結）（一般２Ｑ）",
+        "四半期\t[IFRS]（非連結）（一般２Ｑ）",
+    )
+    for raw in accepted:
+        assert verifier._normalize_dei_document_type(raw) == "attachment_xbrl"
+
+    rejected = (
+        "四半期 [IFRS]（連結）（一般２Ｑ）",
+        "四半期 [日本基準]（非連結）（一般２Ｑ）",
+        "通期 [IFRS]（非連結）（一般２Ｑ）",
+        "中間期 [IFRS]（非連結）",
+        "一般２Ｑ [IFRS]",
+        "２Ｑ決算説明資料",
+        "前文 四半期 [IFRS]（非連結）（一般２Ｑ）",
+        "四半期 [IFRS]（非連結）（一般２Ｑ） 後文",
+        "四半期 [IFRS]（非連結）（一般2Q）",
+    )
+    for raw in rejected:
+        assert verifier._normalize_dei_document_type(raw) != "attachment_xbrl"
+
+
 def test_ifrs_non_consolidated_annual_dei_document_type_is_exactly_normalized():
     for raw in ("通期　[IFRS]（非連結）", "通期 [IFRS]（非連結）"):
         assert verifier._normalize_dei_document_type(raw) == "attachment_xbrl"
@@ -728,6 +768,66 @@ def test_row2284_diagnostic_zip_accepts_exact_ifrs_non_consolidated_annual_type(
         "requested_disclosure_no": "20250513546549",
         "identity_value_sources": dict(fresh_downloader.WITHOUT_INTERNAL_ID_VALUE_SOURCES),
     }) is True
+
+
+def test_row2286_diagnostic_zip_accepts_exact_ifrs_non_consolidated_general_2q_type():
+    assert ROW2286_ZIP.is_file()
+    assert hashlib.sha256(ROW2286_ZIP.read_bytes()).hexdigest() == ROW2286_SHA256
+    meta = extract_actual_metadata_from_zip(str(ROW2286_ZIP), "2026-03-31", "2Q")
+    audit = verifier._identity_candidate_audit(str(ROW2286_ZIP))
+    provenance = TrustedProvenance(
+        source="jquants", requested_disclosure_no="20251029581610",
+        requested_file_type="x", resolved_by_function="jquants_td_files_adapter",
+        official_request_succeeded=True, response_status=200,
+        downloaded_size=ROW2286_ZIP.stat().st_size, downloaded_sha256=ROW2286_SHA256,
+        internal_document_id="", ticker="2130", period="2026-03-31", quarter="2Q",
+        document_type="attachment_xbrl", resolved_at="2026-07-19T08:53:31+00:00",
+    )
+    verdict = verify_zip_identity(
+        str(ROW2286_ZIP), "20251029581610", "2130", "2026-03-31", "2Q", provenance
+    )
+
+    assert audit["candidate_count"] == 1
+    assert len(audit["excluded_candidates"]) == 6
+    assert audit["conflict_fields"] == []
+    assert meta == {
+        "ticker": "2130", "period": "2026-03-31", "quarter": "2Q",
+        "document_type": "attachment_xbrl", "internal_document_id": "",
+    }
+    assert verdict.passed is True
+    assert verdict.verdict == "official_linked_xbrl_match_without_internal_id"
+    assert verdict.internal_id == ""
+    assert is_production_ready_identity_result({
+        "identity_verdict": verdict.verdict,
+        "identity_status": "DOWNLOAD_IDENTITY_VERIFIED",
+        "plan_classification": "STANDARD_FRESH_DOWNLOAD",
+        "auto_ready_allowed": True,
+        "quarantine_release_required": False,
+        "internal_document_id": None,
+        "internal_document_id_status": "absent_in_artifact",
+        "linkage_basis": "jquants_td_files_exact_discno",
+        "source_route": "JQUANTS_TD_FILES",
+        "td_files_type": "x",
+        "td_files_http_status": 200,
+        "td_files_result_code": "TD_FILES_OK",
+        "xbrl_candidate_count": 1,
+        "signed_url_received": True,
+        "file_http_status": 200,
+        "requested_disclosure_no": "20251029581610",
+        "identity_value_sources": dict(fresh_downloader.WITHOUT_INTERNAL_ID_VALUE_SOURCES),
+    }) is True
+
+
+def test_row803_diagnostic_zip_still_fails_closed_on_period_conflict():
+    assert ROW803_ZIP.is_file()
+    assert hashlib.sha256(ROW803_ZIP.read_bytes()).hexdigest() == ROW803_SHA256
+    verdict = verify_zip_identity(
+        str(ROW803_ZIP), "20240509586144", "1764", "2023-06-30", "3Q"
+    )
+
+    assert verdict.passed is False
+    assert verdict.rejection_reason == "zip_internal_identity_conflict"
+    assert verdict.details["conflict_fields"] == ["period"]
 
 
 def test_attachment_without_internal_id_requires_official_provenance(tmp_path):
