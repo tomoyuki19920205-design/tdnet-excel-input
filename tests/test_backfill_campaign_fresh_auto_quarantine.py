@@ -10,8 +10,10 @@ import pytest
 from lib.backfill import campaign_fresh_download_loop as loop
 from lib.backfill.campaign_fresh_auto_quarantine import (
     FreshAutoQuarantineStop,
+    canonical_failure_stage,
     failure_contract,
     prospective_limit_reason,
+    safe_failure_telemetry,
     verify_evidence_tree,
     write_known_failure_evidence,
 )
@@ -21,6 +23,7 @@ from tests.test_backfill_campaign_fresh_download_loop import CID, _environment
 def _failure(code="TD_FILES_DISCNO_NOT_FOUND", stage="STAGE_A", status=404):
     return {
         "failure_code": code, "failure_stage": stage, "retryable": False,
+        "source_route": "JQUANTS_TD_FILES",
         "http_status": status, "td_files_http_status": status,
         "download_attempts": [{"stage": "TD_FILES", "http_status": status,
             "reason_phrase": "Not Found", "result_code": code}],
@@ -35,6 +38,69 @@ def _failure(code="TD_FILES_DISCNO_NOT_FOUND", stage="STAGE_A", status=404):
 ])
 def test_exact_known_contracts_only(failure, expected):
     assert failure_contract(failure) == expected
+
+
+def test_td_files_raw_stage_is_normalized_only_for_exact_stage_a_404():
+    failure = _failure(stage="TD_FILES")
+    assert canonical_failure_stage(failure) == "STAGE_A"
+    assert failure_contract(failure) == (
+        "TD_FILES_DISCNO_NOT_FOUND", "STAGE_A", "JQUANTS_TD_FILES", 404,
+    )
+
+
+@pytest.mark.parametrize("changes", [
+    {"failure_code": "HTTP_FAILED"},
+    {"td_files_http_status": 401, "http_status": 401},
+    {"td_files_http_status": 403, "http_status": 403},
+    {"td_files_http_status": 500, "http_status": 500},
+    {"td_files_http_status": 429, "http_status": 429},
+    {"td_files_http_status": None, "http_status": None},
+    {"failure_code": "HTTP_TIMEOUT", "td_files_http_status": None, "http_status": None},
+    {"failure_code": "HTTP_CONNECTION_ERROR", "td_files_http_status": None, "http_status": None},
+    {"failure_stage": "SIGNED_URL"},
+    {"failure_stage": None},
+    {"source_route": "STATIC_TDNET"},
+])
+def test_td_files_stage_normalization_is_fail_closed(changes):
+    failure = _failure(stage="TD_FILES")
+    failure.update(changes)
+    assert canonical_failure_stage(failure) == str(failure.get("failure_stage") or "")
+    assert failure_contract(failure) is None
+
+
+def test_safe_failure_telemetry_keeps_stage_a_diagnostics_without_secrets():
+    failure = _failure(stage="TD_FILES")
+    failure["download_attempts"][0].update({
+        "endpoint": "https://api.jquants.com/v2/td/files/20260000000001",
+        "elapsed_seconds": 0.157,
+        "retry_after": "12",
+        "signed_url_received": False,
+        "exception_type": "HTTPError",
+        "exception_message": "Not Found",
+    })
+    telemetry = safe_failure_telemetry(
+        failure,
+        {"manifest_row_id": "0000001116", "requested_disclosure_no": "20260000000001"},
+    )
+    assert telemetry == {
+        "manifest_row_id": "0000001116",
+        "requested_disclosure_no": "20260000000001",
+        "source_route": "JQUANTS_TD_FILES",
+        "adapter_result_code": "TD_FILES_DISCNO_NOT_FOUND",
+        "raw_failure_stage": "TD_FILES",
+        "canonical_failure_stage": "STAGE_A",
+        "http_status": 404,
+        "endpoint_host": "api.jquants.com",
+        "elapsed_milliseconds": 157.0,
+        "retry_after_present": True,
+        "retry_after": "12",
+        "attempt_number": 1,
+        "signed_url_received": False,
+        "stage_b_started": False,
+        "exception_class": "HTTPError",
+        "exception_message_summary": "Not Found",
+    }
+    assert "https://" not in json.dumps(telemetry)
 
 
 def test_canonical_evidence_round_trip_and_secret_redaction(tmp_path):
@@ -53,6 +119,8 @@ def test_canonical_evidence_round_trip_and_secret_redaction(tmp_path):
     raw = Path(result["file"]).read_bytes()
     assert raw.endswith(b"\n") and b"http://" not in raw and b"token" not in raw.lower()
     assert payload["failure"]["failure_code"] == "TD_FILES_DISCNO_NOT_FOUND"
+    assert payload["failure"]["raw_failure_stage"] == "STAGE_A"
+    assert payload["failure"]["canonical_failure_stage"] == "STAGE_A"
 
 
 def test_evidence_sha_mismatch_is_rejected(tmp_path):
@@ -193,6 +261,67 @@ def test_known_failure_is_formally_quarantined_then_reselected(monkeypatch, tmp_
     assert result["summary"]["successful_chunks"]==1
     assert len(download_calls)==2 and len(quarantine_calls)==1
     assert "tools.backfill_campaign_fresh_quarantine" in quarantine_calls[0]
+
+
+def test_row_1116_raw_td_files_404_is_quarantined_without_retry(monkeypatch, tmp_path):
+    db, cache, plan = _environment(tmp_path, pending=101, quarantined=0)
+    monkeypatch.setattr(loop, "_validate_parent_path", lambda path: None)
+    monkeypatch.setattr(loop, "_verify_artifacts", lambda rows: {"accepted":len(rows),"production_ready":len(rows)})
+    launches = quarantines = 0
+    row_id = "0000000016"
+
+    def value(command, flag): return command[command.index(flag)+1]
+    def download(command):
+        nonlocal launches
+        launches += 1
+        output=Path(value(command,"--output-dir"));output.mkdir()
+        manifest_path=Path(value(command,"--manifest-list"));manifest=json.loads(manifest_path.read_text())
+        ids=[item["manifest_row_id"] for item in manifest["rows"]]
+        if row_id in ids:
+            item=next(x for x in manifest["rows"] if x["manifest_row_id"]==row_id)
+            conn=sqlite3.connect(db);columns=[x[1] for x in conn.execute("PRAGMA table_info(campaign_fresh_downloads)")]
+            row=dict(zip(columns,conn.execute("SELECT * FROM campaign_fresh_downloads WHERE manifest_row_id=?",(row_id,)).fetchone()));conn.close()
+            row["requested_disclosure_no"]=item["requested_disclosure_no"]
+            failure=_failure(stage="TD_FILES")
+            evidence=write_known_failure_evidence(
+                output_dir=output,run_id="row-1116",campaign_id=CID,row=row,failure=failure,
+                journal_path=output/"journal.json",manifest_path=manifest_path,
+                manifest_sha256=loop.sha256_file(manifest_path),campaign_db_start_sha256=value(command,"--campaign-db-sha256"),
+            )
+            telemetry=safe_failure_telemetry(failure,row)
+            (output/"journal.json").write_text(json.dumps({"current_phase":"FAILED","failure_code":failure["failure_code"],"rows":{row_id:{
+                "failure_code":failure["failure_code"],"failure_stage":"STAGE_A","raw_failure_stage":"TD_FILES",
+                "canonical_failure_stage":"STAGE_A","source_route":"JQUANTS_TD_FILES","http_status":404,
+                "failure_telemetry":telemetry,"failure_evidence":evidence}}}),encoding="utf-8")
+            return subprocess.CompletedProcess(command,2,"","known")
+        conn=sqlite3.connect(db)
+        for target in ids:conn.execute("UPDATE campaign_fresh_downloads SET fresh_status='COMPLETE',attempt_count=1 WHERE manifest_row_id=?",(target,))
+        conn.commit();conn.close();(output/"journal.json").write_text(json.dumps({"current_phase":"COMPLETE","run_id":"recovery","rows":{x:{} for x in ids}}),encoding="utf-8")
+        return subprocess.CompletedProcess(command,0,"ok","")
+    def quarantine(command):
+        nonlocal quarantines
+        quarantines += 1
+        assert value(command,"--manifest-row-id") == row_id
+        assert value(command,"--failure-stage") == "STAGE_A"
+        conn=sqlite3.connect(db);conn.execute("UPDATE campaign_fresh_downloads SET fresh_status='QUARANTINED',plan_classification='QUARANTINE_FRESH_RECHECK',last_error_code='TD_FILES_DISCNO_NOT_FOUND',last_error_stage='STAGE_A' WHERE manifest_row_id=?",(row_id,));conn.commit();conn.close()
+        output=Path(value(command,"--output-dir"));output.mkdir();(output/"journal.json").write_text('{"current_phase":"COMPLETE"}',encoding="utf-8")
+        return subprocess.CompletedProcess(command,0,"ok","")
+    result=loop.run_loop(campaign_db=db,campaign_id=CID,download_plan=plan,cache_root=cache,
+        parent_output_dir=tmp_path/"v4-campaign-production-loop-20260719-060606",chunk_size=100,max_chunks=1,
+        min_idle_window_minutes=20,source_route="JQUANTS_TD_FILES",confirm_production_cache_root=str(cache),
+        confirm_campaign_id=CID,confirm_max_chunks=1,apply=True,production_apply=True,repo_root=tmp_path,
+        child_runner=download,quarantine_runner=quarantine,runtime_checker=lambda _: {},idle_minutes_provider=lambda:60,
+        child_output_provider=lambda n:tmp_path/f"v4-campaign-production-download-20260719-{500000+n:06d}",
+        quarantine_output_provider=lambda n:tmp_path/f"v4-fresh-quarantine-20260719-{600000+n:06d}",
+        auto_quarantine_known_defects=True,confirm_auto_quarantine_known_defects=True,
+        max_auto_quarantines=5,confirm_max_auto_quarantines=5,max_consecutive_auto_quarantines=2,
+        confirm_max_consecutive_auto_quarantines=2,max_auto_quarantine_rate_percent=50,confirm_max_auto_quarantine_rate_percent=50)
+    assert quarantines == 1 and launches == 2
+    assert result["summary"]["auto_quarantines"] == 1
+    conn=sqlite3.connect(db)
+    row=conn.execute("SELECT fresh_status,attempt_count,last_error_code,last_error_stage FROM campaign_fresh_downloads WHERE manifest_row_id=?",(row_id,)).fetchone()
+    conn.close()
+    assert row == ("QUARANTINED",0,"TD_FILES_DISCNO_NOT_FOUND","STAGE_A")
 
 
 def test_six_hundred_rows_one_in_six_known_defects_complete(monkeypatch, tmp_path):

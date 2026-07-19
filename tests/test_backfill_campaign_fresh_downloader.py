@@ -1124,22 +1124,24 @@ def test_production_hundred_partial_stage_a_failure_keeps_database_unchanged(tmp
     assert journal["rows"]["0000000037"]["failure_code"] == downloader.STOP_HTTP
 
 
-@pytest.mark.parametrize("failure_code,failure_stage,http_status", [
-    ("TD_FILES_DISCNO_NOT_FOUND", "STAGE_A", 404),
-    ("ZIP_INTERNAL_IDENTITY_CONFLICT", "ZIP_IDENTITY", 200),
+@pytest.mark.parametrize("failure_code,raw_failure_stage,expected_stage,http_status", [
+    ("TD_FILES_DISCNO_NOT_FOUND", "TD_FILES", "STAGE_A", 404),
+    ("ZIP_INTERNAL_IDENTITY_CONFLICT", "ZIP_IDENTITY", "ZIP_IDENTITY", 200),
 ])
 def test_production_known_failure_writes_canonical_secret_free_evidence(
-    tmp_path, failure_code, failure_stage, http_status,
+    tmp_path, failure_code, raw_failure_stage, expected_stage, http_status,
 ):
     env, environment, provider, runtime, _checks = _production_fixture(tmp_path, count=5)
     before_sha = _sha(env["db"])
     def fail_at_three(row, cache_root, campaign_id):
         if row["manifest_row_id"] == "0000000003":
             raise downloader.DownloadFailure(
-                downloader.STOP_IDENTITY if failure_stage == "ZIP_IDENTITY" else downloader.STOP_HTTP,
-                failure_code=failure_code, failure_stage=failure_stage, retryable=False,
+                downloader.STOP_IDENTITY if raw_failure_stage == "ZIP_IDENTITY" else downloader.STOP_HTTP,
+                failure_code=failure_code, failure_stage=raw_failure_stage, retryable=False,
                 attempts=[{"stage":"TD_FILES", "http_status":http_status,
                     "reason_phrase":"known", "result_code":failure_code,
+                    "endpoint":"https://api.jquants.com/v2/td/files/redacted",
+                    "elapsed_seconds":0.157, "signed_url_received":False,
                     "requested_url":"https://example.test/?token=must-not-leak"}],
             )
         return provider(row, cache_root, campaign_id)
@@ -1152,11 +1154,49 @@ def test_production_known_failure_writes_canonical_secret_free_evidence(
     failed = journal["rows"]["0000000003"]
     evidence = failed["failure_evidence"]
     assert failed["failure_code"] == failure_code
-    assert failed["failure_stage"] == failure_stage
+    assert failed["failure_stage"] == expected_stage
+    assert failed["raw_failure_stage"] == raw_failure_stage
+    assert failed["canonical_failure_stage"] == expected_stage
     assert failed["http_status"] == http_status
+    assert failed["failure_telemetry"]["raw_failure_stage"] == raw_failure_stage
+    assert failed["failure_telemetry"]["canonical_failure_stage"] == expected_stage
+    assert failed["failure_telemetry"]["endpoint_host"] == "api.jquants.com"
+    assert failed["failure_telemetry"]["elapsed_milliseconds"] == 157.0
+    assert failed["failure_telemetry"]["signed_url_received"] is False
+    assert failed["failure_telemetry"]["stage_b_started"] is False
     raw = Path(evidence["file"]).read_text(encoding="utf-8")
     assert "token" not in raw.lower() and "example.test" not in raw
-    assert json.loads(raw)["failure"]["failure_code"] == failure_code
+    payload = json.loads(raw)
+    assert payload["failure"]["failure_code"] == failure_code
+    assert payload["failure"]["raw_failure_stage"] == raw_failure_stage
+    assert payload["failure"]["canonical_failure_stage"] == expected_stage
+
+
+def test_production_unknown_http_failure_keeps_safe_telemetry_without_evidence(tmp_path):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path, count=5)
+    def fail_at_three(row, cache_root, campaign_id):
+        if row["manifest_row_id"] == "0000000003":
+            raise downloader.DownloadFailure(
+                downloader.STOP_HTTP, failure_code="HTTP_FAILED",
+                failure_stage="TD_FILES", retryable=True,
+                attempts=[{"stage":"TD_FILES", "http_status":500,
+                    "reason_phrase":"Server Error", "result_code":"HTTP_FAILED",
+                    "endpoint":"https://api.jquants.com/v2/td/files/redacted",
+                    "elapsed_seconds":0.25, "signed_url_received":False}],
+            )
+        return provider(row, cache_root, campaign_id)
+    with pytest.raises(downloader.DownloadFailure):
+        downloader.run_production_downloads(
+            **_production_kwargs(env, environment, fail_at_three, runtime)
+        )
+    journal = json.loads((env["output"] / "journal.json").read_text(encoding="utf-8"))
+    failed = journal["rows"]["0000000003"]
+    assert failed["failure_code"] == "HTTP_FAILED"
+    assert failed["raw_failure_stage"] == "TD_FILES"
+    assert failed["canonical_failure_stage"] == "TD_FILES"
+    assert failed["failure_telemetry"]["http_status"] == 500
+    assert failed["failure_telemetry"]["endpoint_host"] == "api.jquants.com"
+    assert "failure_evidence" not in failed
 
 
 @pytest.mark.parametrize("change", [
@@ -1294,6 +1334,43 @@ def test_production_valid_artifacts_enable_database_only_repair(tmp_path):
     assert all(row["attempt_count"] == 0 for row in result["readback"])
     assert all(row["artifact_reused"] is True for row in result["journal"]["rows"].values())
     assert all(row["network_attempted"] is False for row in result["journal"]["rows"].values())
+
+
+def test_production_reuses_ninety_six_and_publishes_only_four(tmp_path):
+    env, environment, provider, runtime, _checks = _production_fixture(tmp_path, count=100)
+    for row in env["rows"][:96]:
+        provider(row, env["cache"], CAMPAIGN_ID)
+    reused_before = {
+        path.relative_to(env["cache"]).as_posix(): (_sha(path), path.stat().st_size, path.stat().st_mtime_ns)
+        for path in env["cache"].rglob("*") if path.is_file()
+    }
+    calls = []
+    def missing_only(row, cache_root, campaign_id):
+        calls.append(row["manifest_row_id"])
+        return provider(row, cache_root, campaign_id)
+    conn = connect_db(env["db"])
+    filings_before = downloader._campaign_rows_digest(conn, CAMPAIGN_ID, set())
+    conn.close()
+    result = downloader.run_production_downloads(
+        **_production_kwargs(env, environment, missing_only, runtime)
+    )
+    assert calls == [f"{index:010d}" for index in range(97, 101)]
+    assert result["summary"]["db_updated"] == 100
+    assert result["summary"]["network_calls"] == 8
+    assert sum(row["artifact_reused"] is True for row in result["journal"]["rows"].values()) == 96
+    assert sum(row["network_attempts_started"] == 1 for row in result["journal"]["rows"].values()) == 4
+    for relative, before in reused_before.items():
+        path = env["cache"] / relative
+        assert (_sha(path), path.stat().st_size, path.stat().st_mtime_ns) == before
+    conn = connect_db(env["db"])
+    counts = dict(conn.execute("SELECT fresh_status,COUNT(*) FROM campaign_fresh_downloads GROUP BY fresh_status"))
+    attempts = dict(conn.execute("SELECT attempt_count,COUNT(*) FROM campaign_fresh_downloads GROUP BY attempt_count"))
+    conn.close()
+    assert counts == {"COMPLETE": 100}
+    assert attempts == {0: 96, 1: 4}
+    conn = connect_db(env["db"])
+    assert downloader._campaign_rows_digest(conn, CAMPAIGN_ID, set()) == filings_before
+    conn.close()
 
 
 def test_production_exact_identity_artifacts_enable_database_only_repair(tmp_path):

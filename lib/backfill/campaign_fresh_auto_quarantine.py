@@ -13,6 +13,7 @@ import re
 import uuid
 from pathlib import Path
 from typing import Mapping
+from urllib.parse import urlsplit
 
 
 ALLOWED_CONTRACTS = frozenset({
@@ -60,24 +61,86 @@ def failure_http_status(failure: Mapping[str, object]) -> int | None:
     return int(value) if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def canonical_failure_stage(failure: Mapping[str, object]) -> str:
+    """Map only the attested TD Files 404 stage to the policy stage name."""
+    raw_stage = str(failure.get("failure_stage") or "")
+    if (
+        str(failure.get("source_route") or "") == "JQUANTS_TD_FILES"
+        and str(failure.get("failure_code") or "") == "TD_FILES_DISCNO_NOT_FOUND"
+        and failure_http_status(failure) == 404
+        and raw_stage == "TD_FILES"
+    ):
+        return "STAGE_A"
+    return raw_stage
+
+
 def failure_contract(failure: Mapping[str, object]) -> tuple[str, str, str, int] | None:
     status = failure_http_status(failure)
     if status is None:
         return None
     contract = (
         str(failure.get("failure_code") or ""),
-        str(failure.get("failure_stage") or ""),
-        "JQUANTS_TD_FILES",
+        canonical_failure_stage(failure),
+        str(failure.get("source_route") or ""),
         status,
     )
     return contract if contract in ALLOWED_CONTRACTS else None
+
+
+def _safe_message(value: object) -> str | None:
+    text = str(value or "").replace("\r", " ").replace("\n", " ")[:200]
+    if not text or URL_RE.search(text) or SECRET_KEY_RE.search(text):
+        return None
+    return text
+
+
+def safe_failure_telemetry(
+    failure: Mapping[str, object], row: Mapping[str, object],
+) -> dict[str, object]:
+    """Return the safe row-scoped HTTP telemetry retained in child journals."""
+    attempts = [item for item in failure.get("download_attempts", []) or [] if isinstance(item, Mapping)]
+    stage_a = next((item for item in reversed(attempts) if item.get("stage") == "TD_FILES"), {})
+    stage_b_started = any(item.get("stage") == "SIGNED_URL" for item in attempts)
+    endpoint_host = None
+    endpoint = str(stage_a.get("endpoint") or "")
+    if endpoint:
+        try:
+            endpoint_host = (urlsplit(endpoint).hostname or "").lower() or None
+        except ValueError:
+            endpoint_host = None
+    elapsed = stage_a.get("elapsed_seconds")
+    elapsed_ms = round(float(elapsed) * 1000, 3) if isinstance(elapsed, (int, float)) else None
+    retry_after = _safe_message(stage_a.get("retry_after"))
+    telemetry = {
+        "manifest_row_id": str(row.get("manifest_row_id") or ""),
+        "requested_disclosure_no": str(row.get("requested_disclosure_no") or ""),
+        "source_route": str(failure.get("source_route") or ""),
+        "adapter_result_code": str(stage_a.get("result_code") or failure.get("failure_code") or ""),
+        "raw_failure_stage": str(failure.get("failure_stage") or ""),
+        "canonical_failure_stage": canonical_failure_stage(failure),
+        "http_status": failure_http_status(failure),
+        "endpoint_host": endpoint_host,
+        "elapsed_milliseconds": elapsed_ms,
+        "retry_after_present": retry_after is not None,
+        "retry_after": retry_after,
+        "attempt_number": int(stage_a.get("attempt_number") or len(attempts) or 0),
+        "signed_url_received": bool(stage_a.get("signed_url_received", False)),
+        "stage_b_started": stage_b_started,
+        "exception_class": _safe_message(stage_a.get("exception_type") or failure.get("exception_type")),
+        "exception_message_summary": _safe_message(
+            stage_a.get("exception_message") or failure.get("exception_message")
+        ),
+    }
+    _assert_secret_free(telemetry)
+    return telemetry
 
 
 def _safe_attempts(failure: Mapping[str, object]) -> list[dict[str, object]]:
     safe_keys = {
         "stage", "http_status", "reason_phrase", "result_code", "content_type",
         "bytes_received", "zip_sha256", "identity_conflict_fields",
-        "xbrl_candidate_count", "exception_type",
+        "xbrl_candidate_count", "exception_type", "attempt_number",
+        "elapsed_seconds", "retry_after", "signed_url_received",
     }
     result: list[dict[str, object]] = []
     for raw in failure.get("download_attempts", []) or []:
@@ -96,6 +159,8 @@ def _safe_attempts(failure: Mapping[str, object]) -> list[dict[str, object]]:
 
 
 def _assert_secret_free(value: object, key: str = "") -> None:
+    if key == "signed_url_received" and isinstance(value, bool):
+        return
     if SECRET_KEY_RE.search(key):
         raise FreshAutoQuarantineStop("STOP_V4_FRESH_AUTO_QUARANTINE_SECRET_MATERIAL")
     if isinstance(value, Mapping):
@@ -124,8 +189,15 @@ def write_known_failure_evidence(
         "requested_disclosure_no": str(row["requested_disclosure_no"]),
         "failure": {
             "failure_code": contract[0], "failure_stage": contract[1],
+            "raw_failure_stage": str(failure.get("failure_stage") or ""),
+            "canonical_failure_stage": canonical_failure_stage(failure),
             "source_route": contract[2], "http_status": contract[3],
             "retryable": bool(failure.get("retryable", False)),
+            "signed_url_received": bool(failure.get("signed_url_received", False)),
+            "stage_b_started": any(
+                isinstance(attempt, Mapping) and attempt.get("stage") == "SIGNED_URL"
+                for attempt in failure.get("download_attempts", []) or []
+            ),
         },
         "campaign_db_start_sha256": campaign_db_start_sha256.lower(),
         "manifest_path": str(manifest_path), "manifest_sha256": manifest_sha256.lower(),
@@ -138,6 +210,7 @@ def write_known_failure_evidence(
             "completed_at": row.get("completed_at"),
         },
         "attempt_evidence": _safe_attempts(failure),
+        "failure_telemetry": safe_failure_telemetry(failure, row),
         "provenance_published": False,
     }
     _assert_secret_free(payload)

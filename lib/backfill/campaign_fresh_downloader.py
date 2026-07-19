@@ -34,7 +34,11 @@ from lib.backfill.jquants_td_files_adapter import (
     resolve_xbrl_file,
 )
 from lib.backfill.campaign_fresh_download_plan import validate_download_url
-from lib.backfill.campaign_fresh_auto_quarantine import write_known_failure_evidence
+from lib.backfill.campaign_fresh_auto_quarantine import (
+    canonical_failure_stage,
+    safe_failure_telemetry,
+    write_known_failure_evidence,
+)
 from lib.backfill.campaign_state import (
     FreshDownloadCASFailed,
     FreshStateMigrationConflict,
@@ -143,6 +147,7 @@ class DownloadFailure(FreshDownloaderStop):
             "status": "FAILED", "error": str(self),
             "failure_code": self.failure_code,
             "failure_stage": self.failure_stage,
+            "source_route": JQUANTS_SOURCE_ROUTE,
             "retryable": self.retryable,
             "attempt_count": len(self.attempts),
             "requested_url": last.get("requested_url"),
@@ -1811,6 +1816,24 @@ def run_production_downloads(
                         result = dict(artifact_provider(row, cache_root, campaign_id))
                     except DownloadFailure as exc:
                         failure = exc.result(row)
+                        raw_stage = str(failure.get("failure_stage") or "")
+                        normalized_stage = canonical_failure_stage(failure)
+                        row_journal.update(
+                            stage_a_state="FAILED",
+                            failure_code=failure["failure_code"],
+                            failure_stage=normalized_stage,
+                            raw_failure_stage=raw_stage,
+                            canonical_failure_stage=normalized_stage,
+                            source_route=failure["source_route"],
+                            http_status=(
+                                failure.get("td_files_http_status")
+                                if failure.get("td_files_http_status") is not None
+                                else failure.get("http_status")
+                            ),
+                            failure_telemetry=safe_failure_telemetry(failure, row),
+                        )
+                        journal["failure_code"] = failure["failure_code"]
+                        _journal_write(journal_path, journal)
                         evidence = write_known_failure_evidence(
                             output_dir=output_dir, run_id=run_id, campaign_id=campaign_id,
                             row=row, failure=failure, journal_path=journal_path,
@@ -1845,6 +1868,24 @@ def run_production_downloads(
                         )
                     except DownloadFailure as exc:
                         failure = exc.result(row)
+                        raw_stage = str(failure.get("failure_stage") or "")
+                        normalized_stage = canonical_failure_stage(failure)
+                        row_journal.update(
+                            stage_a_state="FAILED",
+                            failure_code=failure["failure_code"],
+                            failure_stage=normalized_stage,
+                            raw_failure_stage=raw_stage,
+                            canonical_failure_stage=normalized_stage,
+                            source_route=failure["source_route"],
+                            http_status=(
+                                failure.get("td_files_http_status")
+                                if failure.get("td_files_http_status") is not None
+                                else failure.get("http_status")
+                            ),
+                            failure_telemetry=safe_failure_telemetry(failure, row),
+                        )
+                        journal["failure_code"] = failure["failure_code"]
+                        _journal_write(journal_path, journal)
                         evidence = write_known_failure_evidence(
                             output_dir=output_dir, run_id=run_id, campaign_id=campaign_id,
                             row=row, failure=failure, journal_path=journal_path,
@@ -1992,7 +2033,7 @@ def run_production_downloads(
                 and row_journal.get("filesystem_state") != "ARTIFACTS_READY"
             ):
                 row_journal["stage_a_state"] = "FAILED"
-                row_journal["failure_code"] = str(exc)
+                row_journal["failure_code"] = row_journal.get("failure_code") or str(exc)
         if journal.get("current_phase") not in {"DB_PENDING", "DB_COMMITTED"}:
             _journal_update(
                 journal_path, journal, "FAILED",
