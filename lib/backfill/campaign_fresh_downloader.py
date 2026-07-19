@@ -97,6 +97,36 @@ PROVENANCE_SCHEMA_VERSION = "1"
 PRODUCTION_MAX_COUNT = 100
 PRODUCTION_OUTPUT_RE = re.compile(r"^v4-campaign-production-download-\d{8}-\d{6}$")
 
+_RUNTIME_MODULES = frozenset({
+    "tools.backfill_campaign_fresh_download_loop",
+    "tools.backfill_campaign_fresh_download",
+    "tools.scheduler_nightly",
+    "tools.scheduler_realtime",
+    "tools.backfill_segments_tdnet",
+    "tools.sync_segments",
+    "tools.backfill_xbrl_to_canonical",
+    "tools.backfill_canonical_segments",
+    "tools.backfill_canonical_financials",
+    "tools.rebuild_canonical_financials",
+    "tools.filings_process",
+    "tools.filings_ingest",
+    "lib.pipeline.canonical_sync",
+})
+_RUNTIME_SCRIPT_NAMES = frozenset({
+    "scheduler_nightly.py",
+    "scheduler_realtime.py",
+    "backfill_segments_tdnet.py",
+    "sync_segments.py",
+    "backfill_xbrl_to_canonical.py",
+    "backfill_canonical_segments.py",
+    "backfill_canonical_financials.py",
+    "rebuild_canonical_financials.py",
+    "filings_process.py",
+    "filings_ingest.py",
+})
+_PYTHON_EXECUTABLE_RE = re.compile(r"^(?:python(?:\d+(?:\.\d+)*)?|py)(?:\.exe)?$", re.IGNORECASE)
+_LAUNCHER_EXECUTABLES = frozenset({"powershell", "powershell.exe", "pwsh", "pwsh.exe", "cmd", "cmd.exe"})
+
 
 @dataclass(frozen=True)
 class ProductionEnvironment:
@@ -513,6 +543,52 @@ def _journal_update(path: Path, journal: dict[str, object], phase: str, **values
     _journal_write(path, journal)
 
 
+def _command_token(value: object) -> str:
+    return str(value or "").strip().strip("\"'").replace("\\", "/").lower()
+
+
+def _is_runtime_python_invocation(tokens: Sequence[object]) -> bool:
+    """Return true only for a direct Python invocation of a guarded workload."""
+    values = [_command_token(token) for token in tokens if str(token or "").strip()]
+    if not values or not _PYTHON_EXECUTABLE_RE.fullmatch(Path(values[0]).name):
+        return False
+    for index, value in enumerate(values[:-1]):
+        if value == "-m" and values[index + 1] in _RUNTIME_MODULES:
+            return True
+    return any(Path(value).name in _RUNTIME_SCRIPT_NAMES for value in values[1:])
+
+
+def _launcher_payload(tokens: Sequence[object]) -> list[str]:
+    values = [str(token or "") for token in tokens]
+    for index, value in enumerate(values):
+        if value.lower() in {"-command", "/c", "-c"}:
+            payload = " ".join(values[index + 1:]).strip().strip("\"'")
+            if not payload:
+                return []
+            # A launcher payload is only trusted when it begins with an actual
+            # Python command (or PowerShell's explicit call operator).  This
+            # deliberately excludes Get-CimInstance/rg/logging expressions
+            # that merely contain a guarded module name as text.
+            return re.findall(r'''(?:[^\s"']+|"[^"]*"|'[^']*')+''', payload)
+    return []
+
+
+def _is_related_production_command(cmdline: Sequence[object]) -> bool:
+    """Classify real guarded workloads without matching monitor text literals."""
+    tokens = [str(token or "") for token in cmdline]
+    if not tokens:
+        return False
+    if _is_runtime_python_invocation(tokens):
+        return True
+    executable = _command_token(tokens[0])
+    if Path(executable).name not in _LAUNCHER_EXECUTABLES:
+        return False
+    payload = _launcher_payload(tokens)
+    if payload and _command_token(payload[0]) == "&":
+        payload = payload[1:]
+    return _is_runtime_python_invocation(payload)
+
+
 def check_production_runtime(repo_root: Path) -> dict[str, object]:
     locks = [
         repo_root / "state" / "locks" / "nightly.lock",
@@ -530,15 +606,10 @@ def check_production_runtime(repo_root: Path) -> dict[str, object]:
         import psutil
         process = psutil.Process(os.getpid())
         excluded = {process.pid, *(parent.pid for parent in process.parents())}
-        patterns = (
-            "tdnet_nightly", "tdnet_realtime", "backfill_segments_tdnet",
-            "sync_segments", "canonical_sync", "backfill_campaign_fresh_download",
-        )
         for candidate in psutil.process_iter(("pid", "name", "cmdline")):
             if candidate.info["pid"] in excluded:
                 continue
-            command = " ".join(candidate.info.get("cmdline") or []).lower()
-            if any(pattern in command for pattern in patterns):
+            if _is_related_production_command(candidate.info.get("cmdline") or []):
                 active.append({"pid": candidate.info["pid"], "name": candidate.info.get("name")})
     except Exception as exc:
         raise FreshDownloaderStop(STOP_PRODUCTION_RUNTIME) from exc

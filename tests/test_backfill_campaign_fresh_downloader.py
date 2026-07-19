@@ -9,6 +9,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import types
 import zipfile
 from pathlib import Path
 
@@ -1247,6 +1248,64 @@ def test_production_runtime_active_prevents_output(tmp_path):
     with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_RUNTIME):
         downloader.run_production_downloads(**kwargs)
     assert not env["output"].exists()
+
+
+@pytest.mark.parametrize("cmdline", [
+    ["powershell.exe", "-Command", "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*tools.backfill_campaign_fresh_download*' }"],
+    ["pwsh.exe", "-Command", "Get-Content C:\\tmp\\journal.json"],
+    ["powershell.exe", "-Command", "rg tools.backfill_campaign_fresh_download C:\\tmp"],
+    ["python.exe", "-c", "print('tools.backfill_campaign_fresh_download')"],
+    ["python.exe", "-c", "print('backfill monitor')"],
+])
+def test_runtime_classifier_ignores_read_only_monitor_text(cmdline):
+    assert downloader._is_related_production_command(cmdline) is False
+
+
+@pytest.mark.parametrize("cmdline", [
+    ["python.exe", "-B", "-m", "tools.backfill_campaign_fresh_download_loop"],
+    ["python.exe", "-m", "tools.backfill_campaign_fresh_download"],
+    ["python.exe", "tools/scheduler_nightly.py"],
+    ["python.exe", "tools/scheduler_realtime.py"],
+    ["python.exe", "-m", "lib.pipeline.canonical_sync"],
+    ["python.exe", "tools/sync_segments.py", "--apply"],
+    ["python.exe", "tools/backfill_segments_tdnet.py", "--apply"],
+    ["powershell.exe", "-Command", "& python.exe -B -m tools.backfill_campaign_fresh_download_loop --apply"],
+    ["cmd.exe", "/c", "python.exe -m tools.backfill_campaign_fresh_download --apply"],
+])
+def test_runtime_classifier_detects_direct_guarded_launches(cmdline):
+    assert downloader._is_related_production_command(cmdline) is True
+
+
+def test_runtime_checker_ignores_monitor_and_excludes_self(monkeypatch, tmp_path):
+    class Current:
+        pid = 10
+        def parents(self):
+            return []
+    class Candidate:
+        def __init__(self, pid, cmdline):
+            self.info = {"pid": pid, "name": "python.exe", "cmdline": cmdline}
+    fake = types.SimpleNamespace(
+        Process=lambda _pid: Current(),
+        process_iter=lambda _attrs: [
+            Candidate(10, ["python.exe", "-m", "tools.backfill_campaign_fresh_download"]),
+            Candidate(11, ["powershell.exe", "-Command", "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*tools.backfill_campaign_fresh_download*' }"]),
+        ],
+    )
+    monkeypatch.setitem(sys.modules, "psutil", fake)
+    assert downloader.check_production_runtime(tmp_path)["active_processes"] == []
+
+
+def test_runtime_checker_rejects_direct_parallel_child(monkeypatch, tmp_path):
+    class Current:
+        pid = 10
+        def parents(self):
+            return []
+    class Candidate:
+        info = {"pid": 11, "name": "python.exe", "cmdline": ["python.exe", "-m", "tools.backfill_campaign_fresh_download"]}
+    fake = types.SimpleNamespace(Process=lambda _pid: Current(), process_iter=lambda _attrs: [Candidate()])
+    monkeypatch.setitem(sys.modules, "psutil", fake)
+    with pytest.raises(downloader.FreshDownloaderStop, match=downloader.STOP_PRODUCTION_RUNTIME):
+        downloader.check_production_runtime(tmp_path)
 
 
 def test_production_detects_database_change_after_artifacts(tmp_path):
