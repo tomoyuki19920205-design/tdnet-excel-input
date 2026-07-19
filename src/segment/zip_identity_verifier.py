@@ -167,6 +167,13 @@ def _normalize_dei_quarter(value: str) -> str:
 
 def _normalize_dei_document_type(value: str) -> str:
     normalized = value.strip()
+    # TD Files attachment iXBRL may identify a non-consolidated IFRS
+    # quarterly financial statement with this Japanese DEI label.  Accept
+    # exactly that label after whitespace-only canonicalization; keep every
+    # other punctuation and word distinction fail-closed.
+    whitespace_normalized = re.sub(r"\s+", " ", normalized)
+    if whitespace_normalized == "四半期 [IFRS]（非連結）":
+        return "attachment_xbrl"
     compact = re.sub(r"[^a-z]", "", normalized.lower())
     if (
         "financialstatements" in compact

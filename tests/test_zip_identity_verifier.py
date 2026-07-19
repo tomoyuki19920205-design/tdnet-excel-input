@@ -2,18 +2,25 @@ import hashlib
 import zipfile
 from pathlib import Path
 import src.segment.zip_identity_verifier as verifier
+import lib.backfill.campaign_fresh_downloader as fresh_downloader
 
 from src.segment.zip_identity_verifier import (
     TrustedProvenance,
     extract_actual_metadata_from_zip,
     verify_zip_identity,
 )
+from lib.backfill.campaign_fresh_downloader import is_production_ready_identity_result
 
 ROW51_ZIP = Path(
     r"C:\tmp\v4-fresh-row51-identity-audit-20260718-100133"
     r"\diagnostic-download\row51-xbrl.zip"
 )
 ROW51_SHA256 = "cb555a7cad60fa76e029b94aa4f2d2904e8f4a9691e465c45e4145a0e0f0a5f5"
+ROW2283_ZIP = Path(
+    r"C:\tmp\v4-row2283-identity-audit-20260719-145037"
+    r"\download\row2283.zip"
+)
+ROW2283_SHA256 = "121325edc618119df68ef011e070e786ae54952e9826d579c4a5aaa229970041"
 
 
 def _write_zip(path, dates, *, include_summary=True, quarter="4", markers=""):
@@ -421,6 +428,25 @@ def test_attachment_non_financial_document_type_is_not_compatible(tmp_path):
     assert verdict.rejection_reason == "metadata_unresolved"
 
 
+def test_ifrs_non_consolidated_quarterly_dei_document_type_is_exactly_normalized():
+    for raw in ("四半期　[IFRS]（非連結）", "四半期 [IFRS]（非連結）"):
+        assert verifier._normalize_dei_document_type(raw) == "attachment_xbrl"
+
+    rejected = (
+        "四半期 [IFRS]",
+        "四半期（非連結）",
+        "四半期 [日本基準]（非連結）",
+        "四半期 [IFRS]（連結）",
+        "通期 [IFRS]（非連結）",
+        "中間期 [IFRS]（非連結）",
+        "第1四半期説明資料",
+        "IFRS決算補足資料",
+        "前文 四半期 [IFRS]（非連結） 後文",
+    )
+    for raw in rejected:
+        assert verifier._normalize_dei_document_type(raw) != "attachment_xbrl"
+
+
 def test_attachment_internal_id_conflict_is_rejected(tmp_path):
     path = tmp_path / "conflict-internal.zip"
     with zipfile.ZipFile(path, "w") as zf:
@@ -575,6 +601,54 @@ def test_row51_diagnostic_zip_accepts_official_link_without_internal_id():
     assert verdict.passed is True
     assert verdict.verdict == "official_linked_xbrl_match_without_internal_id"
     assert verdict.internal_id == ""
+
+
+def test_row2283_diagnostic_zip_accepts_exact_ifrs_non_consolidated_quarterly_type():
+    assert ROW2283_ZIP.is_file()
+    assert hashlib.sha256(ROW2283_ZIP.read_bytes()).hexdigest() == ROW2283_SHA256
+    meta = extract_actual_metadata_from_zip(str(ROW2283_ZIP), "2025-03-31", "3Q")
+    audit = verifier._identity_candidate_audit(str(ROW2283_ZIP))
+    provenance = TrustedProvenance(
+        source="jquants", requested_disclosure_no="20250130558581",
+        requested_file_type="x", resolved_by_function="jquants_td_files_adapter",
+        official_request_succeeded=True, response_status=200,
+        downloaded_size=ROW2283_ZIP.stat().st_size, downloaded_sha256=ROW2283_SHA256,
+        internal_document_id="", ticker="2130", period="2025-03-31", quarter="3Q",
+        document_type="attachment_xbrl", resolved_at="2026-07-19T05:54:48+00:00",
+    )
+    verdict = verify_zip_identity(
+        str(ROW2283_ZIP), "20250130558581", "2130", "2025-03-31", "3Q", provenance
+    )
+
+    assert audit["candidate_count"] == 1
+    assert len(audit["excluded_candidates"]) == 6
+    assert audit["conflict_fields"] == []
+    assert meta == {
+        "ticker": "2130", "period": "2025-03-31", "quarter": "3Q",
+        "document_type": "attachment_xbrl", "internal_document_id": "",
+    }
+    assert verdict.passed is True
+    assert verdict.verdict == "official_linked_xbrl_match_without_internal_id"
+    assert verdict.internal_id == ""
+    assert is_production_ready_identity_result({
+        "identity_verdict": verdict.verdict,
+        "identity_status": "DOWNLOAD_IDENTITY_VERIFIED",
+        "plan_classification": "STANDARD_FRESH_DOWNLOAD",
+        "auto_ready_allowed": True,
+        "quarantine_release_required": False,
+        "internal_document_id": None,
+        "internal_document_id_status": "absent_in_artifact",
+        "linkage_basis": "jquants_td_files_exact_discno",
+        "source_route": "JQUANTS_TD_FILES",
+        "td_files_type": "x",
+        "td_files_http_status": 200,
+        "td_files_result_code": "TD_FILES_OK",
+        "xbrl_candidate_count": 1,
+        "signed_url_received": True,
+        "file_http_status": 200,
+        "requested_disclosure_no": "20250130558581",
+        "identity_value_sources": dict(fresh_downloader.WITHOUT_INTERNAL_ID_VALUE_SOURCES),
+    }) is True
 
 
 def test_attachment_without_internal_id_requires_official_provenance(tmp_path):
