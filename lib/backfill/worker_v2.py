@@ -523,6 +523,7 @@ def _try_xbrl_source(
             period=getattr(filing, "expected_period", None) or None,
             quarter=getattr(filing, "expected_quarter", None) or None,
             title=getattr(filing, "title", None),
+            include_context_evidence=verified_identity,
             allow_expected_quarter_without_title=verified_identity,
         )
         xbrl_rows = detailed.segments
@@ -593,6 +594,7 @@ def _try_xbrl_source(
             "_reportable_sales_total_raw",
             "_consolidated_sales_raw",
             "_sales_reconciliation_verified",
+            "_context_evidence",
         ):
             if evidence_key in row_evidence:
                 record[evidence_key] = row_evidence[evidence_key]

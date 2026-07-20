@@ -619,12 +619,20 @@ def extract_segments_from_xbrl_zip_detailed(
                     accounting_standard = "IFRS"
 
                 loop_period = estimated_period
+                period_inferred_from_filename = False
                 if not loop_period:
                     pm = re.search(r"-(\d{4}-\d{2}-\d{2})", seg_file)
                     if pm:
                         loop_period = pm.group(1)
+                        period_inferred_from_filename = True
 
-                if loop_period:
+                # A caller-supplied period is the canonical fiscal-year end
+                # already bound to the verified filing identity.  Rounding it
+                # would corrupt non-month-end fiscal years (for example 03-20)
+                # and make otherwise verified current rows fail the persistence
+                # contract.  Filename-derived legacy dates retain the existing
+                # month-end normalization because they are only an inference.
+                if loop_period and period_inferred_from_filename:
                     loop_period = _round_to_month_end(loop_period)
 
                 try:
