@@ -1070,6 +1070,16 @@ def _extract_ixbrl_segment_data(
                     aggregate_sales[period_type]["consolidated"].add(value)
             continue
 
+        # A dimensioned numeric fact does not by itself constitute a supported
+        # segment metric row.  Some filings attach goodwill or amortization
+        # facts to a reportable-segment member while disclosing no segment
+        # sales/profit table.  Initializing a row from those unrelated facts
+        # produces an all-NULL sales/profit record and a false too_few_sales
+        # quarantine.  Keep supported explicit-nil facts below, but ignore
+        # unsupported metrics before a candidate row can be created.
+        if not is_sales and not is_profit:
+            continue
+
         # キーを (member, period_type, context_ref) にする
         key = (member, period_type, ctx)
         if key not in temp_candidate:
