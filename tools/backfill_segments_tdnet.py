@@ -1525,6 +1525,7 @@ def _summary_with_validation_rejections(metrics) -> dict:
     summary = metrics.summary_dict()
     summary.update(_validation_rejection_summary(metrics))
     summary.update(_canonical_sync_failure_summary(metrics))
+    summary.update(_canonical_sync_control_summary(metrics))
     summary.update(getattr(metrics, "_isolated_seed_summary", {}))
     summary.update(getattr(metrics, "_manifest_replay_summary", {
         "manifest_replay_enabled": False,
@@ -1543,6 +1544,54 @@ def _summary_with_validation_rejections(metrics) -> dict:
         "manifest_failed_retry_non_target_changed_count": 0,
     }))
     return summary
+
+
+_CANONICAL_SYNC_MODES = {"auto", "disabled"}
+
+
+def _resolve_canonical_sync_mode(
+    mode: str, confirm: str | None, *, production_apply: bool
+) -> str:
+    """Resolve the explicit canonical-sync contract before any database write."""
+    if mode not in _CANONICAL_SYNC_MODES:
+        raise ValueError("canonical sync mode must be auto or disabled")
+    if confirm is not None and confirm != mode:
+        raise ValueError("canonical sync mode confirmation mismatch")
+    if production_apply and mode == "disabled" and confirm != "disabled":
+        raise ValueError(
+            "production apply with disabled canonical sync requires "
+            "--confirm-canonical-sync-mode disabled"
+        )
+    return mode
+
+
+def _canonical_sync_control_summary(metrics) -> dict:
+    values = getattr(metrics, "_canonical_sync_control", None) or {}
+    seen_ids = getattr(metrics, "_canonical_sync_ids_seen", set())
+    return {
+        "canonical_sync_mode": values.get("canonical_sync_mode", "auto"),
+        "canonical_sync_requested": bool(values.get("canonical_sync_requested", False)),
+        "canonical_sync_attempted": bool(values.get("canonical_sync_attempted", False)),
+        "canonical_sync_ids_count": len(seen_ids),
+        "canonical_rows_written": int(values.get("canonical_rows_written", 0) or 0),
+        "supabase_config_loaded": bool(values.get("supabase_config_loaded", False)),
+    }
+
+
+def _ensure_canonical_sync_control(metrics, mode: str) -> dict:
+    control = getattr(metrics, "_canonical_sync_control", None)
+    if control is None:
+        control = {
+            "canonical_sync_mode": mode,
+            "canonical_sync_requested": False,
+            "canonical_sync_attempted": False,
+            "canonical_rows_written": 0,
+            "supabase_config_loaded": False,
+        }
+        metrics._canonical_sync_control = control
+    if not hasattr(metrics, "_canonical_sync_ids_seen"):
+        metrics._canonical_sync_ids_seen = set()
+    return control
 
 
 def _canonical_sync_failure_summary(metrics) -> dict:
@@ -1837,8 +1886,11 @@ def run_backfill(
     replay_manifest_done: bool = False,
     retry_manifest_failed: bool = False,
     isolated_seed_summary: dict | None = None,
+    canonical_sync_mode: str = "auto",
 ) -> dict:
     """バックフィルを実行する (Phase 1 / Phase 2 自動選択)。"""
+    if canonical_sync_mode not in _CANONICAL_SYNC_MODES:
+        raise ValueError("canonical sync mode must be auto or disabled")
     if replay_manifest_done or retry_manifest_failed:
         scope_pending_to_manifest = True
         require_all_manifest_pending = True
@@ -1867,6 +1919,14 @@ def run_backfill(
     use_v2 = worker_version == "v2"
     use_v4 = worker_version == "v4"
     metrics = BackfillMetricsV2() if (use_v2 or use_v4) else BackfillMetrics()
+    metrics._canonical_sync_control = {
+        "canonical_sync_mode": canonical_sync_mode,
+        "canonical_sync_requested": False,
+        "canonical_sync_attempted": False,
+        "canonical_rows_written": 0,
+        "supabase_config_loaded": False,
+    }
+    metrics._canonical_sync_ids_seen = set()
     metrics._isolated_seed_summary = dict(isolated_seed_summary or {})
     metrics._manifest_replay_summary = {
         "manifest_replay_enabled": bool(replay_manifest_done),
@@ -2196,6 +2256,7 @@ def run_backfill(
             log_jsonl_path=log_jsonl_path,
             filing_list_path=filing_list_path,
             validation_filing_id_map=validation_filing_id_map,
+            canonical_sync_mode=canonical_sync_mode,
         )
 
     logger.info(f"[backfill] phase={mode} stage start: input_count={len(pending)}")
@@ -2259,6 +2320,7 @@ def run_backfill(
             flush_every_seconds=flush_every_seconds,
             dry_run_only=dry_run_only,
             validation_filing_id_map=validation_filing_id_map,
+            canonical_sync_mode=canonical_sync_mode,
         )
 
     logger.info(f"[backfill] {mode} done")
@@ -2294,6 +2356,7 @@ def _run_phase1(
     flush_every_seconds,
     dry_run_only: bool = True,
     validation_filing_id_map: dict[str, str] | None = None,
+    canonical_sync_mode: str = "auto",
 ):
     """Phase 1: 従来の ThreadPoolExecutor。"""
     last_flush = time.monotonic()
@@ -2357,6 +2420,7 @@ def _run_phase1(
                     metrics, store, run_logger, dry_run_only=dry_run_only,
                     isolated_worker_dry_run=isolated_worker_dry_run,
                     validation_filing_id_map=validation_filing_id_map,
+                    canonical_sync_mode=canonical_sync_mode,
                 )
                 last_flush = time.monotonic()
 
@@ -2373,8 +2437,10 @@ def _flush_buffer(
     log_jsonl_path: str | None = None,
     filing_list_path: str | None = None,
     validation_filing_id_map: dict[str, str] | None = None,
+    canonical_sync_mode: str = "auto",
 ):
     """segment バッファを DB に flush し、state を mark_upserted する。"""
+    control = _ensure_canonical_sync_control(metrics, canonical_sync_mode)
     if isolated_worker_dry_run:
         _validate_isolated_write_paths(
             run_root=isolated_run_root or "",
@@ -2439,8 +2505,20 @@ def _flush_buffer(
             "validation_rejected_filing_ids": rejected_filing_ids,
             "validation_reasons_by_filing": rejected_reasons,
         }
-        canonical_sync_enabled = not dry_run_only and not isolated_worker_dry_run
+        metrics._canonical_sync_ids_seen.update(
+            int(value) for value in stats.canonical_sync_ids
+        )
+        canonical_sync_enabled = (
+            not dry_run_only
+            and not isolated_worker_dry_run
+            and canonical_sync_mode == "auto"
+        )
+        control["canonical_sync_requested"] = bool(
+            control["canonical_sync_requested"]
+            or (stats.canonical_sync_ids and canonical_sync_enabled)
+        )
         if stats.failed_batches == 0 and stats.canonical_sync_ids and canonical_sync_enabled:
+            control["canonical_sync_attempted"] = True
             try:
                 sync_ids_by_filing = _canonical_sync_ids_by_filing(
                     db,
@@ -2476,6 +2554,7 @@ def _flush_buffer(
                 from tools.sync_segments import sync_sqlite_segment_ids
                 load_env()
                 config = get_supabase_write_config()
+                control["supabase_config_loaded"] = True
                 for filing_id, filing_sync_ids in sync_ids_by_filing.items():
                     reason = None
                     if not config:
@@ -2503,6 +2582,9 @@ def _flush_buffer(
                             )
                             reason = "canonical_sync_exception"
                     if reason is None:
+                        control["canonical_rows_written"] += len(
+                            sync_result.get("synced_segment_ids", [])
+                        )
                         continue
                     already_failed = filing_id in getattr(
                         metrics, "_canonical_sync_failed_filing_ids", []
@@ -2522,6 +2604,7 @@ def _flush_buffer(
                         f"reason={reason}"
                     )
         upsert_detail.update(_canonical_sync_failure_summary(metrics))
+        upsert_detail.update(_canonical_sync_control_summary(metrics))
         run_logger.log_upsert("batch", upsert_detail)
         for fid in rejected_filing_ids:
             store.mark_failed(
@@ -2814,7 +2897,7 @@ def _run_dry_run(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="TDNET 並列バックフィル — セグメント業績抽出")
+    parser = argparse.ArgumentParser(description="TDNET 並列バックフィル - セグメント業績抽出")
     parser.add_argument("--years", type=int, default=None)
     parser.add_argument("--date-from", type=str, default=None)
     parser.add_argument("--date-to", type=str, default=None)
@@ -2903,8 +2986,28 @@ def main():
                         help="--apply の manifest 対象 done/extracted だけを原子的に再処理する")
     parser.add_argument("--apply", action="store_true",
                         help="実際にDBに書き込む (ALLOW_BACKFILL_XBRL_WRITE=1 環境変数も必要)")
+    parser.add_argument(
+        "--canonical-sync-mode",
+        choices=sorted(_CANONICAL_SYNC_MODES),
+        default="auto",
+        help="canonical同期契約: auto (従来動作) / disabled (明示的に同期しない)",
+    )
+    parser.add_argument(
+        "--confirm-canonical-sync-mode",
+        choices=sorted(_CANONICAL_SYNC_MODES),
+        default=None,
+        help="production applyでdisabledを選ぶ場合の二重確認",
+    )
 
     args = parser.parse_args()
+    try:
+        args.canonical_sync_mode = _resolve_canonical_sync_mode(
+            args.canonical_sync_mode,
+            args.confirm_canonical_sync_mode,
+            production_apply=args.apply,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
 
     if args.hydrate_manifest_cache:
         incompatible = any((
@@ -3138,6 +3241,7 @@ def main():
             replay_manifest_done=args.replay_manifest_done,
             retry_manifest_failed=args.retry_manifest_failed,
             isolated_seed_summary=isolated_seed_summary,
+            canonical_sync_mode=args.canonical_sync_mode,
         )
     except ManifestReplayStop as stop:
         _emit_manifest_replay_stop(stop)
