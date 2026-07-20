@@ -33,7 +33,7 @@ def test_resolver_and_verifier_rejections_stop_before_download(monkeypatch):
     resolver = Mock(return_value=SimpleNamespace(zip_path=None, status="JQUANTS_URL_NOT_FOUND", error_reason="resolver_reason", trusted_provenance=None)); verifier = Mock()
     w, _ = _patch_gate(monkeypatch, resolver, verifier); download = Mock(); ai = Mock(); monkeypatch.setattr(w, "_download_originals", download); monkeypatch.setattr(w, "extract_segments_with_ai", ai)
     result = w.process_one_filing_v4(_filing(), cache_root="tmp", dry_run_only=True)
-    assert result.quarantine_reason == "resolver_reason"; resolver.assert_called_once_with(doc_id="20260709590505", ticker="7601", expected_quarter="1Q", expected_period="2027-02-28", allow_jquants_fetch=False, persist_provenance=False)
+    assert result.quarantine_reason == "resolver_reason"; resolver.assert_called_once_with(doc_id="20260709590505", ticker="7601", expected_quarter="1Q", expected_period="2027-02-28", cache_dir="tmp", allow_jquants_fetch=False, persist_provenance=False)
     verifier.assert_not_called(); download.assert_not_called(); ai.assert_not_called()
 
 

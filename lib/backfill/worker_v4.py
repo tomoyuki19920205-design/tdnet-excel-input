@@ -780,6 +780,7 @@ def process_one_filing_v4(
         ticker=filing.ticker,
         expected_quarter=filing.expected_quarter,
         expected_period=filing.expected_period,
+        cache_dir=cache_root,
         allow_jquants_fetch=not dry_run_only,
         persist_provenance=not dry_run_only,
     )
