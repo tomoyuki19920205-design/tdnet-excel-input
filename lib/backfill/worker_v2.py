@@ -585,6 +585,17 @@ def _try_xbrl_source(
         record["_segment_period_role"] = (getattr(row, "raw_json", None) or {}).get(
             "_segment_period_role", "unknown"
         )
+        row_evidence = getattr(row, "raw_json", None) or {}
+        for evidence_key in (
+            "_sales_fact_explicit_nil",
+            "_sales_fact_names",
+            "_segment_member_kind",
+            "_reportable_sales_total_raw",
+            "_consolidated_sales_raw",
+            "_sales_reconciliation_verified",
+        ):
+            if evidence_key in row_evidence:
+                record[evidence_key] = row_evidence[evidence_key]
         records.append(record)
 
     validation = validate_extraction_result(records, source="xbrl")

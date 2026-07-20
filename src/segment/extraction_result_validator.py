@@ -50,6 +50,7 @@ class SoftFailReason(str, Enum):
     WEAK_PROFIT = "weak_profit"                     # profit < 要件だが sales は OK
     BORDERLINE_INVALID_RATIO = "borderline_invalid_ratio"
     LOW_CONFIDENCE_NAMES = "low_confidence_names"
+    UNDISCLOSED_SEGMENT_SALES = "undisclosed_segment_sales"
 
 
 # ============================================================
@@ -229,6 +230,16 @@ def validate_extraction_result(
         if raw_count > 0 else False
     )
 
+    valid_records = [
+        rec for rec, validation in zip(segment_records, validations)
+        if validation.is_valid and validation.row_type == RowType.SEGMENT
+    ]
+    undisclosed_sales_contract = _has_verified_undisclosed_segment_sales(
+        valid_records,
+        source=source,
+        invalid_count=invalid_count,
+    )
+
     # --- 判定ロジック ---
     status, confidence, reason, hard_fail, soft_fail = _determine_status(
         raw_count=raw_count,
@@ -240,6 +251,7 @@ def validate_extraction_result(
         profit_non_null=profit_non_null,
         narrative_contamination=narrative_contamination,
         source=source,
+        undisclosed_sales_contract=undisclosed_sales_contract,
     )
 
     return ExtractionValidationResult(
@@ -274,6 +286,7 @@ def _determine_status(
     profit_non_null: int,
     narrative_contamination: bool,
     source: str,
+    undisclosed_sales_contract: bool = False,
 ) -> tuple[ExtractionStatus, float, str, HardFailReason, SoftFailReason]:
     """success / partial / quarantine を判定する。
 
@@ -352,6 +365,13 @@ def _determine_status(
 
     # (4) sales_non_null < 2
     if sales_non_null < MIN_SALES_NON_NULL:
+        if undisclosed_sales_contract:
+            return (
+                ExtractionStatus.PARTIAL, 0.9,
+                f"[{source}] reportable segment sales explicitly undisclosed; reconciliation verified",
+                HardFailReason.NONE,
+                SoftFailReason.UNDISCLOSED_SEGMENT_SALES,
+            )
         return (
             ExtractionStatus.QUARANTINE, 0.9,
             f"[{source}] 売上非NULLセグメント不足 ({sales_non_null} < {MIN_SALES_NON_NULL})",
@@ -423,3 +443,42 @@ def _is_non_null(value) -> bool:
     if isinstance(value, str):
         return value.strip() != ""
     return True
+
+
+def _has_verified_undisclosed_segment_sales(
+    valid_records: list[dict], *, source: str, invalid_count: int
+) -> bool:
+    """Strictly recognize reportable segments whose sales are explicitly nil.
+
+    This is deliberately evidence-driven.  It does not relax the global sales
+    threshold and cannot be activated by a missing parser value alone.
+    """
+    if source != "xbrl" or invalid_count or len(valid_records) < 2:
+        return False
+    if len({(r.get("period"), r.get("quarter")) for r in valid_records}) != 1:
+        return False
+    if any(r.get("_segment_period_role") != "current" for r in valid_records):
+        return False
+    if any(r.get("_segment_member_kind") != "reportable" for r in valid_records):
+        return False
+    if len({str(r.get("segment_name") or "").strip() for r in valid_records}) != len(valid_records):
+        return False
+    missing = [r for r in valid_records if not _is_non_null(r.get("segment_sales"))]
+    present = [r for r in valid_records if _is_non_null(r.get("segment_sales"))]
+    if not missing or not present:
+        return False
+    if any(not _is_non_null(r.get("segment_profit")) for r in missing):
+        return False
+    if any(
+        r.get("_sales_fact_explicit_nil") is not True
+        or not r.get("_sales_fact_names")
+        for r in missing
+    ):
+        return False
+    if any(r.get("_sales_reconciliation_verified") is not True for r in valid_records):
+        return False
+    totals = {r.get("_reportable_sales_total_raw") for r in valid_records}
+    consolidated = {r.get("_consolidated_sales_raw") for r in valid_records}
+    if len(totals) != 1 or len(consolidated) != 1 or None in totals or None in consolidated:
+        return False
+    return totals == consolidated

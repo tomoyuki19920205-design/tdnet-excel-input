@@ -694,6 +694,16 @@ def extract_segments_from_xbrl_zip_detailed(
                     row_raw_json = {"_segment_period_role": period_type}
                     if profit_tag:
                         row_raw_json["profit_tag"] = profit_tag
+                    row_raw_json.update({
+                        "_sales_fact_explicit_nil": bool(data.get("sales_fact_explicit_nil")),
+                        "_sales_fact_names": list(data.get("sales_fact_names") or []),
+                        "_segment_member_kind": data.get("segment_member_kind", "unknown"),
+                        "_reportable_sales_total_raw": data.get("reportable_sales_total"),
+                        "_consolidated_sales_raw": data.get("consolidated_sales"),
+                        "_sales_reconciliation_verified": bool(
+                            data.get("sales_reconciliation_verified")
+                        ),
+                    })
 
                     if include_context_evidence:
                         row_raw_json = row_raw_json or {}
@@ -957,6 +967,10 @@ def _extract_ixbrl_segment_data(
 
     # 一時的な蓄積用。キーを (member, period_type, context_ref) にして上書き衝突を防ぐ
     temp_candidate: dict[tuple[str, str, str], dict] = {}
+    aggregate_sales: dict[str, dict[str, set[int]]] = {
+        "current": {"reportable_total": set(), "consolidated": set()},
+        "previous": {"reportable_total": set(), "consolidated": set()},
+    }
 
     # ix:nonfraction タグを収集
     for tag in soup.find_all("ix:nonfraction"):
@@ -970,9 +984,36 @@ def _extract_ixbrl_segment_data(
         if period_type == "unknown" or not _is_duration_context(ctx):
             continue
 
-        # セグメント member 抽出
+        # 会社固有 namespace を含む element の判定。nil fact も正式な
+        # 「非開示」証跡なので、数値parseより先にmetricを分類する。
+        is_sales = name in sales_tags
+        is_profit = name in profit_tags
+        is_primary_sales = name in _PRIMARY_SALES_NAMES
+        if not is_sales and not is_profit:
+            local_name = name.split(":")[-1] if ":" in name else name
+            if any(local_name.endswith(s) for s in _COMPANY_SALES_SUFFIXES):
+                is_sales = True
+                if any(local_name.endswith(s) for s in (
+                    "netsales", "netsalesifrs", "revenueifrs", "revenue",
+                    "revenue2ifrs",
+                )):
+                    is_primary_sales = True
+            elif any(local_name.endswith(s) for s in _COMPANY_PROFIT_SUFFIXES):
+                if not local_name.endswith("extraordinaryincome"):
+                    is_profit = True
+
+        value = _parse_ixbrl_number(text, sign)
+
+        # ReportableSegmentsMember の合計とdimensionなし連結値は、
+        # explicit-nil segmentを安全に受理するreconciliation証跡にだけ使う。
         member = _extract_segment_member(ctx)
         if not member:
+            if is_sales and value is not None:
+                ctx_l = ctx.lower()
+                if "reportablesegmentsmember" in ctx_l and "tse-" not in ctx_l:
+                    aggregate_sales[period_type]["reportable_total"].add(value)
+                elif "member" not in ctx_l:
+                    aggregate_sales[period_type]["consolidated"].add(value)
             continue
 
         # キーを (member, period_type, context_ref) にする
@@ -983,35 +1024,25 @@ def _extract_ixbrl_segment_data(
                 "sales": None,
                 "profit": None,
                 "profit_priority": 999,
-                "profit_tag": None
+                "profit_tag": None,
+                "sales_fact_explicit_nil": False,
+                "sales_fact_names": [],
+                "segment_member_kind": (
+                    "reportable"
+                    if (
+                        "reportablesegmentmember" in ctx.lower()
+                        or "reportablesegmentsmember" in ctx.lower()
+                    )
+                    else "other"
+                ),
             }
 
-        value = _parse_ixbrl_number(text, sign)
+        if is_sales and name not in temp_candidate[key]["sales_fact_names"]:
+            temp_candidate[key]["sales_fact_names"].append(name)
+        if is_sales and str(tag.get("xsi:nil") or tag.get("nil") or "").lower() == "true":
+            temp_candidate[key]["sales_fact_explicit_nil"] = True
         if value is None:
             continue
-
-        # 会社固有 namespace を含む element の判定
-        is_sales = name in sales_tags
-        is_profit = name in profit_tags
-        is_primary_sales = name in _PRIMARY_SALES_NAMES
-
-        if not is_sales and not is_profit:
-            # 会社固有 namespace (tse-xxx:yyy) を suffix で判定
-            local_name = name.split(":")[-1] if ":" in name else name
-            if any(local_name.endswith(s) for s in _COMPANY_SALES_SUFFIXES):
-                is_sales = True
-                # 計(NetSales等)は primary 扱い
-                if any(local_name.endswith(s) for s in (
-                    "netsales",
-                    "netsalesifrs",
-                    "revenueifrs",
-                    "revenue",
-                    "revenue2ifrs",
-                )):
-                    is_primary_sales = True
-            elif any(local_name.endswith(s) for s in _COMPANY_PROFIT_SUFFIXES):
-                if not local_name.endswith("extraordinaryincome"):
-                    is_profit = True
 
         if is_sales:
             if is_primary_sales or temp_candidate[key]["sales"] is None:
@@ -1125,6 +1156,20 @@ def _extract_ixbrl_segment_data(
     aggregated: dict[tuple[str, str], dict] = {
         k: v for k, v in result.items() if v
     }
+    for period_type in ("current", "previous"):
+        period_rows = [v for (member, role), v in aggregated.items() if role == period_type]
+        non_null_sum = sum(v["sales"] for v in period_rows if v.get("sales") is not None)
+        totals = aggregate_sales[period_type]["reportable_total"]
+        consolidated = aggregate_sales[period_type]["consolidated"]
+        reconciliation_ok = (
+            len(totals) == 1
+            and len(consolidated) == 1
+            and next(iter(totals)) == next(iter(consolidated)) == non_null_sum
+        )
+        for data in period_rows:
+            data["reportable_sales_total"] = next(iter(totals)) if len(totals) == 1 else None
+            data["consolidated_sales"] = next(iter(consolidated)) if len(consolidated) == 1 else None
+            data["sales_reconciliation_verified"] = reconciliation_ok
     return aggregated
 
 
