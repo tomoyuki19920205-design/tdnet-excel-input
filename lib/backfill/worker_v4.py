@@ -799,10 +799,15 @@ def process_one_filing_v4(
         expected_quarter=filing.expected_quarter,
         trusted_provenance=resolved.trusted_provenance,
     )
-    if not (identity.passed and identity.verdict in {"exact_document_id_match", "official_linked_xbrl_match"}):
+    accepted_identity_verdicts = {
+        "exact_document_id_match",
+        "official_linked_xbrl_match",
+        "official_linked_xbrl_match_without_internal_id",
+    }
+    if not (identity.passed and identity.verdict in accepted_identity_verdicts):
         return _quarantine_now(identity.rejection_reason or identity.verdict)
-    internal_document_id = str(getattr(identity, "internal_id", "") or "").strip()
-    if not internal_document_id:
+    internal_document_id = str(getattr(identity, "internal_id", "") or "").strip() or None
+    if not internal_document_id and identity.verdict != "official_linked_xbrl_match_without_internal_id":
         return _quarantine_now("verified_xbrl_provenance_incomplete")
     xbrl_path = resolved.zip_path
 
@@ -850,8 +855,30 @@ def process_one_filing_v4(
     xbrl_candidate = _try_xbrl_source(
         xbrl_path, doc_path, filing, financials_data, fid, paths, metrics,
         retry_xbrl=retry_xbrl, timeout_xbrl=timeout_xbrl, sleep_fn=_sleep,
+        verified_identity=True,
     )
     candidates.append(xbrl_candidate)
+
+    # A verified XBRL may legitimately contain no segment facts.  Do not turn
+    # this known, detailed-extractor outcome into an offline quarantine.
+    if xbrl_candidate.skip_reason.startswith("valid_no_segments:"):
+        elapsed = int((time.monotonic() - t0) * 1000)
+        metrics["total_ms"] = elapsed
+        reason = xbrl_candidate.skip_reason
+        append_filing_log(paths, {
+            "event": "skipped_normal", "ticker": filing.ticker,
+            "reason": reason, "pipeline": "v4",
+        })
+        return FilingResultV2(
+            filing_id=fid, status="skipped_normal", source="xbrl",
+            selected_path="none", confidence=0.0, reason=reason,
+            hard_fail_reason="", quarantine_reason="", fallback_used=False,
+            fallback_reason="", raw_segment_count=0, valid_segment_count=0,
+            invalid_segment_count=0, sales_non_null_count=0,
+            profit_non_null_count=0, metrics=metrics,
+            cache_paths={"cache_dir": str(paths.cache_dir)},
+            route_mode="valid_no_segments",
+        )
 
     # Step 3: XBRL が成功していれば採用、そうでなければ V4 PDF
     xbrl_ok = (

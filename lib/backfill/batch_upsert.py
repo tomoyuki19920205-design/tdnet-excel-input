@@ -105,11 +105,21 @@ def normalize_and_validate_rec(
         return False, f"invalid_quarter:{quarter}", "none"
 
     role = rec.get("_segment_period_role", "")
+    identity_verdict = rec.get("_identity_verdict")
+    linked_without_internal_id = (
+        identity_verdict == "official_linked_xbrl_match_without_internal_id"
+        and rec.get("_internal_document_id") is None
+        and tdnet_doc_id is None
+    )
     verified = (
         rec.get("_identity_verified") is True
-        and rec.get("_identity_verdict") in {"exact_document_id_match", "official_linked_xbrl_match"}
+        and identity_verdict in {
+            "exact_document_id_match",
+            "official_linked_xbrl_match",
+            "official_linked_xbrl_match_without_internal_id",
+        }
         and bool(rec.get("_requested_disclosure_no"))
-        and bool(rec.get("_internal_document_id"))
+        and (bool(rec.get("_internal_document_id")) or linked_without_internal_id)
         and bool(rec.get("_canonical_expected_period"))
         and rec.get("_canonical_expected_quarter") in ("1Q", "2Q", "3Q", "FY")
         and bool(rec.get("_resolved_zip_sha256"))

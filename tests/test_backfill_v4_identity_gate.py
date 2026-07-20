@@ -37,10 +37,10 @@ def test_resolver_and_verifier_rejections_stop_before_download(monkeypatch):
     verifier.assert_not_called(); download.assert_not_called(); ai.assert_not_called()
 
 
-@pytest.mark.parametrize("verdict", ["exact_document_id_match", "official_linked_xbrl_match"])
+@pytest.mark.parametrize("verdict", ["exact_document_id_match", "official_linked_xbrl_match", "official_linked_xbrl_match_without_internal_id"])
 def test_accepted_identity_uses_same_zip_and_pdf_only(monkeypatch, verdict):
     provenance = object(); resolver = Mock(return_value=SimpleNamespace(zip_path="verified.zip", status="FOUND_CACHE", error_reason="", trusted_provenance=provenance)); verifier = Mock(return_value=SimpleNamespace(passed=True, verdict=verdict, rejection_reason=""))
-    verifier.return_value.internal_id = "20260709590505"
+    verifier.return_value.internal_id = "" if verdict.endswith("without_internal_id") else "20260709590505"
     w, _ = _patch_gate(monkeypatch, resolver, verifier)
     download = Mock(return_value=(None, None)); monkeypatch.setattr(w, "_download_originals", download)
     seen = []
@@ -57,11 +57,11 @@ def test_accepted_identity_uses_same_zip_and_pdf_only(monkeypatch, verdict):
 def test_v2_xbrl_source_uses_filing_canonical_fiscal_period(monkeypatch):
     import lib.backfill.worker_v2 as worker_v2
 
-    extracted = Mock(return_value=[SimpleNamespace(
+    extracted = Mock(return_value=SimpleNamespace(status="success", segments=[SimpleNamespace(
         normalized_segment_name="Smartstore", raw_segment_name="Smartstore",
         period="2026-05-31", quarter="1Q", sales=1242325, profit=-89191,
-    )])
-    monkeypatch.setattr("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip", extracted)
+    )]))
+    monkeypatch.setattr("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip_detailed", extracted)
     filing = _filing(title="title-derived-value")
     pl_zip_path = "verified.zip"
 
@@ -74,6 +74,7 @@ def test_v2_xbrl_source_uses_filing_canonical_fiscal_period(monkeypatch):
 
     extracted.assert_called_once_with(
         pl_zip_path, period="2027-02-28", quarter="1Q", title="title-derived-value",
+        allow_expected_quarter_without_title=False,
     )
     assert extracted.call_args.kwargs["period"] != "2026-05-31"
     assert filing.requested_disclosure_no == "20260709590505"
@@ -87,8 +88,8 @@ def test_v2_xbrl_source_uses_filing_canonical_fiscal_period(monkeypatch):
 def test_v2_xbrl_source_missing_canonical_values_preserves_defaults(monkeypatch, expected_period, expected_quarter):
     import lib.backfill.worker_v2 as worker_v2
 
-    extracted = Mock(return_value=[])
-    monkeypatch.setattr("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip", extracted)
+    extracted = Mock(return_value=SimpleNamespace(status="failed", segments=[]))
+    monkeypatch.setattr("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip_detailed", extracted)
     filing = _filing(expected_period=expected_period, expected_quarter=expected_quarter)
 
     result = worker_v2._try_xbrl_source(
@@ -97,7 +98,10 @@ def test_v2_xbrl_source_missing_canonical_values_preserves_defaults(monkeypatch,
         retry_xbrl=1, timeout_xbrl=1, sleep_fn=lambda _: None,
     )
 
-    extracted.assert_called_once_with("verified.zip", period=None, quarter=None, title="title")
+    extracted.assert_called_once_with(
+        "verified.zip", period=None, quarter=None, title="title",
+        allow_expected_quarter_without_title=False,
+    )
     assert result.error == "xbrl_no_segment_facts"
 
 
@@ -281,21 +285,57 @@ def test_verified_v4_xbrl_uses_internal_id_for_business_column(
     assert record["tdnet_doc_id"] != "862b70fdccda143c86712d70"
 
 
-def test_verified_identity_without_internal_id_is_rejected_without_fallback(monkeypatch):
-    w = _prepare_skip_pdf_worker(monkeypatch, xbrl_success=True, internal_id="")
-    download = Mock(); xbrl = Mock(); pdf = Mock(); ai = Mock()
-    monkeypatch.setattr(w, "_download_originals", download)
-    monkeypatch.setattr(w, "_try_xbrl_source", xbrl)
-    monkeypatch.setattr(w, "_try_pdf_source_v4", pdf)
-    monkeypatch.setattr(w, "extract_segments_with_ai", ai)
-
-    result = w.process_one_filing_v4(
-        _filing(filing_id="manifest-filing-id"), cache_root="tmp",
+def test_verified_linked_identity_without_internal_id_keeps_business_id_null(monkeypatch):
+    w = _prepare_skip_pdf_worker(
+        monkeypatch, xbrl_success=True,
+        verdict="official_linked_xbrl_match_without_internal_id", internal_id="",
     )
+    monkeypatch.setattr(
+        "lib.backfill.segment_partial_check.check_xbrl_partial_segments",
+        Mock(return_value=(False, "", {"xbrl_count": 1, "edinet_hist_count": None, "other_ratio": 0.0})),
+    )
+    result = w.process_one_filing_v4(_filing(filing_id="manifest-filing-id"), cache_root="tmp", skip_pdf=True)
+    record = result.segment_records[0]
+    assert result.status == "ok"
+    assert record["_requested_disclosure_no"] == "20260709590505"
+    assert record["_internal_document_id"] is None
+    assert record["tdnet_doc_id"] is None
 
-    assert result.status == "quarantined"
-    assert result.quarantine_reason == "verified_xbrl_provenance_incomplete"
-    download.assert_not_called(); xbrl.assert_not_called(); pdf.assert_not_called(); ai.assert_not_called()
+
+@pytest.mark.parametrize("detailed_status", ["success_empty", "segment_source_unavailable"])
+def test_v2_xbrl_known_empty_status_is_normal_skip_candidate(monkeypatch, detailed_status):
+    import lib.backfill.worker_v2 as worker_v2
+    extracted = Mock(return_value=SimpleNamespace(status=detailed_status, segments=[]))
+    monkeypatch.setattr("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip_detailed", extracted)
+    result = worker_v2._try_xbrl_source(
+        "verified.zip", None, _filing(), {"period": "2027-02-28", "quarter": "1Q"},
+        "fid", None, None, retry_xbrl=1, timeout_xbrl=1, sleep_fn=lambda _: None,
+    )
+    assert result.error == ""
+    assert result.skip_reason == f"valid_no_segments:{detailed_status}"
+
+
+def test_v4_known_empty_xbrl_is_normal_skip_without_pdf_or_ai(monkeypatch):
+    w = _prepare_skip_pdf_worker(monkeypatch, xbrl_success=False)
+    normal = w.SourceCandidate(source="xbrl", attempted=True, available=True, skip_reason="valid_no_segments:success_empty")
+    monkeypatch.setattr(w, "_try_xbrl_source", Mock(return_value=normal))
+    pdf = Mock(); ai = Mock(); monkeypatch.setattr(w, "_try_pdf_source_v4", pdf); monkeypatch.setattr(w, "extract_segments_with_ai", ai)
+    result = w.process_one_filing_v4(_filing(), cache_root="tmp", skip_pdf=True, isolated_worker_dry_run=True)
+    assert result.status == "skipped_normal"
+    assert result.route_mode == "valid_no_segments"
+    pdf.assert_not_called(); ai.assert_not_called()
+
+
+def test_v4_passes_formal_identity_flag_to_xbrl_extractor(monkeypatch):
+    w = _prepare_skip_pdf_worker(monkeypatch, xbrl_success=False)
+    seen = {}
+    def xbrl(*args, **kwargs):
+        seen.update(kwargs)
+        return w.SourceCandidate(source="xbrl", attempted=True, available=True, skip_reason="valid_no_segments:success_empty")
+    monkeypatch.setattr(w, "_try_xbrl_source", xbrl)
+    result = w.process_one_filing_v4(_filing(), cache_root="tmp", skip_pdf=True)
+    assert result.status == "skipped_normal"
+    assert seen["verified_identity"] is True
 
 
 def test_pdf_fallback_tdnet_doc_id_is_not_overwritten_by_verified_xbrl_identity(monkeypatch):

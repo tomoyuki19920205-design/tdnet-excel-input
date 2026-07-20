@@ -3,10 +3,35 @@ import pytest
 import zipfile
 import datetime
 from src.segment.xbrl_segment_extractor import (
+    _extract_segment_member,
     extract_segments_from_xbrl_zip,
     extract_segments_from_xbrl_zip_detailed,
     SegmentExtractionResult
 )
+
+
+def test_company_specific_plain_segments_member_is_extracted_but_aggregate_is_not():
+    assert _extract_segment_member(
+        "CurrentYearDuration_tse-acedjpfr-23050ChildPhotographSegmentsMember"
+    ) == "ChildPhotograph"
+    assert _extract_segment_member(
+        "CurrentYearDuration_tse-acedjpfr-23050ReportableSegmentsMember"
+    ) is None
+
+
+def test_verified_expected_quarter_allows_attachment_without_embedded_title(tmp_path):
+    zip_path = tmp_path / "attachment-no-title.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("XBRLData/Attachment/data-ixbrl.htm", "<html><body></body></html>")
+    rejected = extract_segments_from_xbrl_zip_detailed(
+        str(zip_path), period="2025-03-31", quarter="FY",
+    )
+    accepted = extract_segments_from_xbrl_zip_detailed(
+        str(zip_path), period="2025-03-31", quarter="FY",
+        allow_expected_quarter_without_title=True,
+    )
+    assert rejected.status == "quarter_unresolved"
+    assert accepted.status == "segment_source_unavailable"
 
 def create_dummy_ixbrl_zip(zip_path, title, contexts: list[dict], facts: list[dict]):
     # context xml を構築

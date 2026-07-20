@@ -505,7 +505,7 @@ def _select_best_candidate(candidates: list[SourceCandidate]) -> SourceCandidate
 
 def _try_xbrl_source(
     xbrl_path, doc_path, filing, financials_data, fid, paths, metrics, *,
-    retry_xbrl, timeout_xbrl, sleep_fn,
+    retry_xbrl, timeout_xbrl, sleep_fn, verified_identity=False,
 ) -> SourceCandidate:
     """XBRL セグメント抽出を試行し SourceCandidate を返す。"""
     if not xbrl_path:
@@ -517,13 +517,15 @@ def _try_xbrl_source(
     from src.segment.extraction_result_validator import validate_extraction_result
 
     try:
-        from src.segment.xbrl_segment_extractor import extract_segments_from_xbrl_zip
-        xbrl_rows = extract_segments_from_xbrl_zip(
+        from src.segment.xbrl_segment_extractor import extract_segments_from_xbrl_zip_detailed
+        detailed = extract_segments_from_xbrl_zip_detailed(
             xbrl_path,
             period=getattr(filing, "expected_period", None) or None,
             quarter=getattr(filing, "expected_quarter", None) or None,
             title=getattr(filing, "title", None),
+            allow_expected_quarter_without_title=verified_identity,
         )
+        xbrl_rows = detailed.segments
     except Exception as e:
         logger.debug(f"[v2] XBRL extraction error: fid={fid} err={e}")
         return SourceCandidate(
@@ -532,6 +534,14 @@ def _try_xbrl_source(
         )
 
     if not xbrl_rows:
+        # 解析済みだがセグメント事実がない開示は、抽出失敗ではない。
+        # worker_v4 が offline/skip-pdf でも正常完了として扱えるよう、
+        # detailed extractor の fail-closed な状態だけを明示的に渡す。
+        if detailed.status in {"success_empty", "segment_source_unavailable"}:
+            return SourceCandidate(
+                source="xbrl", attempted=True, available=True,
+                skip_reason=f"valid_no_segments:{detailed.status}",
+            )
         return SourceCandidate(
             source="xbrl", attempted=True, available=True,
             error="xbrl_no_segment_facts",

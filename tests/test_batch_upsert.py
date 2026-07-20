@@ -340,6 +340,33 @@ class TestProvenanceAwareBatchUpsert:
         assert payload_source == "backfill_xbrl"
         db.close()
 
+    def test_formally_linked_record_without_internal_id_keeps_null_business_id(self, tmp_path):
+        db = MigrationDB(str(tmp_path / "linked-no-internal.db"))
+        record = self._record(
+            tdnet_doc_id=None,
+            _identity_verdict="official_linked_xbrl_match_without_internal_id",
+            _internal_document_id=None,
+        )
+        stats = batch_upsert_segments([record], db)
+        assert stats.inserted == 1
+        assert stats.validation_rejected_record_count == 0
+        stored = db._conn.execute(
+            "SELECT tdnet_doc_id FROM segment_financials WHERE company_code='4057'"
+        ).fetchone()[0]
+        assert stored is None
+        db.close()
+
+    def test_linked_without_internal_id_rejects_requested_id_substitution(self, tmp_path):
+        db = MigrationDB(str(tmp_path / "linked-no-internal-reject.db"))
+        record = self._record(
+            tdnet_doc_id="20260713591788",
+            _identity_verdict="official_linked_xbrl_match_without_internal_id",
+            _internal_document_id=None,
+        )
+        stats = batch_upsert_segments([record], db)
+        assert stats.validation_rejected_record_count == 1
+        db.close()
+
     @pytest.mark.parametrize(
         ("existing_source", "existing_doc_id", "incoming", "counter"),
         [

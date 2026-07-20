@@ -118,12 +118,23 @@ ALL_PROFIT_TAGS = _PROFIT_TAGS | _IFRS_PROFIT_TAGS
 # ============================================================
 # パターン1: 標準 suffix (ReportableSegmentsMember 等)
 _SEGMENT_MEMBER_RE = re.compile(
-    r"(?:tse-\w+-\d+0?)"       # prefix (tse-acedjpfr-25900, tse-qcediffr-72030 等)
+    r"(?:tse-\w+-\d+)(?=[A-Za-z])"  # ticker の末尾数字を member 名へ渡さない
     r"(\w+?)"                   # segment member name
     r"(?:ReportableSegments?Member|OperatingSegments?Member"
     r"|BusinessSegments?Member|OtherSegments?Member)",
     re.IGNORECASE,
 )
+
+# パターン1b: 会社固有の plain ``<Name>SegmentsMember``。
+# 標準の ReportableSegmentsMember を付けずに明示軸 member を表す
+# TDNET XBRL がある。ticker prefix を必須にし、汎用集計 member は除外する。
+_PLAIN_SEGMENTS_MEMBER_RE = re.compile(
+    r"(?:tse-\w+-\d+)(?=[A-Za-z])([A-Za-z][A-Za-z0-9]*?)SegmentsMember$",
+    re.IGNORECASE,
+)
+_PLAIN_SEGMENTS_MEMBER_EXCLUDED = {
+    "reportable", "operating", "business", "other", "total", "all",
+}
 
 # パターン2: ticker prefix + plain Member (76860StoreSalesMember, 246A0NetworkMember 等)
 # ticker は数字4-5桁 or 英数字混合 (246A0 等)
@@ -167,7 +178,17 @@ def _extract_segment_member(context_ref: str) -> Optional[str]:
     # パターン1: 標準 suffix
     m = _SEGMENT_MEMBER_RE.search(context_ref)
     if m:
-        return m.group(1)
+        name = m.group(1)
+        if name.lower() not in _PLAIN_SEGMENTS_MEMBER_EXCLUDED:
+            return name
+
+    # パターン1b: ``tse-...-23050ChildPhotographSegmentsMember`` のような
+    # 会社固有の明示 member。集計・構造 member は segment として受理しない。
+    m_plain = _PLAIN_SEGMENTS_MEMBER_RE.search(context_ref)
+    if m_plain:
+        name = m_plain.group(1)
+        if name.lower() not in _PLAIN_SEGMENTS_MEMBER_EXCLUDED:
+            return name
 
     # パターン3: OperatingSegmentsNotIncluded... → "Other" として扱う
     if _OSNI_RE.search(context_ref):
@@ -421,6 +442,7 @@ def extract_segments_from_xbrl_zip_detailed(
     quarter: Optional[str] = None,
     title: Optional[str] = None,
     include_context_evidence: bool = False,
+    allow_expected_quarter_without_title: bool = False,
 ) -> SegmentExtractionResult:
     """XBRL ZIP からセグメント情報を詳細ステータス付きで抽出。"""
     parse_error_count = 0
@@ -478,6 +500,18 @@ def extract_segments_from_xbrl_zip_detailed(
 
             if document_title:
                 title_quarter = _parse_quarter_from_title(document_title)
+
+            if (
+                (not title_quarter or title_quarter == "UNKNOWN")
+                and allow_expected_quarter_without_title
+                and meta_quarter
+                and meta_quarter != "UNKNOWN"
+            ):
+                # Only the V4 worker enables this after formal ZIP identity
+                # verification has already bound the expected quarter to the
+                # exact requested TD Files artifact.  Generic callers remain
+                # fail-closed when the embedded title is unavailable.
+                title_quarter = meta_quarter
 
             if not title_quarter or title_quarter == "UNKNOWN":
                 logger.warning(f"[XBRL] Could not verify quarter from title for {basename}: '{document_title}'. Skipping to be safe.")
