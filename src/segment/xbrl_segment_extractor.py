@@ -52,6 +52,23 @@ def _calculate_expected_context_end(period_str: str, quarter: str) -> Optional[d
     _, last_day = calendar.monthrange(d.year, d.month)
     return datetime.date(d.year, d.month, min(d.day, last_day))
 
+
+def _extract_dei_date_values(soup: BeautifulSoup, local_name: str) -> set[datetime.date]:
+    """Return valid ISO DEI dates for *local_name* from one iXBRL document."""
+    values: set[datetime.date] = set()
+    expected_name = local_name.lower()
+    for tag in soup.find_all(["ix:nonnumeric", "ix:nonfraction"]):
+        qualified_name = str(tag.get("name") or "")
+        prefix, separator, fact_name = qualified_name.rpartition(":")
+        if separator != ":" or prefix.lower() != "jpdei_cor" or fact_name.lower() != expected_name:
+            continue
+        raw_value = tag.get_text(strip=True)
+        try:
+            values.add(datetime.datetime.strptime(raw_value, "%Y-%m-%d").date())
+        except ValueError:
+            continue
+    return values
+
 # ============================================================
 # iXBRL タグ → セグメント値マッピング
 # ============================================================
@@ -478,6 +495,8 @@ def extract_segments_from_xbrl_zip_detailed(
     global_context_map = {}
     document_title = None
     title_quarter = None
+    dei_current_period_ends: set[datetime.date] = set()
+    dei_fiscal_year_ends: set[datetime.date] = set()
 
     try:
         with zipfile.ZipFile(zip_path) as zf:
@@ -494,6 +513,12 @@ def extract_segments_from_xbrl_zip_detailed(
                         if "context" in content.lower():
                             s = BeautifulSoup(content, "html.parser")
                             global_context_map.update(_parse_context_periods(s))
+                            dei_current_period_ends.update(
+                                _extract_dei_date_values(s, "CurrentPeriodEndDateDEI")
+                            )
+                            dei_fiscal_year_ends.update(
+                                _extract_dei_date_values(s, "CurrentFiscalYearEndDateDEI")
+                            )
                     except Exception as e:
                         logger.warning(f"Failed to parse context in {name}: {e}")
                         parse_error_count += 1
@@ -551,6 +576,35 @@ def extract_segments_from_xbrl_zip_detailed(
             expected_end = None
             if period and estimated_quarter:
                 expected_end = _calculate_expected_context_end(period, estimated_quarter)
+                try:
+                    expected_fiscal_year_end = datetime.datetime.strptime(
+                        period[:10], "%Y-%m-%d"
+                    ).date()
+                except ValueError:
+                    expected_fiscal_year_end = None
+
+                # A newly listed company may have a short first fiscal year, so
+                # subtracting fixed quarter offsets from the fiscal-year end can
+                # point at the wrong date.  Use the filing's authoritative DEI
+                # current-period end only when both DEI date fields are singular,
+                # the fiscal-year end matches the caller-bound identity, and the
+                # current-period end does not exceed that fiscal-year end.
+                if len(dei_current_period_ends) > 1 or len(dei_fiscal_year_ends) > 1:
+                    return SegmentExtractionResult(
+                        status="context_unresolved",
+                        segments=[],
+                        reason="dei_period_date_conflict",
+                        title_quarter=estimated_quarter,
+                        candidate_file_count=candidate_file_count,
+                    )
+                if (
+                    expected_fiscal_year_end is not None
+                    and len(dei_current_period_ends) == 1
+                    and dei_fiscal_year_ends == {expected_fiscal_year_end}
+                ):
+                    dei_current_period_end = next(iter(dei_current_period_ends))
+                    if dei_current_period_end <= expected_fiscal_year_end:
+                        expected_end = dei_current_period_end
 
             for seg_file in seg_files:
                 try:
