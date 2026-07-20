@@ -644,6 +644,15 @@ def extract_segments_from_xbrl_zip_detailed(
 
                 parsed_file_count += 1
 
+                verified_current_segment_omission = bool(
+                    expected_end
+                    and rows
+                    and all(role == "previous" for _, role in rows)
+                    and _has_verified_current_segment_omission(
+                        soup, global_context_map, expected_end
+                    )
+                )
+
                 file_date_guard_status = "UNKNOWN"
 
                 def _get_prior_expected_end(ed: datetime.date) -> datetime.date:
@@ -655,7 +664,13 @@ def extract_segments_from_xbrl_zip_detailed(
                     except ValueError:
                         return ed
 
-                if expected_end:
+                if verified_current_segment_omission:
+                    # Current-period segment narrative is present and bound to
+                    # the expected period, but only prior-period quantitative
+                    # facts exist. Do not emit those prior rows as current data.
+                    rows = {}
+                    file_date_guard_status = "PASS"
+                elif expected_end:
                     actual_ends = []
                     if rows:
                         used_ctx_ids = list(set([r.get("context_ref") for r in rows.values() if "context_ref" in r]))
@@ -994,6 +1009,61 @@ def _get_profit_priority(name: str) -> int:
     if "beforetax" in n or "incomebefore" in n:
         return 4
     return 1
+
+
+def _has_verified_current_segment_omission(
+    soup: BeautifulSoup,
+    global_context_map: dict,
+    expected_end: datetime.date,
+) -> bool:
+    """Return true only for a verified current-period narrative-only segment note.
+
+    Some quarterly attachments retain the prior-year quantitative segment table
+    while the current-period table is intentionally omitted. Their contexts may
+    be declared in another Inline XBRL document in the same ZIP. Treat that
+    shape as empty only when a current segment text block is period-bound and
+    there are no current numeric segment candidates of any kind.
+    """
+    current_segment_narrative = False
+    for tag in soup.find_all("ix:nonnumeric"):
+        name = (tag.get("name") or "").lower()
+        context_ref = tag.get("contextref", "")
+        if "segment" not in name or "textblock" not in name:
+            continue
+        if _classify_period_type(context_ref) != "current":
+            continue
+        context = global_context_map.get(context_ref, {})
+        if context.get("type") != "duration" or not context.get("end"):
+            continue
+        try:
+            context_end = datetime.datetime.strptime(
+                context["end"][:10], "%Y-%m-%d"
+            ).date()
+        except ValueError:
+            continue
+        if abs((context_end - expected_end).days) <= 40 and tag.get_text(strip=True):
+            current_segment_narrative = True
+
+    if not current_segment_narrative:
+        return False
+
+    for tag in soup.find_all("ix:nonfraction"):
+        context_ref = tag.get("contextref", "")
+        if _classify_period_type(context_ref) != "current":
+            continue
+        name = (tag.get("name") or "").lower()
+        local_name = name.split(":")[-1]
+        is_supported_metric = (
+            name in ALL_SALES_TAGS
+            or name in ALL_PROFIT_TAGS
+            or any(local_name.endswith(value) for value in _COMPANY_SALES_SUFFIXES)
+            or any(local_name.endswith(value) for value in _COMPANY_PROFIT_SUFFIXES)
+        )
+        has_segment_member = _extract_segment_member(context_ref) is not None
+        if is_supported_metric or has_segment_member:
+            return False
+
+    return True
 
 def _extract_ixbrl_segment_data(
     soup: BeautifulSoup, accounting_standard: str, estimated_quarter: str = "UNKNOWN", global_context_map: Optional[dict] = None, expected_end: Optional[datetime.date] = None
