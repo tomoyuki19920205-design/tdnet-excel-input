@@ -1008,6 +1008,7 @@ def run_ingest(
                     title=item.title,
                     disclosure_datetime=item.published_at,
                     doc_url=item.doc_url,
+                    source_doc_id=item.source_doc_id or "",
                 )
                 for item in items  # 全文書（決算短信+予想修正+その他）
             ]

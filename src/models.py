@@ -12,6 +12,8 @@ class DisclosureType:
     FINANCIAL_STATEMENT = "financial_statement"
     DIVIDEND_REVISION = "dividend_revision"
     BUYBACK = "buyback"
+    EARNINGS_MATERIAL = "earnings_material"
+    MONTHLY_UPDATE = "monthly_update"
 
 
 @dataclass

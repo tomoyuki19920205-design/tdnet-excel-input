@@ -15,6 +15,8 @@ class EventType:
     BUYBACK = "buyback"
     FORECAST_REVISION = "forecast_revision"
     DIVIDEND_REVISION = "dividend_revision"
+    EARNINGS_MATERIAL = "earnings_material"
+    MONTHLY_UPDATE = "monthly_update"
 
 
 # ============================================================
@@ -31,6 +33,7 @@ class DocumentMeta:
     doc_url: str = ""
     pdf_path: str = ""
     text_body: str = ""  # 取得済みの場合
+    source_doc_id: str = ""  # provider-native ID; doc_id remains the stable fallback
 
 
 # ============================================================

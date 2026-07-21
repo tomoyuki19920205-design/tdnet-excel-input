@@ -37,8 +37,10 @@ from .buyback_extractor import extract_buyback_event
 from .forecast_extractor import extract_forecast_revision
 from .dividend_extractor import extract_dividend_revision
 from .price_service import get_last_close
+from src.pdf_only_materials import classify_pdf_only_material
 
 logger = logging.getLogger("event_pipeline")
+PDF_ONLY_MATERIAL_ALERTS_VERSION = "2026-07-21.v1"
 
 # buyback event_type → subtype マッピング
 _BUYBACK_SUBTYPE_MAP = {
@@ -372,6 +374,33 @@ def _dividend_to_event_record(
     )
 
 
+def _pdf_only_material_to_event_record(doc: DocumentMeta, match) -> EventRecord:
+    """Build a viewer-only event entirely from trusted TDNET metadata."""
+    source_doc_id = doc.source_doc_id or doc.doc_id
+    payload = {
+        "pdf_only": True,
+        "display_label": match.short_label,
+        "notification_type": match.event_type,
+        "source_doc_id": source_doc_id,
+        "pdf_url": doc.doc_url,
+    }
+    return EventRecord(
+        source_doc_id=source_doc_id,
+        ticker=doc.ticker,
+        company_name=doc.company_name,
+        disclosure_datetime=doc.disclosure_datetime,
+        title=doc.title,
+        doc_url=doc.doc_url,
+        event_type=match.event_type,
+        subtype="pdf_only",
+        importance=40,
+        summary_text=match.short_label,
+        raw_payload_json=json.dumps({"title": doc.title}, ensure_ascii=False),
+        extracted_payload_json=json.dumps(payload, ensure_ascii=False),
+        fingerprint=compute_fingerprint(match.event_type, source_doc_id),
+    )
+
+
 # ============================================================
 # 単一文書処理
 # ============================================================
@@ -395,7 +424,10 @@ def _process_single_document(
     """
     results = []
     title = doc.title
-    allowed = event_types or {EventType.BUYBACK, EventType.FORECAST_REVISION, EventType.DIVIDEND_REVISION}
+    allowed = event_types or {
+        EventType.BUYBACK, EventType.FORECAST_REVISION, EventType.DIVIDEND_REVISION,
+        EventType.EARNINGS_MATERIAL, EventType.MONTHLY_UPDATE,
+    }
 
     # ================================================================
     # ★ STEP 1: タイトルのみによる軽量事前分類（PDF取得なし）
@@ -403,10 +435,12 @@ def _process_single_document(
     _pre_buyback_subtype = classify_buyback_subtype(title)  # 'ignore' / 'new_program' / 'tostnet' 等
     _pre_forecast = classify_forecast(title, "")             # title のみで十分判定可能
     _pre_dividend = classify_dividend(title, "")             # title のみで十分判定可能
+    _pre_material = classify_pdf_only_material(title, doc.doc_url)
 
     _need_buyback  = (EventType.BUYBACK in allowed) and (_pre_buyback_subtype != "ignore")
     _need_forecast = (EventType.FORECAST_REVISION in allowed) and _pre_forecast.is_target
     _need_dividend = (EventType.DIVIDEND_REVISION in allowed) and _pre_dividend.is_target
+    _need_material = bool(_pre_material and _pre_material.event_type in allowed)
 
     logger.info(
         f"[FORECAST_CALL] doc_id={doc.doc_id[:16] if doc.doc_id else '?'} "
@@ -419,16 +453,34 @@ def _process_single_document(
         f"buyback_subtype={_pre_buyback_subtype!r} "
         f"forecast={_pre_forecast.is_target} "
         f"dividend={_pre_dividend.is_target} "
+        f"pdf_only_material={getattr(_pre_material, 'event_type', None)!r} "
         f"title={title[:60]!r}"
     )
 
     # 全カテゴリ対象外 → PDF取得不要で即return
-    if not (_need_buyback or _need_forecast or _need_dividend):
+    if not (_need_buyback or _need_forecast or _need_dividend or _need_material):
         logger.info(
             f"[TITLE_PRECLASSIFY] SKIP_ALL ticker={doc.ticker} "
             f"(no event category matched, skip PDF fetch)"
         )
         return [{"action": "skipped_non_target"}]
+
+    # Viewer-only material alerts intentionally do not fetch or parse the PDF.
+    if _need_material:
+        record = _pdf_only_material_to_event_record(doc, _pre_material)
+        if dry_run:
+            results.append({
+                "event_type": record.event_type, "subtype": record.subtype,
+                "action": "dry_run", "event_id": record.event_id,
+                "summary": record.summary_text, "_event_record": record,
+            })
+        else:
+            action, eid = upsert_event(conn, record)
+            results.append({
+                "event_type": record.event_type, "subtype": record.subtype,
+                "action": action, "event_id": eid,
+                "_event_record": record if action in ("inserted", "updated") else None,
+            })
 
     # ================================================================
     # ★ STEP 2: 必要カテゴリ用に PDF 取得（遅延評価・1回のみ）
@@ -709,6 +761,7 @@ def process_documents(
     PipelineResult
     """
     result = PipelineResult()
+    logger.info("[PDF_ONLY_MATERIAL_ALERTS] version=%s docs=%d", PDF_ONLY_MATERIAL_ALERTS_VERSION, len(docs))
 
     conn: sqlite3.Connection | None = None
     try:
@@ -725,7 +778,10 @@ def process_documents(
         def _prefetch_worker(doc: DocumentMeta) -> dict | None:
             # 軽量事前分類（PDFが必要か判定）
             title = doc.title
-            allowed = event_types or {EventType.BUYBACK, EventType.FORECAST_REVISION, EventType.DIVIDEND_REVISION}
+            allowed = event_types or {
+                EventType.BUYBACK, EventType.FORECAST_REVISION, EventType.DIVIDEND_REVISION,
+                EventType.EARNINGS_MATERIAL, EventType.MONTHLY_UPDATE,
+            }
             _pre_buyback_subtype = classify_buyback_subtype(title)
             _pre_forecast = classify_forecast(title, "")
             _pre_dividend = classify_dividend(title, "")

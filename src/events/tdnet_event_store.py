@@ -36,6 +36,8 @@ DISPLAY_DIVIDEND = "dividend"
 DISPLAY_EARNINGS = "earnings"
 DISPLAY_SHAREHOLDER = "shareholder"
 DISPLAY_OTHER = "other"
+DISPLAY_EARNINGS_MATERIAL = "earnings_material"
+DISPLAY_MONTHLY_UPDATE = "monthly_update"
 
 # event_type → display_category 直接マッピング
 _EVENT_TYPE_TO_CATEGORY = {
@@ -45,6 +47,8 @@ _EVENT_TYPE_TO_CATEGORY = {
     "earnings": DISPLAY_EARNINGS,
     "shareholder": DISPLAY_SHAREHOLDER,
     "other": DISPLAY_OTHER,
+    "earnings_material": DISPLAY_EARNINGS_MATERIAL,
+    "monthly_update": DISPLAY_MONTHLY_UPDATE,
 }
 
 # headline/title キーワード → display_category マッピング
@@ -174,6 +178,8 @@ _PRIORITY_MAP = {
     (EventType.DIVIDEND_REVISION, "special_dividend"): 30,
     (EventType.DIVIDEND_REVISION, "commemorative_dividend"): 30,
     ("earnings", None): 40,
+    (EventType.EARNINGS_MATERIAL, None): 40,
+    (EventType.MONTHLY_UPDATE, None): 80,
     (EventType.FORECAST_REVISION, "downward"): 50,
     (EventType.FORECAST_REVISION, "difference"): 50,
     (EventType.FORECAST_REVISION, "neutral"): 60,
@@ -732,7 +738,9 @@ def build_supabase_row(event: EventRecord, client=None) -> tuple[dict, dict, str
     formatted_message = event.summary_text or ""
     metric_name, metric_value, metric_yoy = _extract_primary_metric(event)
     strength = _compute_strength_score(event)
-    notify_discord = should_notify_event(event)
+    notify_discord = False if event.event_type in (
+        EventType.EARNINGS_MATERIAL, EventType.MONTHLY_UPDATE,
+    ) else should_notify_event(event)
 
     original_event_type = event.event_type or ""
 
@@ -793,7 +801,10 @@ def build_supabase_row(event: EventRecord, client=None) -> tuple[dict, dict, str
         "headline": event.title or "",
         "summary": event.summary_text or "",
         "source_url": event.doc_url or None,
-        "pdf_url": event.doc_url if display_category in ("earnings", "forecast", "dividend", "buyback") else None,
+        "pdf_url": event.doc_url if display_category in (
+            "earnings", "forecast", "dividend", "buyback",
+            DISPLAY_EARNINGS_MATERIAL, DISPLAY_MONTHLY_UPDATE,
+        ) else None,
         "raw_payload": json.dumps(raw_payload, ensure_ascii=False, default=str),
         "strength_score": strength,
         "priority_rank": priority_rank,

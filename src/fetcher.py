@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 
 from .common_ticker import strip_tdnet_trailing_zero
 from .models import DisclosureItem, DisclosureType, FINANCIAL_STATEMENT_KEYWORDS
+from .pdf_only_materials import classify_pdf_only_material
 from .utils import sha256, today_yyyymmdd
 from lib.backfill.xbrl_url_inference import infer_xbrl_url_from_pdf
 
@@ -111,6 +112,13 @@ def classify_disclosure(title: str) -> str | None:
     _has_buyback_excl = any(kw in title for kw in _BUYBACK_HARD_EXCLUDE)
     if _has_buyback_kw and not _has_buyback_excl:
         return DisclosureType.BUYBACK
+
+    # ── viewer-only metadata events (PDF URL is validated downstream) ──
+    # Run before the broad "通期決算" financial-statement keyword so
+    # "通期決算説明資料" is not sent to numeric statement extraction.
+    material = classify_pdf_only_material(title)
+    if material:
+        return material.event_type
 
     # ── financial_statement 判定 ──
     if any(kw in n for kw in FINANCIAL_STATEMENT_KEYWORDS):
