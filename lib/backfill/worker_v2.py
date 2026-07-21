@@ -590,10 +590,18 @@ def _try_xbrl_source(
         for evidence_key in (
             "_sales_fact_explicit_nil",
             "_sales_fact_names",
+            "_sales_fact_numeric_present",
+            "_sales_fact_selected_name",
+            "_sales_fact_selected_raw",
+            "_sales_fact_rounds_to_zero",
             "_segment_member_kind",
             "_reportable_sales_total_raw",
             "_consolidated_sales_raw",
             "_sales_reconciliation_verified",
+            "_selected_reportable_sales_total_raw",
+            "_selected_consolidated_sales_raw",
+            "_selected_sales_raw_sum",
+            "_sales_rounding_reconciliation_verified",
             "_context_evidence",
         ):
             if evidence_key in row_evidence:

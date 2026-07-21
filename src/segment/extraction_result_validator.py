@@ -51,6 +51,7 @@ class SoftFailReason(str, Enum):
     BORDERLINE_INVALID_RATIO = "borderline_invalid_ratio"
     LOW_CONFIDENCE_NAMES = "low_confidence_names"
     UNDISCLOSED_SEGMENT_SALES = "undisclosed_segment_sales"
+    SUB_MILLION_SEGMENT_SALES = "sub_million_segment_sales"
 
 
 # ============================================================
@@ -239,6 +240,11 @@ def validate_extraction_result(
         source=source,
         invalid_count=invalid_count,
     )
+    sub_million_sales_contract = _has_verified_sub_million_segment_sales(
+        valid_records,
+        source=source,
+        invalid_count=invalid_count,
+    )
 
     # --- 判定ロジック ---
     status, confidence, reason, hard_fail, soft_fail = _determine_status(
@@ -252,6 +258,7 @@ def validate_extraction_result(
         narrative_contamination=narrative_contamination,
         source=source,
         undisclosed_sales_contract=undisclosed_sales_contract,
+        sub_million_sales_contract=sub_million_sales_contract,
     )
 
     return ExtractionValidationResult(
@@ -287,6 +294,7 @@ def _determine_status(
     narrative_contamination: bool,
     source: str,
     undisclosed_sales_contract: bool = False,
+    sub_million_sales_contract: bool = False,
 ) -> tuple[ExtractionStatus, float, str, HardFailReason, SoftFailReason]:
     """success / partial / quarantine を判定する。
 
@@ -371,6 +379,13 @@ def _determine_status(
                 f"[{source}] reportable segment sales explicitly undisclosed; reconciliation verified",
                 HardFailReason.NONE,
                 SoftFailReason.UNDISCLOSED_SEGMENT_SALES,
+            )
+        if sub_million_sales_contract:
+            return (
+                ExtractionStatus.PARTIAL, 0.9,
+                f"[{source}] verified numeric segment sales rounds to zero after million-yen normalization",
+                HardFailReason.NONE,
+                SoftFailReason.SUB_MILLION_SEGMENT_SALES,
             )
         return (
             ExtractionStatus.QUARANTINE, 0.9,
@@ -482,3 +497,59 @@ def _has_verified_undisclosed_segment_sales(
     if len(totals) != 1 or len(consolidated) != 1 or None in totals or None in consolidated:
         return False
     return totals == consolidated
+
+
+def _has_verified_sub_million_segment_sales(
+    valid_records: list[dict], *, source: str, invalid_count: int
+) -> bool:
+    """Accept only source-proven sub-million sales lost to display-unit rounding.
+
+    The global non-null threshold remains unchanged.  This contract requires
+    every reportable row to carry a numeric XBRL sales fact and independently
+    reconciles the raw values to the matching reportable-segment total.
+    """
+    if source != "xbrl" or invalid_count or len(valid_records) < 2:
+        return False
+    if len({(r.get("period"), r.get("quarter")) for r in valid_records}) != 1:
+        return False
+    if any(r.get("_segment_period_role") != "current" for r in valid_records):
+        return False
+    if any(r.get("_segment_member_kind") != "reportable" for r in valid_records):
+        return False
+    if len({str(r.get("segment_name") or "").strip() for r in valid_records}) != len(valid_records):
+        return False
+    rounded = [r for r in valid_records if not _is_non_null(r.get("segment_sales"))]
+    if not rounded or len(rounded) == len(valid_records):
+        return False
+    if any(
+        r.get("_sales_fact_numeric_present") is not True
+        or r.get("_sales_fact_explicit_nil") is True
+        or not r.get("_sales_fact_names")
+        or not r.get("_sales_fact_selected_name")
+        for r in valid_records
+    ):
+        return False
+    if any(
+        r.get("_sales_fact_rounds_to_zero") is not True
+        or not isinstance(r.get("_sales_fact_selected_raw"), (int, float))
+        or r.get("_sales_fact_selected_raw") == 0
+        or not _is_non_null(r.get("segment_profit"))
+        for r in rounded
+    ):
+        return False
+    if any(
+        (r.get("_context_evidence") or {}).get("date_guard_status") != "PASS"
+        for r in valid_records
+    ):
+        return False
+    names = {r.get("_sales_fact_selected_name") for r in valid_records}
+    totals = {r.get("_selected_reportable_sales_total_raw") for r in valid_records}
+    sums = {r.get("_selected_sales_raw_sum") for r in valid_records}
+    if len(names) != 1 or len(totals) != 1 or len(sums) != 1:
+        return False
+    if None in totals or None in sums or totals != sums:
+        return False
+    return all(
+        r.get("_sales_rounding_reconciliation_verified") is True
+        for r in valid_records
+    )

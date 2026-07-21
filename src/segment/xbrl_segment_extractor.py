@@ -756,6 +756,7 @@ def extract_segments_from_xbrl_zip_detailed(
 
                     sales = data.get("sales")
                     profit = data.get("profit")
+                    sales_raw = sales
 
                     if sales is not None:
                         sales = _to_million_yen(sales, unit)
@@ -774,11 +775,27 @@ def extract_segments_from_xbrl_zip_detailed(
                     row_raw_json.update({
                         "_sales_fact_explicit_nil": bool(data.get("sales_fact_explicit_nil")),
                         "_sales_fact_names": list(data.get("sales_fact_names") or []),
+                        "_sales_fact_numeric_present": sales_raw is not None,
+                        "_sales_fact_selected_name": data.get("sales_fact_selected_name"),
+                        "_sales_fact_selected_raw": sales_raw,
+                        "_sales_fact_rounds_to_zero": (
+                            sales_raw not in (None, 0) and sales == 0
+                        ),
                         "_segment_member_kind": data.get("segment_member_kind", "unknown"),
                         "_reportable_sales_total_raw": data.get("reportable_sales_total"),
                         "_consolidated_sales_raw": data.get("consolidated_sales"),
                         "_sales_reconciliation_verified": bool(
                             data.get("sales_reconciliation_verified")
+                        ),
+                        "_selected_reportable_sales_total_raw": data.get(
+                            "selected_reportable_sales_total"
+                        ),
+                        "_selected_consolidated_sales_raw": data.get(
+                            "selected_consolidated_sales"
+                        ),
+                        "_selected_sales_raw_sum": data.get("selected_sales_raw_sum"),
+                        "_sales_rounding_reconciliation_verified": bool(
+                            data.get("sales_rounding_reconciliation_verified")
                         ),
                     })
 
@@ -1103,6 +1120,10 @@ def _extract_ixbrl_segment_data(
         "current": {"reportable_total": set(), "consolidated": set()},
         "previous": {"reportable_total": set(), "consolidated": set()},
     }
+    aggregate_sales_by_name: dict[str, dict[str, dict[str, set[int]]]] = {
+        "current": {"reportable_total": {}, "consolidated": {}},
+        "previous": {"reportable_total": {}, "consolidated": {}},
+    }
 
     # ix:nonfraction タグを収集
     for tag in soup.find_all("ix:nonfraction"):
@@ -1144,8 +1165,14 @@ def _extract_ixbrl_segment_data(
                 ctx_l = ctx.lower()
                 if "reportablesegmentsmember" in ctx_l and "tse-" not in ctx_l:
                     aggregate_sales[period_type]["reportable_total"].add(value)
+                    aggregate_sales_by_name[period_type]["reportable_total"].setdefault(
+                        name, set()
+                    ).add(value)
                 elif "member" not in ctx_l:
                     aggregate_sales[period_type]["consolidated"].add(value)
+                    aggregate_sales_by_name[period_type]["consolidated"].setdefault(
+                        name, set()
+                    ).add(value)
             continue
 
         # A dimensioned numeric fact does not by itself constitute a supported
@@ -1169,6 +1196,7 @@ def _extract_ixbrl_segment_data(
                 "profit_tag": None,
                 "sales_fact_explicit_nil": False,
                 "sales_fact_names": [],
+                "sales_fact_selected_name": None,
                 "segment_member_kind": (
                     "reportable"
                     if (
@@ -1189,6 +1217,7 @@ def _extract_ixbrl_segment_data(
         if is_sales:
             if is_primary_sales or temp_candidate[key]["sales"] is None:
                 temp_candidate[key]["sales"] = value
+                temp_candidate[key]["sales_fact_selected_name"] = name
         elif is_profit:
             priority = _get_profit_priority(name)
             current_priority = temp_candidate[key].get("profit_priority", 999)
@@ -1308,10 +1337,49 @@ def _extract_ixbrl_segment_data(
             and len(consolidated) == 1
             and next(iter(totals)) == next(iter(consolidated)) == non_null_sum
         )
+        selected_names = {
+            v.get("sales_fact_selected_name")
+            for v in period_rows
+            if v.get("sales_fact_selected_name")
+        }
+        selected_name = next(iter(selected_names)) if len(selected_names) == 1 else None
+        selected_totals = (
+            aggregate_sales_by_name[period_type]["reportable_total"].get(
+                selected_name, set()
+            )
+            if selected_name
+            else set()
+        )
+        selected_consolidated = (
+            aggregate_sales_by_name[period_type]["consolidated"].get(
+                selected_name, set()
+            )
+            if selected_name
+            else set()
+        )
+        selected_raw_sum = sum(
+            v["sales"] for v in period_rows if v.get("sales") is not None
+        )
+        rounding_reconciliation_ok = (
+            len(selected_totals) == 1
+            and next(iter(selected_totals)) == selected_raw_sum
+        )
         for data in period_rows:
             data["reportable_sales_total"] = next(iter(totals)) if len(totals) == 1 else None
             data["consolidated_sales"] = next(iter(consolidated)) if len(consolidated) == 1 else None
             data["sales_reconciliation_verified"] = reconciliation_ok
+            data["selected_reportable_sales_total"] = (
+                next(iter(selected_totals)) if len(selected_totals) == 1 else None
+            )
+            data["selected_consolidated_sales"] = (
+                next(iter(selected_consolidated))
+                if len(selected_consolidated) == 1
+                else None
+            )
+            data["selected_sales_raw_sum"] = selected_raw_sum
+            data["sales_rounding_reconciliation_verified"] = (
+                rounding_reconciliation_ok
+            )
     return aggregated
 
 
