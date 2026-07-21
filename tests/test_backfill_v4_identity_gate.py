@@ -74,6 +74,7 @@ def test_v2_xbrl_source_uses_filing_canonical_fiscal_period(monkeypatch):
 
     extracted.assert_called_once_with(
         pl_zip_path, period="2027-02-28", quarter="1Q", title="title-derived-value",
+        include_context_evidence=False,
         allow_expected_quarter_without_title=False,
     )
     assert extracted.call_args.kwargs["period"] != "2026-05-31"
@@ -100,6 +101,7 @@ def test_v2_xbrl_source_missing_canonical_values_preserves_defaults(monkeypatch,
 
     extracted.assert_called_once_with(
         "verified.zip", period=None, quarter=None, title="title",
+        include_context_evidence=False,
         allow_expected_quarter_without_title=False,
     )
     assert result.error == "xbrl_no_segment_facts"
