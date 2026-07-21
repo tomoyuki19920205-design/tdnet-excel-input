@@ -7,7 +7,7 @@ from src.events.common_models import DocumentMeta, EventRecord, EventType
 from src.events.event_pipeline import process_documents
 from src.events.notify_rules import should_notify_event
 from src.events.tdnet_event_store import build_dedupe_key, build_supabase_row
-from src.pdf_only_materials import classify_pdf_only_material
+from src.pdf_only_materials import classify_pdf_only_material, is_after_pdf_only_material_activation
 
 
 PDF = "https://www.release.tdnet.info/inbs/140120260721596728.pdf"
@@ -65,13 +65,19 @@ class TestPdfOnlyMaterialClassifier(unittest.TestCase):
             self.assertIsNone(classify_pdf_only_material(title, PDF), title)
         self.assertIsNone(classify_pdf_only_material("2026年6月度 月次売上高", "https://example.com/a.html"))
 
+    def test_rollout_boundary_blocks_same_day_catchup(self):
+        self.assertFalse(is_after_pdf_only_material_activation("2026-07-21 16:59:00"))
+        self.assertTrue(is_after_pdf_only_material_activation("2026-07-21T16:59:01+09:00"))
+        self.assertTrue(is_after_pdf_only_material_activation("2026-07-21T08:00:00Z"))
+        self.assertFalse(is_after_pdf_only_material_activation(""))
+
 
 class TestPdfOnlyMaterialPipeline(unittest.TestCase):
     def _doc(self):
         return DocumentMeta(
             doc_id="material-doc-1", ticker="7545", company_name="西松屋チェーン",
             title="2027年２月期売上高前年比速報（７月度）",
-            disclosure_datetime="2026-07-21 15:00", doc_url=PDF,
+            disclosure_datetime="2026-07-21 17:00", doc_url=PDF,
             source_doc_id="jquants-native-id-1",
         )
 
@@ -83,6 +89,14 @@ class TestPdfOnlyMaterialPipeline(unittest.TestCase):
         self.assertEqual(record.event_type, EventType.MONTHLY_UPDATE)
         self.assertEqual(record.summary_text, "7月月次")
         self.assertFalse(should_notify_event(record))
+
+    @patch("src.events.event_pipeline._get_text_and_pdf", side_effect=AssertionError("PDF must not be fetched"))
+    def test_pipeline_marks_pre_activation_document_non_target(self, _fetch):
+        doc = self._doc()
+        doc.disclosure_datetime = "2026-07-21 16:59:00"
+        result = process_documents([doc], ":memory:", dry_run=True)
+        self.assertEqual(result.detected, 0)
+        self.assertEqual(result.skipped_all_doc_ids, [doc.doc_id])
 
     @patch("src.events.tdnet_event_store._get_supabase", return_value=None)
     def test_duplicate_realtime_retry_saves_once(self, _supabase):

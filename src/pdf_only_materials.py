@@ -4,11 +4,15 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from urllib.parse import unquote
 
 
 EARNINGS_MATERIAL = "earnings_material"
 MONTHLY_UPDATE = "monthly_update"
+JST = timezone(timedelta(hours=9))
+# Rollout boundary: do not turn previously filtered same-day disclosures into a backfill.
+PDF_ONLY_MATERIAL_ALERTS_ACTIVATED_AT = datetime(2026, 7, 21, 16, 59, 1, tzinfo=JST)
 
 
 @dataclass(frozen=True)
@@ -27,6 +31,20 @@ def is_pdf_url(url: str) -> bool:
     return value.startswith(("https://", "http://")) and bool(
         re.search(r"\.pdf(?:$|[?#&])", value)
     )
+
+
+def is_after_pdf_only_material_activation(disclosed_at: str) -> bool:
+    """Return true only for disclosures published at/after the production rollout."""
+    value = (disclosed_at or "").strip()
+    if not value:
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=JST)
+    return parsed >= PDF_ONLY_MATERIAL_ALERTS_ACTIVATED_AT
 
 
 _EARNINGS_TERMS = (

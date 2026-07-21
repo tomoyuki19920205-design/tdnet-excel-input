@@ -37,7 +37,7 @@ from .buyback_extractor import extract_buyback_event
 from .forecast_extractor import extract_forecast_revision
 from .dividend_extractor import extract_dividend_revision
 from .price_service import get_last_close
-from src.pdf_only_materials import classify_pdf_only_material
+from src.pdf_only_materials import classify_pdf_only_material, is_after_pdf_only_material_activation
 
 logger = logging.getLogger("event_pipeline")
 PDF_ONLY_MATERIAL_ALERTS_VERSION = "2026-07-21.v1"
@@ -436,6 +436,12 @@ def _process_single_document(
     _pre_forecast = classify_forecast(title, "")             # title のみで十分判定可能
     _pre_dividend = classify_dividend(title, "")             # title のみで十分判定可能
     _pre_material = classify_pdf_only_material(title, doc.doc_url)
+    if _pre_material and not is_after_pdf_only_material_activation(doc.disclosure_datetime):
+        logger.info(
+            "[PDF_ONLY_MATERIAL_ALERTS] pre-activation skip ticker=%s disclosed_at=%s",
+            doc.ticker, doc.disclosure_datetime,
+        )
+        _pre_material = None
 
     _need_buyback  = (EventType.BUYBACK in allowed) and (_pre_buyback_subtype != "ignore")
     _need_forecast = (EventType.FORECAST_REVISION in allowed) and _pre_forecast.is_target
