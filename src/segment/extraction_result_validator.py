@@ -165,13 +165,18 @@ def validate_extraction_result(
                 continue
             if not re.match(r'^[A-Za-z0-9&]+$', nm):
                 continue
-            # ローマ数字単独・記号単独を除外
-            if _ROMAN_ONLY.match(nm.upper()):
+            # ローマ数字単独は通常は除外する。ただし XBRL context が正式な
+            # reportable segment member と証明する場合は、DX のように偶然
+            # ローマ数字の文字集合だけで構成される事業略称を拒否しない。
+            # member 証拠のない PDF/HTML 由来や generic XBRL row は従来どおり
+            # fail-closed とする。
+            rec = segment_records[i]
+            is_reportable_member = rec.get("_segment_member_kind") == "reportable"
+            if _ROMAN_ONLY.match(nm.upper()) and not is_reportable_member:
                 continue
             if _SYMBOL_ONLY.match(nm):
                 continue
             # sales or profit fact があるか
-            rec = segment_records[i]
             has_fact = (
                 _is_non_null(rec.get("segment_sales"))
                 or _is_non_null(rec.get("segment_profit"))
