@@ -105,6 +105,7 @@ _IFRS_PROFIT_TAGS = {
 # element 名の末尾が以下のいずれかなら sales/profit として認識
 _COMPANY_SALES_SUFFIXES = (
     "revenuesfromexternalcustomers",
+    "revenuesfromexternalcustomers2",
     "operatingrevenuefromexternalcustomersifrs",
     "salesrevenuesifrs",
     "salestoexternalcustomersifrs",
@@ -113,6 +114,7 @@ _COMPANY_SALES_SUFFIXES = (
     "netsales",
     "netsalesifrs",
     "revenueifrs",
+    "revenue2",
     "revenue2ifrs",
 )
 _COMPANY_PROFIT_SUFFIXES = (
@@ -126,6 +128,14 @@ _COMPANY_PROFIT_SUFFIXES = (
     "ordinaryincomebnk",
     "incomebeforeincometaxes",
 )
+
+
+def _matches_company_sales_suffix(local_name: str) -> bool:
+    """Match a company-defined sales amount, never a change-rate concept."""
+    normalized = local_name.lower()
+    if normalized.startswith(("changein", "percentagechangein")):
+        return False
+    return any(normalized.endswith(suffix) for suffix in _COMPANY_SALES_SUFFIXES)
 
 ALL_SALES_TAGS = _SALES_TAGS | _IFRS_SALES_TAGS
 ALL_PROFIT_TAGS = _PROFIT_TAGS | _IFRS_PROFIT_TAGS
@@ -1135,7 +1145,7 @@ def _has_verified_current_segment_omission(
         is_supported_metric = (
             name in ALL_SALES_TAGS
             or name in ALL_PROFIT_TAGS
-            or any(local_name.endswith(value) for value in _COMPANY_SALES_SUFFIXES)
+            or _matches_company_sales_suffix(local_name)
             or any(local_name.endswith(value) for value in _COMPANY_PROFIT_SUFFIXES)
         )
         has_segment_member = _extract_segment_member(
@@ -1200,11 +1210,11 @@ def _extract_ixbrl_segment_data(
         is_primary_sales = name in _PRIMARY_SALES_NAMES
         if not is_sales and not is_profit:
             local_name = name.split(":")[-1] if ":" in name else name
-            if any(local_name.endswith(s) for s in _COMPANY_SALES_SUFFIXES):
+            if _matches_company_sales_suffix(local_name):
                 is_sales = True
                 if any(local_name.endswith(s) for s in (
                     "netsales", "netsalesifrs", "revenueifrs", "revenue",
-                    "revenue2ifrs",
+                    "revenue2", "revenue2ifrs",
                 )):
                     is_primary_sales = True
             elif any(local_name.endswith(s) for s in _COMPANY_PROFIT_SUFFIXES):
