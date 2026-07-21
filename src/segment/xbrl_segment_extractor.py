@@ -180,7 +180,42 @@ _OTHER_SEGMENTS_RE = re.compile(
 _CAMEL_SPLIT = re.compile(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
-def _extract_segment_member(context_ref: str) -> Optional[str]:
+_STRUCTURAL_OPERATING_SEGMENT_MEMBERS = {
+    "reportablesegmentmember",
+    "reportablesegmentsmember",
+    "operatingsegmentsnotincludedinreportablesegmentsmember",
+    "operatingsegmentsnotincludedinreportablesegmentsandotherrevenuegeneratingbusinessactivitiesmember",
+    "reconcilingitemsmember",
+    "entitytotalmember",
+    "corporateexpensesandeliminationmember",
+}
+
+
+def _explicit_operating_segment_member(context_info: Optional[dict]) -> Optional[str]:
+    """Return a concrete member from the formal OperatingSegmentsAxis.
+
+    Some TDNET filings use context IDs ending in a company member name without
+    the conventional ``Member`` suffix.  The actual xbrldi:explicitMember is
+    authoritative; aggregate/reconciliation members remain excluded.
+    """
+    if not context_info:
+        return None
+    for item in context_info.get("explicit_members") or []:
+        dimension = str(item.get("dimension") or "").split(":")[-1].lower()
+        if dimension != "operatingsegmentsaxis":
+            continue
+        qname = str(item.get("member") or "").strip()
+        local_name = qname.split(":")[-1]
+        if not local_name or local_name.lower() in _STRUCTURAL_OPERATING_SEGMENT_MEMBERS:
+            return None
+        return local_name
+    return None
+
+
+def _extract_segment_member(
+    context_ref: str,
+    context_info: Optional[dict] = None,
+) -> Optional[str]:
     """context ref からセグメント member 名を抽出。
 
     対応パターン:
@@ -226,6 +261,12 @@ def _extract_segment_member(context_ref: str) -> Optional[str]:
                                 "entitytotal", "corporateexpensesandelimination"):
                 return None
             return name
+
+    # Formal dimension evidence is the fallback for context IDs that omit the
+    # conventional Member suffix (for example ``...21640AdvertisingBusiness``).
+    explicit_member = _explicit_operating_segment_member(context_info)
+    if explicit_member:
+        return explicit_member
 
     # unknown member suffix 検出 (パターン漏れの早期発見用)
     if "Member" in context_ref and ("Segment" in context_ref or "segment" in context_ref):
@@ -329,6 +370,19 @@ def _parse_context_periods(soup: BeautifulSoup) -> dict[str, dict]:
             elif instant:
                 info["type"] = "instant"
                 info["instant"] = instant.get_text(strip=True).split("T")[0]
+
+        explicit_members = []
+        for member in ctx.find_all(
+            lambda t: t.name and t.name.endswith("explicitmember")
+        ):
+            explicit_members.append(
+                {
+                    "dimension": str(member.get("dimension") or ""),
+                    "member": member.get_text(strip=True),
+                }
+            )
+        if explicit_members:
+            info["explicit_members"] = explicit_members
 
         contexts[cid] = info
     return contexts
@@ -1084,7 +1138,9 @@ def _has_verified_current_segment_omission(
             or any(local_name.endswith(value) for value in _COMPANY_SALES_SUFFIXES)
             or any(local_name.endswith(value) for value in _COMPANY_PROFIT_SUFFIXES)
         )
-        has_segment_member = _extract_segment_member(context_ref) is not None
+        has_segment_member = _extract_segment_member(
+            context_ref, global_context_map.get(context_ref, {})
+        ) is not None
         if is_supported_metric or has_segment_member:
             return False
 
@@ -1159,7 +1215,8 @@ def _extract_ixbrl_segment_data(
 
         # ReportableSegmentsMember の合計とdimensionなし連結値は、
         # explicit-nil segmentを安全に受理するreconciliation証跡にだけ使う。
-        member = _extract_segment_member(ctx)
+        context_info = global_context_map.get(ctx, {}) if global_context_map else {}
+        member = _extract_segment_member(ctx, context_info)
         if not member:
             if is_sales and value is not None:
                 ctx_l = ctx.lower()
@@ -1202,6 +1259,7 @@ def _extract_ixbrl_segment_data(
                     if (
                         "reportablesegmentmember" in ctx.lower()
                         or "reportablesegmentsmember" in ctx.lower()
+                        or _explicit_operating_segment_member(context_info) is not None
                     )
                     else "other"
                 ),
