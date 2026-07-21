@@ -32,6 +32,20 @@ def file_sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def semantic_sha256(path: Path) -> str:
+    con = sqlite3.connect(f"file:{path.resolve().as_posix()}?mode=ro", uri=True)
+    try:
+        cols = _columns(con)
+        rows = [dict(zip(cols, row)) for row in con.execute(
+            f"SELECT {','.join(chr(34) + c + chr(34) for c in cols)} FROM segment_financials ORDER BY id"
+        )]
+    finally:
+        con.close()
+    for row in rows:
+        row.pop("updated_at", None)
+    return hashlib.sha256(json.dumps(rows, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")).hexdigest()
+
+
 def _load_manifest(path: Path, expected_count: int) -> list[dict[str, Any]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     rows = payload.get("rows") if isinstance(payload, dict) else payload
@@ -122,15 +136,31 @@ def inspect_repairs(con: sqlite3.Connection, plans: list[dict[str, Any]]) -> dic
 def run_repair(
     db_path: Path, manifest_path: Path, expected_count: int, *, apply: bool,
     confirm_count: int | None = None, expected_db_sha256: str | None = None,
+    target_environment: str = "non-production", allow_production_repair: bool = False,
+    confirm_production_repair: str | None = None, expected_semantic_sha256: str | None = None,
+    expected_manifest_sha256: str | None = None, expected_filing_count: int | None = None,
 ) -> dict[str, Any]:
-    if apply and _production_db_path(db_path):
+    is_production = _production_db_path(db_path)
+    if apply and is_production and not (
+        target_environment == "production" and allow_production_repair
+        and confirm_production_repair == "YES"
+    ):
         raise RepairContractError("production_path_apply_forbidden")
+    if target_environment == "production" and not is_production:
+        raise RepairContractError("production_path_required")
     if apply and confirm_count != expected_count:
         raise RepairContractError("apply_confirmation_mismatch")
     before_sha = file_sha256(db_path)
     if expected_db_sha256 and before_sha.lower() != expected_db_sha256.lower():
         raise RepairContractError("database_sha256_mismatch")
+    before_semantic = semantic_sha256(db_path)
+    if expected_semantic_sha256 and before_semantic.lower() != expected_semantic_sha256.lower():
+        raise RepairContractError("database_semantic_sha256_mismatch")
+    if expected_manifest_sha256 and file_sha256(manifest_path).lower() != expected_manifest_sha256.lower():
+        raise RepairContractError("repair_manifest_sha256_mismatch")
     plans = _load_manifest(manifest_path, expected_count)
+    if expected_filing_count is not None and len({str(row["expected_tdnet_doc_id"]) for row in plans}) != expected_filing_count:
+        raise RepairContractError("expected_filing_count_mismatch")
     con = sqlite3.connect(db_path)
     con.row_factory = None
     result: dict[str, Any] | None = None
@@ -171,11 +201,14 @@ def run_repair(
             "updated_rows": updated, "inserted_rows": 0, "deleted_rows": 0,
             "final_pending": len(final["pending"]), "final_completed": len(final["completed"]),
             "database_sha256_before": before_sha,
+            "database_semantic_sha256_before": before_semantic,
+            "target_environment": target_environment,
         }
     finally:
         con.close()
     assert result is not None
     result["database_sha256_after"] = file_sha256(db_path)
+    result["database_semantic_sha256_after"] = semantic_sha256(db_path)
     return result
 
 
@@ -189,12 +222,24 @@ def main() -> int:
     mode.add_argument("--plan", action="store_true")
     mode.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm-null-doc-id-repair", type=int)
+    parser.add_argument("--target-environment", choices=("non-production", "production"), default="non-production")
+    parser.add_argument("--allow-production-repair", action="store_true")
+    parser.add_argument("--confirm-production-repair")
+    parser.add_argument("--expected-semantic-sha256")
+    parser.add_argument("--repair-manifest-sha256")
+    parser.add_argument("--expected-filing-count", type=int)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     result = run_repair(
         args.db, args.repair_manifest, args.expected_row_count, apply=args.apply,
         confirm_count=args.confirm_null_doc_id_repair,
         expected_db_sha256=args.expected_db_sha256,
+        target_environment=args.target_environment,
+        allow_production_repair=args.allow_production_repair,
+        confirm_production_repair=args.confirm_production_repair,
+        expected_semantic_sha256=args.expected_semantic_sha256,
+        expected_manifest_sha256=args.repair_manifest_sha256,
+        expected_filing_count=args.expected_filing_count,
     )
     text = json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
     if args.output:
