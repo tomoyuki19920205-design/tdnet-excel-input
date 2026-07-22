@@ -286,6 +286,31 @@ def _create_segment_db_with_datasource(path: str, rows: list[dict]) -> None:
     conn.close()
 
 
+def _add_lineage_contract(path: str, rows: list[dict]) -> None:
+    """Attach the V4 filing identity contract to a segment test database."""
+    conn = sqlite3.connect(path)
+    conn.execute("""
+        CREATE TABLE filing_segment_lineage (
+            lineage_id INTEGER PRIMARY KEY,
+            filing_id TEXT NOT NULL,
+            requested_id TEXT NOT NULL,
+            relation_role TEXT NOT NULL,
+            canonical_segment_financial_id INTEGER
+        )
+    """)
+    conn.executemany(
+        "INSERT INTO filing_segment_lineage "
+        "(filing_id,requested_id,relation_role,canonical_segment_financial_id) "
+        "VALUES (?,?,?,?)",
+        [(
+            row["filing_id"], row.get("requested_id", "REQUESTED-MUST-NOT-BE-USED"),
+            row["relation_role"], row["segment_id"],
+        ) for row in rows],
+    )
+    conn.commit()
+    conn.close()
+
+
 _MOCK_CANONICAL_CONFIG = {
     "url": "http://test",
     "key": "test-service-role-key",
@@ -583,6 +608,161 @@ def test_wide_alias_skip_still_executes_eav_and_marks_row_synced(tmp_path, monke
     assert {action["action"] for action in stats["row_results"][0]["eav_actions"]} == {"eav_inserted"}
     assert stats["synced_segment_ids"] == [1]
     assert post_urls == ["http://test/rest/v1/canonical_segments"]
+
+
+class TestV4CanonicalPayloadIdentityContract:
+    FILING_A = "04d0fd4726d74eb6c5c52189"
+    FILING_B = "04534b88519a014ea47b3976"
+
+    @staticmethod
+    def _db(tmp_path, *, role="CANONICAL_SOURCE", filing_id=None):
+        db_path = str(tmp_path / "segments.db")
+        _create_segment_db_with_datasource(db_path, [{
+            "company_code": "1376", "fiscal_year_end": "2026-03-31",
+            "quarter": "FY", "segment_name": "Core", "segment_sales": 1042,
+            "segment_profit": 52, "data_source": "backfill_xbrl",
+        }])
+        lineage = [] if filing_id is None and role == "MISSING" else [{
+            "segment_id": 1, "filing_id": filing_id or TestV4CanonicalPayloadIdentityContract.FILING_A,
+            "requested_id": "20260101123456", "relation_role": role,
+        }]
+        _add_lineage_contract(db_path, lineage)
+        return db_path
+
+    def test_direct_lineage_identity_and_millions_unit_reach_eav_payload(self, tmp_path):
+        from tools import sync_segments
+        db_path = self._db(tmp_path)
+        plan = sync_segments.plan_alias_aware_segment_ids(
+            db_path, [1], "http://test/rest/v1", {}, live_read=False,
+        )
+        assert plan["sync_error"] == ""
+        actions = plan["row_results"][0]["eav_actions"]
+        assert {a["payload"]["filing_id"] for a in actions} == {self.FILING_A}
+        assert {a["payload"]["unit"] for a in actions} == {"millions_jpy"}
+        assert all(a["payload"]["source_row_key"].endswith("|" + self.FILING_A) for a in actions)
+
+    def test_equivalent_reference_is_an_explicit_alias_identity(self, tmp_path):
+        from tools import sync_segments
+        db_path = self._db(tmp_path, role="EQUIVALENT_REFERENCE")
+        plan = sync_segments.plan_alias_aware_segment_ids(
+            db_path, [1], "http://test/rest/v1", {}, live_read=False,
+        )
+        assert plan["sync_error"] == ""
+        assert plan["row_results"][0]["canonical_route"] == "ALIAS_CANONICAL_REFERENCE"
+        assert plan["row_results"][0]["filing_id"] == self.FILING_A
+
+    def test_requested_id_is_never_substituted_for_filing_id(self, tmp_path):
+        from tools import sync_segments
+        db_path = self._db(tmp_path)
+        plan = sync_segments.plan_alias_aware_segment_ids(
+            db_path, [1], "http://test/rest/v1", {}, live_read=False,
+        )
+        payloads = [a["payload"] for a in plan["row_results"][0]["eav_actions"]]
+        assert all(p["filing_id"] != "20260101123456" for p in payloads)
+        assert all("20260101123456" not in p["source_row_key"] for p in payloads)
+
+    @pytest.mark.parametrize("role", ["MISSING", "NONCANONICAL_OBSERVATION"])
+    def test_missing_or_noncanonical_filing_identity_fails_closed(self, tmp_path, role):
+        from tools import sync_segments
+        db_path = self._db(tmp_path, role=role, filing_id=None)
+        plan = sync_segments.plan_alias_aware_segment_ids(
+            db_path, [1], "http://test/rest/v1", {}, live_read=False,
+        )
+        assert plan["sync_error"] == "segment_sync_filing_identity_unresolved"
+        assert plan["row_results"] == []
+        assert plan["eav_inserted"] == 0
+
+    def test_ambiguous_filing_identity_fails_closed(self, tmp_path):
+        from tools import sync_segments
+        db_path = self._db(tmp_path)
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO filing_segment_lineage "
+            "(filing_id,requested_id,relation_role,canonical_segment_financial_id) "
+            "VALUES (?,?,?,?)", (self.FILING_B, "OTHER", "CANONICAL_SOURCE", 1),
+        )
+        conn.commit()
+        conn.close()
+        plan = sync_segments.plan_alias_aware_segment_ids(
+            db_path, [1], "http://test/rest/v1", {}, live_read=False,
+        )
+        assert plan["sync_error"] == "segment_sync_filing_identity_unresolved"
+
+    def test_logical_existing_match_skips_new_versioned_key(self, tmp_path, monkeypatch):
+        from tools import sync_segments
+        db_path = self._db(tmp_path)
+        current = [{
+            "ticker": "1376", "period": "2026-03-31", "quarter": "FY",
+            "segment_name": "Core", "segment_key": "core", "metric": "sales",
+            "value": 1042, "unit": "millions_jpy", "source": "backfill_xbrl",
+            "filing_id": "historical-id", "source_row_key": "historical-key",
+        }, {
+            "ticker": "1376", "period": "2026-03-31", "quarter": "FY",
+            "segment_name": "Core", "segment_key": "core", "metric": "profit",
+            "value": 52, "unit": "millions_jpy", "source": "backfill_xbrl",
+            "filing_id": "historical-id", "source_row_key": "historical-key-2",
+        }]
+        monkeypatch.setattr(sync_segments.requests, "get", _layer_get([], current))
+        plan = sync_segments.plan_alias_aware_segment_ids(
+            db_path, [1], "http://test/rest/v1", {}, live_read=True,
+        )
+        assert plan["eav_inserted"] == 0
+        assert plan["eav_skipped_alias_equivalent_existing"] == 2
+        assert {a["action"] for a in plan["row_results"][0]["eav_actions"]} == {
+            "eav_skipped_alias_equivalent_existing"
+        }
+
+    def test_logical_value_conflict_stops_before_write(self, tmp_path, monkeypatch):
+        from tools import sync_segments
+        db_path = self._db(tmp_path)
+        current = [{
+            "ticker": "1376", "period": "2026-03-31", "quarter": "FY",
+            "segment_name": "Core", "segment_key": "core", "metric": "sales",
+            "value": 9999, "unit": "millions_jpy", "source": "backfill_xbrl",
+        }]
+        monkeypatch.setattr(sync_segments.requests, "get", _layer_get([], current))
+        monkeypatch.setattr(sync_segments.requests, "post", lambda *a, **k: pytest.fail("conflict must not write"))
+        result = sync_segments.sync_sqlite_segment_ids(
+            db_path, [1], "http://test/rest/v1", {}, False,
+        )
+        assert result["sync_error"] == "segment_eav_alias_value_conflict"
+        assert result["synced_segment_ids"] == []
+
+    def test_unit_conflict_stops_before_write(self, tmp_path, monkeypatch):
+        from tools import sync_segments
+        db_path = self._db(tmp_path)
+        current = [{
+            "ticker": "1376", "period": "2026-03-31", "quarter": "FY",
+            "segment_name": "Core", "segment_key": "core", "metric": "sales",
+            "value": 1042, "unit": "JPY", "source": "backfill_xbrl",
+        }]
+        monkeypatch.setattr(sync_segments.requests, "get", _layer_get([], current))
+        monkeypatch.setattr(sync_segments.requests, "post", lambda *a, **k: pytest.fail("unit conflict must not write"))
+        result = sync_segments.sync_sqlite_segment_ids(
+            db_path, [1], "http://test/rest/v1", {}, False,
+        )
+        assert result["sync_error"] == "segment_eav_unit_conflict"
+        assert result["synced_segment_ids"] == []
+
+    def test_mixed_direct_and_alias_scope_uses_one_safe_planner(self, tmp_path):
+        from tools import sync_segments
+        db_path = str(tmp_path / "segments.db")
+        _create_segment_db_with_datasource(db_path, [
+            {"company_code": "1376", "fiscal_year_end": "2026-03-31", "quarter": "FY", "segment_name": "A", "segment_sales": 1, "segment_profit": 2, "data_source": "backfill_xbrl"},
+            {"company_code": "1376", "fiscal_year_end": "2026-03-31", "quarter": "FY", "segment_name": "B", "segment_sales": 3, "segment_profit": 4, "data_source": "backfill_xbrl"},
+        ])
+        _add_lineage_contract(db_path, [
+            {"segment_id": 1, "filing_id": self.FILING_A, "relation_role": "CANONICAL_SOURCE"},
+            {"segment_id": 2, "filing_id": self.FILING_B, "relation_role": "EQUIVALENT_REFERENCE"},
+        ])
+        result = sync_segments.sync_sqlite_segment_ids(
+            db_path, [1, 2], "http://test/rest/v1", {}, True,
+        )
+        assert result["sync_error"] == ""
+        assert result["synced_segment_ids"] == [1, 2]
+        assert {r["canonical_route"] for r in result["row_results"]} == {
+            "DIRECT_CANONICAL_REFERENCE", "ALIAS_CANONICAL_REFERENCE"
+        }
 
 
 class TestBackfillV4PdfSourcePassthrough:

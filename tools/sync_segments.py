@@ -519,6 +519,51 @@ def _read_segment_id_rows(db_path: str, segment_ids: list[int]) -> tuple[list[di
             f"FROM segment_financials WHERE id IN ({placeholders})",
             requested_ids,
         ).fetchall()]
+        lineage_present = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='filing_segment_lineage'"
+        ).fetchone() is not None
+        if lineage_present:
+            lineage_rows = conn.execute(
+                "SELECT canonical_segment_financial_id, filing_id, relation_role "
+                "FROM filing_segment_lineage "
+                f"WHERE canonical_segment_financial_id IN ({placeholders}) "
+                "AND relation_role IN "
+                "('CANONICAL_SOURCE','EQUIVALENT_REFERENCE','NONCANONICAL_OBSERVATION') "
+                "ORDER BY canonical_segment_financial_id, filing_id",
+                requested_ids,
+            ).fetchall()
+            lineage_by_id: dict[int, dict[str, set[str]]] = {}
+            for lineage in lineage_rows:
+                segment_id = int(lineage["canonical_segment_financial_id"])
+                role_map = lineage_by_id.setdefault(segment_id, {})
+                role_map.setdefault(str(lineage["relation_role"]), set()).add(
+                    str(lineage["filing_id"] or "").strip()
+                )
+            for row in rows:
+                segment_id = int(row["id"])
+                roles = lineage_by_id.get(segment_id, {})
+                canonical = sorted(value for value in roles.get("CANONICAL_SOURCE", set()) if value)
+                equivalent = sorted(value for value in roles.get("EQUIVALENT_REFERENCE", set()) if value)
+                noncanonical = sorted(value for value in roles.get("NONCANONICAL_OBSERVATION", set()) if value)
+                if len(canonical) == 1:
+                    row["canonical_filing_id"] = canonical[0]
+                    row["canonical_route"] = "DIRECT_CANONICAL_REFERENCE"
+                elif not canonical and len(equivalent) == 1:
+                    row["canonical_filing_id"] = equivalent[0]
+                    row["canonical_route"] = "ALIAS_CANONICAL_REFERENCE"
+                elif not canonical and not equivalent and noncanonical:
+                    row["canonical_filing_id"] = None
+                    row["canonical_route"] = "OBSERVATION_ONLY_NO_CANONICAL_MUTATION"
+                else:
+                    row["canonical_filing_id"] = None
+                    row["canonical_route"] = "IDENTITY_UNRESOLVED"
+                row["lineage_contract_present"] = True
+        else:
+            for row in rows:
+                row["canonical_filing_id"] = None
+                row["canonical_route"] = "LEGACY_LINEAGE_UNAVAILABLE"
+                row["lineage_contract_present"] = False
     finally:
         conn.close()
     if {int(row["id"]) for row in rows} != set(requested_ids):
@@ -570,6 +615,22 @@ def plan_alias_aware_segment_ids(
         plan["sync_error"] = error
         return plan
 
+    lineage_contract_present = bool(rows and rows[0].get("lineage_contract_present"))
+    if lineage_contract_present:
+        invalid_identity = [
+            row for row in rows
+            if row.get("canonical_route") not in {
+                "DIRECT_CANONICAL_REFERENCE", "ALIAS_CANONICAL_REFERENCE"
+            } or not str(row.get("canonical_filing_id") or "").strip()
+        ]
+        if invalid_identity:
+            plan["sync_error"] = "segment_sync_filing_identity_unresolved"
+            plan["conflicts"] = [{
+                "sqlite_row_id": int(row["id"]),
+                "reason": str(row.get("canonical_route") or "IDENTITY_UNRESOLVED"),
+            } for row in invalid_identity]
+            return plan
+
     valid_rows = [row for row in rows if not _classify_skip_reason(row)]
     plan["sqlite_valid"] = len(valid_rows)
     plan["payloads"] = []
@@ -595,6 +656,7 @@ def plan_alias_aware_segment_ids(
         period = str(row["fiscal_year_end"])
         quarter = _QUARTER_MAP.get(str(row["quarter"]), str(row["quarter"]))
         source = str(row.get("data_source") or "excel_legacy")
+        filing_id = str(row.get("canonical_filing_id") or "").strip() or None
         segment_name = str(row["segment_name"]).strip()
         segment_key = normalize_segment_display_key(ticker, segment_name)
         sales = int(row["segment_sales"]) if row["segment_sales"] is not None else None
@@ -611,6 +673,8 @@ def plan_alias_aware_segment_ids(
             "sqlite_row_id": row_id, "alias_key": segment_key,
             "wide_action": "", "wide_reason": "", "wide_existing": [],
             "eav_actions": [], "source_priority": get_priority(source),
+            "filing_id": filing_id,
+            "canonical_route": row.get("canonical_route"),
         }
 
         wide_matches = [
@@ -650,7 +714,7 @@ def plan_alias_aware_segment_ids(
         eav_payloads, _ = expand_segments_rows(
             ticker=ticker, period=period, quarter=quarter,
             segments=[{"segment_name": segment_name, "sales": sales, "profit": profit}],
-            source=source,
+            source=source, filing_id=filing_id, unit="millions_jpy",
         )
         for eav_payload in eav_payloads:
             logical_matches = [
@@ -670,6 +734,17 @@ def plan_alias_aware_segment_ids(
             elif any(not _null_safe_value_equal(existing.get("value"), eav_payload["value"]) for existing in logical_matches):
                 action["action"] = "eav_conflict"
                 action["reason"] = "segment_eav_alias_value_conflict"
+                plan["eav_conflict"] += 1
+                plan["conflicts"].append({
+                    "sqlite_row_id": row_id, "metric": eav_payload["metric"],
+                    "reason": action["reason"],
+                })
+            elif lineage_contract_present and any(
+                str(existing.get("unit") or "") != str(eav_payload["unit"])
+                for existing in logical_matches
+            ):
+                action["action"] = "eav_conflict"
+                action["reason"] = "segment_eav_unit_conflict"
                 plan["eav_conflict"] += 1
                 plan["conflicts"].append({
                     "sqlite_row_id": row_id, "metric": eav_payload["metric"],
@@ -1048,6 +1123,12 @@ def sync_sqlite_segment_ids(
         stats["sqlite_total"] = len(rows)
         stats["sync_error"] = error
         return stats
+    if rows and bool(rows[0].get("lineage_contract_present")):
+        plan = plan_alias_aware_segment_ids(
+            db_path, segment_ids, rest_url, headers, live_read=not dry_run,
+        )
+        return _execute_alias_aware_plan(plan, rest_url, headers, dry_run=dry_run)
+
     alias_flags = {has_segment_display_aliases(str(row["company_code"])) for row in rows}
     if True in alias_flags:
         if alias_flags != {True}:
