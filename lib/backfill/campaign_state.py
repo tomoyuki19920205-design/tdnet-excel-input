@@ -76,6 +76,10 @@ class FreshDownloadQuarantineCASFailed(RuntimeError):
     """A runtime Fresh quarantine transition failed its fail-closed contract."""
 
 
+class FreshDownloadReleaseCASFailed(RuntimeError):
+    """An audited quarantine release failed its fail-closed contract."""
+
+
 class FreshStateMigrationConflict(RuntimeError):
     """An existing fresh-download schema or seed does not match the migration contract."""
 
@@ -192,6 +196,33 @@ def _create_fresh_download_schema(conn: sqlite3.Connection) -> None:
     )
 
 
+def _create_quarantine_release_schema(conn: sqlite3.Connection) -> None:
+    """Create the append-only evidence ledger used by quarantine releases."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS backfill_quarantine_releases (
+            release_id TEXT PRIMARY KEY,
+            campaign_id TEXT NOT NULL,
+            manifest_row_id TEXT NOT NULL,
+            filing_id TEXT NOT NULL,
+            from_state TEXT NOT NULL CHECK(from_state='QUARANTINED'),
+            to_state TEXT NOT NULL CHECK(to_state='FAILED_RETRYABLE'),
+            original_quarantine_reason TEXT,
+            retry_classification TEXT NOT NULL,
+            evidence_digest TEXT NOT NULL,
+            manifest_digest TEXT NOT NULL,
+            release_run_id TEXT NOT NULL,
+            released_at TEXT NOT NULL,
+            UNIQUE(campaign_id, manifest_row_id, evidence_digest),
+            FOREIGN KEY (campaign_id, manifest_row_id)
+                REFERENCES campaign_fresh_downloads(campaign_id, manifest_row_id)
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_quarantine_releases_run "
+        "ON backfill_quarantine_releases(release_run_id)"
+    )
+
+
 def initialize_schema(conn: sqlite3.Connection, *, schema_version: str = SCHEMA_VERSION) -> None:
     """Create the campaign schema idempotently; reject version mismatches."""
     conn.execute("PRAGMA foreign_keys = ON")
@@ -284,6 +315,7 @@ def initialize_schema(conn: sqlite3.Connection, *, schema_version: str = SCHEMA_
             conn.execute(f"CREATE INDEX IF NOT EXISTS {name} ON campaign_filings(campaign_id, {column})")
         if str(schema_version) == SCHEMA_VERSION:
             _create_fresh_download_schema(conn)
+            _create_quarantine_release_schema(conn)
 
 
 def table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
@@ -891,3 +923,219 @@ def apply_fresh_download_quarantine(
         "integrity_check": "ok",
         "foreign_key_check": 0,
     }}
+
+
+def _valid_sha256(value: object) -> bool:
+    text = str(value or "")
+    return len(text) == 64 and all(character in "0123456789abcdefABCDEF" for character in text)
+
+
+def plan_quarantine_releases(
+    conn: sqlite3.Connection, *, campaign_id: str,
+    release_rows: Sequence[Mapping[str, object]], manifest_digest: str,
+) -> dict[str, object]:
+    """Plan an explicitly enumerated QUARANTINED -> FAILED_RETRYABLE release.
+
+    Every manifest row carries the complete CAS snapshot.  The function never
+    selects by ticker or reason and therefore cannot broaden the caller's
+    allow-list.
+    """
+    if not campaign_id or not _valid_sha256(manifest_digest):
+        raise FreshDownloadReleaseCASFailed("release manifest contract is invalid")
+    normalized: list[dict[str, object]] = []
+    seen_rows: set[str] = set()
+    seen_filings: set[str] = set()
+    for raw in release_rows:
+        item = dict(raw)
+        row_id = str(item.get("manifest_row_id") or item.get("campaign_row_id") or "")
+        filing_id = str(item.get("filing_id") or "")
+        provider_id = str(item.get("provider_native_id") or "")
+        classification = str(item.get("retry_classification") or item.get("classification") or "")
+        evidence = str(item.get("evidence_digest") or "").lower()
+        expected_state = str(item.get("expected_state") or "QUARANTINED")
+        required = (
+            row_id and filing_id and provider_id and classification and _valid_sha256(evidence)
+            and expected_state == "QUARANTINED"
+            and item.get("retryable") is True and item.get("final_quarantine") is False
+            and item.get("identity_resolved") is True
+            and item.get("provider_metadata_unique") is True
+            and item.get("protected_complete") is False
+        )
+        if (
+            not required or row_id in seen_rows or filing_id in seen_filings
+            or classification.startswith(("G.", "H.", "I."))
+        ):
+            raise FreshDownloadReleaseCASFailed("release row is invalid, duplicated, or final")
+        seen_rows.add(row_id)
+        seen_filings.add(filing_id)
+        item["manifest_row_id"] = row_id
+        item["filing_id"] = filing_id
+        item["provider_native_id"] = provider_id
+        item["retry_classification"] = classification
+        item["evidence_digest"] = evidence
+        normalized.append(item)
+    if not normalized:
+        raise FreshDownloadReleaseCASFailed("release manifest is empty")
+
+    pending: list[dict[str, object]] = []
+    already_released: list[dict[str, object]] = []
+    conflicts: list[dict[str, object]] = []
+    for item in sorted(normalized, key=lambda value: str(value["manifest_row_id"])):
+        row_id = str(item["manifest_row_id"])
+        joined = conn.execute(
+            "SELECT f.state_filing_id,f.requested_disclosure_no,f.normalized_company_code,"
+            "d.* FROM campaign_fresh_downloads d JOIN campaign_filings f "
+            "ON f.campaign_id=d.campaign_id AND f.manifest_row_id=d.manifest_row_id "
+            "WHERE d.campaign_id=? AND d.manifest_row_id=?",
+            (campaign_id, row_id),
+        ).fetchone()
+        if joined is None:
+            conflicts.append({"manifest_row_id": row_id, "reason": "TARGET_MISSING"})
+            continue
+        current = dict(joined)
+        ledger = None
+        if table_exists(conn, "backfill_quarantine_releases"):
+            ledger = conn.execute(
+                "SELECT * FROM backfill_quarantine_releases "
+                "WHERE campaign_id=? AND manifest_row_id=? AND evidence_digest=?",
+                (campaign_id, row_id, item["evidence_digest"]),
+            ).fetchone()
+        if current["fresh_status"] == "FAILED_RETRYABLE" and ledger is not None:
+            already_released.append({"manifest_row_id": row_id, "release_id": ledger["release_id"]})
+            continue
+        checks = {
+            "requested_disclosure_no": item["provider_native_id"],
+            "normalized_company_code": str(item.get("ticker") or ""),
+            "fresh_status": "QUARANTINED",
+            "attempt_count": int(item.get("expected_attempt_count") or 0),
+            "updated_at": str(item.get("expected_updated_at") or ""),
+            "last_error_code": item.get("expected_quarantine_reason"),
+            "quarantine_release_required": 1,
+        }
+        if current.get("state_filing_id") not in {None, ""}:
+            checks["state_filing_id"] = item["filing_id"]
+        mismatches = [
+            key for key, expected in checks.items()
+            if current.get(key) != expected
+        ]
+        if mismatches:
+            conflicts.append({
+                "manifest_row_id": row_id, "reason": "CAS_PRECONDITION_CHANGED",
+                "mismatches": mismatches,
+            })
+            continue
+        pending.append({**item, "before": {
+            column: current.get(column) for column in _FRESH_DOWNLOAD_COLUMNS
+        }})
+    return {
+        "campaign_id": campaign_id, "manifest_digest": manifest_digest.lower(),
+        "target_count": len(normalized), "pending_count": len(pending),
+        "already_released_count": len(already_released),
+        "conflict_count": len(conflicts), "pending": pending,
+        "already_released": already_released, "conflicts": conflicts,
+    }
+
+
+def apply_quarantine_releases(
+    conn: sqlite3.Connection, *, campaign_id: str,
+    release_rows: Sequence[Mapping[str, object]], manifest_digest: str,
+    release_run_id: str, released_at: str | None = None,
+    after_update: Callable[[int, sqlite3.Connection], None] | None = None,
+) -> dict[str, object]:
+    """Atomically release only the evidence-backed rows in ``release_rows``."""
+    if not release_run_id:
+        raise FreshDownloadReleaseCASFailed("release run id is required")
+    timestamp = str(released_at or _now())
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        _create_quarantine_release_schema(conn)
+        plan = plan_quarantine_releases(
+            conn, campaign_id=campaign_id, release_rows=release_rows,
+            manifest_digest=manifest_digest,
+        )
+        if plan["conflict_count"] or plan["already_released_count"]:
+            raise FreshDownloadReleaseCASFailed("release plan is not a fresh conflict-free apply")
+        target_ids = {str(item["manifest_row_id"]) for item in plan["pending"]}
+        if len(target_ids) != len(release_rows):
+            raise FreshDownloadReleaseCASFailed("release target count changed")
+        filing_digest = _table_digest(conn, "campaign_filings", campaign_id, set())
+        non_target_digest = _table_digest(
+            conn, "campaign_fresh_downloads", campaign_id, target_ids
+        )
+        results: list[dict[str, object]] = []
+        for index, item in enumerate(plan["pending"]):
+            before = dict(item["before"])
+            desired = {
+                "fresh_status": "FAILED_RETRYABLE",
+                "auto_ready_allowed": 1,
+                "quarantine_release_required": 0,
+                "updated_at": timestamp,
+            }
+            cas = " AND ".join(f"{column} IS ?" for column in _FRESH_DOWNLOAD_COLUMNS)
+            cursor = conn.execute(
+                f"UPDATE campaign_fresh_downloads SET "
+                "fresh_status=?,auto_ready_allowed=?,quarantine_release_required=?,updated_at=? "
+                f"WHERE {cas}",
+                [*desired.values(), *(before.get(column) for column in _FRESH_DOWNLOAD_COLUMNS)],
+            )
+            if cursor.rowcount != 1:
+                raise FreshDownloadReleaseCASFailed(
+                    f"quarantine release CAS failed for {item['manifest_row_id']}"
+                )
+            release_id = hashlib.sha256(
+                f"{campaign_id}|{item['manifest_row_id']}|{item['evidence_digest']}".encode("utf-8")
+            ).hexdigest()
+            conn.execute(
+                "INSERT INTO backfill_quarantine_releases("
+                "release_id,campaign_id,manifest_row_id,filing_id,from_state,to_state,"
+                "original_quarantine_reason,retry_classification,evidence_digest,"
+                "manifest_digest,release_run_id,released_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    release_id, campaign_id, item["manifest_row_id"], item["filing_id"],
+                    "QUARANTINED", "FAILED_RETRYABLE",
+                    item.get("expected_quarantine_reason"), item["retry_classification"],
+                    item["evidence_digest"], manifest_digest.lower(), release_run_id, timestamp,
+                ),
+            )
+            if after_update is not None:
+                after_update(index, conn)
+            after = conn.execute(
+                "SELECT * FROM campaign_fresh_downloads WHERE campaign_id=? AND manifest_row_id=?",
+                (campaign_id, item["manifest_row_id"]),
+            ).fetchone()
+            if after is None or any(dict(after).get(key) != value for key, value in desired.items()):
+                raise FreshDownloadReleaseCASFailed("quarantine release readback mismatch")
+            for preserved in (
+                "attempt_count", "last_error_code", "last_error_stage",
+                "last_error_message", "artifact_zip_sha256",
+                "artifact_internal_document_id", "identity_verdict",
+            ):
+                if dict(after).get(preserved) != before.get(preserved):
+                    raise FreshDownloadReleaseCASFailed("quarantine history was not preserved")
+            results.append({
+                "manifest_row_id": item["manifest_row_id"],
+                "release_id": release_id, "before": before, "after": dict(after),
+            })
+        if (
+            _table_digest(conn, "campaign_filings", campaign_id, set()) != filing_digest
+            or _table_digest(conn, "campaign_fresh_downloads", campaign_id, target_ids)
+            != non_target_digest
+            or str(conn.execute("PRAGMA integrity_check").fetchone()[0]) != "ok"
+            or conn.execute("PRAGMA foreign_key_check").fetchone() is not None
+        ):
+            raise FreshDownloadReleaseCASFailed("quarantine release invariant failed")
+    except Exception:
+        conn.rollback()
+        raise
+    else:
+        conn.commit()
+    second = plan_quarantine_releases(
+        conn, campaign_id=campaign_id, release_rows=release_rows,
+        manifest_digest=manifest_digest,
+    )
+    if second["pending_count"] or second["conflict_count"] or second["already_released_count"] != len(results):
+        raise FreshDownloadReleaseCASFailed("quarantine release second plan is not idempotent")
+    return {
+        "released_count": len(results), "results": results,
+        "second_plan": second, "integrity_check": "ok", "foreign_key_check": 0,
+    }
