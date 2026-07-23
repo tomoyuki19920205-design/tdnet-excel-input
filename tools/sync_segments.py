@@ -513,9 +513,18 @@ def _read_segment_id_rows(db_path: str, segment_ids: list[int]) -> tuple[list[di
     conn.row_factory = sqlite3.Row
     try:
         placeholders = ",".join("?" for _ in requested_ids)
+        segment_columns = {
+            str(column["name"]) for column in conn.execute(
+                "PRAGMA table_info(segment_financials)"
+            ).fetchall()
+        }
+        optional_segment_columns = ", ".join(
+            column if column in segment_columns else f"NULL AS {column}"
+            for column in ("tdnet_doc_id", "disclosure_date")
+        )
         rows = [dict(row) for row in conn.execute(
             "SELECT id, company_code, fiscal_year_end, quarter, segment_name, "
-            "segment_sales, segment_profit, data_source "
+            "segment_sales, segment_profit, data_source, " + optional_segment_columns + " "
             f"FROM segment_financials WHERE id IN ({placeholders})",
             requested_ids,
         ).fetchall()]
@@ -524,8 +533,18 @@ def _read_segment_id_rows(db_path: str, segment_ids: list[int]) -> tuple[list[di
             "AND name='filing_segment_lineage'"
         ).fetchone() is not None
         if lineage_present:
+            lineage_columns = {
+                str(column["name"]) for column in conn.execute(
+                    "PRAGMA table_info(filing_segment_lineage)"
+                ).fetchall()
+            }
+            lineage_tdnet = (
+                "tdnet_doc_id" if "tdnet_doc_id" in lineage_columns
+                else "NULL AS tdnet_doc_id"
+            )
             lineage_rows = conn.execute(
-                "SELECT canonical_segment_financial_id, filing_id, relation_role "
+                "SELECT canonical_segment_financial_id, filing_id, relation_role, "
+                + lineage_tdnet + " "
                 "FROM filing_segment_lineage "
                 f"WHERE canonical_segment_financial_id IN ({placeholders}) "
                 "AND relation_role IN "
@@ -533,25 +552,100 @@ def _read_segment_id_rows(db_path: str, segment_ids: list[int]) -> tuple[list[di
                 "ORDER BY canonical_segment_financial_id, filing_id",
                 requested_ids,
             ).fetchall()
+            observation_dates: dict[tuple[int, str], str] = {}
+            observation_business: dict[tuple[int, str], tuple] = {}
+            observations_present = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='filing_segment_observations'"
+            ).fetchone() is not None
+            if observations_present:
+                for observation in conn.execute(
+                    "SELECT canonical_segment_financial_id, filing_id, disclosure_date, "
+                    "company_code, fiscal_year_end, quarter, segment_name, "
+                    "observed_sales, observed_profit, row_semantic_digest "
+                    "FROM filing_segment_observations "
+                    f"WHERE canonical_segment_financial_id IN ({placeholders})",
+                    requested_ids,
+                ).fetchall():
+                    observation_dates[
+                        (int(observation["canonical_segment_financial_id"]),
+                         str(observation["filing_id"]))
+                    ] = str(observation["disclosure_date"] or "").strip()
+                    observation_business[
+                        (int(observation["canonical_segment_financial_id"]),
+                         str(observation["filing_id"]))
+                    ] = (
+                        str(observation["company_code"]),
+                        str(observation["fiscal_year_end"]),
+                        str(observation["quarter"]),
+                        str(observation["segment_name"]),
+                        observation["observed_sales"],
+                        observation["observed_profit"],
+                        str(observation["row_semantic_digest"]),
+                    )
             lineage_by_id: dict[int, dict[str, set[str]]] = {}
+            equivalent_provenance: dict[int, dict[str, tuple[str, str]]] = {}
             for lineage in lineage_rows:
                 segment_id = int(lineage["canonical_segment_financial_id"])
                 role_map = lineage_by_id.setdefault(segment_id, {})
-                role_map.setdefault(str(lineage["relation_role"]), set()).add(
-                    str(lineage["filing_id"] or "").strip()
-                )
+                filing_id = str(lineage["filing_id"] or "").strip()
+                role = str(lineage["relation_role"])
+                role_map.setdefault(role, set()).add(filing_id)
+                if role == "EQUIVALENT_REFERENCE" and filing_id:
+                    equivalent_provenance.setdefault(segment_id, {})[filing_id] = (
+                        str(lineage["tdnet_doc_id"] or "").strip(),
+                        observation_dates.get((segment_id, filing_id), ""),
+                    )
             for row in rows:
                 segment_id = int(row["id"])
                 roles = lineage_by_id.get(segment_id, {})
                 canonical = sorted(value for value in roles.get("CANONICAL_SOURCE", set()) if value)
                 equivalent = sorted(value for value in roles.get("EQUIVALENT_REFERENCE", set()) if value)
                 noncanonical = sorted(value for value in roles.get("NONCANONICAL_OBSERVATION", set()) if value)
+                row["equivalent_reference_filing_ids"] = equivalent
                 if len(canonical) == 1:
                     row["canonical_filing_id"] = canonical[0]
                     row["canonical_route"] = "DIRECT_CANONICAL_REFERENCE"
                 elif not canonical and len(equivalent) == 1:
                     row["canonical_filing_id"] = equivalent[0]
                     row["canonical_route"] = "ALIAS_CANONICAL_REFERENCE"
+                elif not canonical and len(equivalent) > 1:
+                    business_rows = [
+                        observation_business.get((segment_id, filing_id))
+                        for filing_id in equivalent
+                    ]
+                    expected_business = (
+                        str(row["company_code"]), str(row["fiscal_year_end"]),
+                        str(row["quarter"]), str(row["segment_name"]),
+                        row["segment_sales"], row["segment_profit"],
+                    )
+                    business_equivalent = (
+                        all(value is not None for value in business_rows)
+                        and len({value for value in business_rows if value is not None}) == 1
+                        and business_rows[0][:-1] == expected_business
+                    )
+                    baseline_tdnet = str(row.get("tdnet_doc_id") or "").strip()
+                    baseline_date = str(row.get("disclosure_date") or "").strip()
+                    baseline_matches = [
+                        filing_id for filing_id in equivalent
+                        if baseline_tdnet and baseline_date
+                        and equivalent_provenance.get(segment_id, {}).get(filing_id)
+                        == (baseline_tdnet, baseline_date)
+                    ]
+                    if not business_equivalent:
+                        row["canonical_filing_id"] = None
+                        row["canonical_route"] = "IDENTITY_UNRESOLVED"
+                        row["route_evidence_class"] = "MULTI_REFERENCE_BUSINESS_CONFLICT"
+                    elif len(baseline_matches) == 1:
+                        row["canonical_filing_id"] = baseline_matches[0]
+                        row["canonical_route"] = "UNIQUE_BASELINE_PROVENANCE"
+                        row["route_evidence_class"] = "UNIQUE_BASELINE_PROVENANCE"
+                    else:
+                        row["canonical_filing_id"] = None
+                        row["canonical_route"] = "MULTI_EQUIVALENT_REFERENCE"
+                        row["route_evidence_class"] = (
+                            "MULTI_EQUIVALENT_REFERENCE_SAME_DESTINATION"
+                        )
                 elif not canonical and not equivalent and noncanonical:
                     row["canonical_filing_id"] = None
                     row["canonical_route"] = "OBSERVATION_ONLY_NO_CANONICAL_MUTATION"
@@ -620,18 +714,45 @@ def plan_alias_aware_segment_ids(
         invalid_identity = [
             row for row in rows
             if row.get("canonical_route") not in {
-                "DIRECT_CANONICAL_REFERENCE", "ALIAS_CANONICAL_REFERENCE"
-            } or not str(row.get("canonical_filing_id") or "").strip()
+                "DIRECT_CANONICAL_REFERENCE", "ALIAS_CANONICAL_REFERENCE",
+                "MULTI_EQUIVALENT_REFERENCE", "UNIQUE_BASELINE_PROVENANCE",
+                "OBSERVATION_ONLY_NO_CANONICAL_MUTATION",
+            } or (
+                row.get("canonical_route") not in {
+                    "MULTI_EQUIVALENT_REFERENCE",
+                    "OBSERVATION_ONLY_NO_CANONICAL_MUTATION",
+                }
+                and not str(row.get("canonical_filing_id") or "").strip()
+            ) or (
+                row.get("canonical_route") == "MULTI_EQUIVALENT_REFERENCE"
+                and len(row.get("equivalent_reference_filing_ids") or []) < 2
+            )
         ]
         if invalid_identity:
             plan["sync_error"] = "segment_sync_filing_identity_unresolved"
             plan["conflicts"] = [{
                 "sqlite_row_id": int(row["id"]),
-                "reason": str(row.get("canonical_route") or "IDENTITY_UNRESOLVED"),
+                "reason": str(
+                    row.get("route_evidence_class")
+                    or row.get("canonical_route")
+                    or "IDENTITY_UNRESOLVED"
+                ),
             } for row in invalid_identity]
             return plan
 
-    valid_rows = [row for row in rows if not _classify_skip_reason(row)]
+    observation_only_rows = [
+        row for row in rows
+        if row.get("canonical_route") == "OBSERVATION_ONLY_NO_CANONICAL_MUTATION"
+    ]
+    plan["observation_only_no_canonical_mutation"] = len(observation_only_rows)
+    plan["observation_only_segment_ids"] = sorted(
+        int(row["id"]) for row in observation_only_rows
+    )
+    valid_rows = [
+        row for row in rows
+        if not _classify_skip_reason(row)
+        and row.get("canonical_route") != "OBSERVATION_ONLY_NO_CANONICAL_MUTATION"
+    ]
     plan["sqlite_valid"] = len(valid_rows)
     plan["payloads"] = []
     groups = {
@@ -657,6 +778,17 @@ def plan_alias_aware_segment_ids(
         quarter = _QUARTER_MAP.get(str(row["quarter"]), str(row["quarter"]))
         source = str(row.get("data_source") or "excel_legacy")
         filing_id = str(row.get("canonical_filing_id") or "").strip() or None
+        equivalent_reference_filing_ids = [
+            value for value in list(row.get("equivalent_reference_filing_ids") or [])
+            if value != filing_id
+        ]
+        reference_filing_ids = (
+            ([filing_id] if filing_id else []) + equivalent_reference_filing_ids
+            if row.get("route_evidence_class") == "UNIQUE_BASELINE_PROVENANCE"
+            else list(row.get("equivalent_reference_filing_ids") or [])
+            if row.get("canonical_route") == "MULTI_EQUIVALENT_REFERENCE"
+            else [filing_id]
+        )
         segment_name = str(row["segment_name"]).strip()
         segment_key = normalize_segment_display_key(ticker, segment_name)
         sales = int(row["segment_sales"]) if row["segment_sales"] is not None else None
@@ -674,7 +806,10 @@ def plan_alias_aware_segment_ids(
             "wide_action": "", "wide_reason": "", "wide_existing": [],
             "eav_actions": [], "source_priority": get_priority(source),
             "filing_id": filing_id,
+            "equivalent_reference_filing_ids": equivalent_reference_filing_ids,
+            "evaluated_filing_ids": reference_filing_ids,
             "canonical_route": row.get("canonical_route"),
+            "route_evidence_class": row.get("route_evidence_class"),
         }
 
         wide_matches = [
@@ -711,11 +846,14 @@ def plan_alias_aware_segment_ids(
                 result["wide_reason"] = "alias_equivalent_existing_value_match"
                 plan["wide_skipped_alias_equivalent_existing"] += 1
 
-        eav_payloads, _ = expand_segments_rows(
-            ticker=ticker, period=period, quarter=quarter,
-            segments=[{"segment_name": segment_name, "sales": sales, "profit": profit}],
-            source=source, filing_id=filing_id, unit="millions_jpy",
-        )
+        eav_payloads = []
+        for reference_filing_id in reference_filing_ids:
+            reference_payloads, _ = expand_segments_rows(
+                ticker=ticker, period=period, quarter=quarter,
+                segments=[{"segment_name": segment_name, "sales": sales, "profit": profit}],
+                source=source, filing_id=reference_filing_id, unit="millions_jpy",
+            )
+            eav_payloads.extend(reference_payloads)
         for eav_payload in eav_payloads:
             logical_matches = [
                 existing for existing in eav_existing[group]
@@ -727,11 +865,19 @@ def plan_alias_aware_segment_ids(
                 "action": "", "reason": "", "payload": eav_payload,
                 "existing": logical_matches,
             }
+            value_matches = [
+                existing for existing in logical_matches
+                if _null_safe_value_equal(existing.get("value"), eav_payload["value"])
+            ]
+            unit_matches = [
+                existing for existing in value_matches
+                if str(existing.get("unit") or "") == str(eav_payload["unit"])
+            ]
             if not logical_matches:
                 action["action"] = "eav_upsert"
                 action["reason"] = "alias_equivalent_existing_not_found"
                 plan["eav_inserted"] += 1
-            elif any(not _null_safe_value_equal(existing.get("value"), eav_payload["value"]) for existing in logical_matches):
+            elif not value_matches:
                 action["action"] = "eav_conflict"
                 action["reason"] = "segment_eav_alias_value_conflict"
                 plan["eav_conflict"] += 1
@@ -739,10 +885,7 @@ def plan_alias_aware_segment_ids(
                     "sqlite_row_id": row_id, "metric": eav_payload["metric"],
                     "reason": action["reason"],
                 })
-            elif lineage_contract_present and any(
-                str(existing.get("unit") or "") != str(eav_payload["unit"])
-                for existing in logical_matches
-            ):
+            elif lineage_contract_present and not unit_matches:
                 action["action"] = "eav_conflict"
                 action["reason"] = "segment_eav_unit_conflict"
                 plan["eav_conflict"] += 1
@@ -755,7 +898,7 @@ def plan_alias_aware_segment_ids(
                     int(existing.get("source_priority"))
                     if existing.get("source_priority") is not None
                     else get_priority(str(existing.get("source") or ""))
-                    for existing in logical_matches
+                    for existing in (unit_matches if lineage_contract_present else value_matches)
                 )
                 if best_existing_priority > get_priority(source):
                     action["action"] = "eav_conflict"
@@ -770,6 +913,25 @@ def plan_alias_aware_segment_ids(
                     action["reason"] = "alias_equivalent_existing_value_match"
                     plan["eav_skipped_alias_equivalent_existing"] += 1
             result["eav_actions"].append(action)
+        if row.get("canonical_route") == "MULTI_EQUIVALENT_REFERENCE" and any(
+            action["action"] == "eav_upsert" for action in result["eav_actions"]
+        ):
+            result["eav_actions"] = [
+                {**action, "action": "eav_conflict",
+                 "reason": "segment_multi_reference_versioned_insert_required"}
+                if action["action"] == "eav_upsert" else action
+                for action in result["eav_actions"]
+            ]
+            inserted = sum(
+                action["reason"] == "segment_multi_reference_versioned_insert_required"
+                for action in result["eav_actions"]
+            )
+            plan["eav_inserted"] -= inserted
+            plan["eav_conflict"] += inserted
+            plan["conflicts"].append({
+                "sqlite_row_id": row_id,
+                "reason": "segment_multi_reference_versioned_insert_required",
+            })
         plan["row_results"].append(result)
 
     if plan["conflicts"]:

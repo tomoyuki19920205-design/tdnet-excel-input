@@ -661,15 +661,28 @@ class TestV4CanonicalPayloadIdentityContract:
         assert all(p["filing_id"] != "20260101123456" for p in payloads)
         assert all("20260101123456" not in p["source_row_key"] for p in payloads)
 
-    @pytest.mark.parametrize("role", ["MISSING", "NONCANONICAL_OBSERVATION"])
-    def test_missing_or_noncanonical_filing_identity_fails_closed(self, tmp_path, role):
+    def test_missing_filing_identity_fails_closed(self, tmp_path):
         from tools import sync_segments
-        db_path = self._db(tmp_path, role=role, filing_id=None)
+        db_path = self._db(tmp_path, role="MISSING", filing_id=None)
         plan = sync_segments.plan_alias_aware_segment_ids(
             db_path, [1], "http://test/rest/v1", {}, live_read=False,
         )
         assert plan["sync_error"] == "segment_sync_filing_identity_unresolved"
         assert plan["row_results"] == []
+        assert plan["eav_inserted"] == 0
+
+    def test_noncanonical_observation_is_explicit_no_mutation(self, tmp_path):
+        from tools import sync_segments
+        db_path = self._db(tmp_path, role="NONCANONICAL_OBSERVATION")
+        plan = sync_segments.plan_alias_aware_segment_ids(
+            db_path, [1], "http://test/rest/v1", {}, live_read=False,
+        )
+        assert plan["sync_error"] == ""
+        assert plan["observation_only_no_canonical_mutation"] == 1
+        assert plan["observation_only_segment_ids"] == [1]
+        assert plan["payloads"] == []
+        assert plan["row_results"] == []
+        assert plan["wide_inserted"] == 0
         assert plan["eav_inserted"] == 0
 
     def test_ambiguous_filing_identity_fails_closed(self, tmp_path):
@@ -688,6 +701,139 @@ class TestV4CanonicalPayloadIdentityContract:
         )
         assert plan["sync_error"] == "segment_sync_filing_identity_unresolved"
 
+    def _multi_reference_db(self, tmp_path, *, baseline_filing=None, conflict=False):
+        db_path = self._db(
+            tmp_path, role="EQUIVALENT_REFERENCE", filing_id=self.FILING_A,
+        )
+        conn = sqlite3.connect(db_path)
+        conn.execute("ALTER TABLE segment_financials ADD COLUMN disclosure_date TEXT")
+        conn.execute("ALTER TABLE filing_segment_lineage ADD COLUMN tdnet_doc_id TEXT")
+        conn.execute(
+            "UPDATE segment_financials SET tdnet_doc_id=?, disclosure_date=? WHERE id=1",
+            ("DOC-B" if baseline_filing == self.FILING_B else "BASELINE-OTHER",
+             "2026-01-02" if baseline_filing == self.FILING_B else "2026-02-01"),
+        )
+        conn.execute(
+            "UPDATE filing_segment_lineage SET tdnet_doc_id=? WHERE filing_id=?",
+            ("DOC-A", self.FILING_A),
+        )
+        conn.execute(
+            "INSERT INTO filing_segment_lineage "
+            "(filing_id,requested_id,relation_role,canonical_segment_financial_id,tdnet_doc_id) "
+            "VALUES (?,?,?,?,?)",
+            (self.FILING_B, "OTHER-REQUESTED", "EQUIVALENT_REFERENCE", 1, "DOC-B"),
+        )
+        conn.execute("""
+            CREATE TABLE filing_segment_observations (
+                observation_id INTEGER PRIMARY KEY,
+                filing_id TEXT NOT NULL,
+                canonical_segment_financial_id INTEGER,
+                disclosure_date TEXT,
+                company_code TEXT NOT NULL,
+                fiscal_year_end TEXT NOT NULL,
+                quarter TEXT NOT NULL,
+                segment_name TEXT NOT NULL,
+                observed_sales REAL,
+                observed_profit REAL,
+                row_semantic_digest TEXT NOT NULL
+            )
+        """)
+        observations = [
+            (self.FILING_A, "2026-01-01", 1042, 52, "same-digest"),
+            (self.FILING_B, "2026-01-02", 1042, 999 if conflict else 52,
+             "different-digest" if conflict else "same-digest"),
+        ]
+        conn.executemany(
+            "INSERT INTO filing_segment_observations "
+            "(filing_id,canonical_segment_financial_id,disclosure_date,company_code,"
+            "fiscal_year_end,quarter,segment_name,observed_sales,observed_profit,"
+            "row_semantic_digest) VALUES (?,1,?,'1376','2026-03-31','FY','Core',?,?,?)",
+            observations,
+        )
+        conn.commit()
+        conn.close()
+        return db_path
+
+    @staticmethod
+    def _existing_core_rows():
+        return [{
+            "ticker": "1376", "period": "2026-03-31", "quarter": "FY",
+            "segment_name": "Core", "segment_key": "core", "metric": metric,
+            "value": value, "unit": "millions_jpy", "source": "backfill_xbrl",
+            "source_row_key": "already-existing-" + metric,
+        } for metric, value in (("sales", 1042), ("profit", 52))]
+
+    def test_multiple_equivalent_references_preserve_both_without_owner_guess(self, tmp_path, monkeypatch):
+        from tools import sync_segments
+        db_path = self._multi_reference_db(tmp_path)
+        monkeypatch.setattr(
+            sync_segments.requests, "get", _layer_get([], self._existing_core_rows()),
+        )
+        plan = sync_segments.plan_alias_aware_segment_ids(
+            db_path, [1], "http://test/rest/v1", {}, live_read=True,
+        )
+        assert plan["sync_error"] == ""
+        result = plan["row_results"][0]
+        assert result["canonical_route"] == "MULTI_EQUIVALENT_REFERENCE"
+        assert result["filing_id"] is None
+        assert result["equivalent_reference_filing_ids"] == sorted([
+            self.FILING_A, self.FILING_B,
+        ])
+        assert len(plan["payloads"]) == 1
+        assert len(result["eav_actions"]) == 4
+        assert {action["action"] for action in result["eav_actions"]} == {
+            "eav_skipped_alias_equivalent_existing"
+        }
+        assert {action["payload"]["filing_id"] for action in result["eav_actions"]} == {
+            self.FILING_A, self.FILING_B,
+        }
+        assert all(action["payload"]["unit"] == "millions_jpy" for action in result["eav_actions"])
+        assert all(not action["payload"]["source_row_key"].endswith("|") for action in result["eav_actions"])
+
+    def test_unique_baseline_provenance_selects_only_the_exact_filing(self, tmp_path, monkeypatch):
+        from tools import sync_segments
+        db_path = self._multi_reference_db(tmp_path, baseline_filing=self.FILING_B)
+        monkeypatch.setattr(
+            sync_segments.requests, "get", _layer_get([], self._existing_core_rows()),
+        )
+        plan = sync_segments.plan_alias_aware_segment_ids(
+            db_path, [1], "http://test/rest/v1", {}, live_read=True,
+        )
+        result = plan["row_results"][0]
+        assert plan["sync_error"] == ""
+        assert result["canonical_route"] == "UNIQUE_BASELINE_PROVENANCE"
+        assert result["route_evidence_class"] == "UNIQUE_BASELINE_PROVENANCE"
+        assert result["filing_id"] == self.FILING_B
+        assert result["filing_id"] == self.FILING_B
+        assert result["equivalent_reference_filing_ids"] == [self.FILING_A]
+        assert result["evaluated_filing_ids"] == [self.FILING_B, self.FILING_A]
+        assert {action["payload"]["filing_id"] for action in result["eav_actions"]} == {
+            self.FILING_A, self.FILING_B,
+        }
+        assert len(plan["payloads"]) == 1
+
+    def test_multiple_reference_business_or_destination_conflict_fails_closed(self, tmp_path):
+        from tools import sync_segments
+        db_path = self._multi_reference_db(tmp_path, conflict=True)
+        plan = sync_segments.plan_alias_aware_segment_ids(
+            db_path, [1], "http://test/rest/v1", {}, live_read=False,
+        )
+        assert plan["sync_error"] == "segment_sync_filing_identity_unresolved"
+        assert plan["conflicts"] == [{
+            "sqlite_row_id": 1, "reason": "MULTI_REFERENCE_BUSINESS_CONFLICT",
+        }]
+        assert plan["row_results"] == []
+
+    def test_multiple_reference_new_version_insert_is_rejected(self, tmp_path):
+        from tools import sync_segments
+        db_path = self._multi_reference_db(tmp_path)
+        plan = sync_segments.plan_alias_aware_segment_ids(
+            db_path, [1], "http://test/rest/v1", {}, live_read=False,
+        )
+        assert plan["sync_error"] == "segment_multi_reference_versioned_insert_required"
+        assert plan["eav_inserted"] == 0
+        assert plan["eav_conflict"] == 4
+
     def test_logical_existing_match_skips_new_versioned_key(self, tmp_path, monkeypatch):
         from tools import sync_segments
         db_path = self._db(tmp_path)
@@ -701,6 +847,16 @@ class TestV4CanonicalPayloadIdentityContract:
             "segment_name": "Core", "segment_key": "core", "metric": "profit",
             "value": 52, "unit": "millions_jpy", "source": "backfill_xbrl",
             "filing_id": "historical-id", "source_row_key": "historical-key-2",
+        }, {
+            "ticker": "1376", "period": "2026-03-31", "quarter": "FY",
+            "segment_name": "Core", "segment_key": "core", "metric": "sales",
+            "value": 9999, "unit": "millions_jpy", "source": "backfill_xbrl",
+            "filing_id": "older-different-value", "source_row_key": "older-different-value",
+        }, {
+            "ticker": "1376", "period": "2026-03-31", "quarter": "FY",
+            "segment_name": "Core", "segment_key": "core", "metric": "sales",
+            "value": 1042, "unit": "JPY", "source": "backfill_xbrl",
+            "filing_id": "older-different-unit", "source_row_key": "older-different-unit",
         }]
         monkeypatch.setattr(sync_segments.requests, "get", _layer_get([], current))
         plan = sync_segments.plan_alias_aware_segment_ids(
