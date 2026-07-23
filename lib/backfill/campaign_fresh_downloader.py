@@ -445,6 +445,32 @@ def load_campaign_rows(path: Path, campaign_id: str, plan_rows: list[dict[str, o
     return result
 
 
+def load_formally_released_quarantine_ids(
+    path: Path, campaign_id: str, row_ids: Sequence[str],
+) -> set[str]:
+    """Return rows backed by the append-only formal release ledger."""
+    if not row_ids:
+        return set()
+    conn = connect_read_only(path)
+    try:
+        if not table_exists(conn, "backfill_quarantine_releases"):
+            return set()
+        placeholders = ",".join("?" for _ in row_ids)
+        rows = conn.execute(
+            "SELECT manifest_row_id,COUNT(*) AS release_count "
+            "FROM backfill_quarantine_releases WHERE campaign_id=? "
+            f"AND manifest_row_id IN ({placeholders}) "
+            "AND from_state='QUARANTINED' AND to_state='FAILED_RETRYABLE' "
+            "GROUP BY manifest_row_id",
+            [campaign_id, *row_ids],
+        ).fetchall()
+        if any(int(row["release_count"]) != 1 for row in rows):
+            raise FreshDownloaderStop(STOP_PRODUCTION_COUNT)
+        return {str(row["manifest_row_id"]) for row in rows}
+    finally:
+        conn.close()
+
+
 def load_production_rows(
     path: Path, campaign_id: str, plan_rows: list[dict[str, object]],
 ) -> list[dict[str, object]]:
@@ -1755,7 +1781,7 @@ def run_production_downloads(
     if manifest_semantic_sha256(selected) != manifest_semantic_sha256_value.lower():
         raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
     if len(selected) != expected_count or any(
-        row["plan_classification"] != "STANDARD_FRESH_DOWNLOAD" for row in selected
+        row["plan_classification"] not in PLAN_CLASSES for row in selected
     ):
         raise FreshDownloaderStop(STOP_PRODUCTION_COUNT)
     plan_rows, actual_plan_sha = load_selected_plan(download_plan, selected, campaign_id)
@@ -1763,13 +1789,26 @@ def run_production_downloads(
         raise FreshDownloaderStop(STOP_PRODUCTION_GUARD)
     before_rows = load_production_rows(campaign_db, campaign_id, plan_rows)
     target_ids = [str(row["manifest_row_id"]) for row in before_rows]
+    recheck_ids = {
+        str(row["manifest_row_id"]) for row in before_rows
+        if row.get("plan_classification") == "QUARANTINE_FRESH_RECHECK"
+    }
+    released_recheck_ids = load_formally_released_quarantine_ids(
+        campaign_db, campaign_id, sorted(recheck_ids)
+    )
     if len(set(target_ids)) != expected_count:
         raise FreshDownloaderStop(STOP_PRODUCTION_COUNT)
     if any(
-        row.get("plan_classification") != "STANDARD_FRESH_DOWNLOAD"
-        or row.get("fresh_status") not in {"NOT_STARTED", "FAILED_RETRYABLE"}
+        row.get("fresh_status") not in {"NOT_STARTED", "FAILED_RETRYABLE"}
+        or (
+            row.get("plan_classification") == "QUARANTINE_FRESH_RECHECK"
+            and (
+                row.get("fresh_status") != "FAILED_RETRYABLE"
+                or str(row.get("manifest_row_id")) not in released_recheck_ids
+            )
+        )
         for row in before_rows
-    ):
+    ) or released_recheck_ids != recheck_ids:
         raise FreshDownloaderStop(STOP_PRODUCTION_COUNT)
     target_zip_paths = [str(row.get("target_zip_path") or "") for row in before_rows]
     target_provenance_paths = [str(row.get("target_provenance_path") or "") for row in before_rows]

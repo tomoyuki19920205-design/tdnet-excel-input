@@ -20,6 +20,7 @@ from lib.backfill.campaign_state import (
     transaction,
 )
 from tools import backfill_campaign_quarantine_release as cli
+from lib.backfill import campaign_fresh_downloader as downloader
 
 
 def _sha(path: Path) -> str:
@@ -235,6 +236,23 @@ def test_released_row_is_accepted_by_worker_success_cas(tmp_path):
         expected_count=1, run_id="worker", journal_path="journal",
     )[0]["fresh_status"] == "COMPLETE"
     conn.close()
+
+
+def test_formal_release_ledger_authorizes_only_exact_recheck_row(tmp_path):
+    path = _db(tmp_path)
+    rows = _rows(path)[:1]
+    assert downloader.load_formally_released_quarantine_ids(
+        path, "c1", ["0000000001", "0000000002"]
+    ) == set()
+    conn = connect_db(path)
+    apply_quarantine_releases(
+        conn, campaign_id="c1", release_rows=rows, manifest_digest=_digest(rows),
+        release_run_id="release-1",
+    )
+    conn.close()
+    assert downloader.load_formally_released_quarantine_ids(
+        path, "c1", ["0000000001", "0000000002"]
+    ) == {"0000000001"}
 
 
 def test_cli_defaults_to_dry_run_and_does_not_modify_database(tmp_path):
