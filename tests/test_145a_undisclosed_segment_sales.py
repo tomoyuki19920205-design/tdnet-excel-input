@@ -155,3 +155,95 @@ def test_parser_reconciliation_mismatch_is_not_verified():
     )
     assert rows
     assert all(not row["sales_reconciliation_verified"] for row in rows.values())
+
+
+def test_parser_accepts_entity_total_member_as_consolidated_reconciliation():
+    html = """
+    <html><body>
+      <ix:nonfraction name="jpcrp_cor:revenuesfromexternalcustomers"
+        contextref="CurrentYTDDuration_tse-qcedjpfr-145A0DXSolutionReportableSegmentMember">665742</ix:nonfraction>
+      <ix:nonfraction name="jppfs_cor:operatingincome"
+        contextref="CurrentYTDDuration_tse-qcedjpfr-145A0DXSolutionReportableSegmentMember">75000</ix:nonfraction>
+      <ix:nonfraction name="jpcrp_cor:revenuesfromexternalcustomers" xsi:nil="true"
+        contextref="CurrentYTDDuration_tse-qcedjpfr-145A0InvestmentBusinessReportableSegmentMember"></ix:nonfraction>
+      <ix:nonfraction name="jppfs_cor:operatingincome" sign="-"
+        contextref="CurrentYTDDuration_tse-qcedjpfr-145A0InvestmentBusinessReportableSegmentMember">1000</ix:nonfraction>
+      <ix:nonfraction name="jpcrp_cor:revenuesfromexternalcustomers"
+        contextref="CurrentYTDDuration_ReportableSegmentsMember">665742</ix:nonfraction>
+      <ix:nonfraction name="jpcrp_cor:revenuesfromexternalcustomers"
+        contextref="CurrentYTDDuration_EntityTotalMember">665742</ix:nonfraction>
+    </body></html>
+    """
+    contexts = {
+        key: {
+            "type": "duration",
+            "start": "2026-01-01",
+            "end": "2026-03-31",
+            "duration_days": 89,
+        }
+        for key in (
+            "CurrentYTDDuration_tse-qcedjpfr-145A0DXSolutionReportableSegmentMember",
+            "CurrentYTDDuration_tse-qcedjpfr-145A0InvestmentBusinessReportableSegmentMember",
+            "CurrentYTDDuration_ReportableSegmentsMember",
+            "CurrentYTDDuration_EntityTotalMember",
+        )
+    }
+    rows = _extract_ixbrl_segment_data(
+        BeautifulSoup(html, "html.parser"), "JGAAP", "1Q", contexts
+    )
+    records = [
+        {
+            "segment_name": member,
+            "segment_sales": data["sales"],
+            "segment_profit": data["profit"],
+            "period": "2026-12-31",
+            "quarter": "1Q",
+            "_segment_period_role": role,
+            "_segment_member_kind": data["segment_member_kind"],
+            "_sales_fact_explicit_nil": data["sales_fact_explicit_nil"],
+            "_sales_fact_names": data["sales_fact_names"],
+            "_sales_reconciliation_verified": data["sales_reconciliation_verified"],
+            "_reportable_sales_total_raw": data["reportable_sales_total"],
+            "_consolidated_sales_raw": data["consolidated_sales"],
+        }
+        for (member, role), data in rows.items()
+        if role == "current"
+    ]
+    result = validate_extraction_result(records, source="xbrl")
+    assert result.status is ExtractionStatus.PARTIAL
+    assert result.hard_fail_reason is HardFailReason.NONE
+
+
+@pytest.mark.parametrize(
+    "sales_name",
+    [
+        "jppfs_cor:revenue",
+        "tse-anedjpfr-73680:revenuefromexternalcustomers",
+    ],
+)
+def test_parser_accepts_revenue_sales_concepts_used_by_7368(sales_name):
+    html = f"""
+    <html><body>
+      <ix:nonfraction name="{sales_name}"
+        contextref="CurrentYearDuration_tse-anedjpfr-73680NAVITABusinessReportableSegmentsMember">8074186</ix:nonfraction>
+      <ix:nonfraction name="jppfs_cor:operatingincome"
+        contextref="CurrentYearDuration_tse-anedjpfr-73680NAVITABusinessReportableSegmentsMember">1225000</ix:nonfraction>
+    </body></html>
+    """
+    context = "CurrentYearDuration_tse-anedjpfr-73680NAVITABusinessReportableSegmentsMember"
+    rows = _extract_ixbrl_segment_data(
+        BeautifulSoup(html, "html.parser"),
+        "JGAAP",
+        "FY",
+        {
+            context: {
+                "type": "duration",
+                "start": "2024-04-01",
+                "end": "2025-03-31",
+                "duration_days": 364,
+            }
+        },
+    )
+    current = rows[("NAVITABusiness", "current")]
+    assert current["sales"] == 8_074_186
+    assert current["profit"] == 1_225_000

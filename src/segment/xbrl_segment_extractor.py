@@ -76,6 +76,7 @@ def _extract_dei_date_values(soup: BeautifulSoup, local_name: str) -> set[dateti
 _SALES_TAGS = {
     "jpcrp_cor:revenuesfromexternalcustomers",  # 外部顧客への売上高
     "jppfs_cor:netsales",                       # 売上高
+    "jppfs_cor:revenue",                        # 営業収益
 }
 _PROFIT_TAGS = {
     "jppfs_cor:operatingincome",                # 営業利益 / セグメント利益
@@ -104,6 +105,7 @@ _IFRS_PROFIT_TAGS = {
 # 会社固有 namespace のパターン (tse-qcediffr-72030:xxx 等)
 # element 名の末尾が以下のいずれかなら sales/profit として認識
 _COMPANY_SALES_SUFFIXES = (
+    "revenuefromexternalcustomers",
     "revenuesfromexternalcustomers",
     "revenuesfromexternalcustomers2",
     "operatingrevenuefromexternalcustomersifrs",
@@ -1235,7 +1237,7 @@ def _extract_ixbrl_segment_data(
                     aggregate_sales_by_name[period_type]["reportable_total"].setdefault(
                         name, set()
                     ).add(value)
-                elif "member" not in ctx_l:
+                elif "member" not in ctx_l or "entitytotalmember" in ctx_l:
                     aggregate_sales[period_type]["consolidated"].add(value)
                     aggregate_sales_by_name[period_type]["consolidated"].setdefault(
                         name, set()
