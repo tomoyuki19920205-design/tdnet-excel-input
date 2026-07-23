@@ -19,6 +19,7 @@ import requests
 import lib.backfill.campaign_fresh_downloader as downloader
 from lib.backfill.jquants_td_files_adapter import TD_FILES_ENDPOINT
 from lib.backfill.campaign_state import (
+    apply_quarantine_releases,
     connect_db, create_campaign, create_campaign_filing, create_fresh_download,
     initialize_schema, transaction,
 )
@@ -902,8 +903,8 @@ def test_cli_help_has_all_contract_arguments():
         assert option in proc.stdout
 
 
-def _production_fixture(tmp_path: Path, count: int = 5):
-    rows = [_row(index) for index in range(1, count + 1)]
+def _production_fixture(tmp_path: Path, count: int = 5, rows=None):
+    rows = rows or [_row(index) for index in range(1, count + 1)]
     env = _prepare(tmp_path, rows)
     env["cache"] = tmp_path / "repo" / "data" / "v4_campaign_cache" / CAMPAIGN_ID
     conn = connect_db(env["db"])
@@ -1378,6 +1379,103 @@ def test_production_quarantined_rejected_before_output_and_network(tmp_path):
         downloader.run_production_downloads(**_production_kwargs(env, environment, provider, runtime))
     assert not env["output"].exists()
     assert not env["cache"].exists()
+
+
+def test_production_reuses_formally_released_recheck_artifact(tmp_path):
+    recheck = _row(classification="QUARANTINE_FRESH_RECHECK")
+    env, environment, _provider, runtime, _checks = _production_fixture(
+        tmp_path, count=1, rows=[recheck],
+    )
+    conn = connect_db(env["db"])
+    current = conn.execute(
+        "SELECT * FROM campaign_fresh_downloads WHERE campaign_id=? AND manifest_row_id=?",
+        (CAMPAIGN_ID, recheck["manifest_row_id"]),
+    ).fetchone()
+    evidence = "b" * 64
+    release_row = {
+        "manifest_row_id": recheck["manifest_row_id"],
+        "filing_id": "resolved-filing-1",
+        "provider_native_id": recheck["requested_disclosure_no"],
+        "ticker": recheck["normalized_company_code"],
+        "retry_classification": "D.SOURCE_AVAILABLE_REDOWNLOAD_REQUIRED",
+        "evidence_digest": evidence,
+        "expected_state": "QUARANTINED",
+        "expected_attempt_count": current["attempt_count"],
+        "expected_updated_at": current["updated_at"],
+        "expected_quarantine_reason": current["last_error_code"],
+        "retryable": True,
+        "final_quarantine": False,
+        "identity_resolved": True,
+        "provider_metadata_unique": True,
+        "protected_complete": False,
+    }
+    applied = apply_quarantine_releases(
+        conn, campaign_id=CAMPAIGN_ID, release_rows=[release_row],
+        manifest_digest="c" * 64, release_run_id="release-test",
+    )
+    assert applied["released_count"] == 1
+    conn.close()
+
+    directory, zip_path, provenance_path = downloader._production_target_paths(
+        env["cache"], CAMPAIGN_ID, recheck["manifest_row_id"],
+    )
+    directory.mkdir(parents=True)
+    zip_path.write_bytes(_zip_bytes(
+        ticker=recheck["normalized_company_code"],
+        internal=recheck["requested_disclosure_no"],
+        period=recheck["expected_period"],
+        quarter=recheck["expected_quarter"],
+    ))
+    payload = {
+        "schema_version": "1", "campaign_id": CAMPAIGN_ID,
+        "manifest_row_id": recheck["manifest_row_id"],
+        "requested_disclosure_no": recheck["requested_disclosure_no"],
+        "company_code": recheck["company_code"],
+        "normalized_company_code": recheck["normalized_company_code"],
+        "source_url": recheck["source_url"],
+        "normalized_xbrl_url": recheck["normalized_xbrl_url"],
+        "source_route": "JQUANTS_TD_FILES", "final_url": None,
+        "downloaded_at": "2026-07-23T00:00:00+00:00",
+        "downloaded_at_utc": "2026-07-23T00:00:00+00:00",
+        "downloaded_at_jst": "2026-07-23T09:00:00+09:00",
+        "http_status": 200, "content_type": "application/zip",
+        "content_length": str(zip_path.stat().st_size), "download_attempts": [],
+        "zip_sha256": _sha(zip_path), "zip_size": zip_path.stat().st_size,
+        "internal_document_id": recheck["requested_disclosure_no"],
+        "zip_internal_ticker": recheck["normalized_company_code"],
+        "zip_internal_period": recheck["expected_period"],
+        "zip_internal_quarter": recheck["expected_quarter"],
+        "document_type": "attachment_xbrl",
+        "identity_status": "QUARANTINE_RECHECK_MATCH",
+        "identity_verdict": "official_linked_xbrl_match",
+        "plan_classification": "QUARANTINE_FRESH_RECHECK",
+        "auto_ready_allowed": False, "quarantine_release_required": True,
+        "code_sha": CODE_SHA, "run_id": "failed-first-attempt",
+        "download_tool_version": "1", "error_code": None, "error_message": None,
+    }
+    provenance_path.write_bytes(downloader._json_bytes(payload))
+
+    def forbidden(*_args):
+        raise AssertionError("released artifact must be reused without network")
+
+    result = downloader.run_production_downloads(
+        **_production_kwargs(env, environment, forbidden, runtime)
+    )
+
+    assert result["summary"]["network_calls"] == 0
+    assert result["results"][0]["status"] == "READY"
+    assert result["results"][0]["formal_quarantine_release_evidence_digest"] == evidence
+    conn = connect_db(env["db"])
+    fresh = conn.execute(
+        "SELECT * FROM campaign_fresh_downloads WHERE campaign_id=? AND manifest_row_id=?",
+        (CAMPAIGN_ID, recheck["manifest_row_id"]),
+    ).fetchone()
+    assert fresh["fresh_status"] == "COMPLETE"
+    assert fresh["attempt_count"] == 0
+    assert conn.execute(
+        "SELECT COUNT(*) FROM backfill_quarantine_releases"
+    ).fetchone()[0] == 1
+    conn.close()
 
 
 def test_production_valid_artifacts_enable_database_only_repair(tmp_path):

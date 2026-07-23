@@ -445,30 +445,57 @@ def load_campaign_rows(path: Path, campaign_id: str, plan_rows: list[dict[str, o
     return result
 
 
-def load_formally_released_quarantine_ids(
+def load_formally_released_quarantine_attestations(
     path: Path, campaign_id: str, row_ids: Sequence[str],
-) -> set[str]:
-    """Return rows backed by the append-only formal release ledger."""
+) -> dict[str, dict[str, object]]:
+    """Return verified append-only release records for the requested rows."""
     if not row_ids:
-        return set()
+        return {}
     conn = connect_read_only(path)
     try:
         if not table_exists(conn, "backfill_quarantine_releases"):
-            return set()
+            return {}
         placeholders = ",".join("?" for _ in row_ids)
         rows = conn.execute(
-            "SELECT manifest_row_id,COUNT(*) AS release_count "
-            "FROM backfill_quarantine_releases WHERE campaign_id=? "
-            f"AND manifest_row_id IN ({placeholders}) "
-            "AND from_state='QUARANTINED' AND to_state='FAILED_RETRYABLE' "
-            "GROUP BY manifest_row_id",
+            "SELECT r.*,d.fresh_status,d.auto_ready_allowed AS current_auto_ready_allowed,"
+            "d.quarantine_release_required AS current_quarantine_release_required "
+            "FROM backfill_quarantine_releases r "
+            "JOIN campaign_fresh_downloads d "
+            "ON d.campaign_id=r.campaign_id AND d.manifest_row_id=r.manifest_row_id "
+            "WHERE r.campaign_id=? "
+            f"AND r.manifest_row_id IN ({placeholders}) "
+            "AND r.from_state='QUARANTINED' AND r.to_state='FAILED_RETRYABLE' "
+            "ORDER BY r.manifest_row_id",
             [campaign_id, *row_ids],
         ).fetchall()
-        if any(int(row["release_count"]) != 1 for row in rows):
+        by_id: dict[str, dict[str, object]] = {}
+        for raw in rows:
+            row = dict(raw)
+            row_id = str(row["manifest_row_id"])
+            expected_release_id = hashlib.sha256(
+                f"{campaign_id}|{row_id}|{row['evidence_digest']}".encode("utf-8")
+            ).hexdigest()
+            if (
+                row_id in by_id
+                or row["release_id"] != expected_release_id
+                or row["fresh_status"] != "FAILED_RETRYABLE"
+                or int(row["current_auto_ready_allowed"]) != 1
+                or int(row["current_quarantine_release_required"]) != 0
+            ):
+                raise FreshDownloaderStop(STOP_PRODUCTION_COUNT)
+            by_id[row_id] = row
+        if set(by_id) - set(row_ids):
             raise FreshDownloaderStop(STOP_PRODUCTION_COUNT)
-        return {str(row["manifest_row_id"]) for row in rows}
+        return by_id
     finally:
         conn.close()
+
+
+def load_formally_released_quarantine_ids(
+    path: Path, campaign_id: str, row_ids: Sequence[str],
+) -> set[str]:
+    """Compatibility wrapper returning formally released manifest row IDs."""
+    return set(load_formally_released_quarantine_attestations(path, campaign_id, row_ids))
 
 
 def load_production_rows(
@@ -889,6 +916,20 @@ def load_provenance(zip_path: Path, provenance_path: Path) -> dict[str, object]:
         if verdict not in PRODUCTION_READY_IDENTITY_VERDICTS:
             raise FreshDownloaderStop(STOP_IDENTITY)
     if verdict == WITHOUT_INTERNAL_ID_VERDICT:
+        classification_contract_valid = bool(
+            (
+                payload.get("plan_classification") == "STANDARD_FRESH_DOWNLOAD"
+                and payload.get("identity_status") == "DOWNLOAD_IDENTITY_VERIFIED"
+                and payload.get("auto_ready_allowed") is True
+                and payload.get("quarantine_release_required") is False
+            )
+            or (
+                payload.get("plan_classification") == "QUARANTINE_FRESH_RECHECK"
+                and payload.get("identity_status") == "QUARANTINE_RECHECK_MATCH"
+                and payload.get("auto_ready_allowed") is False
+                and payload.get("quarantine_release_required") is True
+            )
+        )
         if (
             payload.get("internal_document_id") is not None
             or meta["internal_document_id"] != ""
@@ -903,24 +944,59 @@ def load_provenance(zip_path: Path, provenance_path: Path) -> dict[str, object]:
             or payload.get("file_http_status") != 200
             or payload.get("http_status") != 200
             or re.fullmatch(r"\d{14}", str(payload.get("requested_disclosure_no") or "")) is None
-            or payload.get("plan_classification") != "STANDARD_FRESH_DOWNLOAD"
-            or payload.get("auto_ready_allowed") is not True
-            or payload.get("quarantine_release_required") is not False
+            or not classification_contract_valid
             or payload.get("identity_value_sources") != WITHOUT_INTERNAL_ID_VALUE_SOURCES
         ):
             raise FreshDownloaderStop(STOP_IDENTITY)
     return payload
 
 
-def is_production_ready_identity_result(payload: Mapping[str, object]) -> bool:
+def _release_attestation_matches(
+    payload: Mapping[str, object], release: Mapping[str, object] | None,
+) -> bool:
+    if release is None:
+        return False
+    campaign_id = str(payload.get("campaign_id") or "")
+    row_id = str(payload.get("manifest_row_id") or "")
+    evidence_digest = str(release.get("evidence_digest") or "")
+    expected_release_id = hashlib.sha256(
+        f"{campaign_id}|{row_id}|{evidence_digest}".encode("utf-8")
+    ).hexdigest()
+    return bool(
+        campaign_id
+        and row_id
+        and release.get("campaign_id") == campaign_id
+        and release.get("manifest_row_id") == row_id
+        and release.get("from_state") == "QUARANTINED"
+        and release.get("to_state") == "FAILED_RETRYABLE"
+        and release.get("release_id") == expected_release_id
+        and release.get("fresh_status") == "FAILED_RETRYABLE"
+        and int(release.get("current_auto_ready_allowed") or 0) == 1
+        and int(release.get("current_quarantine_release_required") or 0) == 0
+    )
+
+
+def is_production_ready_identity_result(
+    payload: Mapping[str, object],
+    release_attestation: Mapping[str, object] | None = None,
+) -> bool:
     """Return whether formally loaded provenance is eligible for production READY."""
-    base_ready = bool(
+    standard_ready = bool(
         payload.get("identity_verdict") in PRODUCTION_READY_IDENTITY_VERDICTS
         and payload.get("identity_status") == "DOWNLOAD_IDENTITY_VERIFIED"
         and payload.get("plan_classification") == "STANDARD_FRESH_DOWNLOAD"
         and payload.get("auto_ready_allowed") is True
         and payload.get("quarantine_release_required") is False
     )
+    released_recheck_ready = bool(
+        payload.get("identity_verdict") in PRODUCTION_READY_IDENTITY_VERDICTS
+        and payload.get("identity_status") == "QUARANTINE_RECHECK_MATCH"
+        and payload.get("plan_classification") == "QUARANTINE_FRESH_RECHECK"
+        and payload.get("auto_ready_allowed") is False
+        and payload.get("quarantine_release_required") is True
+        and _release_attestation_matches(payload, release_attestation)
+    )
+    base_ready = standard_ready or released_recheck_ready
     if not base_ready:
         return False
     if payload.get("identity_verdict") != WITHOUT_INTERNAL_ID_VERDICT:
@@ -1793,9 +1869,10 @@ def run_production_downloads(
         str(row["manifest_row_id"]) for row in before_rows
         if row.get("plan_classification") == "QUARANTINE_FRESH_RECHECK"
     }
-    released_recheck_ids = load_formally_released_quarantine_ids(
+    release_attestations = load_formally_released_quarantine_attestations(
         campaign_db, campaign_id, sorted(recheck_ids)
     )
+    released_recheck_ids = set(release_attestations)
     if len(set(target_ids)) != expected_count:
         raise FreshDownloaderStop(STOP_PRODUCTION_COUNT)
     if any(
@@ -1881,6 +1958,7 @@ def run_production_downloads(
                 if index and min_interval_seconds:
                     sleep(min_interval_seconds)
                 row_id = str(row["manifest_row_id"])
+                release_attestation = release_attestations.get(row_id)
                 row_journal = journal["rows"][row_id]
                 _directory, zip_path, provenance_path = _production_target_paths(cache_root, campaign_id, row_id)
                 if (
@@ -1904,7 +1982,9 @@ def run_production_downloads(
                     if (
                         payload.get("manifest_row_id") != row_id
                         or payload.get("requested_disclosure_no") != row["requested_disclosure_no"]
-                        or not is_production_ready_identity_result(payload)
+                        or not is_production_ready_identity_result(
+                            payload, release_attestation
+                        )
                     ):
                         raise FreshDownloaderStop(STOP_PRODUCTION_ARTIFACT)
                     if row.get("fresh_status") == "COMPLETE" and any((
@@ -2017,10 +2097,28 @@ def run_production_downloads(
                         result = _result_from_verified_provenance(payload, zip_path, provenance_path, "DB_ONLY_REPAIR")
                 payload = _load_production_provenance(zip_path, provenance_path)
                 if (
-                    not is_production_ready_identity_result(payload)
+                    not is_production_ready_identity_result(
+                        payload, release_attestation
+                    )
                     or result.get("zip_sha256") != payload.get("zip_sha256")
                 ):
                     raise FreshDownloaderStop(STOP_PRODUCTION_ARTIFACT)
+                if release_attestation is not None:
+                    counters = {
+                        key: result.get(key, 0)
+                        for key in (
+                            "attempt_count", "network_calls", "td_files_requests",
+                            "signed_url_download_requests", "static_url_requests",
+                        )
+                    }
+                    result = _result_from_verified_provenance(
+                        payload, zip_path, provenance_path, "READY",
+                    )
+                    result.update(counters)
+                    result["formal_quarantine_release_id"] = release_attestation["release_id"]
+                    result["formal_quarantine_release_evidence_digest"] = (
+                        release_attestation["evidence_digest"]
+                    )
                 results.append(result)
                 network_attempts = int(result.get("attempt_count", 0) or 0)
                 row_journal.update({
