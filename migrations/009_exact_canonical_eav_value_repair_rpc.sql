@@ -123,8 +123,6 @@ BEGIN
         v_locked := v_locked + 1;
         IF v_row.id IS DISTINCT FROM
                 (v_item->>'canonical_segments_id')::bigint
-           OR v_row.segment_id IS DISTINCT FROM
-                (v_item->>'segment_id')::bigint
            OR v_row.metric IS DISTINCT FROM v_item->>'metric'
            OR v_row.value IS DISTINCT FROM (v_item->>'old_value')::bigint
            OR v_row.unit IS DISTINCT FROM v_item->>'unit'
@@ -153,8 +151,6 @@ BEGIN
         WHERE cs.source_row_key = v_item->>'source_row_key'
           AND cs.id IS NOT DISTINCT FROM
                 (v_item->>'canonical_segments_id')::bigint
-          AND cs.segment_id IS NOT DISTINCT FROM
-                (v_item->>'segment_id')::bigint
           AND cs.metric IS NOT DISTINCT FROM v_item->>'metric'
           AND cs.value IS NOT DISTINCT FROM (v_item->>'old_value')::bigint
           AND cs.unit IS NOT DISTINCT FROM v_item->>'unit'
@@ -181,8 +177,6 @@ BEGIN
         IF NOT FOUND
            OR v_row.id IS DISTINCT FROM
                 (v_item->>'canonical_segments_id')::bigint
-           OR v_row.segment_id IS DISTINCT FROM
-                (v_item->>'segment_id')::bigint
            OR v_row.metric IS DISTINCT FROM v_item->>'metric'
            OR v_row.value IS DISTINCT FROM (v_item->>'new_value')::bigint
            OR v_row.unit IS DISTINCT FROM v_item->>'unit'
@@ -202,7 +196,7 @@ BEGIN
         v_result_rows := v_result_rows || jsonb_build_array(
             jsonb_build_object(
                 'canonical_segments_id', v_row.id,
-                'segment_id', v_row.segment_id,
+                'segment_id', (v_item->>'segment_id')::bigint,
                 'source_row_key', v_row.source_row_key,
                 'metric', v_row.metric,
                 'before_value', (v_item->>'old_value')::bigint,

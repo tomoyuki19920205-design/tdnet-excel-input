@@ -173,3 +173,9 @@ def test_23_result_contains_before_after_and_identity():
 def test_24_fixed_canary_segment_ids_are_not_hardcoded():
     for segment_id in ("221631", "221632", "221808"):
         assert segment_id not in SQL
+
+
+def test_25_local_segment_id_is_audit_correlation_not_remote_column():
+    assert "v_row.segment_id" not in SQL
+    assert "cs.segment_id" not in SQL
+    assert "'segment_id', (v_item->>'segment_id')::bigint" in SQL
