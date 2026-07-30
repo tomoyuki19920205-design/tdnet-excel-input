@@ -22,6 +22,7 @@ from typing import Any, Optional
 from .common_models import EventRecord, EventType
 from .notify_rules import should_notify_event
 from lib.pipeline.retry_helper import with_retry
+from src.tdnet_disclosure_time import is_date_only, resolve_official_disclosure_datetime
 
 logger = logging.getLogger("tdnet_event_store")
 
@@ -363,6 +364,11 @@ def _sanitize_disclosed_at(dt_str: str | None) -> str | None:
     if not dt_str:
         return None
     s = dt_str.strip()
+    # A calendar date is not a disclosure timestamp.  Storing it in a
+    # timestamptz column silently becomes UTC midnight (= 09:00 JST), which
+    # must never be presented as an official TDNET publication time.
+    if is_date_only(s):
+        return None
     if len(s) <= 5:
         return None
 
@@ -847,6 +853,26 @@ def save_event_to_supabase(
         {"action": "inserted"|"dedup_skipped"|"error"|"dry_run", ...}
     """
     result = {"action": "error", "dedupe_key": ""}
+
+    # Some canonical/backfill inputs preserve only a calendar date.  Do not
+    # let PostgreSQL coerce that value to UTC midnight (which the card renders
+    # as 09:00 JST).  Resolve the original TDNET listing time before any
+    # dedupe, notification, or persistence work; unresolved records are held
+    # for retry rather than shown with a fabricated time.
+    if is_date_only(event.disclosure_datetime):
+        official_time = resolve_official_disclosure_datetime(
+            event.disclosure_datetime,
+            event.doc_url,
+        )
+        if not official_time:
+            result["error"] = "official_tdnet_disclosure_time_not_found"
+            logger.error(
+                "[STORE] Refusing date-only disclosure timestamp "
+                "ticker=%s date=%s source_url=%s",
+                event.ticker, event.disclosure_datetime, event.doc_url,
+            )
+            return result
+        event.disclosure_datetime = official_time
 
     try:
         client = _get_supabase()
