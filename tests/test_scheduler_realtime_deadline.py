@@ -281,3 +281,15 @@ class TestIngestTimeoutBehavior:
         abort_logs = [m for m in warn_msgs if "REALTIME_ABORT_AFTER_INGEST_FAILURE" in m
                       or "REALTIME_STEP_SKIPPED_DEADLINE" in m]
         assert abort_logs, f"ingest timeout+deadline不足時の警告が出なかった: {warn_msgs}"
+
+
+class TestChildExitPropagation:
+    def test_nonzero_child_exit_fails_scheduler_after_downstream_steps(self):
+        """ingest が非ゼロでも後段を実行し、scheduler は非ゼロで終える。"""
+        rc = _run_main_mocked([
+            _make_step("ingest", "warning", rc=1),
+            _make_step("process-realtime", "success"),
+            _make_step("notify", "success"),
+        ])
+
+        assert rc == 1

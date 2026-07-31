@@ -76,6 +76,7 @@ _XBRL_TAG_MAP = {
     "OperatingRevenuesREIT": "sales",        # REIT/投資法人の営業収益
     "OperatingRevenueINV": "sales",          # 投資法人の営業収益
     "SalesIFRS": "sales",
+    "NetSalesIFRS": "sales",
     "RevenueFromContractsWithCustomers": "sales",
     "RevenueIFRS": "sales",
     "NetOperatingRevenueSEC": "sales",
@@ -91,6 +92,7 @@ _XBRL_TAG_MAP = {
     "OperatingIncome": "operating_profit",
     "OperatingProfit": "operating_profit",
     "OperatingIncomeIFRS": "operating_profit",
+    "OperatingProfitLossIFRS": "operating_profit",
     "OrdinaryIncome": "operating_profit",    # 経常利益（営業利益なし時のFB）
 }
 

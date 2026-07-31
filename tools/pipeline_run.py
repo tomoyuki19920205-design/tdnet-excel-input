@@ -70,8 +70,27 @@ def _run_ingest(dry_run: bool, yanoshin_timeout_sec: float | None = None) -> Ste
     try:
         from tools.filings_ingest import run as ingest_run
         result = ingest_run(dry_run=dry_run, yanoshin_timeout_sec=yanoshin_timeout_sec)
-        step.detail = result
-        step.status = "success"
+        # run_ingest は個別開示の失敗を例外にせず、summary.errors で返す。
+        # これを無視すると scheduler まで exit 0 となり、実データの欠損を
+        # 正常実行として監視してしまう。
+        summary = result.get("summary") or {}
+        errors = int(summary.get("errors", 0) or 0)
+        normalized = dict(result)
+        normalized.setdefault("success", summary.get("success", summary.get("succeeded", 0)))
+        normalized.setdefault("failed", errors)
+        normalized.setdefault("skipped", summary.get("skipped", 0))
+        normalized.setdefault("quarantined", summary.get("quarantined", errors))
+        step.detail = normalized
+        step.status = "success" if errors == 0 else "failed"
+        if errors:
+            logger.error(
+                "[PIPELINE] ingest completed with item failures: "
+                "total=%s success=%s errors=%s skipped=%s",
+                result.get("total", 0),
+                normalized["success"],
+                errors,
+                normalized["skipped"],
+            )
     except Exception as e:
         step.status = "failed"
         step.detail = {"error": str(e)}

@@ -338,7 +338,11 @@ def main() -> int:
         )
 
         # 失敗判定
-        failed = [s for s in steps if s.status in ("error", "timeout")]
+        # run_step maps a non-zero child exit code to ``warning`` so that
+        # downstream queue processing can still run.  The scheduler itself
+        # must nevertheless fail: otherwise Task Scheduler records success
+        # for an ingest/process failure and monitoring cannot detect it.
+        failed = [s for s in steps if s.rc != 0 or s.status in ("error", "timeout")]
         return 1 if failed else 0
 
     finally:

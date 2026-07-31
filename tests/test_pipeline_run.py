@@ -238,6 +238,18 @@ class TestPipelineRunAllSuccess:
 # ============================================================
 
 class TestPipelineRunFailures:
+    def test_ingest_item_errors_fail_the_pipeline(self):
+        result, *_ = _run_pipeline_mocked(
+            ingest_return={
+                "total": 3,
+                "results": [],
+                "summary": {"success": 2, "errors": 1, "skipped": 0},
+            },
+        )
+        assert result["overall"] == "failed"
+        assert result["steps"]["ingest"] == "failed"
+        assert "process" not in result["steps"]
+
     def test_ingest_failure_exits_early(self):
         result, *_ = _run_pipeline_mocked(
             ingest_error=RuntimeError("API down"),
