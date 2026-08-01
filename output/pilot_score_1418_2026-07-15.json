@@ -1,0 +1,88 @@
+{
+  "code": "1418",
+  "company_name": "インターライフホールディングス株式会社",
+  "analysis_as_of_jst": "2026-07-15T15:20:00+09:00",
+  "input_snapshot": "output/pilot_snapshot_1418_2026-07-15_1520_v2.json",
+  "scope": "Provisional scoring only. No holding decision or outcome comparison.",
+  "scores": {
+    "A": {
+      "name": "業績サプライズ期待",
+      "score": 33,
+      "maximum": 100,
+      "breakdown": [
+        {"criterion":"対象Qに直接効く先行指標","score":4,"maximum":30,"rationale":"受注高・受注残・月次KPIが非開示または未取得。直接情報の欠損を悪材料とは扱わず、加点できる確認済み先行指標が乏しいことのみを反映。"},
+        {"criterion":"会社予想と過去の予想修正傾向","score":12,"maximum":20,"rationale":"FY2027は増収・営業増益計画。過去の上方修正3件は確認できるが、2QまたはFY時点であり対象1Qへの関連はindirect/background。"},
+        {"criterion":"セグメント、受注、利益率の根拠","score":9,"maximum":20,"rationale":"音響・照明の大型案件・保守受注増、内装の利益率改善は確認済み。ただしFY実績であり対象1Qの受注額・完工時期は不明。"},
+        {"criterion":"前年同期の比較ハードル、季節性","score":2,"maximum":15,"rationale":"前年1Qは増収16.9%、営業増益38.1%、計算営業利益率10.69%で比較ハードルが高い。定量的季節性は非開示。"},
+        {"criterion":"コスト、業界、マクロ","score":6,"maximum":15,"rationale":"設備投資需要の堅調さは支え。一方、資材調達、人員不足、時間外労働規制は工事原価・執行能力の制約。"}
+      ]
+    },
+    "B": {
+      "name": "還元・資本政策期待",
+      "score": 57,
+      "maximum": 100,
+      "breakdown": [
+        {"criterion":"配当と還元方針","score":18,"maximum":25,"rationale":"FY2027配当予想30円、安定配当方針、予想配当利回り5.70%。DOE・累進配当・下限配当は未確認。"},
+        {"criterion":"自己株買い実績","score":12,"maximum":20,"rationale":"FY2026の自己株式取得支出199百万円を確認。新規の取得決定は入力事実にない。"},
+        {"criterion":"財務余力","score":15,"maximum":20,"rationale":"現金2,598百万円、開示借入金との差額による計算ネットキャッシュ約1,143百万円。"},
+        {"criterion":"増配、自社株買いの追加余地","score":6,"maximum":20,"rationale":"予想配当性向57.2%は追加増配余地を制約し得る。追加施策は未確認であり、未確認自体を減点材料にはしていない。"},
+        {"criterion":"所有構造、資本政策材料","score":6,"maximum":15,"rationale":"最大株主の保有比率31.280%と既存株主による売出しは確認。新株発行ではなく、対象1Qの直接材料ではない。"}
+      ]
+    },
+    "M": {
+      "name": "未織り込み度",
+      "score": 40,
+      "maximum": 100,
+      "breakdown": [
+        {"criterion":"PER、PBR、配当利回り","score":21,"maximum":30,"rationale":"7月14日終値ベースでPER10.03倍、PBR1.72倍、予想配当利回り5.70%。評価水準の記述に留め、割安の結論には使わない。"},
+        {"criterion":"前回決算後からの株価位置","score":8,"maximum":25,"rationale":"前回決算発表日前終値比+8.23%、翌日終値比-7.07%。方向が混在し、未織り込みの強い根拠にはならない。"},
+        {"criterion":"会社予想と市場期待の差","score":7,"maximum":25,"rationale":"通期の小幅増収増益計画は確認できるが、市場コンセンサス・期待値は入力にない。"},
+        {"criterion":"流動性、同業比較、過去レンジ","score":4,"maximum":20,"rationale":"20営業日売買代金中央値、完全な同業比較は未取得。未取得を低未織り込みの根拠にはせず、確認可能な材料が限定的なことのみを反映。"}
+      ]
+    },
+    "D": {
+      "name": "下振れリスク（高いほど危険）",
+      "score": 49,
+      "maximum": 100,
+      "breakdown": [
+        {"criterion":"前年同期の比較ハードル","score":15,"maximum":20,"rationale":"前年1Qの売上+16.9%、営業利益+38.1%、計算営業利益率10.69%は直接的な前年比較ハードル。"},
+        {"criterion":"原材料、人件費、施工能力","score":13,"maximum":20,"rationale":"原材料調達、人員不足、時間外労働上限規制を会社がリスクとして明記。"},
+        {"criterion":"案件計上時期、受注の不透明さ","score":6,"maximum":20,"rationale":"大型案件の完工時期が業績要因であることは確認。ただし受注・受注残の未開示をリスク点として断定加算していない。"},
+        {"criterion":"先行費用、構造変化","score":8,"maximum":15,"rationale":"採用・M&A等の先行費用の金額・時期は非開示。ポートフォリオ再編により比較可能性に構造変化。"},
+        {"criterion":"株価需給、流動性、その他","score":7,"maximum":25,"rationale":"既存株主売出しは需給文脈として確認。流動性中央値未取得はリスク点を追加しない。"}
+      ]
+    },
+    "C": {
+      "name": "確認信頼度",
+      "score": 61,
+      "maximum": 100,
+      "breakdown": [
+        {"criterion":"一次資料による確認率","score":22,"maximum":35,"rationale":"通期・前年1Q・業績修正・資本政策・リスクの主要根拠はTDnet/有価証券報告書。価格・一部所有構造は外部補完または計算値。"},
+        {"criterion":"対象1Qに直接関連する情報の充足率","score":11,"maximum":30,"rationale":"前年1Q比較ハードルとリスクは直接関連。一方、受注残、月次KPI、先行費用、季節性の定量値が未確認・非開示。"},
+        {"criterion":"情報の新しさ","score":10,"maximum":15,"rationale":"価格基準日は1日前、主要会社資料は51日または92日前。前年1Q比較は365日前。"},
+        {"criterion":"数値整合性、根拠追跡性","score":18,"maximum":20,"rationale":"すべてのconfirmed事実に資料URLがあり、計算値はcalculated/estimatedとして区別。未確認値はnullと検索範囲を保存。"}
+      ]
+    }
+  },
+  "classification": {
+    "closest_type": "B型",
+    "rationale": "Bが57でAの33を上回る。ただし還元・資本政策の追加施策は確認されておらず、判定ではない。",
+    "holding_decision": "保留"
+  },
+  "anti_double_counting": {
+    "status": "pass",
+    "rules_applied": [
+      "前年1Qの高い比較ハードルはDで主に評価し、Aでは期待加点に転用しない。",
+      "配当利回りはBのdividend_supportで主に評価し、Mでは評価水準として限定加点に留める。",
+      "自己株取得とネットキャッシュはBの別小項目に一度ずつ配分し、A/Mへ重複加点しない。",
+      "過去の上方修正はAの会社予想・修正傾向にのみ配分し、B/Mへ重複加点しない。",
+      "未確認・非開示項目はDの悪材料にせず、主にCの情報充足度に反映する。"
+    ]
+  },
+  "data_integrity": {
+    "prohibited_sources_not_used": true,
+    "source_scope": "Only the specified v2 snapshot was read.",
+    "outcome_comparison_performed": false,
+    "post_cutoff_data_used": false
+  }
+}

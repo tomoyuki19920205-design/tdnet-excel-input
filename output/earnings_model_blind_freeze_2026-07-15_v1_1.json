@@ -1,0 +1,232 @@
+{
+  "freeze_schema_version": "1.1",
+  "freeze_purpose": "pre-label blind-model integrity seal",
+  "analysis_as_of_jst": "2026-07-15T15:20:00+09:00",
+  "freeze_created_at_jst": "2026-08-01T21:11:53+09:00",
+  "git_head_before_commit": "517f79a5ccee4b90063110e7bc83adba5920a233",
+  "data_source": {
+    "database": "data/jquants.db",
+    "table": "jquants_financials_normalized",
+    "disclosed_date_condition": "disclosed_date < '2026-07-15'",
+    "cutoff_rationale": "J-Quants disclosed_date has no time, so all 2026-07-15 disclosures are excluded."
+  },
+  "target_codes": [
+    "1418",
+    "205A",
+    "3547",
+    "3558",
+    "3697",
+    "2164",
+    "2168",
+    "2449",
+    "4197",
+    "9238",
+    "198A",
+    "2337",
+    "244A",
+    "2484",
+    "280A"
+  ],
+  "score_source_priority": [
+    "1. Explicitly declared latest individual score (1418 and 2337).",
+    "2. Integrated 15-company score fallback when no explicit individual score is declared.",
+    "3. missing when neither source exists (not used in this freeze)."
+  ],
+  "overlay_rule_summary": [
+    "high timing risk plus target-quarter visibility none: zero / blocked.",
+    "unknown timing risk, or insufficient information outside a known medium/none route: unknown / insufficient.",
+    "highly_lumpy or structural_change operating-profit pattern: reduced / conditional.",
+    "medium timing risk plus visibility none: reduced / conditional.",
+    "low timing risk plus stable/seasonal sales and stable/structural_trend profit: full / usable.",
+    "all remaining combinations: reduced / conditional."
+  ],
+  "blindness_assertions": {
+    "outcome_labels_not_referenced": true,
+    "post_earnings_information_not_referenced": true,
+    "market_reaction_not_referenced": true,
+    "label_comparison_performed": false
+  },
+  "reproduction_check": {
+    "command": "python tools/build_earnings_route_overlay_15_v1_1.py",
+    "outputs": {
+      "output/earnings_route_overlay_15_asof_v1_1.csv": {
+        "before_sha256": "48c5f578c68a11005c1d1819097da8edb2352431fdc88861f61800fcc6051025",
+        "after_sha256": "48c5f578c68a11005c1d1819097da8edb2352431fdc88861f61800fcc6051025",
+        "matches": true
+      },
+      "output/earnings_route_overlay_15_asof_v1_1.md": {
+        "before_sha256": "92c04d9ae9db623ba0464aab944b40cc6fbafe594885439ca08961669d4a88db",
+        "after_sha256": "92c04d9ae9db623ba0464aab944b40cc6fbafe594885439ca08961669d4a88db",
+        "matches": true
+      },
+      "output/earnings_route_score_manifest_15_asof_v1_1.csv": {
+        "before_sha256": "931c1c262cdefdd858ab6a7359148f87466631af1f53a37fe6da90eab2610e4c",
+        "after_sha256": "931c1c262cdefdd858ab6a7359148f87466631af1f53a37fe6da90eab2610e4c",
+        "matches": true
+      }
+    },
+    "all_match": true
+  },
+  "files": [
+    {
+      "relative_path": "tools/build_quarterly_predictability_15_jquants_v2.py",
+      "role": "model_code_quarterly_observation_and_single_quarter_conversion",
+      "sha256": "0a6f1c60e401278a74c1bce42b832acb3f15038177a9d2c3e22f8c1db3125cbe",
+      "file_size": 18723,
+      "git_tracked": true,
+      "git_status": "AM tools/build_quarterly_predictability_15_jquants_v2.py",
+      "generated_by": "manual_model_freeze",
+      "input_or_output": "code"
+    },
+    {
+      "relative_path": "tools/audit_quarterly_predictability_v3.py",
+      "role": "model_code_predictability_threshold_audit",
+      "sha256": "806a0724ddab5e3ac9e035c0f5b644237709c5458e0059cbff458ccab7623db8",
+      "file_size": 10289,
+      "git_tracked": true,
+      "git_status": "A  tools/audit_quarterly_predictability_v3.py",
+      "generated_by": "manual_model_freeze",
+      "input_or_output": "code"
+    },
+    {
+      "relative_path": "tools/classify_quarterly_timing_risk_15.py",
+      "role": "model_code_revenue_timing_risk_classification",
+      "sha256": "640bc66a6403067e673118a2e1a18e08535b1a40503d3b3b663198c569900689",
+      "file_size": 11214,
+      "git_tracked": true,
+      "git_status": "A  tools/classify_quarterly_timing_risk_15.py",
+      "generated_by": "manual_model_freeze",
+      "input_or_output": "code"
+    },
+    {
+      "relative_path": "tools/build_earnings_route_overlay_15_v1_1.py",
+      "role": "model_code_A_route_overlay",
+      "sha256": "36778a233b17f4aadd077f301914f675dd5802ddac9c6094380123e5e46ec5be",
+      "file_size": 11566,
+      "git_tracked": true,
+      "git_status": "A  tools/build_earnings_route_overlay_15_v1_1.py",
+      "generated_by": "manual_model_freeze",
+      "input_or_output": "code"
+    },
+    {
+      "relative_path": "output/quarterly_history_15_jquants_asof_v2.csv",
+      "role": "input_single_quarter_history_for_v3",
+      "sha256": "931bcac10965ddf89b69484179bc4299dbde0de4b64736d641ab0b5b60439d22",
+      "file_size": 114224,
+      "git_tracked": true,
+      "git_status": "A  output/quarterly_history_15_jquants_asof_v2.csv",
+      "generated_by": "preexisting_blind_model_input",
+      "input_or_output": "input"
+    },
+    {
+      "relative_path": "output/quarterly_predictability_15_jquants_asof_v2.csv",
+      "role": "input_v2_classification_for_v3_change_audit",
+      "sha256": "127b85739a693be7667de5c9589492bce908db703cd36bd0f9cde19b6e0e74d4",
+      "file_size": 16417,
+      "git_tracked": true,
+      "git_status": "A  output/quarterly_predictability_15_jquants_asof_v2.csv",
+      "generated_by": "preexisting_blind_model_input",
+      "input_or_output": "input"
+    },
+    {
+      "relative_path": "output/pilot_score_1418_2026-07-15.json",
+      "role": "input_explicit_latest_individual_score_1418",
+      "sha256": "9c2e579071e6b81fd79e765e859117c86d5c310e6c2ec857a6546b63b5448afa",
+      "file_size": 7566,
+      "git_tracked": true,
+      "git_status": "A  output/pilot_score_1418_2026-07-15.json",
+      "generated_by": "preexisting_blind_model_input",
+      "input_or_output": "input"
+    },
+    {
+      "relative_path": "output/pilot_score_2337_2026-07-15.json",
+      "role": "input_explicit_latest_individual_score_2337",
+      "sha256": "24493feb0eea2429e237d0c05657bb79dcbde9d618e8d13ee291cd0ac9f158ec",
+      "file_size": 8851,
+      "git_tracked": true,
+      "git_status": "A  output/pilot_score_2337_2026-07-15.json",
+      "generated_by": "preexisting_blind_model_input",
+      "input_or_output": "input"
+    },
+    {
+      "relative_path": "output/pilot_scores_15_2026-07-15.csv",
+      "role": "input_integrated_15_score_fallback",
+      "sha256": "74e244aaccd4c1513f2b4f27e2cc0d014ca1478345007133e97727412f8703f6",
+      "file_size": 6467,
+      "git_tracked": true,
+      "git_status": "A  output/pilot_scores_15_2026-07-15.csv",
+      "generated_by": "preexisting_blind_model_input",
+      "input_or_output": "input"
+    },
+    {
+      "relative_path": "output/quarterly_predictability_15_jquants_asof_v3.csv",
+      "role": "output_predictability_v3",
+      "sha256": "94ed11625ad5ff169b43c8d38aaf95f40a143d2e7dc98ae7009e4ba7dad6cb4d",
+      "file_size": 20166,
+      "git_tracked": true,
+      "git_status": "A  output/quarterly_predictability_15_jquants_asof_v3.csv",
+      "generated_by": "blind_model_pipeline",
+      "input_or_output": "output"
+    },
+    {
+      "relative_path": "output/quarterly_predictability_15_jquants_asof_v3.md",
+      "role": "output_predictability_v3_report",
+      "sha256": "68f9679fa1eb8e70b3100a939124707b2e519a860b9ca4142edd4932057244c9",
+      "file_size": 10908,
+      "git_tracked": true,
+      "git_status": "A  output/quarterly_predictability_15_jquants_asof_v3.md",
+      "generated_by": "blind_model_pipeline",
+      "input_or_output": "output"
+    },
+    {
+      "relative_path": "output/quarterly_timing_risk_15_asof_v1.csv",
+      "role": "output_timing_risk_v1",
+      "sha256": "c91f50db215c9d376c0c38ea5886e59c8ed7bf60bc016cf286aa3cc66bfcddfe",
+      "file_size": 6825,
+      "git_tracked": true,
+      "git_status": "A  output/quarterly_timing_risk_15_asof_v1.csv",
+      "generated_by": "blind_model_pipeline",
+      "input_or_output": "output"
+    },
+    {
+      "relative_path": "output/quarterly_timing_risk_15_asof_v1.md",
+      "role": "output_timing_risk_v1_report",
+      "sha256": "1280de9e83ee201f677eff141fceb402981aa52699b5058050224561c3d58706",
+      "file_size": 5152,
+      "git_tracked": true,
+      "git_status": "A  output/quarterly_timing_risk_15_asof_v1.md",
+      "generated_by": "blind_model_pipeline",
+      "input_or_output": "output"
+    },
+    {
+      "relative_path": "output/earnings_route_overlay_15_asof_v1_1.csv",
+      "role": "output_A_route_overlay_v1_1",
+      "sha256": "48c5f578c68a11005c1d1819097da8edb2352431fdc88861f61800fcc6051025",
+      "file_size": 7294,
+      "git_tracked": true,
+      "git_status": "A  output/earnings_route_overlay_15_asof_v1_1.csv",
+      "generated_by": "blind_model_pipeline",
+      "input_or_output": "output"
+    },
+    {
+      "relative_path": "output/earnings_route_overlay_15_asof_v1_1.md",
+      "role": "output_A_route_overlay_v1_1_report",
+      "sha256": "92c04d9ae9db623ba0464aab944b40cc6fbafe594885439ca08961669d4a88db",
+      "file_size": 2439,
+      "git_tracked": true,
+      "git_status": "A  output/earnings_route_overlay_15_asof_v1_1.md",
+      "generated_by": "blind_model_pipeline",
+      "input_or_output": "output"
+    },
+    {
+      "relative_path": "output/earnings_route_score_manifest_15_asof_v1_1.csv",
+      "role": "output_score_source_manifest_v1_1",
+      "sha256": "931c1c262cdefdd858ab6a7359148f87466631af1f53a37fe6da90eab2610e4c",
+      "file_size": 4345,
+      "git_tracked": true,
+      "git_status": "A  output/earnings_route_score_manifest_15_asof_v1_1.csv",
+      "generated_by": "blind_model_pipeline",
+      "input_or_output": "output"
+    }
+  ]
+}

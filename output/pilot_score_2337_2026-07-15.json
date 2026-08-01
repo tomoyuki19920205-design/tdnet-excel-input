@@ -1,0 +1,203 @@
+{
+  "code": "2337",
+  "company_name": "いちご株式会社",
+  "analysis_as_of_jst": "2026-07-15T15:20:00+09:00",
+  "input_snapshot": "output/pilot_snapshot_2337_2026-07-15_1520_v2.json",
+  "scope": "Provisional scoring only. No holding decision or outcome comparison.",
+  "scores": {
+    "A": {
+      "name": "業績サプライズ期待",
+      "score": 47,
+      "maximum": 100,
+      "breakdown": [
+        {
+          "criterion": "対象Qに直接効く先行指標",
+          "score": 8,
+          "maximum": 30,
+          "rationale": "4月予定の新規ホテル稼働と、関連インフラ投資法人の3-5月発電実績を確認。ただし連結対象1Qへの寄与額・受注残は不明で、後者は間接指標。"
+        },
+        {
+          "criterion": "会社予想と過去の予想修正傾向",
+          "score": 14,
+          "maximum": 20,
+          "rationale": "FY2027純利益180億円、EPS45.13円の増益計画を確認。四半期別計画と直近2年の修正履歴は網羅確認できず、通期根拠に限定。"
+        },
+        {
+          "criterion": "セグメント、受注、利益率の根拠",
+          "score": 15,
+          "maximum": 20,
+          "rationale": "ストック収益+6%、フロー収益+14%、各セグメント実績、取得パイプラインを確認。対象1Qの資産売却・引渡しは非開示。"
+        },
+        {
+          "criterion": "前年同期の比較ハードル、季節性",
+          "score": 3,
+          "maximum": 15,
+          "rationale": "前年1Qの営業利益34.68億円・計算営業利益率27.77%が高い比較基準。資産売却の四半期季節性は定量非開示。"
+        },
+        {
+          "criterion": "コスト、業界、マクロ",
+          "score": 7,
+          "maximum": 15,
+          "rationale": "賃料・インバウンド・資産価値向上は支え。一方、金利動向と支払利息増は利益への制約。"
+        }
+      ]
+    },
+    "B": {
+      "name": "還元・資本政策期待",
+      "score": 75,
+      "maximum": 100,
+      "breakdown": [
+        {
+          "criterion": "配当と還元方針",
+          "score": 24,
+          "maximum": 25,
+          "rationale": "DOE目標を5%以上へ引上げ、FY2027配当15.5円・DOE5.1%を会社が提示。"
+        },
+        {
+          "criterion": "自己株買い実績",
+          "score": 18,
+          "maximum": 20,
+          "rationale": "FY2026に100億円の取得決議、取得支出98.36億円、発行済み株式数の7%消却を確認。"
+        },
+        {
+          "criterion": "財務余力",
+          "score": 13,
+          "maximum": 20,
+          "rationale": "現金420.19億円、純資産1,167.54億円。ただし自己資本比率26.6%、有利子負債/EBITDA11.8倍で、レバレッジも併記。"
+        },
+        {
+          "criterion": "増配、自社株買いの追加余地",
+          "score": 13,
+          "maximum": 20,
+          "rationale": "DOE目標引上げは還元強化。ただし予想DOE5.1%は新目標を既に上回り、追加施策の規模は未開示。"
+        },
+        {
+          "criterion": "所有構造、資本政策材料",
+          "score": 7,
+          "maximum": 15,
+          "rationale": "最大株主55.99%を確認。アクティビスト等は未確認で、未確認自体を減点していない。"
+        }
+      ]
+    },
+    "M": {
+      "name": "未織り込み度",
+      "score": 43,
+      "maximum": 100,
+      "breakdown": [
+        {
+          "criterion": "PER、PBR、配当利回り",
+          "score": 22,
+          "maximum": 30,
+          "rationale": "7月14日終値441円で予想PER9.77倍、PBR1.53倍、予想配当利回り3.51%。評価記述にとどめる。"
+        },
+        {
+          "criterion": "前回決算後からの株価位置",
+          "score": 4,
+          "maximum": 25,
+          "rationale": "前回決算近傍からの一貫した株価位置を取得できず、推定しない。"
+        },
+        {
+          "criterion": "会社予想と市場期待の差",
+          "score": 10,
+          "maximum": 25,
+          "rationale": "会社の純利益・EPS増益計画は確認できるが、市場コンセンサスを使用していない。"
+        },
+        {
+          "criterion": "流動性、同業比較、過去レンジ",
+          "score": 7,
+          "maximum": 20,
+          "rationale": "7月14日の価格・出来高のみ確認。20日売買代金中央値、同業比較、過去レンジは未算出。"
+        }
+      ]
+    },
+    "D": {
+      "name": "下振れリスク（高いほど危険）",
+      "score": 53,
+      "maximum": 100,
+      "breakdown": [
+        {
+          "criterion": "前年同期の比較ハードル",
+          "score": 15,
+          "maximum": 20,
+          "rationale": "前年1Qの営業利益34.68億円、計算営業利益率27.77%は直接の比較ハードル。"
+        },
+        {
+          "criterion": "原材料、人件費、施工能力",
+          "score": 9,
+          "maximum": 20,
+          "rationale": "人件費・施工能力の直接数値は未確認。借入増に伴う支払利息増と金利リスクを確認。"
+        },
+        {
+          "criterion": "案件計上時期、受注の不透明さ",
+          "score": 14,
+          "maximum": 20,
+          "rationale": "心築・オーナーズの資産売却・引渡し時期がフロー収益を左右。対象1Qの契約・引渡し額は非開示で、未開示自体は追加リスク点に転用していない。"
+        },
+        {
+          "criterion": "先行費用、構造変化",
+          "score": 9,
+          "maximum": 15,
+          "rationale": "不動産取得795億円とホテル・レジデンス取得は将来収益の源泉である一方、資金・計上時期の負荷を伴う。"
+        },
+        {
+          "criterion": "株価需給、流動性、その他",
+          "score": 6,
+          "maximum": 25,
+          "rationale": "最大株主の集中保有は需給文脈。流動性中央値未取得を危険点へ転用していない。"
+        }
+      ]
+    },
+    "C": {
+      "name": "確認信頼度",
+      "score": 77,
+      "maximum": 100,
+      "breakdown": [
+        {
+          "criterion": "一次資料による確認率",
+          "score": 28,
+          "maximum": 35,
+          "rationale": "通期、前年1Q、株主説明会、月次開示の主要根拠は会社または関連投資法人の一次資料。価格・株主比率は外部補完または公式ウェブ。"
+        },
+        {
+          "criterion": "対象1Qに直接関連する情報の充足率",
+          "score": 17,
+          "maximum": 30,
+          "rationale": "前年1Q比較、4月ホテル稼働予定、3-5月発電指標は確認。一方、受注残、対象1Q計画、資産引渡し予定は不足。"
+        },
+        {
+          "criterion": "情報の新しさ",
+          "score": 12,
+          "maximum": 15,
+          "rationale": "価格基準日は1日前、月次資料は12日前、主要会社資料は52-91日前。"
+        },
+        {
+          "criterion": "数値整合性、根拠追跡性",
+          "score": 20,
+          "maximum": 20,
+          "rationale": "confirmed事実にURLを付し、計算値をestimated/calculatedとして区別。未確認値はnullと検索範囲で保存。"
+        }
+      ]
+    }
+  },
+  "classification": {
+    "closest_type": "B型",
+    "rationale": "Bが75でAの47を上回る。還元・資本政策の確認材料が業績の対象1Q直接材料より厚いが、持ち越し判定ではない。",
+    "holding_decision": "保留"
+  },
+  "anti_double_counting": {
+    "status": "pass",
+    "rules_applied": [
+      "前年1Qの高い比較ハードルはDで主に評価し、Aの期待加点に転用しない。",
+      "DOE・配当はBで主に評価し、Mには予想配当利回りとして限定的に一度だけ反映。",
+      "自己株取得・消却はBの自己株買い実績に一度だけ配分。",
+      "資産取得・売却時期はAのセグメント根拠とDの時期リスクで、成長性と不確実性という別方向を重複した点数にしない。",
+      "未確認・非開示項目はDの悪材料にせず、主にCに反映。"
+    ]
+  },
+  "data_integrity": {
+    "prohibited_sources_not_used": true,
+    "source_scope": "Only pre-cutoff sources specified in the v2 snapshot were used.",
+    "outcome_comparison_performed": false,
+    "post_cutoff_data_used": false
+  }
+}
