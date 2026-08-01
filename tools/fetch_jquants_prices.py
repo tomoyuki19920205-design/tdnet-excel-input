@@ -44,6 +44,17 @@ _MIGRATION_SQL = Path(_PROJECT_ROOT) / "migrations" / "003_market_per_share.sql"
 COMMON_STOCK_PRODUCT_CATEGORY = "011"
 TSE_EQUITY_MARKETS = {"0101", "0102", "0103", "0104", "0106", "0107", "0111", "0112", "0113"}
 COMMON_STOCK_RULE_VERSION = "jquants_master_v2_20260801"
+MARKET_DATA_RETENTION_YEARS = 1
+
+
+def market_data_retention_start(reference: datetime | None = None) -> str:
+    """Inclusive rolling one-calendar-year retention boundary (JST local date)."""
+    today = (reference or datetime.now()).date()
+    try:
+        prior = today.replace(year=today.year - MARKET_DATA_RETENTION_YEARS)
+    except ValueError:  # Feb 29
+        prior = today.replace(year=today.year - MARKET_DATA_RETENTION_YEARS, day=28)
+    return (prior + timedelta(days=1)).isoformat()
 
 SLEEP_BETWEEN_CODES = 0.3
 SLEEP_BETWEEN_PAGES = 0.3
@@ -293,10 +304,13 @@ def upsert_quotes(conn: sqlite3.Connection, items: list[dict]) -> int:
     has_quarantine = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='market_data_quarantine'"
     ).fetchone() is not None
+    retention_start = market_data_retention_start()
     for item in items:
         code = (item.get("Code") or "").strip()
         date = (item.get("Date") or "").strip()
         if not code or not date:
+            continue
+        if date < retention_start:
             continue
 
         ticker = normalize_jquants_code(code)
@@ -428,7 +442,12 @@ def main():
     else:
         since = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
 
+    retention_start = market_data_retention_start()
+    since = max(since, retention_start)
     to_date = args.until or datetime.now().strftime("%Y-%m-%d")
+    if to_date < retention_start:
+        logger.info("requested range is outside one-year retention; nothing to fetch")
+        return
 
     # ログ
     Path(_LOG_DIR).mkdir(parents=True, exist_ok=True)

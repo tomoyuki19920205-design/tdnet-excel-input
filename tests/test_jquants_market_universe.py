@@ -1,6 +1,10 @@
 import sqlite3
 
-from tools.fetch_jquants_prices import is_common_stock, normalize_jquants_code, upsert_quotes
+from datetime import datetime
+
+from tools.fetch_jquants_prices import (
+    is_common_stock, market_data_retention_start, normalize_jquants_code, upsert_quotes,
+)
 
 
 def _master(**overrides):
@@ -41,6 +45,10 @@ def test_v2_numeric_and_alpha_security_codes_do_not_collide():
     assert normalize_jquants_code("138A0") == "138A"
 
 
+def test_one_year_retention_boundary_is_inclusive_from_august_third():
+    assert market_data_retention_start(datetime(2026, 8, 2)) == "2025-08-03"
+
+
 def test_identical_quote_upsert_does_not_update_existing_row() -> None:
     conn = sqlite3.connect(":memory:")
     conn.executescript("""
@@ -70,7 +78,7 @@ def test_refetched_historical_adjusted_series_replaces_changed_value() -> None:
           UNIQUE(ticker, date)
         );
     """)
-    before = {"Code": "72030", "Date": "2021-09-29", "O": 1, "H": 2,
+    before = {"Code": "72030", "Date": "2026-07-29", "O": 1, "H": 2,
               "L": 1, "C": 2, "Vo": 100, "Va": 200, "AdjFactor": 1,
               "AdjC": 2, "AdjVo": 100}
     after = {**before, "AdjFactor": 0.5, "AdjC": 1, "AdjVo": 200}

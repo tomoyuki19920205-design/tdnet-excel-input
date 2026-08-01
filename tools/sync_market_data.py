@@ -32,8 +32,18 @@ _RETRY_MAX = 5
 _RETRY_BASE_SEC = 1.0
 _DEFAULT_RECENT_DAYS = 30
 JST = timezone(timedelta(hours=9))
+MARKET_DATA_RETENTION_YEARS = 1
 
 logger = logging.getLogger("sync_market_data")
+
+
+def market_data_retention_start(reference: datetime | None = None) -> str:
+    today = (reference or datetime.now(JST)).date()
+    try:
+        prior = today.replace(year=today.year - MARKET_DATA_RETENTION_YEARS)
+    except ValueError:
+        prior = today.replace(year=today.year - MARKET_DATA_RETENTION_YEARS, day=28)
+    return (prior + timedelta(days=1)).isoformat()
 
 
 def _load_dotenv():
@@ -104,6 +114,8 @@ def read_sqlite(db_path: str, recent_days: int = 0, limit: int = 0):
     ).fetchone() is not None
     where_parts = []
     params = []
+    where_parts.append("m.date >= ?")
+    params.append(market_data_retention_start())
     if recent_days > 0:
         since = (datetime.now(JST) - timedelta(days=recent_days)).strftime("%Y-%m-%d")
         where_parts.append("m.date >= ?")
