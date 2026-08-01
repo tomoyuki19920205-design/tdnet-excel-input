@@ -40,7 +40,7 @@ def get_api_key() -> str:
             "  3. .env に以下を追加:\n"
             "     JQUANTS_API_KEY=コピーしたキー\n"
         )
-    logger.info(f"API KEY loaded ({api_key[:8]}...)")
+    logger.info("J-Quants API key loaded")
     return api_key
 
 

@@ -25,7 +25,7 @@ sys.path.insert(0, _PROJECT_ROOT)
 sys.path.insert(0, str(Path(__file__).parent))
 
 from jquants_auth import get_auth_headers
-from src.common_ticker import normalize_ticker
+from src.common_ticker import strip_tdnet_trailing_zero
 
 logger = logging.getLogger("jquants_prices")
 
@@ -34,6 +34,16 @@ _DEFAULT_DB = os.path.join(_PROJECT_ROOT, "data", "jquants.db")
 _LOG_DIR = os.path.join(_PROJECT_ROOT, "logs")
 _PROGRESS_FILE = Path(_PROJECT_ROOT) / "data" / "jquants_prices_progress.json"
 _MIGRATION_SQL = Path(_PROJECT_ROOT) / "migrations" / "003_market_per_share.sql"
+
+# J-Quants V2 equities/master values.  The selection deliberately uses master
+# attributes, never a ticker-number heuristic.  ProdCat=011 is equities, and
+# these Mkt values cover both the post-2022 TSE boards and the historical
+# TSE 1st/2nd/Mothers/JASDAQ boards.  Preferred
+# shares share ProdCat=011, so the official master security-name flag is an
+# explicit exclusion until J-Quants exposes a separate share-class field.
+COMMON_STOCK_PRODUCT_CATEGORY = "011"
+TSE_EQUITY_MARKETS = {"0101", "0102", "0103", "0104", "0106", "0107", "0111", "0112", "0113"}
+COMMON_STOCK_RULE_VERSION = "jquants_master_v2_20260801"
 
 SLEEP_BETWEEN_CODES = 0.3
 SLEEP_BETWEEN_PAGES = 0.3
@@ -56,6 +66,25 @@ def _ensure_table(conn: sqlite3.Connection):
         else:
             logger.error(f"[SCHEMA] マイグレーションファイルが見つかりません: {_MIGRATION_SQL}")
             sys.exit(1)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS market_data_universe (
+          date TEXT NOT NULL, ticker TEXT NOT NULL, code TEXT NOT NULL,
+          company_name TEXT NOT NULL, product_category TEXT NOT NULL,
+          market_code TEXT NOT NULL, is_common_stock INTEGER NOT NULL,
+          rule_version TEXT NOT NULL, fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (date, ticker)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_market_data_universe_common "
+                 "ON market_data_universe(date, is_common_stock, ticker)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS market_data_quarantine (
+          ticker TEXT NOT NULL, date TEXT NOT NULL, reason TEXT NOT NULL,
+          raw_json TEXT NOT NULL, quarantined_at TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (ticker, date, reason)
+        )
+    """)
+    conn.commit()
 
 
 # ============================================================
@@ -88,14 +117,76 @@ def _api_get(endpoint: str, params: dict, auth_headers: dict) -> requests.Respon
 # ============================================================
 # 銘柄一覧
 # ============================================================
-def fetch_all_codes(auth_headers: dict) -> list[str]:
-    """V2: /equities/listed/info で全銘柄コード取得。"""
-    resp = _api_get("/equities/listed/info", {}, auth_headers)
-    data = resp.json()
-    items = data.get("info", data.get("data", []))
-    codes = sorted(set(item.get("Code", "") for item in items if item.get("Code")))
-    logger.info(f"Total listed codes: {len(codes)}")
-    return codes
+def is_common_stock(master: dict) -> bool:
+    """Return whether a J-Quants master record is an in-scope TSE common stock.
+
+    This is intentionally data-attribute based: product and market categories
+    identify equities and the regular TSE boards.  The preferred-share
+    exclusion is based on the *official master security name*, not the code.
+    """
+    name = str(master.get("CoName") or master.get("CompanyName") or "")
+    name_en = str(master.get("CoNameEn") or master.get("CompanyNameEnglish") or "").lower()
+    return (
+        str(master.get("ProdCat") or "") == COMMON_STOCK_PRODUCT_CATEGORY
+        and str(master.get("Mkt") or "") in TSE_EQUITY_MARKETS
+        and "優先株" not in name
+        and "preferred stock" not in name_en
+    )
+
+
+def normalize_jquants_code(code: object) -> str:
+    """Normalize a V2 security code without cross-security alpha aliases.
+
+    V2 can return both a numeric security such as ``13800`` and alpha security
+    ``138A0`` on the same date.  The legacy crosswalk used elsewhere would map
+    both to ``138A``; daily market-data identity must retain the actual V2 code.
+    """
+    return strip_tdnet_trailing_zero(str(code or "").strip().upper())
+
+
+def fetch_master_by_date(date_str: str, auth_headers: dict) -> list[dict]:
+    """Fetch the authoritative V2 master snapshot for a historical date."""
+    resp = _api_get("/equities/master", {"date": date_str}, auth_headers)
+    if resp.status_code != 200:
+        raise RuntimeError(f"master {date_str}: HTTP {resp.status_code} {resp.text[:300]}")
+    return resp.json().get("data", [])
+
+
+def store_universe_snapshot(conn: sqlite3.Connection, date_str: str, items: list[dict]) -> set[str]:
+    """Persist the decision record and return eligible 5-digit codes."""
+    eligible: set[str] = set()
+    rows = []
+    for item in items:
+        code = str(item.get("Code") or "").strip()
+        if not code:
+            continue
+        ticker = normalize_jquants_code(code)
+        allowed = is_common_stock(item)
+        if allowed:
+            eligible.add(code)
+        rows.append((date_str, ticker, code,
+                     str(item.get("CoName") or item.get("CompanyName") or ""),
+                     str(item.get("ProdCat") or ""), str(item.get("Mkt") or ""),
+                     int(allowed), COMMON_STOCK_RULE_VERSION))
+    conn.executemany("""
+        INSERT INTO market_data_universe
+          (date,ticker,code,company_name,product_category,market_code,is_common_stock,rule_version)
+        VALUES (?,?,?,?,?,?,?,?)
+        ON CONFLICT(date,ticker) DO UPDATE SET
+          code=excluded.code, company_name=excluded.company_name,
+          product_category=excluded.product_category, market_code=excluded.market_code,
+          is_common_stock=excluded.is_common_stock, rule_version=excluded.rule_version,
+          fetched_at=datetime('now')
+    """, rows)
+    conn.commit()
+    return eligible
+
+
+def fetch_all_codes(conn: sqlite3.Connection, auth_headers: dict) -> list[str]:
+    """Current common-stock universe from the authoritative V2 master."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    return sorted(store_universe_snapshot(conn, today,
+                                         fetch_master_by_date(today, auth_headers)))
 
 
 # ============================================================
@@ -187,21 +278,49 @@ def upsert_quotes(conn: sqlite3.Connection, items: list[dict]) -> int:
             adj_factor = excluded.adj_factor,
             adj_close = excluded.adj_close,
             adj_volume = excluded.adj_volume,
-            market_cap = excluded.market_cap,
             fetched_at = excluded.fetched_at
+        WHERE market_data.open IS NOT excluded.open
+           OR market_data.high IS NOT excluded.high
+           OR market_data.low IS NOT excluded.low
+           OR market_data.close IS NOT excluded.close
+           OR market_data.volume IS NOT excluded.volume
+           OR market_data.turnover IS NOT excluded.turnover
+           OR market_data.adj_factor IS NOT excluded.adj_factor
+           OR market_data.adj_close IS NOT excluded.adj_close
+           OR market_data.adj_volume IS NOT excluded.adj_volume
     """
     count = 0
+    has_quarantine = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='market_data_quarantine'"
+    ).fetchone() is not None
     for item in items:
         code = (item.get("Code") or "").strip()
         date = (item.get("Date") or "").strip()
         if not code or not date:
             continue
 
-        ticker = normalize_ticker(code)
+        ticker = normalize_jquants_code(code)
         # V2 フィールド: O, H, L, C, Vo, Va, AdjFactor, AdjC, AdjVo
         # V1 互換: Open, High, Low, Close, Volume, TurnoverValue, etc.
-        close_val = safe_float(item.get("C") or item.get("Close"))
+        close_val = safe_float(item.get("C") if item.get("C") is not None else item.get("Close"))
+        volume_val = safe_int(item.get("Vo") if item.get("Vo") is not None else item.get("Volume"))
+        turnover_val = safe_float(item.get("Va") if item.get("Va") is not None else item.get("TurnoverValue"))
+        adj_factor_val = safe_float(item.get("AdjFactor") if item.get("AdjFactor") is not None else item.get("AdjustmentFactor"))
+        adj_close_val = safe_float(item.get("AdjC") if item.get("AdjC") is not None else item.get("AdjustmentClose"))
+        adj_volume_val = safe_int(item.get("AdjVo") if item.get("AdjVo") is not None else item.get("AdjustmentVolume"))
+        # A master-listed security can legitimately have no bar on a date.  It
+        # is not a zero price/volume observation; preserve the raw record in a
+        # quarantine table and keep it out of the feature-source ledger.
+        if None in (volume_val, turnover_val, adj_factor_val, adj_close_val, adj_volume_val):
+            if has_quarantine:
+                conn.execute("""
+                    INSERT OR REPLACE INTO market_data_quarantine(ticker,date,reason,raw_json)
+                    VALUES (?,?,?,?)
+                """, (ticker, date, "JQUANTS_MISSING_REQUIRED_DAILY_FIELDS",
+                      json.dumps(item, ensure_ascii=False, sort_keys=True)))
+            continue
         try:
+            changes_before = conn.total_changes
             conn.execute(sql, (
                 ticker,
                 date,
@@ -209,14 +328,14 @@ def upsert_quotes(conn: sqlite3.Connection, items: list[dict]) -> int:
                 safe_float(item.get("H") or item.get("High")),
                 safe_float(item.get("L") or item.get("Low")),
                 close_val,
-                safe_int(item.get("Vo") or item.get("Volume")),
-                safe_float(item.get("Va") or item.get("TurnoverValue")),
-                safe_float(item.get("AdjFactor") or item.get("AdjustmentFactor")),
-                safe_float(item.get("AdjC") or item.get("AdjustmentClose")),
-                safe_int(item.get("AdjVo") or item.get("AdjustmentVolume")),
+                volume_val,
+                turnover_val,
+                adj_factor_val,
+                adj_close_val,
+                adj_volume_val,
                 None,  # market_cap — 後で計算
             ))
-            count += 1
+            count += conn.total_changes - changes_before
         except Exception as e:
             logger.error(f"UPSERT error [{ticker} {date}]: {e}")
 
@@ -227,20 +346,22 @@ def upsert_quotes(conn: sqlite3.Connection, items: list[dict]) -> int:
 # ============================================================
 # 進捗管理
 # ============================================================
-def load_progress() -> dict:
-    if _PROGRESS_FILE.exists():
+def load_progress(progress_file: Path = _PROGRESS_FILE) -> dict:
+    if progress_file.exists():
         try:
-            return json.loads(_PROGRESS_FILE.read_text(encoding="utf-8"))
+            return json.loads(progress_file.read_text(encoding="utf-8"))
         except Exception:
             pass
     return {}
 
 
-def save_progress(data: dict):
-    _PROGRESS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _PROGRESS_FILE.write_text(
+def save_progress(data: dict, progress_file: Path = _PROGRESS_FILE):
+    progress_file.parent.mkdir(parents=True, exist_ok=True)
+    temporary = progress_file.with_suffix(progress_file.suffix + ".tmp")
+    temporary.write_text(
         json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    temporary.replace(progress_file)
 
 
 # ============================================================
@@ -280,12 +401,24 @@ def main():
     parser = argparse.ArgumentParser(description="J-Quants 株価一括取得")
     parser.add_argument("--db", default=_DEFAULT_DB)
     parser.add_argument("--since", default=None, help="取得開始日 (YYYY-MM-DD)")
+    parser.add_argument("--until", default=None, help="取得終了日 (YYYY-MM-DD、指定時は当日を含む)")
     parser.add_argument("--recent", action="store_true", help="直近7日のみ")
     parser.add_argument("--code", default=None, help="特定銘柄のみ (5桁コード)")
     parser.add_argument("--resume", action="store_true", help="前回の続きから")
     parser.add_argument("--date-mode", action="store_true",
                         help="日付ベースで取得 (効率的、--since/--recent と組合せ)")
+    parser.add_argument("--backfill", action="store_true",
+                        help="日付ごとの銘柄マスター判定とcheckpointを有効化した履歴取得")
+    parser.add_argument("--progress-file", default=None,
+                        help="checkpoint JSON path (backfill defaults to a dedicated file)")
+    parser.add_argument("--sync-supabase", action="store_true",
+                        help="successful fetch completion後に対象普通株をSupabaseへ全量upsert")
     args = parser.parse_args()
+
+    progress_file = Path(args.progress_file) if args.progress_file else (
+        Path(_PROJECT_ROOT) / "data" / "jquants_prices_backfill_progress.json"
+        if args.backfill else _PROGRESS_FILE
+    )
 
     # 日付範囲
     if args.recent:
@@ -295,7 +428,7 @@ def main():
     else:
         since = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
 
-    to_date = datetime.now().strftime("%Y-%m-%d")
+    to_date = args.until or datetime.now().strftime("%Y-%m-%d")
 
     # ログ
     Path(_LOG_DIR).mkdir(parents=True, exist_ok=True)
@@ -330,12 +463,14 @@ def main():
         total_upserted += n
         logger.info(f"[SINGLE] {n} rows upserted for {code5}")
 
-    elif args.date_mode or args.recent:
+    elif args.date_mode or args.recent or args.backfill:
         # 日付ベースモード: 1日ずつ全銘柄分を取得（--recent 向きの高効率モード）
         current = datetime.strptime(since, "%Y-%m-%d")
         end = datetime.strptime(to_date, "%Y-%m-%d")
         days = (end - current).days + 1
         day_idx = 0
+        progress = load_progress(progress_file) if args.resume else {}
+        completed_dates = set(progress.get("completed_dates", []))
         while current <= end:
             day_idx += 1
             date_str = current.strftime("%Y-%m-%d")
@@ -343,21 +478,43 @@ def main():
             if current.weekday() >= 5:
                 current += timedelta(days=1)
                 continue
-            items = fetch_daily_quotes_by_date(date_str, auth_headers)
+            if date_str in completed_dates:
+                logger.info(f"  [{day_idx}/{days}] {date_str}: checkpoint skip")
+                current += timedelta(days=1)
+                continue
+            # Each historical date is qualified with the master snapshot from
+            # that date, preserving IPOs and delistings without admitting ETFs,
+            # ETNs, REITs, infrastructure funds, or preferred shares.
+            master_items = fetch_master_by_date(date_str, auth_headers)
+            eligible_codes = store_universe_snapshot(conn, date_str, master_items)
+            if not eligible_codes:
+                raise RuntimeError(
+                    f"{date_str}: master returned no in-scope ordinary shares; "
+                    "refusing to checkpoint an unverifiable date"
+                )
+            items = [item for item in fetch_daily_quotes_by_date(date_str, auth_headers)
+                     if str(item.get("Code") or "") in eligible_codes]
             if items:
                 n = upsert_quotes(conn, items)
                 total_upserted += n
-                logger.info(f"  [{day_idx}/{days}] {date_str}: {len(items)} items, {n} upserted")
+                logger.info(f"  [{day_idx}/{days}] {date_str}: {len(items)} eligible items, {n} upserted")
             else:
-                logger.info(f"  [{day_idx}/{days}] {date_str}: no data (祝日?)")
+                logger.info(f"  [{day_idx}/{days}] {date_str}: no eligible data (holiday?)")
+            completed_dates.add(date_str)
+            save_progress({
+                "completed_dates": sorted(completed_dates),
+                "last_completed_date": date_str,
+                "last_updated": datetime.now().isoformat(),
+                "rule_version": COMMON_STOCK_RULE_VERSION,
+            }, progress_file)
             current += timedelta(days=1)
             time.sleep(SLEEP_BETWEEN_CODES)
 
     else:
         # 銘柄ベースモード: 全銘柄を1つずつ
-        all_codes = fetch_all_codes(auth_headers)
+        all_codes = fetch_all_codes(conn, auth_headers)
         if args.resume:
-            progress = load_progress()
+            progress = load_progress(progress_file)
         else:
             progress = {}
         completed = set(progress.get("completed_codes", []))
@@ -365,7 +522,7 @@ def main():
         logger.info(f"To process: {len(remaining)} / {len(all_codes)} codes")
 
         for idx, code5 in enumerate(remaining):
-            ticker4 = normalize_ticker(code5)
+            ticker4 = normalize_jquants_code(code5)
             try:
                 items = fetch_daily_quotes_by_code(code5, since, to_date, auth_headers)
                 n = upsert_quotes(conn, items)
@@ -387,7 +544,7 @@ def main():
                 save_progress({
                     "completed_codes": sorted(completed),
                     "last_updated": datetime.now().isoformat(),
-                })
+                }, progress_file)
             time.sleep(SLEEP_BETWEEN_CODES)
 
     # market_cap 算出
@@ -402,6 +559,19 @@ def main():
     logger.info(f"  Total errors  : {total_errors}")
     logger.info(f"  DB: {args.db}")
     logger.info(f"  Log: {log_file}")
+
+    if args.sync_supabase and total_errors == 0:
+        from tools.sync_market_data import _load_dotenv, sync
+        _load_dotenv()
+        supabase_url = os.environ.get("SUPABASE_URL", "")
+        supabase_key = (os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+                        or os.environ.get("SUPABASE_ANON_KEY", ""))
+        if not supabase_url or not supabase_key:
+            raise RuntimeError("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY is required for --sync-supabase")
+        sync_stats = sync(args.db, supabase_url, supabase_key,
+                          dry_run=False, recent_days=0)
+        if sync_stats["errors"]:
+            raise RuntimeError(f"Supabase sync failed: {sync_stats}")
 
 
 if __name__ == "__main__":

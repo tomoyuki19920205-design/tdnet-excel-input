@@ -8,6 +8,7 @@ sync_market_data.py — SQLite market_data → Supabase market_data 同期
   python tools/sync_market_data.py --apply --full  # 全量
 """
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -24,7 +25,9 @@ sys.path.insert(0, _PROJECT_ROOT)
 _DEFAULT_DB = os.path.join(_PROJECT_ROOT, "data", "jquants.db")
 _LOG_DIR = os.path.join(_PROJECT_ROOT, "logs")
 
-_BATCH_SIZE = 500
+# PostgREST accepts substantially larger JSON batches; 2,000 keeps each payload
+# comfortably below common gateway limits while reducing full-backfill round trips.
+_BATCH_SIZE = 2000
 _RETRY_MAX = 5
 _RETRY_BASE_SEC = 1.0
 _DEFAULT_RECENT_DAYS = 30
@@ -96,19 +99,29 @@ def read_sqlite(db_path: str, recent_days: int = 0, limit: int = 0):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
 
-    where = ""
+    has_universe = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='market_data_universe'"
+    ).fetchone() is not None
+    where_parts = []
     params = []
     if recent_days > 0:
         since = (datetime.now(JST) - timedelta(days=recent_days)).strftime("%Y-%m-%d")
-        where = "WHERE date >= ?"
+        where_parts.append("m.date >= ?")
         params.append(since)
+    # Once the qualified universe table exists, only records proven to be
+    # common stocks by the dated J-Quants master are allowed upstream.
+    if has_universe:
+        where_parts.append("EXISTS (SELECT 1 FROM market_data_universe u "
+                           "WHERE u.date=m.date AND u.ticker=m.ticker "
+                           "AND u.is_common_stock=1)")
+    where = "WHERE " + " AND ".join(where_parts) if where_parts else ""
 
     query = f"""
-        SELECT ticker, date, open, high, low, close, volume,
-               turnover, adj_factor, adj_close, adj_volume, market_cap
-        FROM market_data
+        SELECT m.ticker, m.date, m.open, m.high, m.low, m.close, m.volume,
+               m.turnover, m.adj_factor, m.adj_close, m.adj_volume, m.market_cap
+        FROM market_data m
         {where}
-        ORDER BY date DESC, ticker
+        ORDER BY m.date DESC, m.ticker
     """
     if limit > 0:
         query += f" LIMIT ?"
@@ -139,6 +152,64 @@ def read_sqlite(db_path: str, recent_days: int = 0, limit: int = 0):
     return data
 
 
+def _payload_hash(row: dict) -> str:
+    """Hash values that matter to the remote record (not sync timestamp)."""
+    payload = {key: value for key, value in row.items() if key not in {"fetched_at", "_sync_hash"}}
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+
+def _open_ledger(db_path: str) -> sqlite3.Connection:
+    conn = sqlite3.connect(db_path)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS market_data_sync_ledger (
+            ticker TEXT NOT NULL,
+            date TEXT NOT NULL,
+            payload_hash TEXT NOT NULL,
+            synced_at TEXT NOT NULL,
+            PRIMARY KEY (ticker, date)
+        )
+    """)
+    conn.commit()
+    return conn
+
+
+def _pending_rows(data: list[dict], ledger: sqlite3.Connection) -> tuple[list[dict], int]:
+    # On the initial full sync this short-circuit avoids millions of point lookups.
+    if ledger.execute("SELECT 1 FROM market_data_sync_ledger LIMIT 1").fetchone() is None:
+        for row in data:
+            row["_sync_hash"] = _payload_hash(row)
+        return data, 0
+    pending: list[dict] = []
+    unchanged = 0
+    lookup = ledger.execute
+    for row in data:
+        digest = _payload_hash(row)
+        previous = lookup(
+            "SELECT payload_hash FROM market_data_sync_ledger WHERE ticker=? AND date=?",
+            (row["ticker"], row["date"]),
+        ).fetchone()
+        if previous is not None and previous[0] == digest:
+            unchanged += 1
+            continue
+        row["_sync_hash"] = digest
+        pending.append(row)
+    return pending, unchanged
+
+
+def _record_synced(ledger: sqlite3.Connection, rows: list[dict]) -> None:
+    synced_at = datetime.now(JST).isoformat()
+    ledger.executemany(
+        """INSERT INTO market_data_sync_ledger(ticker, date, payload_hash, synced_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(ticker, date) DO UPDATE SET
+             payload_hash=excluded.payload_hash, synced_at=excluded.synced_at""",
+        [(row["ticker"], row["date"], row["_sync_hash"], synced_at) for row in rows],
+    )
+    ledger.commit()
+
+
 def sync(db_path, supabase_url, supabase_key, dry_run=True,
          recent_days=_DEFAULT_RECENT_DAYS, limit=0):
     data = read_sqlite(db_path, recent_days=recent_days, limit=limit)
@@ -152,20 +223,30 @@ def sync(db_path, supabase_url, supabase_key, dry_run=True,
         logger.info(f"\n{'='*60}\n  DRY-RUN: {len(data):,} rows → market_data\n{'='*60}")
         return {"upserted": 0, "errors": 0, "dry_run": True}
 
+    ledger = _open_ledger(db_path)
+    data, unchanged = _pending_rows(data, ledger)
+    logger.info(f"[SYNC] pending={len(data):,} unchanged={unchanged:,}")
+    if not data:
+        ledger.close()
+        return {"upserted": 0, "unchanged": unchanged, "errors": 0, "dry_run": False}
+
     api = _SupabaseAPI(supabase_url, supabase_key)
     total = 0
     errors = 0
     for i, chunk in enumerate(_chunks(data, _BATCH_SIZE), 1):
         try:
-            n = api.upsert_batch("market_data", chunk, on_conflict="ticker,date")
+            payload = [{key: value for key, value in row.items() if key != "_sync_hash"} for row in chunk]
+            n = api.upsert_batch("market_data", payload, on_conflict="ticker,date")
+            _record_synced(ledger, chunk)
             total += n
             logger.info(f"  batch {i}: {n} rows (累計 {total:,})")
         except Exception as e:
             errors += 1
             logger.error(f"  batch {i}: FAILED — {e}")
 
-    logger.info(f"[SYNC] 完了: upserted={total:,} errors={errors}")
-    return {"upserted": total, "errors": errors, "dry_run": False}
+    ledger.close()
+    logger.info(f"[SYNC] 完了: upserted={total:,} unchanged={unchanged:,} errors={errors}")
+    return {"upserted": total, "unchanged": unchanged, "errors": errors, "dry_run": False}
 
 
 def main():
