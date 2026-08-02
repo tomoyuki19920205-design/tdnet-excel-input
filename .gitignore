@@ -39,3 +39,4 @@ cache/xbrl/*
 cache/html/*
 cache/parsed/*
 cache/**/*.tmp
+output/earnings_market_interval_evidence/

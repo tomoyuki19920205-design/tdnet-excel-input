@@ -99,7 +99,7 @@ def test_existing_zero_market_cap_is_cleared_when_no_valid_share_count() -> None
 
 def test_existing_positive_market_cap_is_cleared_without_valid_shares() -> None:
     conn = _connection()
-    conn.execute("UPDATE market_data SET market_cap = 123_456")
+    conn.execute("UPDATE market_data SET market_cap = 123456")
     _insert_share_row(conn, "2027-03-31", None)
     _insert_share_row(conn, "2026-03-31", 0)
 
