@@ -4,12 +4,15 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.extractor import (
     _detect_scale,
     _extract_value_near_keyword,
     _extract_numbers_from_line,
+    _parse_xbrl_content,
     SALES_KEYWORDS,
     OP_KEYWORDS,
     GROSS_PROFIT_KEYWORDS,
@@ -52,6 +55,11 @@ class TestExtractNumbersFromLine:
         assert 1234567 in nums
         assert 1100000 in nums
 
+    def test_excludes_fiscal_year_but_keeps_amount(self):
+        nums = _extract_numbers_from_line("2027年3月期 51,812")
+        assert 2027 not in nums
+        assert nums == [51812]
+
 
 class TestExtractValueNearKeyword:
     """_extract_value_near_keyword のテスト"""
@@ -93,3 +101,39 @@ class TestExtractValueNearKeyword:
         ]
         result = _extract_value_near_keyword(lines, SALES_KEYWORDS)
         assert result == 1234567
+
+    def test_workman_reference_sales_is_not_a_pl_row(self):
+        lines = ["（参考）チェーン全店売上高 2027年3月期（累計） 67,561百万円"]
+        assert _extract_value_near_keyword(lines, SALES_KEYWORDS) is None
+
+    def test_litalico_narrative_is_not_a_pl_row(self):
+        lines = ["これに伴い、前四半期連結累計期間の売上収益、営業利益について", "そのため2026年3月期"]
+        assert _extract_value_near_keyword(lines, SALES_KEYWORDS) is None
+        assert _extract_value_near_keyword(lines, OP_KEYWORDS) is None
+
+    def test_ricoh_contents_forecast_is_not_a_pl_row(self):
+        lines = ["（3）分野別売上高見通し（連結）", "2027年3月期 第1四半期決算のお知らせ"]
+        assert _extract_value_near_keyword(lines, SALES_KEYWORDS) is None
+
+
+@pytest.mark.parametrize(
+    ("company", "sales_tag", "sales", "op_tag", "op"),
+    [
+        ("workman", "GrossOperatingRevenues", 51_812_000_000, "OperatingIncome", 12_031_000_000),
+        ("litalico", "SalesIFRS", 10_844_000_000, "OperatingIncomeIFRS", 1_434_000_000),
+        ("ricoh", "NetSalesIFRS", 629_812_000_000, "OperatingIncomeIFRS", 47_762_000_000),
+    ],
+)
+def test_20260803_xbrl_pl_tags_win_over_pdf_patterns(company, sales_tag, sales, op_tag, op):
+    """Actual 2026-08-03 tag forms: J-GAAP, IFRS SalesIFRS, and NetSalesIFRS."""
+    raw = f'''<root xmlns:ix="http://www.xbrl.org/2013/inlineXBRL">
+      <ix:nonFraction name="tse:{sales_tag}" contextRef="CurrentAccumulatedQ1Duration_ConsolidatedMember_ResultMember" scale="6">{sales // 1_000_000}</ix:nonFraction>
+      <ix:nonFraction name="tse:{op_tag}" contextRef="CurrentAccumulatedQ1Duration_ConsolidatedMember_ResultMember" scale="6">{op // 1_000_000}</ix:nonFraction>
+    </root>'''.encode()
+
+    result = _parse_xbrl_content(raw, source_label="summary_xbrl")
+
+    assert result is not None, company
+    assert result.sales == sales
+    assert result.operating_profit == op
+    assert result.field_sources == {"sales": "summary_xbrl", "operating_profit": "summary_xbrl"}

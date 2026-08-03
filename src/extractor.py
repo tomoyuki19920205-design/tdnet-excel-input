@@ -535,6 +535,15 @@ def _extract_value_near_keyword(
         if matched_kw is None:
             continue
 
+        # A keyword occurring in narrative text, a table of contents, or a
+        # reference metric is not sufficient evidence for a PL value.  In
+        # particular, PDFs often contain phrases such as "chain-wide sales"
+        # followed by a fiscal-year label; accepting that year is worse than
+        # leaving the low-confidence PDF field empty.  Only accept a metric
+        # when it is the row label itself (the normal horizontal-table form).
+        if not _is_metric_label_line(line, matched_kw):
+            continue
+
         # 同じ行の数値を探す
         nums = _extract_numbers_from_line(line, matched_kw)
         if nums:
@@ -549,12 +558,31 @@ def _extract_value_near_keyword(
     return None
 
 
+def _is_metric_label_line(line: str, keyword: str) -> bool:
+    """Return whether *keyword* is the leading label of a PL table row.
+
+    This deliberately rejects substring matches such as ``チェーン全店売上高``
+    and ``分野別売上高見通し``.  Those are not consolidated PL row labels and
+    can otherwise cause a nearby fiscal year (e.g. ``2027年3月期``) to be
+    stored as sales by the PDF fallback.
+    """
+    label = line.lstrip()
+    if keyword.isascii():
+        return label.lower().startswith(keyword.lower())
+    return label.startswith(keyword)
+
+
 def _extract_numbers_from_line(line: str, exclude_keyword: str | None = None) -> list[int]:
     """行から数値を抽出する（小さすぎるパーセンテージ値を除外）"""
     # キーワード部分を除去
     text = line
     if exclude_keyword:
         text = text.replace(exclude_keyword, "")
+
+    # A fiscal-year label is metadata, never a PL value.  Remove it before
+    # tokenization so a fallback cannot mistake "2027年3月期" for 2,027
+    # million yen.  Keep ordinary four-digit amounts intact.
+    text = re.sub(r"(?<!\d)\d{4}\s*年", "", text)
 
     # YoY%表記を除去
     text = re.sub(r"[+\-－]?\d{1,3}\.\d%?", "", text)
