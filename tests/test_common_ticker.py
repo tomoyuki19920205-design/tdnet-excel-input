@@ -28,9 +28,9 @@ class TestNormalizeTicker:
     """normalize_ticker の代表ケース + エッジケース。"""
 
     # ---- 代表ケース (ユーザー指定) ----
-    def test_41800_to_418A(self):
-        """J-Quants 旧数値コード → alpha (JQUANTS_ALPHA_MAP)"""
-        assert normalize_ticker("41800") == "418A"
+    def test_41800_to_4180(self):
+        """Numeric ticker remains numeric after its market suffix is removed."""
+        assert normalize_ticker("41800") == "4180"
 
     def test_421A0_to_421A(self):
         assert normalize_ticker("421A0") == "421A"
@@ -44,16 +44,15 @@ class TestNormalizeTicker:
     def test_72030_to_7203(self):
         assert normalize_ticker("72030") == "7203"
 
-    # ---- J-Quants Alpha Map 系 ----
-    def test_13000_to_130A(self):
-        """J-Quants numeric → alpha via map"""
-        assert normalize_ticker("13000") == "130A"
+    # ---- Numeric five-character code remains numeric ----
+    def test_13000_to_1300(self):
+        assert normalize_ticker("13000") == "1300"
 
-    def test_42100_to_421A(self):
-        assert normalize_ticker("42100") == "421A"
+    def test_42100_to_4210(self):
+        assert normalize_ticker("42100") == "4210"
 
-    def test_42900_to_429A(self):
-        assert normalize_ticker("42900") == "429A"
+    def test_42900_to_4290(self):
+        assert normalize_ticker("42900") == "4290"
 
     # ---- 4桁 ticker (変換不要) ----
     def test_4digit_numeric(self):
@@ -61,6 +60,14 @@ class TestNormalizeTicker:
 
     def test_4digit_alpha(self):
         assert normalize_ticker("418A") == "418A"
+
+    def test_alphanumeric_and_numeric_tickers_do_not_collide(self):
+        assert normalize_ticker("418A0") == "418A"
+        assert normalize_ticker("41800") == "4180"
+        assert normalize_ticker("418A") != normalize_ticker("4180")
+        assert normalize_ticker("472A0") == "472A"
+        assert normalize_ticker("47200") == "4720"
+        assert normalize_ticker("472A") != normalize_ticker("4720")
 
     def test_4digit_1301(self):
         assert normalize_ticker("1301") == "1301"
