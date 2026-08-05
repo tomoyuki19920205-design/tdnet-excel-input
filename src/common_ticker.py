@@ -11,7 +11,7 @@
   ───────────────────────────────────────────────────
   "72030"           → "7203"     5桁末尾0を除去
   "418A0"           → "418A"     alpha 付き5桁→4桁
-  "41800"           → "418A"     J-Quants 旧数値コード→alpha (JQUANTS_ALPHA_MAP)
+  "41800"           → "4180"     5桁末尾0を除去（数値コードを保持）
   "421A0"           → "421A"     alpha 付き5桁→4桁
   "429A0"           → "429A"     alpha 付き5桁→4桁
   "130A0"           → "130A"     alpha 付き5桁→4桁
@@ -33,14 +33,13 @@ from __future__ import annotations
 import re
 
 # ============================================================
-# J-Quants 旧数値コード → alpha ticker マッピング
-# ============================================================
-# J-Quants API は一部の alpha ticker 企業を純数値5桁コードで返す。
-# 例: ウリドキ (418A) → "41800"
-# このマッピングは strip_trailing_zero の**前に**適用する。
+# Historical compatibility constant. Do not use it for normalisation.
 #
-# 生成元: SQLite jquants_financials_normalized の alpha codes (xxxA0) から
-# 逆引きした numeric → alpha ペア (144 エントリ)
+# A previous implementation inferred alpha tickers from numeric five-character
+# J-Quants codes (for example, ``41800 -> 418A``). Those codes are ambiguous:
+# ``41800`` represents numeric ticker ``4180`` and ``418A0`` represents the
+# distinct ticker ``418A``. Applying this map corrupted canonical keys.
+# Keep the data only for forensic tooling; normalize_ticker never consults it.
 JQUANTS_ALPHA_MAP: dict[str, str] = {
     "13000": "130A", "13500": "135A", "13700": "137A", "13800": "138A",
     "14100": "141A", "14200": "142A", "14300": "143A", "14500": "145A",
@@ -117,14 +116,13 @@ def normalize_ticker(t: str) -> str:
 
     処理順序:
       1. str 変換 + strip + 大文字化
-      2. JQUANTS_ALPHA_MAP で旧数値コードを alpha に変換 (41800 → 418A)
-      3. 5桁末尾0除去 (72030 → 7203, 418A0 → 418A)
+      2. 5桁末尾0除去 (41800 → 4180, 418A0 → 418A)
 
     DB / Excel / Discord 通知など下流で共通使用。
 
     例:
       "72030" → "7203"
-      "41800" → "418A"   ← JQUANTS_ALPHA_MAP 適用
+      "41800" → "4180"
       "418A0" → "418A"
       "421A0" → "421A"
       "429A0" → "429A"
@@ -137,11 +135,8 @@ def normalize_ticker(t: str) -> str:
     t = str(t).strip().upper()
     if not t:
         return t
-    # Step 1: J-Quants 旧数値コード → alpha
-    alpha = JQUANTS_ALPHA_MAP.get(t)
-    if alpha:
-        return alpha
-    # Step 2: 5桁末尾0除去
+    # Only the fifth-character market suffix is removable. A fourth-character
+    # digit and a fourth-character letter are distinct securities.
     return strip_tdnet_trailing_zero(t)
 
 

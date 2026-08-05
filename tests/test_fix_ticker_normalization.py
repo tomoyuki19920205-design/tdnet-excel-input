@@ -52,8 +52,8 @@ class TestNormalizeTickerForFix:
     def test_alpha_mixed(self):
         assert normalize_ticker_for_fix("418A0") == "418A"
 
-    def test_jquants_alpha_map(self):
-        assert normalize_ticker_for_fix("41800") == "418A"
+    def test_numeric_code_is_not_mapped_to_alpha(self):
+        assert normalize_ticker_for_fix("41800") == "4180"
 
     def test_empty_string(self):
         assert normalize_ticker_for_fix("") is None
@@ -67,17 +67,15 @@ class TestNormalizeTickerForFix:
     def test_regular_5digit_trailing_zero(self):
         assert normalize_ticker_for_fix("67580") == "6758"
 
-    def test_alpha_map_disabled_skips_alpha(self):
-        """enable_alpha_map=False: numeric->alpha (ALPHA_MAP) はスキップ"""
-        assert normalize_ticker_for_fix("41800", enable_alpha_map=False) is None
+    def test_alpha_map_flag_does_not_change_numeric_code(self):
+        assert normalize_ticker_for_fix("41800", enable_alpha_map=False) == "4180"
 
     def test_alpha_map_disabled_allows_numeric(self):
         """enable_alpha_map=False: numeric->numeric は許可"""
         assert normalize_ticker_for_fix("78490", enable_alpha_map=False) == "7849"
 
-    def test_alpha_map_enabled_allows_alpha(self):
-        """enable_alpha_map=True: numeric->alpha (ALPHA_MAP) を許可"""
-        assert normalize_ticker_for_fix("41800", enable_alpha_map=True) == "418A"
+    def test_alpha_map_flag_cannot_map_numeric_code_to_alpha(self):
+        assert normalize_ticker_for_fix("41800", enable_alpha_map=True) == "4180"
 
     def test_5digit_all_zeros(self):
         result = normalize_ticker_for_fix("00000")
