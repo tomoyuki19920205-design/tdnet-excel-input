@@ -48,6 +48,20 @@ CREATE TABLE IF NOT EXISTS process_locks (
 );
 """
 
+_CREATE_FINANCIAL_RECONCILIATION_HISTORY = """
+CREATE TABLE IF NOT EXISTS financial_reconciliation_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    disclosure_id TEXT NOT NULL,
+    code TEXT,
+    old_parser_status TEXT,
+    final_status TEXT NOT NULL,
+    reason TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE(run_id, disclosure_id)
+);
+"""
+
 
 class StateDB:
     """SQLiteによる処理状態管理（冪等性保証）"""
@@ -58,6 +72,7 @@ class StateDB:
         self._conn = sqlite3.connect(db_path)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute(_CREATE_TABLE)
+        self._conn.execute(_CREATE_FINANCIAL_RECONCILIATION_HISTORY)
         self.ensure_process_locks_table()
         self._conn.commit()
 
@@ -136,6 +151,35 @@ class StateDB:
             return None
         cols = [desc[0] for desc in cur.description]
         return dict(zip(cols, row))
+
+    def record_financial_reconciliation(
+        self,
+        *,
+        run_id: str,
+        disclosure_id: str,
+        code: str,
+        old_parser_status: str,
+        final_status: str,
+        reason: str,
+    ) -> None:
+        """Record a final financial outcome without mutating legacy failures."""
+        self._conn.execute(
+            """
+            INSERT INTO financial_reconciliation_history
+                (run_id, disclosure_id, code, old_parser_status,
+                 final_status, reason, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(run_id, disclosure_id) DO UPDATE SET
+                old_parser_status=excluded.old_parser_status,
+                final_status=excluded.final_status,
+                reason=excluded.reason
+            """,
+            (
+                run_id, disclosure_id, code, old_parser_status,
+                final_status, reason, now_jst_str(),
+            ),
+        )
+        self._conn.commit()
 
     # --- Lock management ---
     def ensure_process_locks_table(self) -> None:

@@ -299,6 +299,10 @@ def _fetch_via_api(session: requests.Session | None = None, timeout_sec: float |
             or item.get("url_xbrl")
             or item.get("xbrl_url")
         )
+        # API feeds can omit url_xbrl even when the official attachment exists.
+        # Infer TDnet's deterministic 1401 PDF -> 0812 XBRL mapping; download
+        # still decides availability from the response.
+        xbrl_url = xbrl_url or infer_xbrl_url_from_pdf(doc_url)
 
         if not title or not ticker or not doc_url:
             skipped_count += 1

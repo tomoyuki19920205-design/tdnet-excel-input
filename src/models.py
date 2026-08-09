@@ -49,6 +49,8 @@ class ExtractedFinancials:
     gross_profit: int | None = None      # 累計粗利益（抽出できない場合None）
     selling_general_and_administrative_expenses: int | None = None # 累計販管費
     operating_profit: int | None = None  # 累計営業利益
+    ordinary_profit: int | None = None   # 累計経常利益（項目がない会計基準ではNone）
+    net_income: int | None = None        # 累計親会社株主帰属利益／純利益
     cost_of_sales: int | None = None     # 売上原価（計算補完用）
     fiscal_year: str = ""                # "R8/3" 形式
     quarter: str = ""                    # "1Q","2Q","3Q","4Q"

@@ -926,6 +926,9 @@ def run_ingest(
                         dry_run=dry_run, dump_dir=dump_dir, session=session,
                         pre_fetched=pf
                     )
+                    result.setdefault("disclosure_id", item.disclosure_id)
+                    result.setdefault("doc_url", item.doc_url)
+                    result.setdefault("title", item.title)
                     results.append(result)
                     if result.get("status") in ("inserted", "updated", "no_change", "dry_run"):
                         success_count += 1
@@ -938,6 +941,9 @@ def run_ingest(
                         "status": "error",
                         "detail": f"予期しないエラー: {e}",
                         "code": item.ticker,
+                        "disclosure_id": item.disclosure_id,
+                        "doc_url": item.doc_url,
+                        "title": item.title,
                     })
                     failed_count += 1
                 
@@ -1112,6 +1118,7 @@ def run_ingest(
                     dry_run=dry_run,
                     state_db=state_db,
                     session=session,
+                    notify_enabled=False,
                 )
                 summary["earnings_v2"] = {
                     "tanshin": _ev2_result.tanshin_count,
@@ -1134,6 +1141,28 @@ def run_ingest(
             finally:
                 if _ev2_conn is not None:
                     _ev2_conn.close()
+
+        # Reconcile legacy parser errors only after EARNINGS_V2/canonical has
+        # completed.  Legacy processing_log rows remain untouched evidence.
+        try:
+            from lib.pipeline.financial_reconciliation_runtime import (
+                reconcile_ingest_run,
+            )
+            reconcile_ingest_run(
+                results=results,
+                target_items=target_items,
+                summary=summary,
+                state_db=state_db,
+                run_id=run_id,
+                decision_db_path=earnings_db_path or decision_db_path,
+                dry_run=dry_run,
+            )
+        except Exception as _recon_error:
+            logger.error("[FINANCIAL_RECONCILE] failed: %s", _recon_error, exc_info=True)
+            summary["financial_reconciliation"] = {"error": str(_recon_error)}
+            summary["old_parser_errors"] = summary.get("errors", 0)
+            summary["unresolved_financial_errors"] = summary.get("errors", 0)
+            summary["fatal_errors"] = max(1, int(summary.get("errors", 0) or 0))
 
         # ── prior_comparative realtime hook ──
         if os.environ.get("PRIOR_COMPARATIVE_REALTIME_ENABLED", "0") == "1":

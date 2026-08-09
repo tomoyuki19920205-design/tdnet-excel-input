@@ -74,10 +74,17 @@ def _run_ingest(dry_run: bool, yanoshin_timeout_sec: float | None = None) -> Ste
         # これを無視すると scheduler まで exit 0 となり、実データの欠損を
         # 正常実行として監視してしまう。
         summary = result.get("summary") or {}
-        errors = int(summary.get("errors", 0) or 0)
+        old_parser_errors = int(summary.get("errors", 0) or 0)
+        errors = int(
+            summary.get(
+                "fatal_errors",
+                summary.get("unresolved_financial_errors", old_parser_errors),
+            ) or 0
+        )
         normalized = dict(result)
         normalized.setdefault("success", summary.get("success", summary.get("succeeded", 0)))
-        normalized.setdefault("failed", errors)
+        normalized["failed"] = errors
+        normalized["old_parser_errors"] = old_parser_errors
         normalized.setdefault("skipped", summary.get("skipped", 0))
         normalized.setdefault("quarantined", summary.get("quarantined", errors))
         step.detail = normalized
@@ -85,10 +92,11 @@ def _run_ingest(dry_run: bool, yanoshin_timeout_sec: float | None = None) -> Ste
         if errors:
             logger.error(
                 "[PIPELINE] ingest completed with item failures: "
-                "total=%s success=%s errors=%s skipped=%s",
+                "total=%s success=%s fatal_errors=%s old_parser_errors=%s skipped=%s",
                 result.get("total", 0),
                 normalized["success"],
                 errors,
+                old_parser_errors,
                 normalized["skipped"],
             )
     except Exception as e:
@@ -141,12 +149,25 @@ def _run_process_realtime(dry_run: bool, max_jobs: int = 50,
     step = StepResult("process-realtime")
     st = time.monotonic()
     try:
+        try:
+            from tools.financial_recovery_retry import run as recovery_run
+            recovery = recovery_run(dry_run=dry_run, max_jobs=max_jobs)
+        except Exception as recovery_error:
+            logger.error(
+                "[PIPELINE] financial-recovery FAILED: %s", recovery_error
+            )
+            recovery = {"failed": 1, "error": str(recovery_error)}
+
         from tools.filings_process import run_realtime
         result = run_realtime(
             dry_run=dry_run, 
             max_jobs=max_jobs,
             enable_prior_comparative=enable_prior_comparative,
             prior_comparative_canary_tickers=prior_comparative_canary_tickers,
+        )
+        result["financial_recovery"] = recovery
+        result["errors"] = int(result.get("errors", 0) or 0) + int(
+            recovery.get("failed", 0) or 0
         )
         step.detail = result
         step.status = "success" if result.get("errors", 0) == 0 else "warning"

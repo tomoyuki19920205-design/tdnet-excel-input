@@ -1478,6 +1478,7 @@ def run_earnings_production(
     dry_run: bool = False,
     state_db=None,
     session=None,
+    notify_enabled: bool = True,
 ) -> EarningsProductionResult:
     """決算短信V2 本番パイプラインを実行する。
 
@@ -1494,7 +1495,9 @@ def run_earnings_production(
     from src.downloader import download_document
     from src.events.env_loader import get_project_root
 
-    if not webhook_url:
+    if not notify_enabled:
+        webhook_url = ""
+    elif not webhook_url:
         webhook_url = os.getenv("DISCORD_WEBHOOK_URL", "")
 
     result = EarningsProductionResult()
@@ -1530,7 +1533,10 @@ def run_earnings_production(
         allowlist_env_j = os.getenv("EARNINGS_SUBPROCESS_ALLOWLIST", "")
         allowlist_j = [t.strip() for t in allowlist_env_j.split(",") if t.strip()] if allowlist_env_j else []
         # ゲート: Discord / state_db 無効フラグ
-        enable_discord = os.getenv("EARNINGS_SUBPROCESS_ENABLE_DISCORD", "0") == "1"
+        enable_discord = (
+            notify_enabled
+            and os.getenv("EARNINGS_SUBPROCESS_ENABLE_DISCORD", "0") == "1"
+        )
         enable_state_update = os.getenv("EARNINGS_SUBPROCESS_ENABLE_STATE_UPDATE", "0") == "1"
 
         if (enable_real_save or dry_run) and allowlist_j:
@@ -2787,7 +2793,7 @@ def run_earnings_production(
                 result.saved_count += 1
 
             # ---- Phase 0-3: 通知条件判定 ----
-            if should_notify_earnings(earnings.sales_yoy, earnings.op_yoy):
+            if notify_enabled and should_notify_earnings(earnings.sales_yoy, earnings.op_yoy):
                 if not dry_run and webhook_url:
                     sent = send_earnings_discord(webhook_url, full_message)
                     if sent:

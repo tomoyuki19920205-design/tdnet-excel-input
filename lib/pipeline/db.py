@@ -254,7 +254,7 @@ def supabase_upsert(
     last_error: str | None = None
     last_status = 200
 
-    _RETRYABLE_STATUSES = {502, 503, 504}
+    _RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
 
     for batch_idx, batch in enumerate(batches, 1):
         batch_t0 = _time.monotonic()
@@ -284,6 +284,17 @@ def supabase_upsert(
                     _time.sleep(2 ** attempt)
                     continue
                 last_error = f"timeout: {e}"
+                last_status = 0
+                break
+            except _requests_mod.exceptions.RequestException as e:
+                logger.warning(
+                    f"[db] UPSERT {table} batch {batch_idx}/{total_batches} "
+                    f"network error (attempt {attempt}/{max_retries}): {e}"
+                )
+                if attempt < max_retries:
+                    _time.sleep(2 ** attempt)
+                    continue
+                last_error = f"network error: {e}"
                 last_status = 0
                 break
             except Exception as e:

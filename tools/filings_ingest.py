@@ -75,7 +75,7 @@ def run(
     logger.info(
         f"[filings_ingest] done "
         f"total={result.get('total', 0)} "
-        f"success={summary.get('succeeded', 0)} "
+        f"success={summary.get('succeeded', summary.get('success', 0))} "
         f"errors={summary.get('errors', 0)}"
     )
 
@@ -94,6 +94,30 @@ def _enqueue_disclosure_ids(ingest_result: dict) -> None:
     inserted / updated の結果のみ対象。
     """
     results = ingest_result.get("results", [])
+    from lib.pipeline.db import load_env
+    from lib.pipeline.financial_recovery_enqueue import (
+        enqueue_unresolved_financials,
+    )
+    load_env(_PROJECT_ROOT)
+    financial_queue = enqueue_unresolved_financials(ingest_result)
+    summary = ingest_result.setdefault("summary", {})
+    summary["financial_recovery_queue"] = financial_queue
+    reconciliation = summary.get("financial_reconciliation") or {}
+    logger.info(
+        "[filings_ingest] financial final summary "
+        "old_parser_success=%s old_parser_errors=%s old_parser_skipped=%s recovered_by_v2=%s "
+        "supplemental_nonfinancial=%s unresolved_financial=%s "
+        "retry_enqueued=%s retry_existing=%s",
+        reconciliation.get("old_parser_success", 0),
+        reconciliation.get("old_parser_errors", 0),
+        reconciliation.get("old_parser_skipped", 0),
+        reconciliation.get("recovered_by_earnings_v2", 0),
+        reconciliation.get("supplemental_or_nonfinancial", 0),
+        reconciliation.get("unresolved_financial", 0),
+        financial_queue.get("enqueued", 0),
+        financial_queue.get("duplicates", 0),
+    )
+
     if not results:
         return
 

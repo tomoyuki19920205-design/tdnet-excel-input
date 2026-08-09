@@ -20,11 +20,17 @@ from __future__ import annotations
 #   4: pdf / pdf_table
 #   5: excel_legacy / legacy_excel
 
+# Manually verified official-PDF repairs retain explicit provenance. A later
+# official correction outranks the superseded J-Quants row; an uncorrected
+# official PDF stays at normal TDnet priority.
+
 SOURCE_PRIORITY: dict[str, int] = {
     # ── financials source ──
     "summary_xbrl": 1,
     "attachment_xbrl": 2,
     "jquants": 2,        # J-Quants: TSE公式集計データ → attachment_xbrl と同格
+    "official_pdf_correction": 1,
+    "official_pdf": 3,
     "html_table": 3,
     "pdf_table": 4,
     "legacy_excel": 5,

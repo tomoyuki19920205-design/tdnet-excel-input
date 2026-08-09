@@ -219,6 +219,15 @@ def main() -> int:
         ], timeout_sec=300)
         steps.append(step)
 
+        # Pending financial gaps are rechecked only after J-Quants sync.  An
+        # existing canonical key resolves the job without another write.
+        step = run_step("financial-recovery", [
+            PYTHON, "-X", "utf8",
+            "tools/financial_recovery_retry.py",
+            *dry_flag,
+        ], timeout_sec=300)
+        steps.append(step)
+
         # ── Step 5a: extract_per_share_from_raw（jquants.db raw_json → per_share_data） ──
         logger.info("[PER_SHARE] extract start")
         step = run_step("per-share-extract", [

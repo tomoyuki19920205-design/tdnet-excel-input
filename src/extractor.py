@@ -93,7 +93,26 @@ _XBRL_TAG_MAP = {
     "OperatingProfit": "operating_profit",
     "OperatingIncomeIFRS": "operating_profit",
     "OperatingProfitLossIFRS": "operating_profit",
-    "OrdinaryIncome": "operating_profit",    # 経常利益（営業利益なし時のFB）
+    "OrdinaryIncome": "ordinary_profit",
+    "ProfitLoss": "net_income",
+    "NetIncome": "net_income",
+    "ProfitAttributableToOwnersOfParent": "net_income",
+    "ProfitLossAttributableToOwnersOfParent": "net_income",
+    "ProfitAttributableToOwnersOfParentIFRS": "net_income",
+    "ProfitLossAttributableToOwnersOfParentIFRS": "net_income",
+}
+
+
+_XBRL_TAG_PRIORITY = {
+    # Consolidated statements may expose both total profit/loss and profit
+    # attributable to owners of the parent for the same duration/context.
+    # Canonical net income must prefer the parent-attributable concept.
+    "ProfitLoss": 10,
+    "NetIncome": 20,
+    "ProfitAttributableToOwnersOfParent": 30,
+    "ProfitLossAttributableToOwnersOfParent": 30,
+    "ProfitAttributableToOwnersOfParentIFRS": 30,
+    "ProfitLossAttributableToOwnersOfParentIFRS": 30,
 }
 
 
@@ -216,6 +235,8 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
         "gross_profit": None,
         "selling_general_and_administrative_expenses": None,
         "operating_profit": None,
+        "ordinary_profit": None,
+        "net_income": None,
         "cost_of_sales": None,
     }
     value_priority: dict[str, tuple[int, bool]] = {}
@@ -237,7 +258,9 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
                 val = normalize_number(elem.text or "")
                 if val is not None:
                     is_consol = _is_consolidated_preferred(context)
-                    tag_prio = 0 if is_fallback else 10
+                    tag_prio = (
+                        0 if is_fallback else _XBRL_TAG_PRIORITY.get(tag_local, 10)
+                    )
                     new_prio = (tag_prio, is_consol)
                     current_prio = value_priority.get(field_name, (-1, False))
                     if values[field_name] is None or new_prio > current_prio:
@@ -253,6 +276,8 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
             gross_profit=values["gross_profit"],
             selling_general_and_administrative_expenses=values["selling_general_and_administrative_expenses"],
             operating_profit=values["operating_profit"],
+            ordinary_profit=values["ordinary_profit"],
+            net_income=values["net_income"],
             source_unit="円",
             confidence="high",
             field_sources=sources,
@@ -261,7 +286,15 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
         return result
 
     # --- パス2: iXBRLモード（ix:nonFraction の name 属性）---
-    values = {"sales": None, "gross_profit": None, "selling_general_and_administrative_expenses": None, "operating_profit": None, "cost_of_sales": None}
+    values = {
+        "sales": None,
+        "gross_profit": None,
+        "selling_general_and_administrative_expenses": None,
+        "operating_profit": None,
+        "ordinary_profit": None,
+        "net_income": None,
+        "cost_of_sales": None,
+    }
     value_priority = {}
     detected_unit = "円"
     unknown_tags: set[str] = set()
@@ -324,7 +357,9 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
                 pass
 
         is_consol = _is_consolidated_preferred(context)
-        tag_prio = 0 if is_fallback else 10
+        tag_prio = (
+            0 if is_fallback else _XBRL_TAG_PRIORITY.get(concept_local, 10)
+        )
         new_prio = (tag_prio, is_consol)
         current_prio = value_priority.get(field_name, (-1, False))
         if values[field_name] is None or new_prio > current_prio:
@@ -349,6 +384,8 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
         sales=values["sales"],
         gross_profit=values["gross_profit"],
         operating_profit=values["operating_profit"],
+        ordinary_profit=values["ordinary_profit"],
+        net_income=values["net_income"],
         source_unit=detected_unit,
         confidence="high",
         field_sources=sources,
@@ -447,6 +484,10 @@ def _extract_from_xbrl(xbrl_path: str) -> ExtractedFinancials | None:
                 missing_fields.append("sales")
             if summary_result.operating_profit is None:
                 missing_fields.append("operating_profit")
+            if summary_result.ordinary_profit is None:
+                missing_fields.append("ordinary_profit")
+            if summary_result.net_income is None:
+                missing_fields.append("net_income")
 
             if missing_fields:
                 pl_candidates = [c for c in candidates if _is_pl_attachment(c)]
@@ -487,6 +528,16 @@ def _extract_from_xbrl(xbrl_path: str) -> ExtractedFinancials | None:
                             summary_result.operating_profit = pl_result.operating_profit
                             summary_result.field_sources["operating_profit"] = "attachment_xbrl"
                             logger.info(f"[XBRL] Attachment補完: operating_profit={pl_result.operating_profit}")
+
+                        if "ordinary_profit" in missing_fields and pl_result.ordinary_profit is not None:
+                            summary_result.ordinary_profit = pl_result.ordinary_profit
+                            summary_result.field_sources["ordinary_profit"] = "attachment_xbrl"
+                            logger.info(f"[XBRL] Attachment補完: ordinary_profit={pl_result.ordinary_profit}")
+
+                        if "net_income" in missing_fields and pl_result.net_income is not None:
+                            summary_result.net_income = pl_result.net_income
+                            summary_result.field_sources["net_income"] = "attachment_xbrl"
+                            logger.info(f"[XBRL] Attachment補完: net_income={pl_result.net_income}")
 
                         break  # 最初に成功したPL Attachmentで補完完了
                     except Exception as e:
@@ -678,6 +729,7 @@ def _extract_order_metrics_from_ocr(
 def _extract_from_pdf(pdf_path: str) -> tuple[ExtractedFinancials | None, str]:
     """PDFファイルから決算数値を抽出する（OCRフォールバック付き）"""
     try:
+        tables = []
         with pdfplumber.open(pdf_path) as pdf:
             # 最初の3ページからテキスト抽出
             text = ""
@@ -685,6 +737,11 @@ def _extract_from_pdf(pdf_path: str) -> tuple[ExtractedFinancials | None, str]:
                 page_text = page.extract_text()
                 if page_text:
                     text += page_text + "\n"
+                try:
+                    tables.extend(page.extract_tables() or [])
+                except Exception:
+                    # Text extraction remains available if table detection fails.
+                    pass
 
         # ── ① native textが空 → OCRでテキスト再取得 ──
         ocr_used = False
@@ -716,6 +773,21 @@ def _extract_from_pdf(pdf_path: str) -> tuple[ExtractedFinancials | None, str]:
         gross_profit = _extract_value_near_keyword(lines, GROSS_PROFIT_KEYWORDS)
         operating_profit = _extract_value_near_keyword(lines, OP_KEYWORDS)
 
+        ordinary_profit = None
+        net_income = None
+
+        # Structured table cells are more reliable than flattened text for
+        # compact TDnet summaries (including 222A's merged current/prior cells).
+        from .pdf_financial_table import extract_actual_financial_table
+        table_values = extract_actual_financial_table(tables)
+        if table_values:
+            sales = table_values.get("sales", sales)
+            operating_profit = table_values.get(
+                "operating_profit", operating_profit
+            )
+            ordinary_profit = table_values.get("ordinary_profit")
+            net_income = table_values.get("net_income")
+            logger.info("[PDF_TABLE] extracted metrics=%s", sorted(table_values))
         # ── ② native数値抽出失敗 → OCRテキストで再抽出 ──
         if sales is None and operating_profit is None and not ocr_used:
             if _ocr_enabled():
@@ -745,12 +817,16 @@ def _extract_from_pdf(pdf_path: str) -> tuple[ExtractedFinancials | None, str]:
 
         source_label = "pdf_ocr" if ocr_used else "pdf"
         sources = {}
-        if sales is not None: sources["sales"] = source_label
-        if gross_profit is not None: sources["gross_profit"] = source_label
-        if operating_profit is not None: sources["operating_profit"] = source_label
+        values = {"sales": sales, "gross_profit": gross_profit, "operating_profit": operating_profit,
+                  "ordinary_profit": ordinary_profit, "net_income": net_income}
+        for field, value in values.items():
+            if value is not None:
+                sources[field] = "pdf_table" if field in table_values else source_label
         return ExtractedFinancials(
             sales=sales,
             gross_profit=gross_profit,
+            ordinary_profit=ordinary_profit,
+            net_income=net_income,
             operating_profit=operating_profit,
             source_unit=scale_str,
             confidence="low" if ocr_used else "medium",
@@ -1162,7 +1238,9 @@ def extract_financials(
             logger.info(f"[抽出] XBRL抽出成功: sales={result.sales}, gp={result.gross_profit}, op={result.operating_profit}")
 
             # === per-field PDF 補完 ===
-            _PL_FIELDS = ("sales", "gross_profit", "operating_profit")
+            _PL_FIELDS = (
+                "sales", "gross_profit", "operating_profit", "ordinary_profit", "net_income",
+            )
             missing = [f for f in _PL_FIELDS if getattr(result, f) is None]
             if missing and _is_tanshin_title(title) and Path(doc_path).exists():
                 logger.info(f"[補完] XBRL欠損フィールド={missing}, PDF補完を試行")

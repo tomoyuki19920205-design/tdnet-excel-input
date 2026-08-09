@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
-from unittest.mock import patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -161,3 +161,128 @@ class TestLoadEnv:
         # cleanup
         os.environ.pop("TEST_DB_PRIO", None)
         db_mod._env_loaded = False
+
+
+class TestSupabaseBatchRetry:
+    @staticmethod
+    def _response(status: int, text: str = ""):
+        response = MagicMock()
+        response.status_code = status
+        response.text = text
+        response.headers = {}
+        return response
+
+    def test_rate_limit_batch_is_retried(self):
+        from lib.pipeline.db import supabase_upsert
+
+        post = MagicMock(side_effect=[
+            self._response(429, "rate limited"),
+            self._response(201),
+        ])
+        config = {
+            "rest_url": "https://example.invalid/rest/v1",
+            "headers": {"apikey": "service", "Authorization": "Bearer service"},
+        }
+
+        with patch("requests.post", post), patch("time.sleep"):
+            result = supabase_upsert(
+                "canonical_financials",
+                [{"source_row_key": "a"}],
+                config=config,
+                on_conflict="source_row_key",
+                max_retries=3,
+            )
+
+        assert result["ok"] is True
+        assert result["batches_succeeded"] == 1
+        assert post.call_count == 2
+
+    def test_connection_error_batch_is_retried(self):
+        import requests
+        from lib.pipeline.db import supabase_upsert
+
+        post = MagicMock(side_effect=[
+            requests.ConnectionError("temporary disconnect"),
+            self._response(201),
+        ])
+        config = {
+            "rest_url": "https://example.invalid/rest/v1",
+            "headers": {"apikey": "service", "Authorization": "Bearer service"},
+        }
+
+        with patch("requests.post", post), patch("time.sleep"):
+            result = supabase_upsert(
+                "canonical_financials", [{"source_row_key": "a"}],
+                config=config, on_conflict="source_row_key", max_retries=3,
+            )
+        assert result["ok"] is True
+        assert post.call_count == 2
+
+    def test_timeout_then_retry_success_is_idempotent(self):
+        import requests
+        from lib.pipeline.db import supabase_upsert
+
+        payload = {"source_row_key": "2026-08-07:7567", "sales": 1}
+        post = MagicMock(side_effect=[
+            requests.Timeout("15:42 canonical_financials timeout"),
+            self._response(201),
+        ])
+        sleep = MagicMock()
+        config = {
+            "rest_url": "https://example.invalid/rest/v1",
+            "headers": {"apikey": "service", "Authorization": "Bearer service"},
+        }
+
+        with patch("requests.post", post), patch("time.sleep", sleep):
+            result = supabase_upsert(
+                "canonical_financials", payload,
+                config=config, on_conflict="source_row_key", max_retries=3,
+            )
+
+        assert result == {
+            "status": 201,
+            "ok": True,
+            "count": 1,
+            "error": None,
+            "batches_attempted": 1,
+            "batches_succeeded": 1,
+            "batches_failed": 0,
+        }
+        assert post.call_count == 2
+        assert post.call_args_list[0].kwargs["json"] == payload
+        assert post.call_args_list[1].kwargs["json"] == payload
+        assert post.call_args_list[0].kwargs["params"] == {
+            "on_conflict": "source_row_key"
+        }
+        assert "resolution=merge-duplicates" in post.call_args_list[0].kwargs["headers"]["Prefer"]
+        sleep.assert_called_once_with(2)
+
+    def test_timeout_retry_limit_returns_explicit_failure(self):
+        import requests
+        from lib.pipeline.db import supabase_upsert
+
+        post = MagicMock(
+            side_effect=requests.Timeout("15:42 canonical_financials timeout")
+        )
+        sleep = MagicMock()
+        config = {
+            "rest_url": "https://example.invalid/rest/v1",
+            "headers": {"apikey": "service", "Authorization": "Bearer service"},
+        }
+
+        with patch("requests.post", post), patch("time.sleep", sleep):
+            result = supabase_upsert(
+                "canonical_financials",
+                [{"source_row_key": "a"}, {"source_row_key": "b"}],
+                config=config, on_conflict="source_row_key", max_retries=3,
+            )
+
+        assert result["ok"] is False
+        assert result["status"] == 0
+        assert result["count"] == 0
+        assert result["batches_attempted"] == 1
+        assert result["batches_succeeded"] == 0
+        assert result["batches_failed"] == 1
+        assert "timeout" in result["error"]
+        assert post.call_count == 3
+        assert sleep.call_args_list == [call(2), call(4)]
