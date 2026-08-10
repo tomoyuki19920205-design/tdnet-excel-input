@@ -211,6 +211,8 @@ WITH latest AS (
                    type_of_current_period
       ORDER BY disclosed_date DESC
     ) AS rn,
+    disclosed_date,
+    type_of_document,
     net_sales,
     gross_profit,
     operating_profit
@@ -238,12 +240,15 @@ field_best AS (
        AND s.type_of_current_period = latest.type_of_current_period
        AND s.gross_profit IS NOT NULL
      ORDER BY s.rn LIMIT 1) AS gross_profit,
+    -- Actual OP follows the latest effective financial-statement disclosure,
+    -- including an explicit NULL. Forecast-revision documents are supplemental
+    -- and must neither tombstone nor supply the actual historical PL value.
     (SELECT s.operating_profit FROM latest s
      WHERE s.local_code = latest.local_code
        AND s.current_fiscal_year_end_date = latest.current_fiscal_year_end_date
        AND s.type_of_current_period = latest.type_of_current_period
-       AND s.operating_profit IS NOT NULL
-     ORDER BY s.rn LIMIT 1) AS operating_profit
+       AND s.type_of_document LIKE '%FinancialStatements%'
+     ORDER BY s.disclosed_date DESC, s.rn LIMIT 1) AS operating_profit
   FROM latest
   WHERE rn = 1
 )

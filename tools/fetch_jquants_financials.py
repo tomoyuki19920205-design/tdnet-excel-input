@@ -356,8 +356,10 @@ def _row_to_db(item: dict) -> dict | None:
 # ============================================================
 # INSERT + 条件付き UPDATE 方式:
 #   - 新規行は INSERT
-#   - 既存行は UPDATE。ただし gross_profit / net_sales / operating_profit は
-#     「新規値が NULL かつ既存値が NOT NULL」の場合は既存値を保持（COALESCE）。
+#   - 既存行は UPDATE。gross_profit / net_sales は新規値が NULL の場合、
+#     既存値を保持する。
+#   - operating_profit は latest-effective correction の明示的な NULL を
+#     保持するため、OP の値（NULL を含む）で置換する。
 #   - raw_json と fetched_at は常に最新値で上書きする。
 _INSERT_SQL = """
 INSERT OR IGNORE INTO jquants_financials_normalized
@@ -378,7 +380,7 @@ SET
     type_of_document  = :type_of_document,
     net_sales         = COALESCE(:net_sales,        net_sales),
     gross_profit      = COALESCE(:gross_profit,     gross_profit),
-    operating_profit  = COALESCE(:operating_profit, operating_profit),
+    operating_profit  = :operating_profit,
     raw_json          = :raw_json,
     fetched_at        = :fetched_at
 WHERE
@@ -386,14 +388,15 @@ WHERE
     AND disclosed_date           = :disclosed_date
     AND current_fiscal_year_end_date = :current_fiscal_year_end_date
     AND type_of_current_period   = :type_of_current_period
+    AND type_of_document         = :type_of_document
 """
 
 
 def upsert_rows(conn: sqlite3.Connection, rows: list[dict]) -> int:
     """rows を jquants_financials_normalized に upsert。戻り値は成功件数。
 
-    既存行の gross_profit / net_sales / operating_profit は
-    新規値が NULL の場合に既存値を保持する（NULL 上書き防止）。
+    既存行の gross_profit / net_sales は新規値が NULL の場合に既存値を保持する。
+    operating_profit は訂正開示の NULL を有効な状態として上書きする。
     """
     count = 0
     for row in rows:
@@ -401,7 +404,7 @@ def upsert_rows(conn: sqlite3.Connection, rows: list[dict]) -> int:
             # 1) 新規行なら INSERT（既存行は無視）
             conn.execute(_INSERT_SQL, row)
             # 2) 既存行（INSERT が無視された場合も含む）を UPDATE
-            #    COALESCE により NULL → 既存値保持
+            #    sales / gross_profit は COALESCE、OP は NULL を含めて置換
             conn.execute(_UPDATE_SQL, row)
             count += 1
         except Exception as e:

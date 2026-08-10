@@ -39,14 +39,15 @@ def _create_test_db(rows: list[dict]) -> str:
         conn.execute("""
             INSERT INTO jquants_financials_normalized
             (local_code, disclosed_date, current_fiscal_year_end_date,
-             type_of_current_period, net_sales, gross_profit, operating_profit,
-             fetched_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             type_of_current_period, type_of_document,
+             net_sales, gross_profit, operating_profit, fetched_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             r.get("local_code", "23010"),
             r["disclosed_date"],
             r["current_fiscal_year_end_date"],
             r["type_of_current_period"],
+            r.get("type_of_document", "FYFinancialStatements_Consolidated_JP"),
             r.get("net_sales"),
             r.get("gross_profit"),
             r.get("operating_profit"),
@@ -207,7 +208,7 @@ class TestFieldLevelCoalesceMerge:
             results = _run_sync_query(db)
             r = [x for x in results if x["ticker"] == "99990"][0]
             assert r["gross_profit"] == 5000000000
-            assert r["operating_profit"] == 2000000000
+            assert r["operating_profit"] is None
         finally:
             os.unlink(db)
 
@@ -599,7 +600,7 @@ class TestExistingAttachmentFallbackRegression:
             r = results[0]
             assert r["sales"] == 101000000000, "latest sales should be used"
             assert r["gross_profit"] == 30000000000, "first filing's gp should be kept"
-            assert r["operating_profit"] == 10500000000, "second filing's OP should be used"
+            assert r["operating_profit"] is None, "latest financial statement NULL must tombstone older OP"
         finally:
             os.unlink(db)
 
