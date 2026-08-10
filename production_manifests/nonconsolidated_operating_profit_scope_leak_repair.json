@@ -1,0 +1,53 @@
+{
+  "scope": "exact_nonconsolidated_operating_profit_contamination_repair",
+  "generated_at_jst": "2026-08-11",
+  "expected_delete_count": 3,
+  "rows": [
+    {
+      "id": 42236446,
+      "ticker": "8053",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "source": "summary_xbrl",
+      "value": -36812.0,
+      "source_row_key": "cf|8053|2026-03-31|FY|operating_profit|summary_xbrl|",
+      "official_disclosure_no": "20260430515781",
+      "official_package_sha256": "714405ecea9d358506c8c9068ec6f2ec0b3448717497377329f4c78e5bfd3ec7",
+      "official_qname": "tse-ed-t:OperatingIncome",
+      "official_context": "CurrentYearDuration_NonConsolidatedMember_ResultMember",
+      "official_value_jpy": -36812000000
+    },
+    {
+      "id": 42236358,
+      "ticker": "8253",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "source": "summary_xbrl",
+      "value": 55536.0,
+      "source_row_key": "cf|8253|2026-03-31|FY|operating_profit|summary_xbrl|",
+      "official_disclosure_no": "20260604563577",
+      "official_package_sha256": "6a724d4e3e04180668f19184ba526965ed2a33736be152c4ebcd1f65761057f7",
+      "official_qname": "jppfs_cor:OperatingIncome",
+      "official_context": "CurrentYearDuration_NonConsolidatedMember",
+      "official_value_jpy": 55536000000
+    },
+    {
+      "id": 42235659,
+      "ticker": "9984",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "source": "summary_xbrl",
+      "value": 1952956.0,
+      "source_row_key": "cf|9984|2026-03-31|FY|operating_profit|summary_xbrl|",
+      "official_disclosure_no": "20260515538975",
+      "official_package_sha256": "212444608b902928b655f6430dd3cfc8103221b0929ea323d35eea0fc082139c",
+      "official_qname": "tse-ed-t:OperatingIncome",
+      "official_context": "CurrentYearDuration_NonConsolidatedMember_ResultMember",
+      "official_value_jpy": 1952956000000
+    }
+  ],
+  "manifest_sha256": "c8875bd7739fcc82a8d4838013758adec0cce68a3f62366a9db19fa4ed85144f"
+}

@@ -26,6 +26,10 @@ from .year_parser import (
     detect_all_quarters,
     parse_reiwa,
 )
+from .xbrl_context_scope import (
+    is_actual_consolidated_duration_context,
+    parse_context_metadata,
+)
 from .analysis.header_analysis import normalize_header
 
 logger = logging.getLogger("tdnet")
@@ -229,6 +233,7 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
     """
     xml_str = read_xbrl_bytes(raw)
     root = ET.fromstring(xml_str)
+    contexts = parse_context_metadata(root)
 
     values: dict[str, int | None] = {
         "sales": None,
@@ -255,6 +260,11 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
             is_fallback = primary_metric is None and fallback_metric is not None
             context = elem.get("contextRef", "")
             if _is_current_duration(context):
+                if (
+                    field_name == "operating_profit"
+                    and not is_actual_consolidated_duration_context(context, contexts)
+                ):
+                    continue
                 val = normalize_number(elem.text or "")
                 if val is not None:
                     is_consol = _is_consolidated_preferred(context)
@@ -334,6 +344,11 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
         if not _is_current_duration(context):
             continue
         if "ForecastMember" in context or "LowerMember" in context or "UpperMember" in context:
+            continue
+        if (
+            field_name == "operating_profit"
+            and not is_actual_consolidated_duration_context(context, contexts)
+        ):
             continue
 
         text = (elem.text or "").strip()

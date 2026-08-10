@@ -23,10 +23,15 @@ import os
 import re
 import zipfile
 from dataclasses import dataclass, field
-from src.events.pipeline_context import EarningsExtractionEvidence
 from pathlib import Path
 from typing import Optional
 from xml.etree import ElementTree as ET
+
+from src.events.pipeline_context import EarningsExtractionEvidence
+from src.xbrl_context_scope import (
+    is_actual_consolidated_duration_context,
+    parse_context_metadata,
+)
 
 logger = logging.getLogger("summary_financials")
 
@@ -349,12 +354,6 @@ def _is_consolidated_preferred(ctx: str) -> bool:
     return "Consolidated" in ctx and "NonConsolidated" not in ctx
 
 
-_ACTUAL_SCOPE_REJECT_TOKENS = (
-    "Forecast", "Estimate", "Lower", "Upper", "NonConsolidated",
-)
-_PBT_ALLOWED_DIMENSION_MEMBERS = {"ConsolidatedMember", "ResultMember"}
-
-
 def _local_name(name: str) -> str:
     if name.startswith("{") and "}" in name:
         return name.split("}", 1)[1]
@@ -373,38 +372,8 @@ def _namespace_map(raw: bytes) -> dict[str, str]:
 
 
 def _context_metadata(root: ET.Element) -> dict[str, dict[str, object]]:
-    """Return duration/dimension details needed for strict actual PBT scope."""
-    result: dict[str, dict[str, object]] = {}
-    for elem in root.iter():
-        if _local_name(str(elem.tag)) != "context":
-            continue
-        context_id = elem.get("id", "")
-        if not context_id:
-            continue
-        start = end = instant = ""
-        members: list[str] = []
-        for child in elem.iter():
-            local = _local_name(str(child.tag))
-            text = (child.text or "").strip()
-            if local == "startDate":
-                start = text
-            elif local == "endDate":
-                end = text
-            elif local == "instant":
-                instant = text
-            elif local in ("explicitMember", "typedMember"):
-                member = text.split(":")[-1] if text else ""
-                if member:
-                    members.append(member)
-                elif local == "typedMember":
-                    members.append("__typed_member__")
-        result[context_id] = {
-            "start": start,
-            "end": end,
-            "instant": instant,
-            "members": members,
-        }
-    return result
+    """Compatibility wrapper around the shared context parser."""
+    return parse_context_metadata(root)
 
 
 def _is_actual_consolidated_pbt_context(
@@ -417,34 +386,18 @@ def _is_actual_consolidated_pbt_context(
     consolidated statements commonly use the dimensionless CurrentYTDDuration
     context, so a dimensionless standard duration context is also accepted.
     """
-    if not ctx or any(token in ctx for token in _ACTUAL_SCOPE_REJECT_TOKENS):
-        return False
     if _classify_context(ctx) == "unknown":
         return False
+    return is_actual_consolidated_duration_context(ctx, contexts)
 
-    metadata = contexts.get(ctx)
-    if metadata is None:
-        # Synthetic/test iXBRL may omit context definitions. Keep the fallback
-        # strict enough to reject member/segment contexts while accepting the
-        # standard detailed-statement duration ids.
-        if "Member" in ctx:
-            return (
-                "ConsolidatedMember" in ctx
-                and "ResultMember" in ctx
-                and all(token not in ctx for token in _ACTUAL_SCOPE_REJECT_TOKENS)
-            )
-        return "Segment" not in ctx and "Axis" not in ctx
 
-    if not metadata.get("start") or not metadata.get("end") or metadata.get("instant"):
+def _is_actual_consolidated_operating_profit_context(
+    ctx: str,
+    contexts: dict[str, dict[str, object]],
+) -> bool:
+    if _classify_context(ctx) == "unknown":
         return False
-    members = set(metadata.get("members") or [])
-    if any("NonConsolidated" in member for member in members):
-        return False
-    if not members:
-        return True
-    return members.issubset(_PBT_ALLOWED_DIMENSION_MEMBERS) and {
-        "ConsolidatedMember", "ResultMember"
-    }.issubset(members)
+    return is_actual_consolidated_duration_context(ctx, contexts)
 
 
 def _detect_quarter_from_context(ctx: str) -> str:
@@ -595,6 +548,8 @@ def _parse_xbrl_multi_period(raw: bytes, include_evidence: bool = False) -> dict
             continue
         if field_name == "profit_before_tax" and not _is_actual_consolidated_pbt_context(ctx, contexts):
             continue
+        if field_name == "operating_profit" and not _is_actual_consolidated_operating_profit_context(ctx, contexts):
+            continue
 
         val_text = elem.text or ""
         from src.utils import normalize_number
@@ -669,6 +624,8 @@ def _parse_xbrl_multi_period(raw: bytes, include_evidence: bool = False) -> dict
         if period_type == "unknown":
             continue
         if field_name == "profit_before_tax" and not _is_actual_consolidated_pbt_context(ctx, contexts):
+            continue
+        if field_name == "operating_profit" and not _is_actual_consolidated_operating_profit_context(ctx, contexts):
             continue
 
         text = (elem.text or "").strip()
