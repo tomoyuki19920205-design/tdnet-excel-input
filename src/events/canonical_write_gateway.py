@@ -6,12 +6,14 @@ ALLOWED_SOURCES = {
     'jquants_earnings_summary',
     'jquants_forecast_fy',
     'jquants_nxf',
-    'legacy_excel'
+    'legacy_excel',
+    'tdnet_xbrl',
 }
 
 ALLOWED_METRICS = {
     'sales',
     'operating_profit',
+    'profit_before_tax',
     'ordinary_profit',
     'net_income',
     'gross_profit',

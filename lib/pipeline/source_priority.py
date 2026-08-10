@@ -27,6 +27,7 @@ from __future__ import annotations
 SOURCE_PRIORITY: dict[str, int] = {
     # ── financials source ──
     "summary_xbrl": 1,
+    "tdnet_xbrl": 1,
     "attachment_xbrl": 2,
     "jquants": 2,        # J-Quants: TSE公式集計データ → attachment_xbrl と同格
     "official_pdf_correction": 1,

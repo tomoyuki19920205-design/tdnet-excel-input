@@ -79,6 +79,8 @@ class EarningsExtractionEvidence:
     metric: str
     value: Optional[float]
     tag_name: Optional[str] = None
+    qname: Optional[str] = None
+    namespace: Optional[str] = None
     context_ref: Optional[str] = None
     unit: Optional[str] = None
     scale: Optional[int] = None
@@ -114,7 +116,10 @@ class CanonicalWritePlan:
         certain sources (e.g. jquants, jquants_nxf, legacy_excel, jquants_forecast_fy).
         tdnet may be ignored by the view or replaced if its priority/format is mismatched.
         """
-        supported = {'jquants', 'jquants_nxf', 'jquants_forecast_fy', 'legacy_excel'}
+        supported = {
+            'jquants', 'jquants_nxf', 'jquants_forecast_fy',
+            'legacy_excel', 'tdnet_xbrl',
+        }
         return source in supported
 
     def validate_and_prepare(self):
