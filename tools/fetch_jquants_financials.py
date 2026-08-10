@@ -59,6 +59,8 @@ if _PROJECT_ROOT not in sys.path:
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from src.jquants.financial_details import normalize_actual_consolidated_pbt
+
 # Windows cp932 対策
 if sys.stdout and hasattr(sys.stdout, "encoding"):
     if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
@@ -275,6 +277,7 @@ CREATE TABLE IF NOT EXISTS jquants_financials_normalized (
     net_sales                     INTEGER,
     gross_profit                  INTEGER,
     operating_profit              INTEGER,
+    profit_before_tax             INTEGER,
     raw_json                      TEXT,
     fetched_at                    TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -283,6 +286,11 @@ CREATE TABLE IF NOT EXISTS jquants_financials_normalized (
 def _ensure_table(conn: sqlite3.Connection) -> None:
     """テーブルが存在しない場合のみ作成する。UNIQUE INDEX は既存テーブルにすでに存在する可能性があるためスキップ。"""
     conn.execute(_CREATE_TABLE_SQL)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(jquants_financials_normalized)")}
+    if "profit_before_tax" not in columns:
+        conn.execute(
+            "ALTER TABLE jquants_financials_normalized ADD COLUMN profit_before_tax INTEGER"
+        )
     conn.commit()
 
 
@@ -335,6 +343,7 @@ def _row_to_db(item: dict) -> dict | None:
     # V2 /fins/summary に GrossProfit フィールドは存在しない。
     # ただし旧スクリプトが raw_json に "_gross_profit" を追記していた場合はそれを採用する。
     gross_profit = _safe_int(item.get("_gross_profit"))
+    profit_before_tax = _safe_int(item.get("_profit_before_tax"))
 
     return {
         "local_code": local_code,
@@ -346,6 +355,7 @@ def _row_to_db(item: dict) -> dict | None:
         "net_sales": net_sales,
         "gross_profit": gross_profit,
         "operating_profit": operating_profit,
+        "profit_before_tax": profit_before_tax,
         "raw_json": json.dumps(item, ensure_ascii=False),
         "fetched_at": datetime.now(JST).isoformat(),
     }
@@ -365,12 +375,12 @@ _INSERT_SQL = """
 INSERT OR IGNORE INTO jquants_financials_normalized
     (local_code, disclosed_date, current_fiscal_year_end_date,
      type_of_current_period, type_of_document,
-     net_sales, gross_profit, operating_profit,
+     net_sales, gross_profit, operating_profit, profit_before_tax,
      raw_json, fetched_at)
 VALUES
     (:local_code, :disclosed_date, :current_fiscal_year_end_date,
      :type_of_current_period, :type_of_document,
-     :net_sales, :gross_profit, :operating_profit,
+     :net_sales, :gross_profit, :operating_profit, :profit_before_tax,
      :raw_json, :fetched_at)
 """
 
@@ -381,6 +391,7 @@ SET
     net_sales         = COALESCE(:net_sales,        net_sales),
     gross_profit      = COALESCE(:gross_profit,     gross_profit),
     operating_profit  = :operating_profit,
+    profit_before_tax = COALESCE(:profit_before_tax, profit_before_tax),
     raw_json          = :raw_json,
     fetched_at        = :fetched_at
 WHERE
@@ -398,8 +409,10 @@ def upsert_rows(conn: sqlite3.Connection, rows: list[dict]) -> int:
     既存行の gross_profit / net_sales は新規値が NULL の場合に既存値を保持する。
     operating_profit は訂正開示の NULL を有効な状態として上書きする。
     """
+    _ensure_table(conn)
     count = 0
     for row in rows:
+        row = {**row, "profit_before_tax": row.get("profit_before_tax")}
         try:
             # 1) 新規行なら INSERT（既存行は無視）
             conn.execute(_INSERT_SQL, row)
@@ -576,6 +589,51 @@ def _fetch_details_gross_profit(
     return None
 
 
+def _fetch_details_actual_metrics(
+    session: requests.Session,
+    auth_headers: dict,
+    summary_item: dict,
+) -> dict[str, int | None]:
+    """Fetch the matching details disclosure and extract strict actual metrics."""
+    local_code = str(summary_item.get("Code") or "")
+    disclosed_date = str(summary_item.get("DiscDate") or "")
+    response = _api_get(
+        session,
+        _DETAILS_ENDPOINT,
+        {"code": local_code, "date": disclosed_date},
+        auth_headers,
+    )
+    if response.status_code != 200:
+        logger.warning(
+            f"[DETAILS] HTTP {response.status_code}: "
+            f"local_code={local_code} date={disclosed_date}"
+        )
+        return {"gross_profit": None, "profit_before_tax": None}
+    items = response.json().get("data") or []
+    disclosure_number = str(summary_item.get("DiscNo") or "")
+    matching = [
+        item for item in items
+        if item.get("Code") == local_code
+        and str(item.get("DiscNo") or "") == disclosure_number
+    ]
+    if len(matching) != 1:
+        logger.warning(
+            f"[DETAILS] exact disclosure match count={len(matching)} "
+            f"code={local_code} disc_no={disclosure_number}"
+        )
+        return {"gross_profit": None, "profit_before_tax": None}
+    item = matching[0]
+    pbt_record = normalize_actual_consolidated_pbt(
+        item, summary_item, expected_code=local_code
+    )
+    return {
+        "gross_profit": _extract_gp_from_detail_item(item),
+        "profit_before_tax": (
+            pbt_record.raw_value_jpy if pbt_record is not None else None
+        ),
+    }
+
+
 def _supplement_gross_profit_from_details(
     conn: sqlite3.Connection,
     session: requests.Session,
@@ -608,11 +666,10 @@ def _supplement_gross_profit_from_details(
         "details_cache_hits": 0,
     }
 
-    # (local_code, disclosed_date) → gp (int) or Noneのインプロセスキャッシュ
-    # 同日に 2Q/FY 等複数行ある場合でも API は 1回だけ呼ぶ
-    details_cache: dict[tuple[str, str], int | None] = {}
+    # Each disclosure number is matched exactly; no cross-document fallback.
+    details_cache: dict[str, dict[str, int | None]] = {}
 
-    where_clause = "gross_profit IS NULL" if not force else "1=1"
+    where_clause = "(gross_profit IS NULL OR profit_before_tax IS NULL)" if not force else "1=1"
     if target_local_code:
         where_clause += f" AND local_code = '{target_local_code}'"
     if date_from:
@@ -624,7 +681,7 @@ def _supplement_gross_profit_from_details(
         f"""
         SELECT local_code, disclosed_date,
                current_fiscal_year_end_date, type_of_current_period,
-               gross_profit
+               gross_profit, profit_before_tax, raw_json
         FROM jquants_financials_normalized
         WHERE {where_clause}
         ORDER BY disclosed_date DESC
@@ -645,27 +702,30 @@ def _supplement_gross_profit_from_details(
         fy_end       = row[2]
         period_type  = row[3]
         existing_gp  = row[4]
+        existing_pbt = row[5]
+        summary_item = json.loads(row[6] or "{}")
 
         # force=False かつ既存値あり → スキップ
-        if not force and existing_gp is not None:
+        if not force and existing_gp is not None and existing_pbt is not None:
             stats["skipped"] += 1
             continue
 
-        cache_key = (local_code, disc_date)
+        cache_key = str(summary_item.get("DiscNo") or "")
         if cache_key in details_cache:
-            gp = details_cache[cache_key]
+            metrics = details_cache[cache_key]
             stats["details_cache_hits"] += 1
-            logger.info(
-                f"[DETAILS] cache hit: local_code={local_code} date={disc_date} "
-                f"gp={gp} period={period_type}"
-            )
         else:
-            gp = _fetch_details_gross_profit(session, auth_headers, local_code, disc_date)
-            details_cache[cache_key] = gp  # None（未取得）もキャッシュする
+            metrics = _fetch_details_actual_metrics(
+                session, auth_headers, summary_item
+            )
+            details_cache[cache_key] = metrics
             stats["details_api_calls"] += 1
             time.sleep(0.3)
 
-        if gp is None:
+        gp = metrics["gross_profit"]
+        pbt = metrics["profit_before_tax"]
+
+        if gp is None and pbt is None:
             logger.debug(
                 f"[DETAILS] 取得不可: local_code={local_code} date={disc_date} period={period_type}"
             )
@@ -676,19 +736,20 @@ def _supplement_gross_profit_from_details(
             conn.execute(
                 """
                 UPDATE jquants_financials_normalized
-                SET gross_profit = ?
+                SET gross_profit = COALESCE(?, gross_profit),
+                    profit_before_tax = COALESCE(?, profit_before_tax)
                 WHERE local_code = ?
                   AND disclosed_date = ?
                   AND current_fiscal_year_end_date = ?
                   AND type_of_current_period = ?
                 """,
-                (gp, local_code, disc_date, fy_end, period_type),
+                (gp, pbt, local_code, disc_date, fy_end, period_type),
             )
             conn.commit()
             logger.info(
                 f"[DETAILS] ✅ gross_profit 補完: local_code={local_code} "
                 f"date={disc_date} period={fy_end}/{period_type} "
-                f"gp={gp:,}  (force={force})"
+                f"gp={gp} pbt={pbt} (force={force})"
             )
             stats["supplemented"] += 1
         except Exception as e:

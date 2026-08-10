@@ -1,0 +1,1398 @@
+{
+  "scope": {
+    "ticker": "5713",
+    "jquants_code": "57130",
+    "metric": "profit_before_tax",
+    "actual_only": true,
+    "consolidated_only": true
+  },
+  "endpoint": "https://api.jquants.com/v2/fins/details",
+  "raw_response_sha256": "506c65df63c72391660a091072c21ae85f1a10df0ab0a2595d6ef81a9e1f43da",
+  "raw_summary_response_sha256": "3733912450fe5c7684711efacdd0dec08b15f2593fa248b79dae76ef23de96d3",
+  "source_priority": [
+    "tdnet_xbrl",
+    "jquants",
+    null
+  ],
+  "operating_profit_write_count": 0,
+  "viewer_period_count": 28,
+  "valid_jquants_period_count": 66,
+  "expected_insert_count": 4,
+  "official_rows_preserved_count": 4,
+  "rows": [
+    {
+      "ticker": "5713",
+      "fiscal_year": 2020,
+      "quarter": "1Q",
+      "period_end": "2020-03-31",
+      "raw_jquants_pbt_jpy": 17900000000,
+      "canonical_normalized_value_millions_jpy": 17900,
+      "existing_canonical_pbt": [],
+      "source": "jquants",
+      "disclosure_number": "20190808485183",
+      "disclosure_datetime": "2019-08-08T15:00:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "INSERT_JQUANTS_PBT",
+      "source_row_key": "cf|5713|2020-03-31|1Q|profit_before_tax|jquants|20190808485183"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2020,
+      "quarter": "2Q",
+      "period_end": "2020-03-31",
+      "raw_jquants_pbt_jpy": 36365000000,
+      "canonical_normalized_value_millions_jpy": 36365,
+      "existing_canonical_pbt": [],
+      "source": "jquants",
+      "disclosure_number": "20191108422263",
+      "disclosure_datetime": "2019-11-08T15:00:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "INSERT_JQUANTS_PBT",
+      "source_row_key": "cf|5713|2020-03-31|2Q|profit_before_tax|jquants|20191108422263"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2020,
+      "quarter": "3Q",
+      "period_end": "2020-03-31",
+      "raw_jquants_pbt_jpy": 67473000000,
+      "canonical_normalized_value_millions_jpy": 67473,
+      "existing_canonical_pbt": [],
+      "source": "jquants",
+      "disclosure_number": "20200207459991",
+      "disclosure_datetime": "2020-02-07T15:00:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "INSERT_JQUANTS_PBT",
+      "source_row_key": "cf|5713|2020-03-31|3Q|profit_before_tax|jquants|20200207459991"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2020,
+      "quarter": "FY",
+      "period_end": "2020-03-31",
+      "raw_jquants_pbt_jpy": 79035000000,
+      "canonical_normalized_value_millions_jpy": 79035,
+      "existing_canonical_pbt": [],
+      "source": "jquants",
+      "disclosure_number": "20200508406460",
+      "disclosure_datetime": "2020-05-08T14:00:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "INSERT_JQUANTS_PBT",
+      "source_row_key": "cf|5713|2020-03-31|FY|profit_before_tax|jquants|20200508406460"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2021,
+      "quarter": "FY",
+      "period_end": "2021-03-31",
+      "raw_jquants_pbt_jpy": 123379000000,
+      "canonical_normalized_value_millions_jpy": 123379,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "5713",
+          "period": "2021-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 123379,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20210510409061",
+          "source_row_key": "cf|5713|2021-03-31|FY|profit_before_tax|jquants|20210510409061",
+          "disclosure_datetime": "2021-05-10T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20210510409061",
+      "disclosure_datetime": "2021-05-10T15:00:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT",
+      "source_row_key": "cf|5713|2021-03-31|FY|profit_before_tax|jquants|20210510409061"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2022,
+      "quarter": "1Q",
+      "period_end": "2022-03-31",
+      "raw_jquants_pbt_jpy": 59939000000,
+      "canonical_normalized_value_millions_jpy": 59939,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "5713",
+          "period": "2022-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 59939,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20210806480963",
+          "source_row_key": "cf|5713|2022-03-31|1Q|profit_before_tax|jquants|20210806480963",
+          "disclosure_datetime": "2021-08-06T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20210806480963",
+      "disclosure_datetime": "2021-08-06T15:00:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT",
+      "source_row_key": "cf|5713|2022-03-31|1Q|profit_before_tax|jquants|20210806480963"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2022,
+      "quarter": "2Q",
+      "period_end": "2022-03-31",
+      "raw_jquants_pbt_jpy": 121666000000,
+      "canonical_normalized_value_millions_jpy": 121666,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "5713",
+          "period": "2022-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 121666,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20211108427154",
+          "source_row_key": "cf|5713|2022-03-31|2Q|profit_before_tax|jquants|20211108427154",
+          "disclosure_datetime": "2021-11-08T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20211108427154",
+      "disclosure_datetime": "2021-11-08T15:00:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT",
+      "source_row_key": "cf|5713|2022-03-31|2Q|profit_before_tax|jquants|20211108427154"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2022,
+      "quarter": "3Q",
+      "period_end": "2022-03-31",
+      "raw_jquants_pbt_jpy": 195372000000,
+      "canonical_normalized_value_millions_jpy": 195372,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "5713",
+          "period": "2022-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 195372,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20220209585033",
+          "source_row_key": "cf|5713|2022-03-31|3Q|profit_before_tax|jquants|20220209585033",
+          "disclosure_datetime": "2022-02-09T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20220209585033",
+      "disclosure_datetime": "2022-02-09T15:30:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT",
+      "source_row_key": "cf|5713|2022-03-31|3Q|profit_before_tax|jquants|20220209585033"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2022,
+      "quarter": "FY",
+      "period_end": "2022-03-31",
+      "raw_jquants_pbt_jpy": 357434000000,
+      "canonical_normalized_value_millions_jpy": 357434,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "5713",
+          "period": "2022-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 357434,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20220510536716",
+          "source_row_key": "cf|5713|2022-03-31|FY|profit_before_tax|jquants|20220510536716",
+          "disclosure_datetime": "2022-05-10T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20220510536716",
+      "disclosure_datetime": "2022-05-10T15:00:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT",
+      "source_row_key": "cf|5713|2022-03-31|FY|profit_before_tax|jquants|20220510536716"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2023,
+      "quarter": "1Q",
+      "period_end": "2023-03-31",
+      "raw_jquants_pbt_jpy": 104041000000,
+      "canonical_normalized_value_millions_jpy": 104041,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "5713",
+          "period": "2023-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 104041,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20220808514248",
+          "source_row_key": "cf|5713|2023-03-31|1Q|profit_before_tax|jquants|20220808514248",
+          "disclosure_datetime": "2022-08-08T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20220808514248",
+      "disclosure_datetime": "2022-08-08T15:00:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT",
+      "source_row_key": "cf|5713|2023-03-31|1Q|profit_before_tax|jquants|20220808514248"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2023,
+      "quarter": "2Q",
+      "period_end": "2023-03-31",
+      "raw_jquants_pbt_jpy": 169106000000,
+      "canonical_normalized_value_millions_jpy": 169106,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "5713",
+          "period": "2023-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 169106,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20221108558900",
+          "source_row_key": "cf|5713|2023-03-31|2Q|profit_before_tax|jquants|20221108558900",
+          "disclosure_datetime": "2022-11-08T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20221108558900",
+      "disclosure_datetime": "2022-11-08T15:00:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT",
+      "source_row_key": "cf|5713|2023-03-31|2Q|profit_before_tax|jquants|20221108558900"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2023,
+      "quarter": "3Q",
+      "period_end": "2023-03-31",
+      "raw_jquants_pbt_jpy": 218630000000,
+      "canonical_normalized_value_millions_jpy": 218630,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "5713",
+          "period": "2023-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 218630,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20230208503148",
+          "source_row_key": "cf|5713|2023-03-31|3Q|profit_before_tax|jquants|20230208503148",
+          "disclosure_datetime": "2023-02-08T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20230208503148",
+      "disclosure_datetime": "2023-02-08T15:00:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT",
+      "source_row_key": "cf|5713|2023-03-31|3Q|profit_before_tax|jquants|20230208503148"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2023,
+      "quarter": "FY",
+      "period_end": "2023-03-31",
+      "raw_jquants_pbt_jpy": 229910000000,
+      "canonical_normalized_value_millions_jpy": 229910,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "5713",
+          "period": "2023-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 229910,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20230510562590",
+          "source_row_key": "cf|5713|2023-03-31|FY|profit_before_tax|jquants|20230510562590",
+          "disclosure_datetime": "2023-05-10T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20230510562590",
+      "disclosure_datetime": "2023-05-10T15:00:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT",
+      "source_row_key": "cf|5713|2023-03-31|FY|profit_before_tax|jquants|20230510562590"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2024,
+      "quarter": "1Q",
+      "period_end": "2024-03-31",
+      "raw_jquants_pbt_jpy": 27133000000,
+      "canonical_normalized_value_millions_jpy": 27133,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "5713",
+          "period": "2024-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 27133,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20230807535354",
+          "source_row_key": "cf|5713|2024-03-31|1Q|profit_before_tax|jquants|20230807535354",
+          "disclosure_datetime": "2023-08-07T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20230807535354",
+      "disclosure_datetime": "2023-08-07T15:00:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT",
+      "source_row_key": "cf|5713|2024-03-31|1Q|profit_before_tax|jquants|20230807535354"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2024,
+      "quarter": "2Q",
+      "period_end": "2024-03-31",
+      "raw_jquants_pbt_jpy": 53779000000,
+      "canonical_normalized_value_millions_jpy": 53779,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "5713",
+          "period": "2024-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 53779,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20231108581897",
+          "source_row_key": "cf|5713|2024-03-31|2Q|profit_before_tax|jquants|20231108581897",
+          "disclosure_datetime": "2023-11-08T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20231108581897",
+      "disclosure_datetime": "2023-11-08T15:00:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT",
+      "source_row_key": "cf|5713|2024-03-31|2Q|profit_before_tax|jquants|20231108581897"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2024,
+      "quarter": "3Q",
+      "period_end": "2024-03-31",
+      "raw_jquants_pbt_jpy": 87359000000,
+      "canonical_normalized_value_millions_jpy": 87359,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "5713",
+          "period": "2024-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 87359,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20240208529766",
+          "source_row_key": "cf|5713|2024-03-31|3Q|profit_before_tax|jquants|20240208529766",
+          "disclosure_datetime": "2024-02-08T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20240208529766",
+      "disclosure_datetime": "2024-02-08T15:00:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT",
+      "source_row_key": "cf|5713|2024-03-31|3Q|profit_before_tax|jquants|20240208529766"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2024,
+      "quarter": "FY",
+      "period_end": "2024-03-31",
+      "raw_jquants_pbt_jpy": 95795000000,
+      "canonical_normalized_value_millions_jpy": 95795,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "5713",
+          "period": "2024-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 95795,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20240731558644",
+          "source_row_key": "cf|5713|2024-03-31|FY|profit_before_tax|jquants|20240731558644",
+          "disclosure_datetime": "2024-07-31T07:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20240731558644",
+      "disclosure_datetime": "2024-07-31T16:00:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT",
+      "source_row_key": "cf|5713|2024-03-31|FY|profit_before_tax|jquants|20240731558644"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2025,
+      "quarter": "1Q",
+      "period_end": "2025-03-31",
+      "raw_jquants_pbt_jpy": 30688000000,
+      "canonical_normalized_value_millions_jpy": 30688,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "5713",
+          "period": "2025-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 30688,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20240807564996",
+          "source_row_key": "cf|5713|2025-03-31|1Q|profit_before_tax|jquants|20240807564996",
+          "disclosure_datetime": "2024-08-07T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20240807564996",
+      "disclosure_datetime": "2024-08-07T15:00:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT",
+      "source_row_key": "cf|5713|2025-03-31|1Q|profit_before_tax|jquants|20240807564996"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2025,
+      "quarter": "2Q",
+      "period_end": "2025-03-31",
+      "raw_jquants_pbt_jpy": 72991000000,
+      "canonical_normalized_value_millions_jpy": 72991,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "5713",
+          "period": "2025-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 72991,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20241112519018",
+          "source_row_key": "cf|5713|2025-03-31|2Q|profit_before_tax|jquants|20241112519018",
+          "disclosure_datetime": "2024-11-12T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20241112519018",
+      "disclosure_datetime": "2024-11-12T15:30:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT",
+      "source_row_key": "cf|5713|2025-03-31|2Q|profit_before_tax|jquants|20241112519018"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2025,
+      "quarter": "3Q",
+      "period_end": "2025-03-31",
+      "raw_jquants_pbt_jpy": 48139000000,
+      "canonical_normalized_value_millions_jpy": 48139,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "5713",
+          "period": "2025-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 48139,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20250212569536",
+          "source_row_key": "cf|5713|2025-03-31|3Q|profit_before_tax|jquants|20250212569536",
+          "disclosure_datetime": "2025-02-12T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20250212569536",
+      "disclosure_datetime": "2025-02-12T15:30:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT",
+      "source_row_key": "cf|5713|2025-03-31|3Q|profit_before_tax|jquants|20250212569536"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2025,
+      "quarter": "FY",
+      "period_end": "2025-03-31",
+      "raw_jquants_pbt_jpy": 31383000000,
+      "canonical_normalized_value_millions_jpy": 31383,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "5713",
+          "period": "2025-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 31383,
+          "unit": "millions_jpy",
+          "source": "tdnet_xbrl",
+          "source_priority": 1,
+          "filing_id": "20260511521788",
+          "source_row_key": "cf|5713|2025-03-31|FY|profit_before_tax|tdnet_xbrl|20260511521788",
+          "disclosure_datetime": "2026-05-11T05:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20250509537066",
+      "disclosure_datetime": "2025-05-09T15:30:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_OFFICIAL_PBT_EXISTS",
+      "source_row_key": "cf|5713|2025-03-31|FY|profit_before_tax|jquants|20250509537066"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2026,
+      "quarter": "1Q",
+      "period_end": "2026-03-31",
+      "raw_jquants_pbt_jpy": 37901000000,
+      "canonical_normalized_value_millions_jpy": 37901,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "5713",
+          "period": "2026-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 37901,
+          "unit": "millions_jpy",
+          "source": "tdnet_xbrl",
+          "source_priority": 1,
+          "filing_id": "20260810516462",
+          "source_row_key": "cf|5713|2026-03-31|1Q|profit_before_tax|tdnet_xbrl|20260810516462",
+          "disclosure_datetime": "2026-08-10T05:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20250807533916",
+      "disclosure_datetime": "2025-08-07T14:30:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_OFFICIAL_PBT_EXISTS",
+      "source_row_key": "cf|5713|2026-03-31|1Q|profit_before_tax|jquants|20250807533916"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2026,
+      "quarter": "2Q",
+      "period_end": "2026-03-31",
+      "raw_jquants_pbt_jpy": 77815000000,
+      "canonical_normalized_value_millions_jpy": 77815,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "5713",
+          "period": "2026-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 77815,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20251110593452",
+          "source_row_key": "cf|5713|2026-03-31|2Q|profit_before_tax|jquants|20251110593452",
+          "disclosure_datetime": "2025-11-10T05:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20251110593452",
+      "disclosure_datetime": "2025-11-10T14:30:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT",
+      "source_row_key": "cf|5713|2026-03-31|2Q|profit_before_tax|jquants|20251110593452"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2026,
+      "quarter": "3Q",
+      "period_end": "2026-03-31",
+      "raw_jquants_pbt_jpy": 148258000000,
+      "canonical_normalized_value_millions_jpy": 148258,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "5713",
+          "period": "2026-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 148258,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20260209551516",
+          "source_row_key": "cf|5713|2026-03-31|3Q|profit_before_tax|jquants|20260209551516",
+          "disclosure_datetime": "2026-02-09T05:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20260209551516",
+      "disclosure_datetime": "2026-02-09T14:30:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT",
+      "source_row_key": "cf|5713|2026-03-31|3Q|profit_before_tax|jquants|20260209551516"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2026,
+      "quarter": "FY",
+      "period_end": "2026-03-31",
+      "raw_jquants_pbt_jpy": 255680000000,
+      "canonical_normalized_value_millions_jpy": 255680,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "5713",
+          "period": "2026-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 255680,
+          "unit": "millions_jpy",
+          "source": "tdnet_xbrl",
+          "source_priority": 1,
+          "filing_id": "20260511521788",
+          "source_row_key": "cf|5713|2026-03-31|FY|profit_before_tax|tdnet_xbrl|20260511521788",
+          "disclosure_datetime": "2026-05-11T05:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20260511521788",
+      "disclosure_datetime": "2026-05-11T14:30:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_OFFICIAL_PBT_EXISTS",
+      "source_row_key": "cf|5713|2026-03-31|FY|profit_before_tax|jquants|20260511521788"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2027,
+      "quarter": "1Q",
+      "period_end": "2027-03-31",
+      "raw_jquants_pbt_jpy": 118040000000,
+      "canonical_normalized_value_millions_jpy": 118040,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "5713",
+          "period": "2027-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 118040,
+          "unit": "millions_jpy",
+          "source": "tdnet_xbrl",
+          "source_priority": 1,
+          "filing_id": "20260810516462",
+          "source_row_key": "cf|5713|2027-03-31|1Q|profit_before_tax|tdnet_xbrl|20260810516462",
+          "disclosure_datetime": "2026-08-10T05:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20260810516462",
+      "disclosure_datetime": "2026-08-10T14:30:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "accounting_standard": "IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_OFFICIAL_PBT_EXISTS",
+      "source_row_key": "cf|5713|2027-03-31|1Q|profit_before_tax|jquants|20260810516462"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2029,
+      "quarter": "2Q",
+      "period_end": "2029-03-31",
+      "raw_jquants_pbt_jpy": null,
+      "canonical_normalized_value_millions_jpy": null,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": null,
+      "disclosure_datetime": null,
+      "document_type": null,
+      "accounting_standard": null,
+      "consolidation_scope": null,
+      "pbt_field": null,
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "5713",
+      "fiscal_year": 2029,
+      "quarter": "FY",
+      "period_end": "2029-03-31",
+      "raw_jquants_pbt_jpy": null,
+      "canonical_normalized_value_millions_jpy": null,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": null,
+      "disclosure_datetime": null,
+      "document_type": null,
+      "accounting_standard": null,
+      "consolidation_scope": null,
+      "pbt_field": null,
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    }
+  ],
+  "extraction_audit": [
+    {
+      "disclosure_number": "20220620582686",
+      "status": "rejected",
+      "reason": "summary_metadata_missing"
+    },
+    {
+      "period": "2009-03-31",
+      "quarter": "3Q",
+      "disclosure_number": "20090126074499",
+      "status": "selected",
+      "pbt_field": "Income before income taxes",
+      "raw_value_jpy": 53469000000
+    },
+    {
+      "period": "2010-03-31",
+      "quarter": "1Q",
+      "disclosure_number": "20090724063235",
+      "status": "selected",
+      "pbt_field": "Income before income taxes",
+      "raw_value_jpy": 12621000000
+    },
+    {
+      "period": "2010-03-31",
+      "quarter": "2Q",
+      "disclosure_number": "20091026035867",
+      "status": "selected",
+      "pbt_field": "Income before income taxes",
+      "raw_value_jpy": 26373000000
+    },
+    {
+      "period": "2010-03-31",
+      "quarter": "3Q",
+      "disclosure_number": "20100126005755",
+      "status": "selected",
+      "pbt_field": "Income before income taxes",
+      "raw_value_jpy": 51837000000
+    },
+    {
+      "period": "2010-03-31",
+      "quarter": "FY",
+      "disclosure_number": "20100506095355",
+      "status": "selected",
+      "pbt_field": "Income before income taxes",
+      "raw_value_jpy": 82776000000
+    },
+    {
+      "period": "2011-03-31",
+      "quarter": "1Q",
+      "disclosure_number": "20100805084743",
+      "status": "selected",
+      "pbt_field": "Income before income taxes",
+      "raw_value_jpy": 29411000000
+    },
+    {
+      "period": "2011-03-31",
+      "quarter": "2Q",
+      "disclosure_number": "20101027046985",
+      "status": "selected",
+      "pbt_field": "Income before income taxes",
+      "raw_value_jpy": 48966000000
+    },
+    {
+      "period": "2011-03-31",
+      "quarter": "3Q",
+      "disclosure_number": "20110126017213",
+      "status": "selected",
+      "pbt_field": "Income before income taxes",
+      "raw_value_jpy": 79843000000
+    },
+    {
+      "period": "2011-03-31",
+      "quarter": "FY",
+      "disclosure_number": "20110506012788",
+      "status": "selected",
+      "pbt_field": "Income before income taxes",
+      "raw_value_jpy": 74128000000
+    },
+    {
+      "period": "2012-03-31",
+      "quarter": "1Q",
+      "disclosure_number": "20110728090964",
+      "status": "selected",
+      "pbt_field": "Income before income taxes",
+      "raw_value_jpy": 37690000000
+    },
+    {
+      "period": "2012-03-31",
+      "quarter": "2Q",
+      "disclosure_number": "20111028034994",
+      "status": "selected",
+      "pbt_field": "Income before income taxes",
+      "raw_value_jpy": 49427000000
+    },
+    {
+      "period": "2012-03-31",
+      "quarter": "3Q",
+      "disclosure_number": "20120116065965",
+      "status": "selected",
+      "pbt_field": "Income before income taxes",
+      "raw_value_jpy": 65221000000
+    },
+    {
+      "period": "2012-03-31",
+      "quarter": "FY",
+      "disclosure_number": "20120511030982",
+      "status": "selected",
+      "pbt_field": "Income before income taxes",
+      "raw_value_jpy": 87883000000
+    },
+    {
+      "period": "2013-03-31",
+      "quarter": "1Q",
+      "disclosure_number": "20120806091669",
+      "status": "selected",
+      "pbt_field": "Income before income taxes",
+      "raw_value_jpy": 21063000000
+    },
+    {
+      "period": "2013-03-31",
+      "quarter": "2Q",
+      "disclosure_number": "20121105032137",
+      "status": "selected",
+      "pbt_field": "Income before income taxes",
+      "raw_value_jpy": 33847000000
+    },
+    {
+      "period": "2013-03-31",
+      "quarter": "3Q",
+      "disclosure_number": "20130206081433",
+      "status": "selected",
+      "pbt_field": "Income before income taxes",
+      "raw_value_jpy": 78136000000
+    },
+    {
+      "period": "2013-03-31",
+      "quarter": "FY",
+      "disclosure_number": "20130510036664",
+      "status": "selected",
+      "pbt_field": "Income before income taxes",
+      "raw_value_jpy": 122455000000
+    },
+    {
+      "period": "2014-03-31",
+      "quarter": "1Q",
+      "disclosure_number": "20130807009581",
+      "status": "selected",
+      "pbt_field": "Income before income taxes",
+      "raw_value_jpy": 31350000000
+    },
+    {
+      "period": "2014-03-31",
+      "quarter": "2Q",
+      "disclosure_number": "20131108055523",
+      "status": "selected",
+      "pbt_field": "Income before income taxes",
+      "raw_value_jpy": 55995000000
+    },
+    {
+      "period": "2014-03-31",
+      "quarter": "3Q",
+      "disclosure_number": "20140207002029",
+      "status": "selected",
+      "pbt_field": "Income before income taxes",
+      "raw_value_jpy": 85978000000
+    },
+    {
+      "period": "2014-03-31",
+      "quarter": "FY",
+      "disclosure_number": "20140508056287",
+      "status": "selected",
+      "pbt_field": "Income (loss) before income taxes",
+      "raw_value_jpy": 111006000000
+    },
+    {
+      "period": "2015-03-31",
+      "quarter": "1Q",
+      "disclosure_number": "20140806028429",
+      "status": "selected",
+      "pbt_field": "Income (loss) before income taxes",
+      "raw_value_jpy": 26893000000
+    },
+    {
+      "period": "2015-03-31",
+      "quarter": "2Q",
+      "disclosure_number": "20141107076577",
+      "status": "selected",
+      "pbt_field": "Income (loss) before income taxes",
+      "raw_value_jpy": 79672000000
+    },
+    {
+      "period": "2015-03-31",
+      "quarter": "3Q",
+      "disclosure_number": "20150206021361",
+      "status": "selected",
+      "pbt_field": "Income (loss) before income taxes",
+      "raw_value_jpy": 140031000000
+    },
+    {
+      "period": "2015-03-31",
+      "quarter": "FY",
+      "disclosure_number": "20150511470432",
+      "status": "selected",
+      "pbt_field": "Income (loss) before income taxes",
+      "raw_value_jpy": 123261000000
+    },
+    {
+      "period": "2016-03-31",
+      "quarter": "1Q",
+      "disclosure_number": "20150807472565",
+      "status": "selected",
+      "pbt_field": "Income (loss) before income taxes",
+      "raw_value_jpy": 36498000000
+    },
+    {
+      "period": "2016-03-31",
+      "quarter": "2Q",
+      "disclosure_number": "20151109441190",
+      "status": "selected",
+      "pbt_field": "Income (loss) before income taxes",
+      "raw_value_jpy": 80142000000
+    },
+    {
+      "period": "2016-03-31",
+      "quarter": "3Q",
+      "disclosure_number": "20160204405253",
+      "status": "selected",
+      "pbt_field": "Income (loss) before income taxes",
+      "raw_value_jpy": 18154000000
+    },
+    {
+      "period": "2016-03-31",
+      "quarter": "FY",
+      "disclosure_number": "20160511483728",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before income taxes",
+      "raw_value_jpy": 559000000
+    },
+    {
+      "period": "2017-03-31",
+      "quarter": "1Q",
+      "disclosure_number": "20160809472370",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before income taxes",
+      "raw_value_jpy": -12601000000
+    },
+    {
+      "period": "2017-03-31",
+      "quarter": "2Q",
+      "disclosure_number": "20161111437777",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before income taxes",
+      "raw_value_jpy": 2170000000
+    },
+    {
+      "period": "2017-03-31",
+      "quarter": "3Q",
+      "disclosure_number": "20170206491989",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before income taxes",
+      "raw_value_jpy": -28511000000
+    },
+    {
+      "period": "2017-03-31",
+      "quarter": "FY",
+      "disclosure_number": "20170510465730",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before income taxes",
+      "raw_value_jpy": -5999000000
+    },
+    {
+      "period": "2018-03-31",
+      "quarter": "1Q",
+      "disclosure_number": "20170807450974",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before income taxes",
+      "raw_value_jpy": 30705000000
+    },
+    {
+      "period": "2018-03-31",
+      "quarter": "2Q",
+      "disclosure_number": "20171109413351",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before income taxes",
+      "raw_value_jpy": 46316000000
+    },
+    {
+      "period": "2018-03-31",
+      "quarter": "3Q",
+      "disclosure_number": "20180208467019",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before income taxes",
+      "raw_value_jpy": 89211000000
+    },
+    {
+      "period": "2018-03-31",
+      "quarter": "FY",
+      "disclosure_number": "20180510432691",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before income taxes",
+      "raw_value_jpy": 105795000000
+    },
+    {
+      "period": "2019-03-31",
+      "quarter": "1Q",
+      "disclosure_number": "20180808493845",
+      "status": "rejected",
+      "reason": "latest_effective_has_no_exact_pbt"
+    },
+    {
+      "period": "2019-03-31",
+      "quarter": "2Q",
+      "disclosure_number": "20181108432937",
+      "status": "rejected",
+      "reason": "latest_effective_has_no_exact_pbt"
+    },
+    {
+      "period": "2019-03-31",
+      "quarter": "3Q",
+      "disclosure_number": "20190208473744",
+      "status": "rejected",
+      "reason": "latest_effective_has_no_exact_pbt"
+    },
+    {
+      "period": "2019-03-31",
+      "quarter": "FY",
+      "disclosure_number": "20190509418436",
+      "status": "rejected",
+      "reason": "latest_effective_has_no_exact_pbt"
+    },
+    {
+      "period": "2020-03-31",
+      "quarter": "1Q",
+      "disclosure_number": "20190808485183",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 17900000000
+    },
+    {
+      "period": "2020-03-31",
+      "quarter": "2Q",
+      "disclosure_number": "20191108422263",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 36365000000
+    },
+    {
+      "period": "2020-03-31",
+      "quarter": "3Q",
+      "disclosure_number": "20200207459991",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 67473000000
+    },
+    {
+      "period": "2020-03-31",
+      "quarter": "FY",
+      "disclosure_number": "20200508406460",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 79035000000
+    },
+    {
+      "period": "2021-03-31",
+      "quarter": "1Q",
+      "disclosure_number": "20200807477860",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 3543000000
+    },
+    {
+      "period": "2021-03-31",
+      "quarter": "2Q",
+      "disclosure_number": "20201109418538",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 25884000000
+    },
+    {
+      "period": "2021-03-31",
+      "quarter": "3Q",
+      "disclosure_number": "20210208457735",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 64582000000
+    },
+    {
+      "period": "2021-03-31",
+      "quarter": "FY",
+      "disclosure_number": "20210510409061",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 123379000000
+    },
+    {
+      "period": "2022-03-31",
+      "quarter": "1Q",
+      "disclosure_number": "20210806480963",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 59939000000
+    },
+    {
+      "period": "2022-03-31",
+      "quarter": "2Q",
+      "disclosure_number": "20211108427154",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 121666000000
+    },
+    {
+      "period": "2022-03-31",
+      "quarter": "3Q",
+      "disclosure_number": "20220209585033",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 195372000000
+    },
+    {
+      "period": "2022-03-31",
+      "quarter": "FY",
+      "disclosure_number": "20220510536716",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 357434000000
+    },
+    {
+      "period": "2023-03-31",
+      "quarter": "1Q",
+      "disclosure_number": "20220808514248",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 104041000000
+    },
+    {
+      "period": "2023-03-31",
+      "quarter": "2Q",
+      "disclosure_number": "20221108558900",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 169106000000
+    },
+    {
+      "period": "2023-03-31",
+      "quarter": "3Q",
+      "disclosure_number": "20230208503148",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 218630000000
+    },
+    {
+      "period": "2023-03-31",
+      "quarter": "FY",
+      "disclosure_number": "20230510562590",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 229910000000
+    },
+    {
+      "period": "2024-03-31",
+      "quarter": "1Q",
+      "disclosure_number": "20230807535354",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 27133000000
+    },
+    {
+      "period": "2024-03-31",
+      "quarter": "2Q",
+      "disclosure_number": "20231108581897",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 53779000000
+    },
+    {
+      "period": "2024-03-31",
+      "quarter": "3Q",
+      "disclosure_number": "20240208529766",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 87359000000
+    },
+    {
+      "period": "2024-03-31",
+      "quarter": "FY",
+      "disclosure_number": "20240731558644",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 95795000000
+    },
+    {
+      "period": "2025-03-31",
+      "quarter": "1Q",
+      "disclosure_number": "20240807564996",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 30688000000
+    },
+    {
+      "period": "2025-03-31",
+      "quarter": "2Q",
+      "disclosure_number": "20241112519018",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 72991000000
+    },
+    {
+      "period": "2025-03-31",
+      "quarter": "3Q",
+      "disclosure_number": "20250212569536",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 48139000000
+    },
+    {
+      "period": "2025-03-31",
+      "quarter": "FY",
+      "disclosure_number": "20250509537066",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 31383000000
+    },
+    {
+      "period": "2026-03-31",
+      "quarter": "1Q",
+      "disclosure_number": "20250807533916",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 37901000000
+    },
+    {
+      "period": "2026-03-31",
+      "quarter": "2Q",
+      "disclosure_number": "20251110593452",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 77815000000
+    },
+    {
+      "period": "2026-03-31",
+      "quarter": "3Q",
+      "disclosure_number": "20260209551516",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 148258000000
+    },
+    {
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "disclosure_number": "20260511521788",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 255680000000
+    },
+    {
+      "period": "2027-03-31",
+      "quarter": "1Q",
+      "disclosure_number": "20260810516462",
+      "status": "selected",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "raw_value_jpy": 118040000000
+    }
+  ],
+  "manifest_sha256": "2717bc81b426bf72442d95f024c4909543b2516c882507220c71f23c70e45ee0"
+}

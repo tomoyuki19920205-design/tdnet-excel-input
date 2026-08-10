@@ -199,7 +199,7 @@ class _SupabaseAPI:
 # ============================================================
 # SQLite から重複排除済みデータ読み取り
 # ============================================================
-_QUERY_BASE = """\
+_QUERY_BASE_TEMPLATE = """\
 WITH latest AS (
   SELECT
     local_code,
@@ -215,7 +215,8 @@ WITH latest AS (
     type_of_document,
     net_sales,
     gross_profit,
-    operating_profit
+    operating_profit,
+    {pbt_expression} AS profit_before_tax
   FROM jquants_financials_normalized
   {where_clause}
 ),
@@ -249,6 +250,12 @@ field_best AS (
        AND s.type_of_current_period = latest.type_of_current_period
        AND s.type_of_document LIKE '%FinancialStatements%'
      ORDER BY s.disclosed_date DESC, s.rn LIMIT 1) AS operating_profit
+    ,(SELECT s.profit_before_tax FROM latest s
+     WHERE s.local_code = latest.local_code
+       AND s.current_fiscal_year_end_date = latest.current_fiscal_year_end_date
+       AND s.type_of_current_period = latest.type_of_current_period
+       AND s.type_of_document LIKE '%FinancialStatements_Consolidated_%'
+     ORDER BY s.disclosed_date DESC, s.rn LIMIT 1) AS profit_before_tax
   FROM latest
   WHERE rn = 1
 )
@@ -258,10 +265,16 @@ SELECT
   type_of_current_period       AS quarter,
   net_sales                    AS sales,
   gross_profit,
-  operating_profit
+  operating_profit,
+  profit_before_tax
 FROM field_best
 ORDER BY ticker, period, quarter
 """
+
+# Backward-compatible test/query constant for schemas created before PBT.
+_QUERY_BASE = _QUERY_BASE_TEMPLATE.format(
+    where_clause="{where_clause}", pbt_expression="NULL"
+)
 
 _QUERY_COUNT = """\
 SELECT
@@ -306,7 +319,13 @@ def read_sqlite(
     where_clause = "WHERE " + " AND ".join(where_conditions) if where_conditions else ""
 
     # 重複排除済みクエリ
-    query = _QUERY_BASE.format(where_clause=where_clause)
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(jquants_financials_normalized)")
+    }
+    pbt_expression = "profit_before_tax" if "profit_before_tax" in columns else "NULL"
+    query = _QUERY_BASE_TEMPLATE.format(
+        where_clause=where_clause, pbt_expression=pbt_expression
+    )
     if limit > 0:
         query += f" LIMIT ?"
         params.append(limit)
@@ -327,9 +346,10 @@ def read_sqlite(
         sales_m = _to_millions(r["sales"])
         gp_m = _to_millions(r["gross_profit"])
         op_m = _to_millions(r["operating_profit"])
+        pbt_m = _to_millions(r["profit_before_tax"])
 
         # 正規化後のバリデーション: 百万円として異常に大きい値を検知
-        for label, val in [("sales", sales_m), ("gross_profit", gp_m), ("operating_profit", op_m)]:
+        for label, val in [("sales", sales_m), ("gross_profit", gp_m), ("operating_profit", op_m), ("profit_before_tax", pbt_m)]:
             if val is not None and abs(val) > _ABNORMAL_MILLIONS_THRESHOLD:
                 abnormal_count += 1
                 if abnormal_count <= 5:  # 最初の5件だけログ
@@ -347,6 +367,7 @@ def read_sqlite(
                 "sales": sales_m,
                 "gross_profit": gp_m,
                 "operating_profit": op_m,
+                "profit_before_tax": pbt_m,
                 "source": "jquants",
                 "updated_at": now_iso,
             }
@@ -801,6 +822,13 @@ def sync(
     stats["sqlite_codes"] = raw_stats["codes"]
     stats["deduped_rows"] = len(data)
 
+    # public.financials is the legacy wide table and has no PBT column.
+    # Keep PBT only for the canonical long-table dual write below.
+    legacy_data = [
+        {key: value for key, value in row.items() if key != "profit_before_tax"}
+        for row in data
+    ]
+
     if not data:
         logger.warning("[SYNC] 0 件。同期対象がありません。")
         return stats
@@ -838,7 +866,7 @@ def sync(
     )
 
     try:
-        for i, chunk in enumerate(_chunks(data, batch_size), 1):
+        for i, chunk in enumerate(_chunks(legacy_data, batch_size), 1):
             try:
                 n = api.upsert_batch(table, chunk, on_conflict="ticker,period,quarter")
                 stats["upserted"] += n
@@ -900,7 +928,7 @@ def sync(
                     for d in data:
                         metrics_dict = {
                             k: d.get(k)
-                            for k in ("sales", "gross_profit", "operating_profit")
+                            for k in ("sales", "gross_profit", "operating_profit", "profit_before_tax")
                         }
                         expanded, skipped = expand_financials_rows(
                             ticker=d["ticker"],
