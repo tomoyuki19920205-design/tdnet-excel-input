@@ -329,7 +329,9 @@ def _row_to_db(item: dict) -> dict | None:
 
     # 連結優先、なければ非連結を使用
     net_sales = _safe_int(item.get("Sales") or item.get("NCSales"))
-    operating_profit = _safe_int(item.get("OP") or item.get("NCOP"))
+    # OP and NCOP have different consolidation scopes. Never promote NCOP
+    # into the consolidated operating_profit field.
+    operating_profit = _safe_int(item.get("OP"))
     # V2 /fins/summary に GrossProfit フィールドは存在しない。
     # ただし旧スクリプトが raw_json に "_gross_profit" を追記していた場合はそれを採用する。
     gross_profit = _safe_int(item.get("_gross_profit"))
