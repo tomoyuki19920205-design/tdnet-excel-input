@@ -200,10 +200,17 @@ class _SupabaseAPI:
 # SQLite から重複排除済みデータ読み取り
 # ============================================================
 _QUERY_BASE_TEMPLATE = """\
-WITH latest AS (
+WITH resolved_source AS (
+  SELECT
+    source.*,
+    {resolved_period_expression} AS resolved_fiscal_year_end_date
+  FROM jquants_financials_normalized AS source
+  {where_clause}
+),
+latest AS (
   SELECT
     local_code,
-    current_fiscal_year_end_date,
+    resolved_fiscal_year_end_date AS current_fiscal_year_end_date,
     type_of_current_period,
     ROW_NUMBER() OVER (
       PARTITION BY local_code,
@@ -217,8 +224,7 @@ WITH latest AS (
     gross_profit,
     operating_profit,
     {pbt_expression} AS profit_before_tax
-  FROM jquants_financials_normalized
-  {where_clause}
+  FROM resolved_source
 ),
 field_best AS (
   -- field-level COALESCE: 同一 (ticker, period, quarter) の全行から
@@ -273,7 +279,11 @@ ORDER BY ticker, period, quarter
 
 # Backward-compatible test/query constant for schemas created before PBT.
 _QUERY_BASE = _QUERY_BASE_TEMPLATE.format(
-    where_clause="{where_clause}", pbt_expression="NULL"
+    where_clause="{where_clause}",
+    pbt_expression="NULL",
+    resolved_period_expression=(
+        "source.current_fiscal_year_end_date"
+    ),
 )
 
 _QUERY_COUNT = """\
@@ -308,11 +318,17 @@ def read_sqlite(
         since = (datetime.now(JST) - timedelta(days=recent_days)).strftime(
             "%Y-%m-%d %H:%M:%S"
         )
-        where_conditions.append("fetched_at >= ?")
-        params.append(since)
+        from lib.pipeline.jquants_fiscal_period import transition_sibling_sql
+
+        recent_predicate = "recent_fy.fetched_at >= ?"
+        where_conditions.append(
+            f"(source.fetched_at >= ? OR "
+            f"{transition_sibling_sql(recent_predicate, 'source')})"
+        )
+        params.extend((since, since))
         logger.info(f"[SQLite] 差分モード: fetched_at >= {since} (直近{recent_days}日)")
     if ticker:
-        where_conditions.append("local_code LIKE ?")
+        where_conditions.append("source.local_code LIKE ?")
         params.append(f"{ticker}%")
         logger.info(f"[SQLite] ticker絞り込み: {ticker}")
         
@@ -323,8 +339,12 @@ def read_sqlite(
         row[1] for row in conn.execute("PRAGMA table_info(jquants_financials_normalized)")
     }
     pbt_expression = "profit_before_tax" if "profit_before_tax" in columns else "NULL"
+    from lib.pipeline.jquants_fiscal_period import resolved_fiscal_year_end_sql
+
     query = _QUERY_BASE_TEMPLATE.format(
-        where_clause=where_clause, pbt_expression=pbt_expression
+        where_clause=where_clause,
+        pbt_expression=pbt_expression,
+        resolved_period_expression=resolved_fiscal_year_end_sql("source"),
     )
     if limit > 0:
         query += f" LIMIT ?"
