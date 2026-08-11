@@ -42,7 +42,7 @@ import requests
 logger = logging.getLogger("fix_ticker_norm")
 JST = timezone(timedelta(hours=9))
 
-OUT_DIR = r"C:\Users\takuy\.gemini\antigravity\scratch"
+OUT_DIR = os.path.join(_ROOT, "out")
 
 # ============================================================
 # 定数
@@ -63,18 +63,18 @@ def normalize_ticker_for_fix(raw_ticker: str, enable_alpha_map: bool = True) -> 
 
     Args:
         raw_ticker: 元のticker文字列
-        enable_alpha_map: True の場合 JQUANTS_ALPHA_MAP による数値→alpha変換を許可
-                         False の場合 純粋な末尾0除去のみ (numeric→numeric)
+        enable_alpha_map: 互換性のため残す非推奨引数。値にかかわらず、raw codeの
+                          末尾0だけを除去し、numeric→alpha推測は行わない。
 
     Examples:
         >>> normalize_ticker_for_fix("78490")
         '7849'
         >>> normalize_ticker_for_fix("12345")  # 末尾0でない
         >>> normalize_ticker_for_fix("1234")   # 4桁(変換不要)
-        >>> normalize_ticker_for_fix("41800")  # JQUANTS_ALPHA_MAP → '418A'
-        '418A'
+        >>> normalize_ticker_for_fix("41800")
+        '4180'
         >>> normalize_ticker_for_fix("41800", enable_alpha_map=False)
-        # → None (ALPHA_MAP 無効時、末尾0除去で '4180' だが ALPHA_MAP 対象なのでスキップ)
+        '4180'
     """
     if not raw_ticker or len(raw_ticker) != 5:
         return None
@@ -83,7 +83,8 @@ def normalize_ticker_for_fix(raw_ticker: str, enable_alpha_map: bool = True) -> 
         return None
     if not is_valid_ticker(norm):
         return None
-    # ALPHA_MAP 無効時: numeric→alpha 変換が発生していたらスキップ
+    # Defensive compatibility guard. The shared normalizer must never produce
+    # numeric-to-alpha output, regardless of the legacy option value.
     if not enable_alpha_map:
         if not norm.isdigit() and raw_ticker.isdigit():
             return None
@@ -473,7 +474,7 @@ def print_dry_run_report(
     print("  [1. Conversion Spec]")
     print("    - Target: exactly 5-char ticker in canonical_financials")
     print("    - Condition: 5 numeric digits with trailing '0'  (e.g. 78490 -> 7849)")
-    print("    - J-Quants ALPHA_MAP also applied (e.g. 41800 -> 418A)")
+    print("    - Raw identity preserved (e.g. 41800 -> 4180; 418A0 -> 418A)")
     print("    - Non-numeric / no trailing zero / invalid result -> SKIP")
     print()
 
@@ -520,7 +521,7 @@ def print_dry_run_report(
     cc = _count_by(candidates, "conversion_category")
     print("  [4.5 Conversion Pattern Breakdown]")
     print(f"    numeric_to_numeric (e.g. 78490->7849) : {cc.get('numeric_to_numeric', 0):>10,}")
-    print(f"    numeric_to_alpha   (e.g. 41800->418A) : {cc.get('numeric_to_alpha', 0):>10,}")
+    print(f"    numeric_to_alpha   (must remain zero)  : {cc.get('numeric_to_alpha', 0):>10,}")
     if cc.get('other', 0) > 0:
         print(f"    other                                 : {cc['other']:>10,}")
     print()
@@ -725,8 +726,7 @@ def main():
     parser.add_argument("--tickers", type=str, default="",
                         help="Apply only these raw 5-digit tickers (comma-separated)")
     parser.add_argument("--enable-alpha-map", action="store_true",
-                        help="Enable JQUANTS_ALPHA_MAP conversion (numeric->alpha). "
-                             "Default: disabled (numeric->numeric only)")
+                        help="Deprecated compatibility option; numeric-to-alpha inference is always disabled")
     args = parser.parse_args()
     is_apply = args.apply and not args.dry_run
 
@@ -889,4 +889,3 @@ if __name__ == "__main__":
     if hasattr(sys.stderr, 'buffer'):
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
     sys.exit(main())
-

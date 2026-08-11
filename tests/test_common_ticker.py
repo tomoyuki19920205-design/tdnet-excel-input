@@ -62,6 +62,9 @@ class TestNormalizeTicker:
         assert normalize_ticker("418A") == "418A"
 
     def test_alphanumeric_and_numeric_tickers_do_not_collide(self):
+        assert normalize_ticker("417A0") == "417A"
+        assert normalize_ticker("41700") == "4170"
+        assert normalize_ticker("417A") != normalize_ticker("4170")
         assert normalize_ticker("418A0") == "418A"
         assert normalize_ticker("41800") == "4180"
         assert normalize_ticker("418A") != normalize_ticker("4180")

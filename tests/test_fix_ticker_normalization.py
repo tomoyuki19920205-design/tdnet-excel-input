@@ -53,6 +53,7 @@ class TestNormalizeTickerForFix:
         assert normalize_ticker_for_fix("418A0") == "418A"
 
     def test_numeric_code_is_not_mapped_to_alpha(self):
+        assert normalize_ticker_for_fix("41700") == "4170"
         assert normalize_ticker_for_fix("41800") == "4180"
 
     def test_empty_string(self):
@@ -98,6 +99,14 @@ class TestMakeNewSourceRowKey:
         old_key = "cf|41800|2025-12-31|4Q|operating_profit|jquants|filing123"
         result = make_new_source_row_key(old_key, "41800", "418A")
         assert result == "cf|418A|2025-12-31|4Q|operating_profit|jquants|filing123"
+
+    def test_numeric_source_row_key_cannot_become_alpha_identity(self):
+        old_key = "cf|41700|2025-12-31|FY|sales|jquants|filing123"
+        normalized = normalize_ticker_for_fix("41700")
+        assert normalized == "4170"
+        result = make_new_source_row_key(old_key, "41700", normalized)
+        assert result == "cf|4170|2025-12-31|FY|sales|jquants|filing123"
+        assert "|417A|" not in result
 
     def test_only_first_occurrence_replaced(self):
         old_key = "cf|78490|78490|1Q|78490|source|"

@@ -32,7 +32,7 @@ if _PROJECT_ROOT not in sys.path:
 
 import requests
 from lib.pipeline.db import load_env
-from src.common_ticker import normalize_ticker, is_valid_ticker, JQUANTS_ALPHA_MAP
+from src.common_ticker import normalize_ticker, is_valid_ticker
 
 JST = timezone(timedelta(hours=9))
 
@@ -57,11 +57,9 @@ def classify_ticker(raw: str) -> tuple[str, str]:
     s = raw.strip()
     normalized = normalize_ticker(s)
 
-    # JQUANTS_ALPHA_MAP に含まれる → alpha 化すべき
-    if s in JQUANTS_ALPHA_MAP:
-        return "alpha_should_convert", JQUANTS_ALPHA_MAP[s]
-
-    # 5桁末尾0で正規化後が4桁 valid → 正常な5桁コード (末尾0除去で valid)
+    # Raw code identity is authoritative.  Numeric 41700 is ticker 4170;
+    # alphanumeric 417A0 is the distinct ticker 417A.  Never infer an alpha
+    # ticker from a numeric code via the retired JQUANTS_ALPHA_MAP.
     if len(s) == 5 and s.endswith("0"):
         candidate = s[:4]
         if is_valid_ticker(candidate):
