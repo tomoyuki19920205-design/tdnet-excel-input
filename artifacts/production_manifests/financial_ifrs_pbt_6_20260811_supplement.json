@@ -1,0 +1,5495 @@
+{
+  "scope": {
+    "tickers": [
+      "7198",
+      "8473",
+      "8698",
+      "8253",
+      "7157",
+      "8630"
+    ],
+    "jquants_codes": {
+      "7198": "71980",
+      "8473": "84730",
+      "8698": "86980",
+      "8253": "82530",
+      "7157": "71570",
+      "8630": "86300"
+    },
+    "metric": "profit_before_tax",
+    "actual_only": true,
+    "consolidated_only": true,
+    "accounting_standard": "IFRS"
+  },
+  "endpoints": {
+    "details": "https://api.jquants.com/v2/fins/details",
+    "summary": "https://api.jquants.com/v2/fins/summary"
+  },
+  "raw_response_sha256": {
+    "7198": {
+      "details_sha256": "62216bc9eb066a3f2578812080a67f706cf009ffa5979ea37c623f88e8fc247f",
+      "summary_sha256": "74b933ef791d7bb5be9c66f4850e00225ede26fb13a3c8045011002b80105687"
+    },
+    "8473": {
+      "details_sha256": "65dd051fb92715cee398fd193f4c60df6579f657247e348cab1f3df8e8e4772b",
+      "summary_sha256": "bebb4b08a8621e4fb1be1ab9576370d6a03366eb99b8659081ac8b12d632e68e"
+    },
+    "8698": {
+      "details_sha256": "24b235f99f4e69df513d960245a94bcd1252a361165a40be88177c2487d38928",
+      "summary_sha256": "4fba0be718536ced6ee382af1ad4f371fcf262fa475a70b6e90e66faffb8bb45"
+    },
+    "8253": {
+      "details_sha256": "e6e4f5018d5046c5f8d480fadfa744aa8b2a4650b3e9f768e7810ce5ecb1c7f7",
+      "summary_sha256": "6763412c9c999e8d3786173770da53e7600ef1d3b6641196f5436a8238487844"
+    },
+    "7157": {
+      "details_sha256": "6ff2ce1118df13fdb6889c6b42b745c141ea1497a76ad023e566f21a6c642218",
+      "summary_sha256": "17629f237761003da6e0d98b0a1aa81c00e6e6d637a5390cecaa1d3454c4e541"
+    },
+    "8630": {
+      "details_sha256": "cf35744af9f3a0e942a19f7ef76947fbe63f04c02430d7c1c6053f90e7663f89",
+      "summary_sha256": "17f589b27f4ab15a7b68f252ee001bb422c88ad752a942ec1ea0feeb09e55a44"
+    }
+  },
+  "source_priority": [
+    "tdnet_xbrl",
+    "jquants",
+    null
+  ],
+  "operating_profit_write_count": 0,
+  "viewer_period_count_by_ticker": {
+    "7198": 22,
+    "8473": 22,
+    "8698": 22,
+    "8253": 14,
+    "7157": 10,
+    "8630": 18
+  },
+  "valid_ifrs_jquants_period_count_by_ticker": {
+    "7198": 29,
+    "8473": 29,
+    "8698": 25,
+    "8253": 28,
+    "7157": 12,
+    "8630": 5
+  },
+  "expected_insert_count_by_ticker": {
+    "7198": 0,
+    "8473": 0,
+    "8698": 0,
+    "8253": 0,
+    "7157": 0,
+    "8630": 1
+  },
+  "non_ifrs_period_count_by_ticker": {
+    "7198": 0,
+    "8473": 0,
+    "8698": 0,
+    "8253": 0,
+    "7157": 0,
+    "8630": 16
+  },
+  "expected_insert_count": 1,
+  "official_rows_preserved_count": 0,
+  "rows": [
+    {
+      "ticker": "7198",
+      "company_name": "SBIアルヒ",
+      "fiscal_year": 2021,
+      "quarter": "FY",
+      "period_end": "2021-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 7745000000,
+      "canonical_normalized_value_millions_jpy": 7745,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7198",
+          "period": "2021-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 7745,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20210511411470",
+          "source_row_key": "cf|7198|2021-03-31|FY|profit_before_tax|jquants|20210511411470",
+          "disclosure_datetime": "2021-05-11T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20210511411470",
+      "disclosure_datetime": "2021-05-11T15:15:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7198",
+      "company_name": "SBIアルヒ",
+      "fiscal_year": 2022,
+      "quarter": "1Q",
+      "period_end": "2022-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 1828000000,
+      "canonical_normalized_value_millions_jpy": 1828,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7198",
+          "period": "2022-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 1828,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20210805479443",
+          "source_row_key": "cf|7198|2022-03-31|1Q|profit_before_tax|jquants|20210805479443",
+          "disclosure_datetime": "2021-08-05T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20210805479443",
+      "disclosure_datetime": "2021-08-05T15:15:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7198",
+      "company_name": "SBIアルヒ",
+      "fiscal_year": 2022,
+      "quarter": "2Q",
+      "period_end": "2022-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 3322000000,
+      "canonical_normalized_value_millions_jpy": 3322,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7198",
+          "period": "2022-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 3322,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20211111431884",
+          "source_row_key": "cf|7198|2022-03-31|2Q|profit_before_tax|jquants|20211111431884",
+          "disclosure_datetime": "2021-11-11T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20211111431884",
+      "disclosure_datetime": "2021-11-11T15:15:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7198",
+      "company_name": "SBIアルヒ",
+      "fiscal_year": 2022,
+      "quarter": "3Q",
+      "period_end": "2022-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 5375000000,
+      "canonical_normalized_value_millions_jpy": 5375,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7198",
+          "period": "2022-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 5375,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20220207581751",
+          "source_row_key": "cf|7198|2022-03-31|3Q|profit_before_tax|jquants|20220207581751",
+          "disclosure_datetime": "2022-02-07T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20220207581751",
+      "disclosure_datetime": "2022-02-07T15:15:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7198",
+      "company_name": "SBIアルヒ",
+      "fiscal_year": 2022,
+      "quarter": "FY",
+      "period_end": "2022-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 6151000000,
+      "canonical_normalized_value_millions_jpy": 6151,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7198",
+          "period": "2022-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 6151,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20220510537161",
+          "source_row_key": "cf|7198|2022-03-31|FY|profit_before_tax|jquants|20220510537161",
+          "disclosure_datetime": "2022-05-10T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20220510537161",
+      "disclosure_datetime": "2022-05-10T15:15:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7198",
+      "company_name": "SBIアルヒ",
+      "fiscal_year": 2023,
+      "quarter": "1Q",
+      "period_end": "2023-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 1217000000,
+      "canonical_normalized_value_millions_jpy": 1217,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7198",
+          "period": "2023-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 1217,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20220809515576",
+          "source_row_key": "cf|7198|2023-03-31|1Q|profit_before_tax|jquants|20220809515576",
+          "disclosure_datetime": "2022-08-09T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20220809515576",
+      "disclosure_datetime": "2022-08-09T15:15:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7198",
+      "company_name": "SBIアルヒ",
+      "fiscal_year": 2023,
+      "quarter": "2Q",
+      "period_end": "2023-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 2557000000,
+      "canonical_normalized_value_millions_jpy": 2557,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7198",
+          "period": "2023-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 2557,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20221114566032",
+          "source_row_key": "cf|7198|2023-03-31|2Q|profit_before_tax|jquants|20221114566032",
+          "disclosure_datetime": "2022-11-14T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20221114566032",
+      "disclosure_datetime": "2022-11-14T15:15:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7198",
+      "company_name": "SBIアルヒ",
+      "fiscal_year": 2023,
+      "quarter": "3Q",
+      "period_end": "2023-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 3663000000,
+      "canonical_normalized_value_millions_jpy": 3663,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7198",
+          "period": "2023-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 3663,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20230209504832",
+          "source_row_key": "cf|7198|2023-03-31|3Q|profit_before_tax|jquants|20230209504832",
+          "disclosure_datetime": "2023-02-09T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20230209504832",
+      "disclosure_datetime": "2023-02-09T15:15:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7198",
+      "company_name": "SBIアルヒ",
+      "fiscal_year": 2023,
+      "quarter": "FY",
+      "period_end": "2023-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 4119000000,
+      "canonical_normalized_value_millions_jpy": 4119,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7198",
+          "period": "2023-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 4119,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20230510563501",
+          "source_row_key": "cf|7198|2023-03-31|FY|profit_before_tax|jquants|20230510563501",
+          "disclosure_datetime": "2023-05-11T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20230510563501",
+      "disclosure_datetime": "2023-05-11T15:15:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7198",
+      "company_name": "SBIアルヒ",
+      "fiscal_year": 2024,
+      "quarter": "1Q",
+      "period_end": "2024-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 449000000,
+      "canonical_normalized_value_millions_jpy": 449,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7198",
+          "period": "2024-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 449,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20230803533356",
+          "source_row_key": "cf|7198|2024-03-31|1Q|profit_before_tax|jquants|20230803533356",
+          "disclosure_datetime": "2023-08-03T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20230803533356",
+      "disclosure_datetime": "2023-08-03T15:15:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7198",
+      "company_name": "SBIアルヒ",
+      "fiscal_year": 2024,
+      "quarter": "2Q",
+      "period_end": "2024-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 764000000,
+      "canonical_normalized_value_millions_jpy": 764,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7198",
+          "period": "2024-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 764,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20231107580858",
+          "source_row_key": "cf|7198|2024-03-31|2Q|profit_before_tax|jquants|20231107580858",
+          "disclosure_datetime": "2023-11-07T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20231107580858",
+      "disclosure_datetime": "2023-11-07T15:15:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7198",
+      "company_name": "SBIアルヒ",
+      "fiscal_year": 2024,
+      "quarter": "3Q",
+      "period_end": "2024-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 1835000000,
+      "canonical_normalized_value_millions_jpy": 1835,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7198",
+          "period": "2024-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 1835,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20240206527162",
+          "source_row_key": "cf|7198|2024-03-31|3Q|profit_before_tax|jquants|20240206527162",
+          "disclosure_datetime": "2024-02-06T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20240206527162",
+      "disclosure_datetime": "2024-02-06T15:15:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7198",
+      "company_name": "SBIアルヒ",
+      "fiscal_year": 2024,
+      "quarter": "FY",
+      "period_end": "2024-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 2327000000,
+      "canonical_normalized_value_millions_jpy": 2327,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7198",
+          "period": "2024-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 2327,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20240508583848",
+          "source_row_key": "cf|7198|2024-03-31|FY|profit_before_tax|jquants|20240508583848",
+          "disclosure_datetime": "2024-05-08T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20240508583848",
+      "disclosure_datetime": "2024-05-08T15:15:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7198",
+      "company_name": "SBIアルヒ",
+      "fiscal_year": 2025,
+      "quarter": "1Q",
+      "period_end": "2025-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 795000000,
+      "canonical_normalized_value_millions_jpy": 795,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7198",
+          "period": "2025-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 795,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20240801560203",
+          "source_row_key": "cf|7198|2025-03-31|1Q|profit_before_tax|jquants|20240801560203",
+          "disclosure_datetime": "2024-08-01T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20240801560203",
+      "disclosure_datetime": "2024-08-01T15:15:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7198",
+      "company_name": "SBIアルヒ",
+      "fiscal_year": 2025,
+      "quarter": "2Q",
+      "period_end": "2025-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 1340000000,
+      "canonical_normalized_value_millions_jpy": 1340,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7198",
+          "period": "2025-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 1340,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20241107514306",
+          "source_row_key": "cf|7198|2025-03-31|2Q|profit_before_tax|jquants|20241107514306",
+          "disclosure_datetime": "2024-11-07T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20241107514306",
+      "disclosure_datetime": "2024-11-07T15:30:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7198",
+      "company_name": "SBIアルヒ",
+      "fiscal_year": 2025,
+      "quarter": "3Q",
+      "period_end": "2025-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 2308000000,
+      "canonical_normalized_value_millions_jpy": 2308,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7198",
+          "period": "2025-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 2308,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20250206564743",
+          "source_row_key": "cf|7198|2025-03-31|3Q|profit_before_tax|jquants|20250206564743",
+          "disclosure_datetime": "2025-02-06T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20250206564743",
+      "disclosure_datetime": "2025-02-06T15:30:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7198",
+      "company_name": "SBIアルヒ",
+      "fiscal_year": 2025,
+      "quarter": "FY",
+      "period_end": "2025-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 2427000000,
+      "canonical_normalized_value_millions_jpy": 2427,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7198",
+          "period": "2025-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 2427,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20250508534333",
+          "source_row_key": "cf|7198|2025-03-31|FY|profit_before_tax|jquants|20250508534333",
+          "disclosure_datetime": "2025-05-08T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20250508534333",
+      "disclosure_datetime": "2025-05-08T15:30:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7198",
+      "company_name": "SBIアルヒ",
+      "fiscal_year": 2026,
+      "quarter": "1Q",
+      "period_end": "2026-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 437000000,
+      "canonical_normalized_value_millions_jpy": 437,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7198",
+          "period": "2026-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 437,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20250804528633",
+          "source_row_key": "cf|7198|2026-03-31|1Q|profit_before_tax|jquants|20250804528633",
+          "disclosure_datetime": "2025-08-04T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20250804528633",
+      "disclosure_datetime": "2025-08-04T15:30:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7198",
+      "company_name": "SBIアルヒ",
+      "fiscal_year": 2026,
+      "quarter": "2Q",
+      "period_end": "2026-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 1176000000,
+      "canonical_normalized_value_millions_jpy": 1176,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7198",
+          "period": "2026-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 1176,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20251110593318",
+          "source_row_key": "cf|7198|2026-03-31|2Q|profit_before_tax|jquants|20251110593318",
+          "disclosure_datetime": "2025-11-10T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20251110593318",
+      "disclosure_datetime": "2025-11-10T15:30:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7198",
+      "company_name": "SBIアルヒ",
+      "fiscal_year": 2026,
+      "quarter": "3Q",
+      "period_end": "2026-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 2499000000,
+      "canonical_normalized_value_millions_jpy": 2499,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7198",
+          "period": "2026-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 2499,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20260212555994",
+          "source_row_key": "cf|7198|2026-03-31|3Q|profit_before_tax|jquants|20260212555994",
+          "disclosure_datetime": "2026-02-12T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20260212555994",
+      "disclosure_datetime": "2026-02-12T15:30:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7198",
+      "company_name": "SBIアルヒ",
+      "fiscal_year": 2026,
+      "quarter": "FY",
+      "period_end": "2026-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 2779000000,
+      "canonical_normalized_value_millions_jpy": 2779,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7198",
+          "period": "2026-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 2779,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20260512524751",
+          "source_row_key": "cf|7198|2026-03-31|FY|profit_before_tax|jquants|20260512524751",
+          "disclosure_datetime": "2026-05-12T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20260512524751",
+      "disclosure_datetime": "2026-05-12T15:30:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7198",
+      "company_name": "SBIアルヒ",
+      "fiscal_year": 2027,
+      "quarter": "1Q",
+      "period_end": "2027-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 639000000,
+      "canonical_normalized_value_millions_jpy": 639,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7198",
+          "period": "2027-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 639,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20260810516468",
+          "source_row_key": "cf|7198|2027-03-31|1Q|profit_before_tax|jquants|20260810516468",
+          "disclosure_datetime": "2026-08-10T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20260810516468",
+      "disclosure_datetime": "2026-08-10T15:30:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8473",
+      "company_name": "SBIホールディングス",
+      "fiscal_year": 2021,
+      "quarter": "FY",
+      "period_end": "2021-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 140380000000,
+      "canonical_normalized_value_millions_jpy": 140380,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8473",
+          "period": "2021-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 140380,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20210427401817",
+          "source_row_key": "cf|8473|2021-03-31|FY|profit_before_tax|jquants|20210427401817",
+          "disclosure_datetime": "2021-04-28T02:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20210427401817",
+      "disclosure_datetime": "2021-04-28T11:00:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8473",
+      "company_name": "SBIホールディングス",
+      "fiscal_year": 2022,
+      "quarter": "1Q",
+      "period_end": "2022-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 33029000000,
+      "canonical_normalized_value_millions_jpy": 33029,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8473",
+          "period": "2022-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 33029,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20210728472883",
+          "source_row_key": "cf|8473|2022-03-31|1Q|profit_before_tax|jquants|20210728472883",
+          "disclosure_datetime": "2021-07-29T01:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20210728472883",
+      "disclosure_datetime": "2021-07-29T10:30:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8473",
+      "company_name": "SBIホールディングス",
+      "fiscal_year": 2022,
+      "quarter": "2Q",
+      "period_end": "2022-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 109276000000,
+      "canonical_normalized_value_millions_jpy": 109276,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8473",
+          "period": "2022-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 109276,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20211027418154",
+          "source_row_key": "cf|8473|2022-03-31|2Q|profit_before_tax|jquants|20211027418154",
+          "disclosure_datetime": "2021-10-28T01:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20211027418154",
+      "disclosure_datetime": "2021-10-28T10:30:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8473",
+      "company_name": "SBIホールディングス",
+      "fiscal_year": 2022,
+      "quarter": "3Q",
+      "period_end": "2022-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 373449000000,
+      "canonical_normalized_value_millions_jpy": 373449,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8473",
+          "period": "2022-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 373449,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20220225596546",
+          "source_row_key": "cf|8473|2022-03-31|3Q|profit_before_tax|jquants|20220225596546",
+          "disclosure_datetime": "2022-02-28T05:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20220225596546",
+      "disclosure_datetime": "2022-02-28T14:00:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8473",
+      "company_name": "SBIホールディングス",
+      "fiscal_year": 2022,
+      "quarter": "FY",
+      "period_end": "2022-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 412724000000,
+      "canonical_normalized_value_millions_jpy": 412724,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8473",
+          "period": "2022-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 412724,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20220526559887",
+          "source_row_key": "cf|8473|2022-03-31|FY|profit_before_tax|jquants|20220526559887",
+          "disclosure_datetime": "2022-05-27T01:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20220526559887",
+      "disclosure_datetime": "2022-05-27T10:30:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8473",
+      "company_name": "SBIホールディングス",
+      "fiscal_year": 2023,
+      "quarter": "1Q",
+      "period_end": "2023-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 23522000000,
+      "canonical_normalized_value_millions_jpy": 23522,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8473",
+          "period": "2023-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 23522,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20220812519820",
+          "source_row_key": "cf|8473|2023-03-31|1Q|profit_before_tax|jquants|20220812519820",
+          "disclosure_datetime": "2022-08-15T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20220812519820",
+      "disclosure_datetime": "2022-08-15T15:00:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8473",
+      "company_name": "SBIホールディングス",
+      "fiscal_year": 2023,
+      "quarter": "2Q",
+      "period_end": "2023-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 52687000000,
+      "canonical_normalized_value_millions_jpy": 52687,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8473",
+          "period": "2023-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 52687,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20221111565081",
+          "source_row_key": "cf|8473|2023-03-31|2Q|profit_before_tax|jquants|20221111565081",
+          "disclosure_datetime": "2022-11-14T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20221111565081",
+      "disclosure_datetime": "2022-11-14T15:00:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8473",
+      "company_name": "SBIホールディングス",
+      "fiscal_year": 2023,
+      "quarter": "3Q",
+      "period_end": "2023-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 48108000000,
+      "canonical_normalized_value_millions_jpy": 48108,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8473",
+          "period": "2023-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 48108,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20230206501478",
+          "source_row_key": "cf|8473|2023-03-31|3Q|profit_before_tax|jquants|20230206501478",
+          "disclosure_datetime": "2023-02-07T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20230206501478",
+      "disclosure_datetime": "2023-02-07T15:00:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8473",
+      "company_name": "SBIホールディングス",
+      "fiscal_year": 2023,
+      "quarter": "FY",
+      "period_end": "2023-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 100753000000,
+      "canonical_normalized_value_millions_jpy": 100753,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8473",
+          "period": "2023-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 100753,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20230511567250",
+          "source_row_key": "cf|8473|2023-03-31|FY|profit_before_tax|jquants|20230511567250",
+          "disclosure_datetime": "2023-05-12T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20230511567250",
+      "disclosure_datetime": "2023-05-12T15:00:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8473",
+      "company_name": "SBIホールディングス",
+      "fiscal_year": 2024,
+      "quarter": "1Q",
+      "period_end": "2024-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 43008000000,
+      "canonical_normalized_value_millions_jpy": 43008,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8473",
+          "period": "2024-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 43008,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20230803533759",
+          "source_row_key": "cf|8473|2024-03-31|1Q|profit_before_tax|jquants|20230803533759",
+          "disclosure_datetime": "2023-08-04T02:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20230803533759",
+      "disclosure_datetime": "2023-08-04T11:30:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8473",
+      "company_name": "SBIホールディングス",
+      "fiscal_year": 2024,
+      "quarter": "2Q",
+      "period_end": "2024-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 70241000000,
+      "canonical_normalized_value_millions_jpy": 70241,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8473",
+          "period": "2024-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 70241,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20231109584432",
+          "source_row_key": "cf|8473|2024-03-31|2Q|profit_before_tax|jquants|20231109584432",
+          "disclosure_datetime": "2023-11-10T02:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20231109584432",
+      "disclosure_datetime": "2023-11-10T11:30:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8473",
+      "company_name": "SBIホールディングス",
+      "fiscal_year": 2024,
+      "quarter": "3Q",
+      "period_end": "2024-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 100088000000,
+      "canonical_normalized_value_millions_jpy": 100088,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8473",
+          "period": "2024-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 100088,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20240206527741",
+          "source_row_key": "cf|8473|2024-03-31|3Q|profit_before_tax|jquants|20240206527741",
+          "disclosure_datetime": "2024-02-07T02:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20240206527741",
+      "disclosure_datetime": "2024-02-07T11:30:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8473",
+      "company_name": "SBIホールディングス",
+      "fiscal_year": 2024,
+      "quarter": "FY",
+      "period_end": "2024-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 141569000000,
+      "canonical_normalized_value_millions_jpy": 141569,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8473",
+          "period": "2024-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 141569,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20240521502404",
+          "source_row_key": "cf|8473|2024-03-31|FY|profit_before_tax|jquants|20240521502404",
+          "disclosure_datetime": "2024-05-21T08:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20240521502404",
+      "disclosure_datetime": "2024-05-21T17:00:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8473",
+      "company_name": "SBIホールディングス",
+      "fiscal_year": 2025,
+      "quarter": "1Q",
+      "period_end": "2025-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 51748000000,
+      "canonical_normalized_value_millions_jpy": 51748,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8473",
+          "period": "2025-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 51748,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20240801560754",
+          "source_row_key": "cf|8473|2025-03-31|1Q|profit_before_tax|jquants|20240801560754",
+          "disclosure_datetime": "2024-08-02T02:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20240801560754",
+      "disclosure_datetime": "2024-08-02T11:30:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8473",
+      "company_name": "SBIホールディングス",
+      "fiscal_year": 2025,
+      "quarter": "2Q",
+      "period_end": "2025-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 78872000000,
+      "canonical_normalized_value_millions_jpy": 78872,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8473",
+          "period": "2025-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 78872,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20241107514964",
+          "source_row_key": "cf|8473|2025-03-31|2Q|profit_before_tax|jquants|20241107514964",
+          "disclosure_datetime": "2024-11-08T02:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20241107514964",
+      "disclosure_datetime": "2024-11-08T11:30:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8473",
+      "company_name": "SBIホールディングス",
+      "fiscal_year": 2025,
+      "quarter": "3Q",
+      "period_end": "2025-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 179378000000,
+      "canonical_normalized_value_millions_jpy": 179378,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8473",
+          "period": "2025-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 179378,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20250206565453",
+          "source_row_key": "cf|8473|2025-03-31|3Q|profit_before_tax|jquants|20250206565453",
+          "disclosure_datetime": "2025-02-07T02:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20250206565453",
+      "disclosure_datetime": "2025-02-07T11:30:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8473",
+      "company_name": "SBIホールディングス",
+      "fiscal_year": 2025,
+      "quarter": "FY",
+      "period_end": "2025-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 282290000000,
+      "canonical_normalized_value_millions_jpy": 282290,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8473",
+          "period": "2025-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 282290,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20250508535348",
+          "source_row_key": "cf|8473|2025-03-31|FY|profit_before_tax|jquants|20250508535348",
+          "disclosure_datetime": "2025-05-09T02:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20250508535348",
+      "disclosure_datetime": "2025-05-09T11:30:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8473",
+      "company_name": "SBIホールディングス",
+      "fiscal_year": 2026,
+      "quarter": "1Q",
+      "period_end": "2026-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 90352000000,
+      "canonical_normalized_value_millions_jpy": 90352,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8473",
+          "period": "2026-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 90352,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20250730524379",
+          "source_row_key": "cf|8473|2026-03-31|1Q|profit_before_tax|jquants|20250730524379",
+          "disclosure_datetime": "2025-07-31T01:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20250730524379",
+      "disclosure_datetime": "2025-07-31T10:15:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8473",
+      "company_name": "SBIホールディングス",
+      "fiscal_year": 2026,
+      "quarter": "2Q",
+      "period_end": "2026-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 212104000000,
+      "canonical_normalized_value_millions_jpy": 212104,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8473",
+          "period": "2026-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 212104,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20251030583454",
+          "source_row_key": "cf|8473|2026-03-31|2Q|profit_before_tax|jquants|20251030583454",
+          "disclosure_datetime": "2025-10-31T01:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20251030583454",
+      "disclosure_datetime": "2025-10-31T10:30:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8473",
+      "company_name": "SBIホールディングス",
+      "fiscal_year": 2026,
+      "quarter": "3Q",
+      "period_end": "2026-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 433315000000,
+      "canonical_normalized_value_millions_jpy": 433315,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8473",
+          "period": "2026-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 433315,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20260203546153",
+          "source_row_key": "cf|8473|2026-03-31|3Q|profit_before_tax|jquants|20260203546153",
+          "disclosure_datetime": "2026-02-04T01:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20260203546153",
+      "disclosure_datetime": "2026-02-04T10:30:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8473",
+      "company_name": "SBIホールディングス",
+      "fiscal_year": 2026,
+      "quarter": "FY",
+      "period_end": "2026-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 516667000000,
+      "canonical_normalized_value_millions_jpy": 516667,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8473",
+          "period": "2026-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 516667,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20260430515452",
+          "source_row_key": "cf|8473|2026-03-31|FY|profit_before_tax|jquants|20260430515452",
+          "disclosure_datetime": "2026-05-01T01:10:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20260430515452",
+      "disclosure_datetime": "2026-05-01T10:10:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8473",
+      "company_name": "SBIホールディングス",
+      "fiscal_year": 2027,
+      "quarter": "1Q",
+      "period_end": "2027-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 225814000000,
+      "canonical_normalized_value_millions_jpy": 225814,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8473",
+          "period": "2027-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 225814,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20260730503797",
+          "source_row_key": "cf|8473|2027-03-31|1Q|profit_before_tax|jquants|20260730503797",
+          "disclosure_datetime": "2026-07-31T01:10:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20260730503797",
+      "disclosure_datetime": "2026-07-31T10:10:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8698",
+      "company_name": "マネックスグループ",
+      "fiscal_year": 2021,
+      "quarter": "FY",
+      "period_end": "2021-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 21296000000,
+      "canonical_normalized_value_millions_jpy": 21296,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8698",
+          "period": "2021-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 21296,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20210604441144",
+          "source_row_key": "cf|8698|2021-03-31|FY|profit_before_tax|jquants|20210604441144",
+          "disclosure_datetime": "2021-06-04T07:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20210604441144",
+      "disclosure_datetime": "2021-06-04T16:00:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8698",
+      "company_name": "マネックスグループ",
+      "fiscal_year": 2022,
+      "quarter": "1Q",
+      "period_end": "2022-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 11107000000,
+      "canonical_normalized_value_millions_jpy": 11107,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8698",
+          "period": "2022-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 11107,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20210727471941",
+          "source_row_key": "cf|8698|2022-03-31|1Q|profit_before_tax|jquants|20210727471941",
+          "disclosure_datetime": "2021-07-28T02:40:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20210727471941",
+      "disclosure_datetime": "2021-07-28T11:40:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8698",
+      "company_name": "マネックスグループ",
+      "fiscal_year": 2022,
+      "quarter": "2Q",
+      "period_end": "2022-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 18269000000,
+      "canonical_normalized_value_millions_jpy": 18269,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8698",
+          "period": "2022-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 18269,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20211028419825",
+          "source_row_key": "cf|8698|2022-03-31|2Q|profit_before_tax|jquants|20211028419825",
+          "disclosure_datetime": "2021-10-29T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20211028419825",
+      "disclosure_datetime": "2021-10-29T15:15:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8698",
+      "company_name": "マネックスグループ",
+      "fiscal_year": 2022,
+      "quarter": "3Q",
+      "period_end": "2022-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 19279000000,
+      "canonical_normalized_value_millions_jpy": 19279,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8698",
+          "period": "2022-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 19279,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20220128575054",
+          "source_row_key": "cf|8698|2022-03-31|3Q|profit_before_tax|jquants|20220128575054",
+          "disclosure_datetime": "2022-01-31T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20220128575054",
+      "disclosure_datetime": "2022-01-31T15:15:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8698",
+      "company_name": "マネックスグループ",
+      "fiscal_year": 2022,
+      "quarter": "FY",
+      "period_end": "2022-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 20801000000,
+      "canonical_normalized_value_millions_jpy": 20801,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8698",
+          "period": "2022-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 20801,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20220426528841",
+          "source_row_key": "cf|8698|2022-03-31|FY|profit_before_tax|jquants|20220426528841",
+          "disclosure_datetime": "2022-04-27T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20220426528841",
+      "disclosure_datetime": "2022-04-27T15:15:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8698",
+      "company_name": "マネックスグループ",
+      "fiscal_year": 2023,
+      "quarter": "1Q",
+      "period_end": "2023-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 1078000000,
+      "canonical_normalized_value_millions_jpy": 1078,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8698",
+          "period": "2023-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 1078,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20220802510282",
+          "source_row_key": "cf|8698|2023-03-31|1Q|profit_before_tax|jquants|20220802510282",
+          "disclosure_datetime": "2022-08-03T02:40:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20220802510282",
+      "disclosure_datetime": "2022-08-03T11:40:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8698",
+      "company_name": "マネックスグループ",
+      "fiscal_year": 2023,
+      "quarter": "2Q",
+      "period_end": "2023-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 2073000000,
+      "canonical_normalized_value_millions_jpy": 2073,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8698",
+          "period": "2023-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 2073,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20221027550931",
+          "source_row_key": "cf|8698|2023-03-31|2Q|profit_before_tax|jquants|20221027550931",
+          "disclosure_datetime": "2022-10-28T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20221027550931",
+      "disclosure_datetime": "2022-10-28T15:15:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8698",
+      "company_name": "マネックスグループ",
+      "fiscal_year": 2023,
+      "quarter": "3Q",
+      "period_end": "2023-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 2458000000,
+      "canonical_normalized_value_millions_jpy": 2458,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8698",
+          "period": "2023-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 2458,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20230127595254",
+          "source_row_key": "cf|8698|2023-03-31|3Q|profit_before_tax|jquants|20230127595254",
+          "disclosure_datetime": "2023-01-30T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20230127595254",
+      "disclosure_datetime": "2023-01-30T15:15:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8698",
+      "company_name": "マネックスグループ",
+      "fiscal_year": 2023,
+      "quarter": "FY",
+      "period_end": "2023-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 4669000000,
+      "canonical_normalized_value_millions_jpy": 4669,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8698",
+          "period": "2023-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 4669,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20230426553801",
+          "source_row_key": "cf|8698|2023-03-31|FY|profit_before_tax|jquants|20230426553801",
+          "disclosure_datetime": "2023-04-27T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20230426553801",
+      "disclosure_datetime": "2023-04-27T15:15:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8698",
+      "company_name": "マネックスグループ",
+      "fiscal_year": 2024,
+      "quarter": "1Q",
+      "period_end": "2024-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 2852000000,
+      "canonical_normalized_value_millions_jpy": 2852,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8698",
+          "period": "2024-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 2852,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20230727528580",
+          "source_row_key": "cf|8698|2024-03-31|1Q|profit_before_tax|jquants|20230727528580",
+          "disclosure_datetime": "2023-07-28T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20230727528580",
+      "disclosure_datetime": "2023-07-28T15:15:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8698",
+      "company_name": "マネックスグループ",
+      "fiscal_year": 2024,
+      "quarter": "2Q",
+      "period_end": "2024-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 5510000000,
+      "canonical_normalized_value_millions_jpy": 5510,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8698",
+          "period": "2024-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 5510,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20231026572518",
+          "source_row_key": "cf|8698|2024-03-31|2Q|profit_before_tax|jquants|20231026572518",
+          "disclosure_datetime": "2023-10-27T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20231026572518",
+      "disclosure_datetime": "2023-10-27T15:15:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8698",
+      "company_name": "マネックスグループ",
+      "fiscal_year": 2024,
+      "quarter": "3Q",
+      "period_end": "2024-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 4845000000,
+      "canonical_normalized_value_millions_jpy": 4845,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8698",
+          "period": "2024-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 4845,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20240130522300",
+          "source_row_key": "cf|8698|2024-03-31|3Q|profit_before_tax|jquants|20240130522300",
+          "disclosure_datetime": "2024-01-31T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20240130522300",
+      "disclosure_datetime": "2024-01-31T15:15:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8698",
+      "company_name": "マネックスグループ",
+      "fiscal_year": 2024,
+      "quarter": "FY",
+      "period_end": "2024-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 25237000000,
+      "canonical_normalized_value_millions_jpy": 25237,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8698",
+          "period": "2024-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 25237,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20240424575965",
+          "source_row_key": "cf|8698|2024-03-31|FY|profit_before_tax|jquants|20240424575965",
+          "disclosure_datetime": "2024-04-25T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20240424575965",
+      "disclosure_datetime": "2024-04-25T15:15:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8698",
+      "company_name": "マネックスグループ",
+      "fiscal_year": 2025,
+      "quarter": "1Q",
+      "period_end": "2025-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 3160000000,
+      "canonical_normalized_value_millions_jpy": 3160,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8698",
+          "period": "2025-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 3160,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20240725555138",
+          "source_row_key": "cf|8698|2025-03-31|1Q|profit_before_tax|jquants|20240725555138",
+          "disclosure_datetime": "2024-07-26T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20240725555138",
+      "disclosure_datetime": "2024-07-26T15:15:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8698",
+      "company_name": "マネックスグループ",
+      "fiscal_year": 2025,
+      "quarter": "2Q",
+      "period_end": "2025-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 5012000000,
+      "canonical_normalized_value_millions_jpy": 5012,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8698",
+          "period": "2025-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 5012,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20241025503161",
+          "source_row_key": "cf|8698|2025-03-31|2Q|profit_before_tax|jquants|20241025503161",
+          "disclosure_datetime": "2024-10-28T06:15:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20241025503161",
+      "disclosure_datetime": "2024-10-28T15:15:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8698",
+      "company_name": "マネックスグループ",
+      "fiscal_year": 2025,
+      "quarter": "3Q",
+      "period_end": "2025-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": -6939000000,
+      "canonical_normalized_value_millions_jpy": -6939,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8698",
+          "period": "2025-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": -6939,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20250210568715",
+          "source_row_key": "cf|8698|2025-03-31|3Q|profit_before_tax|jquants|20250210568715",
+          "disclosure_datetime": "2025-02-12T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20250210568715",
+      "disclosure_datetime": "2025-02-12T15:30:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8698",
+      "company_name": "マネックスグループ",
+      "fiscal_year": 2025,
+      "quarter": "FY",
+      "period_end": "2025-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": -4626000000,
+      "canonical_normalized_value_millions_jpy": -4626,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8698",
+          "period": "2025-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": -4626,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20250508535874",
+          "source_row_key": "cf|8698|2025-03-31|FY|profit_before_tax|jquants|20250508535874",
+          "disclosure_datetime": "2025-05-09T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20250508535874",
+      "disclosure_datetime": "2025-05-09T15:30:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8698",
+      "company_name": "マネックスグループ",
+      "fiscal_year": 2026,
+      "quarter": "1Q",
+      "period_end": "2026-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 2939000000,
+      "canonical_normalized_value_millions_jpy": 2939,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8698",
+          "period": "2026-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 2939,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20250806532739",
+          "source_row_key": "cf|8698|2026-03-31|1Q|profit_before_tax|jquants|20250806532739",
+          "disclosure_datetime": "2025-08-07T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20250806532739",
+      "disclosure_datetime": "2025-08-07T15:30:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8698",
+      "company_name": "マネックスグループ",
+      "fiscal_year": 2026,
+      "quarter": "2Q",
+      "period_end": "2026-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 7658000000,
+      "canonical_normalized_value_millions_jpy": 7658,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8698",
+          "period": "2026-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 7658,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20251106590764",
+          "source_row_key": "cf|8698|2026-03-31|2Q|profit_before_tax|jquants|20251106590764",
+          "disclosure_datetime": "2025-11-07T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20251106590764",
+      "disclosure_datetime": "2025-11-07T15:30:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8698",
+      "company_name": "マネックスグループ",
+      "fiscal_year": 2026,
+      "quarter": "3Q",
+      "period_end": "2026-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 12663000000,
+      "canonical_normalized_value_millions_jpy": 12663,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8698",
+          "period": "2026-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 12663,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20260212556196",
+          "source_row_key": "cf|8698|2026-03-31|3Q|profit_before_tax|jquants|20260212556196",
+          "disclosure_datetime": "2026-02-12T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20260212556196",
+      "disclosure_datetime": "2026-02-12T15:30:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8698",
+      "company_name": "マネックスグループ",
+      "fiscal_year": 2026,
+      "quarter": "FY",
+      "period_end": "2026-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 15758000000,
+      "canonical_normalized_value_millions_jpy": 15758,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8698",
+          "period": "2026-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 15758,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20260512524865",
+          "source_row_key": "cf|8698|2026-03-31|FY|profit_before_tax|jquants|20260512524865",
+          "disclosure_datetime": "2026-05-12T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20260512524865",
+      "disclosure_datetime": "2026-05-12T15:30:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8698",
+      "company_name": "マネックスグループ",
+      "fiscal_year": 2027,
+      "quarter": "1Q",
+      "period_end": "2027-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 2280000000,
+      "canonical_normalized_value_millions_jpy": 2280,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8698",
+          "period": "2027-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 2280,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20260805510817",
+          "source_row_key": "cf|8698|2027-03-31|1Q|profit_before_tax|jquants|20260805510817",
+          "disclosure_datetime": "2026-08-06T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20260805510817",
+      "disclosure_datetime": "2026-08-06T15:30:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8253",
+      "company_name": "クレディセゾン",
+      "fiscal_year": 2022,
+      "quarter": "1Q",
+      "period_end": "2022-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 16760000000,
+      "canonical_normalized_value_millions_jpy": 16760,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8253",
+          "period": "2022-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 16760,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20210806480779",
+          "source_row_key": "cf|8253|2022-03-31|1Q|profit_before_tax|jquants|20210806480779",
+          "disclosure_datetime": "2021-08-06T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20210806480779",
+      "disclosure_datetime": "2021-08-06T15:00:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8253",
+      "company_name": "クレディセゾン",
+      "fiscal_year": 2022,
+      "quarter": "2Q",
+      "period_end": "2022-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 33252000000,
+      "canonical_normalized_value_millions_jpy": 33252,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8253",
+          "period": "2022-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 33252,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20211109428623",
+          "source_row_key": "cf|8253|2022-03-31|2Q|profit_before_tax|jquants|20211109428623",
+          "disclosure_datetime": "2021-11-09T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20211109428623",
+      "disclosure_datetime": "2021-11-09T15:00:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8253",
+      "company_name": "クレディセゾン",
+      "fiscal_year": 2022,
+      "quarter": "3Q",
+      "period_end": "2022-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 54223000000,
+      "canonical_normalized_value_millions_jpy": 54223,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8253",
+          "period": "2022-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 54223,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20220209584406",
+          "source_row_key": "cf|8253|2022-03-31|3Q|profit_before_tax|jquants|20220209584406",
+          "disclosure_datetime": "2022-02-09T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20220209584406",
+      "disclosure_datetime": "2022-02-09T15:00:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8253",
+      "company_name": "クレディセゾン",
+      "fiscal_year": 2023,
+      "quarter": "1Q",
+      "period_end": "2023-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 22157000000,
+      "canonical_normalized_value_millions_jpy": 22157,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8253",
+          "period": "2023-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 22157,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20220810517960",
+          "source_row_key": "cf|8253|2023-03-31|1Q|profit_before_tax|jquants|20220810517960",
+          "disclosure_datetime": "2022-08-10T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20220810517960",
+      "disclosure_datetime": "2022-08-10T15:00:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8253",
+      "company_name": "クレディセゾン",
+      "fiscal_year": 2023,
+      "quarter": "2Q",
+      "period_end": "2023-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 39965000000,
+      "canonical_normalized_value_millions_jpy": 39965,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8253",
+          "period": "2023-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 39965,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20221110562388",
+          "source_row_key": "cf|8253|2023-03-31|2Q|profit_before_tax|jquants|20221110562388",
+          "disclosure_datetime": "2022-11-10T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20221110562388",
+      "disclosure_datetime": "2022-11-10T15:00:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8253",
+      "company_name": "クレディセゾン",
+      "fiscal_year": 2023,
+      "quarter": "3Q",
+      "period_end": "2023-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 64488000000,
+      "canonical_normalized_value_millions_jpy": 64488,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8253",
+          "period": "2023-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 64488,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20230209504434",
+          "source_row_key": "cf|8253|2023-03-31|3Q|profit_before_tax|jquants|20230209504434",
+          "disclosure_datetime": "2023-02-09T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20230209504434",
+      "disclosure_datetime": "2023-02-09T15:00:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8253",
+      "company_name": "クレディセゾン",
+      "fiscal_year": 2024,
+      "quarter": "1Q",
+      "period_end": "2024-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 24009000000,
+      "canonical_normalized_value_millions_jpy": 24009,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8253",
+          "period": "2024-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 24009,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20230810540421",
+          "source_row_key": "cf|8253|2024-03-31|1Q|profit_before_tax|jquants|20230810540421",
+          "disclosure_datetime": "2023-08-10T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20230810540421",
+      "disclosure_datetime": "2023-08-10T15:00:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8253",
+      "company_name": "クレディセゾン",
+      "fiscal_year": 2024,
+      "quarter": "2Q",
+      "period_end": "2024-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 59372000000,
+      "canonical_normalized_value_millions_jpy": 59372,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8253",
+          "period": "2024-03-31",
+          "quarter": "2Q",
+          "metric": "profit_before_tax",
+          "value": 59372,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20231109584779",
+          "source_row_key": "cf|8253|2024-03-31|2Q|profit_before_tax|jquants|20231109584779",
+          "disclosure_datetime": "2023-11-10T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20231109584779",
+      "disclosure_datetime": "2023-11-10T15:00:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8253",
+      "company_name": "クレディセゾン",
+      "fiscal_year": 2024,
+      "quarter": "3Q",
+      "period_end": "2024-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 83775000000,
+      "canonical_normalized_value_millions_jpy": 83775,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8253",
+          "period": "2024-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 83775,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20240213533964",
+          "source_row_key": "cf|8253|2024-03-31|3Q|profit_before_tax|jquants|20240213533964",
+          "disclosure_datetime": "2024-02-13T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20240213533964",
+      "disclosure_datetime": "2024-02-13T15:00:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8253",
+      "company_name": "クレディセゾン",
+      "fiscal_year": 2025,
+      "quarter": "1Q",
+      "period_end": "2025-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 23577000000,
+      "canonical_normalized_value_millions_jpy": 23577,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8253",
+          "period": "2025-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 23577,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20240809569527",
+          "source_row_key": "cf|8253|2025-03-31|1Q|profit_before_tax|jquants|20240809569527",
+          "disclosure_datetime": "2024-08-09T06:00:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20240809569527",
+      "disclosure_datetime": "2024-08-09T15:00:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8253",
+      "company_name": "クレディセゾン",
+      "fiscal_year": 2025,
+      "quarter": "3Q",
+      "period_end": "2025-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 81742000000,
+      "canonical_normalized_value_millions_jpy": 81742,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8253",
+          "period": "2025-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 81742,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20250213573961",
+          "source_row_key": "cf|8253|2025-03-31|3Q|profit_before_tax|jquants|20250213573961",
+          "disclosure_datetime": "2025-02-14T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20250213573961",
+      "disclosure_datetime": "2025-02-14T15:30:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8253",
+      "company_name": "クレディセゾン",
+      "fiscal_year": 2026,
+      "quarter": "1Q",
+      "period_end": "2026-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 22866000000,
+      "canonical_normalized_value_millions_jpy": 22866,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8253",
+          "period": "2026-03-31",
+          "quarter": "1Q",
+          "metric": "profit_before_tax",
+          "value": 22866,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20250814541895",
+          "source_row_key": "cf|8253|2026-03-31|1Q|profit_before_tax|jquants|20250814541895",
+          "disclosure_datetime": "2025-08-14T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20250814541895",
+      "disclosure_datetime": "2025-08-14T15:30:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8253",
+      "company_name": "クレディセゾン",
+      "fiscal_year": 2026,
+      "quarter": "3Q",
+      "period_end": "2026-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 73170000000,
+      "canonical_normalized_value_millions_jpy": 73170,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8253",
+          "period": "2026-03-31",
+          "quarter": "3Q",
+          "metric": "profit_before_tax",
+          "value": 73170,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20260212558173",
+          "source_row_key": "cf|8253|2026-03-31|3Q|profit_before_tax|jquants|20260212558173",
+          "disclosure_datetime": "2026-02-13T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20260212558173",
+      "disclosure_datetime": "2026-02-13T15:30:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8253",
+      "company_name": "クレディセゾン",
+      "fiscal_year": 2026,
+      "quarter": "FY",
+      "period_end": "2026-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 89980000000,
+      "canonical_normalized_value_millions_jpy": 89980,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8253",
+          "period": "2026-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 89980,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20260604563577",
+          "source_row_key": "cf|8253|2026-03-31|FY|profit_before_tax|jquants|20260604563577",
+          "disclosure_datetime": "2026-06-05T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20260604563577",
+      "disclosure_datetime": "2026-06-05T15:30:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7157",
+      "company_name": "ライフネット生命保険",
+      "fiscal_year": 2021,
+      "quarter": "FY",
+      "period_end": "2021-03-31",
+      "accounting_standard": null,
+      "raw_jquants_pbt_jpy": null,
+      "canonical_normalized_value_millions_jpy": null,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": null,
+      "disclosure_datetime": null,
+      "document_type": null,
+      "consolidation_scope": null,
+      "pbt_field": null,
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7157",
+      "company_name": "ライフネット生命保険",
+      "fiscal_year": 2022,
+      "quarter": "1Q",
+      "period_end": "2022-03-31",
+      "accounting_standard": null,
+      "raw_jquants_pbt_jpy": null,
+      "canonical_normalized_value_millions_jpy": null,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": null,
+      "disclosure_datetime": null,
+      "document_type": null,
+      "consolidation_scope": null,
+      "pbt_field": null,
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7157",
+      "company_name": "ライフネット生命保険",
+      "fiscal_year": 2022,
+      "quarter": "2Q",
+      "period_end": "2022-03-31",
+      "accounting_standard": null,
+      "raw_jquants_pbt_jpy": null,
+      "canonical_normalized_value_millions_jpy": null,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": null,
+      "disclosure_datetime": null,
+      "document_type": null,
+      "consolidation_scope": null,
+      "pbt_field": null,
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7157",
+      "company_name": "ライフネット生命保険",
+      "fiscal_year": 2022,
+      "quarter": "3Q",
+      "period_end": "2022-03-31",
+      "accounting_standard": null,
+      "raw_jquants_pbt_jpy": null,
+      "canonical_normalized_value_millions_jpy": null,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": null,
+      "disclosure_datetime": null,
+      "document_type": null,
+      "consolidation_scope": null,
+      "pbt_field": null,
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7157",
+      "company_name": "ライフネット生命保険",
+      "fiscal_year": 2022,
+      "quarter": "FY",
+      "period_end": "2022-03-31",
+      "accounting_standard": null,
+      "raw_jquants_pbt_jpy": null,
+      "canonical_normalized_value_millions_jpy": null,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": null,
+      "disclosure_datetime": null,
+      "document_type": null,
+      "consolidation_scope": null,
+      "pbt_field": null,
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7157",
+      "company_name": "ライフネット生命保険",
+      "fiscal_year": 2023,
+      "quarter": "1Q",
+      "period_end": "2023-03-31",
+      "accounting_standard": null,
+      "raw_jquants_pbt_jpy": null,
+      "canonical_normalized_value_millions_jpy": null,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": null,
+      "disclosure_datetime": null,
+      "document_type": null,
+      "consolidation_scope": null,
+      "pbt_field": null,
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7157",
+      "company_name": "ライフネット生命保険",
+      "fiscal_year": 2023,
+      "quarter": "2Q",
+      "period_end": "2023-03-31",
+      "accounting_standard": null,
+      "raw_jquants_pbt_jpy": null,
+      "canonical_normalized_value_millions_jpy": null,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": null,
+      "disclosure_datetime": null,
+      "document_type": null,
+      "consolidation_scope": null,
+      "pbt_field": null,
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7157",
+      "company_name": "ライフネット生命保険",
+      "fiscal_year": 2023,
+      "quarter": "3Q",
+      "period_end": "2023-03-31",
+      "accounting_standard": null,
+      "raw_jquants_pbt_jpy": null,
+      "canonical_normalized_value_millions_jpy": null,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": null,
+      "disclosure_datetime": null,
+      "document_type": null,
+      "consolidation_scope": null,
+      "pbt_field": null,
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7157",
+      "company_name": "ライフネット生命保険",
+      "fiscal_year": 2023,
+      "quarter": "FY",
+      "period_end": "2023-03-31",
+      "accounting_standard": null,
+      "raw_jquants_pbt_jpy": null,
+      "canonical_normalized_value_millions_jpy": null,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": null,
+      "disclosure_datetime": null,
+      "document_type": null,
+      "consolidation_scope": null,
+      "pbt_field": null,
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "7157",
+      "company_name": "ライフネット生命保険",
+      "fiscal_year": 2026,
+      "quarter": "FY",
+      "period_end": "2026-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 11389000000,
+      "canonical_normalized_value_millions_jpy": 11389,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "7157",
+          "period": "2026-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 11389,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20260513529356",
+          "source_row_key": "cf|7157|2026-03-31|FY|profit_before_tax|jquants|20260513529356",
+          "disclosure_datetime": "2026-05-13T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20260513529356",
+      "disclosure_datetime": "2026-05-13T15:30:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8630",
+      "company_name": "SOMPOホールディングス",
+      "fiscal_year": 2021,
+      "quarter": "FY",
+      "period_end": "2021-03-31",
+      "accounting_standard": "JP",
+      "raw_jquants_pbt_jpy": 194937000000,
+      "canonical_normalized_value_millions_jpy": 194937,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": "20210512414253",
+      "disclosure_datetime": "2021-05-20T14:00:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_JP",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before income taxes",
+      "intended_action": "NO_ACTION_NON_IFRS_PERIOD"
+    },
+    {
+      "ticker": "8630",
+      "company_name": "SOMPOホールディングス",
+      "fiscal_year": 2022,
+      "quarter": "1Q",
+      "period_end": "2022-03-31",
+      "accounting_standard": "JP",
+      "raw_jquants_pbt_jpy": 76775000000,
+      "canonical_normalized_value_millions_jpy": 76775,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": "20210802476779",
+      "disclosure_datetime": "2021-08-06T15:00:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_JP",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before income taxes",
+      "intended_action": "NO_ACTION_NON_IFRS_PERIOD"
+    },
+    {
+      "ticker": "8630",
+      "company_name": "SOMPOホールディングス",
+      "fiscal_year": 2022,
+      "quarter": "2Q",
+      "period_end": "2022-03-31",
+      "accounting_standard": "JP",
+      "raw_jquants_pbt_jpy": 188094000000,
+      "canonical_normalized_value_millions_jpy": 188094,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": "20211110429665",
+      "disclosure_datetime": "2021-11-19T14:30:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_JP",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before income taxes",
+      "intended_action": "NO_ACTION_NON_IFRS_PERIOD"
+    },
+    {
+      "ticker": "8630",
+      "company_name": "SOMPOホールディングス",
+      "fiscal_year": 2022,
+      "quarter": "3Q",
+      "period_end": "2022-03-31",
+      "accounting_standard": "JP",
+      "raw_jquants_pbt_jpy": 259126000000,
+      "canonical_normalized_value_millions_jpy": 259126,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": "20220203579393",
+      "disclosure_datetime": "2022-02-14T16:00:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_JP",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before income taxes",
+      "intended_action": "NO_ACTION_NON_IFRS_PERIOD"
+    },
+    {
+      "ticker": "8630",
+      "company_name": "SOMPOホールディングス",
+      "fiscal_year": 2022,
+      "quarter": "FY",
+      "period_end": "2022-03-31",
+      "accounting_standard": "JP",
+      "raw_jquants_pbt_jpy": 317632000000,
+      "canonical_normalized_value_millions_jpy": 317632,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": "20220407518802",
+      "disclosure_datetime": "2022-05-20T15:00:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_JP",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before income taxes",
+      "intended_action": "NO_ACTION_NON_IFRS_PERIOD"
+    },
+    {
+      "ticker": "8630",
+      "company_name": "SOMPOホールディングス",
+      "fiscal_year": 2023,
+      "quarter": "1Q",
+      "period_end": "2023-03-31",
+      "accounting_standard": "JP",
+      "raw_jquants_pbt_jpy": 53775000000,
+      "canonical_normalized_value_millions_jpy": 53775,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": "20220801508638",
+      "disclosure_datetime": "2022-08-05T15:00:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_JP",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before income taxes",
+      "intended_action": "NO_ACTION_NON_IFRS_PERIOD"
+    },
+    {
+      "ticker": "8630",
+      "company_name": "SOMPOホールディングス",
+      "fiscal_year": 2023,
+      "quarter": "2Q",
+      "period_end": "2023-03-31",
+      "accounting_standard": "JP",
+      "raw_jquants_pbt_jpy": -25127000000,
+      "canonical_normalized_value_millions_jpy": -25127,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": "20221109560741",
+      "disclosure_datetime": "2022-11-18T15:30:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_JP",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before income taxes",
+      "intended_action": "NO_ACTION_NON_IFRS_PERIOD"
+    },
+    {
+      "ticker": "8630",
+      "company_name": "SOMPOホールディングス",
+      "fiscal_year": 2023,
+      "quarter": "3Q",
+      "period_end": "2023-03-31",
+      "accounting_standard": "JP",
+      "raw_jquants_pbt_jpy": 57601000000,
+      "canonical_normalized_value_millions_jpy": 57601,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": "20230203500453",
+      "disclosure_datetime": "2023-02-14T16:00:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_JP",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before income taxes",
+      "intended_action": "NO_ACTION_NON_IFRS_PERIOD"
+    },
+    {
+      "ticker": "8630",
+      "company_name": "SOMPOホールディングス",
+      "fiscal_year": 2023,
+      "quarter": "FY",
+      "period_end": "2023-03-31",
+      "accounting_standard": "JP",
+      "raw_jquants_pbt_jpy": 123409000000,
+      "canonical_normalized_value_millions_jpy": 123409,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": "20230510563327",
+      "disclosure_datetime": "2023-05-19T16:00:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_JP",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before income taxes",
+      "intended_action": "NO_ACTION_NON_IFRS_PERIOD"
+    },
+    {
+      "ticker": "8630",
+      "company_name": "SOMPOホールディングス",
+      "fiscal_year": 2024,
+      "quarter": "1Q",
+      "period_end": "2024-03-31",
+      "accounting_standard": "JP",
+      "raw_jquants_pbt_jpy": 127193000000,
+      "canonical_normalized_value_millions_jpy": 127193,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": "20230803533089",
+      "disclosure_datetime": "2023-08-09T15:00:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_JP",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before income taxes",
+      "intended_action": "NO_ACTION_NON_IFRS_PERIOD"
+    },
+    {
+      "ticker": "8630",
+      "company_name": "SOMPOホールディングス",
+      "fiscal_year": 2024,
+      "quarter": "2Q",
+      "period_end": "2024-03-31",
+      "accounting_standard": "JP",
+      "raw_jquants_pbt_jpy": 178399000000,
+      "canonical_normalized_value_millions_jpy": 178399,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": "20231110585162",
+      "disclosure_datetime": "2023-11-17T15:00:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_JP",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before income taxes",
+      "intended_action": "NO_ACTION_NON_IFRS_PERIOD"
+    },
+    {
+      "ticker": "8630",
+      "company_name": "SOMPOホールディングス",
+      "fiscal_year": 2024,
+      "quarter": "3Q",
+      "period_end": "2024-03-31",
+      "accounting_standard": "JP",
+      "raw_jquants_pbt_jpy": 427472000000,
+      "canonical_normalized_value_millions_jpy": 427472,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": "20240206527382",
+      "disclosure_datetime": "2024-02-14T16:00:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_JP",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before income taxes",
+      "intended_action": "NO_ACTION_NON_IFRS_PERIOD"
+    },
+    {
+      "ticker": "8630",
+      "company_name": "SOMPOホールディングス",
+      "fiscal_year": 2024,
+      "quarter": "FY",
+      "period_end": "2024-03-31",
+      "accounting_standard": "JP",
+      "raw_jquants_pbt_jpy": 479581000000,
+      "canonical_normalized_value_millions_jpy": 479581,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": "20240509587641",
+      "disclosure_datetime": "2024-05-20T15:30:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_JP",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before income taxes",
+      "intended_action": "NO_ACTION_NON_IFRS_PERIOD"
+    },
+    {
+      "ticker": "8630",
+      "company_name": "SOMPOホールディングス",
+      "fiscal_year": 2025,
+      "quarter": "1Q",
+      "period_end": "2025-03-31",
+      "accounting_standard": "JP",
+      "raw_jquants_pbt_jpy": 142152000000,
+      "canonical_normalized_value_millions_jpy": 142152,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": "20240808568003",
+      "disclosure_datetime": "2024-08-09T15:00:00+09:00",
+      "document_type": "1QFinancialStatements_Consolidated_JP",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before income taxes",
+      "intended_action": "NO_ACTION_NON_IFRS_PERIOD"
+    },
+    {
+      "ticker": "8630",
+      "company_name": "SOMPOホールディングス",
+      "fiscal_year": 2025,
+      "quarter": "2Q",
+      "period_end": "2025-03-31",
+      "accounting_standard": "JP",
+      "raw_jquants_pbt_jpy": 343572000000,
+      "canonical_normalized_value_millions_jpy": 343572,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": "20241118525610",
+      "disclosure_datetime": "2024-11-19T16:30:00+09:00",
+      "document_type": "2QFinancialStatements_Consolidated_JP",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before income taxes",
+      "intended_action": "NO_ACTION_NON_IFRS_PERIOD"
+    },
+    {
+      "ticker": "8630",
+      "company_name": "SOMPOホールディングス",
+      "fiscal_year": 2025,
+      "quarter": "3Q",
+      "period_end": "2025-03-31",
+      "accounting_standard": "JP",
+      "raw_jquants_pbt_jpy": 504542000000,
+      "canonical_normalized_value_millions_jpy": 504542,
+      "existing_canonical_pbt": [],
+      "source": null,
+      "disclosure_number": "20250213572010",
+      "disclosure_datetime": "2025-02-14T16:00:00+09:00",
+      "document_type": "3QFinancialStatements_Consolidated_JP",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before income taxes",
+      "intended_action": "NO_ACTION_NON_IFRS_PERIOD"
+    },
+    {
+      "ticker": "8630",
+      "company_name": "SOMPOホールディングス",
+      "fiscal_year": 2025,
+      "quarter": "FY",
+      "period_end": "2025-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 330279000000,
+      "canonical_normalized_value_millions_jpy": 330279,
+      "existing_canonical_pbt": [
+        {
+          "ticker": "8630",
+          "period": "2025-03-31",
+          "quarter": "FY",
+          "metric": "profit_before_tax",
+          "value": 330279,
+          "unit": "millions_jpy",
+          "source": "jquants",
+          "source_priority": 2,
+          "filing_id": "20250625598799",
+          "source_row_key": "cf|8630|2025-03-31|FY|profit_before_tax|jquants|20250625598799",
+          "disclosure_datetime": "2025-06-27T06:30:00+00:00"
+        }
+      ],
+      "source": "jquants",
+      "disclosure_number": "20250625598799",
+      "disclosure_datetime": "2025-06-27T15:30:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "NO_ACTION_NO_VALID_PBT"
+    },
+    {
+      "ticker": "8630",
+      "company_name": "SOMPOホールディングス",
+      "fiscal_year": 2026,
+      "quarter": "FY",
+      "period_end": "2026-03-31",
+      "accounting_standard": "IFRS",
+      "raw_jquants_pbt_jpy": 843226000000,
+      "canonical_normalized_value_millions_jpy": 843226,
+      "existing_canonical_pbt": [],
+      "source": "jquants",
+      "disclosure_number": "20260519540591",
+      "disclosure_datetime": "2026-05-20T16:30:00+09:00",
+      "document_type": "FYFinancialStatements_Consolidated_IFRS",
+      "consolidation_scope": "actual_consolidated",
+      "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+      "intended_action": "INSERT_JQUANTS_PBT",
+      "source_row_key": "cf|8630|2026-03-31|FY|profit_before_tax|jquants|20260519540591"
+    }
+  ],
+  "extraction_audit": {
+    "7198": [
+      {
+        "period": "2019-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20190513424089",
+        "status": "rejected",
+        "reason": "latest_effective_has_no_exact_pbt"
+      },
+      {
+        "period": "2020-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20190808485287",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 2193000000
+      },
+      {
+        "period": "2020-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20191105419273",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 4187000000
+      },
+      {
+        "period": "2020-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20200212462077",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 6154000000
+      },
+      {
+        "period": "2020-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20200512409667",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 7315000000
+      },
+      {
+        "period": "2021-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20200730469673",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 2000000000
+      },
+      {
+        "period": "2021-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20201105416147",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 3981000000
+      },
+      {
+        "period": "2021-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20210204455494",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 5962000000
+      },
+      {
+        "period": "2021-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20210511411470",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 7745000000
+      },
+      {
+        "period": "2022-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20210805479443",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 1828000000
+      },
+      {
+        "period": "2022-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20211111431884",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 3322000000
+      },
+      {
+        "period": "2022-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20220207581751",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 5375000000
+      },
+      {
+        "period": "2022-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20220510537161",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 6151000000
+      },
+      {
+        "period": "2023-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20220809515576",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 1217000000
+      },
+      {
+        "period": "2023-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20221114566032",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 2557000000
+      },
+      {
+        "period": "2023-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20230209504832",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 3663000000
+      },
+      {
+        "period": "2023-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20230510563501",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 4119000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20230803533356",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 449000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20231107580858",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 764000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20240206527162",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 1835000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20240508583848",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 2327000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20240801560203",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 795000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20241107514306",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 1340000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20250206564743",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 2308000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20250508534333",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 2427000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20250804528633",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 437000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20251110593318",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 1176000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20260212555994",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 2499000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20260512524751",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 2779000000
+      },
+      {
+        "period": "2027-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20260810516468",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 639000000
+      }
+    ],
+    "8473": [
+      {
+        "period": "2010-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20090723062569",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 3016000000
+      },
+      {
+        "period": "2010-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20091022032373",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 1074000000
+      },
+      {
+        "period": "2010-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20100121001065",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 1007000000
+      },
+      {
+        "period": "2010-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20100422083136",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 920000000
+      },
+      {
+        "period": "2011-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20100726072609",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 841000000
+      },
+      {
+        "period": "2011-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20101022040542",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 113000000
+      },
+      {
+        "period": "2011-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20110121013350",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 2903000000
+      },
+      {
+        "period": "2011-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20110420095393",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 10116000000
+      },
+      {
+        "period": "2012-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20110722085756",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 3727000000
+      },
+      {
+        "period": "2012-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20111020027444",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 2779000000
+      },
+      {
+        "period": "2012-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20120124069985",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 7549000000
+      },
+      {
+        "period": "2012-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20120426018217",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 17552000000
+      },
+      {
+        "period": "2019-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20190425411795",
+        "status": "rejected",
+        "reason": "latest_effective_has_no_exact_pbt"
+      },
+      {
+        "period": "2020-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20190729477859",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 20217000000
+      },
+      {
+        "period": "2020-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20191029414302",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 48049000000
+      },
+      {
+        "period": "2020-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20200131454544",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 64715000000
+      },
+      {
+        "period": "2020-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20200427400620",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 65819000000
+      },
+      {
+        "period": "2021-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20200729469227",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 27757000000
+      },
+      {
+        "period": "2021-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20201027409735",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 54512000000
+      },
+      {
+        "period": "2021-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20210128450630",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 93738000000
+      },
+      {
+        "period": "2021-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20210427401817",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 140380000000
+      },
+      {
+        "period": "2022-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20210728472883",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 33029000000
+      },
+      {
+        "period": "2022-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20211027418154",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 109276000000
+      },
+      {
+        "period": "2022-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20220225596546",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 373449000000
+      },
+      {
+        "period": "2022-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20220526559887",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 412724000000
+      },
+      {
+        "period": "2023-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20220812519820",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 23522000000
+      },
+      {
+        "period": "2023-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20221111565081",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 52687000000
+      },
+      {
+        "period": "2023-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20230206501478",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 48108000000
+      },
+      {
+        "period": "2023-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20230511567250",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 100753000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20230803533759",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 43008000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20231109584432",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 70241000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20240206527741",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 100088000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20240521502404",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 141569000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20240801560754",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 51748000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20241107514964",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 78872000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20250206565453",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 179378000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20250508535348",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 282290000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20250730524379",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 90352000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20251030583454",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 212104000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20260203546153",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 433315000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20260430515452",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 516667000000
+      },
+      {
+        "period": "2027-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20260730503797",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 225814000000
+      }
+    ],
+    "8698": [
+      {
+        "period": "2009-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20090109058509",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 2875000000
+      },
+      {
+        "period": "2010-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20090709050219",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 2156000000
+      },
+      {
+        "period": "2010-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20091006018671",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 3139000000
+      },
+      {
+        "period": "2010-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20091229085562",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 4280000000
+      },
+      {
+        "period": "2010-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20100409072028",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 3996000000
+      },
+      {
+        "period": "2011-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20100723071979",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 1327000000
+      },
+      {
+        "period": "2011-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20101019036975",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 1975000000
+      },
+      {
+        "period": "2011-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20110119011266",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 2421000000
+      },
+      {
+        "period": "2011-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20110420094871",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 1412000000
+      },
+      {
+        "period": "2012-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20110708078896",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 819000000
+      },
+      {
+        "period": "2012-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20111111045042",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 1768000000
+      },
+      {
+        "period": "2012-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20120515034648",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 1918000000
+      },
+      {
+        "period": "2012-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20120508026697",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 2585000000
+      },
+      {
+        "period": "2013-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20120702069254",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 440000000
+      },
+      {
+        "period": "2013-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20120925009701",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 256000000
+      },
+      {
+        "period": "2013-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20121228055454",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 7000000
+      },
+      {
+        "period": "2021-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20200728468138",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 1991000000
+      },
+      {
+        "period": "2021-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20201026408725",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 4152000000
+      },
+      {
+        "period": "2021-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20210128451014",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 8944000000
+      },
+      {
+        "period": "2021-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20210604441144",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 21296000000
+      },
+      {
+        "period": "2022-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20210727471941",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 11107000000
+      },
+      {
+        "period": "2022-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20211028419825",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 18269000000
+      },
+      {
+        "period": "2022-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20220128575054",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 19279000000
+      },
+      {
+        "period": "2022-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20220426528841",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 20801000000
+      },
+      {
+        "period": "2023-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20220802510282",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 1078000000
+      },
+      {
+        "period": "2023-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20221027550931",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 2073000000
+      },
+      {
+        "period": "2023-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20230127595254",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 2458000000
+      },
+      {
+        "period": "2023-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20230426553801",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 4669000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20230727528580",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 2852000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20231026572518",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 5510000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20240130522300",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 4845000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20240424575965",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 25237000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20240725555138",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 3160000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20241025503161",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 5012000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20250210568715",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": -6939000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20250508535874",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": -4626000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20250806532739",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 2939000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20251106590764",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 7658000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20260212556196",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 12663000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20260512524865",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 15758000000
+      },
+      {
+        "period": "2027-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20260805510817",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 2280000000
+      }
+    ],
+    "8253": [
+      {
+        "period": "2009-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20090204090227",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 41381000000
+      },
+      {
+        "period": "2010-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20090804074602",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 8254000000
+      },
+      {
+        "period": "2010-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20091104048127",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 18201000000
+      },
+      {
+        "period": "2010-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20100202013042",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 31827000000
+      },
+      {
+        "period": "2010-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20100511001802",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 31270000000
+      },
+      {
+        "period": "2011-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20100806086084",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 11108000000
+      },
+      {
+        "period": "2011-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20101104056673",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 15734000000
+      },
+      {
+        "period": "2011-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20110201023967",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 29076000000
+      },
+      {
+        "period": "2011-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20110512022978",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 15073000000
+      },
+      {
+        "period": "2012-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20110803096049",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 19887000000
+      },
+      {
+        "period": "2012-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20111107040978",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 31916000000
+      },
+      {
+        "period": "2012-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20120206078217",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 44246000000
+      },
+      {
+        "period": "2012-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20120515035628",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": -10714000000
+      },
+      {
+        "period": "2013-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20120802089739",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 15563000000
+      },
+      {
+        "period": "2013-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20121108034374",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 27722000000
+      },
+      {
+        "period": "2013-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20130207082602",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 40842000000
+      },
+      {
+        "period": "2013-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20130515042791",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 41416000000
+      },
+      {
+        "period": "2014-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20130807009668",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 13203000000
+      },
+      {
+        "period": "2014-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20131107055339",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 27354000000
+      },
+      {
+        "period": "2014-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20140205000808",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 43034000000
+      },
+      {
+        "period": "2014-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20140513062982",
+        "status": "selected",
+        "pbt_field": "Income (loss) before income taxes",
+        "raw_value_jpy": 44003000000
+      },
+      {
+        "period": "2015-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20140807029400",
+        "status": "selected",
+        "pbt_field": "Income (loss) before income taxes",
+        "raw_value_jpy": 14914000000
+      },
+      {
+        "period": "2015-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20141106075554",
+        "status": "selected",
+        "pbt_field": "Income (loss) before income taxes",
+        "raw_value_jpy": 27437000000
+      },
+      {
+        "period": "2015-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20150205020334",
+        "status": "selected",
+        "pbt_field": "Income (loss) before income taxes",
+        "raw_value_jpy": 40425000000
+      },
+      {
+        "period": "2015-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20150512473329",
+        "status": "selected",
+        "pbt_field": "Income (loss) before income taxes",
+        "raw_value_jpy": 34231000000
+      },
+      {
+        "period": "2016-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20150804469449",
+        "status": "selected",
+        "pbt_field": "Income (loss) before income taxes",
+        "raw_value_jpy": 18029000000
+      },
+      {
+        "period": "2016-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20151109440829",
+        "status": "selected",
+        "pbt_field": "Income (loss) before income taxes",
+        "raw_value_jpy": 34485000000
+      },
+      {
+        "period": "2016-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20160204405836",
+        "status": "selected",
+        "pbt_field": "Income (loss) before income taxes",
+        "raw_value_jpy": 37497000000
+      },
+      {
+        "period": "2016-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20160513488377",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 48508000000
+      },
+      {
+        "period": "2017-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20160804468281",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 15361000000
+      },
+      {
+        "period": "2017-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20161108434672",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 41619000000
+      },
+      {
+        "period": "2017-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20170207493091",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 54328000000
+      },
+      {
+        "period": "2017-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20170511468712",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 62207000000
+      },
+      {
+        "period": "2018-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20170808452227",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 29632000000
+      },
+      {
+        "period": "2018-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20171109414272",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 44991000000
+      },
+      {
+        "period": "2018-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20180209469229",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 46676000000
+      },
+      {
+        "period": "2018-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20180514438164",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 52307000000
+      },
+      {
+        "period": "2019-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20180808494566",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 14890000000
+      },
+      {
+        "period": "2019-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20181112435801",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 25945000000
+      },
+      {
+        "period": "2019-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20190207472837",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 38949000000
+      },
+      {
+        "period": "2019-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20190515427505",
+        "status": "rejected",
+        "reason": "latest_effective_has_no_exact_pbt"
+      },
+      {
+        "period": "2020-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20190808486118",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 14280000000
+      },
+      {
+        "period": "2020-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20191111424335",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 25159000000
+      },
+      {
+        "period": "2020-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20200206459449",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 40665000000
+      },
+      {
+        "period": "2020-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20200515415792",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 27458000000
+      },
+      {
+        "period": "2021-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20200807478483",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 15706000000
+      },
+      {
+        "period": "2021-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20201110419570",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 29315000000
+      },
+      {
+        "period": "2021-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20210209459012",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 48338000000
+      },
+      {
+        "period": "2021-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20210514419140",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 50915000000
+      },
+      {
+        "period": "2022-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20210806480779",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 16760000000
+      },
+      {
+        "period": "2022-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20211109428623",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 33252000000
+      },
+      {
+        "period": "2022-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20220209584406",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 54223000000
+      },
+      {
+        "period": "2022-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20220513546549",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 49936000000
+      },
+      {
+        "period": "2023-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20220810517960",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 22157000000
+      },
+      {
+        "period": "2023-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20221110562388",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 39965000000
+      },
+      {
+        "period": "2023-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20230209504434",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 64488000000
+      },
+      {
+        "period": "2023-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20230515572353",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 61044000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20230810540421",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 24009000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20231109584779",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 59372000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20240213533964",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 83775000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20240515597903",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 97952000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20240809569527",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 23577000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20241114523432",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 41781000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20250213573961",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 81742000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20250515553603",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 92786000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20250814541895",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 22866000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20251114502679",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 41144000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20260212558173",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 73170000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20260604563577",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 89980000000
+      }
+    ],
+    "7157": [
+      {
+        "disclosure_number": "20120514034388",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20120726083081",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20121114038509",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20130127071099",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20130429027498",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20130805007758",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20131108055906",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20140203098827",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20140430050418",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20140728021398",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20141028066704",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20150130015627",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20150430456526",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20150729463055",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20151027425973",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20160209410140",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20160512485447",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20160810473275",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20161110436680",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20170209494903",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20170512470457",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20170809452689",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20171110415134",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20180208468042",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20180515438704",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20180810496337",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20181112435221",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20190212474682",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20190513423150",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20190808485644",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20191112424856",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20200212462168",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20200514414050",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20200811479563",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20201111421185",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20210209459067",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20210513416115",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20210811483442",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20211110430279",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20220210586611",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20220512542619",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20220810517555",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20221110561917",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20230209504470",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20230501557784",
+        "status": "rejected",
+        "reason": "not_actual_consolidated_financial_statements"
+      },
+      {
+        "disclosure_number": "20231220506307",
+        "status": "rejected",
+        "reason": "summary_metadata_missing"
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20230814542333",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 2521000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20231115590580",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 3926000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20240213533908",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 6215000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20240514595306",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 8251000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20240814571974",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 2621000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20241114522952",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 4378000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20250212570235",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 6884000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20250514549231",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 9179000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20250813540448",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 3063000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20251113500287",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 6301000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20260212556793",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 8781000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20260513529356",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 11389000000
+      }
+    ],
+    "8630": [
+      {
+        "period": "2011-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20100809087826",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 21883000000
+      },
+      {
+        "period": "2011-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20101111064898",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 478000000
+      },
+      {
+        "period": "2011-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20110204028154",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 41014000000
+      },
+      {
+        "period": "2011-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20110516027406",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": -17683000000
+      },
+      {
+        "period": "2012-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20110809000406",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 16723000000
+      },
+      {
+        "period": "2012-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20111114045992",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": -47806000000
+      },
+      {
+        "period": "2012-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20120207079696",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": -125420000000
+      },
+      {
+        "period": "2012-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20120517036910",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": -57636000000
+      },
+      {
+        "period": "2013-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20120809093929",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": -32116000000
+      },
+      {
+        "period": "2013-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20121114038595",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": -47612000000
+      },
+      {
+        "period": "2013-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20130207082434",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 12655000000
+      },
+      {
+        "period": "2013-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20130516043999",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 34535000000
+      },
+      {
+        "period": "2014-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20130806009361",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 4553000000
+      },
+      {
+        "period": "2014-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20131113059303",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 39376000000
+      },
+      {
+        "period": "2014-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20140206001438",
+        "status": "selected",
+        "pbt_field": "Income before income taxes",
+        "raw_value_jpy": 70647000000
+      },
+      {
+        "period": "2014-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20140515065400",
+        "status": "selected",
+        "pbt_field": "Income (loss) before income taxes",
+        "raw_value_jpy": 69157000000
+      },
+      {
+        "period": "2015-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20140805027476",
+        "status": "selected",
+        "pbt_field": "Income (loss) before income taxes",
+        "raw_value_jpy": -6111000000
+      },
+      {
+        "period": "2015-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20141117082242",
+        "status": "selected",
+        "pbt_field": "Income (loss) before income taxes",
+        "raw_value_jpy": 18124000000
+      },
+      {
+        "period": "2015-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20150206021168",
+        "status": "selected",
+        "pbt_field": "Income (loss) before income taxes",
+        "raw_value_jpy": 60206000000
+      },
+      {
+        "period": "2015-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20150512471637",
+        "status": "selected",
+        "pbt_field": "Income (loss) before income taxes",
+        "raw_value_jpy": 104527000000
+      },
+      {
+        "period": "2016-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20150804468574",
+        "status": "selected",
+        "pbt_field": "Income (loss) before income taxes",
+        "raw_value_jpy": 35824000000
+      },
+      {
+        "period": "2016-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20151113446839",
+        "status": "selected",
+        "pbt_field": "Income (loss) before income taxes",
+        "raw_value_jpy": 39661000000
+      },
+      {
+        "period": "2016-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20160205406536",
+        "status": "selected",
+        "pbt_field": "Income (loss) before income taxes",
+        "raw_value_jpy": 113936000000
+      },
+      {
+        "period": "2016-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20160511482255",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 211330000000
+      },
+      {
+        "period": "2017-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20160804467489",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 29268000000
+      },
+      {
+        "period": "2017-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20161111438678",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 60479000000
+      },
+      {
+        "period": "2017-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20170208493432",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 153476000000
+      },
+      {
+        "period": "2017-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20170512471605",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 231989000000
+      },
+      {
+        "period": "2018-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20170807450695",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 33476000000
+      },
+      {
+        "period": "2018-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20171003484414",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": -6037000000
+      },
+      {
+        "period": "2018-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20180205463749",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 112924000000
+      },
+      {
+        "period": "2018-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20180514437585",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 114336000000
+      },
+      {
+        "period": "2019-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20180802490825",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 71409000000
+      },
+      {
+        "period": "2019-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20181112436103",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 24946000000
+      },
+      {
+        "period": "2019-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20190206470970",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 158362000000
+      },
+      {
+        "period": "2019-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20190514426137",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 202029000000
+      },
+      {
+        "period": "2020-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20190805482202",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 41795000000
+      },
+      {
+        "period": "2020-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20191111424020",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 60112000000
+      },
+      {
+        "period": "2020-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20200207460277",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 147082000000
+      },
+      {
+        "period": "2020-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20200514414719",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 177191000000
+      },
+      {
+        "period": "2021-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20200803472944",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 63736000000
+      },
+      {
+        "period": "2021-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20201111421722",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 63601000000
+      },
+      {
+        "period": "2021-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20210204456110",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 130482000000
+      },
+      {
+        "period": "2021-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20210512414253",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 194937000000
+      },
+      {
+        "period": "2022-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20210802476779",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 76775000000
+      },
+      {
+        "period": "2022-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20211110429665",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 188094000000
+      },
+      {
+        "period": "2022-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20220203579393",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 259126000000
+      },
+      {
+        "period": "2022-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20220407518802",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 317632000000
+      },
+      {
+        "period": "2023-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20220801508638",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 53775000000
+      },
+      {
+        "period": "2023-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20221109560741",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": -25127000000
+      },
+      {
+        "period": "2023-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20230203500453",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 57601000000
+      },
+      {
+        "period": "2023-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20230510563327",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 123409000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20230803533089",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 127193000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20231110585162",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 178399000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20240206527382",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 427472000000
+      },
+      {
+        "period": "2024-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20240509587641",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 479581000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20240808568003",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 142152000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20241118525610",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 343572000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20250213572010",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before income taxes",
+        "raw_value_jpy": 504542000000
+      },
+      {
+        "period": "2025-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20250625598799",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 330279000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "1Q",
+        "disclosure_number": "20250813540289",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 150820000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "2Q",
+        "disclosure_number": "20251118505452",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 465372000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "3Q",
+        "disclosure_number": "20260212556141",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 677848000000
+      },
+      {
+        "period": "2026-03-31",
+        "quarter": "FY",
+        "disclosure_number": "20260519540591",
+        "status": "selected",
+        "pbt_field": "Profit (loss) before tax from continuing operations (IFRS)",
+        "raw_value_jpy": 843226000000
+      }
+    ]
+  },
+  "manifest_sha256": "ea43ea904da725c932fc696f540201756778b53d7d9a0959d1f26c40a03cabc4"
+}
