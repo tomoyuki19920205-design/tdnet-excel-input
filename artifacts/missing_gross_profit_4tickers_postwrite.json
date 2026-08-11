@@ -1,0 +1,40 @@
+{
+  "judgment": "PASS_GROSS_PROFIT_GAPS_MULTIPLE_ROOT_CAUSES_FIXED_AND_REPAIRED",
+  "manifest_sha256": "52eee298f2759e30b54b78ea638972842af8f457b3fd9683a5d4d26efd2cc0e9",
+  "production_write": {
+    "inserted": 6,
+    "updated": 0,
+    "deleted": 0,
+    "source": "tdnet_xbrl"
+  },
+  "results": [
+    {"ticker": "1892", "period": "2026-03-31", "quarter": "1Q", "gross_profit_millions_jpy": 1417, "status": "OFFICIAL_XBRL_DISPLAYED"},
+    {"ticker": "1892", "period": "2026-03-31", "quarter": "2Q", "gross_profit_millions_jpy": 3405, "status": "OFFICIAL_XBRL_DISPLAYED"},
+    {"ticker": "1892", "period": "2026-03-31", "quarter": "3Q", "gross_profit_millions_jpy": 5727, "status": "OFFICIAL_XBRL_DISPLAYED"},
+    {"ticker": "2148", "period": "2026-03-31", "quarter": "FY", "gross_profit_millions_jpy": 5099.96, "viewer_display_millions_jpy": 5100, "status": "OFFICIAL_XBRL_DISPLAYED"},
+    {"ticker": "6268", "period": "2025-12-31", "quarter": "FY", "gross_profit_millions_jpy": 93781, "status": "OFFICIAL_XBRL_DISPLAYED"},
+    {"ticker": "6268", "period": "2026-12-31", "quarter": "1Q", "gross_profit_millions_jpy": 26863, "status": "OFFICIAL_XBRL_DISPLAYED"},
+    {"ticker": "6503", "period": "2026-03-31", "quarter": "FY", "gross_profit_millions_jpy": null, "status": "NO_ACTION_NO_VALID_GP"},
+    {"ticker": "6503", "period": "2027-03-31", "quarter": "1Q", "gross_profit_millions_jpy": null, "status": "NO_ACTION_NO_VALID_GP"}
+  ],
+  "root_causes": [
+    "legacy TDnet gross-profit rows without filing provenance were excluded by the Viewer safety view",
+    "gross-profit XBRL extraction did not reject segment-dimension contexts",
+    "some official packages contained valid GP facts that had never reached canonical_financials"
+  ],
+  "idempotency": {
+    "remaining_insert_candidates": 0,
+    "remaining_update_candidates": 0,
+    "remaining_delete_candidates": 0
+  },
+  "viewer": {
+    "http_status": 200,
+    "live": true,
+    "verified_tickers": ["6268", "6503", "1892", "2148"]
+  },
+  "tests": {
+    "passed": 85,
+    "deselected_known_baseline": 1,
+    "warnings": 1
+  }
+}

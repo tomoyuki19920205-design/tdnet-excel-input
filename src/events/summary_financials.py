@@ -400,6 +400,16 @@ def _is_actual_consolidated_operating_profit_context(
     return is_actual_consolidated_duration_context(ctx, contexts)
 
 
+def _is_actual_consolidated_gross_profit_context(
+    ctx: str,
+    contexts: dict[str, dict[str, object]],
+) -> bool:
+    """Reject segment/nonconsolidated/forecast GP facts from company totals."""
+    if _classify_context(ctx) == "unknown":
+        return False
+    return is_actual_consolidated_duration_context(ctx, contexts)
+
+
 def _detect_quarter_from_context(ctx: str) -> str:
     if "FirstQuarterMember" in ctx:
         return "1Q"
@@ -550,6 +560,8 @@ def _parse_xbrl_multi_period(raw: bytes, include_evidence: bool = False) -> dict
             continue
         if field_name == "operating_profit" and not _is_actual_consolidated_operating_profit_context(ctx, contexts):
             continue
+        if field_name == "gross_profit" and not _is_actual_consolidated_gross_profit_context(ctx, contexts):
+            continue
 
         val_text = elem.text or ""
         from src.utils import normalize_number
@@ -626,6 +638,8 @@ def _parse_xbrl_multi_period(raw: bytes, include_evidence: bool = False) -> dict
         if field_name == "profit_before_tax" and not _is_actual_consolidated_pbt_context(ctx, contexts):
             continue
         if field_name == "operating_profit" and not _is_actual_consolidated_operating_profit_context(ctx, contexts):
+            continue
+        if field_name == "gross_profit" and not _is_actual_consolidated_gross_profit_context(ctx, contexts):
             continue
 
         text = (elem.text or "").strip()

@@ -261,7 +261,7 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
             context = elem.get("contextRef", "")
             if _is_current_duration(context):
                 if (
-                    field_name == "operating_profit"
+                    field_name in ("operating_profit", "gross_profit")
                     and not is_actual_consolidated_duration_context(context, contexts)
                 ):
                     continue
@@ -346,7 +346,7 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
         if "ForecastMember" in context or "LowerMember" in context or "UpperMember" in context:
             continue
         if (
-            field_name == "operating_profit"
+            field_name in ("operating_profit", "gross_profit")
             and not is_actual_consolidated_duration_context(context, contexts)
         ):
             continue
