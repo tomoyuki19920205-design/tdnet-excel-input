@@ -94,11 +94,17 @@ def cmd_init_sql(args: argparse.Namespace) -> int:
 # ============================================================
 
 # J-Quants 読み取り CTE (sync_financials.py と同等)
-_JQUANTS_QUERY = """\
-WITH latest AS (
+_JQUANTS_QUERY_TEMPLATE = """\
+WITH resolved_source AS (
+  SELECT
+    source.*,
+    {resolved_period_expression} AS resolved_fiscal_year_end_date
+  FROM jquants_financials_normalized AS source
+),
+latest AS (
   SELECT
     local_code,
-    current_fiscal_year_end_date,
+    resolved_fiscal_year_end_date AS current_fiscal_year_end_date,
     type_of_current_period,
     ROW_NUMBER() OVER (
       PARTITION BY local_code,
@@ -109,7 +115,7 @@ WITH latest AS (
     net_sales,
     gross_profit,
     operating_profit
-  FROM jquants_financials_normalized
+  FROM resolved_source
 ),
 field_best AS (
   SELECT
@@ -147,6 +153,12 @@ SELECT
 FROM field_best
 ORDER BY ticker, period, quarter
 """
+
+from lib.pipeline.jquants_fiscal_period import resolved_fiscal_year_end_sql
+
+_JQUANTS_QUERY = _JQUANTS_QUERY_TEMPLATE.format(
+    resolved_period_expression=resolved_fiscal_year_end_sql("source")
+)
 
 
 def _read_jquants_source(jquants_db: str) -> list[dict]:
