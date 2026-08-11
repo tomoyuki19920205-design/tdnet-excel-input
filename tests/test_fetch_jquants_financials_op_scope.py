@@ -58,3 +58,30 @@ def test_5713_fy2026_non_consolidated_op_is_not_promoted():
     assert result["current_fiscal_year_end_date"] == "2026-03-31"
     assert result["type_of_current_period"] == "FY"
     assert result["operating_profit"] is None
+
+
+def test_rejects_9249_style_stale_interim_period_metadata():
+    payload = _summary_row(
+        Code="92490",
+        DiscDate="2026-05-15",
+        CurFYEn="2025-09-30",
+        CurPerType="2Q",
+        DocType="2QFinancialStatements_Consolidated_JP",
+        Sales="7882000000",
+        OP="1019000000",
+    )
+
+    assert _row_to_db(payload) is None
+
+
+def test_accepts_interim_result_before_current_fiscal_year_end():
+    payload = _summary_row(
+        DiscDate="2026-05-15",
+        CurFYEn="2026-09-30",
+        CurPerType="2Q",
+        DocType="2QFinancialStatements_Consolidated_JP",
+        Sales="7882000000",
+        OP="1019000000",
+    )
+
+    assert _row_to_db(payload) is not None

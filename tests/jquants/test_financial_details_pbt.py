@@ -1,5 +1,6 @@
 from src.jquants.financial_details import (
     extract_pbt_from_fs,
+    has_plausible_actual_period_metadata,
     normalize_actual_consolidated_pbt,
     select_latest_effective_pbt,
 )
@@ -90,3 +91,18 @@ def test_latest_correction_without_pbt_does_not_fall_back():
     )
     assert selected == []
     assert any(item.get("reason") == "latest_effective_has_no_exact_pbt" for item in audit)
+
+
+def test_interim_period_metadata_rejects_prior_fiscal_year_assignment():
+    assert not has_plausible_actual_period_metadata({
+        "DocType": "2QFinancialStatements_Consolidated_JP",
+        "CurPerType": "2Q",
+        "DiscDate": "2026-05-15",
+        "CurFYEn": "2025-09-30",
+    })
+    assert has_plausible_actual_period_metadata({
+        "DocType": "2QFinancialStatements_Consolidated_JP",
+        "CurPerType": "2Q",
+        "DiscDate": "2026-05-15",
+        "CurFYEn": "2026-09-30",
+    })

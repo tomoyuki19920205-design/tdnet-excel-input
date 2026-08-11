@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 import re
 from typing import Any, Iterable
@@ -20,6 +20,36 @@ _ACTUAL_CONSOLIDATED_DOCUMENT = re.compile(
     r"^(1Q|2Q|3Q|FY)FinancialStatements_Consolidated_([A-Za-z0-9]+)$"
 )
 _VALID_QUARTERS = {"1Q", "2Q", "3Q", "FY"}
+
+
+def has_plausible_actual_period_metadata(item: dict[str, Any]) -> bool:
+    """Fail closed when an interim result points to an already-ended FY.
+
+    An original 1Q/2Q/3Q result is disclosed before the current fiscal year
+    ends.  J-Quants occasionally exposes a current summary value alongside a
+    stale prior-year DEI period.  Accepting that row silently assigns the
+    current value to the prior fiscal year.  FY results remain valid because
+    they are normally disclosed after year end.
+    """
+    document_type = str(item.get("DocType") or "")
+    match = re.match(
+        r"^(1Q|2Q|3Q|FY)FinancialStatements_"
+        r"(?:Consolidated|NonConsolidated)_[A-Za-z0-9]+$",
+        document_type,
+    )
+    if match is None:
+        return True
+    quarter = str(item.get("CurPerType") or "")
+    if quarter != match.group(1):
+        return False
+    if quarter == "FY":
+        return True
+    try:
+        disclosed = date.fromisoformat(str(item.get("DiscDate") or ""))
+        fiscal_year_end = date.fromisoformat(str(item.get("CurFYEn") or ""))
+    except ValueError:
+        return False
+    return disclosed <= fiscal_year_end
 
 
 @dataclass(frozen=True)
@@ -95,6 +125,9 @@ def normalize_actual_consolidated_pbt(
     document_info = actual_consolidated_document_info(document_type)
     if document_info is None:
         return None
+    period_metadata = {**summary, "DiscDate": detail.get("DiscDate")}
+    if not has_plausible_actual_period_metadata(period_metadata):
+        return None
     document_quarter, accounting_standard = document_info
     quarter = str(summary.get("CurPerType") or "")
     fiscal_year_end = str(summary.get("CurFYEn") or "")
@@ -157,6 +190,10 @@ def select_latest_effective_pbt(
                 reason = "not_actual_consolidated_financial_statements"
             elif summary.get("CurPerType") != info[0] or not summary.get("CurFYEn"):
                 reason = "period_metadata_mismatch"
+            elif not has_plausible_actual_period_metadata(
+                {**summary, "DiscDate": detail.get("DiscDate")}
+            ):
+                reason = "implausible_interim_period_metadata"
         if reason:
             audit.append({"disclosure_number": disc_no, "status": "rejected", "reason": reason})
             continue

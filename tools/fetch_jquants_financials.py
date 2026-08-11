@@ -59,7 +59,10 @@ if _PROJECT_ROOT not in sys.path:
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.jquants.financial_details import normalize_actual_consolidated_pbt
+from src.jquants.financial_details import (
+    has_plausible_actual_period_metadata,
+    normalize_actual_consolidated_pbt,
+)
 
 # Windows cp932 対策
 if sys.stdout and hasattr(sys.stdout, "encoding"):
@@ -333,6 +336,13 @@ def _row_to_db(item: dict) -> dict | None:
 
     # 必須フィールドチェック
     if not local_code or not disclosed_date or not fiscal_year_end or not period:
+        return None
+    if not has_plausible_actual_period_metadata(item):
+        logger.warning(
+            "[JQUANTS] reject implausible interim period metadata: "
+            "code=%s disc_date=%s fy_end=%s quarter=%s doc_type=%s",
+            local_code, disclosed_date, fiscal_year_end, period, doc_type,
+        )
         return None
 
     # 連結優先、なければ非連結を使用
