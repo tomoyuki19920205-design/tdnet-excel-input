@@ -9,8 +9,10 @@ fetch_jquants_prices.py — J-Quants V2 /equities/bars/daily から株価デー�
   python tools/fetch_jquants_prices.py --resume           # 前回の続き
 """
 import argparse
+from dataclasses import dataclass
 import json
 import logging
+import math
 import os
 import sqlite3
 import sys
@@ -379,33 +381,159 @@ def save_progress(data: dict, progress_file: Path = _PROGRESS_FILE):
 
 
 # ============================================================
-# market_cap 算出（per_share_data から株式数を取得）
+# market_cap 算出（price-date basis の発行済株式数を使用）
 # ============================================================
-def update_market_caps(conn: sqlite3.Connection) -> int:
-    """per_share_data の最新 shares_outstanding/treasury_stock で market_cap を算出。"""
-    sql = """
-        UPDATE market_data
-        SET market_cap = close * (
-            SELECT p.shares_outstanding - COALESCE(p.treasury_stock, 0)
-            FROM per_share_data p
-            WHERE p.ticker = market_data.ticker
-              AND p.shares_outstanding > 0
-            ORDER BY p.period DESC, p.quarter DESC
-            LIMIT 1
-        )
-        WHERE market_cap IS NOT NULL
-           OR (close IS NOT NULL AND EXISTS (
-            SELECT 1 FROM per_share_data p
-            WHERE p.ticker = market_data.ticker
-              AND p.shares_outstanding > 0
-          ))
+@dataclass(frozen=True)
+class MarketCapUpdateStats:
+    scanned_rows: int
+    changed_rows: int
+    changed_tickers: int
+    null_rows: int
+    errors: int
+
+
+def _same_market_cap(left: float | None, right: float | None) -> bool:
+    if left is None or right is None:
+        return left is right
+    return math.isclose(left, right, rel_tol=1e-12, abs_tol=1e-6)
+
+
+def recalculate_market_caps(
+    conn: sqlite3.Connection,
+    *,
+    apply: bool = True,
+) -> MarketCapUpdateStats:
+    """Recalculate point-in-time market caps on the unadjusted-price basis.
+
+    For each price row, use the latest positive ``shares_outstanding`` that was
+    disclosed on or before that price date.  J-Quants ``adj_factor`` is the
+    price adjustment multiplier on the corporate-action effective date
+    (0.5 for a 2-for-1 split, 10 for a 1-for-10 consolidation).  The matching
+    price-date share count is therefore the disclosed count divided by the
+    cumulative factors strictly after its disclosure and through the price
+    date.  A new disclosure resets the cumulative factor and prevents double
+    application.
+
+    ``treasury_stock`` is intentionally not subtracted: Viewer market cap is
+    defined as unadjusted close times total issued shares.
     """
-    cursor = conn.execute(sql)
-    conn.commit()
-    updated = cursor.rowcount
-    if updated > 0:
-        logger.info(f"[MARKET_CAP] {updated:,} 行の時価総額を算出しました")
-    return updated
+    share_rows: dict[str, list[tuple[str, str, str, int]]] = {}
+    for row in conn.execute(
+        """
+        SELECT ticker, disclosed_date, period, quarter, shares_outstanding
+        FROM per_share_data
+        WHERE shares_outstanding > 0
+          AND disclosed_date IS NOT NULL
+          AND disclosed_date <> ''
+        ORDER BY ticker, disclosed_date, period, quarter
+        """
+    ):
+        ticker, disclosed_date, period, quarter, shares = row
+        share_rows.setdefault(ticker, []).append(
+            (str(disclosed_date), str(period), str(quarter), int(shares))
+        )
+
+    updates: list[tuple[float | None, int]] = []
+    changed_tickers: set[str] = set()
+    scanned_rows = 0
+    null_rows = 0
+    errors = 0
+
+    current_ticker: str | None = None
+    ticker_shares: list[tuple[str, str, str, int]] = []
+    share_index = 0
+    selected_disclosure: str | None = None
+    selected_shares: int | None = None
+    cumulative_factor = 1.0
+
+    market_cursor = conn.execute(
+        """
+        SELECT rowid, ticker, date, close, market_cap, adj_factor
+        FROM market_data
+        ORDER BY ticker, date
+        """
+    )
+    for rowid, ticker, price_date, close, old_cap, adj_factor in market_cursor:
+        scanned_rows += 1
+        ticker = str(ticker)
+        price_date = str(price_date)
+
+        if ticker != current_ticker:
+            current_ticker = ticker
+            ticker_shares = share_rows.get(ticker, [])
+            share_index = 0
+            selected_disclosure = None
+            selected_shares = None
+            cumulative_factor = 1.0
+
+        while (
+            share_index < len(ticker_shares)
+            and ticker_shares[share_index][0] <= price_date
+        ):
+            disclosure, _period, _quarter, shares = ticker_shares[share_index]
+            selected_disclosure = disclosure
+            selected_shares = shares
+            cumulative_factor = 1.0
+            share_index += 1
+
+        factor = float(adj_factor) if adj_factor is not None else 1.0
+        if not math.isfinite(factor) or factor <= 0:
+            errors += 1
+            continue
+
+        # Effective-date boundary: the unadjusted close changes basis on the
+        # action date itself.  A same-day share disclosure is treated as the
+        # new basis and must not receive the factor again.
+        if (
+            factor != 1.0
+            and selected_disclosure is not None
+            and selected_disclosure < price_date
+        ):
+            cumulative_factor *= factor
+
+        new_cap: float | None = None
+        if close is not None and selected_shares is not None:
+            new_cap = float(close) * (selected_shares / cumulative_factor)
+        if new_cap is None:
+            null_rows += 1
+
+        old_value = float(old_cap) if old_cap is not None else None
+        if not _same_market_cap(old_value, new_cap):
+            updates.append((new_cap, int(rowid)))
+            changed_tickers.add(ticker)
+
+    if apply and updates:
+        for start in range(0, len(updates), 10_000):
+            conn.executemany(
+                "UPDATE market_data SET market_cap = ? WHERE rowid = ?",
+                updates[start:start + 10_000],
+            )
+        conn.commit()
+
+    return MarketCapUpdateStats(
+        scanned_rows=scanned_rows,
+        changed_rows=len(updates),
+        changed_tickers=len(changed_tickers),
+        null_rows=null_rows,
+        errors=errors,
+    )
+
+
+def update_market_caps(conn: sqlite3.Connection) -> int:
+    stats = recalculate_market_caps(conn, apply=True)
+    logger.info(
+        "[MARKET_CAP] scanned=%s changed=%s tickers=%s null=%s errors=%s",
+        f"{stats.scanned_rows:,}",
+        f"{stats.changed_rows:,}",
+        f"{stats.changed_tickers:,}",
+        f"{stats.null_rows:,}",
+        stats.errors,
+    )
+    if stats.errors:
+        raise RuntimeError(
+            f"market-cap recalculation failed for {stats.errors} rows"
+        )
+    return stats.changed_rows
 
 
 # ============================================================

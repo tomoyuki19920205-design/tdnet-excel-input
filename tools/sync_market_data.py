@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import sqlite3
 import sys
 import time
@@ -22,14 +23,28 @@ import requests
 
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 sys.path.insert(0, _PROJECT_ROOT)
+from tools.file_lock import FileLock, read_lock_metadata
+
 _DEFAULT_DB = os.path.join(_PROJECT_ROOT, "data", "jquants.db")
 _LOG_DIR = os.path.join(_PROJECT_ROOT, "logs")
 
-# PostgREST accepts substantially larger JSON batches; 2,000 keeps each payload
-# comfortably below common gateway limits while reducing full-backfill round trips.
-_BATCH_SIZE = 2000
-_RETRY_MAX = 5
+# Keep market-data writes deliberately below the throughput that can interfere
+# with the realtime pipeline and Company Viewer reads.
+_BATCH_SIZE = 500
+_BATCH_INTERVAL_SEC = 0.75
+_RETRY_MAX = 3
 _RETRY_BASE_SEC = 1.0
+_RETRY_JITTER_SEC = 0.5
+_CONNECT_TIMEOUT_SEC = 10
+_READ_TIMEOUT_SEC = 30
+_CIRCUIT_BREAKER_FAILURES = 3
+_REALTIME_POLL_SEC = 15
+_BLACKOUT_START = (15, 20)
+_BLACKOUT_END = (16, 10)
+_SYNC_LOCK_NAME = "market_data_sync"
+_SYNC_LOCK_MAX_AGE_MINUTES = 5
+_REALTIME_LOCK_MAX_AGE_MINUTES = 15
+_LOCK_DIR = os.path.join(_PROJECT_ROOT, "state", "locks")
 _DEFAULT_RECENT_DAYS = 30
 JST = timezone(timedelta(hours=9))
 MARKET_DATA_RETENTION_YEARS = 1
@@ -74,17 +89,36 @@ class _SupabaseAPI:
         last_exc = None
         for attempt in range(_RETRY_MAX):
             try:
-                r = requests.request(method, url, timeout=60, **kwargs)
+                r = requests.request(
+                    method,
+                    url,
+                    timeout=(_CONNECT_TIMEOUT_SEC, _READ_TIMEOUT_SEC),
+                    **kwargs,
+                )
                 r.raise_for_status()
                 return r
             except (requests.ConnectionError, requests.Timeout) as e:
                 last_exc = e
-                time.sleep(_RETRY_BASE_SEC * (2 ** attempt))
+                if attempt + 1 >= _RETRY_MAX:
+                    break
+                delay = _RETRY_BASE_SEC * (2 ** attempt) + random.uniform(0, _RETRY_JITTER_SEC)
+                logger.warning(
+                    "[RETRY] attempt=%d/%d delay_sec=%.2f error=%s",
+                    attempt + 1, _RETRY_MAX, delay, type(e).__name__,
+                )
+                time.sleep(delay)
             except requests.HTTPError as e:
-                status = e.response.status_code if e.response else 0
+                status = e.response.status_code if e.response is not None else 0
                 if status == 429 or status >= 500:
                     last_exc = e
-                    time.sleep(_RETRY_BASE_SEC * (2 ** attempt))
+                    if attempt + 1 >= _RETRY_MAX:
+                        break
+                    delay = _RETRY_BASE_SEC * (2 ** attempt) + random.uniform(0, _RETRY_JITTER_SEC)
+                    logger.warning(
+                        "[RETRY] attempt=%d/%d status=%d delay_sec=%.2f",
+                        attempt + 1, _RETRY_MAX, status, delay,
+                    )
+                    time.sleep(delay)
                 else:
                     raise
         raise last_exc
@@ -222,43 +256,168 @@ def _record_synced(ledger: sqlite3.Connection, rows: list[dict]) -> None:
     ledger.commit()
 
 
-def sync(db_path, supabase_url, supabase_key, dry_run=True,
-         recent_days=_DEFAULT_RECENT_DAYS, limit=0):
+def _is_full_sync_blackout(reference: datetime | None = None) -> bool:
+    now = (reference or datetime.now(JST)).astimezone(JST)
+    current = (now.hour, now.minute, now.second, now.microsecond)
+    start = (*_BLACKOUT_START, 0, 0)
+    end = (*_BLACKOUT_END, 0, 0)
+    return start <= current < end
+
+
+def _lock_is_active(name: str, state_dir: str, max_age_minutes: int) -> bool:
+    lock = FileLock(name, max_age_minutes=max_age_minutes, state_dir=state_dir)
+    return os.path.exists(lock.lock_path) and not lock.is_stale()
+
+
+def _realtime_lock_active(state_dir: str = _LOCK_DIR) -> bool:
+    return _lock_is_active("realtime", state_dir, _REALTIME_LOCK_MAX_AGE_MINUTES)
+
+
+def _log_lock_holder(lock_path: str) -> None:
+    meta = read_lock_metadata(lock_path)
+    logger.error(
+        "[SYNC_LOCK] acquire rejected holder_pid=%s acquired_at=%s command=%s",
+        meta.get("pid"), meta.get("started_at"),
+        meta.get("command_line") or meta.get("script_name"),
+    )
+
+
+def _wait_for_realtime_clear(state_dir: str, sleep_fn=time.sleep) -> int:
+    pauses = 0
+    while _realtime_lock_active(state_dir):
+        pauses += 1
+        meta = read_lock_metadata(os.path.join(state_dir, "realtime.lock"))
+        logger.warning(
+            "[REALTIME_PAUSE] pause=%d holder_pid=%s acquired_at=%s sleep_sec=%s",
+            pauses, meta.get("pid"), meta.get("started_at"), _REALTIME_POLL_SEC,
+        )
+        sleep_fn(_REALTIME_POLL_SEC)
+    if pauses:
+        logger.info("[REALTIME_PAUSE] released; resuming after %d poll(s)", pauses)
+    return pauses
+
+
+def _sync_with_lock(
+    db_path, supabase_url, supabase_key, *, recent_days, limit,
+    state_dir, sleep_fn,
+):
     data = read_sqlite(db_path, recent_days=recent_days, limit=limit)
     logger.info(f"[SYNC] {len(data):,} rows from SQLite")
 
     if not data:
         logger.warning("[SYNC] 0件。同期対象なし。")
-        return {"upserted": 0, "errors": 0, "dry_run": dry_run}
+        return {"upserted": 0, "errors": 0, "dry_run": False,
+                "pending": 0, "realtime_pauses": 0}
+
+    ledger = _open_ledger(db_path)
+    try:
+        data, unchanged = _pending_rows(data, ledger)
+        logger.info(f"[SYNC] pending={len(data):,} unchanged={unchanged:,}")
+        if not data:
+            return {"upserted": 0, "unchanged": unchanged, "errors": 0,
+                    "dry_run": False, "pending": 0, "realtime_pauses": 0}
+
+        api = _SupabaseAPI(supabase_url, supabase_key)
+        total = 0
+        errors = 0
+        attempted = 0
+        succeeded_batches = 0
+        failed_batches = 0
+        consecutive_failures = 0
+        realtime_pauses = 0
+        chunks = list(_chunks(data, _BATCH_SIZE))
+        for i, chunk in enumerate(chunks, 1):
+            realtime_pauses += _wait_for_realtime_clear(state_dir, sleep_fn)
+            attempted += len(chunk)
+            try:
+                payload = [{key: value for key, value in row.items() if key != "_sync_hash"} for row in chunk]
+                n = api.upsert_batch("market_data", payload, on_conflict="ticker,date")
+                _record_synced(ledger, chunk)
+                total += n
+                succeeded_batches += 1
+                consecutive_failures = 0
+                logger.info(
+                    "  batch %d/%d: %d rows (累計 %s)",
+                    i, len(chunks), n, f"{total:,}",
+                )
+            except Exception as e:
+                errors += 1
+                failed_batches += 1
+                consecutive_failures += 1
+                logger.error(
+                    "  batch %d/%d: FAILED consecutive=%d — %s",
+                    i, len(chunks), consecutive_failures, e,
+                )
+                if consecutive_failures >= _CIRCUIT_BREAKER_FAILURES:
+                    logger.error(
+                        "[CIRCUIT_BREAKER] OPEN consecutive_failures=%d; stopping sync",
+                        consecutive_failures,
+                    )
+                    break
+            if i < len(chunks):
+                sleep_fn(_BATCH_INTERVAL_SEC)
+
+        remaining = len(data) - total
+        stats = {
+            "upserted": total, "unchanged": unchanged, "errors": errors,
+            "dry_run": False, "pending": remaining,
+            "batches_total": len(chunks), "batches_succeeded": succeeded_batches,
+            "batches_failed": failed_batches, "rows_attempted": attempted,
+            "realtime_pauses": realtime_pauses,
+            "circuit_breaker_open": consecutive_failures >= _CIRCUIT_BREAKER_FAILURES,
+        }
+        logger.info("[SYNC] 完了: %s", stats)
+        return stats
+    finally:
+        ledger.close()
+
+
+def sync(db_path, supabase_url, supabase_key, dry_run=True,
+         recent_days=_DEFAULT_RECENT_DAYS, limit=0, *,
+         state_dir=_LOCK_DIR, reference_time=None, sleep_fn=time.sleep):
+    """Synchronize market data with an apply-only, process-wide safety guard."""
+    is_full = recent_days == 0
 
     if dry_run:
+        data = read_sqlite(db_path, recent_days=recent_days, limit=limit)
+        logger.info(f"[SYNC] {len(data):,} rows from SQLite")
+        if not data:
+            logger.warning("[SYNC] 0件。同期対象なし。")
+            return {"upserted": 0, "errors": 0, "dry_run": True}
         logger.info(f"\n{'='*60}\n  DRY-RUN: {len(data):,} rows → market_data\n{'='*60}")
         return {"upserted": 0, "errors": 0, "dry_run": True}
 
-    ledger = _open_ledger(db_path)
-    data, unchanged = _pending_rows(data, ledger)
-    logger.info(f"[SYNC] pending={len(data):,} unchanged={unchanged:,}")
-    if not data:
-        ledger.close()
-        return {"upserted": 0, "unchanged": unchanged, "errors": 0, "dry_run": False}
+    sync_lock = FileLock(
+        _SYNC_LOCK_NAME,
+        max_age_minutes=_SYNC_LOCK_MAX_AGE_MINUTES,
+        state_dir=state_dir,
+    )
+    if not sync_lock.acquire():
+        _log_lock_holder(sync_lock.lock_path)
+        return {"upserted": 0, "errors": 1, "dry_run": False,
+                "rejected": "single_instance_lock"}
 
-    api = _SupabaseAPI(supabase_url, supabase_key)
-    total = 0
-    errors = 0
-    for i, chunk in enumerate(_chunks(data, _BATCH_SIZE), 1):
-        try:
-            payload = [{key: value for key, value in row.items() if key != "_sync_hash"} for row in chunk]
-            n = api.upsert_batch("market_data", payload, on_conflict="ticker,date")
-            _record_synced(ledger, chunk)
-            total += n
-            logger.info(f"  batch {i}: {n} rows (累計 {total:,})")
-        except Exception as e:
-            errors += 1
-            logger.error(f"  batch {i}: FAILED — {e}")
-
-    ledger.close()
-    logger.info(f"[SYNC] 完了: upserted={total:,} unchanged={unchanged:,} errors={errors}")
-    return {"upserted": total, "unchanged": unchanged, "errors": errors, "dry_run": False}
+    try:
+        if is_full and _is_full_sync_blackout(reference_time):
+            logger.error("[SYNC_GATE] full apply rejected during 15:20-16:10 JST blackout")
+            return {"upserted": 0, "errors": 1, "dry_run": False,
+                    "rejected": "realtime_blackout"}
+        if is_full and _realtime_lock_active(state_dir):
+            meta = read_lock_metadata(os.path.join(state_dir, "realtime.lock"))
+            logger.error(
+                "[SYNC_GATE] full apply rejected: realtime active holder_pid=%s acquired_at=%s command=%s",
+                meta.get("pid"), meta.get("started_at"),
+                meta.get("command_line") or meta.get("script_name"),
+            )
+            return {"upserted": 0, "errors": 1, "dry_run": False,
+                    "rejected": "realtime_active"}
+        return _sync_with_lock(
+            db_path, supabase_url, supabase_key,
+            recent_days=recent_days, limit=limit,
+            state_dir=state_dir, sleep_fn=sleep_fn,
+        )
+    finally:
+        sync_lock.release()
 
 
 def main():
