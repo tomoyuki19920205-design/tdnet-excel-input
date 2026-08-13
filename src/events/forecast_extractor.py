@@ -207,18 +207,18 @@ def _detect_unit(text: str) -> str:
 # テキスト正規化
 # ============================================================
 def _normalize_text(text: str) -> str:
-    """全角→半角、NFKC正規化、および数値の分断修復"""
+    """全角→半角のnativeテキスト正規化。
+
+    PDF抽出器が列間を単一スペースで返すため、数字間スペースは保持する。
+    OCR特有の分断数字は ``_normalize_ocr_text`` だけで修復する。
+    """
     if not text: return ""
     # CID表記 (cid:数字) を完全に除去して、誤数値抽出を防止する
     text = re.sub(r"\(cid:\d+\)", " ", text)
     s = unicodedata.normalize("NFKC", text)
     s = s.replace("\u3000", " ")  # 全角スペース
     
-    # 1. 数字間の「単一」スペースのみ結合。2つ以上のスペース(タブ等)は区切りとして維持。
-    for _ in range(5):
-        s = re.sub(r"(\d) (\d)", r"\1\2", s)
-    
-    # 2. 小数点・カンマ前後のスペースを結合 (分断対応)
+    # 小数点・カンマ前後のスペースを結合 (同一数値内の分断対応)
     # 複数スペース(2つ以上)は数値の区切りである可能性が高いため、単一スペースのみ結合
     s = re.sub(r"(\d+)\s?\.\s?(\d+)", r"\1.\2", s)
     s = re.sub(r"(\d+)\s?,\s?(\d+)", r"\1,\2", s)
@@ -515,16 +515,6 @@ def _extract_numbers_from_line(line: str) -> list[float | None]:
         m = m.strip()
         if not m:
             continue
-        # 年号の一部（4桁のみの数字 + 周囲に年月が近い）をスキップ
-        # → 簡易版: 4桁で2000-2099範囲は年号の可能性があるのでスキップ
-        try:
-            raw_val = m.replace(',', '').replace('△', '').replace('▲', '').rstrip('%')
-            if raw_val and raw_val.replace('.', '').replace('-', '').isdigit():
-                test_val = float(raw_val)
-                if 2000 <= test_val <= 2099 and ',' not in m:
-                    continue  # 年号スキップ
-        except ValueError:
-            pass
         val = _parse_cell_value(m)
         nums.append(val)
     return nums
@@ -612,6 +602,13 @@ def _find_labeled_line(lines: list[str], labels: list[str], search_start: int = 
                     num_tokens = len(re.findall(r"[\d,.]+", after_label))
                     if has_financial_number or has_triangle_number or num_tokens >= 1:
                         return i
+                    # pdfplumber may split the row label and its numeric cells
+                    # across adjacent lines.  Preserve the label row so the
+                    # caller's next-line fallback can consume those cells.
+                    if i + 1 < min(end, len(lines)):
+                        next_numbers = _extract_numbers_from_line(lines[i + 1])
+                        if len(next_numbers) >= 3:
+                            return i
                 else:
                     return i
     return None
@@ -651,6 +648,22 @@ def _detect_column_order(lines: list[str], ref_idx: int) -> dict[str, int]:
     search_end = ref_idx
     if search_start >= search_end:
         return default_map
+
+    header_text = "\n".join(lines[search_start:search_end])
+    # EBITDA is frequently inserted between sales and operating profit but is
+    # not a canonical forecast metric. Account for its physical column.
+    if ("EBITDA" in header_text and "売上高" in header_text
+            and "営業利益" in header_text and "経常利益" in header_text):
+        return {
+            "sales": 0, "op": 2, "ordinary": 3,
+            "net_income": 4, "eps": 5,
+        }
+    # Common IFRS layout. The attributable-profit and EPS headers are often
+    # split over multiple extracted lines.
+    if (("売上収益" in header_text or "営業収益" in header_text)
+            and "営業利益" in header_text
+            and ("基本的1株当たり" in header_text or "基本的１株当たり" in header_text)):
+        return {"sales": 0, "op": 1, "net_income": 2, "eps": 3}
 
     for i in range(search_start, search_end):
         line = lines[i] if i < len(lines) else ""
@@ -860,9 +873,11 @@ def _find_consolidated_section(lines: list[str]) -> tuple[int, int]:
 
     for i, line in enumerate(lines):
         clean = _normalize_text(line).strip()
-        if "連結" in clean and ("業績予想" in clean or "経営成績" in clean):
+        if (consolidated_start is None and "連結" in clean
+                and ("業績予想" in clean or "経営成績" in clean)):
             consolidated_start = i
-        if "個別" in clean and ("業績予想" in clean or "経営成績" in clean):
+        if (standalone_start is None and "個別" in clean
+                and ("業績予想" in clean or "経営成績" in clean)):
             standalone_start = i
 
     if consolidated_start is not None:
@@ -940,6 +955,46 @@ def _sanitize_metrics(table_result: dict) -> dict:
 
     table_result["metrics_count"] = valid_count
     return table_result
+
+
+def _sanitize_event_amount_metrics(event: ForecastRevisionEvent) -> ForecastRevisionEvent:
+    """Apply a final guard shared by every native/OCR/fitz return path.
+
+    Amounts are stored in millions of yen.  Values below 0.01 million yen or
+    above 100 trillion yen cannot be credible full-year listed-company
+    forecasts.  They are characteristic of PDF columns being concatenated or
+    a yen value being converted twice.  A malformed row can also leave other
+    columns looking superficially plausible (for example sales is concatenated
+    while operating profit becomes ``1``), so clear the complete amount row.
+    EPS remains independent because it is stored in yen per share.
+    """
+    metrics = ("sales", "op", "ordinary", "net_income")
+    values = [
+        getattr(event, f"{side}_{metric}", None)
+        for metric in metrics
+        for side in ("previous", "revised")
+    ]
+    malformed = any(
+        value is not None and (0 < abs(value) < 0.01 or abs(value) > 100_000_000)
+        for value in values
+    )
+    if not malformed:
+        return event
+
+    logger.warning(
+        "[forecast_amount_sanitize] source=%s values=%s reason=impossible_million_yen_amount",
+        getattr(event, "extraction_source", ""), values,
+    )
+    for metric in metrics:
+        setattr(event, f"previous_{metric}", None)
+        setattr(event, f"revised_{metric}", None)
+        setattr(event, f"delta_{metric}", None)
+        setattr(event, f"change_{metric}_pct", None)
+    event.extracted_metrics_count = 0
+    event.subtype = "undecided"
+    event.importance = 0
+    event.confidence = 0.0
+    return event
 
 
 # ============================================================
@@ -2306,6 +2361,7 @@ def _return_with_eps_log(
     text: str = "",
 ) -> ForecastRevisionEvent:
     """EPS を INFO ログに出力し、補助経路による latest_full_year_eps を設定してから event を返す。"""
+    event = _sanitize_event_amount_metrics(event)
     if event.previous_eps is not None or event.revised_eps is not None:
         logger.info(
             f"[forecast_ocr] EPS prev={event.previous_eps} rev={event.revised_eps}"
@@ -3011,12 +3067,15 @@ def extract_forecast_revision(
     """
     # ---- FORECAST_FITZ_ONLY スイッチ ----
     if os.environ.get("FORECAST_FITZ_ONLY", "").strip() == "1":
-        return _extract_fitz_only(
-            text=text,
-            title=title,
-            is_difference=is_difference,
-            pdf_path=pdf_path,
-            doc_id=doc_id,
+        return _return_with_eps_log(
+            _extract_fitz_only(
+                text=text,
+                title=title,
+                is_difference=is_difference,
+                pdf_path=pdf_path,
+                doc_id=doc_id,
+            ),
+            text,
         )
 
     _doc_label = doc_id[:16] if doc_id else "?"
@@ -3064,7 +3123,7 @@ def extract_forecast_revision(
         images = _rasterize(ocr_pdf_path)
         if not images:
             logger.info(f"[forecast_ocr] skipped reason=rasterize_failed")
-            return base
+            return _return_with_eps_log(base, text)
 
         try:
             # ---- Google OCR テキスト抽出 ----
@@ -3072,7 +3131,7 @@ def extract_forecast_revision(
             ocr_text = _google_ocr(images)
             if not ocr_text.strip():
                 logger.info(f"[forecast_ocr] OCR text extraction failed (empty result)")
-                return base
+                return _return_with_eps_log(base, text)
             logger.info(f"[forecast_ocr] OCR text extraction succeeded (len={len(ocr_text)})")
 
             # ---- normalize（OCR 専用、native には絶対かけない）----

@@ -3,6 +3,8 @@ import sqlite3
 import uuid
 from pathlib import Path
 
+import pytest
+
 from lib.pipeline.forecast_sync import (
     ForecastDTO,
     _effective_disclosure_datetime,
@@ -14,6 +16,12 @@ from lib.pipeline.forecast_sync import (
     select_latest_forecasts,
 )
 from src.events.earnings_summary_storage import ensure_earnings_summary_table
+from src.events.forecast_extractor import (
+    _extract_from_horizontal_table,
+    _normalize_text,
+    _return_with_eps_log,
+)
+from src.events.forecast_models import ForecastRevisionEvent
 
 
 def _dto(**overrides):
@@ -176,3 +184,106 @@ def test_nightly_jquants_rows_preserve_disclosure_date():
         "source": "jquants_nxf", "disclosure_datetime": "2026-05-13",
         "updated_at": rows[0]["updated_at"],
     }]
+
+
+@pytest.mark.parametrize(
+    ("ticker_case", "sales", "operating_profit"),
+    [
+        ("4058", 60_002_370_210_021_000_000_000, None),
+        ("5025", 1_601_748_216_262.72, None),
+        ("6090", 142_021_021_020_035.6, None),
+        ("4076", None, 0.0000550055),
+        ("1663", 0.000029, None),
+    ],
+)
+def test_final_forecast_guard_rejects_scale_and_concatenation_anomalies(
+    ticker_case, sales, operating_profit,
+):
+    event = ForecastRevisionEvent(
+        revised_sales=sales,
+        revised_op=operating_profit,
+        previous_op=14.0,
+        extraction_source="prose",
+        extracted_metrics_count=2,
+        subtype="upward",
+        importance=90,
+        confidence=0.45,
+    )
+    sanitized = _return_with_eps_log(event)
+    assert sanitized.revised_sales is None, ticker_case
+    assert sanitized.previous_op is None, ticker_case
+    assert sanitized.revised_op is None, ticker_case
+    assert sanitized.extracted_metrics_count == 0
+    assert sanitized.importance == 0
+
+
+def test_final_forecast_guard_keeps_plausible_million_yen_amounts():
+    event = ForecastRevisionEvent(
+        previous_sales=5900,
+        revised_sales=6000,
+        previous_op=650,
+        revised_op=710,
+        extraction_source="pdfplumber_table_fitz",
+        extracted_metrics_count=2,
+    )
+    sanitized = _return_with_eps_log(event)
+    assert sanitized.revised_sales == 6000
+    assert sanitized.revised_op == 710
+    assert sanitized.extracted_metrics_count == 2
+
+
+@pytest.mark.parametrize(
+    ("ticker_case", "text", "expected"),
+    [
+        (
+            "4058",
+            "EBITDA 1株当たり\n売上高 営業利益 経常利益 当期純利益\n"
+            "前回発表予想(A) 5,800 2,170 1,900 1,900 1,300 119.67\n"
+            "今回修正予想(B) 6,000 2,370 2,100 2,100 1,400 128.87",
+            (5800, 6000, 1900, 2100),
+        ),
+        (
+            "1663",
+            "売上高 営業利益 経常利益 当期純利益\n"
+            "前回発表予想(A) 87,000 9,200 10,300 6,300\n"
+            "今回修正予想(B) 99,900 9,600 10,900 6,800",
+            (87000, 99900, 9200, 9600),
+        ),
+        (
+            "2120",
+            "売上収益 営業利益 当期利益\n"
+            "前回発表予想(A) 29,700 3,000 1,900\n"
+            "今回修正予想(B) 29,300 3,900 2,500",
+            (29700, 29300, 3000, 3900),
+        ),
+        (
+            "3160",
+            "売上高 営業利益 経常利益 当期純利益\n"
+            "前回発表予想(A) 78,600 660 820 550\n"
+            "今回修正予想(B) 79,549 159 339 56",
+            (78600, 79549, 660, 159),
+        ),
+    ],
+)
+def test_native_table_keeps_single_space_column_boundaries(ticker_case, text, expected):
+    result = _extract_from_horizontal_table(_normalize_text(text).splitlines())
+    actual = (
+        result["previous_sales"], result["revised_sales"],
+        result["previous_op"], result["revised_op"],
+    )
+    assert actual == expected, ticker_case
+
+
+def test_ifrs_header_maps_attributable_profit_and_basic_eps_columns():
+    text = (
+        "単位:百万円\n"
+        "親会社の所有者に帰属する当期利益 基本的1株当たり当期利益(円)\n"
+        "売上収益 営業利益\n"
+        "前回発表予想(A) 29,700 3,000 1,900 14.10\n"
+        "今回修正予想(B) 29,300 3,900 2,500 19.50"
+    )
+    result = _extract_from_horizontal_table(_normalize_text(text).splitlines())
+    assert result["previous_net_income"] == 1900
+    assert result["revised_net_income"] == 2500
+    assert result["previous_eps"] == 14.10
+    assert result["revised_eps"] == 19.50

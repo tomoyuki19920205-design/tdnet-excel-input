@@ -41,7 +41,6 @@ SOURCE_PRIORITY: dict[str, int] = {
     "jquants_forecast_fy": 10,
     "jquants_forecast_next_fy": 10,
     "jquants_forecast": 10,
-    "tdnet_forecast": 10,
     # ── segment source (実データ値) ──
     # SegmentRawRow.source: 'xbrl' | 'html' | 'pdf' | 'tdnet'
     # xbrl は summary_xbrl 相当、html/pdf はそれぞれ html_table/pdf_table 相当

@@ -17,66 +17,67 @@ def _patch_actual_pipeline(monkeypatch):
     )
 
 
-def test_process_realtime_writes_actual_and_forecast_and_completes_both_queues(monkeypatch):
-    import lib.pipeline.forecast_sync as forecast_sync
+def test_process_realtime_writes_actual_without_tdnet_forecast_canonical_sync(monkeypatch):
     import lib.pipeline.queue as queue
 
-    jobs = {
-        "tdnet_realtime_process": [{"id": 1, "target_id": "earnings-doc"}],
-        "tdnet_realtime_forecast": [{"id": 2, "target_id": "revision-doc"}],
-    }
+    jobs = {"tdnet_realtime_process": [{"id": 1, "target_id": "earnings-doc"}]}
     completed = []
-    monkeypatch.setattr(queue, "take_pending_jobs", lambda job_type, **kwargs: jobs[job_type])
+    requested_job_types = []
+
+    def take_jobs(job_type, **kwargs):
+        requested_job_types.append(job_type)
+        return jobs[job_type]
+
+    monkeypatch.setattr(queue, "take_pending_jobs", take_jobs)
     monkeypatch.setattr(
         queue, "complete_job",
         lambda job_id, status="done", **kwargs: completed.append((job_id, status)),
     )
     _patch_actual_pipeline(monkeypatch)
-    calls = []
-
-    def fake_forecast(**kwargs):
-        calls.append(kwargs)
-        return {
-            "forecast_rows": 4, "written": 4, "errors": 0, "quarantined": 0,
-            "earnings_quarantine_ids": [], "revision_quarantine_ids": [],
-            "revision_disclosure_ids": ["revision-doc"],
-        }
-
-    monkeypatch.setattr(forecast_sync, "sync_realtime_forecasts", fake_forecast)
     result = filings_process.run_realtime(dry_run=True, db_path="unused.db")
-    assert calls[0]["earnings_disclosure_ids"] == ["earnings-doc"]
-    assert calls[0]["revision_disclosure_ids"] == ["revision-doc"]
-    assert completed == [(1, "done"), (2, "done")]
-    assert result["queue_success"] == 2
-    assert result["forecast"]["forecast_rows"] == 4
-
-
-def test_bad_revision_does_not_fail_unrelated_actual_job(monkeypatch):
-    import lib.pipeline.forecast_sync as forecast_sync
-    import lib.pipeline.queue as queue
-
-    jobs = {
-        "tdnet_realtime_process": [{"id": 1, "target_id": "earnings-doc"}],
-        "tdnet_realtime_forecast": [{"id": 2, "target_id": "bad-revision"}],
-    }
-    completed = []
-    monkeypatch.setattr(queue, "take_pending_jobs", lambda job_type, **kwargs: jobs[job_type])
-    monkeypatch.setattr(
-        queue, "complete_job",
-        lambda job_id, status="done", **kwargs: completed.append((job_id, status)),
-    )
-    _patch_actual_pipeline(monkeypatch)
-    monkeypatch.setattr(
-        forecast_sync,
-        "sync_realtime_forecasts",
-        lambda **kwargs: {
-            "forecast_rows": 0, "written": 0, "errors": 0, "quarantined": 1,
-            "earnings_quarantine_ids": [],
-            "revision_quarantine_ids": ["bad-revision"],
-            "revision_disclosure_ids": [],
-        },
-    )
-    result = filings_process.run_realtime(dry_run=True, db_path="unused.db")
-    assert completed == [(1, "done"), (2, "failed")]
+    assert requested_job_types == ["tdnet_realtime_process"]
+    assert completed == [(1, "done")]
     assert result["queue_success"] == 1
-    assert result["queue_failed"] == 1
+    assert "forecast" not in result
+
+
+def test_repair_cli_has_no_apply_capability(monkeypatch):
+    import pytest
+    from tools import repair_forecast_canonical
+
+    monkeypatch.setattr("sys.argv", ["repair_forecast_canonical.py", "--apply"])
+    with pytest.raises(SystemExit) as exc_info:
+        repair_forecast_canonical.main()
+    assert exc_info.value.code == 2
+
+
+def test_tdnet_canonical_writer_and_queue_are_not_reachable():
+    import inspect
+    import lib.pipeline.forecast_sync as forecast_sync
+    import src.events.event_pipeline as event_pipeline
+
+    assert not hasattr(forecast_sync, "sync_realtime_forecasts")
+    assert "tdnet_realtime_forecast" not in inspect.getsource(event_pipeline)
+    assert "tdnet_realtime_forecast" not in inspect.getsource(filings_process.run_realtime)
+
+
+def test_jquants_nightly_canonical_row_expansion_is_preserved():
+    from lib.pipeline.forecast_sync import ForecastDTO, expand_forecast_rows
+
+    rows = expand_forecast_rows([ForecastDTO(
+        ticker="3032",
+        forecast_period_end="2027-03-31",
+        metric="sales",
+        value=7000,
+        disclosure_datetime="2026-05-13",
+        filing_id="",
+        source="jquants_nxf",
+        correction_flag=False,
+        forecast_horizon="next_fy",
+        accounting_standard="UNKNOWN",
+        document_type="jquants_forecast",
+    )])
+    assert len(rows) == 1
+    assert rows[0]["source"] == "jquants_nxf"
+    assert rows[0]["source_priority"] == 10
+    assert rows[0]["source_row_key"].startswith("cf|3032|2027-03-31|FY|sales|jquants_nxf|")

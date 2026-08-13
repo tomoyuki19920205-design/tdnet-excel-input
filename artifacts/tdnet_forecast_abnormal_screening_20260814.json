@@ -1,0 +1,2365 @@
+{
+  "generated_at": "2026-08-13T22:54:35.607901+00:00",
+  "mode": "read_only",
+  "tdnet_rows": 3198,
+  "ratio_comparable_rows": 1898,
+  "ratio_buckets": {
+    "0.001-0.01x": 10,
+    "0.01-0.1x": 17,
+    "0.1-10x": 1758,
+    "10-100x": 9,
+    "100-1000x": 3,
+    "<=0.001x": 52,
+    ">=1000x": 45,
+    "jq_zero": 4
+  },
+  "abnormal_rows": 143,
+  "abnormal_tickers": 115,
+  "abnormal_reason_counts": {
+    "jquants_ratio_100x": 110,
+    "sales_extremely_small": 15,
+    "sales_over_100_trillion_yen": 54,
+    "operating_profit_extremely_small": 21,
+    "operating_profit_over_100_trillion_yen": 2,
+    "operating_profit_over_2x_sales": 11,
+    "sales_non_positive": 8
+  },
+  "timeout_partial_commit_rows": 10,
+  "timeout_partial_commit_records": [
+    {
+      "ticker": "1332",
+      "period": "2027-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "value": 42500.0,
+      "filing_id": "1264eda18c50778c021f19c459332fd616eb25359d1b280beb46d772c5621a6e",
+      "source_row_key": "cf|1332|2027-03-31|FY|operating_profit|tdnet_forecast|1264eda18c50778c021f19c459332fd616eb25359d1b280beb46d772c5621a6e",
+      "updated_at": "2026-08-13 12:52:41.724237+00:00",
+      "cleanup_action": "delete_with_tdnet_forecast"
+    },
+    {
+      "ticker": "1332",
+      "period": "2027-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "value": 1000000.0,
+      "filing_id": "1264eda18c50778c021f19c459332fd616eb25359d1b280beb46d772c5621a6e",
+      "source_row_key": "cf|1332|2027-03-31|FY|sales|tdnet_forecast|1264eda18c50778c021f19c459332fd616eb25359d1b280beb46d772c5621a6e",
+      "updated_at": "2026-08-13 12:52:41.724237+00:00",
+      "cleanup_action": "delete_with_tdnet_forecast"
+    },
+    {
+      "ticker": "1333",
+      "period": "2027-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "value": 32000.0,
+      "filing_id": "a416bf22a0f966476970d47e6505140bfdb542ef52c923e9daec5e30c35a09a7",
+      "source_row_key": "cf|1333|2027-03-31|FY|operating_profit|tdnet_forecast|a416bf22a0f966476970d47e6505140bfdb542ef52c923e9daec5e30c35a09a7",
+      "updated_at": "2026-08-13 12:52:41.724237+00:00",
+      "cleanup_action": "delete_with_tdnet_forecast"
+    },
+    {
+      "ticker": "1333",
+      "period": "2027-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "value": 1110000.0,
+      "filing_id": "a416bf22a0f966476970d47e6505140bfdb542ef52c923e9daec5e30c35a09a7",
+      "source_row_key": "cf|1333|2027-03-31|FY|sales|tdnet_forecast|a416bf22a0f966476970d47e6505140bfdb542ef52c923e9daec5e30c35a09a7",
+      "updated_at": "2026-08-13 12:52:41.724237+00:00",
+      "cleanup_action": "delete_with_tdnet_forecast"
+    },
+    {
+      "ticker": "1375",
+      "period": "2027-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "value": 4140.0,
+      "filing_id": "2b89b532b324088784472ffc3710ddd0635ef0333623123e8a35142e51349575",
+      "source_row_key": "cf|1375|2027-03-31|FY|operating_profit|tdnet_forecast|2b89b532b324088784472ffc3710ddd0635ef0333623123e8a35142e51349575",
+      "updated_at": "2026-08-13 12:52:41.724237+00:00",
+      "cleanup_action": "delete_with_tdnet_forecast"
+    },
+    {
+      "ticker": "1375",
+      "period": "2027-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "value": 56910.0,
+      "filing_id": "2b89b532b324088784472ffc3710ddd0635ef0333623123e8a35142e51349575",
+      "source_row_key": "cf|1375|2027-03-31|FY|sales|tdnet_forecast|2b89b532b324088784472ffc3710ddd0635ef0333623123e8a35142e51349575",
+      "updated_at": "2026-08-13 12:52:41.724237+00:00",
+      "cleanup_action": "delete_with_tdnet_forecast"
+    },
+    {
+      "ticker": "1376",
+      "period": "2027-05-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "value": 2000.0,
+      "filing_id": "433c5979b8a24600cfe8a2e0f9838a317cf567e3f29f68bc182a6e2ce018b4c0",
+      "source_row_key": "cf|1376|2027-05-31|FY|operating_profit|tdnet_forecast|433c5979b8a24600cfe8a2e0f9838a317cf567e3f29f68bc182a6e2ce018b4c0",
+      "updated_at": "2026-08-13 12:52:41.724237+00:00",
+      "cleanup_action": "delete_with_tdnet_forecast"
+    },
+    {
+      "ticker": "1376",
+      "period": "2027-05-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "value": 70000.0,
+      "filing_id": "433c5979b8a24600cfe8a2e0f9838a317cf567e3f29f68bc182a6e2ce018b4c0",
+      "source_row_key": "cf|1376|2027-05-31|FY|sales|tdnet_forecast|433c5979b8a24600cfe8a2e0f9838a317cf567e3f29f68bc182a6e2ce018b4c0",
+      "updated_at": "2026-08-13 12:52:41.724237+00:00",
+      "cleanup_action": "delete_with_tdnet_forecast"
+    },
+    {
+      "ticker": "137A",
+      "period": "2027-05-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "value": 167.0,
+      "filing_id": "ceafd8ee5aed2eef9ad0e5a04234e50bbff7a800ee07b4dd09737e0781e313d3",
+      "source_row_key": "cf|137A|2027-05-31|FY|operating_profit|tdnet_forecast|ceafd8ee5aed2eef9ad0e5a04234e50bbff7a800ee07b4dd09737e0781e313d3",
+      "updated_at": "2026-08-13 12:52:41.724237+00:00",
+      "cleanup_action": "delete_with_tdnet_forecast"
+    },
+    {
+      "ticker": "137A",
+      "period": "2027-05-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "value": 1601.0,
+      "filing_id": "ceafd8ee5aed2eef9ad0e5a04234e50bbff7a800ee07b4dd09737e0781e313d3",
+      "source_row_key": "cf|137A|2027-05-31|FY|sales|tdnet_forecast|ceafd8ee5aed2eef9ad0e5a04234e50bbff7a800ee07b4dd09737e0781e313d3",
+      "updated_at": "2026-08-13 12:52:41.724237+00:00",
+      "cleanup_action": "delete_with_tdnet_forecast"
+    }
+  ],
+  "records": [
+    {
+      "ticker": "1663",
+      "period": "2026-12-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 2.9e-05,
+      "filing_id": "3a5adb1492d8c4e016655c5b45abf8ef1a0161e8eabb924b3c2a0c1eced12f63",
+      "disclosure_datetime": "2026-08-12 07:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 99900.0,
+      "ratio": 2.902902902902903e-10,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_extremely_small"
+      ]
+    },
+    {
+      "ticker": "1719",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 3200000.0,
+      "filing_id": "18c04d0bc6d85b3b91057f6253b6108522bd3feede0968593617a56f45fe9717",
+      "disclosure_datetime": "2026-03-30 06:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 27100.0,
+      "ratio": 118.08118081180812,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "1793",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 8.744023602700182e+18,
+      "filing_id": "6b54ddf2eacef84233616dae454a9b7415c6731781c7b36d62a8bbde13f5ab4e",
+      "disclosure_datetime": "2026-04-22 03:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 83000.0,
+      "ratio": 105349681960243.16,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "184A",
+      "period": "2025-04-30",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 2.0,
+      "filing_id": "053f343d1f79541b2947dc1e3edc8644923a122cddf6d7fea8aaeef6bbcc0044",
+      "disclosure_datetime": "2026-03-22 07:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 200.0,
+      "ratio": 0.01,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "184A",
+      "period": "2025-04-30",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 1.0,
+      "filing_id": "053f343d1f79541b2947dc1e3edc8644923a122cddf6d7fea8aaeef6bbcc0044",
+      "disclosure_datetime": "2026-03-22 07:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 774.0,
+      "ratio": 0.0012919896640826874,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "1911",
+      "period": "2026-12-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 8.499999999999999e-05,
+      "filing_id": "8e4c6e2bf6a9bd08cd269209544803eb0654de1ea887be8a8f66ef06f486a67c",
+      "disclosure_datetime": "2026-08-07 06:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 143000.0,
+      "ratio": 5.944055944055944e-10,
+      "reasons": [
+        "jquants_ratio_100x",
+        "operating_profit_extremely_small"
+      ]
+    },
+    {
+      "ticker": "1911",
+      "period": "2026-12-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 2.9500001430001148e+19,
+      "filing_id": "8e4c6e2bf6a9bd08cd269209544803eb0654de1ea887be8a8f66ef06f486a67c",
+      "disclosure_datetime": "2026-08-07 06:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 2950000.0,
+      "ratio": 10000000484746.152,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "1925",
+      "period": "2027-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 4.8e-05,
+      "filing_id": "cff550f00dbcbf2d70550c01927f3f573249ed63fc0c7221f62e4c425ba5658e",
+      "disclosure_datetime": "2026-08-06 06:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 460000.0,
+      "ratio": 1.0434782608695653e-10,
+      "reasons": [
+        "jquants_ratio_100x",
+        "operating_profit_extremely_small"
+      ]
+    },
+    {
+      "ticker": "1925",
+      "period": "2027-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 0.00042899999999999997,
+      "filing_id": "cff550f00dbcbf2d70550c01927f3f573249ed63fc0c7221f62e4c425ba5658e",
+      "disclosure_datetime": "2026-08-06 06:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 5900000.0,
+      "ratio": 7.271186440677965e-11,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_extremely_small"
+      ]
+    },
+    {
+      "ticker": "1939",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 9.94008800930075e+19,
+      "filing_id": "d725c3253bf877181cf20731119b8dafa5c87294e8c09d4f86ca6138f2232c76",
+      "disclosure_datetime": "2026-04-23 07:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 100000.0,
+      "ratio": 994008800930075.0,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "1945",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 8.30004700550043e+19,
+      "filing_id": "7c8d164ed4ff13267b59dd2f166d9331d1e453c9564caa3bdc087fcc1dfe7c2d",
+      "disclosure_datetime": "2026-04-23 07:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 82000.0,
+      "ratio": 1012200854329320.9,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "1980",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 350000319000.0,
+      "filing_id": "ffffc299a56e0cb58d9b198efac8e6192c6f1e9314dd9f6733a4101813459f97",
+      "disclosure_datetime": "2026-04-23 06:00:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "1982",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 83789794000.0,
+      "filing_id": "8abd5ba1d23d32ce4fc5d617faa2de586708ecdd26896e97ae23bc5b90657b0f",
+      "disclosure_datetime": "2026-05-13 03:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 93500.0,
+      "ratio": 896147.5294117647,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "1997",
+      "period": "2025-08-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 9.500135014009505e+17,
+      "filing_id": "1a786c15ffb206072cf7fff190fcf8cf2279ba2e7ee6f9db12fd9ebd012665a8",
+      "disclosure_datetime": "2026-06-29 01:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 750.0,
+      "ratio": 1266684668534600.8,
+      "reasons": [
+        "jquants_ratio_100x",
+        "operating_profit_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "2109",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 0.0123,
+      "filing_id": "eb580a966e74f629230123aa57a08774e50368db0139e2019376b117ead946fd",
+      "disclosure_datetime": "2026-03-24 07:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 12300.0,
+      "ratio": 1e-06,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "2109",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 0.19999999999999998,
+      "filing_id": "eb580a966e74f629230123aa57a08774e50368db0139e2019376b117ead946fd",
+      "disclosure_datetime": "2026-03-24 07:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 200000.0,
+      "ratio": 1e-06,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "2120",
+      "period": "2026-09-30",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 1.0,
+      "filing_id": "e5c7511555bd4c5edded8f3b0987eb07083918952631f77addb26dbc7f5f809c",
+      "disclosure_datetime": "2026-08-12 06:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 3900.0,
+      "ratio": 0.0002564102564102564,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "2120",
+      "period": "2026-09-30",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 293003900250019.5,
+      "filing_id": "e5c7511555bd4c5edded8f3b0987eb07083918952631f77addb26dbc7f5f809c",
+      "disclosure_datetime": "2026-08-12 06:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 29300.0,
+      "ratio": 10000133114.335136,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "212A",
+      "period": "2026-10-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 1.4322350635582472e+19,
+      "filing_id": "774df13855e2a1e204e2701558a4312bfa7ee6e57c2e1ca8b8379d5307a0926c",
+      "disclosure_datetime": "2026-06-12 06:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 14322.0,
+      "ratio": 1000024482305716.5,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "2269",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 115407400.0,
+      "filing_id": "afcdeebf2e18bf037b3e82b15311a5a7d786a99a556b1842982e8f9bf401ed82",
+      "disclosure_datetime": "2026-03-26 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 1195000.0,
+      "ratio": 96.575230125523,
+      "reasons": [
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "2281",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 4.7500091001140045e+20,
+      "filing_id": "92b79411854ac0ec32f7b5fa84db319f7c42c3f42683642c8e6fd85dd70d8d70",
+      "disclosure_datetime": "2026-04-17 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 480000.0,
+      "ratio": 989585229190417.6,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "2341",
+      "period": "2026-02-28",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 471916016918910.3,
+      "filing_id": "e042572bf8497c008f29e23b653a328c40d74da55812c00bda97061957ed1a06",
+      "disclosure_datetime": "2026-04-03 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 4745.0,
+      "ratio": 99455430330.64496,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "2656",
+      "period": "2025-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": -0.000601,
+      "filing_id": "4b697819626c94d6ee572d443d8d50822163661e75ad705605faa7e9143b335e",
+      "disclosure_datetime": "2026-04-13 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": -476.0,
+      "ratio": 1.2626050420168067e-06,
+      "reasons": [
+        "jquants_ratio_100x",
+        "operating_profit_extremely_small",
+        "operating_profit_over_2x_sales"
+      ]
+    },
+    {
+      "ticker": "2656",
+      "period": "2025-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 0.000156,
+      "filing_id": "4b697819626c94d6ee572d443d8d50822163661e75ad705605faa7e9143b335e",
+      "disclosure_datetime": "2026-04-13 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 262.0,
+      "ratio": 5.954198473282443e-07,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_extremely_small"
+      ]
+    },
+    {
+      "ticker": "2687",
+      "period": "2026-02-28",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 7902130.0,
+      "filing_id": "fe49aa3bf09e7bcba3e3c8d137f39862669e8820f66365d57d6929501b13d89d",
+      "disclosure_datetime": "2026-04-10 06:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 8896.0,
+      "ratio": 888.2790017985611,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "2737",
+      "period": "2027-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 1.40000048900408e+25,
+      "filing_id": "15244638dfd65bfb44b26be885912437512858f90d467ce35f696efd04245f19",
+      "disclosure_datetime": "2026-07-30 04:00:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 1400000.0,
+      "ratio": 1.0000003492886286e+19,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "2972",
+      "period": "2026-08-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 601.0,
+      "filing_id": "02f284f608ce4d8bd2ff4c5a70bdf1028fb43fc084b01abb76d5cdeb38403fc7",
+      "disclosure_datetime": "2026-04-28 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 1573.0,
+      "ratio": 0.3820724729815639,
+      "reasons": [
+        "operating_profit_over_2x_sales"
+      ]
+    },
+    {
+      "ticker": "3010",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 2.8,
+      "filing_id": "ac133f26efe7e4fa93ec761054c9b30c828bf9caa81770b9840a4613d8bbc034",
+      "disclosure_datetime": "2026-03-26 03:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 3190.0,
+      "ratio": 0.0008777429467084639,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "3160",
+      "period": "2026-05-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 79549159339563.0,
+      "filing_id": "fef7e072043da4bb433accf5d6e0ffc79f42f0790429f9a5f75654a683abf1a0",
+      "disclosure_datetime": "2026-07-06 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 79300.0,
+      "ratio": 1003141984.1054603,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "3238",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 0.0,
+      "filing_id": "c6cea2d645a124186b7f525dfaec83f38a160525288fcc72a8df3ee9a09e5066",
+      "disclosure_datetime": "2026-03-22 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 1500.0,
+      "ratio": 0.0,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "336A",
+      "period": "2027-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 7000.0,
+      "filing_id": "f30bedf491f84cff41a928f1032b32f8b1ede78aab37aa5d579aa0f9d81dc82f",
+      "disclosure_datetime": "2026-08-06 15:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 740000.0,
+      "ratio": 0.00945945945945946,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "3513",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 0.0015999999999999999,
+      "filing_id": "7ab73b46fe8acd580360e7056b80c11c9daa02ab7557442c26391782f849d78a",
+      "disclosure_datetime": "2026-04-28 06:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 720.0,
+      "ratio": 2.222222222222222e-06,
+      "reasons": [
+        "jquants_ratio_100x",
+        "operating_profit_extremely_small"
+      ]
+    },
+    {
+      "ticker": "3513",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 0.0147,
+      "filing_id": "7ab73b46fe8acd580360e7056b80c11c9daa02ab7557442c26391782f849d78a",
+      "disclosure_datetime": "2026-04-28 06:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 13400.0,
+      "ratio": 1.0970149253731344e-06,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "3563",
+      "period": "2026-09-30",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 5.0500071000505e+23,
+      "filing_id": "6f57c81e9ef0ade0332bd6f279bc9e91aeb8744131cfde65f912b837e74854e3",
+      "disclosure_datetime": "2026-08-07 02:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 505000.0,
+      "ratio": 1.000001405950594e+18,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "3600",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": -0.000222,
+      "filing_id": "c9afb238f6436649000886a5327dafdabd7678aafdc2e5606753bb2b50d50792",
+      "disclosure_datetime": "2026-05-13 07:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": -122.0,
+      "ratio": 1.819672131147541e-06,
+      "reasons": [
+        "jquants_ratio_100x",
+        "operating_profit_extremely_small"
+      ]
+    },
+    {
+      "ticker": "3600",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 0.005474,
+      "filing_id": "c9afb238f6436649000886a5327dafdabd7678aafdc2e5606753bb2b50d50792",
+      "disclosure_datetime": "2026-05-13 07:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 5631.0,
+      "ratio": 9.721186290179365e-07,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_extremely_small"
+      ]
+    },
+    {
+      "ticker": "3627",
+      "period": "2026-02-28",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 1020010405.0,
+      "filing_id": "4a9a7813c37ac04cac8396ea58bc2ee5fd3e30dd08d6772cb33e59777071ae05",
+      "disclosure_datetime": "2026-04-10 06:30:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "3634",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 106052558635.37,
+      "filing_id": "0a24cb5ac0e61dca4c139299de623052a8adba7a900d5205fb6fe386de0c1271",
+      "disclosure_datetime": "2026-04-23 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 1100.0,
+      "ratio": 96411416.94124545,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "3750",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": -910.0,
+      "filing_id": "e906e4b121139f8c64eb93df1f1543698d29e5296ccb26b28ca0f350dafb1f18",
+      "disclosure_datetime": "2026-03-24 08:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": -123.0,
+      "ratio": 7.3983739837398375,
+      "reasons": [
+        "operating_profit_over_2x_sales"
+      ]
+    },
+    {
+      "ticker": "3793",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 0.0,
+      "filing_id": "ba4df234a937303ffe6298462002ee428608ec844dbc018253a94b0aeff78c35",
+      "disclosure_datetime": "2026-04-23 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 20000.0,
+      "ratio": 0.0,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_non_positive"
+      ]
+    },
+    {
+      "ticker": "3923",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 7e-06,
+      "filing_id": "4c58767f739dafcb19a852a1eafe34784fa322d7985387ba8687ce64a3b06b6b",
+      "disclosure_datetime": "2026-04-27 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 15000.0,
+      "ratio": 4.666666666666667e-10,
+      "reasons": [
+        "jquants_ratio_100x",
+        "operating_profit_extremely_small"
+      ]
+    },
+    {
+      "ticker": "3923",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 7e-06,
+      "filing_id": "4c58767f739dafcb19a852a1eafe34784fa322d7985387ba8687ce64a3b06b6b",
+      "disclosure_datetime": "2026-04-27 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 59400.0,
+      "ratio": 1.1784511784511785e-10,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_extremely_small"
+      ]
+    },
+    {
+      "ticker": "3933",
+      "period": "2025-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 1000092087053071.0,
+      "filing_id": "48f790c06dd82bea6751904c680929848cb564d4289f643069d76bcda46fc2dc",
+      "disclosure_datetime": "2026-04-20 07:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 4800.0,
+      "ratio": 208352518136.05646,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "3934",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 1.839314821520995e+18,
+      "filing_id": "8f82a406dc8bb55c17446998447a9c3df4fd51db181c2156dafbe1c293a6714f",
+      "disclosure_datetime": "2026-04-30 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 17042.0,
+      "ratio": 107928343006747.75,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "3964",
+      "period": "2026-12-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 0.0,
+      "filing_id": "64696fffae9218b62f88e2af7c1e577087ba5511454e048d61c4165446813ad1",
+      "disclosure_datetime": "2026-08-04 06:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 12000.0,
+      "ratio": 0.0,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "4058",
+      "period": "2026-12-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 6.0002370210021e+22,
+      "filing_id": "daaf9f767e47f0350ea22d119f67e7a82e3e461ed7fd939f4adb9fc138220a66",
+      "disclosure_datetime": "2026-08-13 02:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 6000.0,
+      "ratio": 1.00003950350035e+19,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "4076",
+      "period": "2026-05-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 5.5005499999999994e-05,
+      "filing_id": "b6d39848c96cab1ed962174c7721ad45583fcf619bd542df663a05f21553f3bc",
+      "disclosure_datetime": "2026-04-10 06:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 710.0,
+      "ratio": 7.74725352112676e-08,
+      "reasons": [
+        "jquants_ratio_100x",
+        "operating_profit_extremely_small"
+      ]
+    },
+    {
+      "ticker": "4082",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 3.57503480325025e+19,
+      "filing_id": "e3d020e52457a6eb2838f37bf2fcb4f8fff7f66d592fc95c8ff07f3731945d06",
+      "disclosure_datetime": "2026-04-23 09:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 34000.0,
+      "ratio": 1051480824485367.8,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "4109",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 0.036199999999999996,
+      "filing_id": "7d849f7ea3eef31d3f48faf6eac52f22b523f8d7c3c20d10480d6b8353c7058c",
+      "disclosure_datetime": "2026-03-24 05:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 36000.0,
+      "ratio": 1.0055555555555556e-06,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "418A",
+      "period": "2026-11-30",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 248944344330766.75,
+      "filing_id": "87eb327d3674bbb571c166eff8431d57194432cc41d982ea66183b9ca4319a76",
+      "disclosure_datetime": "2026-07-15 06:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 2489.0,
+      "ratio": 100017816123.249,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "4249",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 1.3380046003900232e+20,
+      "filing_id": "cc4d6946fa09045e71f7ba339762eea5905bc08e8ba9cd32bfc3eec586a88322",
+      "disclosure_datetime": "2026-04-23 05:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 137000.0,
+      "ratio": 976645693715345.5,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "4299",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 1.820015601580114e+19,
+      "filing_id": "9146434fce4609000e726ab3b8b39123c1e50fe10064ee53d8822e022166d4cc",
+      "disclosure_datetime": "2026-04-23 05:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 20000.0,
+      "ratio": 910007800790057.0,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "429A",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 5.6e-05,
+      "filing_id": "1f75261a341bc238a8359d2a6f0e11e27af95540bb9ee47506e4632a5502c288",
+      "disclosure_datetime": "2026-03-27 07:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 8500.0,
+      "ratio": 6.588235294117647e-09,
+      "reasons": [
+        "jquants_ratio_100x",
+        "operating_profit_extremely_small"
+      ]
+    },
+    {
+      "ticker": "4316",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": -0.000179,
+      "filing_id": "b59f89ddcf8832683e055be78447fcb05fb0b15ed2bd85d5827184d0613b26e0",
+      "disclosure_datetime": "2026-05-13 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 50.0,
+      "ratio": 3.5799999999999996e-06,
+      "reasons": [
+        "jquants_ratio_100x",
+        "operating_profit_extremely_small"
+      ]
+    },
+    {
+      "ticker": "434A",
+      "period": "2026-02-28",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 2784285245162162.0,
+      "filing_id": "326ed0c53c3327d7832858bf45e7da2ceac4e0d25651f3a3a19cc23022632b6b",
+      "disclosure_datetime": "2026-04-14 08:00:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "4412",
+      "period": "2026-08-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 213022021818823.0,
+      "filing_id": "a71b4ea389c0fbb6ec0ba3abb1f8b32ad1dc4fd0c88adc4c377d42e79630337e",
+      "disclosure_datetime": "2026-07-15 06:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 2130.0,
+      "ratio": 100010338882.07652,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "4430",
+      "period": "2026-05-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 0.0,
+      "filing_id": "b9d029fcfdab4b8aac2a5e5dd4e5bef9c6d5a93f7e011c5ece897a5863fe9a44",
+      "disclosure_datetime": "2026-04-10 06:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 1350.0,
+      "ratio": 0.0,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "4430",
+      "period": "2026-05-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 5.9999999999999995e-05,
+      "filing_id": "b9d029fcfdab4b8aac2a5e5dd4e5bef9c6d5a93f7e011c5ece897a5863fe9a44",
+      "disclosure_datetime": "2026-04-10 06:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 12000.0,
+      "ratio": 4.999999999999999e-09,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_extremely_small"
+      ]
+    },
+    {
+      "ticker": "4442",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 1190090090050025.2,
+      "filing_id": "fd2bee78bc94143455e31faccb8a997ab073c5345ce26ea173575e4e578d4ab7",
+      "disclosure_datetime": "2026-04-23 07:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 12000.0,
+      "ratio": 99174174170.83543,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "4488",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 4399385405.0,
+      "filing_id": "2564389a899cb7f00bfbfd075942e908aa23a74e2d3ab25b88743296af018a6e",
+      "disclosure_datetime": "2026-04-23 06:35:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 505.0,
+      "ratio": 8711654.267326733,
+      "reasons": [
+        "jquants_ratio_100x",
+        "operating_profit_over_100_trillion_yen",
+        "operating_profit_over_2x_sales"
+      ]
+    },
+    {
+      "ticker": "4577",
+      "period": "2026-05-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 5.10003300350025e+18,
+      "filing_id": "d23ba0915a1db56c673638c72b97b8a263de20ba7499d2683428898f3cb8690b",
+      "disclosure_datetime": "2026-04-10 06:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 51000.0,
+      "ratio": 100000647127455.89,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "4586",
+      "period": "2026-12-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": -1206.0,
+      "filing_id": "41145e361f3c4664c5e34a8e26836a3fc6027c123686192f625bc08f97cf1c89",
+      "disclosure_datetime": "2026-08-07 06:35:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": -1206.0,
+      "ratio": 1.0,
+      "reasons": [
+        "operating_profit_over_2x_sales"
+      ]
+    },
+    {
+      "ticker": "4594",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 0.0,
+      "filing_id": "2b199f7f6465826740a5e849019252cab9577649c7145c166570a3660a90a604",
+      "disclosure_datetime": "2026-03-22 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 0.0,
+      "ratio": null,
+      "reasons": [
+        "sales_non_positive"
+      ]
+    },
+    {
+      "ticker": "4615",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 21400250350.0,
+      "filing_id": "c944a4fb7d4fb2c82a52d2bebdcf02a5007c4f425cbd1d447eaf1380189d166f",
+      "disclosure_datetime": "2026-04-22 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 18000.0,
+      "ratio": 1188902.7972222222,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "4617",
+      "period": "2027-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 1.600001750018e+23,
+      "filing_id": "9857690d65fffa058fc4cbbec284fca462c32b201c8416592b43618fe9c33612",
+      "disclosure_datetime": "2026-07-03 06:30:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "4620",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 1.1e-05,
+      "filing_id": "c62c5cfa38559d8e46f11f83d6d2a3880934f68980736e4e924a92f9acd91165",
+      "disclosure_datetime": "2026-04-28 05:00:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "sales_extremely_small"
+      ]
+    },
+    {
+      "ticker": "4763",
+      "period": "2026-02-28",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 50.0,
+      "filing_id": "24c9cc31127c5deca70ba843fe580f8540af57e7b06d88b76bbe2d21dfa1891c",
+      "disclosure_datetime": "2026-03-26 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 5000.0,
+      "ratio": 0.01,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "4829",
+      "period": "2026-05-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 458085110451.17,
+      "filing_id": "b8e31ac3c4d57aded7a8c8b1e40ea1ac1506728712cba7bac326c6fff3ef1093",
+      "disclosure_datetime": "2026-04-09 07:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 5330.0,
+      "ratio": 85944673.6306135,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "4840",
+      "period": "2026-12-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": -2.2e-05,
+      "filing_id": "f4acf381ef0abbfc8d72aad692f987a51c274ec17f0cebd2375a52c0945bc1cb",
+      "disclosure_datetime": "2026-06-19 06:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": -22.0,
+      "ratio": 1e-06,
+      "reasons": [
+        "jquants_ratio_100x",
+        "operating_profit_extremely_small"
+      ]
+    },
+    {
+      "ticker": "4840",
+      "period": "2026-12-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 0.001416,
+      "filing_id": "f4acf381ef0abbfc8d72aad692f987a51c274ec17f0cebd2375a52c0945bc1cb",
+      "disclosure_datetime": "2026-06-19 06:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 1416.0,
+      "ratio": 1e-06,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_extremely_small"
+      ]
+    },
+    {
+      "ticker": "4885",
+      "period": "2026-05-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 7700700660470117.0,
+      "filing_id": "39caaf4aed580c3e5b105a45b7b87ab1c42528e03d641d45acd8e722b4833be8",
+      "disclosure_datetime": "2026-04-14 07:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 6500.0,
+      "ratio": 1184723178533.8643,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "4936",
+      "period": "2026-07-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 32037000.0,
+      "filing_id": "6af4880fa2613aff3f7213610cd35d95b41511b01c0936aecd49d7ddf56733f1",
+      "disclosure_datetime": "2026-06-12 06:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 13500.0,
+      "ratio": 2373.1111111111113,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "5025",
+      "period": "2026-02-28",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 1601748216262.72,
+      "filing_id": "2a7a347321f28ae927695c7183bfda9946f8b460b65c82e0a134f19aeaef5821",
+      "disclosure_datetime": "2026-04-13 08:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 1600.0,
+      "ratio": 1001092635.1642,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "5077",
+      "period": "2026-06-30",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 3252164176112282.0,
+      "filing_id": "4b1d8588bee4704a2b439f2a726523e7ded91bad528d7c949aaf1d83ed8cf03e",
+      "disclosure_datetime": "2026-04-14 06:00:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "5136",
+      "period": "2026-10-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": -9.0,
+      "filing_id": "9103cf8946b946e2f5890a01792fc496121e3403fe2e8ec050a95a3c825c22bb",
+      "disclosure_datetime": "2026-06-15 06:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 3501.0,
+      "ratio": 0.002570694087403599,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_non_positive"
+      ]
+    },
+    {
+      "ticker": "5250",
+      "period": "2026-11-30",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 112470725114.77,
+      "filing_id": "9c7d73f84eaa82066484f06f84f1eb482935a7e50f807490d3d3f617cda80b2e",
+      "disclosure_datetime": "2026-04-13 06:31:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 1029.0,
+      "ratio": 109300996.22426628,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "525A",
+      "period": "2026-07-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 1205209145.0,
+      "filing_id": "a0ef5d14a650afa44b1d2dce4ac6b275d3f81a4c88c7fd51a55dc620fcd53430",
+      "disclosure_datetime": "2026-07-27 06:30:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "5351",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 7.599999999999999e-05,
+      "filing_id": "eb5f0675f41c7d5517a48b97b41a474661c672938d26a26762c3cb3193b3c885",
+      "disclosure_datetime": "2026-04-16 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 13500.0,
+      "ratio": 5.6296296296296286e-09,
+      "reasons": [
+        "jquants_ratio_100x",
+        "operating_profit_extremely_small"
+      ]
+    },
+    {
+      "ticker": "5351",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 1.760002150013e+22,
+      "filing_id": "eb5f0675f41c7d5517a48b97b41a474661c672938d26a26762c3cb3193b3c885",
+      "disclosure_datetime": "2026-04-16 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 174000.0,
+      "ratio": 1.0114954885132184e+17,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "5573",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 364962715397.04,
+      "filing_id": "e0feaef98447ea441a35e886dd72d119825c02129da914ced9d8e2935bc2e601",
+      "disclosure_datetime": "2026-04-23 07:30:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "6018",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 5.6e-05,
+      "filing_id": "2452f05f61bdd6101bc3a79be8f92a07c7182d6b402a84ee89b1959a3f671a8b",
+      "disclosure_datetime": "2026-04-22 06:45:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 700.0,
+      "ratio": 8e-08,
+      "reasons": [
+        "jquants_ratio_100x",
+        "operating_profit_extremely_small"
+      ]
+    },
+    {
+      "ticker": "6018",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 3.5e-05,
+      "filing_id": "2452f05f61bdd6101bc3a79be8f92a07c7182d6b402a84ee89b1959a3f671a8b",
+      "disclosure_datetime": "2026-04-22 06:45:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 13900.0,
+      "ratio": 2.517985611510791e-09,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_extremely_small"
+      ]
+    },
+    {
+      "ticker": "6090",
+      "period": "2026-06-30",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 142021021020035.6,
+      "filing_id": "a1b5d93c02dc3e352898c1271facb7666bd9de29409f4710f92341bc7e1ec34a",
+      "disclosure_datetime": "2026-05-13 06:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 1420.0,
+      "ratio": 100014803535.23633,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "6111",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 1.3393123177803338e+16,
+      "filing_id": "ceec794e71eda13d440e5f4a0f0c55b3d36e875ed62df479c72b4b22482227b6",
+      "disclosure_datetime": "2026-04-23 07:30:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "6140",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 4.199224173387194e+18,
+      "filing_id": "ccf1097671425542e05f40ec5c7d4a803580564a83017dcc193dd5e606864d37",
+      "disclosure_datetime": "2026-04-16 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 42500.0,
+      "ratio": 98805274667933.97,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "6157",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 9.494195920111443e+17,
+      "filing_id": "0dccc72dc95b1afad68da83621facfa8362853a8e462d43aca6d1603474974b3",
+      "disclosure_datetime": "2026-04-20 07:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 9680.0,
+      "ratio": 98080536364787.64,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "6323",
+      "period": "2026-02-28",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 0.031153999999999998,
+      "filing_id": "6cfaf6c3a49a3d2b7bc821f41360989da2d1c335c8bc2f38db5e08f0778a15bb",
+      "disclosure_datetime": "2026-03-26 06:40:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 30345.0,
+      "ratio": 1.0266600757950238e-06,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "6323",
+      "period": "2026-02-28",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 0.128794,
+      "filing_id": "6cfaf6c3a49a3d2b7bc821f41360989da2d1c335c8bc2f38db5e08f0778a15bb",
+      "disclosure_datetime": "2026-03-26 06:40:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 128190.0,
+      "ratio": 1.0047117559872064e-06,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "6325",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 654832637620518.2,
+      "filing_id": "f7eae3ffdaf6933011f4395032d03468963c47ce696f4746534ae1f429f0d4ab",
+      "disclosure_datetime": "2026-04-16 06:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 7200.0,
+      "ratio": 90948977447.2942,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "6332",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 1.4900098001100016e+22,
+      "filing_id": "24cc64ed6e6a722c90c83fb568bc790d817aedd80b5ffc37c295dc54ac33e49a",
+      "disclosure_datetime": "2026-04-23 08:15:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 144000.0,
+      "ratio": 1.0347290278541678e+17,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "6419",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": -18.7,
+      "filing_id": "9eff323b064345c1bc776d3f12d7432bd28097423b4a2961a314e42002a867a9",
+      "disclosure_datetime": "2026-04-13 07:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 10700.0,
+      "ratio": 0.001747663551401869,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "6419",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": -14.0,
+      "filing_id": "9eff323b064345c1bc776d3f12d7432bd28097423b4a2961a314e42002a867a9",
+      "disclosure_datetime": "2026-04-13 07:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 37500.0,
+      "ratio": 0.0003733333333333333,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_non_positive"
+      ]
+    },
+    {
+      "ticker": "6467",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 0.0,
+      "filing_id": "531afd7b7534fcca9e3d6ff8759e2476377c4740c0e48d596af35d9ce39ab1cc",
+      "disclosure_datetime": "2026-03-26 06:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 160.0,
+      "ratio": 0.0,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "6467",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 0.010985,
+      "filing_id": "88a75f976e15706f133f36df5edf198f07ed7eec76feeccd6addf15a8afaefd5",
+      "disclosure_datetime": "2026-03-25 06:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 12100.0,
+      "ratio": 9.078512396694215e-07,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "6577",
+      "period": "2026-07-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 3050310.0,
+      "filing_id": "9023de79ec67c5248e157389b1c001530a3713b6dfc1f87dff5ba8ccc115bbc6",
+      "disclosure_datetime": "2026-06-10 04:30:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "operating_profit_over_2x_sales"
+      ]
+    },
+    {
+      "ticker": "6588",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 0.00017377,
+      "filing_id": "ce0dfb4a8805d83c7fde3181d712746cb8cae149a16cd56bfde9a69d3fa75f72",
+      "disclosure_datetime": "2026-04-27 06:30:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "operating_profit_extremely_small"
+      ]
+    },
+    {
+      "ticker": "6588",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 0.00015021999999999998,
+      "filing_id": "ce0dfb4a8805d83c7fde3181d712746cb8cae149a16cd56bfde9a69d3fa75f72",
+      "disclosure_datetime": "2026-04-27 06:30:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "sales_extremely_small"
+      ]
+    },
+    {
+      "ticker": "6676",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 1.173009200102008e+21,
+      "filing_id": "47a47b1095745f2b522505289789392dd5c182f73136cacb2843c6c03ec58758",
+      "disclosure_datetime": "2026-04-13 06:40:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "6778",
+      "period": "2026-07-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 257515530815717.0,
+      "filing_id": "7346d9b5338e5a9e68e71a15a853f0df5a30f4b5e0000ae5286701d22b570393",
+      "disclosure_datetime": "2026-06-12 06:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 2575.0,
+      "ratio": 100006031384.74446,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "6862",
+      "period": "2027-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 1.8e-05,
+      "filing_id": "849604ed452cfe200bd341bc14c26b84a4d3e647ce22d6525fece9ce8e66d49e",
+      "disclosure_datetime": "2026-08-10 06:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 10000.0,
+      "ratio": 1.8e-09,
+      "reasons": [
+        "jquants_ratio_100x",
+        "operating_profit_extremely_small"
+      ]
+    },
+    {
+      "ticker": "6862",
+      "period": "2027-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 0.0,
+      "filing_id": "849604ed452cfe200bd341bc14c26b84a4d3e647ce22d6525fece9ce8e66d49e",
+      "disclosure_datetime": "2026-08-10 06:30:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 81000.0,
+      "ratio": 0.0,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_non_positive"
+      ]
+    },
+    {
+      "ticker": "6901",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 202.0,
+      "filing_id": "6ad33df15aa678fafa3a751bb645de9ebfa24c859f9e82a5143fea9d274b00b7",
+      "disclosure_datetime": "2026-03-23 00:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 27500.0,
+      "ratio": 0.007345454545454546,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "7022",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 7.499999999999999e-06,
+      "filing_id": "773be21947b93561be454bc0dd1f6ff674fc4b63d078be6643a6ec4ae67d1185",
+      "disclosure_datetime": "2026-03-31 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 800.0,
+      "ratio": 9.375e-09,
+      "reasons": [
+        "jquants_ratio_100x",
+        "operating_profit_extremely_small"
+      ]
+    },
+    {
+      "ticker": "7327",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 3.6e-05,
+      "filing_id": "554be719d841f229ce580ca967ae8ce67ea0f05a3316137f0dfabaf075380972",
+      "disclosure_datetime": "2026-04-27 07:00:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "sales_extremely_small"
+      ]
+    },
+    {
+      "ticker": "7343",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 0.0,
+      "filing_id": "af33fd164d120ef971dadd39f5150f793683efbbf9c204afbdd835d14fbfce07",
+      "disclosure_datetime": "2026-04-15 07:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 575.0,
+      "ratio": 0.0,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "7343",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 6.5e-05,
+      "filing_id": "af33fd164d120ef971dadd39f5150f793683efbbf9c204afbdd835d14fbfce07",
+      "disclosure_datetime": "2026-04-15 07:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 5940.0,
+      "ratio": 1.0942760942760942e-08,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_extremely_small"
+      ]
+    },
+    {
+      "ticker": "7356",
+      "period": "2026-09-30",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 1496100795.0,
+      "filing_id": "653db4fdfa6543f106c5b18e5bd03f7b6f6ea995ca9080a3d94bec25feb2c953",
+      "disclosure_datetime": "2026-08-13 08:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 1603.0,
+      "ratio": 933313.0349344978,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "7564",
+      "period": "2027-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 32112.0,
+      "filing_id": "1b0e00aaefb93f56ea61d26eed1abb95db83f8fb7c355fe2c46c44f8f94319f0",
+      "disclosure_datetime": "2026-08-02 15:00:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 32112.0,
+      "ratio": 1.0,
+      "reasons": [
+        "operating_profit_over_2x_sales"
+      ]
+    },
+    {
+      "ticker": "7564",
+      "period": "2027-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 1.0,
+      "filing_id": "1b0e00aaefb93f56ea61d26eed1abb95db83f8fb7c355fe2c46c44f8f94319f0",
+      "disclosure_datetime": "2026-08-02 15:00:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 183376.0,
+      "ratio": 5.453276328418114e-06,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "7593",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 5.1e-05,
+      "filing_id": "37b0f604aa01d704b3ad1261499f2d1154a80162cd60c1a5aead0e26d5ed02d8",
+      "disclosure_datetime": "2026-05-11 07:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 13000.0,
+      "ratio": 3.923076923076923e-09,
+      "reasons": [
+        "jquants_ratio_100x",
+        "operating_profit_extremely_small"
+      ]
+    },
+    {
+      "ticker": "7593",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 3887001100010100.5,
+      "filing_id": "37b0f604aa01d704b3ad1261499f2d1154a80162cd60c1a5aead0e26d5ed02d8",
+      "disclosure_datetime": "2026-05-11 07:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 370000.0,
+      "ratio": 10505408378.405678,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "7610",
+      "period": "2026-02-28",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 4.223313771355867e+17,
+      "filing_id": "17ea619706f99f5255a7208deb8523504da220777b61deda9a94d4245e1b5293",
+      "disclosure_datetime": "2026-04-10 07:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 40000.0,
+      "ratio": 10558284428389.668,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "7673",
+      "period": "2026-05-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 2.190012271260878e+18,
+      "filing_id": "bb3fe02034df2217c74e97d3d35e3043102d421cc1e0c3d4ac7f7881caa89674",
+      "disclosure_datetime": "2026-05-18 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 21260.0,
+      "ratio": 103010925270972.62,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "7725",
+      "period": "2026-05-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 294850772148747.44,
+      "filing_id": "3ebd1afd40583e754263215807d53cb9dd96b16253f0095092fd8df3bf0b3272",
+      "disclosure_datetime": "2026-04-10 07:00:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "7726",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 2.4999999999999998e-05,
+      "filing_id": "4f5ee4fe22a31f87c61f6c9c8f17d4f35f8a3172f1270b998476ddd2524e4c5d",
+      "disclosure_datetime": "2026-04-28 06:35:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 700.0,
+      "ratio": 3.571428571428571e-08,
+      "reasons": [
+        "jquants_ratio_100x",
+        "operating_profit_extremely_small"
+      ]
+    },
+    {
+      "ticker": "7726",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 0.019,
+      "filing_id": "4f5ee4fe22a31f87c61f6c9c8f17d4f35f8a3172f1270b998476ddd2524e4c5d",
+      "disclosure_datetime": "2026-04-28 06:35:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 20700.0,
+      "ratio": 9.178743961352657e-07,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "7846",
+      "period": "2026-12-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 1.3300019500200002e+23,
+      "filing_id": "30988bda8a1a93c573a6c2dbb3f4a1a73f168ce98633defd94d1fffd51567d4b",
+      "disclosure_datetime": "2026-08-06 07:00:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 133000.0,
+      "ratio": 1.0000014661804513e+18,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "7971",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 1.123005100570044e+19,
+      "filing_id": "16d47e05add8b351560d255098511b4227d28bd94b893475f5131da8c0ebe700",
+      "disclosure_datetime": "2026-04-23 05:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 108000.0,
+      "ratio": 103981953756485.56,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "8057",
+      "period": "2026-07-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 2.2e-05,
+      "filing_id": "57eea9eafabcefb0ce4ad7306aca084e3393a321164ac301b252e4c8007544c0",
+      "disclosure_datetime": "2026-06-03 06:30:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "operating_profit_extremely_small"
+      ]
+    },
+    {
+      "ticker": "8057",
+      "period": "2026-07-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 4.2100015400162995e+17,
+      "filing_id": "57eea9eafabcefb0ce4ad7306aca084e3393a321164ac301b252e4c8007544c0",
+      "disclosure_datetime": "2026-06-03 06:30:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "8059",
+      "period": "2025-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 0.0,
+      "filing_id": "0825a85913edbde2a8c0f9d89748c2fb491a53e086554c26070167c5eb866408",
+      "disclosure_datetime": "2026-04-27 08:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 10000.0,
+      "ratio": 0.0,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "8059",
+      "period": "2025-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 7.4e-05,
+      "filing_id": "0825a85913edbde2a8c0f9d89748c2fb491a53e086554c26070167c5eb866408",
+      "disclosure_datetime": "2026-04-27 08:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 200000.0,
+      "ratio": 3.6999999999999996e-10,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_extremely_small"
+      ]
+    },
+    {
+      "ticker": "8107",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 2540105.0,
+      "filing_id": "5e5624598f8e0cbc5e5d1dfb5455a869c62848724e4bb4aaa79d53abb44a9073",
+      "disclosure_datetime": "2026-04-22 07:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 2800.0,
+      "ratio": 907.1803571428571,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "8165",
+      "period": "2026-12-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": -4000.0,
+      "filing_id": "52bbb4751443c8acd853052ed5567e1a0a3ab0eb86766b0cde577ef97a8e7c89",
+      "disclosure_datetime": "2026-08-07 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 45000.0,
+      "ratio": 0.08888888888888889,
+      "reasons": [
+        "sales_non_positive"
+      ]
+    },
+    {
+      "ticker": "8308",
+      "period": "2027-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 20200.0,
+      "filing_id": "9e63e4461fa1c978df2303f6bbfb7d8388175a6f5cf6efb2fb77dc6a4976dcf5",
+      "disclosure_datetime": "2026-07-31 07:00:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "operating_profit_over_2x_sales"
+      ]
+    },
+    {
+      "ticker": "8370",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 7.9e-05,
+      "filing_id": "cd7a5883e38d479e363c5cc163f631083f0b8401bc0aacbd378e23fdabe98a8a",
+      "disclosure_datetime": "2026-04-27 06:00:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "operating_profit_extremely_small"
+      ]
+    },
+    {
+      "ticker": "8377",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 6.5e-05,
+      "filing_id": "5d7181cb8fb5b5dfe6743201e286fc564c05cd40b3c6a1ee4a4c59f0f103b9a7",
+      "disclosure_datetime": "2026-03-27 06:00:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "operating_profit_extremely_small"
+      ]
+    },
+    {
+      "ticker": "8399",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 6.1e-05,
+      "filing_id": "6b258c09e2b890f3b4f645f059823d3fe39a0dfda262886bcea11e0aa21bf49b",
+      "disclosure_datetime": "2026-04-23 06:00:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "sales_extremely_small"
+      ]
+    },
+    {
+      "ticker": "8558",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": -30000.0,
+      "filing_id": "c88cf9a3441b47589cb62eb086835e842f874cc3cb6a3bf4555215a12377621c",
+      "disclosure_datetime": "2026-03-22 06:30:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "sales_non_positive"
+      ]
+    },
+    {
+      "ticker": "8591",
+      "period": "2027-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 160.0,
+      "filing_id": "5bff364d3157117c243380a5b4371b385a3efb1eb4a1a8a001d16286de1b6b4f",
+      "disclosure_datetime": "2026-08-05 15:00:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "operating_profit_over_2x_sales"
+      ]
+    },
+    {
+      "ticker": "8697",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 115500.0,
+      "filing_id": "36ee3f106a654adebeb92917b017e58c1ce8f053fe6cb7122f2950fa83a5d1ea",
+      "disclosure_datetime": "2026-03-25 03:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 82500.0,
+      "ratio": 1.4,
+      "reasons": [
+        "operating_profit_over_2x_sales"
+      ]
+    },
+    {
+      "ticker": "8914",
+      "period": "2026-12-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 3.0,
+      "filing_id": "ac9bd3482acfb5bc8f0ae122ea95dc3bfe495f048b84a6c3217195829c2258e3",
+      "disclosure_datetime": "2026-07-29 03:00:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 6050.0,
+      "ratio": 0.0004958677685950413,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "8914",
+      "period": "2026-12-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 2.8700605056703816e+18,
+      "filing_id": "ac9bd3482acfb5bc8f0ae122ea95dc3bfe495f048b84a6c3217195829c2258e3",
+      "disclosure_datetime": "2026-07-29 03:00:00+00:00",
+      "jquants_source": "jquants_forecast_fy",
+      "jquants_value": 28700.0,
+      "ratio": 100002108211511.55,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_over_100_trillion_yen"
+      ]
+    },
+    {
+      "ticker": "8952",
+      "period": "2025-09-30",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 100.0,
+      "filing_id": "1d43da9e0e6d8d38547815af6c6dea53132428d846a823b75b8130a1c915bb45",
+      "disclosure_datetime": "2026-03-22 06:45:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 20660.0,
+      "ratio": 0.00484027105517909,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "8958",
+      "period": "2026-09-30",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 12.4,
+      "filing_id": "b63c09afc6e3b00d72a548932f8db0da92eea0f57cc941080ac5181f3b7b2185",
+      "disclosure_datetime": "2026-03-26 07:00:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 4455.0,
+      "ratio": 0.0027833894500561168,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "8966",
+      "period": "2026-11-30",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 4.9999999999999996e-06,
+      "filing_id": "622f6d89b7d573222ac681a27ff57721567287557c0f0228d6a95fcde65a7b59",
+      "disclosure_datetime": "2026-05-18 07:20:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 4109.0,
+      "ratio": 1.2168410805548793e-09,
+      "reasons": [
+        "jquants_ratio_100x",
+        "operating_profit_extremely_small"
+      ]
+    },
+    {
+      "ticker": "8966",
+      "period": "2026-11-30",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 4.9999999999999996e-06,
+      "filing_id": "622f6d89b7d573222ac681a27ff57721567287557c0f0228d6a95fcde65a7b59",
+      "disclosure_datetime": "2026-05-18 07:20:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 8954.0,
+      "ratio": 5.584096493187402e-10,
+      "reasons": [
+        "jquants_ratio_100x",
+        "sales_extremely_small"
+      ]
+    },
+    {
+      "ticker": "9036",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 202.0,
+      "filing_id": "ada4a39aa7a527dddbf23889b5be07cb38fe6f2d5f70d6ec0149d102fe80faa6",
+      "disclosure_datetime": "2026-05-12 08:45:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 384.0,
+      "ratio": 0.5260416666666666,
+      "reasons": [
+        "operating_profit_over_2x_sales"
+      ]
+    },
+    {
+      "ticker": "9036",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 1.202,
+      "filing_id": "ada4a39aa7a527dddbf23889b5be07cb38fe6f2d5f70d6ec0149d102fe80faa6",
+      "disclosure_datetime": "2026-05-12 08:45:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 11243.0,
+      "ratio": 0.00010691096682380147,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "9219",
+      "period": "2026-06-30",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": -1300.0,
+      "filing_id": "7a506f8495770532cd71e7ffe4b82cb1266ded46c01da52f12585377d0c41f9a",
+      "disclosure_datetime": "2026-04-30 06:30:00+00:00",
+      "jquants_source": null,
+      "jquants_value": null,
+      "ratio": null,
+      "reasons": [
+        "sales_non_positive"
+      ]
+    },
+    {
+      "ticker": "9698",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "operating_profit",
+      "tdnet_value": 0.0,
+      "filing_id": "359f9163c701c2c9d74fde76934d12a61b6898171826654611d67e9b0ba4e747",
+      "disclosure_datetime": "2026-03-26 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 1140.0,
+      "ratio": 0.0,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "9698",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 55.0,
+      "filing_id": "359f9163c701c2c9d74fde76934d12a61b6898171826654611d67e9b0ba4e747",
+      "disclosure_datetime": "2026-03-26 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 15100.0,
+      "ratio": 0.003642384105960265,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    },
+    {
+      "ticker": "9880",
+      "period": "2026-03-31",
+      "quarter": "FY",
+      "metric": "sales",
+      "tdnet_value": 0.0465,
+      "filing_id": "d2544e1a36c8117d4213977d875af24256b805809f0746c528d8e93c5d9bcbc9",
+      "disclosure_datetime": "2026-03-26 06:30:00+00:00",
+      "jquants_source": "jquants_nxf",
+      "jquants_value": 43500.0,
+      "ratio": 1.0689655172413792e-06,
+      "reasons": [
+        "jquants_ratio_100x"
+      ]
+    }
+  ]
+}

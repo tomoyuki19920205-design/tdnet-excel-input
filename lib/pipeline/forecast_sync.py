@@ -1,8 +1,7 @@
-"""Normalize TDNET/J-Quants forecasts and write canonical forecast rows.
+"""Normalize TDNET/J-Quants forecasts for realtime analysis and J-Quants sync.
 
-Forecasts share ``canonical_financials`` with actual metrics, but use
-``quarter='FY'`` and a forecast source.  Winner ordering is based on the
-effective disclosure timestamp; source priority is only a final tie-break.
+Realtime TDNET forecasts are deliberately not written to ``canonical_financials``.
+``expand_forecast_rows`` remains for the J-Quants Nightly canonical path only.
 """
 from __future__ import annotations
 
@@ -19,7 +18,6 @@ from typing import Iterable
 from src.common_ticker import normalize_ticker
 
 from .canonical_writer import _make_financials_row_key
-from .db import get_supabase_write_config, supabase_upsert
 from .source_priority import get_priority
 
 logger = logging.getLogger("pipeline.forecast_sync")
@@ -348,60 +346,3 @@ def expand_forecast_rows(candidates: Iterable[ForecastDTO]) -> list[dict]:
             "updated_at": now_iso,
         })
     return rows
-
-
-def sync_realtime_forecasts(
-    *,
-    db_path: str,
-    earnings_disclosure_ids: Iterable[str] = (),
-    revision_disclosure_ids: Iterable[str] = (),
-    dry_run: bool = False,
-    strict: bool = False,
-) -> dict:
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        earnings, eq = load_earnings_forecasts(conn, disclosure_ids=earnings_disclosure_ids)
-        revisions, rq = load_revision_forecasts(conn, disclosure_ids=revision_disclosure_ids)
-    finally:
-        conn.close()
-    candidates = earnings + revisions
-    winners = select_latest_forecasts(candidates)
-    rows = expand_forecast_rows(winners)
-    stats = {
-        "candidates": len(candidates), "forecast_rows": len(rows),
-        "earnings_candidates": len(earnings), "revision_candidates": len(revisions),
-        "earnings_quarantined": len(eq), "revision_quarantined": len(rq),
-        "earnings_disclosure_ids": sorted({item.filing_id for item in earnings if item.filing_id}),
-        "revision_disclosure_ids": sorted({item.filing_id for item in revisions if item.filing_id}),
-        "earnings_quarantine_ids": sorted({str(item.get("disclosure_id") or "") for item in eq}),
-        "revision_quarantine_ids": sorted({str(item.get("disclosure_id") or "") for item in rq}),
-        "written": 0, "skipped": 0, "quarantined": len(eq) + len(rq),
-        "errors": 0, "quarantine": eq + rq,
-    }
-    for item in stats["quarantine"]:
-        logger.warning("[forecast_sync] QUARANTINE %s", item)
-    if dry_run:
-        stats["skipped"] = len(rows)
-        logger.info("[forecast_sync] DRY-RUN rows=%d quarantined=%d", len(rows), stats["quarantined"])
-        return stats
-    if not rows:
-        return stats
-    config = get_supabase_write_config()
-    if not config:
-        stats["errors"] = len(rows)
-        if strict:
-            raise RuntimeError("forecast canonical write config unavailable")
-        return stats
-    result = supabase_upsert(
-        "canonical_financials", rows, on_conflict="source_row_key",
-        config=config, batch_size=100,
-    )
-    if result.get("ok"):
-        stats["written"] = int(result.get("count", len(rows)) or len(rows))
-    else:
-        stats["errors"] = len(rows)
-        logger.error("[forecast_sync] canonical upsert failed: %s", result.get("error"))
-        if strict:
-            raise RuntimeError(str(result.get("error") or "forecast canonical upsert failed"))
-    return stats
