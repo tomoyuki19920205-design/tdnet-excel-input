@@ -555,6 +555,7 @@ def read_forecast_rows(
                 "gross_profit":     None,
                 "operating_profit": nxf_op_m,
                 "source":           "jquants_nxf",
+                "disclosure_datetime": r["disclosed_date"],
                 "updated_at":       now_iso,
             })
 
@@ -597,6 +598,7 @@ def read_forecast_rows(
             "gross_profit":     None,
             "operating_profit": f_op_m,
             "source":           "jquants_forecast_fy",
+            "disclosure_datetime": r["disclosed_date"],
             "updated_at":       now_iso,
         })
 
@@ -1026,7 +1028,7 @@ def sync(
 
                 # canonical への dual-write (best-effort)
                 try:
-                    from lib.pipeline.canonical_writer import expand_financials_rows
+                    from lib.pipeline.forecast_sync import ForecastDTO, expand_forecast_rows
                     from lib.pipeline.db import (
                         load_env, get_supabase_write_config, supabase_upsert
                     )
@@ -1036,20 +1038,26 @@ def sync(
                         fc_rows: list[dict] = []
                         fc_skipped = 0
                         for d in forecast_data:
-                            metrics_dict = {
-                                k: d.get(k)
-                                for k in ("sales", "gross_profit", "operating_profit")
-                            }
-                            expanded, skipped = expand_financials_rows(
-                                ticker=d["ticker"],
-                                period=d["period"],
-                                quarter=d["quarter"],
-                                metrics_dict=metrics_dict,
-                                source=d["source"],
-                                unit="millions_jpy",
-                            )
-                            fc_rows.extend(expanded)
-                            fc_skipped += skipped
+                            for metric in ("sales", "operating_profit"):
+                                value = d.get(metric)
+                                if value is None:
+                                    fc_skipped += 1
+                                    continue
+                                fc_rows.extend(expand_forecast_rows([ForecastDTO(
+                                    ticker=d["ticker"],
+                                    forecast_period_end=d["period"],
+                                    metric=metric,
+                                    value=float(value),
+                                    disclosure_datetime=d.get("disclosure_datetime") or "",
+                                    filing_id="",
+                                    source=d["source"],
+                                    correction_flag=False,
+                                    forecast_horizon=(
+                                        "next_fy" if d["source"] == "jquants_nxf" else "current_fy"
+                                    ),
+                                    accounting_standard="UNKNOWN",
+                                    document_type="jquants_forecast",
+                                )]))
                         if fc_rows:
                             fc_result = supabase_upsert(
                                 "canonical_financials",

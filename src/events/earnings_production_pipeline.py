@@ -2515,6 +2515,23 @@ def run_earnings_production(
                     "summary_full": full_message,
                     "fingerprint": fp,
                     "source_url": getattr(doc, "doc_url", "") or "",
+                    "source_doc_id": str(
+                        getattr(doc, "disclosure_id", "")
+                        or getattr(doc, "source_doc_id", "")
+                        or getattr(doc, "doc_id", "")
+                        or ""
+                    ),
+                    "disclosure_datetime": (
+                        getattr(doc, "disclosure_datetime", "")
+                        or getattr(doc, "published_at", "")
+                        or ""
+                    ),
+                    "accounting_standard": (
+                        "IFRS" if "IFRS" in (doc.title or "").upper()
+                        else "US_GAAP" if "米国基準" in (doc.title or "")
+                        else "J_GAAP" if "日本基準" in (doc.title or "")
+                        else "UNKNOWN"
+                    ),
                     "archive_path": xbrl_path,
                 }
                 # 4Qガイダンスカラム

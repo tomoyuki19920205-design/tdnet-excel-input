@@ -35,6 +35,13 @@ SOURCE_PRIORITY: dict[str, int] = {
     "html_table": 3,
     "pdf_table": 4,
     "legacy_excel": 5,
+    # Forecast sources intentionally share one priority. Forecast winner
+    # selection is disclosure-time first; source is only a deterministic tie.
+    "jquants_nxf": 10,
+    "jquants_forecast_fy": 10,
+    "jquants_forecast_next_fy": 10,
+    "jquants_forecast": 10,
+    "tdnet_forecast": 10,
     # ── segment source (実データ値) ──
     # SegmentRawRow.source: 'xbrl' | 'html' | 'pdf' | 'tdnet'
     # xbrl は summary_xbrl 相当、html/pdf はそれぞれ html_table/pdf_table 相当

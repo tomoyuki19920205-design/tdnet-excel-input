@@ -535,6 +535,7 @@ def run_realtime(
         "target_disclosure_ids": [],
         "push": {},
         "canonical": _canonical_default_result(),
+        "forecast": {},
         "queue_success": 0,
         "queue_failed": 0,
         "queue_partial": 0,
@@ -553,6 +554,10 @@ def run_realtime(
             "tdnet_realtime_process",
             limit=max_jobs,
         )
+        forecast_jobs = take_pending_jobs(
+            "tdnet_realtime_forecast",
+            limit=max_jobs,
+        )
     except Exception as e:
         logger.error(f"[process_realtime] phase=take_pending_jobs FAILED: {e}")
         result["errors"] += 1
@@ -562,11 +567,11 @@ def run_realtime(
     logger.info(
         f"[process_realtime] phase=take_pending_jobs "
         f"elapsed={time.monotonic()-t_take:.1f}s "
-        f"taken_job_count={len(jobs)}"
+        f"actual_jobs={len(jobs)} forecast_jobs={len(forecast_jobs)}"
     )
-    result["taken_job_count"] = len(jobs)
+    result["taken_job_count"] = len(jobs) + len(forecast_jobs)
 
-    if not jobs:
+    if not jobs and not forecast_jobs:
         logger.info("[process_realtime] no pending jobs in queue, nothing to do")
         result["elapsed_sec"] = time.monotonic() - t0
         return result
@@ -580,20 +585,30 @@ def run_realtime(
             disclosure_ids.append(target_id)
             job_id_map[target_id] = job["id"]
 
+    forecast_disclosure_ids: list[str] = []
+    forecast_job_id_map: dict[str, int] = {}
+    for job in forecast_jobs:
+        target_id = job.get("target_id", "")
+        if target_id:
+            forecast_disclosure_ids.append(target_id)
+            forecast_job_id_map[target_id] = job["id"]
+
     result["target_disclosure_ids"] = list(disclosure_ids)
     logger.info(
         f"[process_realtime] target_disclosure_ids={disclosure_ids}"
     )
 
-    if not disclosure_ids:
+    invalid_jobs = [job for job in jobs + forecast_jobs if not job.get("target_id")]
+    if invalid_jobs:
         logger.warning("[process_realtime] jobs found but no disclosure_ids extracted")
-        for job in jobs:
+        for job in invalid_jobs:
             try:
                 complete_job(job["id"], status="failed",
                              error_message="no target_id in job")
             except Exception:
                 pass
             result["queue_failed"] += 1
+    if not disclosure_ids and not forecast_disclosure_ids:
         result["elapsed_sec"] = time.monotonic() - t0
         return result
 
@@ -601,21 +616,24 @@ def run_realtime(
     t_push = time.monotonic()
     push_ok = True
     push_stats = {}
-    try:
-        from tools.sqlite_to_supabase import push_sqlite_to_supabase_targeted
-        push_stats = push_sqlite_to_supabase_targeted(
-            db_path=_db,
-            disclosure_ids=disclosure_ids,
-            dry_run=dry_run,
-        )
-        result["push"] = push_stats
-        if push_stats.get("errors", 0) > 0:
+    if disclosure_ids:
+        try:
+            from tools.sqlite_to_supabase import push_sqlite_to_supabase_targeted
+            push_stats = push_sqlite_to_supabase_targeted(
+                db_path=_db,
+                disclosure_ids=disclosure_ids,
+                dry_run=dry_run,
+            )
+            result["push"] = push_stats
+            if push_stats.get("errors", 0) > 0:
+                push_ok = False
+        except Exception as e:
+            logger.error(f"[process_realtime] phase=targeted_push FAILED: {e}")
             push_ok = False
-    except Exception as e:
-        logger.error(f"[process_realtime] phase=targeted_push FAILED: {e}")
-        push_ok = False
-        result["push"] = {"error": str(e)}
-        result["errors"] += 1
+            result["push"] = {"error": str(e)}
+            result["errors"] += 1
+    else:
+        result["push"] = {"status": "skipped", "reason": "no actual jobs"}
 
     logger.info(
         f"[process_realtime] phase=targeted_push "
@@ -636,22 +654,23 @@ def run_realtime(
         for tk in target_keys
     ]
 
-    try:
-        from lib.pipeline.canonical_sync import sync_canonical
-        canonical_stats = sync_canonical(
-            db_path=_db,
-            dry_run=dry_run,
-            target_keys=target_keys_tuples if target_keys_tuples else None,
-            lookback_days=0,
-            allow_fallback=False,
-        )
-        result["canonical"] = canonical_stats
-        if canonical_stats.get("status") == "error":
+    if disclosure_ids:
+        try:
+            from lib.pipeline.canonical_sync import sync_canonical
+            canonical_stats = sync_canonical(
+                db_path=_db,
+                dry_run=dry_run,
+                target_keys=target_keys_tuples if target_keys_tuples else None,
+                lookback_days=0,
+                allow_fallback=False,
+            )
+            result["canonical"] = canonical_stats
+            if canonical_stats.get("status") == "error":
+                canonical_ok = False
+        except Exception as e:
+            logger.error(f"[process_realtime] phase=canonical_sync FAILED: {e}")
             canonical_ok = False
-    except Exception as e:
-        logger.error(f"[process_realtime] phase=canonical_sync FAILED: {e}")
-        canonical_ok = False
-        result["errors"] += 1
+            result["errors"] += 1
 
     logger.info(
         f"[process_realtime] phase=canonical_sync "
@@ -660,6 +679,35 @@ def run_realtime(
         f"target_keys_count={len(target_keys_tuples)} "
         f"canonical_financials_written={result.get('canonical', {}).get('financials', {}).get('written', 0)} "
         f"canonical_segments_written={result.get('canonical', {}).get('segments', {}).get('written', 0)}"
+    )
+
+    # ── Step 5: forecast canonical sync ──
+    t_forecast = time.monotonic()
+    forecast_ok = True
+    try:
+        from lib.pipeline.forecast_sync import sync_realtime_forecasts
+        forecast_stats = sync_realtime_forecasts(
+            db_path=_db,
+            earnings_disclosure_ids=disclosure_ids,
+            revision_disclosure_ids=forecast_disclosure_ids,
+            dry_run=dry_run,
+        )
+        result["forecast"] = forecast_stats
+        forecast_ok = (
+            forecast_stats.get("errors", 0) == 0
+            and forecast_stats.get("quarantined", 0) == 0
+        )
+    except Exception as e:
+        logger.error(f"[process_realtime] phase=forecast_sync FAILED: {e}")
+        result["forecast"] = {"error": str(e), "errors": 1}
+        result["errors"] += 1
+        forecast_ok = False
+    logger.info(
+        f"[process_realtime] phase=forecast_sync "
+        f"elapsed={time.monotonic()-t_forecast:.1f}s ok={forecast_ok} "
+        f"forecast_rows={result.get('forecast', {}).get('forecast_rows', 0)} "
+        f"quarantined={result.get('forecast', {}).get('quarantined', 0)} "
+        f"errors={result.get('forecast', {}).get('errors', 0)}"
     )
 
     # ── 改修: prior_comparative save ──
@@ -689,18 +737,21 @@ def run_realtime(
         else:
             logger.info("[PRIOR_COMP_SAVER] SKIPPED: not enabled")
 
-    # ── Step 5: queue 完了更新 ──
+    # ── Step 6: queue 完了更新 ──
     t_complete = time.monotonic()
+    forecast_write_ok = result.get("forecast", {}).get("errors", 0) == 0
+    earnings_quarantine_ids = set(result.get("forecast", {}).get("earnings_quarantine_ids", []))
     for did, job_id in job_id_map.items():
         try:
-            if push_ok and canonical_ok:
+            earnings_ok = forecast_write_ok and did not in earnings_quarantine_ids
+            if push_ok and canonical_ok and earnings_ok:
                 complete_job(job_id, status="done")
                 result["queue_success"] += 1
-            elif push_ok or canonical_ok:
+            elif push_ok or canonical_ok or earnings_ok:
                 complete_job(
                     job_id, status="failed",
-                    error_message="partial: push_ok={} canonical_ok={}".format(
-                        push_ok, canonical_ok),
+                    error_message="partial: push_ok={} canonical_ok={} earnings_forecast_ok={}".format(
+                        push_ok, canonical_ok, earnings_ok),
                 )
                 result["queue_partial"] += 1
             else:
@@ -712,6 +763,35 @@ def run_realtime(
         except Exception as e:
             logger.error(
                 f"[process_realtime] phase=queue_complete FAILED "
+                f"job_id={job_id}: {e}"
+            )
+            result["errors"] += 1
+
+    revision_candidate_ids = set(result.get("forecast", {}).get("revision_disclosure_ids", []))
+    revision_quarantine_ids = set(result.get("forecast", {}).get("revision_quarantine_ids", []))
+    for did, job_id in forecast_job_id_map.items():
+        try:
+            revision_ok = (
+                forecast_write_ok
+                and did in revision_candidate_ids
+                and did not in revision_quarantine_ids
+            )
+            if revision_ok:
+                complete_job(job_id, status="done")
+                result["queue_success"] += 1
+            else:
+                complete_job(
+                    job_id,
+                    status="failed",
+                    error_message=(
+                        "forecast revision produced no canonical candidates"
+                        if forecast_ok else "forecast canonical sync failed or quarantined"
+                    ),
+                )
+                result["queue_failed"] += 1
+        except Exception as e:
+            logger.error(
+                f"[process_realtime] phase=forecast_queue_complete FAILED "
                 f"job_id={job_id}: {e}"
             )
             result["errors"] += 1

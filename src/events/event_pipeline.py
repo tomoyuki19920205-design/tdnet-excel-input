@@ -628,6 +628,25 @@ def _process_single_document(
                     })
                 else:
                     action, eid = upsert_event(conn, record)
+                    if action in ("inserted", "updated"):
+                        try:
+                            from lib.pipeline.queue import enqueue_job
+                            enqueue_job(
+                                job_type="tdnet_realtime_forecast",
+                                target_type="disclosure",
+                                target_id=record.source_doc_id,
+                                payload={
+                                    "event_type": "forecast_revision",
+                                    "ticker": record.ticker,
+                                    "event_id": eid,
+                                },
+                                priority=2,
+                            )
+                        except Exception as queue_error:
+                            logger.error(
+                                "[EVENT] forecast enqueue failed doc_id=%s ticker=%s error=%s",
+                                doc.doc_id[:16], doc.ticker, queue_error,
+                            )
                     results.append({
                         "event_type": EventType.FORECAST_REVISION, "subtype": forecast_ev.subtype,
                         "action": action, "event_id": eid,

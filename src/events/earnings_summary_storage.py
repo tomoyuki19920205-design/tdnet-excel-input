@@ -44,6 +44,9 @@ CREATE TABLE IF NOT EXISTS earnings_summaries (
     summary_full TEXT,
     fingerprint TEXT NOT NULL UNIQUE,
     source_url TEXT,
+    source_doc_id TEXT,
+    disclosure_datetime TEXT,
+    accounting_standard TEXT,
     archive_path TEXT,
     notified_at TEXT,
     created_at TEXT NOT NULL,
@@ -75,6 +78,9 @@ _GUIDANCE_COLUMNS = [
     ("guidance_op_yoy", "REAL"),
     ("guidance_eps_yoy", "REAL"),
     ("outlook_summary", "TEXT"),
+    ("source_doc_id", "TEXT"),
+    ("disclosure_datetime", "TEXT"),
+    ("accounting_standard", "TEXT"),
 ]
 
 
@@ -106,7 +112,8 @@ _INSERT_COLS = [
     "disclosure_date", "sales_value", "sales_yoy", "op_value", "op_yoy",
     "segment_summary_json", "overall_reason_summary", "segment_reason_summary",
     "summary_short", "summary_full",
-    "fingerprint", "source_url", "archive_path",
+    "fingerprint", "source_url", "source_doc_id", "disclosure_datetime",
+    "accounting_standard", "archive_path",
     "notified_at", "created_at",
     "guidance_sales", "guidance_op", "guidance_eps",
     "guidance_sales_yoy", "guidance_op_yoy", "guidance_eps_yoy",
