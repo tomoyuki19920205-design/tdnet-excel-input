@@ -1,0 +1,157 @@
+{
+  "audit_date": "2026-08-17",
+  "mode": "SOURCE_FEASIBILITY_AND_PHASE1_CODE_ONLY",
+  "repository_head_before_changes": "ef05421f2aba30cb0518f0c3fac9fb51a472a9d0",
+  "population": {
+    "NAGOYA_ONLY": 60,
+    "SAPPORO_ONLY": 16,
+    "FUKUOKA_ONLY": 28,
+    "total": 104
+  },
+  "phase1": {
+    "root_cause": "The legacy is_common_stock decision combined security type (ProdCat=011 and preferred-share exclusion) with a hard-coded TSE market allow-list. The same flag controlled both J-Quants requests and Supabase synchronization.",
+    "new_contract": {
+      "is_ordinary_stock": "Exchange-independent security classification: ProdCat=011 and not explicitly named as preferred stock.",
+      "is_jquants_price_eligible": "Source-coverage decision: ordinary stock and a current/historical regular TSE market code supported by J-Quants daily bars."
+    },
+    "expected_examples": [
+      {"case":"regional ordinary stock","is_ordinary_stock":true,"is_jquants_price_eligible":false},
+      {"case":"TSE ordinary stock","is_ordinary_stock":true,"is_jquants_price_eligible":true},
+      {"case":"ETF","is_ordinary_stock":false,"is_jquants_price_eligible":false},
+      {"case":"REIT","is_ordinary_stock":false,"is_jquants_price_eligible":false},
+      {"case":"preferred stock","is_ordinary_stock":false,"is_jquants_price_eligible":false}
+    ],
+    "nightly_material_change_expected": false,
+    "production_database_migration_executed": false
+  },
+  "sources": [
+    {
+      "exchange": "Nagoya",
+      "selection": "UNSELECTED_PENDING_LICENSE_REVIEW",
+      "preferred_candidate": "Contracted official market-information service or CENTNET",
+      "public_candidate": "https://www.nse.or.jp/market/condition/report/",
+      "candidate_format": "daily PDF; official contracted feed/CENTNET offers additional structured information",
+      "url_pattern_observed": "official report index links dated PDF files; exact file lifecycle must not be assumed without a contract",
+      "fields": {
+        "date": "available",
+        "ticker": "available in official quotation material",
+        "company_name": "available",
+        "open": "available",
+        "high": "available",
+        "low": "available",
+        "close": "available",
+        "volume": "available",
+        "turnover": "available in market reports; per-security contract/feed definition requires confirmation"
+      },
+      "history": "Daily-report archive and monthly statistics are published; guaranteed depth and retention are not stated.",
+      "automation": "NOT_CLEARED",
+      "storage": "NOT_CLEARED",
+      "viewer_redistribution": "NOT_CLEARED",
+      "terms_evidence": [
+        "https://www.nse.or.jp/notes/",
+        "https://www.nse.or.jp/market/pay/information/",
+        "https://www.nse.or.jp/market/pay/centnet/"
+      ],
+      "terms_finding": "The exchange states that real-time market-information use requires an information-use contract. Public-site copyright belongs to the exchange and unauthorized alteration or sale is prohibited; this does not grant automated collection, database storage or Viewer redistribution rights.",
+      "robots_finding": "https://www.nse.or.jp/robots.txt resolves to the exchange NOT FOUND page, so it supplies no affirmative automation permission.",
+      "maintenance": "medium-high"
+    },
+    {
+      "exchange": "Sapporo",
+      "selection": "UNSELECTED_PENDING_LICENSE_REVIEW",
+      "preferred_candidate": "Official daily report, subject to written usage confirmation",
+      "public_candidate": "https://www.sse.or.jp/market/daily",
+      "candidate_format": "daily and historical PDF",
+      "url_pattern_observed": "https://www.sse.or.jp/files/dr/YYYY/MM/YYYYMMDD_daily_report.pdf",
+      "fields": {
+        "date": "available",
+        "ticker": "available",
+        "company_name": "available",
+        "open": "available",
+        "high": "available",
+        "low": "available",
+        "close": "available",
+        "volume": "available in shares",
+        "turnover": "available in thousands of yen"
+      },
+      "history": "The official archive exposes historical reports, with search-visible samples back to at least 2007; retention is not guaranteed.",
+      "automation": "NOT_CLEARED",
+      "storage": "NOT_CLEARED",
+      "viewer_redistribution": "NOT_CLEARED",
+      "terms_evidence": [
+        "https://www.sse.or.jp/privacy",
+        "https://www.sse.or.jp/market/daily"
+      ],
+      "terms_finding": "The public disclaimer addresses accuracy/liability but does not grant scheduled automated downloading, persistent DB storage, or redistribution in Company Viewer. Daily PDFs state copyright and all rights reserved.",
+      "robots_finding": "Direct robots.txt access was blocked by the client and no affirmative automation permission was found.",
+      "maintenance": "high (PDF layout and no adjusted-price series)"
+    },
+    {
+      "exchange": "Fukuoka",
+      "selection": "UNSELECTED_PENDING_LICENSE_REVIEW",
+      "preferred_candidate": "Official daily report for latest price, subject to written usage confirmation",
+      "public_candidate": "https://www.fse.or.jp/market/daily.php",
+      "structured_historical_candidate": "https://www.fse.or.jp/statistics/rate.php",
+      "candidate_format": "daily PDF; monthly and annual XLSX",
+      "url_pattern_observed": "https://www.fse.or.jp/files/mar_day/YYYYMMDDdaily.pdf",
+      "fields": {
+        "date": "available",
+        "ticker": "available",
+        "company_name": "available",
+        "open": "available",
+        "high": "available",
+        "low": "available",
+        "close": "available",
+        "volume": "available in shares",
+        "turnover": "available in thousands of yen"
+      },
+      "history": "Daily PDF archive plus monthly/annual XLSX. Monthly tables are published on the third business day and are unsuitable as the latest-price source.",
+      "automation": "NOT_CLEARED",
+      "storage": "NOT_CLEARED",
+      "viewer_redistribution": "NOT_CLEARED",
+      "terms_evidence": [
+        "https://www.fse.or.jp/disclaimer/index.php",
+        "https://www.fse.or.jp/market/daily.php",
+        "https://www.fse.or.jp/statistics/rate.php"
+      ],
+      "terms_finding": "The exchange asserts copyright and prohibits unauthorized alteration or sale, but gives no affirmative permission for scheduled automated collection, persistent DB storage, or Viewer redistribution.",
+      "robots_finding": "https://www.fse.or.jp/robots.txt renders the normal home page rather than a robots policy and supplies no affirmative automation permission.",
+      "maintenance": "medium-high (PDF for freshness; XLSX only for delayed monthly history; no adjusted-price series)"
+    }
+  ],
+  "canonical_contract": {
+    "columns": ["ticker","date","open","high","low","close","volume","turnover","adj_factor","adj_close","adj_volume","market_cap","source","fetched_at"],
+    "raw_price_policy": "Official exchange OHLC/close remains unadjusted raw price.",
+    "adjusted_price_policy": "adj_factor, adj_close and adj_volume must remain NULL until a verified corporate-action adjustment source and policy exist.",
+    "source_values_planned": ["regional_nagoya","regional_sapporo","regional_fukuoka"],
+    "source_priority": ["jquants", "regional_exchange"],
+    "dual_listing_policy": "Never overwrite TSE/J-Quants rows with a regional fallback.",
+    "unresolved_pipeline_boundary": "sync_market_data.py currently filters through the J-Quants universe and hard-codes source=jquants; regional-source synchronization requires an explicit source-aware gate before any DB canary."
+  },
+  "stop_gate": {
+    "triggered": true,
+    "reason": "Automation, persistent storage, and Viewer redistribution rights are not explicitly granted by the official public terms for all three exchanges. Nagoya additionally documents a contracted market-information channel.",
+    "not_performed": [
+      "regional parser implementation",
+      "latest-price parser canary",
+      "DB backup or write",
+      "Supabase write",
+      "Viewer canary",
+      "104-ticker latest backfill",
+      "historical backfill"
+    ],
+    "required_next_action": "Obtain written confirmation or contracts from each exchange covering scheduled download, internal DB storage, derived valuation display, and external Viewer display/redistribution."
+  },
+  "known_preexisting_contamination": {
+    "ticker": "418A",
+    "classification": "KNOWN_PREEXISTING_CONTAMINATION",
+    "description": "Legacy 4180/41800 price rows are stored under 418A. This audit neither reads them as a regional canary nor cleans them up."
+  },
+  "writes": {
+    "production_database": 0,
+    "supabase": 0,
+    "viewer": 0,
+    "backfill": 0
+  },
+  "final_judgment": "REGIONAL_MARKET_SOURCE_REQUIRES_LICENSE_REVIEW"
+}

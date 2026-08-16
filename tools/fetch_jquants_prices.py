@@ -43,9 +43,9 @@ _MIGRATION_SQL = Path(_PROJECT_ROOT) / "migrations" / "003_market_per_share.sql"
 # TSE 1st/2nd/Mothers/JASDAQ boards.  Preferred
 # shares share ProdCat=011, so the official master security-name flag is an
 # explicit exclusion until J-Quants exposes a separate share-class field.
-COMMON_STOCK_PRODUCT_CATEGORY = "011"
+ORDINARY_STOCK_PRODUCT_CATEGORY = "011"
 TSE_EQUITY_MARKETS = {"0101", "0102", "0103", "0104", "0106", "0107", "0111", "0112", "0113"}
-COMMON_STOCK_RULE_VERSION = "jquants_master_v2_20260801"
+UNIVERSE_RULE_VERSION = "ordinary_vs_jquants_price_v1_20260817"
 MARKET_DATA_RETENTION_YEARS = 1
 
 
@@ -84,12 +84,39 @@ def _ensure_table(conn: sqlite3.Connection):
           date TEXT NOT NULL, ticker TEXT NOT NULL, code TEXT NOT NULL,
           company_name TEXT NOT NULL, product_category TEXT NOT NULL,
           market_code TEXT NOT NULL, is_common_stock INTEGER NOT NULL,
+          is_ordinary_stock INTEGER NOT NULL,
+          is_jquants_price_eligible INTEGER NOT NULL,
           rule_version TEXT NOT NULL, fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
           PRIMARY KEY (date, ticker)
         )
     """)
+    universe_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(market_data_universe)")
+    }
+    if "is_ordinary_stock" not in universe_columns:
+        conn.execute(
+            "ALTER TABLE market_data_universe "
+            "ADD COLUMN is_ordinary_stock INTEGER NOT NULL DEFAULT 0"
+        )
+        conn.execute(
+            "UPDATE market_data_universe SET is_ordinary_stock=is_common_stock"
+        )
+    if "is_jquants_price_eligible" not in universe_columns:
+        conn.execute(
+            "ALTER TABLE market_data_universe "
+            "ADD COLUMN is_jquants_price_eligible INTEGER NOT NULL DEFAULT 0"
+        )
+        # The legacy flag meant 'ordinary stock on an eligible TSE market'.
+        # Copying it preserves the existing nightly universe until the next
+        # dated master snapshot refreshes both explicit decisions.
+        conn.execute(
+            "UPDATE market_data_universe "
+            "SET is_jquants_price_eligible=is_common_stock"
+        )
     conn.execute("CREATE INDEX IF NOT EXISTS ix_market_data_universe_common "
                  "ON market_data_universe(date, is_common_stock, ticker)")
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_market_data_universe_jquants_price "
+                 "ON market_data_universe(date, is_jquants_price_eligible, ticker)")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS market_data_quarantine (
           ticker TEXT NOT NULL, date TEXT NOT NULL, reason TEXT NOT NULL,
@@ -130,21 +157,39 @@ def _api_get(endpoint: str, params: dict, auth_headers: dict) -> requests.Respon
 # ============================================================
 # 銘柄一覧
 # ============================================================
-def is_common_stock(master: dict) -> bool:
-    """Return whether a J-Quants master record is an in-scope TSE common stock.
+def is_ordinary_stock(master: dict) -> bool:
+    """Return whether a master record describes an ordinary/common stock.
 
-    This is intentionally data-attribute based: product and market categories
-    identify equities and the regular TSE boards.  The preferred-share
-    exclusion is based on the *official master security name*, not the code.
+    Security type and official security name determine this classification;
+    the listing exchange deliberately does not.  J-Quants currently groups
+    preferred shares under the same product category, so they remain an
+    explicit name-based exclusion until a share-class attribute is exposed.
     """
     name = str(master.get("CoName") or master.get("CompanyName") or "")
     name_en = str(master.get("CoNameEn") or master.get("CompanyNameEnglish") or "").lower()
     return (
-        str(master.get("ProdCat") or "") == COMMON_STOCK_PRODUCT_CATEGORY
-        and str(master.get("Mkt") or "") in TSE_EQUITY_MARKETS
+        str(master.get("ProdCat") or "") == ORDINARY_STOCK_PRODUCT_CATEGORY
         and "優先株" not in name
         and "preferred stock" not in name_en
     )
+
+
+def is_jquants_price_eligible(master: dict) -> bool:
+    """Return whether J-Quants daily bars cover this ordinary stock.
+
+    This source-coverage decision is intentionally separate from security
+    type.  The current V2 price source covers the regular current/historical
+    TSE boards represented by ``TSE_EQUITY_MARKETS``.
+    """
+    return (
+        is_ordinary_stock(master)
+        and str(master.get("Mkt") or "") in TSE_EQUITY_MARKETS
+    )
+
+
+def is_common_stock(master: dict) -> bool:
+    """Backward-compatible alias for the exchange-independent classification."""
+    return is_ordinary_stock(master)
 
 
 def normalize_jquants_code(code: object) -> str:
@@ -174,21 +219,27 @@ def store_universe_snapshot(conn: sqlite3.Connection, date_str: str, items: list
         if not code:
             continue
         ticker = normalize_jquants_code(code)
-        allowed = is_common_stock(item)
-        if allowed:
+        ordinary = is_ordinary_stock(item)
+        jquants_price_eligible = is_jquants_price_eligible(item)
+        if jquants_price_eligible:
             eligible.add(code)
         rows.append((date_str, ticker, code,
                      str(item.get("CoName") or item.get("CompanyName") or ""),
                      str(item.get("ProdCat") or ""), str(item.get("Mkt") or ""),
-                     int(allowed), COMMON_STOCK_RULE_VERSION))
+                     int(ordinary), int(ordinary), int(jquants_price_eligible),
+                     UNIVERSE_RULE_VERSION))
     conn.executemany("""
         INSERT INTO market_data_universe
-          (date,ticker,code,company_name,product_category,market_code,is_common_stock,rule_version)
-        VALUES (?,?,?,?,?,?,?,?)
+          (date,ticker,code,company_name,product_category,market_code,
+           is_common_stock,is_ordinary_stock,is_jquants_price_eligible,rule_version)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(date,ticker) DO UPDATE SET
           code=excluded.code, company_name=excluded.company_name,
           product_category=excluded.product_category, market_code=excluded.market_code,
-          is_common_stock=excluded.is_common_stock, rule_version=excluded.rule_version,
+          is_common_stock=excluded.is_common_stock,
+          is_ordinary_stock=excluded.is_ordinary_stock,
+          is_jquants_price_eligible=excluded.is_jquants_price_eligible,
+          rule_version=excluded.rule_version,
           fetched_at=datetime('now')
     """, rows)
     conn.commit()
@@ -652,7 +703,7 @@ def main():
                 "completed_dates": sorted(completed_dates),
                 "last_completed_date": date_str,
                 "last_updated": datetime.now().isoformat(),
-                "rule_version": COMMON_STOCK_RULE_VERSION,
+                "rule_version": UNIVERSE_RULE_VERSION,
             }, progress_file)
             current += timedelta(days=1)
             time.sleep(SLEEP_BETWEEN_CODES)

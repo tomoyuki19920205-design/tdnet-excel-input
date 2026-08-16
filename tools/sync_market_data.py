@@ -154,12 +154,21 @@ def read_sqlite(db_path: str, recent_days: int = 0, limit: int = 0):
         since = (datetime.now(JST) - timedelta(days=recent_days)).strftime("%Y-%m-%d")
         where_parts.append("m.date >= ?")
         params.append(since)
-    # Once the qualified universe table exists, only records proven to be
-    # common stocks by the dated J-Quants master are allowed upstream.
+    # Once the qualified universe table exists, only records covered by the
+    # J-Quants price source are allowed upstream.  Ordinary-stock identity is
+    # a separate decision and must not imply J-Quants price coverage.
     if has_universe:
+        universe_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(market_data_universe)")
+        }
+        eligibility_column = (
+            "is_jquants_price_eligible"
+            if "is_jquants_price_eligible" in universe_columns
+            else "is_common_stock"
+        )
         where_parts.append("EXISTS (SELECT 1 FROM market_data_universe u "
                            "WHERE u.date=m.date AND u.ticker=m.ticker "
-                           "AND u.is_common_stock=1)")
+                           f"AND u.{eligibility_column}=1)")
     where = "WHERE " + " AND ".join(where_parts) if where_parts else ""
 
     query = f"""

@@ -3,7 +3,9 @@ import sqlite3
 from datetime import datetime
 
 from tools.fetch_jquants_prices import (
-    is_common_stock, market_data_retention_start, normalize_jquants_code, upsert_quotes,
+    _ensure_table, is_common_stock, is_jquants_price_eligible,
+    is_ordinary_stock, market_data_retention_start, normalize_jquants_code,
+    store_universe_snapshot, upsert_quotes,
 )
 
 
@@ -17,27 +19,59 @@ def _master(**overrides):
 
 
 def test_tse_common_stock_is_in_scope():
-    assert is_common_stock(_master())
+    assert is_ordinary_stock(_master())
+    assert is_jquants_price_eligible(_master())
 
 
 def test_historical_tse_first_section_common_stock_is_in_scope():
-    assert is_common_stock(_master(Mkt="0101"))
+    assert is_ordinary_stock(_master(Mkt="0101"))
+    assert is_jquants_price_eligible(_master(Mkt="0101"))
+
+
+def test_regional_ordinary_stock_is_not_jquants_price_eligible():
+    regional = _master(Code="66230", CoName="愛知電機", Mkt="0501")
+    assert is_ordinary_stock(regional)
+    assert is_common_stock(regional)  # compatibility alias keeps security semantics
+    assert not is_jquants_price_eligible(regional)
 
 
 def test_etf_is_excluded_by_master_product_category_not_ticker_shape():
-    assert not is_common_stock(_master(Code="13060", ProdCat="014", Mkt="0109"))
+    etf = _master(Code="13060", ProdCat="014", Mkt="0109")
+    assert not is_ordinary_stock(etf)
+    assert not is_jquants_price_eligible(etf)
 
 
 def test_reit_is_excluded_by_master_product_category_not_ticker_shape():
-    assert not is_common_stock(_master(Code="89510", ProdCat="013", Mkt="0109"))
+    reit = _master(Code="89510", ProdCat="013", Mkt="0109")
+    assert not is_ordinary_stock(reit)
+    assert not is_jquants_price_eligible(reit)
 
 
-def test_tokyo_pro_market_equity_is_out_of_scope():
-    assert not is_common_stock(_master(Mkt="0105"))
+def test_tokyo_pro_market_equity_is_ordinary_but_not_price_eligible():
+    tokyo_pro = _master(Mkt="0105")
+    assert is_ordinary_stock(tokyo_pro)
+    assert not is_jquants_price_eligible(tokyo_pro)
 
 
 def test_preferred_share_is_explicitly_excluded_from_official_master_name():
-    assert not is_common_stock(_master(Code="94345", CoName="ソフトバンク（優先株式）"))
+    preferred = _master(Code="94345", CoName="ソフトバンク（優先株式）")
+    assert not is_ordinary_stock(preferred)
+    assert not is_jquants_price_eligible(preferred)
+
+
+def test_universe_snapshot_persists_both_decisions_and_queries_only_eligible_codes():
+    conn = sqlite3.connect(":memory:")
+    _ensure_table(conn)
+    tse = _master()
+    regional = _master(Code="66230", CoName="愛知電機", Mkt="0501")
+
+    eligible = store_universe_snapshot(conn, "2026-08-14", [tse, regional])
+
+    assert eligible == {"72030"}
+    assert conn.execute(
+        "SELECT ticker,is_ordinary_stock,is_jquants_price_eligible "
+        "FROM market_data_universe ORDER BY ticker"
+    ).fetchall() == [("6623", 1, 0), ("7203", 1, 1)]
 
 
 def test_v2_numeric_and_alpha_security_codes_do_not_collide():

@@ -63,6 +63,35 @@ def test_market_cap_change_changes_sync_payload_hash() -> None:
     )
 
 
+def test_read_sqlite_uses_price_eligibility_not_ordinary_stock(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "market.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript("""
+        CREATE TABLE market_data (
+          ticker TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL,
+          volume INTEGER, turnover REAL, adj_factor REAL, adj_close REAL,
+          adj_volume INTEGER, market_cap REAL
+        );
+        CREATE TABLE market_data_universe (
+          date TEXT, ticker TEXT, is_common_stock INTEGER,
+          is_ordinary_stock INTEGER, is_jquants_price_eligible INTEGER
+        );
+        INSERT INTO market_data VALUES
+          ('6623','2026-08-14',100,101,99,100,10,1000,NULL,NULL,NULL,NULL),
+          ('7203','2026-08-14',3000,3020,2980,3020,20,60400,1,3020,20,NULL);
+        INSERT INTO market_data_universe VALUES
+          ('2026-08-14','6623',1,1,0),
+          ('2026-08-14','7203',1,1,1);
+    """)
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(subject, "market_data_retention_start", lambda: "2026-08-01")
+
+    rows = subject.read_sqlite(str(db_path))
+
+    assert [row["ticker"] for row in rows] == ["7203"]
+
+
 def test_pending_only_excludes_ledger_current_rows() -> None:
     ledger = _ledger()
     current = _row(10_398_269_403, "1301")
