@@ -31,6 +31,10 @@ _INSERT_COLS = [
 ]
 
 _ALL_COMPANY_SENTINELS = {"", "__all__", "none", "null"}
+# ``全社`` is contextual legacy data, not a global sentinel.  It is treated as
+# an existing company-total candidate only when the incoming producer row is
+# already canonical company-total (segment_name is SQL NULL after normalization).
+_CONFIRMED_LEGACY_COMPANY_TOTAL_KEYS = ("__ALL__", "全社")
 
 
 def normalize_segment_name(value: Any) -> str | None:
@@ -51,6 +55,18 @@ def normalize_segment_name(value: Any) -> str | None:
 def segment_business_key(value: Any) -> str:
     """Match the generated-column component of ``edinet_order_data_uniq``."""
     return normalize_segment_name(value) or "__ALL__"
+
+
+def company_total_lookup_keys(value: Any) -> tuple[str, ...]:
+    """Return safe existing-key candidates for an incoming segment value.
+
+    Real segments always use their exact generated key.  A canonical incoming
+    company-total row may additionally adopt the confirmed legacy ``全社`` row.
+    """
+    normalized = normalize_segment_name(value)
+    if normalized is None:
+        return _CONFIRMED_LEGACY_COMPANY_TOTAL_KEYS
+    return (normalized,)
 
 
 def _get_creds() -> tuple[str, str]:
@@ -116,6 +132,7 @@ def save_to_db(
         "skipped": 0,
         "errors": [],
         "quality_rejects": [],
+        "duplicate_reviews": [],
         "dry_run": dry_run,
     }
 
@@ -194,19 +211,23 @@ def save_to_db(
         fiscal_year = row.get("fiscal_year", "")
         source_type = row.get("source_type", "edinet_yuho")
         segment_name = normalize_segment_name(row.get("segment_name"))
-        segment_name_key = segment_business_key(segment_name)
+        lookup_keys = company_total_lookup_keys(segment_name)
 
         try:
             # DB UNIQUE と同じbusiness keyで存在確認する。generated columnは
             # payloadには含めないが、SELECT/PATCH filterには利用できる。
+            lookup_value = (
+                f"eq.{lookup_keys[0]}" if len(lookup_keys) == 1
+                else f"in.({','.join(lookup_keys)})"
+            )
             params = {
                 "ticker": f"eq.{ticker}",
                 "period": f"eq.{period}",
                 "fiscal_year": f"eq.{fiscal_year}",
-                "segment_name_key": f"eq.{segment_name_key}",
+                "segment_name_key": lookup_value,
                 "source_type": f"eq.{source_type}",
                 "select": "id,segment_name,segment_name_key",
-                "limit": "2",
+                "limit": "3",
             }
 
             chk = requests.get(endpoint, params=params, headers=post_headers, timeout=15)
@@ -214,15 +235,34 @@ def save_to_db(
                 raise RuntimeError(f"business-key lookup HTTP {chk.status_code}: {chk.text[:200]}")
             existing_rows = chk.json()
             if len(existing_rows) > 1:
-                raise RuntimeError(f"business-key lookup returned {len(existing_rows)} rows")
+                review = {
+                    "ticker": ticker,
+                    "period": period,
+                    "fiscal_year": fiscal_year,
+                    "source_type": source_type,
+                    "classification": "LEGACY_COMPANY_TOTAL_DUPLICATE_REVIEW",
+                    "existing": existing_rows,
+                }
+                stats["duplicate_reviews"].append(review)
+                stats["quality_rejects"].append(review)
+                stats["skipped"] += 1
+                print(
+                    f"  [REVIEW] {ticker} {period} "
+                    f"LEGACY_COMPANY_TOTAL_DUPLICATE_REVIEW rows={len(existing_rows)}"
+                )
+                continue
             exists = bool(existing_rows)
 
             if exists:
                 # PATCH (UPDATE)
                 patch_body = {k: row[k] for k in update_cols if k in row}
-                resp = requests.patch(endpoint, json=patch_body, params={
-                    k: v for k, v in params.items() if k != "select" and k != "limit"
-                }, headers=patch_headers, timeout=30)
+                resp = requests.patch(
+                    endpoint,
+                    json=patch_body,
+                    params={"id": f"eq.{existing_rows[0]['id']}"},
+                    headers=patch_headers,
+                    timeout=30,
+                )
             else:
                 # POST (INSERT)
                 resp = requests.post(endpoint, json=row, headers=post_headers, timeout=30)
