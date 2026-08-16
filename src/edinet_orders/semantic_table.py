@@ -181,6 +181,8 @@ class RowCandidate:
     metrics: dict[str, MetricSelection]
     score: float
     is_total: bool
+    row_kind: str
+    consolidation_scope: str
     segment_name: str | None
     arithmetic_status: str
     arithmetic_delta: int | None
@@ -201,7 +203,11 @@ def expand_table(table) -> TableGrid:
         for cell in row.find_all(["th", "td"], recursive=False):
             while c_idx < len(values[r_idx]) and values[r_idx][c_idx] is not None:
                 c_idx += 1
-            text = compact(cell.get_text(" ", strip=True))
+            # Preserve separators between independently rendered values in a
+            # data cell.  Header paths are compacted when they are built, but
+            # collapsing ``※△558 269,399`` here would create the false amount
+            # ``-558269`` before multi-value resolution can inspect it.
+            text = norm(cell.get_text(" ", strip=True))
             colspan = int(cell.get("colspan", 1)); rowspan = int(cell.get("rowspan", 1))
             origin = Origin(r_idx, c_idx, text, rowspan, colspan)
             for dr in range(rowspan):
@@ -275,7 +281,7 @@ def build_leaf_columns(grid: TableGrid, n_header: int, unit_context: dict[str, s
             origin = grid.origins[row][col] if col < len(grid.origins[row]) else None
             if not origin or not origin.text or (origin.row, origin.column) in seen:
                 continue
-            seen.add((origin.row, origin.column)); path.append(origin.text)
+            seen.add((origin.row, origin.column)); path.append(compact(origin.text))
             header_spans.append({
                 "text": origin.text,
                 "rowspan": origin.rowspan,
@@ -352,12 +358,19 @@ def _column_score(metric: str, column: LeafColumn, value: int, expected_period: 
     if metric == "orders_received":
         if _contains_any(leaf, ("当期受注工事高", "当期受注高", "期中受注工事高")):
             score += 45; reason.append("explicit_current_orders_leaf")
+    if metric == "order_backlog" and _contains_any(leaf, EXPLICIT_BACKLOG_KEYWORDS):
+        score += 50; reason.append("explicit_backlog_leaf")
+    # Current/prior headers qualify every period-sensitive amount metric, not
+    # only orders received.  Without this, an explicit backlog pair ties and
+    # DOM order silently promotes the previous-period leaf.
+    if metric in {
+        "orders_received", "order_backlog", "construction_carryover",
+        "completed_construction", "rpo",
+    }:
         if _contains_any(text, PREVIOUS_PERIOD_KEYWORDS):
             score -= 80; reason.append("previous_column_penalty")
         if _contains_any(text, CURRENT_PERIOD_KEYWORDS):
             score += 45; reason.append("current_column")
-    if metric == "order_backlog" and _contains_any(leaf, EXPLICIT_BACKLOG_KEYWORDS):
-        score += 50; reason.append("explicit_backlog_leaf")
     if expected_period:
         year = expected_period[:4]
         jp_date = expected_period.replace("-", "年", 1).replace("-", "月", 1) + "日"
@@ -379,9 +392,27 @@ def _total_priority(label: str) -> int:
     cells = [compact(cell) for cell in label.split("|") if compact(cell)]
     matches = [
         priority for keyword, priority in TOTAL_PRIORITY.items()
-        if any(cell == keyword or cell.endswith(keyword) for cell in cells)
+        if any(cell == keyword for cell in cells)
     ]
     return max(matches, default=0)
+
+
+def _row_kind(label: str) -> str:
+    cells = [compact(cell) for cell in label.split("|") if compact(cell)]
+    if any(cell in TOTAL_PRIORITY for cell in cells):
+        return "grand_total"
+    if any(cell == "小計" or cell.endswith("小計") for cell in cells):
+        return "subtotal"
+    return "detail"
+
+
+def _consolidation_scope(label: str) -> str:
+    value = compact(label)
+    if "連結" in value:
+        return "consolidated"
+    if "事業年度" in value or "単体" in value or "個別" in value:
+        return "standalone"
+    return "unknown"
 
 
 def _extract_date_from_label(label: str) -> str | None:
@@ -506,6 +537,36 @@ def _resolve_arithmetic_options(
         selected.update(dict(zip(keys, combo)))
         return selected, "PASS", delta, "unique_arithmetic_match"
 
+    # EDINET sometimes renders a small footnote adjustment and the reported
+    # total in the same td (for example ``※2,242 301,713``).  If arithmetic
+    # cannot disambiguate, accept only a uniquely dominant magnitude.  Close
+    # alternatives remain ambiguous, preserving the 1960-style safety gate.
+    dominant = dict(selected)
+    dominant_used = False
+    dominant_unresolved = False
+    for metric, items in options.items():
+        best_score = max(item.score for item in items)
+        best_column = min(item.column.index for item in items if item.score == best_score)
+        peers = [
+            item for item in items
+            if item.score == best_score and item.column.index == best_column
+        ]
+        if len(peers) < 2:
+            continue
+        ranked = sorted(peers, key=lambda item: abs(item.value), reverse=True)
+        largest = abs(ranked[0].value)
+        second = abs(ranked[1].value)
+        if largest >= max(1, second) * 5:
+            choice = ranked[0]
+            choice.reason = [*choice.reason, "dominant_magnitude_in_multi_value_cell"]
+            dominant[metric] = choice
+            dominant_used = True
+        else:
+            dominant_unresolved = True
+    if dominant_used and not dominant_unresolved:
+        status, delta = _arithmetic(dominant)
+        return dominant, status, delta, "dominant_magnitude_fallback"
+
     status, delta = _arithmetic(selected)
     resolution = "ambiguous_arithmetic_matches" if passing else "no_arithmetic_match"
     return selected, status, delta, resolution
@@ -552,17 +613,21 @@ def _candidate_rows(
             continue
         label = _row_label(row, (selection.column.index for selection in metrics.values()))
         total_priority = _total_priority(label)
+        row_kind = _row_kind(label)
+        consolidation_scope = _consolidation_scope(label)
         p_score, p_reason = _period_score(label, expected_period)
         coverage = sum(key in metrics for key in (
             "orders_received", "order_backlog", "construction_carryover",
             "completed_construction", "beginning_carryover", "rpo",
         ))
         score = coverage * 30 + p_score + total_priority * 25 + table_index / 1000
+        if consolidation_scope == "consolidated":
+            score += 120
         if arithmetic_status == "PASS":
             score += 70
         elif arithmetic_status == "SOURCE_TABLE_EXCEPTION":
             score -= 10
-        is_total = total_priority > 0
+        is_total = row_kind == "grand_total"
         if arithmetic_status == "ARITHMETIC_REVIEW" and is_total and all(
             len(metrics[key].column.header_path) == 1
             and not metrics[key].column.is_percentage
@@ -616,7 +681,7 @@ def _candidate_rows(
         unresolved_multi_value = any(
             selection.value_count > 1 for metric, selection in metrics.items()
             if metric in {"orders_received", "order_backlog", "construction_carryover", "rpo"}
-        ) and multi_value_resolution != "unique_arithmetic_match"
+        ) and multi_value_resolution not in {"unique_arithmetic_match", "dominant_magnitude_fallback"}
         output.append(RowCandidate(
             html_name=html_name, table_index=table_index, row_index=row_index, row=row,
             row_label=label, period_label=p_reason,
@@ -624,6 +689,7 @@ def _candidate_rows(
             unit=next((selection.column.unit for selection in metrics.values() if selection.column.unit), None),
             unit_source=next((selection.column.unit_source for selection in metrics.values() if selection.column.unit), None),
             metrics=metrics, score=score, is_total=is_total,
+            row_kind=row_kind, consolidation_scope=consolidation_scope,
             segment_name=None if is_total else (label.split("|")[-1] if label else None),
             arithmetic_status=arithmetic_status, arithmetic_delta=arithmetic_delta,
             ambiguous_header=selected_subcomponent or unresolved_multi_value or (repeated_parent and low_margin),
@@ -756,6 +822,9 @@ def extract_semantic_tables(zip_path: str, target: dict[str, Any]) -> dict[str, 
         "source_table_index": best.table_index,
         "source_row_index": best.row_index,
         "source_row_label": best.row_label,
+        "selected_row_kind": best.row_kind,
+        "consolidation_scope": best.consolidation_scope,
+        "consolidated": best.consolidation_scope == "consolidated",
         "selected_table_period": best.selected_table_period,
         "period_selection": best.period_label,
         "report_type": report_type,
@@ -765,6 +834,7 @@ def extract_semantic_tables(zip_path: str, target: dict[str, Any]) -> dict[str, 
         "source_unit": best.unit,
         "source_unit_source": best.unit_source,
         "selection_reason": "highest_score_after_all_table_comparison",
+        "selection_score": best.score,
         "candidate_count": len(candidates),
         "arithmetic_status": best.arithmetic_status,
         "arithmetic_delta": best.arithmetic_delta,
@@ -789,6 +859,8 @@ def extract_semantic_tables(zip_path: str, target: dict[str, Any]) -> dict[str, 
             "selected_table_period": candidate.selected_table_period,
             "score": candidate.score,
             "is_total": candidate.is_total,
+            "row_kind": candidate.row_kind,
+            "consolidation_scope": candidate.consolidation_scope,
             "orders_received": candidate.metrics.get("orders_received").value
             if candidate.metrics.get("orders_received") else None,
             "order_backlog": candidate.metrics.get("order_backlog").value

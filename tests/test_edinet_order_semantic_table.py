@@ -123,6 +123,56 @@ def test_2467_current_orders_and_explicit_backlog_columns(tmp_path):
     assert result["construction_carryover"] is None
 
 
+def test_current_backlog_leaf_beats_prior_backlog_leaf(tmp_path):
+    body = """<table><tr><th>セグメントの名称</th>
+    <th>前連結会計年度受注高(百万円)</th><th>当連結会計年度受注高(百万円)</th>
+    <th>前連結会計年度受注残高(百万円)</th><th>当連結会計年度受注残高(百万円)</th></tr>
+    <tr><td>合計</td><td>626,913</td><td>639,192</td><td>545,725</td><td>534,763</td></tr></table>"""
+    result = _extract(tmp_path, body, ticker="5401")
+    assert result["orders_received"] == 639_192
+    assert result["order_backlog"] == 534_763
+    assert result["provenance"]["metrics"]["order_backlog"]["column_index"] == 4
+    assert "current_column" in result["provenance"]["metrics"]["order_backlog"]["reason"]
+
+
+def test_consolidated_grand_total_beats_overseas_and_standalone_subtotals(tmp_path):
+    header = """<tr><th>期別</th><th>工事別</th><th>期首繰越工事高(百万円)</th>
+    <th>期中受注工事高(百万円)</th><th>計(百万円)</th><th>期中完成工事高(百万円)</th>
+    <th>次期繰越工事高(百万円)</th></tr>"""
+    body = f"""
+    <table>{header}
+    <tr><td rowspan="3">当連結会計年度(自2025年4月1日至2026年3月31日)</td><td>海外</td><td></td><td></td><td></td><td></td><td></td></tr>
+    <tr><td>小計</td><td>237,356</td><td>128,512</td><td>365,869</td><td>151,720</td><td>191,434</td></tr>
+    <tr><td>合計</td><td>※2,242 301,713</td><td>175,885</td><td>477,598</td><td>182,941</td><td>※△558 269,399</td></tr></table>
+    <table>{header}
+    <tr><td rowspan="3">当事業年度(自2025年4月1日至2026年3月31日)</td><td>海外</td><td></td><td></td><td></td><td></td><td></td></tr>
+    <tr><td>小計</td><td>59,852</td><td>50,867</td><td>110,719</td><td>50,802</td><td>56,818</td></tr>
+    <tr><td>合計</td><td>101,415</td><td>85,029</td><td>186,445</td><td>66,248</td><td>114,940</td></tr></table>
+    """
+    result = _extract(tmp_path, body, ticker="6330", period="2026-03-31")
+    assert result["orders_received"] == 175_885
+    assert result["construction_carryover"] == 269_399
+    assert result["order_backlog"] is None
+    assert result["provenance"]["selected_row_kind"] == "grand_total"
+    assert result["provenance"]["consolidation_scope"] == "consolidated"
+    assert result["provenance"]["consolidated"] is True
+    assert result["provenance"]["multi_value_resolution"] == "dominant_magnitude_fallback"
+    assert all(
+        not (candidate["row_kind"] == "subtotal" and candidate["is_total"])
+        for candidate in result["candidate_evidence"]
+    )
+
+
+def test_simple_single_table_company_total_remains_valid(tmp_path):
+    body = """<table><tr><th>区分</th><th>受注高(百万円)</th><th>受注残高(百万円)</th></tr>
+    <tr><td>合計</td><td>12,000</td><td>3,000</td></tr></table>"""
+    result = _extract(tmp_path, body)
+    assert result["orders_received"] == 12_000
+    assert result["order_backlog"] == 3_000
+    assert result["provenance"]["selected_row_kind"] == "grand_total"
+    assert result["provenance"]["consolidation_scope"] == "unknown"
+
+
 def test_rpo_is_not_classified_as_backlog_or_construction_carryover(tmp_path):
     body = """<table><tr><th>区分</th><th>残存履行義務(百万円)</th></tr>
     <tr><td>合計</td><td>12,345</td></tr></table>"""
