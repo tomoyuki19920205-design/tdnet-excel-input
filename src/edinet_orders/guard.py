@@ -109,10 +109,10 @@ def apply_pre_save_guard(row: dict[str, Any], enable_partial_save: bool = False)
     row["segment_name"] = normalized_segment
     row["segment_name_insert_value"] = normalized_segment
 
-    # 1b. 非null segment_name は全社値か不明なため原則SEGMENT_REVIEW
+    # 1b. A segment row must never be persisted as the company total.
     if normalized_segment is not None:
         row["save_candidate"] = False
-        row["classification"] = "SEGMENT_REVIEW"
+        row["classification"] = "SEGMENT_TOTAL_REVIEW"
         return row
 
     # 2. 必須フィールドの欠損チェック
@@ -126,14 +126,40 @@ def apply_pre_save_guard(row: dict[str, Any], enable_partial_save: bool = False)
         row["classification"] = "OTHER_REVIEW"
         return row
 
-    # 3. orders_received / order_backlog の両方/片方nullチェック
+    # 2b. Annual order rows may only come from annual filings.
+    if row.get("_document_period_mismatch"):
+        row["save_candidate"] = False
+        row["classification"] = "DOCUMENT_PERIOD_TYPE_MISMATCH_REJECT"
+        return row
+
+    if row.get("_selected_percentage_leaf") or row.get("_selected_subcomponent_leaf"):
+        row["save_candidate"] = False
+        row["classification"] = "AMBIGUOUS_HEADER_REVIEW"
+        return row
+
+    if row.get("_has_total_row") is False:
+        row["save_candidate"] = False
+        row["classification"] = "SEGMENT_TOTAL_REVIEW"
+        return row
+
+    if row.get("_previous_period_selected_while_current_exists"):
+        row["save_candidate"] = False
+        row["classification"] = "PREVIOUS_PERIOD_TABLE_REVIEW"
+        return row
+
+    # 3. Semantic metric coverage.  Ending construction carryover is a valid
+    # companion to orders_received and must not be duplicated into backlog.
     has_orders = row.get("orders_received") is not None
     has_backlog = row.get("order_backlog") is not None
-    if not has_orders and not has_backlog:
+    has_carryover = row.get("construction_carryover") is not None
+    has_rpo = row.get("rpo") is not None
+    if not has_orders and not has_backlog and not has_carryover and not has_rpo:
         row["save_candidate"] = False
         row["classification"] = "BOTH_NULL_REJECT"
         return row
-    if not has_orders or not has_backlog:
+    semantic_construction_complete = has_orders and has_carryover
+    semantic_rpo_complete = has_rpo and not has_orders and not has_backlog and not has_carryover
+    if not semantic_construction_complete and not semantic_rpo_complete and (not has_orders or not has_backlog):
         # 除外ルールの判定
         snippet = str(row.get("snippet") or "")
         
@@ -173,10 +199,22 @@ def apply_pre_save_guard(row: dict[str, Any], enable_partial_save: bool = False)
 
     # 4. Unit の不明チェック (未知単位はPASS禁止)
     source_unit = str(row.get("source_unit") or "").strip().lower()
-    if source_unit not in ("million_yen", "thousand_yen"):
+    if source_unit not in ("million_yen", "thousand_yen", "billion_yen", "yen"):
         row["save_candidate"] = False
         row["classification"] = "UNKNOWN_UNIT_REVIEW"
         return row
+
+    if row.get("_source_unit_consistent") is False:
+        row["save_candidate"] = False
+        row["classification"] = "SOURCE_UNIT_REVIEW"
+        return row
+
+    arithmetic_status = str(row.get("_arithmetic_status") or "")
+    if arithmetic_status in {"FAIL", "REVIEW", "ARITHMETIC_REVIEW"}:
+        row["save_candidate"] = False
+        row["classification"] = "ARITHMETIC_REVIEW"
+        return row
+    source_table_exception = arithmetic_status == "SOURCE_TABLE_EXCEPTION"
 
     # 5. Same Value チェック (orders == backlog)
     if has_orders and has_backlog and row["orders_received"] == row["order_backlog"]:
@@ -185,14 +223,18 @@ def apply_pre_save_guard(row: dict[str, Any], enable_partial_save: bool = False)
         return row
 
     # 6. 3列ヘッダー・列ずれ疑いチェック
-    if _has_repeated_orders_header(row):
+    if row.get("_ambiguous_header") or (
+        row.get("source_tag") != "semantic_table_v2" and _has_repeated_orders_header(row)
+    ):
         row["save_candidate"] = False
-        row["classification"] = "THREE_COLUMN_HEADER_REVIEW"
+        row["classification"] = "AMBIGUOUS_HEADER_REVIEW"
         return row
 
     # すべてのガードを通過した場合は保存候補
     row["save_candidate"] = True
-    if row.get("classification") != "PARTIAL_METRIC_REVIEW":
+    if source_table_exception:
+        row["classification"] = "SOURCE_TABLE_EXCEPTION"
+    elif row.get("classification") != "PARTIAL_METRIC_REVIEW":
         row["classification"] = "PASS_SAVE_CANDIDATE"
         
     return row

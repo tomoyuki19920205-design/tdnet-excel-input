@@ -12,6 +12,15 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
+from .semantic_table import (
+    BEGIN_CARRYOVER_KEYWORDS,
+    COMPLETED_CONSTRUCTION_KEYWORDS,
+    END_CARRYOVER_KEYWORDS,
+    EXPLICIT_BACKLOG_KEYWORDS,
+    ORDER_KEYWORDS,
+    extract_semantic_tables,
+)
+
 # ── デフォルトキャッシュディレクトリ ──
 _DEFAULT_CACHE_DIR = os.environ.get(
     "EDINET_CACHE_DIR",
@@ -53,21 +62,15 @@ def _detect_unit(texts: list[str]) -> str | None:
 
 # ── キーワード定義 ──
 # 受注高候補（優先順位順）
-_ORDER_KW = [
-    "当期受注工事高", "当期受注契約高",  # 最優先：当期限定のキーワード
-    "受注高", "受注額", "受注金額", "受注工事高", "受注契約高", "受注契約",
-    "受注実績", "受注状況",
-    "受注(契約)高",  # 清水建設等の「受注(契約)高」形式
-]
-# 受注残候補
-_BACKLOG_KW = [
-    "次期繰越工事高", "次期繰越高", "期末繰越高", "繰越工事高", "手持工事高",
-    "受注残高", "受注残",
-]
+_ORDER_KW = list(ORDER_KEYWORDS) + ["受注実績", "受注状況", "受注(契約)高"]
+# Explicit backlog only.  Construction carryover is a different metric.
+_BACKLOG_KW = list(EXPLICIT_BACKLOG_KEYWORDS)
+_BEGIN_CARRYOVER_KW = list(BEGIN_CARRYOVER_KEYWORDS)
+_END_CARRYOVER_KW = list(END_CARRYOVER_KEYWORDS)
 # 除外すべき類似語（受注高として絶対使わない）
-_COMPLETED_KW = ["完成工事高", "売上高", "生産高", "仕入高"]
+_COMPLETED_KW = list(COMPLETED_CONSTRUCTION_KEYWORDS) + ["売上高", "生産高", "仕入高"]
 _RPO_KW = ["残存履行義務", "未充足の履行義務"]
-_SECTION_KW = _ORDER_KW + _BACKLOG_KW + _COMPLETED_KW
+_SECTION_KW = _ORDER_KW + _BACKLOG_KW + _BEGIN_CARRYOVER_KW + _END_CARRYOVER_KW + _COMPLETED_KW
 
 # 当期を示すキーワード
 _CURRENT_PERIOD_KW = ["当事業年度", "当連結会計年度", "当期", "今期"]
@@ -308,6 +311,15 @@ def extract_from_company(
     zip_path = os.path.join(cache_dir, doc_id, "xbrl.zip")
     if not os.path.exists(zip_path):
         result["notes"] = "ZIP not found"
+        return result
+
+    # Preferred path: retain DOM header paths, evaluate every table/row, and
+    # keep explicit backlog separate from construction carryover.  The legacy
+    # path below remains only as a compatibility fallback for documents whose
+    # order disclosure is not represented by a semantic table.
+    semantic = extract_semantic_tables(zip_path, target)
+    if semantic is not None:
+        result.update(semantic)
         return result
 
     with zipfile.ZipFile(zip_path) as z:

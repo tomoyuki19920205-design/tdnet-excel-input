@@ -85,7 +85,7 @@ def transform_to_db_row(
         "doc_id": extracted.get("doc_id"),
         "period": fiscal_end,           # YYYY-MM-DD
         "fiscal_year": fiscal_year,     # integer
-        "segment_name": None,           # 連結全体
+        "segment_name": extracted.get("segment_name"),
         # segment_name_key: generated column — INSERT対象外
         "source_type": "edinet_yuho",
         "source_tag": extracted.get("source_tag"),
@@ -104,7 +104,23 @@ def transform_to_db_row(
         "construction_carryover": _to_million(extracted.get("construction_carryover"), source_unit),
         "completed_construction": _to_million(extracted.get("completed_construction"), source_unit),
         "rpo": _to_million(extracted.get("rpo"), source_unit),
-        "snippet": (extracted.get("snippet") or "")[:2000] or None,
+        # Compact DOM provenance is intentionally retained in snippet because
+        # the current production schema has no dedicated provenance JSONB.
+        "snippet": (extracted.get("snippet") or "")[:8000] or None,
+        "_provenance": extracted.get("provenance"),
+        "_report_type": extracted.get("report_type"),
+        "_document_period_mismatch": bool(extracted.get("document_period_mismatch")),
+        "_arithmetic_status": extracted.get("arithmetic_status"),
+        "_arithmetic_delta": extracted.get("arithmetic_delta"),
+        "_selected_percentage_leaf": bool(extracted.get("selected_percentage_leaf")),
+        "_selected_subcomponent_leaf": bool(extracted.get("selected_subcomponent_leaf")),
+        "_ambiguous_header": bool(extracted.get("ambiguous_header")),
+        "_source_unit_consistent": extracted.get("source_unit_consistent", True),
+        "_has_total_row": extracted.get("has_total_row"),
+        "_selected_period_kind": extracted.get("selected_period_kind"),
+        "_previous_period_selected_while_current_exists": bool(
+            extracted.get("previous_period_selected_while_current_exists")
+        ),
         # DRY RUN補助フィールド（DB INSERT時は無視）
         "_dryrun_period_error": "fiscal_end_missing" if not fiscal_end else None,
     }

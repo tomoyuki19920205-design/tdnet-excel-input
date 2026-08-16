@@ -40,14 +40,15 @@ from .comparison_classifier import (
 logger = logging.getLogger("historical.order_backfill")
 
 # 受注系キーワード（extractor.py と一致）
-_ORDERS_KEYWORDS = ["受注高", "受注額", "新規受注", "受注工事高"]
-_BACKLOG_KEYWORDS = [
-    "受注残高", "受注残", "手持工事高", "手持ち工事高",
-    "繰越工事高", "繰越高", "次期繰越工事高", "繰り越し工事高",
-]
-_CARRYOVER_KEYWORDS = [
-    "繰越工事高", "繰越高", "次期繰越工事高", "繰り越し工事高",
-]
+from src.edinet_orders.semantic_table import (
+    END_CARRYOVER_KEYWORDS,
+    EXPLICIT_BACKLOG_KEYWORDS,
+    ORDER_KEYWORDS,
+)
+
+_ORDERS_KEYWORDS = list(ORDER_KEYWORDS)
+_BACKLOG_KEYWORDS = list(EXPLICIT_BACKLOG_KEYWORDS)
+_CARRYOVER_KEYWORDS = list(END_CARRYOVER_KEYWORDS)
 
 _ORDER_METRIC_MAP = [
     ("orders_total", _ORDERS_KEYWORDS),
