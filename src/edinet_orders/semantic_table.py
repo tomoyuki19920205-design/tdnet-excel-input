@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
+from itertools import product
 import json
 import re
 import unicodedata
@@ -54,6 +55,7 @@ TOTAL_PRIORITY = {
     "工事合計": 3,
     "報告セグメント計": 2,
 }
+MIN_HEADER_SCORE_MARGIN = 30
 
 
 def norm(text: str) -> str:
@@ -72,6 +74,27 @@ def parse_number(text: str | None) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def parse_number_candidates(text: str | None) -> list[int]:
+    """Return DOM-ordered reported integers from one cell.
+
+    Some EDINET construction tables vertically stack two independently
+    reported amounts inside one ``td``.  Flattening the cell concatenates the
+    values and makes ``parse_number`` reject the actual amount column.  Keep
+    every reported value so header and arithmetic evidence can resolve it.
+    """
+    direct = parse_number(text)
+    if direct is not None:
+        return [direct]
+    value = norm(text or "").replace("△", "-").replace("▲", "-").replace("－", "-")
+    matches = re.findall(r"\(?[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)\)?", value)
+    output: list[int] = []
+    for match in matches:
+        parsed = parse_number(match)
+        if parsed is not None:
+            output.append(parsed)
+    return output
+
+
 def detect_unit(texts: Iterable[str]) -> str | None:
     value = compact(" ".join(texts))
     if "百万円" in value:
@@ -83,6 +106,18 @@ def detect_unit(texts: Iterable[str]) -> str | None:
     if re.search(r"(?:単位[:：]?|金額[:：]?|[（(])円[）)]", value):
         return "円"
     return None
+
+
+def _unambiguous_unit(text: str) -> str | None:
+    value = compact(text)
+    units: set[str] = set()
+    for token in ("百万円", "千円", "億円"):
+        if token in value:
+            units.add(token)
+    without_scaled = value.replace("百万円", "").replace("千円", "").replace("億円", "")
+    if re.search(r"(?:単位[:：]?|金額[:：]?|[（(])円[）)]", without_scaled):
+        units.add("円")
+    return next(iter(units)) if len(units) == 1 else None
 
 
 @dataclass(frozen=True)
@@ -107,6 +142,8 @@ class LeafColumn:
     parent_header: str
     leaf_header: str
     unit: str | None
+    unit_source: str | None
+    unit_evidence: str | None
     is_percentage: bool
     is_change: bool
     is_subcomponent: bool
@@ -126,6 +163,8 @@ class MetricSelection:
     value: int
     score: int
     reason: list[str] = field(default_factory=list)
+    value_index: int = 0
+    value_count: int = 1
 
 
 @dataclass
@@ -138,6 +177,7 @@ class RowCandidate:
     period_label: str
     selected_table_period: str | None
     unit: str | None
+    unit_source: str | None
     metrics: dict[str, MetricSelection]
     score: float
     is_total: bool
@@ -145,6 +185,9 @@ class RowCandidate:
     arithmetic_status: str
     arithmetic_delta: int | None
     ambiguous_header: bool
+    leaf_candidates: dict[str, list[dict[str, Any]]]
+    selection_margins: dict[str, int | None]
+    multi_value_resolution: str
 
 
 def expand_table(table) -> TableGrid:
@@ -201,7 +244,27 @@ def header_row_count(grid: TableGrid) -> int:
     return min(max(count, 1), max(1, len(grid.values) - 1))
 
 
-def build_leaf_columns(grid: TableGrid, n_header: int, table_unit: str | None) -> list[LeafColumn]:
+def _column_unit(path: list[str], unit_context: dict[str, str]) -> tuple[str | None, str | None, str | None]:
+    if path:
+        unit = _unambiguous_unit(path[-1])
+        if unit:
+            return unit, "selected_leaf_header", path[-1]
+        for parent in reversed(path[:-1]):
+            unit = _unambiguous_unit(parent)
+            if unit:
+                return unit, "parent_header", parent
+    for source in ("table_caption", "nearby_text", "source_block_heading"):
+        evidence = unit_context.get(source, "")
+        unit = _unambiguous_unit(evidence)
+        if unit:
+            return unit, source, evidence[:500]
+    return None, None, None
+
+
+def build_leaf_columns(grid: TableGrid, n_header: int, unit_context: dict[str, str] | str | None) -> list[LeafColumn]:
+    # Backward-compatible support for direct unit strings used by callers.
+    if not isinstance(unit_context, dict):
+        unit_context = {"nearby_text": unit_context or ""}
     columns: list[LeafColumn] = []
     width = max((len(row) for row in grid.values), default=0)
     for col in range(width):
@@ -225,15 +288,18 @@ def build_leaf_columns(grid: TableGrid, n_header: int, table_unit: str | None) -
             None,
         )
         text = "|".join(path)
+        unit, unit_source, unit_evidence = _column_unit(path, unit_context)
         columns.append(LeafColumn(
             index=col,
             header_path=path,
             parent_header=path[0] if path else "",
             leaf_header=leaf,
-            unit=detect_unit(reversed(path)) or table_unit,
+            unit=unit,
+            unit_source=unit_source,
+            unit_evidence=unit_evidence,
             is_percentage=any(key in text for key in RATE_KEYWORDS),
             is_change=any(key in text for key in CHANGE_KEYWORDS),
-            is_subcomponent=any(key in leaf for key in SUBCOMPONENT_KEYWORDS),
+            is_subcomponent=any(key in text for key in SUBCOMPONENT_KEYWORDS),
             leaf_rowspan=leaf_origin.rowspan if leaf_origin else 1,
             leaf_colspan=leaf_origin.colspan if leaf_origin else 1,
             header_spans=header_spans,
@@ -360,15 +426,89 @@ def _arithmetic(metrics: dict[str, MetricSelection]) -> tuple[str, int | None]:
     return ("PASS" if abs(delta) <= tolerance else "ARITHMETIC_REVIEW"), delta
 
 
-def _table_context(table) -> str:
-    values: list[str] = []
-    node = table.find_previous_sibling()
-    while node is not None and len(values) < 5:
+def _table_unit_context(table) -> dict[str, str]:
+    """Collect local unit evidence without leaking page-global units."""
+    caption = table.find("caption")
+    caption_text = compact(caption.get_text(" ", strip=True)) if caption else ""
+
+    nearby: list[str] = []
+    found_local_annotation = False
+    # EDINET commonly emits ``(単位：千円)`` as a short paragraph immediately
+    # before the table inside a wrapper div.  DOM sibling traversal alone
+    # misses it when the table is nested.  Stop at the previous table so this
+    # remains local and can never become a page-global first-unit fallback.
+    for node in table.find_all_previous(["p", "div", "table"], limit=30):
+        if getattr(node, "name", None) == "table":
+            break
+        if node.find_parent("table") is not None:
+            continue
         value = compact(node.get_text(" ", strip=True))
-        if value:
-            values.append(value)
-        node = node.find_previous_sibling()
-    return "|".join(reversed(values))[-1500:]
+        if value and len(value) <= 160 and _unambiguous_unit(value):
+            nearby.append(value)
+            found_local_annotation = True
+            break
+    if not found_local_annotation:
+        anchor = table
+        for _depth in range(3):
+            node = anchor.find_previous_sibling()
+            while node is not None and len(nearby) < 8:
+                if getattr(node, "name", None) == "table":
+                    break
+                value = compact(node.get_text(" ", strip=True))
+                # Unit annotations are short.  Excluding large blocks prevents a
+                # unit from an unrelated earlier table on the same page leaking in.
+                if value and len(value) <= 300 and getattr(node, "name", None) not in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+                    nearby.append(value)
+                node = node.find_previous_sibling()
+            anchor = anchor.parent
+            if anchor is None or getattr(anchor, "name", None) in {"body", "html"}:
+                break
+
+    heading = table.find_previous(["h1", "h2", "h3", "h4", "h5", "h6"])
+    heading_text = compact(heading.get_text(" ", strip=True)) if heading else ""
+    return {
+        "table_caption": caption_text,
+        "nearby_text": "|".join(nearby),
+        "source_block_heading": heading_text,
+    }
+
+
+def _resolve_arithmetic_options(
+    options: dict[str, list[MetricSelection]],
+) -> tuple[dict[str, MetricSelection], str, int | None, str]:
+    keys = ("beginning_carryover", "orders_received", "completed_construction", "construction_carryover")
+    selected = {metric: max(items, key=lambda item: (item.score, -item.value_index)) for metric, items in options.items() if items}
+    if not all(key in options for key in keys):
+        status, delta = _arithmetic(selected)
+        return selected, status, delta, "not_applicable"
+
+    pools: list[list[MetricSelection]] = []
+    for key in keys:
+        best_score = max(item.score for item in options[key])
+        unique: dict[tuple[int, int], MetricSelection] = {}
+        for item in options[key]:
+            if item.score < best_score - 100:
+                continue
+            unique.setdefault((item.column.index, item.value), item)
+        pools.append(sorted(unique.values(), key=lambda item: (-item.score, item.value_index))[:6])
+
+    passing: list[tuple[int, tuple[MetricSelection, ...], int]] = []
+    for combo in product(*pools):
+        begin, orders, completed, ending = (item.value for item in combo)
+        delta = (begin + orders) - (completed + ending)
+        tolerance = max(2, round(max(abs(begin + orders), abs(completed + ending), 1) * 0.0001))
+        if abs(delta) <= tolerance:
+            rank = sum(item.score for item in combo) - sum(item.value_index for item in combo) * 2
+            passing.append((rank, combo, delta))
+    passing.sort(key=lambda item: item[0], reverse=True)
+    if passing and (len(passing) == 1 or passing[0][0] > passing[1][0]):
+        _, combo, delta = passing[0]
+        selected.update(dict(zip(keys, combo)))
+        return selected, "PASS", delta, "unique_arithmetic_match"
+
+    status, delta = _arithmetic(selected)
+    resolution = "ambiguous_arithmetic_matches" if passing else "no_arithmetic_match"
+    return selected, status, delta, resolution
 
 
 def _candidate_rows(
@@ -381,9 +521,8 @@ def _candidate_rows(
     if not grid.values:
         return []
     n_header = header_row_count(grid)
-    context = _table_context(table)
-    table_unit = detect_unit([context])
-    columns = build_leaf_columns(grid, n_header, table_unit)
+    unit_context = _table_unit_context(table)
+    columns = build_leaf_columns(grid, n_header, unit_context)
     if not any(_metric_for_column(column) for column in columns):
         return []
     parent_counts = {
@@ -393,25 +532,27 @@ def _candidate_rows(
     repeated_parent = any(count > 1 for count in parent_counts.values())
     output: list[RowCandidate] = []
     for row_index, row in enumerate(grid.values[n_header:], n_header):
-        metrics: dict[str, MetricSelection] = {}
+        metric_options: dict[str, list[MetricSelection]] = {}
         for column in columns:
             if column.index >= len(row):
                 continue
-            value = parse_number(row[column.index])
-            if value is None:
+            values = parse_number_candidates(row[column.index])
+            if not values:
                 continue
-            for metric in _metric_for_column(column):
-                score, reason = _column_score(metric, column, value, expected_period)
-                current = metrics.get(metric)
-                selection = MetricSelection(metric, column, value, score, reason)
-                if current is None or selection.score > current.score:
-                    metrics[metric] = selection
+            for value_index, value in enumerate(values):
+                for metric in _metric_for_column(column):
+                    score, reason = _column_score(metric, column, value, expected_period)
+                    if len(values) > 1:
+                        reason = [*reason, "multi_value_cell_candidate"]
+                    metric_options.setdefault(metric, []).append(MetricSelection(
+                        metric, column, value, score, reason, value_index=value_index, value_count=len(values)
+                    ))
+        metrics, arithmetic_status, arithmetic_delta, multi_value_resolution = _resolve_arithmetic_options(metric_options)
         if not metrics or not any(k in metrics for k in ("orders_received", "order_backlog", "construction_carryover", "rpo")):
             continue
         label = _row_label(row, (selection.column.index for selection in metrics.values()))
         total_priority = _total_priority(label)
         p_score, p_reason = _period_score(label, expected_period)
-        arithmetic_status, arithmetic_delta = _arithmetic(metrics)
         coverage = sum(key in metrics for key in (
             "orders_received", "order_backlog", "construction_carryover",
             "completed_construction", "beginning_carryover", "rpo",
@@ -434,15 +575,61 @@ def _candidate_rows(
             arithmetic_status = "SOURCE_TABLE_EXCEPTION"
         if not is_total:
             score -= 80
+        leaf_candidates: dict[str, list[dict[str, Any]]] = {}
+        selection_margins: dict[str, int | None] = {}
+        for metric, items in metric_options.items():
+            ranked = sorted(items, key=lambda item: (-item.score, item.column.index, item.value_index))
+            leaf_candidates[metric] = [
+                {
+                    "column_index": item.column.index,
+                    "header_path": item.column.header_path,
+                    "value": item.value,
+                    "value_index": item.value_index,
+                    "value_count": item.value_count,
+                    "amount": not item.column.is_percentage,
+                    "percentage": item.column.is_percentage,
+                    "current": _contains_any(item.column.text, CURRENT_PERIOD_KEYWORDS),
+                    "previous": _contains_any(item.column.text, PREVIOUS_PERIOD_KEYWORDS),
+                    "row_period_kind": p_reason,
+                    "row_label": label,
+                    "row_is_total": is_total,
+                    "row_is_detail": not is_total,
+                    "unit": item.column.unit,
+                    "unit_source": item.column.unit_source,
+                    "arithmetic_status": arithmetic_status,
+                    "score": item.score,
+                    "reason": item.reason,
+                }
+                for item in ranked[:12]
+            ]
+            column_scores: dict[int, int] = {}
+            for item in ranked:
+                column_scores[item.column.index] = max(column_scores.get(item.column.index, -100_000), item.score)
+            scores = sorted(column_scores.values(), reverse=True)
+            selection_margins[metric] = scores[0] - scores[1] if len(scores) > 1 else None
+        low_margin = any(
+            margin is not None and margin < MIN_HEADER_SCORE_MARGIN
+            for metric, margin in selection_margins.items()
+            if metric in {"orders_received", "order_backlog", "construction_carryover", "rpo"}
+        )
+        selected_subcomponent = any(selection.column.is_subcomponent for selection in metrics.values())
+        unresolved_multi_value = any(
+            selection.value_count > 1 for metric, selection in metrics.items()
+            if metric in {"orders_received", "order_backlog", "construction_carryover", "rpo"}
+        ) and multi_value_resolution != "unique_arithmetic_match"
         output.append(RowCandidate(
             html_name=html_name, table_index=table_index, row_index=row_index, row=row,
             row_label=label, period_label=p_reason,
             selected_table_period=_extract_date_from_label(label),
-            unit=next((selection.column.unit for selection in metrics.values() if selection.column.unit), table_unit),
+            unit=next((selection.column.unit for selection in metrics.values() if selection.column.unit), None),
+            unit_source=next((selection.column.unit_source for selection in metrics.values() if selection.column.unit), None),
             metrics=metrics, score=score, is_total=is_total,
             segment_name=None if is_total else (label.split("|")[-1] if label else None),
             arithmetic_status=arithmetic_status, arithmetic_delta=arithmetic_delta,
-            ambiguous_header=repeated_parent and any(selection.column.is_subcomponent for selection in metrics.values()),
+            ambiguous_header=selected_subcomponent or unresolved_multi_value or (repeated_parent and low_margin),
+            leaf_candidates=leaf_candidates,
+            selection_margins=selection_margins,
+            multi_value_resolution=multi_value_resolution,
         ))
     return output
 
@@ -555,6 +742,8 @@ def extract_semantic_tables(zip_path: str, target: dict[str, Any]) -> dict[str, 
             "leaf_rowspan": selection.column.leaf_rowspan,
             "leaf_colspan": selection.column.leaf_colspan,
             "unit": selection.column.unit,
+            "unit_source": selection.column.unit_source,
+            "unit_evidence": selection.column.unit_evidence,
             "score": selection.score,
             "reason": selection.reason,
         }
@@ -574,10 +763,15 @@ def extract_semantic_tables(zip_path: str, target: dict[str, Any]) -> dict[str, 
         "current_period_end": dei.get("current_period_end"),
         "fiscal_year_end": dei.get("fiscal_year_end"),
         "source_unit": best.unit,
+        "source_unit_source": best.unit_source,
         "selection_reason": "highest_score_after_all_table_comparison",
         "candidate_count": len(candidates),
         "arithmetic_status": best.arithmetic_status,
         "arithmetic_delta": best.arithmetic_delta,
+        "multi_value_resolution": best.multi_value_resolution,
+        "selection_margin_threshold": MIN_HEADER_SCORE_MARGIN,
+        "selection_margins": best.selection_margins,
+        "leaf_candidates": best.leaf_candidates,
         "metrics": provenance_metrics,
     }
     flat_header = [" > ".join(selection.column.header_path) for selection in metrics.values()]
@@ -601,6 +795,9 @@ def extract_semantic_tables(zip_path: str, target: dict[str, Any]) -> dict[str, 
             if candidate.metrics.get("order_backlog") else None,
             "construction_carryover": candidate.metrics.get("construction_carryover").value
             if candidate.metrics.get("construction_carryover") else None,
+            "arithmetic_status": candidate.arithmetic_status,
+            "ambiguous_header": candidate.ambiguous_header,
+            "selection_margins": candidate.selection_margins,
         }
         for candidate in candidates[:20]
     ]

@@ -157,6 +157,64 @@ def test_ambiguous_arithmetic_mismatch_is_review_not_source_exception(tmp_path):
     assert row["save_candidate"] is False
 
 
+def test_multi_value_amount_cell_is_resolved_by_header_and_arithmetic(tmp_path):
+    body = """<table>
+    <tr><th>区分</th><th>期首繰越工事高(百万円)</th><th>当期受注工事高(百万円)</th>
+    <th>当期完成工事高(百万円)</th><th>期末繰越工事高(百万円)</th>
+    <th colspan="2">うち施工高</th></tr>
+    <tr><th></th><th></th><th></th><th></th><th></th><th>(%)</th><th>(百万円)</th></tr>
+    <tr><td>計</td><td>39,377</td><td>36,359</td><td>31,631</td>
+    <td><p>(44,105)</p><p>44,222</p></td><td>0.3</td><td>134</td></tr></table>"""
+    result = _extract(tmp_path, body, ticker="1960", period="2025-03-31")
+    assert result["construction_carryover"] == 44_105
+    assert result["arithmetic_status"] == "PASS"
+    assert result["provenance"]["multi_value_resolution"] == "unique_arithmetic_match"
+    assert result["provenance"]["metrics"]["construction_carryover"]["column_index"] == 4
+
+
+@pytest.mark.parametrize(
+    "body,expected_unit,expected_source",
+    [
+        ("""<table><tr><th>区分</th><th>受注高(千円)</th><th>受注残高(千円)</th></tr>
+        <tr><td>合計</td><td>12,000</td><td>3,000</td></tr></table>""", "千円", "selected_leaf_header"),
+        ("""<table><tr><th rowspan="2">区分</th><th colspan="2">受注高(百万円)</th><th rowspan="2">受注残高(百万円)</th></tr>
+        <tr><th>前事業年度</th><th>当事業年度</th></tr><tr><td>合計</td><td>10,000</td><td>12,000</td><td>3,000</td></tr></table>""", "百万円", "parent_header"),
+        ("""<table><caption>受注状況（単位：百万円）</caption><tr><th>区分</th><th>受注高</th><th>受注残高</th></tr>
+        <tr><td>合計</td><td>12,000</td><td>3,000</td></tr></table>""", "百万円", "table_caption"),
+        ("""<p>（単位：千円）</p><table><tr><th>区分</th><th>受注高</th><th>受注残高</th></tr>
+        <tr><td>合計</td><td>12,000</td><td>3,000</td></tr></table>""", "千円", "nearby_text"),
+        ("""<h3>受注実績（単位：億円）</h3><div><table><tr><th>区分</th><th>受注高</th><th>受注残高</th></tr>
+        <tr><td>合計</td><td>120</td><td>30</td></tr></table></div>""", "億円", "source_block_heading"),
+    ],
+)
+def test_local_unit_resolution_priority(tmp_path, body, expected_unit, expected_source):
+    result = _extract(tmp_path, body)
+    assert result["unit"] == expected_unit
+    assert result["provenance"]["source_unit_source"] == expected_source
+
+
+def test_percentage_leaf_is_not_used_as_unit_amount(tmp_path):
+    body = """<table><tr><th rowspan="2">区分</th><th colspan="2">受注高(百万円)</th><th rowspan="2">受注残高(百万円)</th></tr>
+    <tr><th>金額</th><th>構成比(%)</th></tr>
+    <tr><td>合計</td><td>12,000</td><td>99.9</td><td>3,000</td></tr></table>"""
+    result = _extract(tmp_path, body)
+    assert result["orders_received"] == 12_000
+    assert result["provenance"]["metrics"]["orders_received"]["column_index"] == 1
+    assert not result["selected_percentage_leaf"]
+
+
+def test_ambiguous_multi_header_without_margin_remains_review(tmp_path):
+    body = """<table><tr><th rowspan="2">区分</th><th colspan="2">受注高(百万円)</th><th rowspan="2">受注残高(百万円)</th></tr>
+    <tr><th>当期金額</th><th>当期金額</th></tr>
+    <tr><td>合計</td><td>12,000</td><td>13,000</td><td>3,000</td></tr></table>"""
+    result = _extract(tmp_path, body)
+    row = transform_to_db_row(result, "2025-03-31", enable_partial_save=True)
+    assert result["ambiguous_header"] is True
+    assert result["provenance"]["selection_margins"]["orders_received"] == 0
+    assert row["classification"] == "AMBIGUOUS_HEADER_REVIEW"
+    assert row["save_candidate"] is False
+
+
 def test_keyword_sets_are_semantically_disjoint():
     assert not set(EXPLICIT_BACKLOG_KEYWORDS) & set(BEGIN_CARRYOVER_KEYWORDS)
     assert not set(EXPLICIT_BACKLOG_KEYWORDS) & set(END_CARRYOVER_KEYWORDS)
@@ -229,3 +287,27 @@ def test_real_2467_current_orders_and_explicit_backlog_regression():
     assert result["orders_received"] == 1_475_506
     assert result["order_backlog"] == 254_635
     assert result["construction_carryover"] is None
+
+
+@pytest.mark.parametrize(
+    "period,doc_id,orders,ending",
+    [
+        ("2024-03-31", "S100V3G1", 35_850_796, 40_632_360),
+        ("2025-03-31", "S100W44F", 28_975, 39_416),
+        ("2026-03-31", "S100YFBB", 36_359, 44_105),
+    ],
+)
+def test_real_1960_multi_value_cell_expected(period, doc_id, orders, ending):
+    cache = Path(__file__).resolve().parents[1] / "data" / "edinet_cache"
+    if not (cache / doc_id / "xbrl.zip").exists():
+        pytest.skip("official EDINET cache not available")
+    result = extract_from_company(
+        {"ticker": "1960", "company": "サンテック", "doc_id": doc_id, "period_end": period, "doc_type_code": "120"},
+        cache_dir=str(cache),
+    )
+    row = transform_to_db_row(result, period, enable_partial_save=True)
+    assert result["orders_received"] == orders
+    assert result["construction_carryover"] == ending
+    assert result["arithmetic_status"] == "PASS"
+    assert row["classification"] == "PASS_SAVE_CANDIDATE"
+    assert row["save_candidate"] is True
