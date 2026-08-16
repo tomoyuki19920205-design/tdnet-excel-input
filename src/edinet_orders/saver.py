@@ -30,6 +30,28 @@ _INSERT_COLS = [
     "completed_construction", "rpo", "snippet",
 ]
 
+_ALL_COMPANY_SENTINELS = {"", "__all__", "none", "null"}
+
+
+def normalize_segment_name(value: Any) -> str | None:
+    """Return the canonical stored segment name.
+
+    ``segment_name_key`` is generated as ``COALESCE(segment_name, '__ALL__')``.
+    Legacy producers stored that reserved key literally in ``segment_name``;
+    all such all-company sentinels must therefore converge to SQL NULL.
+    """
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    if normalized.casefold() in _ALL_COMPANY_SENTINELS:
+        return None
+    return normalized
+
+
+def segment_business_key(value: Any) -> str:
+    """Match the generated-column component of ``edinet_order_data_uniq``."""
+    return normalize_segment_name(value) or "__ALL__"
+
 
 def _get_creds() -> tuple[str, str]:
     """SUPABASE_URL と SUPABASE_SERVICE_ROLE_KEY を返す"""
@@ -89,6 +111,8 @@ def save_to_db(
     """
     stats: dict[str, Any] = {
         "upserted": 0,
+        "inserted": 0,
+        "updated": 0,
         "skipped": 0,
         "errors": [],
         "quality_rejects": [],
@@ -124,6 +148,7 @@ def save_to_db(
     clean_rows = []
     for row in valid_rows:
         clean = {k: row[k] for k in _INSERT_COLS if k in row}
+        clean["segment_name"] = normalize_segment_name(row.get("segment_name"))
         clean_rows.append(clean)
 
     # PostgREST 直接 UPSERT
@@ -149,6 +174,7 @@ def save_to_db(
         "construction_carryover", "raw_construction_carryover",
         "completed_construction", "raw_completed_construction",
         "rpo", "raw_rpo",
+        "segment_name",
         "source_unit", "confidence", "null_reason", "snippet",
         "doc_id", "source_tag", "company_name",
     ]
@@ -167,25 +193,29 @@ def save_to_db(
         period = row.get("period", "")
         fiscal_year = row.get("fiscal_year", "")
         source_type = row.get("source_type", "edinet_yuho")
-        segment_name = row.get("segment_name")  # None = 連結全体
+        segment_name = normalize_segment_name(row.get("segment_name"))
+        segment_name_key = segment_business_key(segment_name)
 
         try:
-            # 存在確認: segment_name が NULL の場合 is.null を使う
+            # DB UNIQUE と同じbusiness keyで存在確認する。generated columnは
+            # payloadには含めないが、SELECT/PATCH filterには利用できる。
             params = {
                 "ticker": f"eq.{ticker}",
                 "period": f"eq.{period}",
                 "fiscal_year": f"eq.{fiscal_year}",
+                "segment_name_key": f"eq.{segment_name_key}",
                 "source_type": f"eq.{source_type}",
-                "select": "id",
-                "limit": "1",
+                "select": "id,segment_name,segment_name_key",
+                "limit": "2",
             }
-            if segment_name is None:
-                params["segment_name"] = "is.null"
-            else:
-                params["segment_name"] = f"eq.{segment_name}"
 
             chk = requests.get(endpoint, params=params, headers=post_headers, timeout=15)
-            exists = chk.status_code == 200 and chk.json()
+            if chk.status_code != 200:
+                raise RuntimeError(f"business-key lookup HTTP {chk.status_code}: {chk.text[:200]}")
+            existing_rows = chk.json()
+            if len(existing_rows) > 1:
+                raise RuntimeError(f"business-key lookup returned {len(existing_rows)} rows")
+            exists = bool(existing_rows)
 
             if exists:
                 # PATCH (UPDATE)
@@ -200,6 +230,7 @@ def save_to_db(
             if resp.status_code in (200, 201, 204):
                 upsert_ok += 1
                 action = "UPDATE" if exists else "INSERT"
+                stats["updated" if exists else "inserted"] += 1
                 print(f"  [{action}] {ticker} {period} OK")
             else:
                 err = {
