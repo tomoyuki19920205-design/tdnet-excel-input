@@ -173,6 +173,87 @@ def test_simple_single_table_company_total_remains_valid(tmp_path):
     assert result["provenance"]["consolidation_scope"] == "unknown"
 
 
+@pytest.mark.parametrize(
+    "parent_orders,parent_backlog,children",
+    [
+        (100_615, 20_246, [(40_143, 10_391), (16_277, 4_451), (44_194, 5_404)]),
+        (110_384, 26_902, [(49_891, 16_904), (17_055, 4_115), (43_437, 5_883)]),
+    ],
+)
+def test_hierarchical_parent_is_company_total_when_children_reconcile(
+    tmp_path, parent_orders, parent_backlog, children,
+):
+    child_rows = "".join(
+        (
+            f'<tr><td rowspan="3"></td><td>機器</td><td>{orders:,}</td><td>{backlog:,}</td></tr>'
+            if index == 0 else
+            f'<tr><td>{"開発・構築" if index == 1 else "サービス"}</td><td>{orders:,}</td><td>{backlog:,}</td></tr>'
+        )
+        for index, (orders, backlog) in enumerate(children)
+    )
+    body = f"""<table>
+    <tr><th colspan="2">セグメント</th><th>受注高(百万円)</th><th>受注残高(百万円)</th></tr>
+    <tr><td colspan="2">情報ネットワークソリューションサービス</td><td>{parent_orders:,}</td><td>{parent_backlog:,}</td></tr>
+    {child_rows}</table>"""
+    result = _extract(tmp_path, body, ticker="8157")
+    row = transform_to_db_row(result, "2025-03-31", enable_partial_save=True)
+    assert (result["orders_received"], result["order_backlog"]) == (parent_orders, parent_backlog)
+    assert result["segment_name"] is None
+    assert result["provenance"]["selected_row_kind"] == "hierarchical_parent_total"
+    assert result["provenance"]["hierarchy_evidence"]["child_group_rowspan"] == 3
+    assert row["save_candidate"] is True
+
+
+def test_explicit_grand_total_wins_over_hierarchical_parent(tmp_path):
+    body = """<table>
+    <tr><th colspan="2">セグメント</th><th>受注高(百万円)</th><th>受注残高(百万円)</th></tr>
+    <tr><td colspan="2">サービス事業</td><td>90,000</td><td>18,000</td></tr>
+    <tr><td rowspan="2"></td><td>機器</td><td>40,000</td><td>10,000</td></tr>
+    <tr><td>開発</td><td>50,000</td><td>8,000</td></tr>
+    <tr><td colspan="2">電子デバイス</td><td>20,000</td><td>1,000</td></tr>
+    <tr><td colspan="2">合計</td><td>110,000</td><td>19,000</td></tr></table>"""
+    result = _extract(tmp_path, body)
+    assert (result["orders_received"], result["order_backlog"]) == (110_000, 19_000)
+    assert result["provenance"]["selected_row_kind"] == "grand_total"
+    assert result["provenance"]["hierarchy_evidence"] is None
+
+
+def test_ordinary_segment_rows_are_not_promoted_to_company_total(tmp_path):
+    body = """<table><tr><th>セグメント</th><th>受注高(百万円)</th><th>受注残高(百万円)</th></tr>
+    <tr><td>機器</td><td>40,000</td><td>10,000</td></tr>
+    <tr><td>サービス</td><td>50,000</td><td>8,000</td></tr></table>"""
+    result = _extract(tmp_path, body)
+    row = transform_to_db_row(result, "2025-03-31", enable_partial_save=True)
+    assert result["has_total_row"] is False
+    assert result["provenance"]["selected_row_kind"] == "detail"
+    assert row["classification"] == "SEGMENT_TOTAL_REVIEW"
+
+
+def test_hierarchical_parent_mismatch_remains_review(tmp_path):
+    body = """<table>
+    <tr><th colspan="2">セグメント</th><th>受注高(百万円)</th><th>受注残高(百万円)</th></tr>
+    <tr><td colspan="2">サービス事業</td><td>100,000</td><td>20,000</td></tr>
+    <tr><td rowspan="2"></td><td>機器</td><td>40,000</td><td>10,000</td></tr>
+    <tr><td>開発</td><td>50,000</td><td>8,000</td></tr></table>"""
+    result = _extract(tmp_path, body)
+    row = transform_to_db_row(result, "2025-03-31", enable_partial_save=True)
+    assert result["has_total_row"] is False
+    assert result["provenance"]["hierarchy_evidence"] is None
+    assert row["save_candidate"] is False
+
+
+def test_multiple_top_level_parents_are_not_promoted(tmp_path):
+    body = """<table>
+    <tr><th colspan="2">セグメント</th><th>受注高(百万円)</th><th>受注残高(百万円)</th></tr>
+    <tr><td colspan="2">第一事業</td><td>90,000</td><td>18,000</td></tr>
+    <tr><td rowspan="2"></td><td>機器</td><td>40,000</td><td>10,000</td></tr>
+    <tr><td>開発</td><td>50,000</td><td>8,000</td></tr>
+    <tr><td colspan="2">第二事業</td><td>20,000</td><td>1,000</td></tr></table>"""
+    result = _extract(tmp_path, body)
+    assert result["has_total_row"] is False
+    assert result["provenance"]["hierarchy_evidence"] is None
+
+
 def test_rpo_is_not_classified_as_backlog_or_construction_carryover(tmp_path):
     body = """<table><tr><th>区分</th><th>残存履行義務(百万円)</th></tr>
     <tr><td>合計</td><td>12,345</td></tr></table>"""

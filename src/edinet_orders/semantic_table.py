@@ -190,6 +190,7 @@ class RowCandidate:
     leaf_candidates: dict[str, list[dict[str, Any]]]
     selection_margins: dict[str, int | None]
     multi_value_resolution: str
+    hierarchy_evidence: dict[str, Any] | None = None
 
 
 def expand_table(table) -> TableGrid:
@@ -697,7 +698,131 @@ def _candidate_rows(
             selection_margins=selection_margins,
             multi_value_resolution=multi_value_resolution,
         ))
+    _promote_hierarchical_parent_total(output, grid, columns)
     return output
+
+
+def _promote_hierarchical_parent_total(
+    candidates: list[RowCandidate],
+    grid: TableGrid,
+    columns: list[LeafColumn],
+) -> None:
+    """Promote a structurally proven parent row to the company total.
+
+    Some EDINET tables omit an explicit ``合計`` row.  Instead they report one
+    top-level amount row followed by its child breakdown; the first label cell
+    of that breakdown is an empty ``rowspan`` group marker.  Treating every row
+    as a peer and summing it double-counts the parent.  Promotion is deliberately
+    strict: an explicit total always wins, exactly one full-width parent must
+    exist, the child block must be DOM-proven, and every reported parent metric
+    must reconcile to the child sum.
+    """
+    if not candidates or any(candidate.row_kind == "grand_total" for candidate in candidates):
+        return
+
+    metric_columns = [
+        column.index for column in columns
+        if _metric_for_column(column) and not column.is_percentage and not column.is_subcomponent
+    ]
+    first_metric = min(metric_columns, default=0)
+    if first_metric < 2:
+        return
+
+    by_row = {candidate.row_index: candidate for candidate in candidates}
+    top_level: list[RowCandidate] = []
+    for candidate in candidates:
+        if candidate.row_index >= len(grid.origins):
+            continue
+        origin = grid.origins[candidate.row_index][0] if grid.origins[candidate.row_index] else None
+        if (
+            origin is not None
+            and origin.row == candidate.row_index
+            and bool(compact(origin.text))
+            and origin.colspan >= first_metric
+        ):
+            top_level.append(candidate)
+    if len(top_level) != 1:
+        return
+
+    parent = top_level[0]
+    child_start = parent.row_index + 1
+    if child_start >= len(grid.origins) or not grid.origins[child_start]:
+        return
+    group_origin = grid.origins[child_start][0]
+    if (
+        group_origin is None
+        or group_origin.row != child_start
+        or compact(group_origin.text)
+        or group_origin.rowspan < 2
+    ):
+        return
+
+    child_rows = list(range(child_start, child_start + group_origin.rowspan))
+    if child_rows[-1] >= len(grid.values):
+        return
+    children = [by_row.get(row_index) for row_index in child_rows]
+    if any(child is None for child in children):
+        return
+    child_candidates = [child for child in children if child is not None]
+    if any(child.row_kind != "detail" for child in child_candidates):
+        return
+    if any(not child.row_label for child in child_candidates):
+        return
+
+    material_metrics = (
+        "orders_received", "order_backlog", "construction_carryover",
+        "completed_construction", "rpo",
+    )
+    reconciliations: dict[str, dict[str, Any]] = {}
+    for metric in material_metrics:
+        parent_selection = parent.metrics.get(metric)
+        if parent_selection is None:
+            continue
+        child_selections = [child.metrics.get(metric) for child in child_candidates]
+        if any(selection is None for selection in child_selections):
+            return
+        concrete = [selection for selection in child_selections if selection is not None]
+        if any(selection.column.index != parent_selection.column.index for selection in concrete):
+            return
+        if any(selection.column.unit != parent_selection.column.unit for selection in concrete):
+            return
+        child_sum = sum(selection.value for selection in concrete)
+        delta = parent_selection.value - child_sum
+        # Parent and children are independently rounded display amounts.  The
+        # maximum legitimate reconciliation noise depends on the number of
+        # displayed children, not the magnitude of the business itself.
+        tolerance = max(2, (len(concrete) + 1) // 2)
+        if abs(delta) > tolerance:
+            return
+        reconciliations[metric] = {
+            "parent_value": parent_selection.value,
+            "child_sum": child_sum,
+            "delta": delta,
+            "tolerance": tolerance,
+        }
+    if "orders_received" not in reconciliations:
+        return
+
+    parent.row_kind = "hierarchical_parent_total"
+    parent.is_total = True
+    parent.segment_name = None
+    # Remove the detail penalty (-80) and give the same priority as an
+    # explicit 合計 row (5 * 25).  Explicit totals never enter this branch.
+    parent.score += 205
+    parent.hierarchy_evidence = {
+        "rule": "single_full_width_parent_with_rowspan_child_breakdown",
+        "parent_row_index": parent.row_index,
+        "child_row_indices": child_rows,
+        "child_row_labels": [child.row_label for child in child_candidates],
+        "label_column_count": first_metric,
+        "parent_label_colspan": grid.origins[parent.row_index][0].colspan,
+        "child_group_rowspan": group_origin.rowspan,
+        "reconciliations": reconciliations,
+    }
+    for items in parent.leaf_candidates.values():
+        for item in items:
+            item["row_is_total"] = True
+            item["row_is_detail"] = False
 
 
 def _dei_value(soup: BeautifulSoup, suffix: str) -> str | None:
@@ -839,6 +964,7 @@ def extract_semantic_tables(zip_path: str, target: dict[str, Any]) -> dict[str, 
         "arithmetic_status": best.arithmetic_status,
         "arithmetic_delta": best.arithmetic_delta,
         "multi_value_resolution": best.multi_value_resolution,
+        "hierarchy_evidence": best.hierarchy_evidence,
         "selection_margin_threshold": MIN_HEADER_SCORE_MARGIN,
         "selection_margins": best.selection_margins,
         "leaf_candidates": best.leaf_candidates,
@@ -870,6 +996,7 @@ def extract_semantic_tables(zip_path: str, target: dict[str, Any]) -> dict[str, 
             "arithmetic_status": candidate.arithmetic_status,
             "ambiguous_header": candidate.ambiguous_header,
             "selection_margins": candidate.selection_margins,
+            "hierarchy_evidence": candidate.hierarchy_evidence,
         }
         for candidate in candidates[:20]
     ]
