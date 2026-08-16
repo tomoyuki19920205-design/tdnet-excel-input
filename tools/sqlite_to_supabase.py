@@ -837,7 +837,10 @@ def _build_financials_rows_from_tdnet(
     ) -> str:
         """field の raw_unit を決定"""
         # source_unit が DB に保存されている場合
-        source_unit = _get_row_field(row, "source_unit")
+        source_unit = (
+            _get_row_field(row, "source_unit")
+            or _get_row_field(row, "unit")
+        )
         if source_unit:
             mapped = map_source_unit_to_raw_unit(source_unit)
             if mapped != RawUnit.UNKNOWN:

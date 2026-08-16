@@ -186,6 +186,30 @@ def test_nightly_jquants_rows_preserve_disclosure_date():
     }]
 
 
+def test_1967_targeted_forecast_preserves_march_20_and_filters_other_tickers(tmp_path):
+    from tools.sync_financials import read_forecast_rows
+
+    db_path = tmp_path / "forecast.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE jquants_financials_normalized ("
+        "local_code TEXT, current_fiscal_year_end_date TEXT, "
+        "type_of_current_period TEXT, raw_json TEXT, disclosed_date TEXT, fetched_at TEXT)"
+    )
+    conn.executemany(
+        "INSERT INTO jquants_financials_normalized VALUES (?,?,?,?,?,?)",
+        [
+            ("19670", "2026-03-20", "FY", json.dumps({"NxFSales": 55_000_000_000, "NxFOP": 4_800_000_000}), "2026-05-13", "2026-05-13"),
+            ("99990", "2026-03-31", "FY", json.dumps({"NxFSales": 1_000_000_000}), "2026-05-13", "2026-05-13"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    rows = read_forecast_rows(str(db_path), ticker="1967")
+    assert [(row["ticker"], row["period"]) for row in rows] == [("1967", "2027-03-20")]
+
+
 @pytest.mark.parametrize(
     ("ticker_case", "sales", "operating_profit"),
     [

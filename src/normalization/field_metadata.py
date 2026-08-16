@@ -54,7 +54,11 @@ _SOURCE_UNIT_TO_RAW_UNIT = {
 
 def map_field_source_to_source_type(field_source: str) -> str:
     """field_sources JSON の値を SourceType に変換"""
-    return _FIELD_SOURCE_TO_SOURCE_TYPE.get(field_source, SourceType.UNKNOWN)
+    # A producer may append structured provenance, e.g.
+    # ``summary_xbrl|bank_proxy|OrdinaryIncome``.  The first token remains the
+    # physical source while the remaining tokens explain the proxy decision.
+    physical_source = str(field_source or "").split("|", 1)[0]
+    return _FIELD_SOURCE_TO_SOURCE_TYPE.get(physical_source, SourceType.UNKNOWN)
 
 
 def map_source_unit_to_raw_unit(source_unit: str) -> str:

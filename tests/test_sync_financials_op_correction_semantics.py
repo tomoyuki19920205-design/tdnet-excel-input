@@ -68,7 +68,7 @@ def _read_actual(db_path: str) -> dict:
     return dict(row)
 
 
-def test_7616_latest_financial_statement_blank_op_tombstones_original(tmp_path):
+def test_sparse_financial_statement_blank_op_preserves_original(tmp_path):
     db_path = _create_db(
         tmp_path,
         [
@@ -85,7 +85,7 @@ def test_7616_latest_financial_statement_blank_op_tombstones_original(tmp_path):
         ],
     )
 
-    assert _read_actual(db_path)["operating_profit"] is None
+    assert _read_actual(db_path)["operating_profit"] == 9_407_000_000
 
 
 def test_supplemental_forecast_revision_does_not_tombstone_actual_op(tmp_path):
@@ -128,7 +128,7 @@ def test_latest_financial_statement_nonnull_correction_wins(tmp_path):
     assert _read_actual(db_path)["operating_profit"] == 9_500_000_000
 
 
-def test_upsert_can_clear_op_without_updating_sibling_document_type(tmp_path):
+def test_upsert_sparse_correction_preserves_op_without_touching_sibling_document_type(tmp_path):
     db_path = _create_db(
         tmp_path,
         [
@@ -166,5 +166,68 @@ def test_upsert_can_clear_op_without_updating_sibling_document_type(tmp_path):
     )
     conn.close()
 
-    assert values["FYFinancialStatements_Consolidated_IFRS"] is None
+    assert values["FYFinancialStatements_Consolidated_IFRS"] == 9_407_000_000
     assert values["EarnForecastRevision"] == 123_000_000
+
+
+def test_5125_sparse_correction_preserves_gross_profit(tmp_path):
+    db_path = _create_db(
+        tmp_path,
+        [
+            {
+                "local_code": "51250",
+                "disclosed_date": "2026-06-30T15:30:00",
+                "fiscal_year": "2026-06-30",
+                "quarter": "3Q",
+                "type_of_document": "3QFinancialStatements_Consolidated_JP",
+                "gross_profit": 1_486_077_000,
+                "operating_profit": 57_286_000,
+            },
+            {
+                "local_code": "51250",
+                "disclosed_date": "2026-06-30T16:00:00",
+                "fiscal_year": "2026-06-30",
+                "quarter": "3Q",
+                "type_of_document": "3QFinancialStatements_Consolidated_JP",
+                "gross_profit": None,
+                "operating_profit": 57_000_000,
+            },
+        ],
+    )
+
+    actual = _read_actual(db_path)
+    assert actual["gross_profit"] == 1_486_077_000
+    assert actual["operating_profit"] == 57_000_000
+
+
+def test_3925_sparse_correction_keeps_complete_1q(tmp_path):
+    db_path = _create_db(
+        tmp_path,
+        [
+            {
+                "local_code": "39250",
+                "disclosed_date": "2025-08-13",
+                "fiscal_year": "2026-03-31",
+                "quarter": "1Q",
+                "type_of_document": "1QFinancialStatements_Consolidated_JP",
+                "net_sales": 1_408_000_000,
+                "gross_profit": 626_241_000,
+                "operating_profit": 327_000_000,
+            },
+            {
+                "local_code": "39250",
+                "disclosed_date": "2025-08-19",
+                "fiscal_year": "2026-03-31",
+                "quarter": "1Q",
+                "type_of_document": "1QFinancialStatements_Consolidated_JP",
+                "net_sales": None,
+                "gross_profit": None,
+                "operating_profit": None,
+            },
+        ],
+    )
+
+    actual = _read_actual(db_path)
+    assert actual["sales"] == 1_408_000_000
+    assert actual["gross_profit"] == 626_241_000
+    assert actual["operating_profit"] == 327_000_000

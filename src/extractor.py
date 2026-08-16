@@ -31,6 +31,7 @@ from .xbrl_context_scope import (
     parse_context_metadata,
 )
 from .analysis.header_analysis import normalize_header
+from .extractors.xbrl_profiles import IndustryType, detect_industry_profile
 
 logger = logging.getLogger("tdnet")
 
@@ -97,7 +98,9 @@ _XBRL_TAG_MAP = {
     "OperatingProfit": "operating_profit",
     "OperatingIncomeIFRS": "operating_profit",
     "OperatingProfitLossIFRS": "operating_profit",
+    "OperatingIncomeBNK": "operating_profit",
     "OrdinaryIncome": "ordinary_profit",
+    "OrdinaryProfitBNK": "ordinary_profit",
     "ProfitLoss": "net_income",
     "NetIncome": "net_income",
     "ProfitAttributableToOwnersOfParent": "net_income",
@@ -117,6 +120,7 @@ _XBRL_TAG_PRIORITY = {
     "ProfitLossAttributableToOwnersOfParent": 30,
     "ProfitAttributableToOwnersOfParentIFRS": 30,
     "ProfitLossAttributableToOwnersOfParentIFRS": 30,
+    "OperatingIncomeBNK": 100,
 }
 
 
@@ -139,6 +143,69 @@ _ZIP_SIGNATURE = b"PK\x03\x04"
 # contextRefで当期累計を判定するキーワード
 # InterimDuration: 中間期（2Q/半期決算）のAttachment PLで使用される
 _CURRENT_DURATION_KEYWORDS = ("CurrentYearDuration", "CurrentYTD", "CurrentAccumulatedQ", "InterimDuration")
+
+
+def _concept_names(root: ET.Element) -> set[str]:
+    """Return local XBRL concept names for industry-profile detection."""
+    names: set[str] = set()
+    for elem in root.iter():
+        tag = elem.tag
+        if not isinstance(tag, str):
+            continue
+        local = tag.split("}")[-1] if "}" in tag else tag
+        if local == "nonFraction":
+            concept = elem.get("name", "")
+            if concept:
+                names.add(concept.split(":")[-1])
+        else:
+            names.add(local)
+    return names
+
+
+def _apply_industry_operating_profit(
+    values: dict[str, int | None],
+    value_tags: dict[str, str],
+    fact_names: set[str],
+) -> tuple[str | None, str | None]:
+    """Apply the bank-only OP policy and return (reason, concept tag).
+
+    OperatingIncomeBNK is a direct bank operating metric.  When it is absent,
+    ordinary profit is an explicit bank-only proxy.  No equivalent fallback is
+    performed for a general company.
+    """
+    profiles = detect_industry_profile(fact_names)
+    is_bank = bool(profiles and profiles[0].industry == IndustryType.BANK)
+    if not is_bank:
+        return None, None
+
+    op_tag = value_tags.get("operating_profit")
+    if values.get("operating_profit") is not None and op_tag == "OperatingIncomeBNK":
+        return "bank_operating_income", op_tag
+    if values.get("operating_profit") is None and values.get("ordinary_profit") is not None:
+        proxy_tag = value_tags.get("ordinary_profit") or "OrdinaryIncome"
+        values["operating_profit"] = values["ordinary_profit"]
+        value_tags["operating_profit"] = proxy_tag
+        return "bank_ordinary_profit_proxy", proxy_tag
+    return None, None
+
+
+def _field_sources_with_profile(
+    values: dict[str, int | None],
+    value_tags: dict[str, str],
+    fact_names: set[str],
+    source_label: str,
+) -> dict[str, str]:
+    reason, tag = _apply_industry_operating_profit(values, value_tags, fact_names)
+    sources = {
+        key: source_label
+        for key, value in values.items()
+        if value is not None and key != "cost_of_sales"
+    }
+    if reason and tag:
+        sources["operating_profit"] = f"{source_label}|{reason}|{tag}"
+    if values.get("cost_of_sales") is not None:
+        sources["cost_of_sales"] = source_label
+    return sources
 
 
 def _find_xbrl_in_zip(zf: zipfile.ZipFile) -> list[str]:
@@ -234,6 +301,7 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
     xml_str = read_xbrl_bytes(raw)
     root = ET.fromstring(xml_str)
     contexts = parse_context_metadata(root)
+    fact_names = _concept_names(root)
 
     values: dict[str, int | None] = {
         "sales": None,
@@ -245,6 +313,7 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
         "cost_of_sales": None,
     }
     value_priority: dict[str, tuple[int, bool]] = {}
+    value_tags: dict[str, str] = {}
 
     # --- パス1: 従来XBRLモード（タグ名直接マッチ）---
     for elem in root.iter():
@@ -276,11 +345,12 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
                     if values[field_name] is None or new_prio > current_prio:
                         values[field_name] = val
                         value_priority[field_name] = new_prio
+                        value_tags[field_name] = tag_local
 
     if values["sales"] is not None:
-        sources = {k: source_label for k, v in values.items() if v is not None and k != "cost_of_sales"}
-        if values["cost_of_sales"] is not None:
-            sources["cost_of_sales"] = source_label
+        sources = _field_sources_with_profile(
+            values, value_tags, fact_names, source_label,
+        )
         result = ExtractedFinancials(
             sales=values["sales"],
             gross_profit=values["gross_profit"],
@@ -306,6 +376,7 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
         "cost_of_sales": None,
     }
     value_priority = {}
+    value_tags = {}
     detected_unit = "円"
     unknown_tags: set[str] = set()
     sales_context = ""  # 売上のcontextRef（Q検出用）
@@ -380,6 +451,7 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
         if values[field_name] is None or new_prio > current_prio:
             values[field_name] = val
             value_priority[field_name] = new_prio
+            value_tags[field_name] = concept_local
             if field_name == "sales":
                 sales_context = context
 
@@ -392,9 +464,9 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
     # contextRefからQ情報を検出
     detected_quarter = _detect_quarter_from_context(sales_context)
 
-    sources = {k: source_label for k, v in values.items() if v is not None and k != "cost_of_sales"}
-    if values["cost_of_sales"] is not None:
-        sources["cost_of_sales"] = source_label
+    sources = _field_sources_with_profile(
+        values, value_tags, fact_names, source_label,
+    )
     result = ExtractedFinancials(
         sales=values["sales"],
         gross_profit=values["gross_profit"],

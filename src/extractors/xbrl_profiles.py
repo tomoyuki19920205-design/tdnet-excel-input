@@ -99,7 +99,6 @@ GENERAL_PROFILE = XbrlProfile(
     profit_tags=[
         TagMapping("OperatingIncome", "operating_profit", 100, "営業利益"),
         TagMapping("OperatingProfit", "operating_profit", 95, "営業利益 (別名)"),
-        TagMapping("OrdinaryIncome", "operating_profit", 50, "経常利益 (FB)"),
     ],
     gross_profit_tags=[
         TagMapping("GrossProfit", "gross_profit", 100, "売上総利益"),
@@ -119,6 +118,7 @@ BANK_PROFILE = XbrlProfile(
     profit_tags=[
         TagMapping("OperatingIncomeBNK", "operating_profit", 100, "業務純益"),
         TagMapping("OrdinaryProfitBNK", "operating_profit", 90, "経常利益 (銀行)"),
+        TagMapping("OrdinaryIncome", "operating_profit", 80, "経常利益 proxy (銀行のみ)"),
         TagMapping("OperatingIncome", "operating_profit", 50, "営業利益 (一般FB)"),
     ],
     gross_profit_tags=[],

@@ -214,7 +214,7 @@ latest AS (
     type_of_current_period,
     ROW_NUMBER() OVER (
       PARTITION BY local_code,
-                   current_fiscal_year_end_date,
+                   resolved_fiscal_year_end_date,
                    type_of_current_period
       ORDER BY disclosed_date DESC
     ) AS rn,
@@ -223,7 +223,8 @@ latest AS (
     net_sales,
     gross_profit,
     operating_profit,
-    {pbt_expression} AS profit_before_tax
+    {pbt_expression} AS profit_before_tax,
+    raw_json
   FROM resolved_source
 ),
 field_best AS (
@@ -247,15 +248,21 @@ field_best AS (
        AND s.type_of_current_period = latest.type_of_current_period
        AND s.gross_profit IS NOT NULL
      ORDER BY s.rn LIMIT 1) AS gross_profit,
-    -- Actual OP follows the latest effective financial-statement disclosure,
-    -- including an explicit NULL. Forecast-revision documents are supplemental
-    -- and must neither tombstone nor supply the actual historical PL value.
+    -- Sparse corrections are field-wise patches.  A missing OP never tombstones
+    -- a non-null value from an earlier disclosure of the same economic period.
     (SELECT s.operating_profit FROM latest s
      WHERE s.local_code = latest.local_code
        AND s.current_fiscal_year_end_date = latest.current_fiscal_year_end_date
        AND s.type_of_current_period = latest.type_of_current_period
        AND s.type_of_document LIKE '%FinancialStatements%'
+       AND s.operating_profit IS NOT NULL
      ORDER BY s.disclosed_date DESC, s.rn LIMIT 1) AS operating_profit
+    ,(SELECT json_extract(s.raw_json, '$._operating_profit_proxy.reason') FROM latest s
+     WHERE s.local_code = latest.local_code
+       AND s.current_fiscal_year_end_date = latest.current_fiscal_year_end_date
+       AND s.type_of_current_period = latest.type_of_current_period
+       AND s.operating_profit IS NOT NULL
+     ORDER BY s.disclosed_date DESC, s.rn LIMIT 1) AS operating_profit_proxy_reason
     ,(SELECT s.profit_before_tax FROM latest s
      WHERE s.local_code = latest.local_code
        AND s.current_fiscal_year_end_date = latest.current_fiscal_year_end_date
@@ -272,7 +279,8 @@ SELECT
   net_sales                    AS sales,
   gross_profit,
   operating_profit,
-  profit_before_tax
+  profit_before_tax,
+  operating_profit_proxy_reason
 FROM field_best
 ORDER BY ticker, period, quarter
 """
@@ -442,7 +450,7 @@ def _add_one_year(period: str) -> str:
 # J-Quants raw_json から予想行を生成
 # ============================================================
 def read_forecast_rows(
-    db_path: str, recent_days: int = 0
+    db_path: str, recent_days: int = 0, ticker: str = ""
 ) -> list[dict]:
     """
     jquants_financials_normalized の raw_json から予想行を生成する。
@@ -461,6 +469,7 @@ def read_forecast_rows(
     conn.row_factory = sqlite3.Row
 
     from src.common_ticker import normalize_ticker as _norm_ticker  # noqa: E402
+    target_ticker = _norm_ticker(ticker) if ticker else ""
 
     # 全 FY 実績の (ticker, period) を取得（奈期フィルタなし）
     fy_rows = conn.execute(
@@ -516,6 +525,8 @@ def read_forecast_rows(
 
     for r in rows:
         ticker_4 = _norm_ticker(r["ticker"])
+        if target_ticker and ticker_4 != target_ticker:
+            continue
         period   = r["period"]
         quarter  = r["quarter"]
         key      = (ticker_4, period)
@@ -847,7 +858,10 @@ def sync(
     # public.financials is the legacy wide table and has no PBT column.
     # Keep PBT only for the canonical long-table dual write below.
     legacy_data = [
-        {key: value for key, value in row.items() if key != "profit_before_tax"}
+        {
+            key: value for key, value in row.items()
+            if key not in {"profit_before_tax", "operating_profit_proxy_reason"}
+        }
         for row in data
     ]
 
@@ -952,6 +966,9 @@ def sync(
                             k: d.get(k)
                             for k in ("sales", "gross_profit", "operating_profit", "profit_before_tax")
                         }
+                        proxy_op = None
+                        if d.get("operating_profit_proxy_reason"):
+                            proxy_op = metrics_dict.pop("operating_profit", None)
                         expanded, skipped = expand_financials_rows(
                             ticker=d["ticker"],
                             period=d["period"],
@@ -962,6 +979,17 @@ def sync(
                         )
                         all_canonical_rows.extend(expanded)
                         canonical_skipped += skipped
+                        if proxy_op is not None:
+                            proxy_rows, proxy_skipped = expand_financials_rows(
+                                ticker=d["ticker"],
+                                period=d["period"],
+                                quarter=d["quarter"],
+                                metrics_dict={"operating_profit": proxy_op},
+                                source="jquants_bank_proxy",
+                                unit="millions_jpy",
+                            )
+                            all_canonical_rows.extend(proxy_rows)
+                            canonical_skipped += proxy_skipped
 
                     if all_canonical_rows:
                         upsert_result = supabase_upsert(
@@ -1000,7 +1028,7 @@ def sync(
         # 当期予想行は FY 実績が存在しない period のみ生成されるため衝突しない。
         try:
             forecast_data = read_forecast_rows(
-                db_path, recent_days=recent_days
+                db_path, recent_days=recent_days, ticker=ticker
             )
             if forecast_data:
                 forecast_total = len(forecast_data)
@@ -1010,7 +1038,14 @@ def sync(
                     f"→ {table} ({forecast_batches} batches)"
                 )
                 f_upserted = 0
-                for i, chunk in enumerate(_chunks(forecast_data, batch_size), 1):
+                legacy_forecast_data = [
+                    {
+                        key: value for key, value in row.items()
+                        if key != "disclosure_datetime"
+                    }
+                    for row in forecast_data
+                ]
+                for i, chunk in enumerate(_chunks(legacy_forecast_data, batch_size), 1):
                     try:
                         n = api.upsert_batch(
                             table, chunk, on_conflict="ticker,period,quarter"

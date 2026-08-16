@@ -30,6 +30,7 @@ SOURCE_PRIORITY: dict[str, int] = {
     "tdnet_xbrl": 1,
     "attachment_xbrl": 2,
     "jquants": 2,        # J-Quants: TSE公式集計データ → attachment_xbrl と同格
+    "jquants_bank_proxy": 2,
     "official_pdf_correction": 1,
     "official_pdf": 3,
     "html_table": 3,

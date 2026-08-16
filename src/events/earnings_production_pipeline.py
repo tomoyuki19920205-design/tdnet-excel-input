@@ -2117,7 +2117,10 @@ def run_earnings_production(
             # 実績期と四半期を確定する。FY 短信内の翌期予想 context を
             # provenance period として採用しないため、この値を resolver と
             # 後段検証で共有する。
-            _resolver_expected_period = _derive_fiscal_year_end_period(doc.title) or ""
+            # A title only identifies the fiscal month.  It is a weak hint and
+            # must not be used as an exact identity date for 20日締め等の会社.
+            _resolver_title_period = _derive_fiscal_year_end_period(doc.title) or ""
+            _resolver_expected_period = ""
             _, _resolver_expected_quarter = _parse_fiscal_info(
                 doc.title,
                 EarningsSummaryData(),
@@ -2159,8 +2162,28 @@ def run_earnings_production(
             _seq_provenance = resolved.trusted_provenance
 
             if xbrl_path:
+                from src.segment.zip_identity_verifier import extract_actual_metadata_from_zip
+                _exact_meta = extract_actual_metadata_from_zip(
+                    xbrl_path,
+                    expected_quarter=_resolver_expected_quarter,
+                )
+                from src.common_ticker import normalize_ticker
+                exact_identity_matches = (
+                    normalize_ticker(_exact_meta.get("ticker") or "")
+                    == normalize_ticker(ticker)
+                    and (
+                        not _resolver_expected_quarter
+                        or _exact_meta.get("quarter") == _resolver_expected_quarter
+                    )
+                )
+                _resolver_expected_period = (
+                    _exact_meta.get("period")
+                    if exact_identity_matches and _exact_meta.get("period")
+                    else _resolver_title_period
+                )
                 logger.info(f"[EARNINGS] {ticker} resolved ZIP: {Path(xbrl_path).name}")
             else:
+                _resolver_expected_period = _resolver_title_period
                 logger.info(f"[EARNINGS] {ticker} ZIP resolution failed")
             if not xbrl_path:
                 result.errors.append(f"{ticker}: XBRL ZIP not found")

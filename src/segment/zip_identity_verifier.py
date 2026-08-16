@@ -612,12 +612,16 @@ def extract_actual_metadata_from_zip(
                     and ("AnnualMember" in content or "YearEndMember" in content)
                 ):
                     meta["quarter"] = "FY"
-            else:
-                attachment_meta = _extract_attachment_ixbrl_metadata(zf, names)
-                if any(_ATTACHMENT_IXBRL_RE.search(name) for name in names):
-                    # Attachment candidates are evaluated as one identity set.  Do not
-                    # retain a filename-derived value when their consensus conflicts.
-                    meta.update(attachment_meta)
+
+            # CurrentFiscalYearEndDateDEI in an Attachment is stronger than a
+            # title/Summary calendar-month hint.  Apply it even when Summary is
+            # present so non-month-end issuers (20日締め等) keep their exact date.
+            attachment_meta = _extract_attachment_ixbrl_metadata(zf, names)
+            if (
+                any(_ATTACHMENT_IXBRL_RE.search(name) for name in names)
+                and attachment_meta.get("period")
+            ):
+                meta.update(attachment_meta)
     except Exception as e:
         logger.warning("[ZIP_METADATA] Failed to extract metadata from zip: %s", e)
         

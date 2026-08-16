@@ -342,6 +342,24 @@ def test_attachment_inline_extensions_and_prefix_independence(tmp_path):
         assert extract_actual_metadata_from_zip(str(path))["period"] == "2025-03-31"
 
 
+def test_1967_exact_attachment_fiscal_year_end_overrides_summary_month_end(tmp_path):
+    path = tmp_path / "1967-non-month-end.zip"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr(
+            "XBRLData/Summary/tse-ed-t-19670-summary.htm",
+            "<html><xbrli:endDate xmlns:xbrli='http://www.xbrl.org/2003/instance'>"
+            "2027-03-31</xbrli:endDate><span>AccumulatedQ1</span></html>",
+        )
+        zf.writestr(
+            "XBRLData/Attachment/0300000-acbs01-tse-acedjpfr-19670-2027-03-20-01-2026-08-03-ixbrl.htm",
+            _attachment_ixbrl(ticker="19670", period="2027-03-20", quarter="1Q"),
+        )
+
+    meta = extract_actual_metadata_from_zip(str(path))
+    assert meta["period"] == "2027-03-20"
+    assert meta["quarter"] == "1Q"
+
+
 def test_attachment_plain_or_structurally_incomplete_html_is_rejected(tmp_path):
     variants = [
         "<html><body>plain explanation</body></html>",
