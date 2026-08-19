@@ -216,8 +216,26 @@ def init_db(conn: sqlite3.Connection) -> None:
             ON company_ir_assets(ticker, asset_type);
         CREATE INDEX IF NOT EXISTS idx_company_ir_assets_pending
             ON company_ir_assets(notified, is_baseline, suppression_reason);
+        CREATE TABLE IF NOT EXISTS company_ir_monitor_state (
+            singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+            notifications_enabled INTEGER NOT NULL DEFAULT 0,
+            all_company_baseline_completed_at TEXT,
+            updated_at TEXT NOT NULL
+        );
+        INSERT OR IGNORE INTO company_ir_monitor_state
+            (singleton, notifications_enabled, updated_at)
+        VALUES (1, 0, '1970-01-01T00:00:00+09:00');
     """)
     conn.commit()
+
+
+def notifications_enabled(conn: sqlite3.Connection) -> bool:
+    """Return the global production gate; a missing state is fail-closed."""
+    init_db(conn)
+    row = conn.execute(
+        "SELECT notifications_enabled FROM company_ir_monitor_state WHERE singleton=1"
+    ).fetchone()
+    return bool(row and row[0])
 
 
 def import_sources_csv(conn: sqlite3.Connection, csv_path: str | Path) -> int:
@@ -374,6 +392,8 @@ def run_monitor(
     pdf_hasher: Callable[[str], str | None] | None = None,
     now_iso: str | None = None,
     max_workers: int | None = None,
+    baseline_only: bool = False,
+    allow_notifications: bool = True,
 ) -> RunStats:
     """Crawl every active source independently; one failure never stops the run."""
     init_db(conn)
@@ -419,7 +439,7 @@ def run_monitor(
     tdnet_cache: dict[str, Sequence[Mapping[str, object]]] = {}
     for source_row in rows:
         source = IrSource(int(source_row[0]), source_row[1], source_row[2], source_row[3])
-        baseline_mode = source_row[4] is None
+        baseline_mode = baseline_only or not allow_notifications or source_row[4] is None
         stats.sources += 1
         assets, fetch_error = prefetched[source.source_id]
         if fetch_error is not None:
@@ -451,6 +471,14 @@ def run_monitor(
             if existing:
                 if not dry_run:
                     conn.execute("UPDATE company_ir_assets SET last_seen_at=? WHERE id=?", (now, existing[0]))
+                if baseline_mode and not existing[3] and not existing[4] and not existing[5]:
+                    stats.baseline += 1
+                    if not dry_run:
+                        conn.execute(
+                            "UPDATE company_ir_assets SET is_baseline=1,last_seen_at=? WHERE id=?",
+                            (now, existing[0]),
+                        )
+                    continue
                 if existing[4] or existing[3] or existing[5]:
                     continue
                 asset = IrAsset(raw_asset.asset_type, raw_asset.title, raw_asset.asset_url,

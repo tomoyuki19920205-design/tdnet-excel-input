@@ -368,10 +368,21 @@ def main() -> int:
                     f"(edinet-order-event-nightly, other steps unaffected)"
                 )
 
-        # Nightly-only: company official IR materials/videos.  Each source is
-        # isolated inside the worker, so one 404 cannot stop this scheduler.
+        # Incrementally build/repair the TSE-wide source registry.  This is a
+        # bounded same-domain crawl and is resumable across Nightly runs.
+        if not args.dry_run:
+            step = run_step("company-ir-source-discovery", [
+                PYTHON, "-X", "utf8", "tools/company_ir_source_discovery.py",
+                "--batch-size", "250", "--repair",
+            ], timeout_sec=1800)
+            steps.append(step)
+
+        # Nightly-only: company official IR materials/videos.  The global DB
+        # gate remains fail-closed until all-company baseline validation is
+        # explicitly completed.
         step = run_step("company-ir-monitor", [
-            PYTHON, "-X", "utf8", "tools/company_ir_nightly.py", *dry_flag,
+            PYTHON, "-X", "utf8", "tools/company_ir_nightly.py",
+            "--require-discovery-complete", *dry_flag,
         ], timeout_sec=1800)
         steps.append(step)
 

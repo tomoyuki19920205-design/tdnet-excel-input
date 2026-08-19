@@ -75,6 +75,24 @@ def test_unchanged_after_baseline_emits_zero(conn):
     assert stats.new_assets == stats.notified == 0
 
 
+def test_global_gate_baselines_new_asset_even_after_source_baseline(conn):
+    add_source(conn)
+    old = page([("決算説明会資料", "/old.pdf")], "2025年3月期")
+    current = old + page([("決算説明会資料", "/new.pdf")], "2026年3月期")
+    run_monitor(conn, fetch=lambda _: old, now_iso="2026-08-17T19:00:00+09:00")
+    published = []
+    stats = run_monitor(
+        conn, fetch=lambda _: current, allow_notifications=False,
+        tdnet_lookup=lambda _: [], publish=lambda *args: published.append(args) or True,
+        now_iso="2026-08-18T19:00:00+09:00",
+    )
+    assert stats.notified == 0 and stats.baseline == 1
+    assert published == []
+    assert conn.execute(
+        "SELECT is_baseline FROM company_ir_assets WHERE asset_url LIKE '%/new.pdf'"
+    ).fetchone()[0] == 1
+
+
 @pytest.mark.parametrize("title,url,expected_type", [
     ("第1四半期決算説明資料", "/new.pdf", ASSET_MATERIAL),
     ("決算説明会動画", "https://youtu.be/example", ASSET_VIDEO),
