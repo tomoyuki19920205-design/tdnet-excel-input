@@ -32,6 +32,9 @@ The normal run stores metadata only. HTML snapshots, PDF bodies, and video
 bodies are never written. A newly discovered PDF may be streamed once to
 calculate SHA-256, then discarded.
 
+Page GETs use a bounded pool of 8 workers (`COMPANY_IR_WORKERS`, capped at 16).
+All SQLite and notification decisions remain on the main thread.
+
 ## Recovery
 
 Viewer publication failures remain `notified=0` and are retried on the next

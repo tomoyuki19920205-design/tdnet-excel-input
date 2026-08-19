@@ -7,6 +7,7 @@ therefore never emits viewer events.
 from __future__ import annotations
 
 import csv
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import json
 import logging
@@ -372,13 +373,23 @@ def run_monitor(
     publish: Callable[[IrSource, IrAsset, str, bool], bool] | None = None,
     pdf_hasher: Callable[[str], str | None] | None = None,
     now_iso: str | None = None,
+    max_workers: int | None = None,
 ) -> RunStats:
     """Crawl every active source independently; one failure never stops the run."""
     init_db(conn)
     now = now_iso or _now_iso()
     session = requests.Session()
     session.headers.update({"User-Agent": "tdnet-company-ir-monitor/1.0 (+nightly; metadata-only)"})
-    fetch = fetch or (lambda url: _default_fetch(url, session))
+    if fetch is None:
+        def fetch(url: str) -> bytes:
+            # A session is local to one request, keeping bounded parallel GETs
+            # independent. Hash/dedup requests remain single-threaded below.
+            worker_session = requests.Session()
+            worker_session.headers.update(session.headers)
+            try:
+                return _default_fetch(url, worker_session)
+            finally:
+                worker_session.close()
     tdnet_lookup = tdnet_lookup or (lambda ticker: _default_tdnet_lookup(ticker, session))
     publish = publish or _default_publish
     pdf_hasher = pdf_hasher or (lambda url: hash_remote_pdf(url, session))
@@ -387,22 +398,38 @@ def run_monitor(
         SELECT id, ticker, company_name, source_url, baseline_completed_at
         FROM company_ir_sources WHERE status='active' ORDER BY ticker, id
     """).fetchall()
+    worker_count = max(1, min(max_workers or int(os.environ.get("COMPANY_IR_WORKERS", "8")), 16))
+
+    def fetch_source(source_row):
+        try:
+            return extract_assets(fetch(source_row[3]), source_row[3]), None
+        except Exception as exc:  # returned to the DB-owning main thread
+            return [], exc
+
+    prefetched: dict[int, tuple[list[IrAsset], Exception | None]] = {}
+    if worker_count == 1 or len(rows) <= 1:
+        for row in rows:
+            prefetched[int(row[0])] = fetch_source(row)
+    else:
+        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="company-ir") as pool:
+            futures = {pool.submit(fetch_source, row): int(row[0]) for row in rows}
+            for future in as_completed(futures):
+                prefetched[futures[future]] = future.result()
+
     tdnet_cache: dict[str, Sequence[Mapping[str, object]]] = {}
     for source_row in rows:
         source = IrSource(int(source_row[0]), source_row[1], source_row[2], source_row[3])
         baseline_mode = source_row[4] is None
         stats.sources += 1
-        try:
-            html = fetch(source.source_url)
-            assets = extract_assets(html, source.source_url)
-        except Exception as exc:
+        assets, fetch_error = prefetched[source.source_id]
+        if fetch_error is not None:
             stats.failed_sources += 1
-            logger.error("IR_SOURCE_FETCH_FAILED ticker=%s URL=%s reason=%s", source.ticker, source.source_url, exc)
+            logger.error("IR_SOURCE_FETCH_FAILED ticker=%s URL=%s reason=%s", source.ticker, source.source_url, fetch_error)
             if not dry_run:
                 conn.execute("""
                     UPDATE company_ir_sources SET last_checked_at=?, last_error=?,
                         failure_count=failure_count+1, updated_at=? WHERE id=?
-                """, (now, str(exc)[:500], now, source.source_id))
+                """, (now, str(fetch_error)[:500], now, source.source_id))
                 conn.commit()
             continue
 
