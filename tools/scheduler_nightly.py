@@ -368,6 +368,13 @@ def main() -> int:
                     f"(edinet-order-event-nightly, other steps unaffected)"
                 )
 
+        # Nightly-only: company official IR materials/videos.  Each source is
+        # isolated inside the worker, so one 404 cannot stop this scheduler.
+        step = run_step("company-ir-monitor", [
+            PYTHON, "-X", "utf8", "tools/company_ir_nightly.py", *dry_flag,
+        ], timeout_sec=1800)
+        steps.append(step)
+
 
         elapsed = time.monotonic() - t_start
         _print_summary(steps, elapsed)

@@ -39,6 +39,8 @@ DISPLAY_SHAREHOLDER = "shareholder"
 DISPLAY_OTHER = "other"
 DISPLAY_EARNINGS_MATERIAL = "earnings_material"
 DISPLAY_MONTHLY_UPDATE = "monthly_update"
+DISPLAY_COMPANY_IR_MATERIAL = "company_ir_material"
+DISPLAY_COMPANY_IR_VIDEO = "company_ir_video"
 
 # event_type → display_category 直接マッピング
 _EVENT_TYPE_TO_CATEGORY = {
@@ -50,6 +52,8 @@ _EVENT_TYPE_TO_CATEGORY = {
     "other": DISPLAY_OTHER,
     "earnings_material": DISPLAY_EARNINGS_MATERIAL,
     "monthly_update": DISPLAY_MONTHLY_UPDATE,
+    "company_ir_material": DISPLAY_COMPANY_IR_MATERIAL,
+    "company_ir_video": DISPLAY_COMPANY_IR_VIDEO,
 }
 
 # headline/title キーワード → display_category マッピング
@@ -746,6 +750,7 @@ def build_supabase_row(event: EventRecord, client=None) -> tuple[dict, dict, str
     strength = _compute_strength_score(event)
     notify_discord = False if event.event_type in (
         EventType.EARNINGS_MATERIAL, EventType.MONTHLY_UPDATE,
+        DISPLAY_COMPANY_IR_MATERIAL, DISPLAY_COMPANY_IR_VIDEO,
     ) else should_notify_event(event)
 
     original_event_type = event.event_type or ""
@@ -810,6 +815,7 @@ def build_supabase_row(event: EventRecord, client=None) -> tuple[dict, dict, str
         "pdf_url": event.doc_url if display_category in (
             "earnings", "forecast", "dividend", "buyback",
             DISPLAY_EARNINGS_MATERIAL, DISPLAY_MONTHLY_UPDATE,
+            DISPLAY_COMPANY_IR_MATERIAL, DISPLAY_COMPANY_IR_VIDEO,
         ) else None,
         "raw_payload": json.dumps(raw_payload, ensure_ascii=False, default=str),
         "strength_score": strength,
