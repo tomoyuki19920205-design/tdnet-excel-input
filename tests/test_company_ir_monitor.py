@@ -75,7 +75,7 @@ def test_unchanged_after_baseline_emits_zero(conn):
     assert stats.new_assets == stats.notified == 0
 
 
-def test_global_gate_baselines_new_asset_even_after_source_baseline(conn):
+def test_global_gate_keeps_post_baseline_asset_pending(conn):
     add_source(conn)
     old = page([("決算説明会資料", "/old.pdf")], "2025年3月期")
     current = old + page([("決算説明会資料", "/new.pdf")], "2026年3月期")
@@ -84,13 +84,35 @@ def test_global_gate_baselines_new_asset_even_after_source_baseline(conn):
     stats = run_monitor(
         conn, fetch=lambda _: current, allow_notifications=False,
         tdnet_lookup=lambda _: [], publish=lambda *args: published.append(args) or True,
+        pdf_hasher=lambda _: "c" * 64,
         now_iso="2026-08-18T19:00:00+09:00",
     )
-    assert stats.notified == 0 and stats.baseline == 1
+    assert stats.notified == 0 and stats.baseline == 0 and stats.pending == 1
     assert published == []
     assert conn.execute(
-        "SELECT is_baseline FROM company_ir_assets WHERE asset_url LIKE '%/new.pdf'"
-    ).fetchone()[0] == 1
+        "SELECT is_baseline,notification_status FROM company_ir_assets WHERE asset_url LIKE '%/new.pdf'"
+    ).fetchone() == (0, "pending")
+
+
+def test_pending_asset_publishes_once_after_gate_opens_even_if_link_disappears(conn):
+    add_source(conn)
+    old = page([("決算説明会資料", "/old.pdf")], "2025年3月期")
+    current = old + page([("決算説明会資料", "/new.pdf")], "2026年3月期")
+    run_monitor(conn, fetch=lambda _: old, now_iso="2026-08-17T19:00:00+09:00")
+    run_monitor(conn, fetch=lambda _: current, allow_notifications=False,
+                tdnet_lookup=lambda _: [], pdf_hasher=lambda _: "d" * 64,
+                now_iso="2026-08-18T19:00:00+09:00")
+    sent = []
+    first = run_monitor(conn, fetch=lambda _: old, allow_notifications=True,
+                        publish=lambda _s, asset, *_: sent.append(asset.asset_url) or True,
+                        now_iso="2026-08-19T19:00:00+09:00")
+    second = run_monitor(conn, fetch=lambda _: old, allow_notifications=True,
+                         publish=lambda *_: True, now_iso="2026-08-20T19:00:00+09:00")
+    assert first.notified == 1 and second.notified == 0
+    assert sent == ["https://example.test/new.pdf"]
+    assert conn.execute(
+        "SELECT notification_status FROM company_ir_assets WHERE asset_url LIKE '%/new.pdf'"
+    ).fetchone()[0] == "notified"
 
 
 @pytest.mark.parametrize("title,url,expected_type", [
@@ -129,6 +151,32 @@ def test_tdnet_same_title_suppresses_company_event(conn):
     assert stats.tdnet_suppressed == 1
     assert stats.notified == 0
     assert sent == []
+
+
+def test_gate_off_tdnet_duplicate_is_suppressed_not_pending(conn):
+    add_source(conn)
+    run_monitor(conn, fetch=lambda _: page([]), now_iso="2026-08-17T19:00:00+09:00")
+    stats = run_monitor(
+        conn, fetch=lambda _: page([("決算説明資料", "/duplicate.pdf")]),
+        allow_notifications=False,
+        tdnet_lookup=lambda _: [{"headline": "2026年3月期 決算説明資料"}],
+        pdf_hasher=lambda _: "e" * 64,
+        now_iso="2026-08-18T19:00:00+09:00",
+    )
+    assert stats.tdnet_suppressed == 1 and stats.pending == stats.notified == 0
+    assert conn.execute(
+        "SELECT notification_status FROM company_ir_assets WHERE asset_url LIKE '%duplicate.pdf'"
+    ).fetchone()[0] == "suppressed"
+
+
+def test_baseline_only_does_not_reclassify_completed_source_assets(conn):
+    add_source(conn)
+    old = page([("決算説明会資料", "/old.pdf")], "2025年3月期")
+    run_monitor(conn, fetch=lambda _: old, now_iso="2026-08-17T19:00:00+09:00")
+    calls = []
+    stats = run_monitor(conn, baseline_only=True, allow_notifications=False,
+                        fetch=lambda url: calls.append(url) or old)
+    assert stats.sources == 0 and calls == []
 
 
 def test_one_404_does_not_stop_other_company(conn):
@@ -178,6 +226,17 @@ def test_same_url_reused_for_a_new_fiscal_period_can_notify(conn):
                         tdnet_lookup=lambda _: [], publish=lambda *_: True,
                         now_iso="2026-08-18T19:00:00+09:00")
     assert stats.new_assets == stats.notified == 1
+
+
+def test_pdf_cachebuster_and_render_dimensions_do_not_create_duplicates(conn):
+    add_source(conn)
+    first = page([("決算説明会資料", "/stable.pdf?1234567890abcdef=")])
+    run_monitor(conn, fetch=lambda _: first, now_iso="2026-08-17T19:00:00+09:00")
+    second = page([("決算説明会資料", "/stable.pdf?fedcba9876543210=&h=500&w=800")])
+    stats = run_monitor(conn, fetch=lambda _: second, allow_notifications=False,
+                        tdnet_lookup=lambda _: [], now_iso="2026-08-18T19:00:00+09:00")
+    assert stats.new_assets == stats.pending == 0
+    assert conn.execute("SELECT count(*) FROM company_ir_assets").fetchone()[0] == 1
 
 
 @pytest.mark.parametrize("event_type", ["company_ir_material", "company_ir_video"])

@@ -381,8 +381,7 @@ def main() -> int:
         # gate remains fail-closed until all-company baseline validation is
         # explicitly completed.
         step = run_step("company-ir-monitor", [
-            PYTHON, "-X", "utf8", "tools/company_ir_nightly.py",
-            "--require-discovery-complete", *dry_flag,
+            PYTHON, "-X", "utf8", "tools/company_ir_nightly.py", *dry_flag,
         ], timeout_sec=1800)
         steps.append(step)
 

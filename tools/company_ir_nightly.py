@@ -21,9 +21,11 @@ def main() -> int:
     parser.add_argument("--db", default="data/company_ir_monitor.db")
     parser.add_argument("--sources", default="config/company_ir_sources.csv")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--workers", type=int)
+    parser.add_argument("--request-interval", type=float)
     parser.add_argument(
         "--baseline-only", action="store_true",
-        help="Persist every newly seen asset as baseline and never publish events",
+        help="Fetch only sources whose initial baseline is not complete",
     )
     parser.add_argument(
         "--require-discovery-complete", action="store_true",
@@ -42,7 +44,7 @@ def main() -> int:
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='company_ir_companies'"
             ).fetchone()
             unfinished = -1 if not table else conn.execute(
-                "SELECT COUNT(*) FROM company_ir_companies WHERE discovery_status IN ('pending','official_only')"
+                "SELECT COUNT(*) FROM company_ir_companies WHERE discovery_status='pending'"
             ).fetchone()[0]
             if unfinished != 0:
                 print("COMPANY_IR_NIGHTLY " + json.dumps({
@@ -56,11 +58,12 @@ def main() -> int:
         gate = notifications_enabled(conn)
         stats = run_monitor(
             conn, dry_run=args.dry_run, baseline_only=args.baseline_only,
-            allow_notifications=gate,
+            allow_notifications=gate, max_workers=args.workers,
+            request_interval_seconds=args.request_interval,
         )
         result = {
             "sources_imported": imported,
-            "baseline_only": args.baseline_only or not gate,
+            "baseline_only": args.baseline_only,
             "notifications_enabled": gate,
             **stats.__dict__,
         }

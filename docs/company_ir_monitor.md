@@ -24,10 +24,17 @@ ticker,company_name,source_url
 4022,ラサ工業,https://www.rasa.co.jp/ir/event/presentation.html
 ```
 
-Nightly resumes 250 unfinished companies per run. A source returning 404 is
-rediscovered from its stored official/IR top URL on a later maintenance run.
-The monitor step is skipped while any company remains `pending` or
-`official_only`, so partial discovery can never start the all-company baseline.
+Nightly resumes about 250 unfinished companies per run. A source returning 404
+is rediscovered from its stored official/IR top URL on a later maintenance run.
+For the one-time initial load, `tools/company_ir_bootstrap.py` continuously runs
+250-company batches with a 30-second inter-batch delay. The per-company status
+is the durable checkpoint, so the command is safe to stop and rerun.
+
+Every successfully discovered source is baselined immediately; discovery of
+the other companies does not block its monitor. First-pass completion means
+every ticker has one mutually-exclusive terminal status, not that every ticker
+was successfully discovered. Terminal failures remain eligible for Nightly
+retry.
 
 ## Safe initialization
 
@@ -37,9 +44,16 @@ complete the baseline. Only assets first observed after that successful
 baseline can create an event.
 
 In addition, `company_ir_monitor_state.notifications_enabled` defaults to `0`.
-While it is off, even an already-baselined page treats newly seen assets as
-baseline and cannot publish. Do not enable it until discovery and the full
-all-company baseline report are complete.
+After a source baseline, a newly seen asset is stored as `pending` while this
+gate is off; it is never downgraded into the baseline. Once the gate is opened,
+durable pending rows publish exactly once and become `notified`. Do not enable
+the gate until discovery, the all-company baseline, and the second dry-run are
+complete.
+
+External IR hosts are never crawled. A directly linked external IR library or
+event page can be registered only from successfully fetched official-domain
+HTML, with `provenance_url`, `is_external=1`, and
+`verified_from_official=1` retained for audit.
 
 Run a no-write crawl with:
 
