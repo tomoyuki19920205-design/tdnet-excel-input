@@ -1,4 +1,7 @@
-from tools.extract_per_share_from_raw import extract_per_share
+from tools.extract_per_share_from_raw import (
+    _actual_component_adjustments,
+    extract_per_share,
+)
 
 
 def _raw(**overrides):
@@ -38,6 +41,131 @@ def test_forecast_dividend_aggregates_interim_and_year_end_components():
 
     assert row is not None
     assert row["forecast_dividend_annual"] == 176
+
+
+def test_actual_interim_plus_forecast_year_end_without_split():
+    row = extract_per_share(_raw(Div2Q="30", FDivFY="40"))
+
+    assert row is not None
+    assert row["forecast_dividend_annual"] == 70
+
+
+def test_pre_split_actual_component_is_normalized_but_post_split_forecast_is_not():
+    prior = _raw(DiscDate="2026-05-11", FDiv2Q="63", FDivFY="21")
+    current = _raw(DiscDate="2026-08-06", Div2Q="63", FDivFY="24")
+    adjustments = _actual_component_adjustments(
+        current,
+        [prior, current],
+        [("2026-06-29", 1 / 3)],
+    )
+    row = extract_per_share(
+        current,
+        actual_dividend_adjustments=adjustments,
+    )
+
+    assert row is not None
+    assert row["dividend_q2"] == 21
+    assert row["forecast_dividend_annual"] == 45
+
+
+def test_both_components_pre_split_remain_on_disclosure_basis_for_viewer_action():
+    prior = _raw(DiscDate="2026-04-01", FDiv2Q="30", FDivFY="40")
+    current = _raw(DiscDate="2026-06-01", Div2Q="30", FDivFY="40")
+    adjustments = _actual_component_adjustments(
+        current,
+        [prior, current],
+        [("2026-07-01", 0.5)],
+    )
+    row = extract_per_share(current, actual_dividend_adjustments=adjustments)
+
+    assert row is not None
+    assert adjustments == {}
+    assert row["forecast_dividend_annual"] == 70
+
+
+def test_both_components_already_post_split_are_not_adjusted_twice():
+    prior = _raw(DiscDate="2026-07-02", FDiv2Q="15", FDivFY="20")
+    current = _raw(DiscDate="2026-08-01", Div2Q="15", FDivFY="20")
+    adjustments = _actual_component_adjustments(
+        current,
+        [prior, current],
+        [("2026-07-01", 0.5)],
+    )
+    row = extract_per_share(current, actual_dividend_adjustments=adjustments)
+
+    assert row is not None
+    assert adjustments == {}
+    assert row["forecast_dividend_annual"] == 35
+
+
+def test_forward_split_not_yet_in_market_data_uses_forecast_share_basis():
+    row = extract_per_share(
+        _raw(
+            Div2Q="86.5",
+            FDivFY="97.5",
+            FNP="8601000000",
+            FEPS="119.3",
+            AvgSh="17992751",
+            ShOutFY="18700000",
+            TrShFY="675484",
+        )
+    )
+
+    assert row is not None
+    assert row["forecast_eps"] == 477.2
+    assert row["forecast_dividend_annual"] == 476.5
+
+
+def test_annual_forecast_only_remains_authoritative():
+    row = extract_per_share(_raw(FDivAnn="90", FDiv2Q="40", FDivFY="50"))
+
+    assert row is not None
+    assert row["forecast_dividend_annual"] == 90
+
+
+def test_full_year_actual_remains_authoritative():
+    row = extract_per_share(
+        _raw(CurPerType="FY", DivAnn="95", Div2Q="40", DivFY="50")
+    )
+
+    assert row is not None
+    assert row["dividend_annual"] == 95
+
+
+def test_forward_reverse_split_direction_is_not_inverted():
+    row = extract_per_share(
+        _raw(
+            Div2Q="10",
+            FDivFY="30",
+            FNP="2000",
+            FEPS="20",
+            AvgSh="200",
+            ShOutFY="220",
+            TrShFY="20",
+        )
+    )
+
+    assert row is not None
+    assert row["forecast_eps"] == 10
+    assert row["forecast_dividend_annual"] == 25
+
+
+def test_matching_post_split_forecast_share_basis_is_not_adjusted_again():
+    row = extract_per_share(
+        _raw(
+            Div2Q="15",
+            FDivFY="20",
+            FNP="4000",
+            FEPS="20",
+            AvgSh="200",
+            ShOutFY="220",
+            TrShFY="20",
+        )
+    )
+
+    assert row is not None
+    assert row["forecast_eps"] == 20
+    assert row["forecast_dividend_annual"] == 35
 
 
 def test_partial_interim_dividend_does_not_masquerade_as_annual():
