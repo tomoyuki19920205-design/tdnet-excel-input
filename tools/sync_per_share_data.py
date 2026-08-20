@@ -103,15 +103,20 @@ _COLS = [
 ]
 
 
-def read_sqlite(db_path: str, limit: int = 0):
+def read_sqlite(db_path: str, limit: int = 0, ticker: str | None = None):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
 
-    query = f"SELECT {', '.join(_COLS)} FROM per_share_data ORDER BY ticker, period DESC"
+    query = f"SELECT {', '.join(_COLS)} FROM per_share_data"
+    params: list[str] = []
+    if ticker:
+        query += " WHERE ticker = ?"
+        params.append(ticker)
+    query += " ORDER BY ticker, period DESC"
     if limit > 0:
         query += f" LIMIT {limit}"
 
-    rows = conn.execute(query).fetchall()
+    rows = conn.execute(query, params).fetchall()
     conn.close()
 
     now_iso = datetime.now(JST).isoformat()
@@ -123,8 +128,8 @@ def read_sqlite(db_path: str, limit: int = 0):
     return data
 
 
-def sync(db_path, supabase_url, supabase_key, dry_run=True, limit=0):
-    data = read_sqlite(db_path, limit=limit)
+def sync(db_path, supabase_url, supabase_key, dry_run=True, limit=0, ticker=None):
+    data = read_sqlite(db_path, limit=limit, ticker=ticker)
     logger.info(f"[SYNC] {len(data):,} rows from SQLite per_share_data")
 
     if not data:
@@ -160,6 +165,7 @@ def main():
     parser.add_argument("--sqlite", default=_DEFAULT_DB)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--ticker", help="対象銘柄だけを同期（例: 7480）")
     args = parser.parse_args()
 
     is_dry_run = not args.apply
@@ -185,7 +191,14 @@ def main():
         logger.error("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY 未設定")
         sys.exit(1)
 
-    stats = sync(args.sqlite, url, key, dry_run=is_dry_run, limit=args.limit)
+    stats = sync(
+        args.sqlite,
+        url,
+        key,
+        dry_run=is_dry_run,
+        limit=args.limit,
+        ticker=args.ticker,
+    )
     sys.exit(1 if stats["errors"] > 0 else 0)
 
 
