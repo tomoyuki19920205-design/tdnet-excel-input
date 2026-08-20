@@ -85,6 +85,48 @@ def safe_int(val) -> int | None:
         return None
 
 
+def _annual_dividend(
+    raw: dict,
+    annual_key: str,
+    component_keys: tuple[str, ...],
+    *,
+    require_fiscal_year_end: bool,
+) -> float | None:
+    """Return authoritative annual DPS, with a guarded component fallback.
+
+    J-Quants annual fields already include ordinary, special, and
+    commemorative dividends, so they must outrank a component sum.  A sum is
+    only safe once the fiscal-year-end component is present; otherwise an
+    interim-only disclosure would be mistaken for a full-year dividend.
+    """
+    annual = safe_float(raw.get(annual_key))
+    if annual is not None:
+        return annual
+
+    components = [safe_float(raw.get(key)) for key in component_keys]
+    if require_fiscal_year_end and components[-1] is None:
+        return None
+    present = [value for value in components if value is not None]
+    return sum(present) if present else None
+
+
+def _derived_bps(raw: dict) -> float | None:
+    """Derive current-basis BPS when J-Quants omits the explicit field."""
+    explicit = safe_float(raw.get("BPS"))
+    if explicit is not None:
+        return explicit
+
+    equity = safe_float(raw.get("Eq") or raw.get("Equity"))
+    issued = safe_int(raw.get("ShOutFY"))
+    treasury = safe_int(raw.get("TrShFY"))
+    if equity is None or issued is None or treasury is None:
+        return None
+    denominator = issued - treasury
+    if denominator <= 0:
+        return None
+    return round(equity / denominator, 2)
+
+
 def _next_fiscal_year_end(period_str: str) -> str | None:
     """当期末日 → 翌期末日を計算する。閏年・月末ズレを考慮。
 
@@ -141,7 +183,12 @@ def extract_per_share(raw: dict) -> dict | None:
 
     # forecast: 当期予想のみ (案A — NxF系は入れない)
     forecast_eps = safe_float(raw.get("FEPS"))
-    forecast_div = safe_float(raw.get("FDivAnn"))
+    forecast_div = _annual_dividend(
+        raw,
+        "FDivAnn",
+        ("FDiv1Q", "FDiv2Q", "FDiv3Q", "FDivFY"),
+        require_fiscal_year_end=True,
+    )
     forecast_payout = safe_float(raw.get("FPayoutRatioAnn"))
 
     return {
@@ -152,12 +199,17 @@ def extract_per_share(raw: dict) -> dict | None:
         # 実績
         "eps": safe_float(raw.get("EPS")),
         "diluted_eps": safe_float(raw.get("DEPS")),
-        "bps": safe_float(raw.get("BPS")),
+        "bps": _derived_bps(raw),
         "dividend_q1": safe_float(raw.get("Div1Q")),
         "dividend_q2": safe_float(raw.get("Div2Q")),
         "dividend_q3": safe_float(raw.get("Div3Q")),
         "dividend_fy_end": safe_float(raw.get("DivFY")),
-        "dividend_annual": safe_float(raw.get("DivAnn")),
+        "dividend_annual": _annual_dividend(
+            raw,
+            "DivAnn",
+            ("Div1Q", "Div2Q", "Div3Q", "DivFY"),
+            require_fiscal_year_end=True,
+        ),
         "payout_ratio": safe_float(raw.get("PayoutRatioAnn")),
         # 予想 (FEPS/FDivAnn 優先, Nx系フォールバック)
         "forecast_eps": forecast_eps,
@@ -168,9 +220,9 @@ def extract_per_share(raw: dict) -> dict | None:
         "treasury_stock": safe_int(raw.get("TrShFY")),
         "avg_shares": safe_int(raw.get("AvgSh")),
         # BS
-        "total_assets": safe_int(raw.get("TotalAssets")),
-        "equity": safe_int(raw.get("Equity")),
-        "equity_ratio": safe_float(raw.get("EquityRatio")),
+        "total_assets": safe_int(raw.get("TA") or raw.get("TotalAssets")),
+        "equity": safe_int(raw.get("Eq") or raw.get("Equity")),
+        "equity_ratio": safe_float(raw.get("EqAR") or raw.get("EquityRatio")),
         "source": "jquants",
     }
 
@@ -220,7 +272,12 @@ def _extract_next_year_forecast(raw: dict, fy_record: dict) -> dict | None:
         "payout_ratio":             None,
         "forecast_eps":             nx_feps,
         "initial_forecast_eps":     nx_feps,   # 本決算発表時のNxFEPS = 期初予想。原則不変。
-        "forecast_dividend_annual": safe_float(raw.get("NxFDivAnn")),
+        "forecast_dividend_annual": _annual_dividend(
+            raw,
+            "NxFDivAnn",
+            ("NxFDiv1Q", "NxFDiv2Q", "NxFDiv3Q", "NxFDivFY"),
+            require_fiscal_year_end=True,
+        ),
         "forecast_payout_ratio":    safe_float(raw.get("NxFPayoutRatioAnn")),
         "shares_outstanding":       None,
         "treasury_stock":           None,
@@ -235,7 +292,12 @@ def _extract_next_year_forecast(raw: dict, fy_record: dict) -> dict | None:
 # ============================================================
 # メイン処理
 # ============================================================
-def run(db_path: str, dry_run: bool = True, limit: int = 0) -> dict:
+def run(
+    db_path: str,
+    dry_run: bool = True,
+    limit: int = 0,
+    ticker: str | None = None,
+) -> dict:
     stats = {"total_raw": 0, "extracted": 0, "upserted": 0, "nxf_upserted": 0, "skipped": 0, "errors": 0}
 
     conn = sqlite3.connect(db_path)
@@ -260,6 +322,7 @@ def run(db_path: str, dry_run: bool = True, limit: int = 0) -> dict:
     # 重複排除: (ticker, period, quarter) → 最新の disclosed_date のデータを優先
     best: dict[tuple, dict] = {}
 
+    ticker_filter = normalize_ticker(ticker) if ticker else None
     for row in rows:
         raw_json_str = row["raw_json"]
         try:
@@ -271,6 +334,8 @@ def run(db_path: str, dry_run: bool = True, limit: int = 0) -> dict:
         record = extract_per_share(raw)
         if not record:
             stats["skipped"] += 1
+            continue
+        if ticker_filter and record["ticker"] != ticker_filter:
             continue
 
         stats["extracted"] += 1
@@ -448,6 +513,7 @@ def main():
     parser.add_argument("--apply", action="store_true", help="本番反映")
     parser.add_argument("--dry-run", action="store_true", help="ドライラン (デフォルト)")
     parser.add_argument("--limit", type=int, default=0, help="処理行数上限")
+    parser.add_argument("--ticker", help="対象銘柄だけを再構築（例: 7480）")
     args = parser.parse_args()
 
     os.makedirs(_LOG_DIR, exist_ok=True)
@@ -468,8 +534,14 @@ def main():
     logger.info(f"=== extract_per_share {'DRY-RUN' if is_dry_run else 'APPLY'} ===")
     logger.info(f"  db: {args.db}")
     logger.info(f"  limit: {args.limit or '無制限'}")
+    logger.info(f"  ticker: {args.ticker or '全銘柄'}")
 
-    stats = run(args.db, dry_run=is_dry_run, limit=args.limit)
+    stats = run(
+        args.db,
+        dry_run=is_dry_run,
+        limit=args.limit,
+        ticker=args.ticker,
+    )
 
     logger.info(f"\n{'='*60}")
     logger.info(f"  完了")
