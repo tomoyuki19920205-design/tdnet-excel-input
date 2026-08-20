@@ -14,10 +14,12 @@ import argparse
 import calendar
 import json
 import logging
+import math
 import os
 import sqlite3
 import sys
 from datetime import date, datetime, timedelta, timezone
+from fractions import Fraction
 from pathlib import Path
 
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
@@ -110,6 +112,196 @@ def _annual_dividend(
     return sum(present) if present else None
 
 
+_DIVIDEND_COMPONENTS = (
+    ("Div1Q", "FDiv1Q"),
+    ("Div2Q", "FDiv2Q"),
+    ("Div3Q", "FDiv3Q"),
+    ("DivFY", "FDivFY"),
+)
+
+
+def _has_mixed_dividend_components(raw: dict) -> bool:
+    """Return whether actual and still-forecast DPS coexist in one FY row."""
+    has_actual = any(safe_float(raw.get(actual_key)) is not None
+                     for actual_key, _ in _DIVIDEND_COMPONENTS)
+    has_forecast = any(
+        safe_float(raw.get(actual_key)) is None
+        and safe_float(raw.get(forecast_key)) is not None
+        for actual_key, forecast_key in _DIVIDEND_COMPONENTS
+    )
+    return has_actual and has_forecast
+
+
+def _snap_corporate_action_multiplier(value: float) -> float | None:
+    """Snap an independently-derived share-basis ratio to a safe rational."""
+    if not math.isfinite(value) or value <= 0:
+        return None
+    if 0.95 <= value <= 1.05:
+        return 1.0
+    if 2 / 3 < value < 1.5:
+        return None
+
+    rational = Fraction(value).limit_denominator(20)
+    snapped = rational.numerator / rational.denominator
+    if not math.isclose(value, snapped, rel_tol=0.025, abs_tol=0.005):
+        return None
+    return snapped
+
+
+def _forecast_basis_multiplier(raw: dict) -> float:
+    """Convert forecast per-share facts to the disclosure-date share basis.
+
+    After a forward split is announced, issuer FEPS and remaining forecast DPS
+    can already use the future post-action basis while paid interim DPS and the
+    raw share price remain pre-action.  FNP / FEPS exposes that forecast share
+    denominator.  It is accepted only when both average shares and period-end
+    net issued shares independently yield the same small rational ratio.
+
+    The inference is restricted to mixed actual/forecast rows whose annual
+    forecast is absent.  That is the structured fail-close signal emitted when
+    the components cannot safely be added as reported, and it prevents normal
+    capital issuance from being mistaken for a split.
+    """
+    if safe_float(raw.get("FDivAnn")) is not None:
+        return 1.0
+    if not _has_mixed_dividend_components(raw):
+        return 1.0
+
+    forecast_profit = safe_float(raw.get("FNP") or raw.get("FNCNP"))
+    forecast_eps = safe_float(raw.get("FEPS"))
+    average_shares = safe_float(raw.get("AvgSh"))
+    issued = safe_float(raw.get("ShOutFY"))
+    treasury = safe_float(raw.get("TrShFY"))
+    net_issued = None
+    if issued is not None and treasury is not None and issued > treasury:
+        net_issued = issued - treasury
+
+    if (
+        forecast_profit is None
+        or forecast_eps is None
+        or forecast_profit == 0
+        or forecast_eps == 0
+        or average_shares is None
+        or average_shares <= 0
+        or net_issued is None
+    ):
+        return 1.0
+
+    forecast_shares = abs(forecast_profit / forecast_eps)
+    from_average = _snap_corporate_action_multiplier(
+        forecast_shares / average_shares
+    )
+    from_period_end = _snap_corporate_action_multiplier(
+        forecast_shares / net_issued
+    )
+    if (
+        from_average is None
+        or from_period_end is None
+        or not math.isclose(from_average, from_period_end, rel_tol=1e-12)
+    ):
+        return 1.0
+    return from_average
+
+
+def _mixed_forecast_annual_dividend(
+    raw: dict,
+    *,
+    actual_adjustments: dict[str, float] | None = None,
+    forecast_multiplier: float = 1.0,
+) -> float | None:
+    """Build annual DPS from actual-to-date plus remaining forecast.
+
+    Each component is converted independently to the disclosure-date basis.
+    Viewer can then apply only actions after that disclosure to compare the
+    annual DPS with a later raw close, without double adjustment.
+    """
+    annual = safe_float(raw.get("FDivAnn"))
+    if annual is not None:
+        return annual
+
+    adjustments = actual_adjustments or {}
+    values: list[float] = []
+    for actual_key, forecast_key in _DIVIDEND_COMPONENTS:
+        actual = safe_float(raw.get(actual_key))
+        if actual is not None:
+            values.append(actual * adjustments.get(actual_key, 1.0))
+            continue
+        forecast = safe_float(raw.get(forecast_key))
+        if forecast is not None:
+            values.append(forecast * forecast_multiplier)
+
+    actual_fy = safe_float(raw.get("DivFY"))
+    forecast_fy = safe_float(raw.get("FDivFY"))
+    if actual_fy is None and forecast_fy is None:
+        return None
+    return sum(values) if values else None
+
+
+def _cumulative_action_factor(
+    actions: list[tuple[str, float]],
+    *,
+    after_date: str,
+    through_date: str,
+) -> float:
+    return math.prod(
+        factor
+        for action_date, factor in actions
+        if action_date > after_date and action_date <= through_date
+    )
+
+
+def _actual_component_adjustments(
+    raw: dict,
+    prior_rows: list[dict],
+    actions: list[tuple[str, float]],
+) -> dict[str, float]:
+    """Infer a paid component's basis from its first matching disclosed value.
+
+    Exact value continuity is required.  An action between that source
+    disclosure and the current disclosure adjusts only the repeated actual
+    component; values first disclosed after the action remain untouched.
+    """
+    disclosed = str(raw.get("DiscDate") or raw.get("DisclosedDate") or "")
+    if not disclosed or not actions:
+        return {}
+
+    result: dict[str, float] = {}
+    for actual_key, forecast_key in _DIVIDEND_COMPONENTS:
+        current = safe_float(raw.get(actual_key))
+        if current is None:
+            continue
+        basis_date: str | None = None
+        # Use the first continuous disclosure of this exact component value,
+        # not merely the latest repeat.  A paid interim dividend can continue
+        # to be reported on its record-date (pre-split) basis for multiple
+        # disclosures after the action (for example 2Q -> 3Q).
+        for previous in prior_rows:
+            previous_date = str(
+                previous.get("DiscDate") or previous.get("DisclosedDate") or ""
+            )
+            if not previous_date or previous_date >= disclosed:
+                continue
+            candidates = (
+                safe_float(previous.get(actual_key)),
+                safe_float(previous.get(forecast_key)),
+            )
+            if any(
+                candidate is not None
+                and math.isclose(current, candidate, rel_tol=1e-12, abs_tol=1e-9)
+                for candidate in candidates
+            ):
+                basis_date = previous_date
+                break
+        if basis_date is None:
+            continue
+        factor = _cumulative_action_factor(
+            actions, after_date=basis_date, through_date=disclosed
+        )
+        if not math.isclose(factor, 1.0, rel_tol=1e-12):
+            result[actual_key] = factor
+    return result
+
+
 def _derived_bps(raw: dict) -> float | None:
     """Derive current-basis BPS when J-Quants omits the explicit field."""
     explicit = safe_float(raw.get("BPS"))
@@ -148,7 +340,11 @@ def _normalize_period(raw: str) -> str:
     return raw if raw in ("1Q", "2Q", "3Q", "4Q", "FY") else (raw or "UNKNOWN")
 
 
-def extract_per_share(raw: dict) -> dict | None:
+def extract_per_share(
+    raw: dict,
+    *,
+    actual_dividend_adjustments: dict[str, float] | None = None,
+) -> dict | None:
     """raw_json (J-Quants /fins/statements レスポンス行) から per_share 指標を抽出。
 
     raw_json のキーは短縮名 (fetch_jquants_bulk.py が保存時に短縮):
@@ -182,14 +378,36 @@ def extract_per_share(raw: dict) -> dict | None:
     quarter = _normalize_period(period_type)
 
     # forecast: 当期予想のみ (案A — NxF系は入れない)
-    forecast_eps = safe_float(raw.get("FEPS"))
-    forecast_div = _annual_dividend(
+    forecast_multiplier = _forecast_basis_multiplier(raw)
+    raw_forecast_eps = safe_float(raw.get("FEPS"))
+    forecast_eps = (
+        raw_forecast_eps * forecast_multiplier
+        if raw_forecast_eps is not None
+        else None
+    )
+    forecast_div = _mixed_forecast_annual_dividend(
         raw,
-        "FDivAnn",
-        ("FDiv1Q", "FDiv2Q", "FDiv3Q", "FDivFY"),
-        require_fiscal_year_end=True,
+        actual_adjustments=actual_dividend_adjustments,
+        forecast_multiplier=forecast_multiplier,
     )
     forecast_payout = safe_float(raw.get("FPayoutRatioAnn"))
+    actual_adjustments = actual_dividend_adjustments or {}
+
+    def normalized_actual(key: str) -> float | None:
+        value = safe_float(raw.get(key))
+        return (
+            value * actual_adjustments.get(key, 1.0)
+            if value is not None
+            else None
+        )
+
+    actual_dividend_annual = safe_float(raw.get("DivAnn"))
+    if actual_dividend_annual is None and normalized_actual("DivFY") is not None:
+        actual_dividend_annual = sum(
+            value
+            for key in ("Div1Q", "Div2Q", "Div3Q", "DivFY")
+            if (value := normalized_actual(key)) is not None
+        )
 
     return {
         "ticker": ticker,
@@ -200,16 +418,11 @@ def extract_per_share(raw: dict) -> dict | None:
         "eps": safe_float(raw.get("EPS")),
         "diluted_eps": safe_float(raw.get("DEPS")),
         "bps": _derived_bps(raw),
-        "dividend_q1": safe_float(raw.get("Div1Q")),
-        "dividend_q2": safe_float(raw.get("Div2Q")),
-        "dividend_q3": safe_float(raw.get("Div3Q")),
-        "dividend_fy_end": safe_float(raw.get("DivFY")),
-        "dividend_annual": _annual_dividend(
-            raw,
-            "DivAnn",
-            ("Div1Q", "Div2Q", "Div3Q", "DivFY"),
-            require_fiscal_year_end=True,
-        ),
+        "dividend_q1": normalized_actual("Div1Q"),
+        "dividend_q2": normalized_actual("Div2Q"),
+        "dividend_q3": normalized_actual("Div3Q"),
+        "dividend_fy_end": normalized_actual("DivFY"),
+        "dividend_annual": actual_dividend_annual,
         "payout_ratio": safe_float(raw.get("PayoutRatioAnn")),
         # 予想 (FEPS/FDivAnn 優先, Nx系フォールバック)
         "forecast_eps": forecast_eps,
@@ -310,28 +523,75 @@ def run(
                disclosed_date, raw_json
         FROM jquants_financials_normalized
         WHERE raw_json IS NOT NULL AND raw_json != ''
-        ORDER BY local_code, current_fiscal_year_end_date, type_of_current_period
     """
+    query_params: list[str] = []
+    ticker_filter = normalize_ticker(ticker) if ticker else None
+    if ticker_filter:
+        query += " AND substr(local_code, 1, 4) = ?"
+        query_params.append(ticker_filter)
+    query += " ORDER BY local_code, current_fiscal_year_end_date, type_of_current_period"
     if limit > 0:
         query += f" LIMIT {limit}"
 
-    rows = conn.execute(query).fetchall()
+    rows = conn.execute(query, query_params).fetchall()
     stats["total_raw"] = len(rows)
     logger.info(f"[RAW] raw_json 付き: {len(rows):,} 行")
+
+    parsed_rows: list[dict] = []
+    for row in rows:
+        try:
+            raw = json.loads(row["raw_json"])
+        except (json.JSONDecodeError, TypeError):
+            stats["skipped"] += 1
+            continue
+        parsed_rows.append(raw)
+
+    history: dict[tuple[str, str], list[dict]] = {}
+    for raw in parsed_rows:
+        code = str(raw.get("Code") or raw.get("LocalCode") or "")
+        fiscal_year = str(
+            raw.get("CurFYEn") or raw.get("CurrentFiscalYearEndDate") or ""
+        )
+        if not code or not fiscal_year:
+            continue
+        key = (normalize_ticker(code), fiscal_year)
+        history.setdefault(key, []).append(raw)
+    for prior_rows in history.values():
+        prior_rows.sort(key=lambda item: str(
+            item.get("DiscDate") or item.get("DisclosedDate") or ""
+        ))
+
+    action_map: dict[str, list[tuple[str, float]]] = {}
+    for action_row in conn.execute(
+        """
+        SELECT ticker, date, adj_factor
+        FROM market_data
+        WHERE adj_factor IS NOT NULL AND adj_factor > 0 AND adj_factor != 1
+        ORDER BY ticker, date
+        """
+    ):
+        action_map.setdefault(str(action_row["ticker"]), []).append(
+            (str(action_row["date"]), float(action_row["adj_factor"]))
+        )
 
     # 重複排除: (ticker, period, quarter) → 最新の disclosed_date のデータを優先
     best: dict[tuple, dict] = {}
 
-    ticker_filter = normalize_ticker(ticker) if ticker else None
-    for row in rows:
-        raw_json_str = row["raw_json"]
-        try:
-            raw = json.loads(raw_json_str)
-        except (json.JSONDecodeError, TypeError):
-            stats["skipped"] += 1
-            continue
-
-        record = extract_per_share(raw)
+    for raw in parsed_rows:
+        code = str(raw.get("Code") or raw.get("LocalCode") or "")
+        fiscal_year = str(
+            raw.get("CurFYEn") or raw.get("CurrentFiscalYearEndDate") or ""
+        )
+        raw_ticker = normalize_ticker(code)
+        adjustments = _actual_component_adjustments(
+            raw,
+            history.get((raw_ticker, fiscal_year), []),
+            action_map.get(raw_ticker, []),
+        )
+        record = extract_per_share(
+            raw,
+            actual_dividend_adjustments=adjustments,
+        )
         if not record:
             stats["skipped"] += 1
             continue
