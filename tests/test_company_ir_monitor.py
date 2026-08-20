@@ -13,6 +13,7 @@ from src.company_ir_monitor import (
     _ResolverCircuit,
     extract_assets,
     init_db,
+    normalize_company_ir_display_title,
     run_monitor,
 )
 import src.company_ir_monitor as company_ir_monitor
@@ -34,6 +35,53 @@ def add_source(conn, ticker="4022", company="ラサ工業", url=SOURCE_URL):
         (ticker, company, url),
     )
     conn.commit()
+
+
+@pytest.mark.parametrize(
+    "raw_title, expected",
+    [
+        (
+            "2026年08月20日 2027年３月期 第１四半期 決算補足説明資料（5,968KB）",
+            "2027年3月期 第1四半期 決算補足説明資料",
+        ),
+        ("2027年3月期 第1四半期 決算補足説明資料", "2027年3月期 第1四半期 決算補足説明資料"),
+        ("2027年３月期 第１四半期 決算補足説明資料", "2027年3月期 第1四半期 決算補足説明資料"),
+        ("2026/08/20 2027年3月期 第1四半期 決算補足説明資料(5968KB)", "2027年3月期 第1四半期 決算補足説明資料"),
+        ("2026-08-20 2027 年 3 月期 第 1 四半期 決算補足説明資料（約6MB）", "2027年3月期 第1四半期 決算補足説明資料"),
+        ("2026年08月20日 2027年3月期 第1四半期 決算補足説明資料", "2027年3月期 第1四半期 決算補足説明資料"),
+        ("2027年3月期 第1四半期 決算補足説明資料（1.2MB）", "2027年3月期 第1四半期 決算補足説明資料"),
+    ],
+)
+def test_company_ir_display_title_normalization(raw_title, expected):
+    assert normalize_company_ir_display_title(raw_title) == expected
+
+
+def test_company_ir_display_title_normalization_preserves_substantive_identity():
+    titles = {
+        normalize_company_ir_display_title("2027年3月期 第1四半期 決算補足説明資料"),
+        normalize_company_ir_display_title("2028年3月期 第1四半期 決算補足説明資料"),
+        normalize_company_ir_display_title("2027年3月期 第2四半期 決算補足説明資料"),
+        normalize_company_ir_display_title("2027年3月期 第1四半期 決算説明会資料"),
+    }
+    assert len(titles) == 4
+
+
+def test_default_publish_uses_normalized_title_without_mutating_asset(monkeypatch):
+    source = company_ir_monitor.IrSource(1, "6418", "日本金銭機械", SOURCE_URL)
+    raw_title = "2026年08月20日 2027年３月期 第１四半期 決算補足説明資料（5,968KB）"
+    asset = company_ir_monitor.IrAsset(
+        ASSET_MATERIAL,
+        raw_title,
+        "https://example.test/material.pdf",
+        SOURCE_URL,
+        "a" * 64,
+    )
+    saved = []
+    monkeypatch.setattr(company_ir_monitor, "save_event_to_supabase", lambda event, **_: saved.append(event) or {"action": "inserted"})
+
+    assert company_ir_monitor._default_publish(source, asset, "2026-08-20T11:38:44+09:00", False)
+    assert saved[0].title == "2027年3月期 第1四半期 決算補足説明資料"
+    assert asset.title == raw_title
 
 
 @pytest.fixture

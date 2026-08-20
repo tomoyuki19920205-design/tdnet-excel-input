@@ -104,6 +104,25 @@ def normalize_text(value: str) -> str:
     return re.sub(r"\s+", "", unicodedata.normalize("NFKC", value or "")).lower()
 
 
+def normalize_company_ir_display_title(value: str) -> str:
+    """Derive a stable viewer title without changing persisted source metadata."""
+    title = unicodedata.normalize("NFKC", value or "")
+    title = re.sub(
+        r"^\s*(?:\d{4}年\s*\d{1,2}月\s*\d{1,2}日|\d{4}\s*[/\-]\s*\d{1,2}\s*[/\-]\s*\d{1,2})\s*",
+        "",
+        title,
+    )
+    title = re.sub(
+        r"\s*[\(\[]\s*(?:約\s*)?[\d,.]+\s*(?:KB|MB|GB)\s*[\)\]]\s*$",
+        "",
+        title,
+        flags=re.IGNORECASE,
+    )
+    title = re.sub(r"(\d{4})\s*年\s*(\d{1,2})\s*月期", r"\1年\2月期", title)
+    title = re.sub(r"第\s*([1-4])\s*四半期", r"第\1四半期", title)
+    return re.sub(r"\s+", " ", title).strip()
+
+
 def normalize_url(value: str) -> str:
     """Stable URL identity without fragments and common tracking parameters."""
     parts = urlsplit((value or "").strip())
@@ -534,12 +553,13 @@ def _default_tdnet_lookup(ticker: str, session: requests.Session) -> list[dict]:
 
 def _default_publish(source: IrSource, asset: IrAsset, first_seen_at: str, dry_run: bool) -> bool:
     event_type = EVENT_MATERIAL if asset.asset_type == ASSET_MATERIAL else EVENT_VIDEO
+    display_title = normalize_company_ir_display_title(asset.title)
     record = EventRecord(
         source_doc_id=_asset_key(source.ticker, asset),
         ticker=source.ticker,
         company_name=source.company_name,
         disclosure_datetime=first_seen_at,
-        title=asset.title,
+        title=display_title,
         doc_url=asset.asset_url,
         event_type=event_type,
         subtype="company_ir",
