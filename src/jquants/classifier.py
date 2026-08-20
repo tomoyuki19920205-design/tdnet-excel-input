@@ -16,6 +16,7 @@ from typing import Optional
 
 # 既存モデルの参照（読み取りのみ）
 from src.models import DisclosureType
+from src.review_completion import classify_procedural_review_completion
 
 
 # ============================================================
@@ -134,11 +135,6 @@ def classify_by_title_fallback(title: str) -> Optional[str]:
     """
     n = _normalize_title(title)
 
-    # 決算短信
-    fs_kws = ["決算短信", "四半期決算", "通期決算", "訂正決算短信"]
-    if any(kw in n for kw in fs_kws):
-        return DisclosureType.FINANCIAL_STATEMENT
-
     # 業績予想修正
     has_gyoseki_or_yoso = ("業績" in n or "予想" in n)
     revision_kws = ["修正", "変更", "上方修正", "下方修正", "差異"]
@@ -151,6 +147,14 @@ def classify_by_title_fallback(title: str) -> Optional[str]:
     # 配当予想修正
     if "配当" in n and has_revision:
         return DisclosureType.DIVIDEND_REVISION
+
+    if classify_procedural_review_completion(title):
+        return DisclosureType.REVIEW_COMPLETION
+
+    # 決算短信 (forecast/dividend/review-completion intent 判定後)
+    fs_kws = ["決算短信", "四半期決算", "通期決算", "訂正決算短信"]
+    if any(kw in n for kw in fs_kws):
+        return DisclosureType.FINANCIAL_STATEMENT
 
     # 自社株買い
     buyback_must = ["自己株式取得", "自己株式の取得", "自己株式立会外", "tostnet"]
@@ -174,7 +178,19 @@ def classify_disclosure_jquants(disc_items: list[str], title: str) -> Optional[s
     Returns:
         DisclosureType 定数 or None
     """
+    # DiscItems 11301-11309 describes the document container and cannot
+    # distinguish a later procedural review-completion revision.  Semantic
+    # intent therefore has precedence for this one non-financial event.
+    if classify_procedural_review_completion(title):
+        return DisclosureType.REVIEW_COMPLETION
+
+    # Conversely, a mixed-code document explicitly advertising a forecast or
+    # dividend revision must retain that investor-facing event type.
+    title_result = classify_by_title_fallback(title)
+    if title_result in (DisclosureType.FORECAST_REVISION, DisclosureType.DIVIDEND_REVISION):
+        return title_result
+
     result = classify_by_disc_items(disc_items)
     if result is not None:
         return result
-    return classify_by_title_fallback(title)
+    return title_result

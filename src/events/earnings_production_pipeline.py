@@ -22,6 +22,10 @@ import re
 import sqlite3
 import time
 from src.cache.cache_manager import make_cache_key, load_json, save_json
+from src.review_completion import (
+    should_suppress_after_financial_comparison,
+    should_suppress_earnings_notification,
+)
 import dataclasses
 from .common_normalizers import extract_common_disclosure_no
 from .summary_financials import EarningsSummaryData
@@ -452,7 +456,50 @@ def _is_tanshin_title(title: str) -> bool:
         return False
     if _EXCLUDE_TITLE_RE.search(title):
         return False
+    if should_suppress_earnings_notification(title):
+        return False
     return True
+
+
+def _should_suppress_review_completion_with_history(
+    conn: sqlite3.Connection | None,
+    title: str,
+    current: dict,
+) -> bool:
+    """Resolve ambiguous review-completion titles against prior local history.
+
+    The query is read-only and runs before the current revision is inserted.
+    If history is unavailable, the comparison policy fails open.
+    """
+    if should_suppress_earnings_notification(title):
+        return True
+    if conn is None:
+        return False
+    ticker = str(current.get("ticker") or "")
+    fiscal_year = str(current.get("fiscal_year") or "")
+    quarter = str(current.get("quarter") or "")
+    if not ticker or not fiscal_year or not quarter:
+        return False
+    try:
+        cursor = conn.execute(
+            """
+            SELECT sales_value, op_value, guidance_sales, guidance_op, guidance_eps
+            FROM earnings_summaries
+            WHERE ticker = ? AND fiscal_year = ? AND quarter = ?
+            ORDER BY disclosure_date DESC, id DESC
+            LIMIT 1
+            """,
+            (ticker, fiscal_year, quarter),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return False
+        columns = [description[0] for description in cursor.description]
+        previous = dict(zip(columns, row))
+        return should_suppress_after_financial_comparison(title, previous, current)
+    except (sqlite3.Error, TypeError, ValueError) as exc:
+        logger.warning("[EARNINGS][REVIEW_COMPLETION] history comparison failed open: %s", exc)
+        return False
 
 
 def _derive_fiscal_year_end_period(title: str) -> str | None:
@@ -1394,6 +1441,11 @@ def run_single_earnings_apply(
 
     save_plan = build_save_call_plan(payload)
     event_payload = dict(save_plan["tdnet_event_payload"])
+    review_notification_suppressed = _should_suppress_review_completion_with_history(
+        conn,
+        working_doc.get("title", ""),
+        save_plan["earnings_summary_args"],
+    )
     event_payload["source_doc_id"] = canonical_id
     event_payload["doc_url"] = source_url
     event = EventRecord(**event_payload)
@@ -1423,7 +1475,9 @@ def run_single_earnings_apply(
         )
 
     try:
-        if has_real_dependencies:
+        if review_notification_suppressed:
+            supabase_result = {"action": "suppressed_review_completion"}
+        elif has_real_dependencies:
             supabase_result = save_event_to_supabase(event)
         elif state_recorder is not None and getattr(save_event_to_supabase, "__module__", "") != "src.events.tdnet_event_store":
             # A caller-provided test double may exercise the failure branch without
@@ -1443,7 +1497,7 @@ def run_single_earnings_apply(
             **_single_apply_worker_provenance(worker_result),
         }
 
-    if enable_discord:
+    if enable_discord and not review_notification_suppressed:
         send_earnings_discord(webhook_url, payload.get("discord_message_preview", ""))
 
     state_updated = False
@@ -1462,7 +1516,8 @@ def run_single_earnings_apply(
         "discord_sent": bool(enable_discord), "canonical_synced": False,
         "segment_synced": False, "partial_failure": False,
         "sqlite_saved": sqlite_saved,
-        "supabase_saved": has_real_dependencies,
+        "supabase_saved": has_real_dependencies and not review_notification_suppressed,
+        "review_completion_notification_suppressed": review_notification_suppressed,
         **_single_apply_worker_provenance(worker_result),
     }
 
@@ -1655,6 +1710,12 @@ def run_earnings_production(
                         logger.error("[EARNINGS][REAL] %s call_plan invalid: %s. STOP.", _ticker, _cp_reason)
                         result.errors.append(f"{_ticker}: call_plan_invalid={_cp_reason}")
                         return result
+
+                    _review_notification_suppressed = _should_suppress_review_completion_with_history(
+                        conn,
+                        _merged_plan["earnings_summary_args"].get("title", ""),
+                        _merged_plan["earnings_summary_args"],
+                    )
 
                     if os.getenv("EARNINGS_CANONICAL_GATEWAY_DRYRUN") == "1":
                         _cp_args = _merged_plan["earnings_summary_args"]
@@ -1891,7 +1952,12 @@ def run_earnings_production(
 
                     _ev_rec_fields = {k: v for k, v in _ev_dict.items() if k not in ("source_url", "archive_path")}
                     _ev_rec = EventRecord(**_ev_rec_fields)
-                    _sup_res = save_event_to_supabase(_ev_rec)
+                    if _review_notification_suppressed:
+                        _sup_res = {"action": "suppressed_review_completion"}
+                        result.filtered_count += 1
+                        logger.info("[EARNINGS][REVIEW_COMPLETION] Viewer card suppressed: %s", _ticker)
+                    else:
+                        _sup_res = save_event_to_supabase(_ev_rec)
 
                     # 登録削除
                     _pending_no_segment_states.pop(canonical_filing_id, None)
@@ -2057,8 +2123,8 @@ def run_earnings_production(
                             logger.error("[EARNINGS][SEGMENT_CANONICAL][ERROR] %s subprocess route exception: %s", _ticker, _seg_e)
 
                     # ── Discord 送信 ────────────────────────────────────────────
-                    _discord_sent = False
-                    if enable_discord:
+                    _discord_sent = _review_notification_suppressed
+                    if enable_discord and not _review_notification_suppressed:
                         logger.info("[EARNINGS][REAL] ✁ 通知送信: %s", _ticker)
                         _discord_msg = _merged_plan["discord_plan"]["discord_message"]
                         _d_ok = send_earnings_discord(webhook_url, _discord_msg)
@@ -2069,7 +2135,7 @@ def run_earnings_production(
                             logger.error("[EARNINGS][REAL] %s Discord 送信失敗.", _ticker)
                             result.errors.append(f"{_ticker}: discord_failed")
                             return result
-                    else:
+                    elif not _review_notification_suppressed:
                         logger.info("[EARNINGS][REAL] ✁ 通知送信スキップ(ENABLE_DISCORD=0): %s", _ticker)
 
                     # ── state_db success 記録 ────────────────────────────────────
@@ -2517,6 +2583,21 @@ def run_earnings_production(
                 quarter=quarter
             )
 
+            _review_notification_suppressed = _should_suppress_review_completion_with_history(
+                conn,
+                doc.title,
+                {
+                    "ticker": ticker,
+                    "fiscal_year": fiscal_year,
+                    "quarter": quarter,
+                    "sales_value": earnings.sales_current,
+                    "op_value": earnings.op_current,
+                    "guidance_sales": guidance.sales_forecast if guidance and guidance.has_guidance else None,
+                    "guidance_op": guidance.op_forecast if guidance and guidance.has_guidance else None,
+                    "guidance_eps": guidance.eps_forecast if guidance and guidance.has_guidance else None,
+                },
+            )
+
             if not dry_run:
                 save_data = {
                     "ticker": ticker,
@@ -2671,17 +2752,22 @@ def run_earnings_production(
 
                     _sup_ok = False
                     try:
-                        _ev_res = _save_earnings_to_tdnet_events(
-                            doc=doc,
-                            earnings=earnings,
-                            company_name=company_name,
-                            full_message=full_message,
-                            guidance=guidance,
-                            fiscal_year=fiscal_year,
-                            quarter=quarter,
-                            xbrl_path=xbrl_path,
-                            dry_run=dry_run,
-                        )
+                        if _review_notification_suppressed:
+                            _ev_res = {"action": "suppressed_review_completion"}
+                            result.filtered_count += 1
+                            logger.info("[EARNINGS][REVIEW_COMPLETION] Viewer card suppressed: %s", ticker)
+                        else:
+                            _ev_res = _save_earnings_to_tdnet_events(
+                                doc=doc,
+                                earnings=earnings,
+                                company_name=company_name,
+                                full_message=full_message,
+                                guidance=guidance,
+                                fiscal_year=fiscal_year,
+                                quarter=quarter,
+                                xbrl_path=xbrl_path,
+                                dry_run=dry_run,
+                            )
                         if _ev_res.get("action") in ("inserted", "updated", "dry_run"):
                             _sup_ok = True
                     except Exception as _e:
@@ -2833,7 +2919,11 @@ def run_earnings_production(
                 result.saved_count += 1
 
             # ---- Phase 0-3: 通知条件判定 ----
-            if notify_enabled and should_notify_earnings(earnings.sales_yoy, earnings.op_yoy):
+            if (
+                not _review_notification_suppressed
+                and notify_enabled
+                and should_notify_earnings(earnings.sales_yoy, earnings.op_yoy)
+            ):
                 if not dry_run and webhook_url:
                     sent = send_earnings_discord(webhook_url, full_message)
                     if sent:

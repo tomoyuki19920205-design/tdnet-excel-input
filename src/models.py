@@ -14,6 +14,7 @@ class DisclosureType:
     BUYBACK = "buyback"
     EARNINGS_MATERIAL = "earnings_material"
     MONTHLY_UPDATE = "monthly_update"
+    REVIEW_COMPLETION = "procedural_review_completion"
 
 
 @dataclass

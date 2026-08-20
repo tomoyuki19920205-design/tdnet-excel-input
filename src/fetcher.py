@@ -17,6 +17,7 @@ from bs4 import BeautifulSoup
 from .common_ticker import strip_tdnet_trailing_zero
 from .models import DisclosureItem, DisclosureType, FINANCIAL_STATEMENT_KEYWORDS
 from .pdf_only_materials import classify_pdf_only_material
+from .review_completion import classify_procedural_review_completion
 from .utils import sha256, today_yyyymmdd
 from lib.backfill.xbrl_url_inference import infer_xbrl_url_from_pdf
 
@@ -119,6 +120,13 @@ def classify_disclosure(title: str) -> str | None:
     material = classify_pdf_only_material(title)
     if material:
         return material.event_type
+
+    # A re-filed statement whose only new information is completion of the
+    # statutory interim review is raw disclosure history, not a new earnings
+    # event.  Explicit corrections/revisions are deliberately excluded by the
+    # semantic classifier and continue through the existing routes below.
+    if classify_procedural_review_completion(title):
+        return DisclosureType.REVIEW_COMPLETION
 
     # ── financial_statement 判定 ──
     if any(kw in n for kw in FINANCIAL_STATEMENT_KEYWORDS):
