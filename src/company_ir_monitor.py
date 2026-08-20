@@ -408,6 +408,21 @@ def _default_fetch(url: str, session: requests.Session) -> bytes:
     return response.content[:10 * 1024 * 1024]
 
 
+_TRANSIENT_HTTP_STATUSES = {408, 425, 429, 500, 502, 503, 504}
+
+
+def _is_transient_fetch_error(exc: Exception) -> bool:
+    """Return true only for failures that can safely benefit from a retry."""
+    if isinstance(exc, requests.exceptions.HTTPError):
+        response = exc.response
+        return response is not None and response.status_code in _TRANSIENT_HTTP_STATUSES
+    if isinstance(exc, requests.exceptions.SSLError):
+        # Certificate/hostname failures are generally persistent and must not be
+        # hidden by repeated TLS handshakes.
+        return False
+    return isinstance(exc, (requests.exceptions.Timeout, requests.exceptions.ConnectionError))
+
+
 def _default_tdnet_lookup(ticker: str, session: requests.Session) -> list[dict]:
     base = os.environ.get("SUPABASE_URL") or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
@@ -469,6 +484,9 @@ def run_monitor(
     source_ids: Sequence[int] | None = None,
     request_interval_seconds: float | None = None,
     audit_records: list[dict[str, object]] | None = None,
+    fetch_attempts: int | None = None,
+    per_host_concurrency: int | None = None,
+    retry_backoff_seconds: Sequence[float] | None = None,
 ) -> RunStats:
     """Crawl every active source independently; one failure never stops the run."""
     init_db(conn)
@@ -478,6 +496,12 @@ def run_monitor(
     interval = max(0.0, request_interval_seconds if request_interval_seconds is not None else float(os.environ.get("COMPANY_IR_REQUEST_INTERVAL", "0.1")))
     pace_lock = threading.Lock()
     next_request_at = [0.0]
+    attempts = max(1, min(fetch_attempts or int(os.environ.get("COMPANY_IR_FETCH_ATTEMPTS", "3")), 5))
+    host_limit = max(1, min(per_host_concurrency or int(os.environ.get("COMPANY_IR_PER_HOST_CONCURRENCY", "1")), 8))
+    backoffs = tuple((0.5, 1.5, 3.0, 5.0) if retry_backoff_seconds is None else retry_backoff_seconds)
+    worker_local = threading.local()
+    host_semaphores: dict[str, threading.BoundedSemaphore] = {}
+    host_semaphores_lock = threading.Lock()
 
     def pace() -> None:
         if interval <= 0:
@@ -490,15 +514,29 @@ def run_monitor(
             time.sleep(wait)
     if fetch is None:
         def fetch(url: str) -> bytes:
-            # A session is local to one request, keeping bounded parallel GETs
-            # independent. Hash/dedup requests remain single-threaded below.
-            worker_session = requests.Session()
-            worker_session.headers.update(session.headers)
-            try:
-                pace()
-                return _default_fetch(url, worker_session)
-            finally:
-                worker_session.close()
+            worker_session = getattr(worker_local, "session", None)
+            if worker_session is None:
+                worker_session = requests.Session()
+                worker_session.headers.update(session.headers)
+                worker_local.session = worker_session
+            host = (urlsplit(url).hostname or "").lower()
+            with host_semaphores_lock:
+                host_semaphore = host_semaphores.setdefault(host, threading.BoundedSemaphore(host_limit))
+            for attempt in range(attempts):
+                try:
+                    with host_semaphore:
+                        pace()
+                        return _default_fetch(url, worker_session)
+                except Exception as exc:
+                    if attempt + 1 >= attempts or not _is_transient_fetch_error(exc):
+                        raise
+                    delay = backoffs[min(attempt, len(backoffs) - 1)] if backoffs else 0.0
+                    logger.warning(
+                        "IR_SOURCE_FETCH_RETRY host=%s attempt=%s/%s delay=%.2fs reason=%s",
+                        host, attempt + 2, attempts, delay, exc,
+                    )
+                    if delay > 0:
+                        time.sleep(delay)
     tdnet_lookup = tdnet_lookup or (lambda ticker: (pace(), _default_tdnet_lookup(ticker, session))[1])
     publish = publish or _default_publish
     pdf_hasher = pdf_hasher or (lambda url: (pace(), hash_remote_pdf(url, session))[1])
@@ -516,7 +554,7 @@ def run_monitor(
         SELECT id, ticker, company_name, source_url, baseline_completed_at
         FROM company_ir_sources WHERE {' AND '.join(where)} ORDER BY ticker, id
     """, params).fetchall()
-    worker_count = max(1, min(max_workers or int(os.environ.get("COMPANY_IR_WORKERS", "8")), 64))
+    worker_count = max(1, min(max_workers or int(os.environ.get("COMPANY_IR_WORKERS", "4")), 64))
 
     def fetch_source(source_row):
         try:

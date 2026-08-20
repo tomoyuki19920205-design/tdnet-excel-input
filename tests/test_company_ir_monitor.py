@@ -1,6 +1,9 @@
 import sqlite3
+import threading
+import time
 
 import pytest
+import requests
 
 from src.events.common_models import EventRecord
 from src.events.tdnet_event_store import build_supabase_row
@@ -11,6 +14,7 @@ from src.company_ir_monitor import (
     init_db,
     run_monitor,
 )
+import src.company_ir_monitor as company_ir_monitor
 
 
 SOURCE_URL = "https://example.test/ir/presentation.html"
@@ -223,6 +227,77 @@ def test_audit_records_capture_each_source_without_changing_monitor_semantics(co
     assert records[1]["asset_count"] == 1
     assert records[1]["new_asset_count"] == 0
     assert conn.execute("SELECT COUNT(*) FROM company_ir_assets").fetchone()[0] == 0
+
+
+def test_default_fetch_retries_transient_timeout_then_succeeds(conn, monkeypatch):
+    add_source(conn)
+    calls = []
+
+    def flaky_fetch(_url, _session):
+        calls.append(1)
+        if len(calls) < 3:
+            raise requests.exceptions.Timeout("temporary resolver timeout")
+        return page([("決算説明会資料", "/ok.pdf")]).encode()
+
+    monkeypatch.setattr(company_ir_monitor, "_default_fetch", flaky_fetch)
+    stats = run_monitor(
+        conn,
+        max_workers=1,
+        request_interval_seconds=0,
+        fetch_attempts=3,
+        retry_backoff_seconds=(),
+    )
+    assert len(calls) == 3
+    assert stats.failed_sources == 0 and stats.baseline == 1
+
+
+def test_default_fetch_does_not_retry_404(conn, monkeypatch):
+    add_source(conn)
+    calls = []
+
+    def missing_fetch(_url, _session):
+        calls.append(1)
+        response = requests.Response()
+        response.status_code = 404
+        error = requests.exceptions.HTTPError("404 Client Error", response=response)
+        raise error
+
+    monkeypatch.setattr(company_ir_monitor, "_default_fetch", missing_fetch)
+    stats = run_monitor(
+        conn,
+        max_workers=1,
+        request_interval_seconds=0,
+        fetch_attempts=3,
+        retry_backoff_seconds=(),
+    )
+    assert len(calls) == 1 and stats.failed_sources == 1
+
+
+def test_default_fetch_limits_parallelism_per_host(conn, monkeypatch):
+    for index in range(4):
+        add_source(conn, str(5000 + index), f"会社{index}", f"https://same.test/ir/{index}")
+    lock = threading.Lock()
+    active = 0
+    peak = 0
+
+    def measured_fetch(_url, _session):
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        time.sleep(0.02)
+        with lock:
+            active -= 1
+        return page([]).encode()
+
+    monkeypatch.setattr(company_ir_monitor, "_default_fetch", measured_fetch)
+    stats = run_monitor(
+        conn,
+        max_workers=4,
+        request_interval_seconds=0,
+        per_host_concurrency=1,
+    )
+    assert stats.failed_sources == 0 and peak == 1
 
 
 def test_ambiguous_general_ir_material_is_not_classified():
