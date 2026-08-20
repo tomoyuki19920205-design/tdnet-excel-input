@@ -7,6 +7,7 @@ import json
 import logging
 import sqlite3
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -23,6 +24,10 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--workers", type=int)
     parser.add_argument("--request-interval", type=float)
+    parser.add_argument(
+        "--audit-output",
+        help="Optional JSONL path for one auditable run; omitted during normal Nightly execution",
+    )
     parser.add_argument(
         "--baseline-only", action="store_true",
         help="Fetch only sources whose initial baseline is not complete",
@@ -56,15 +61,34 @@ def main() -> int:
                 }, ensure_ascii=False, sort_keys=True))
                 return 0
         gate = notifications_enabled(conn)
+        audit_records: list[dict[str, object]] | None = [] if args.audit_output else None
+        run_id = datetime.now(timezone.utc).strftime("company_ir_%Y%m%dT%H%M%SZ")
+        timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
         stats = run_monitor(
             conn, dry_run=args.dry_run, baseline_only=args.baseline_only,
             allow_notifications=gate, max_workers=args.workers,
             request_interval_seconds=args.request_interval,
+            audit_records=audit_records,
         )
+        audit_path = None
+        if args.audit_output:
+            audit_path = Path(args.audit_output)
+            if not audit_path.is_absolute():
+                audit_path = ROOT / audit_path
+            audit_path.parent.mkdir(parents=True, exist_ok=True)
+            with audit_path.open("w", encoding="utf-8", newline="\n") as handle:
+                for record in audit_records or []:
+                    handle.write(json.dumps({
+                        "run_id": run_id,
+                        "timestamp": timestamp,
+                        **record,
+                    }, ensure_ascii=False, sort_keys=True) + "\n")
         result = {
             "sources_imported": imported,
             "baseline_only": args.baseline_only,
             "notifications_enabled": gate,
+            "run_id": run_id,
+            "audit_output": str(audit_path) if audit_path else None,
             **stats.__dict__,
         }
         print("COMPANY_IR_NIGHTLY " + json.dumps(result, ensure_ascii=False, sort_keys=True))

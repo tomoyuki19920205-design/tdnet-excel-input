@@ -196,6 +196,35 @@ def test_one_404_does_not_stop_other_company(conn):
     assert failed[0] == 1 and "404" in failed[1]
 
 
+def test_audit_records_capture_each_source_without_changing_monitor_semantics(conn):
+    add_source(conn, "1111", "失敗社", "https://bad.test/ir")
+    add_source(conn, "4022", "ラサ工業", SOURCE_URL)
+
+    def fetch(url):
+        if "bad.test" in url:
+            raise RuntimeError("404 Client Error")
+        return page([("決算説明会資料", "/ok.pdf")])
+
+    records = []
+    stats = run_monitor(
+        conn,
+        fetch=fetch,
+        dry_run=True,
+        audit_records=records,
+        now_iso="2026-08-18T19:00:00+09:00",
+    )
+
+    assert stats.sources == 2 and stats.failed_sources == 1
+    assert [(row["ticker"], row["result_status"]) for row in records] == [
+        ("1111", "fetch_failed"),
+        ("4022", "success"),
+    ]
+    assert records[0]["failure_reason"].startswith("RuntimeError: 404")
+    assert records[1]["asset_count"] == 1
+    assert records[1]["new_asset_count"] == 0
+    assert conn.execute("SELECT COUNT(*) FROM company_ir_assets").fetchone()[0] == 0
+
+
 def test_ambiguous_general_ir_material_is_not_classified():
     html = page([
         ("IR資料", "/generic.pdf"),

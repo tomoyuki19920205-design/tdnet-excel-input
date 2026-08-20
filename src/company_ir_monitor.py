@@ -468,6 +468,7 @@ def run_monitor(
     allow_notifications: bool = True,
     source_ids: Sequence[int] | None = None,
     request_interval_seconds: float | None = None,
+    audit_records: list[dict[str, object]] | None = None,
 ) -> RunStats:
     """Crawl every active source independently; one failure never stops the run."""
     init_db(conn)
@@ -538,6 +539,8 @@ def run_monitor(
     for source_row in rows:
         source = IrSource(int(source_row[0]), source_row[1], source_row[2], source_row[3])
         initial_baseline = source_row[4] is None
+        source_discovered_before = stats.discovered
+        source_new_before = stats.new_assets
         stats.sources += 1
         assets, fetch_error = prefetched[source.source_id]
         if fetch_error is not None:
@@ -549,6 +552,19 @@ def run_monitor(
                         failure_count=failure_count+1, updated_at=? WHERE id=?
                 """, (now, str(fetch_error)[:500], now, source.source_id))
                 conn.commit()
+            if audit_records is not None:
+                response = getattr(fetch_error, "response", None)
+                audit_records.append({
+                    "ticker": source.ticker,
+                    "source_id": source.source_id,
+                    "source_url": source.source_url,
+                    "result_status": "fetch_failed",
+                    "http_status": getattr(response, "status_code", None),
+                    "failure_reason": f"{type(fetch_error).__name__}: {fetch_error}"[:500],
+                    "asset_count": 0,
+                    "new_asset_count": 0,
+                    "initial_baseline": initial_baseline,
+                })
             continue
 
         stats.discovered += len(assets)
@@ -650,6 +666,18 @@ def run_monitor(
                 WHERE id=?
             """, (now, now, now, now, source.source_id))
             conn.commit()
+        if audit_records is not None:
+            audit_records.append({
+                "ticker": source.ticker,
+                "source_id": source.source_id,
+                "source_url": source.source_url,
+                "result_status": "success",
+                "http_status": 200,
+                "failure_reason": None,
+                "asset_count": stats.discovered - source_discovered_before,
+                "new_asset_count": stats.new_assets - source_new_before,
+                "initial_baseline": initial_baseline,
+            })
 
     # A pending asset is durable notification work. It must still be emitted
     # after the gate opens even when the link has since disappeared from HTML.
