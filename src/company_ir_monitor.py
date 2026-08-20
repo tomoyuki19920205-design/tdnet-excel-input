@@ -7,6 +7,7 @@ therefore never emits viewer events.
 from __future__ import annotations
 
 import csv
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import json
@@ -88,6 +89,11 @@ class RunStats:
     tdnet_suppressed: int = 0
     notified: int = 0
     publish_failed: int = 0
+    individual_retries: int = 0
+    delayed_retries: int = 0
+    delayed_retry_successes: int = 0
+    circuit_open_count: int = 0
+    circuit_wait_seconds: float = 0.0
 
 
 def _now_iso() -> str:
@@ -423,6 +429,89 @@ def _is_transient_fetch_error(exc: Exception) -> bool:
     return isinstance(exc, (requests.exceptions.Timeout, requests.exceptions.ConnectionError))
 
 
+def _is_dns_fetch_error(exc: Exception) -> bool:
+    value = f"{type(exc).__name__}: {exc}".lower()
+    return any(term in value for term in (
+        "getaddrinfo failed", "failed to resolve", "nameresolutionerror",
+        "name resolution temporary failure", "temporary failure in name resolution",
+    ))
+
+
+class _ResolverCircuit:
+    """Small process-local circuit for cross-host DNS resolver outages."""
+
+    def __init__(
+        self,
+        *,
+        threshold_hosts: int = 3,
+        window_seconds: float = 15.0,
+        cooldown_seconds: float = 45.0,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        self.threshold_hosts = max(2, threshold_hosts)
+        self.window_seconds = max(0.0, window_seconds)
+        self.cooldown_seconds = max(0.0, cooldown_seconds)
+        self._clock = clock
+        self._sleep = sleep
+        self._condition = threading.Condition()
+        self._failures: deque[tuple[float, str]] = deque()
+        self._open_until = 0.0
+        self._open = False
+        self._probe_in_flight = False
+        self.open_count = 0
+        self.total_wait_seconds = 0.0
+
+    def _open_locked(self, now: float) -> None:
+        self._open = True
+        self._open_until = now + self.cooldown_seconds
+        self._probe_in_flight = False
+        self.open_count += 1
+        self.total_wait_seconds += self.cooldown_seconds
+        logger.warning(
+            "IR_DNS_CIRCUIT_OPEN count=%s cooldown=%.2fs",
+            self.open_count, self.cooldown_seconds,
+        )
+        self._condition.notify_all()
+
+    def record_dns_failure(self, host: str) -> None:
+        now = self._clock()
+        with self._condition:
+            cutoff = now - self.window_seconds
+            while self._failures and self._failures[0][0] < cutoff:
+                self._failures.popleft()
+            self._failures.append((now, host))
+            if not self._open and len({item[1] for item in self._failures}) >= self.threshold_hosts:
+                self._open_locked(now)
+
+    def before_request(self) -> tuple[bool, float]:
+        started = self._clock()
+        while True:
+            with self._condition:
+                now = self._clock()
+                if not self._open:
+                    return False, max(0.0, now - started)
+                if now >= self._open_until and not self._probe_in_flight:
+                    self._probe_in_flight = True
+                    return True, max(0.0, now - started)
+                delay = max(0.01, self._open_until - now) if not self._probe_in_flight else 0.05
+            self._sleep(delay)
+
+    def finish_request(self, probe: bool, dns_failed: bool) -> None:
+        if not probe:
+            return
+        with self._condition:
+            self._probe_in_flight = False
+            # A failed probe can itself be a permanently invalid hostname. Close
+            # first and let record_dns_failure() require fresh cross-host evidence
+            # before reopening; one bad probe must not pause the whole crawl.
+            self._open = False
+            self._open_until = 0.0
+            self._failures.clear()
+            logger.warning("IR_DNS_CIRCUIT_CLOSED probe_dns_failed=%s", dns_failed)
+            self._condition.notify_all()
+
+
 def _default_tdnet_lookup(ticker: str, session: requests.Session) -> list[dict]:
     base = os.environ.get("SUPABASE_URL") or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
@@ -487,6 +576,11 @@ def run_monitor(
     fetch_attempts: int | None = None,
     per_host_concurrency: int | None = None,
     retry_backoff_seconds: Sequence[float] | None = None,
+    resolver_threshold_hosts: int | None = None,
+    resolver_window_seconds: float | None = None,
+    resolver_cooldown_seconds: float | None = None,
+    resolver_clock: Callable[[], float] = time.monotonic,
+    resolver_sleep: Callable[[float], None] = time.sleep,
 ) -> RunStats:
     """Crawl every active source independently; one failure never stops the run."""
     init_db(conn)
@@ -502,6 +596,13 @@ def run_monitor(
     worker_local = threading.local()
     host_semaphores: dict[str, threading.BoundedSemaphore] = {}
     host_semaphores_lock = threading.Lock()
+    circuit = _ResolverCircuit(
+        threshold_hosts=resolver_threshold_hosts or int(os.environ.get("COMPANY_IR_DNS_CIRCUIT_HOSTS", "3")),
+        window_seconds=resolver_window_seconds if resolver_window_seconds is not None else float(os.environ.get("COMPANY_IR_DNS_CIRCUIT_WINDOW", "15")),
+        cooldown_seconds=resolver_cooldown_seconds if resolver_cooldown_seconds is not None else float(os.environ.get("COMPANY_IR_DNS_CIRCUIT_COOLDOWN", "45")),
+        clock=resolver_clock,
+        sleep=resolver_sleep,
+    )
 
     def pace() -> None:
         if interval <= 0:
@@ -512,31 +613,44 @@ def run_monitor(
             next_request_at[0] = max(now_mono, next_request_at[0]) + interval
         if wait:
             time.sleep(wait)
-    if fetch is None:
-        def fetch(url: str) -> bytes:
-            worker_session = getattr(worker_local, "session", None)
-            if worker_session is None:
-                worker_session = requests.Session()
-                worker_session.headers.update(session.headers)
-                worker_local.session = worker_session
-            host = (urlsplit(url).hostname or "").lower()
-            with host_semaphores_lock:
-                host_semaphore = host_semaphores.setdefault(host, threading.BoundedSemaphore(host_limit))
-            for attempt in range(attempts):
-                try:
-                    with host_semaphore:
-                        pace()
-                        return _default_fetch(url, worker_session)
-                except Exception as exc:
-                    if attempt + 1 >= attempts or not _is_transient_fetch_error(exc):
-                        raise
-                    delay = backoffs[min(attempt, len(backoffs) - 1)] if backoffs else 0.0
-                    logger.warning(
-                        "IR_SOURCE_FETCH_RETRY host=%s attempt=%s/%s delay=%.2fs reason=%s",
-                        host, attempt + 2, attempts, delay, exc,
-                    )
-                    if delay > 0:
-                        time.sleep(delay)
+    custom_fetch = fetch
+
+    def default_fetch(url: str, telemetry: dict[str, object], attempt_limit: int) -> bytes:
+        worker_session = getattr(worker_local, "session", None)
+        if worker_session is None:
+            worker_session = requests.Session()
+            worker_session.headers.update(session.headers)
+            worker_local.session = worker_session
+        host = (urlsplit(url).hostname or "").lower()
+        with host_semaphores_lock:
+            host_semaphore = host_semaphores.setdefault(host, threading.BoundedSemaphore(host_limit))
+        for attempt in range(attempt_limit):
+            probe, waited = circuit.before_request()
+            telemetry["circuit_wait_seconds"] = float(telemetry["circuit_wait_seconds"]) + waited
+            telemetry["attempt_count"] = int(telemetry["attempt_count"]) + 1
+            try:
+                with host_semaphore:
+                    pace()
+                    body = _default_fetch(url, worker_session)
+                circuit.finish_request(probe, False)
+                return body
+            except Exception as exc:
+                dns_failed = _is_dns_fetch_error(exc)
+                telemetry["dns_retry"] = bool(telemetry["dns_retry"]) or dns_failed
+                circuit.finish_request(probe, dns_failed)
+                if dns_failed:
+                    circuit.record_dns_failure(host)
+                if attempt + 1 >= attempt_limit or not _is_transient_fetch_error(exc):
+                    raise
+                telemetry["individual_retry_count"] = int(telemetry["individual_retry_count"]) + 1
+                delay = backoffs[min(attempt, len(backoffs) - 1)] if backoffs else 0.0
+                logger.warning(
+                    "IR_SOURCE_FETCH_RETRY host=%s attempt=%s/%s delay=%.2fs reason=%s",
+                    host, attempt + 2, attempt_limit, delay, exc,
+                )
+                if delay > 0:
+                    time.sleep(delay)
+        raise AssertionError("unreachable fetch attempt loop")
     tdnet_lookup = tdnet_lookup or (lambda ticker: (pace(), _default_tdnet_lookup(ticker, session))[1])
     publish = publish or _default_publish
     pdf_hasher = pdf_hasher or (lambda url: (pace(), hash_remote_pdf(url, session))[1])
@@ -556,13 +670,37 @@ def run_monitor(
     """, params).fetchall()
     worker_count = max(1, min(max_workers or int(os.environ.get("COMPANY_IR_WORKERS", "4")), 64))
 
-    def fetch_source(source_row):
-        try:
-            return extract_assets(fetch(source_row[3]), source_row[3]), None
-        except Exception as exc:  # returned to the DB-owning main thread
-            return [], exc
+    def new_telemetry() -> dict[str, object]:
+        return {
+            "attempt_count": 0,
+            "individual_retry_count": 0,
+            "initial_result": None,
+            "initial_failure_reason": None,
+            "final_result": None,
+            "dns_retry": False,
+            "delayed_retry": False,
+            "delayed_retry_success": False,
+            "circuit_wait_seconds": 0.0,
+        }
 
-    prefetched: dict[int, tuple[list[IrAsset], Exception | None]] = {}
+    def fetch_source(source_row):
+        telemetry = new_telemetry()
+        try:
+            if custom_fetch is None:
+                body = default_fetch(source_row[3], telemetry, attempts)
+            else:
+                telemetry["attempt_count"] = 1
+                body = custom_fetch(source_row[3])
+            telemetry["initial_result"] = "success"
+            telemetry["final_result"] = "success"
+            return extract_assets(body, source_row[3]), None, telemetry
+        except Exception as exc:  # returned to the DB-owning main thread
+            telemetry["initial_result"] = "fetch_failed"
+            telemetry["initial_failure_reason"] = f"{type(exc).__name__}: {exc}"[:500]
+            telemetry["final_result"] = "fetch_failed"
+            return [], exc, telemetry
+
+    prefetched: dict[int, tuple[list[IrAsset], Exception | None, dict[str, object]]] = {}
     if worker_count == 1 or len(rows) <= 1:
         for row in rows:
             prefetched[int(row[0])] = fetch_source(row)
@@ -572,6 +710,46 @@ def run_monitor(
             for future in as_completed(futures):
                 prefetched[futures[future]] = future.result()
 
+    # A DNS wave is often shorter than the complete all-company crawl. Give
+    # exhausted DNS failures exactly one final chance in the same run, after
+    # the normal queue has drained. HTTP/parse failures never enter this queue.
+    delayed_rows = [
+        row for row in rows
+        if custom_fetch is None and prefetched[int(row[0])][1] is not None
+        and _is_dns_fetch_error(prefetched[int(row[0])][1])
+    ]
+
+    def delayed_fetch_source(source_row):
+        source_id = int(source_row[0])
+        telemetry = prefetched[source_id][2]
+        telemetry["delayed_retry"] = True
+        try:
+            body = default_fetch(source_row[3], telemetry, 1)
+            telemetry["delayed_retry_success"] = True
+            telemetry["final_result"] = "success"
+            return extract_assets(body, source_row[3]), None, telemetry
+        except Exception as exc:
+            telemetry["final_result"] = "fetch_failed"
+            return [], exc, telemetry
+
+    if delayed_rows:
+        logger.warning("IR_DNS_DELAYED_QUEUE sources=%s", len(delayed_rows))
+        if worker_count == 1 or len(delayed_rows) == 1:
+            for row in delayed_rows:
+                prefetched[int(row[0])] = delayed_fetch_source(row)
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="company-ir-dns-delayed") as pool:
+                futures = {pool.submit(delayed_fetch_source, row): int(row[0]) for row in delayed_rows}
+                for future in as_completed(futures):
+                    prefetched[futures[future]] = future.result()
+
+    telemetry_rows = [item[2] for item in prefetched.values()]
+    stats.individual_retries = sum(int(item["individual_retry_count"]) for item in telemetry_rows)
+    stats.delayed_retries = sum(bool(item["delayed_retry"]) for item in telemetry_rows)
+    stats.delayed_retry_successes = sum(bool(item["delayed_retry_success"]) for item in telemetry_rows)
+    stats.circuit_open_count = circuit.open_count
+    stats.circuit_wait_seconds = round(circuit.total_wait_seconds, 3)
+
     tdnet_cache: dict[str, Sequence[Mapping[str, object]]] = {}
     publish_attempted_ids: set[int] = set()
     for source_row in rows:
@@ -580,7 +758,7 @@ def run_monitor(
         source_discovered_before = stats.discovered
         source_new_before = stats.new_assets
         stats.sources += 1
-        assets, fetch_error = prefetched[source.source_id]
+        assets, fetch_error, telemetry = prefetched[source.source_id]
         if fetch_error is not None:
             stats.failed_sources += 1
             logger.error("IR_SOURCE_FETCH_FAILED ticker=%s URL=%s reason=%s", source.ticker, source.source_url, fetch_error)
@@ -602,6 +780,9 @@ def run_monitor(
                     "asset_count": 0,
                     "new_asset_count": 0,
                     "initial_baseline": initial_baseline,
+                    **telemetry,
+                    "circuit_open_count": stats.circuit_open_count,
+                    "circuit_total_wait_seconds": stats.circuit_wait_seconds,
                 })
             continue
 
@@ -715,6 +896,9 @@ def run_monitor(
                 "asset_count": stats.discovered - source_discovered_before,
                 "new_asset_count": stats.new_assets - source_new_before,
                 "initial_baseline": initial_baseline,
+                **telemetry,
+                "circuit_open_count": stats.circuit_open_count,
+                "circuit_total_wait_seconds": stats.circuit_wait_seconds,
             })
 
     # A pending asset is durable notification work. It must still be emitted

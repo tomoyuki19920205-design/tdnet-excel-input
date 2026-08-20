@@ -10,6 +10,7 @@ from src.events.tdnet_event_store import build_supabase_row
 from src.company_ir_monitor import (
     ASSET_MATERIAL,
     ASSET_VIDEO,
+    _ResolverCircuit,
     extract_assets,
     init_db,
     run_monitor,
@@ -298,6 +299,150 @@ def test_default_fetch_limits_parallelism_per_host(conn, monkeypatch):
         per_host_concurrency=1,
     )
     assert stats.failed_sources == 0 and peak == 1
+
+
+class FakeClock:
+    def __init__(self):
+        self.value = 0.0
+
+    def __call__(self):
+        return self.value
+
+    def sleep(self, seconds):
+        self.value += seconds
+
+
+def dns_error(host="broken.test"):
+    return requests.exceptions.ConnectionError(
+        f"NameResolutionError: Failed to resolve '{host}' ([Errno 11001] getaddrinfo failed)"
+    )
+
+
+def test_one_dns_host_does_not_open_global_circuit():
+    circuit = _ResolverCircuit(threshold_hosts=3)
+    for _ in range(5):
+        circuit.record_dns_failure("one.test")
+    assert circuit.open_count == 0
+
+
+def test_multiple_dns_hosts_open_global_circuit_within_window():
+    clock = FakeClock()
+    circuit = _ResolverCircuit(
+        threshold_hosts=3, window_seconds=15, cooldown_seconds=45,
+        clock=clock, sleep=clock.sleep,
+    )
+    for host in ("one.test", "two.test", "three.test"):
+        circuit.record_dns_failure(host)
+        clock.value += 2
+    assert circuit.open_count == 1
+    assert circuit.total_wait_seconds == 45
+
+
+def test_circuit_resumes_after_cooldown_and_successful_probe():
+    clock = FakeClock()
+    circuit = _ResolverCircuit(
+        threshold_hosts=3, window_seconds=15, cooldown_seconds=5,
+        clock=clock, sleep=clock.sleep,
+    )
+    for host in ("one.test", "two.test", "three.test"):
+        circuit.record_dns_failure(host)
+    probe, waited = circuit.before_request()
+    assert probe and waited == 5
+    circuit.finish_request(probe, dns_failed=False)
+    assert circuit.before_request()[0] is False
+
+
+def test_dns_failures_use_one_delayed_retry_and_recover(conn, monkeypatch):
+    for index, host in enumerate(("one.test", "two.test", "three.test")):
+        add_source(conn, str(6000 + index), f"会社{index}", f"https://{host}/ir")
+    calls = {}
+
+    def recovering_fetch(url, _session):
+        calls[url] = calls.get(url, 0) + 1
+        if calls[url] <= 3:
+            raise dns_error(url)
+        return page([]).encode()
+
+    monkeypatch.setattr(company_ir_monitor, "_default_fetch", recovering_fetch)
+    records = []
+    stats = run_monitor(
+        conn,
+        max_workers=3,
+        request_interval_seconds=0,
+        fetch_attempts=3,
+        retry_backoff_seconds=(),
+        resolver_cooldown_seconds=0,
+        audit_records=records,
+    )
+    assert stats.failed_sources == 0
+    assert stats.delayed_retries == stats.delayed_retry_successes == 3
+    assert stats.circuit_open_count >= 1
+    assert all(value == 4 for value in calls.values())
+    assert all(row["initial_result"] == "fetch_failed" for row in records)
+    assert all(row["final_result"] == "success" and row["delayed_retry"] for row in records)
+
+
+def test_404_does_not_open_circuit_or_enter_delayed_queue(conn, monkeypatch):
+    add_source(conn)
+    calls = []
+
+    def missing_fetch(_url, _session):
+        calls.append(1)
+        response = requests.Response()
+        response.status_code = 404
+        raise requests.exceptions.HTTPError("404 Client Error", response=response)
+
+    monkeypatch.setattr(company_ir_monitor, "_default_fetch", missing_fetch)
+    stats = run_monitor(conn, request_interval_seconds=0, retry_backoff_seconds=())
+    assert len(calls) == 1
+    assert stats.failed_sources == 1
+    assert stats.delayed_retries == stats.circuit_open_count == 0
+
+
+def test_persistent_dns_failure_has_finite_attempts(conn, monkeypatch):
+    add_source(conn)
+    calls = []
+
+    def always_dns(_url, _session):
+        calls.append(1)
+        raise dns_error()
+
+    monkeypatch.setattr(company_ir_monitor, "_default_fetch", always_dns)
+    stats = run_monitor(
+        conn,
+        max_workers=1,
+        request_interval_seconds=0,
+        fetch_attempts=3,
+        retry_backoff_seconds=(),
+        resolver_cooldown_seconds=0,
+    )
+    assert len(calls) == 4
+    assert stats.failed_sources == 1 and stats.delayed_retries == 1
+    assert stats.delayed_retry_successes == 0
+
+
+def test_resolver_circuit_state_is_thread_safe():
+    circuit = _ResolverCircuit(threshold_hosts=3, cooldown_seconds=0.02)
+    for host in ("one.test", "two.test", "three.test"):
+        circuit.record_dns_failure(host)
+    probes = []
+    lock = threading.Lock()
+
+    def worker():
+        probe, _waited = circuit.before_request()
+        if probe:
+            time.sleep(0.01)
+        circuit.finish_request(probe, dns_failed=False)
+        with lock:
+            probes.append(probe)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=2)
+    assert all(not thread.is_alive() for thread in threads)
+    assert sum(probes) == 1 and circuit.open_count == 1
 
 
 def test_ambiguous_general_ir_material_is_not_classified():
