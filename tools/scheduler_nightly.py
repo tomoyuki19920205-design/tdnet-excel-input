@@ -24,6 +24,7 @@ import argparse
 import io
 import logging
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -45,6 +46,13 @@ TASK_NAME = "TDNET_Nightly"
 GLOBAL_LOCK_MAX_AGE = 120  # 分（nightly は長時間なので余裕を持つ）
 JOB_LOCK_MAX_AGE = 120     # 分
 
+# The all-source Company IR pass varies from about 29 minutes to more than 60
+# minutes under real resolver/circuit-wait conditions. Keep the bounded
+# discovery pass at 30 minutes, but allow the daily full monitor 90 minutes.
+# The timeout remains finite and applies only to the Company IR stage.
+COMPANY_IR_DISCOVERY_TIMEOUT_SEC = 1800
+COMPANY_IR_MONITOR_TIMEOUT_SEC = 5400
+
 
 # ============================================================
 # subprocess ステップ実行（scheduler_realtime.py と同一パターン）
@@ -65,6 +73,26 @@ class StepResult:
         return f"Step({self.name}: {self.status}, rc={self.rc}, {self.duration:.1f}s)"
 
 
+def _terminate_process_tree(process: subprocess.Popen) -> None:
+    """Terminate a timed-out step and all descendants that hold its pipes."""
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        terminated = subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            capture_output=True,
+            timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if terminated.returncode != 0 and process.poll() is None:
+            process.kill()
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
 def run_step(
     name: str,
     cmd: list[str],
@@ -78,30 +106,41 @@ def run_step(
     t0 = time.monotonic()
 
     try:
-        result = subprocess.run(
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        if os.name == "nt":
+            creationflags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        process = subprocess.Popen(
             cmd,
             cwd=cwd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=timeout_sec,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            creationflags=creationflags,
+            start_new_session=os.name != "nt",
         )
-        step.rc = result.returncode
+        stdout, stderr = process.communicate(timeout=timeout_sec)
+        step.rc = process.returncode
         step.duration = time.monotonic() - t0
-        step.status = "success" if result.returncode == 0 else "warning"
-        step.stdout_tail = (result.stdout or "")[-500:].strip()
-        step.stderr_tail = (result.stderr or "")[-300:].strip()
+        step.status = "success" if process.returncode == 0 else "warning"
+        step.stdout_tail = (stdout or "")[-500:].strip()
+        step.stderr_tail = (stderr or "")[-300:].strip()
 
-        if result.stdout:
-            for line in result.stdout.strip().split("\n")[-10:]:
+        if stdout:
+            for line in stdout.strip().split("\n")[-10:]:
                 logger.info(f"  [{name}] {line.strip()}")
-        if result.returncode != 0 and result.stderr:
-            for line in result.stderr.strip().split("\n")[-5:]:
+        if process.returncode != 0 and stderr:
+            for line in stderr.strip().split("\n")[-5:]:
                 logger.warning(f"  [{name}] STDERR: {line.strip()}")
 
     except subprocess.TimeoutExpired:
+        _terminate_process_tree(process)
+        try:
+            process.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
         step.duration = time.monotonic() - t0
         step.status = "timeout"
         step.rc = -1
@@ -374,7 +413,7 @@ def main() -> int:
             step = run_step("company-ir-source-discovery", [
                 PYTHON, "-X", "utf8", "tools/company_ir_source_discovery.py",
                 "--batch-size", "250", "--repair",
-            ], timeout_sec=1800)
+            ], timeout_sec=COMPANY_IR_DISCOVERY_TIMEOUT_SEC)
             steps.append(step)
 
         # Nightly-only: company official IR materials/videos.  The global DB
@@ -382,7 +421,7 @@ def main() -> int:
         # explicitly completed.
         step = run_step("company-ir-monitor", [
             PYTHON, "-X", "utf8", "tools/company_ir_nightly.py", *dry_flag,
-        ], timeout_sec=1800)
+        ], timeout_sec=COMPANY_IR_MONITOR_TIMEOUT_SEC)
         steps.append(step)
 
 

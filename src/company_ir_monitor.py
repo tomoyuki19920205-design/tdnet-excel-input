@@ -853,20 +853,33 @@ def run_monitor(
                     content_hash = pdf_hasher(raw_asset.asset_url)
                 asset = IrAsset(raw_asset.asset_type, raw_asset.title, raw_asset.asset_url,
                                 raw_asset.source_page_url, content_hash)
+                content_duplicate = False
+                if content_hash:
+                    content_duplicate = conn.execute("""
+                        SELECT 1 FROM company_ir_assets
+                        WHERE ticker=? AND asset_type=?
+                          AND lower(content_sha256)=lower(?)
+                        LIMIT 1
+                    """, (source.ticker, raw_asset.asset_type, content_hash)).fetchone() is not None
                 if not initial_baseline and source.ticker not in tdnet_cache:
                     try:
                         tdnet_cache[source.ticker] = tdnet_lookup(source.ticker)
                     except Exception as exc:
                         logger.warning("IR_TDNET_DEDUP_LOOKUP_FAILED ticker=%s reason=%s", source.ticker, exc)
                         tdnet_cache[source.ticker] = []
-                duplicate = False if initial_baseline else is_tdnet_duplicate(asset, tdnet_cache.get(source.ticker, []))
-                suppression = "tdnet_duplicate" if duplicate else None
+                tdnet_duplicate = False if initial_baseline else is_tdnet_duplicate(asset, tdnet_cache.get(source.ticker, []))
+                duplicate = content_duplicate or tdnet_duplicate
+                suppression = (
+                    "content_duplicate" if content_duplicate
+                    else "tdnet_duplicate" if tdnet_duplicate
+                    else None
+                )
                 notification_status = "baseline" if initial_baseline else ("suppressed" if duplicate else "pending")
                 if initial_baseline:
                     stats.baseline += 1
                 else:
                     stats.new_assets += 1
-                    stats.tdnet_suppressed += int(duplicate)
+                    stats.tdnet_suppressed += int(tdnet_duplicate)
                     stats.pending += int(not duplicate)
                 if dry_run:
                     continue

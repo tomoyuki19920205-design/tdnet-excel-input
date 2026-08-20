@@ -14,13 +14,15 @@ def _result(name: str, rc: int = 0) -> scheduler.StepResult:
     return result
 
 
-def _run_nightly(*, failures=None, dry_run=False):
+def _run_nightly(*, failures=None, dry_run=False, call_kwargs=None):
     failures = failures or {}
     calls = []
     summary = []
 
-    def fake_run_step(name, cmd, **_kwargs):
+    def fake_run_step(name, cmd, **kwargs):
         calls.append((name, cmd))
+        if call_kwargs is not None:
+            call_kwargs[name] = kwargs
         return _result(name, failures.get(name, 0))
 
     def capture_summary(steps, _elapsed):
@@ -175,3 +177,39 @@ def test_scheduler_returns_nonzero_when_step_status_is_timeout():
         return_code, _calls, _summary = _run_nightly()
 
     assert return_code == 1
+
+
+def test_company_ir_full_monitor_has_bounded_ninety_minute_timeout():
+    call_kwargs = {}
+    _run_nightly(call_kwargs=call_kwargs)
+
+    assert call_kwargs["company-ir-source-discovery"]["timeout_sec"] == 1800
+    assert call_kwargs["company-ir-monitor"]["timeout_sec"] == 5400
+
+
+def test_run_step_terminates_the_process_tree_on_timeout(monkeypatch):
+    class TimedOutProcess:
+        pid = 12345
+        returncode = None
+
+        def communicate(self, timeout=None):
+            if timeout == 1:
+                raise scheduler.subprocess.TimeoutExpired(["worker"], timeout)
+            self.returncode = -9
+            return "", ""
+
+        def poll(self):
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -9
+
+    process = TimedOutProcess()
+    terminated = []
+    monkeypatch.setattr(scheduler.subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(scheduler, "_terminate_process_tree", lambda value: terminated.append(value))
+
+    result = scheduler.run_step("timeout-test", ["worker"], timeout_sec=1)
+
+    assert result.status == "timeout" and result.rc == -1
+    assert terminated == [process]

@@ -222,6 +222,31 @@ def test_gate_off_tdnet_duplicate_is_suppressed_not_pending(conn):
     ).fetchone()[0] == "suppressed"
 
 
+def test_same_pdf_at_alias_urls_keeps_one_pending_and_suppresses_alias(conn):
+    add_source(conn)
+    run_monitor(conn, fetch=lambda _: page([]), now_iso="2026-08-17T19:00:00+09:00")
+    current = page([
+        ("第1四半期決算説明資料", "/presentation.pdf"),
+        ("第1四半期決算説明資料", "/alias/presentation.pdf"),
+    ])
+    stats = run_monitor(
+        conn,
+        fetch=lambda _: current,
+        allow_notifications=False,
+        tdnet_lookup=lambda _: [],
+        pdf_hasher=lambda _: "f" * 64,
+        now_iso="2026-08-18T19:00:00+09:00",
+    )
+
+    assert stats.new_assets == 2
+    assert stats.pending == 1
+    assert stats.tdnet_suppressed == 0
+    assert conn.execute(
+        "SELECT notification_status,suppression_reason FROM company_ir_assets "
+        "WHERE asset_url LIKE '%/presentation.pdf' ORDER BY id"
+    ).fetchall() == [("pending", None), ("suppressed", "content_duplicate")]
+
+
 def test_baseline_only_does_not_reclassify_completed_source_assets(conn):
     add_source(conn)
     old = page([("決算説明会資料", "/old.pdf")], "2025年3月期")
