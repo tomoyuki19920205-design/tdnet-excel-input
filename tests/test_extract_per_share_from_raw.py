@@ -1,5 +1,9 @@
 from tools.extract_per_share_from_raw import (
     _actual_component_adjustments,
+    _extract_next_year_forecast,
+    _merge_next_year_record,
+    _merge_primary_record,
+    _next_fiscal_year_end,
     extract_per_share,
 )
 
@@ -199,3 +203,111 @@ def test_null_and_invalid_share_inputs_fail_closed():
 
     assert row is not None
     assert row["bps"] is None
+
+
+def test_nxf_uses_a_distinct_next_fiscal_year_key():
+    current = extract_per_share(
+        _raw(CurFYEn="2027-03-31", CurPerType="FY", EPS="100", NxFEPS="120")
+    )
+    next_year = _extract_next_year_forecast(
+        _raw(CurFYEn="2027-03-31", CurPerType="FY", EPS="100", NxFEPS="120"),
+        current,
+    )
+
+    assert current is not None and next_year is not None
+    assert (current["period"], next_year["period"]) == (
+        "2027-03-31",
+        "2028-03-31",
+    )
+
+
+def test_period_native_fy_result_promotes_over_old_nxf_placeholder():
+    old_raw = _raw(
+        CurFYEn="2027-03-31",
+        CurPerType="FY",
+        DiscDate="2028-06-30",
+        EPS="90",
+        NxFEPS="120",
+        NxFDivAnn="24",
+    )
+    old_fy = extract_per_share(old_raw)
+    old_nxf = _extract_next_year_forecast(old_raw, old_fy)
+    current = extract_per_share(
+        _raw(
+            CurFYEn="2028-03-31",
+            CurPerType="FY",
+            DiscDate="2028-05-15",
+            EPS="118",
+            FEPS="",
+            DivAnn="20",
+            Div2Q="8",
+            DivFY="12",
+        )
+    )
+    best = {(old_nxf["ticker"], old_nxf["period"], "FY"): old_nxf}
+
+    _merge_primary_record(best, current)
+    promoted = best[("7480", "2028-03-31", "FY")]
+
+    assert promoted["source"] == "jquants"
+    assert promoted["disclosed_date"] == "2028-05-15"
+    assert promoted["eps"] == 118
+    assert promoted["forecast_eps"] is None
+    assert promoted["forecast_dividend_annual"] == 20
+    assert promoted["initial_forecast_eps"] == 120
+
+
+def test_repeated_direct_disclosure_uses_newest_values():
+    first = extract_per_share(
+        _raw(CurPerType="FY", DiscDate="2027-05-10", EPS="100")
+    )
+    correction = extract_per_share(
+        _raw(CurPerType="FY", DiscDate="2027-05-12", EPS="101")
+    )
+    best = {}
+
+    _merge_primary_record(best, first)
+    _merge_primary_record(best, correction)
+
+    assert best[("7480", "2027-03-31", "FY")]["eps"] == 101
+    assert best[("7480", "2027-03-31", "FY")]["disclosed_date"] == "2027-05-12"
+
+
+def test_missing_fiscal_year_metadata_does_not_create_nxf():
+    raw = _raw(CurFYEn="", CurPerType="FY", NxFEPS="120")
+
+    assert extract_per_share(raw) is None
+    assert _next_fiscal_year_end("") is None
+
+
+def test_non_march_fiscal_year_end_is_advanced_without_month_shift():
+    assert _next_fiscal_year_end("2027-12-31") == "2028-12-31"
+    assert _next_fiscal_year_end("2024-02-29") == "2025-02-28"
+
+
+def test_late_old_nxf_cannot_override_completed_fy():
+    completed = extract_per_share(
+        _raw(
+            CurFYEn="2028-03-31",
+            CurPerType="FY",
+            DiscDate="2028-05-15",
+            EPS="118",
+        )
+    )
+    old_raw = _raw(
+        CurFYEn="2027-03-31",
+        CurPerType="FY",
+        DiscDate="2028-06-30",
+        EPS="90",
+        NxFEPS="120",
+    )
+    old_nxf = _extract_next_year_forecast(old_raw, extract_per_share(old_raw))
+    best = {("7480", "2028-03-31", "FY"): completed}
+
+    _merge_next_year_record(best, old_nxf)
+    result = best[("7480", "2028-03-31", "FY")]
+
+    assert result["source"] == "jquants"
+    assert result["disclosed_date"] == "2028-05-15"
+    assert result["forecast_eps"] is None
+    assert result["initial_forecast_eps"] == 120

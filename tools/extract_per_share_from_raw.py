@@ -502,6 +502,79 @@ def _extract_next_year_forecast(raw: dict, fy_record: dict) -> dict | None:
     }
 
 
+def _merge_primary_record(best: dict[tuple, dict], record: dict) -> None:
+    """Merge a period-native J-Quants row into the canonical shadow map.
+
+    A synthetic NxF row is only a forecast placeholder for the following
+    fiscal year.  Once a period-native FY result exists, the native row owns
+    the canonical provenance even when a late re-publication of the previous
+    FY gave the placeholder a later disclosed date.  The original NxF value
+    remains useful solely as the period's initial forecast.
+    """
+    key = (record["ticker"], record["period"], record["quarter"])
+    existing = best.get(key)
+    if existing is None:
+        best[key] = record
+        return
+
+    if (
+        existing.get("source") == _NXF_SOURCE
+        and record.get("source") != _NXF_SOURCE
+        and record.get("quarter") == "FY"
+        and record.get("eps") is not None
+    ):
+        initial_forecast_eps = existing.get("initial_forecast_eps")
+        promoted = dict(record)
+        # A completed period must not regain the old NxF EPS as current
+        # guidance. Dividend fields keep the existing extractor semantics.
+        promoted["forecast_eps"] = None
+        if initial_forecast_eps is not None:
+            promoted["initial_forecast_eps"] = initial_forecast_eps
+        best[key] = promoted
+        return
+
+    # disclosed_date が新しい方を優先、ただしフィールドレベルCOALESCE
+    if (record.get("disclosed_date") or "") >= (existing.get("disclosed_date") or ""):
+        for field in record:
+            if record[field] is not None:
+                existing[field] = record[field]
+        # FY確定行: FEPS=空の場合でも forecast_eps を明示的に上書きして
+        # Supabase の旧予想値（通期予想修正値）残留を防ぐ。
+        if (
+            record.get("quarter") == "FY"
+            and record.get("eps") is not None
+            and record.get("forecast_eps") is None
+        ):
+            existing["forecast_eps"] = None
+    else:
+        for field in record:
+            if existing[field] is None and record[field] is not None:
+                existing[field] = record[field]
+
+
+def _merge_next_year_record(best: dict[tuple, dict], next_row: dict) -> None:
+    """Merge an NxF placeholder without overriding a period-native result."""
+    key = (next_row["ticker"], next_row["period"], next_row["quarter"])
+    existing = best.get(key)
+    if existing is None:
+        best[key] = next_row
+        return
+
+    if existing.get("eps") is not None:
+        # A completed FY must not regain a current forecast from an old NxF.
+        # Keep the first forecast only as historical initial guidance.
+        if existing.get("initial_forecast_eps") is None:
+            existing["initial_forecast_eps"] = next_row.get("initial_forecast_eps")
+        return
+
+    # まだ実績なし → より新しい開示日の NxFEPS で上書き
+    if (next_row.get("disclosed_date") or "") >= (existing.get("disclosed_date") or ""):
+        existing["forecast_eps"] = next_row["forecast_eps"]
+        existing["forecast_dividend_annual"] = next_row.get("forecast_dividend_annual")
+        existing["forecast_payout_ratio"] = next_row.get("forecast_payout_ratio")
+        existing["disclosed_date"] = next_row["disclosed_date"]
+
+
 # ============================================================
 # メイン処理
 # ============================================================
@@ -599,51 +672,12 @@ def run(
             continue
 
         stats["extracted"] += 1
-        key = (record["ticker"], record["period"], record["quarter"])
-        existing = best.get(key)
-
-        if existing is None:
-            best[key] = record
-        else:
-            # disclosed_date が新しい方を優先、ただしフィールドレベルCOALESCE
-            if (record.get("disclosed_date") or "") >= (existing.get("disclosed_date") or ""):
-                for field in record:
-                    if record[field] is not None:
-                        existing[field] = record[field]
-                # FY確定行: FEPS=空の場合でも forecast_eps を明示的に上書きして
-                # Supabase の旧予想値（通期予想修正値）残留を防ぐ。
-                # 条件: FY行 かつ 実績EPS存在（決算確定済み） かつ FEPS が空
-                if (
-                    record.get("quarter") == "FY"
-                    and record.get("eps") is not None
-                    and record.get("forecast_eps") is None
-                ):
-                    existing["forecast_eps"] = None
-            else:
-                for field in record:
-                    if existing[field] is None and record[field] is not None:
-                        existing[field] = record[field]
+        _merge_primary_record(best, record)
 
         # ---- 翌期予想行 (NxFEPS) の生成 ----
         next_row = _extract_next_year_forecast(raw, record)
         if next_row:
-            nkey = (next_row["ticker"], next_row["period"], next_row["quarter"])
-            nexisting = best.get(nkey)
-            if nexisting is None:
-                best[nkey] = next_row
-            elif nexisting.get("eps") is not None:
-                # 既にその期の実績データあり → forecast_eps が未設定の場合のみ補完
-                if nexisting.get("forecast_eps") is None:
-                    nexisting["forecast_eps"] = next_row["forecast_eps"]
-                    nexisting["forecast_dividend_annual"] = next_row.get("forecast_dividend_annual")
-                    nexisting["forecast_payout_ratio"] = next_row.get("forecast_payout_ratio")
-            else:
-                # まだ実績なし → より新しい開示日の NxFEPS で上書き
-                if (next_row.get("disclosed_date") or "") >= (nexisting.get("disclosed_date") or ""):
-                    nexisting["forecast_eps"] = next_row["forecast_eps"]
-                    nexisting["forecast_dividend_annual"] = next_row.get("forecast_dividend_annual")
-                    nexisting["forecast_payout_ratio"] = next_row.get("forecast_payout_ratio")
-                    nexisting["disclosed_date"] = next_row["disclosed_date"]
+            _merge_next_year_record(best, next_row)
 
     logger.info(f"[DEDUP] 重複排除後: {len(best):,} レコード")
 
