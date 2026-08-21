@@ -246,7 +246,8 @@ def main() -> int:
             "--recent-days", "30",
             *([] if args.dry_run else ["--apply"]),
             "--enable-details-gp",  # /v2/fins/details から gross_profit を自動補完
-        ], timeout_sec=900)         # details 補完分で処理時間が延びるため 600→900
+            "--details-budget-sec", "780",  # checkpointして外側timeoutより先にfail-open
+        ], timeout_sec=900)
         steps.append(step)
 
         # ── Step 5: sync_financials（J-Quants DB → Supabase financials） ──

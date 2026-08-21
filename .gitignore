@@ -20,6 +20,7 @@ Thumbs.db
 .env
 
 state/locks/
+state/jquants_financial_details_checkpoint.json
 *.lock
 
 data/*.db

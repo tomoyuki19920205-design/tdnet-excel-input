@@ -38,6 +38,7 @@ data/jquants.db の jquants_financials_normalized テーブルに保存する。
 from __future__ import annotations
 
 import argparse
+import email.utils
 import io
 import json
 import logging
@@ -45,6 +46,7 @@ import os
 import sqlite3
 import sys
 import time
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -63,6 +65,7 @@ from src.jquants.financial_details import (
     has_plausible_actual_period_metadata,
     normalize_actual_consolidated_pbt,
 )
+from tools.state_io import atomic_json_save, safe_json_load
 
 # Windows cp932 対策
 if sys.stdout and hasattr(sys.stdout, "encoding"):
@@ -77,6 +80,9 @@ if sys.stderr and hasattr(sys.stderr, "encoding"):
         )
 
 _DEFAULT_DB = os.path.join(_PROJECT_ROOT, "data", "jquants.db")
+_DEFAULT_DETAILS_STATE = os.path.join(
+    _PROJECT_ROOT, "state", "jquants_financial_details_checkpoint.json"
+)
 _LOG_DIR = os.path.join(_PROJECT_ROOT, "logs")
 _DEFAULT_RECENT_DAYS = 30
 
@@ -87,6 +93,7 @@ _BASE_URL = "https://api.jquants.com/v2"
 _SLEEP_BETWEEN_DATES = 0.3
 _SLEEP_ON_429 = 60
 _MAX_RETRIES = 5
+_DEFAULT_DETAILS_BUDGET_SEC = 780
 
 # gross_profit 補完用: /fins/details エンドポイント
 # probe_jquants_endpoints.py で HTTP200 になったパスに合わせて変更する
@@ -161,30 +168,72 @@ def _get_auth_headers() -> dict:
 # ============================================================
 # API クライアント（429/5xx リトライ付き）
 # ============================================================
+class DetailsBudgetExhausted(RuntimeError):
+    """Raised before a details retry would exceed the stage-owned budget."""
+
+
+def _retry_after_seconds(response: requests.Response, default: float) -> float:
+    """Return Retry-After as seconds, supporting both legal header formats."""
+    raw = response.headers.get("Retry-After")
+    if not raw:
+        return default
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        try:
+            retry_at = email.utils.parsedate_to_datetime(raw)
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=timezone.utc)
+            return max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
+        except (TypeError, ValueError, OverflowError):
+            return default
+
+
+def _bounded_sleep(wait: float, deadline_monotonic: float | None) -> None:
+    if deadline_monotonic is not None and time.monotonic() + wait >= deadline_monotonic:
+        raise DetailsBudgetExhausted(
+            f"details retry wait {wait:.1f}s would exceed the stage budget"
+        )
+    time.sleep(wait)
+
+
 def _api_get(
     session: requests.Session,
     endpoint: str,
     params: dict,
     auth_headers: dict,
+    *,
+    deadline_monotonic: float | None = None,
 ) -> requests.Response:
     """GET リクエスト（429/5xx リトライ付き）。"""
     url = f"{_BASE_URL}{endpoint}"
     for attempt in range(_MAX_RETRIES + 1):
+        request_timeout = 30.0
+        if deadline_monotonic is not None:
+            remaining = deadline_monotonic - time.monotonic()
+            if remaining <= 1.0:
+                raise DetailsBudgetExhausted("details request budget exhausted")
+            request_timeout = min(request_timeout, max(1.0, remaining - 0.5))
         try:
-            resp = session.get(url, params=params, headers=auth_headers, timeout=30)
+            resp = session.get(
+                url, params=params, headers=auth_headers, timeout=request_timeout
+            )
         except requests.exceptions.Timeout:
             logger.warning(f"[API] Timeout: {endpoint} attempt={attempt+1}")
-            time.sleep(5 * (attempt + 1))
+            _bounded_sleep(5 * (attempt + 1), deadline_monotonic)
             continue
         except requests.exceptions.ConnectionError as e:
             logger.warning(f"[API] ConnectionError: {e} attempt={attempt+1}")
-            time.sleep(10 * (attempt + 1))
+            _bounded_sleep(10 * (attempt + 1), deadline_monotonic)
             continue
 
         if resp.status_code == 429:
-            wait = _SLEEP_ON_429 * (attempt + 1)
-            logger.warning(f"[API] Rate limit 429! Waiting {wait}s (attempt {attempt+1})")
-            time.sleep(wait)
+            wait = _retry_after_seconds(resp, _SLEEP_ON_429)
+            logger.warning(
+                f"[API] Rate limit 429! Waiting {wait:g}s "
+                f"(attempt {attempt+1}, retry_after={resp.headers.get('Retry-After')!r})"
+            )
+            _bounded_sleep(wait, deadline_monotonic)
             continue
 
         if resp.status_code == 401:
@@ -196,7 +245,7 @@ def _api_get(
         if resp.status_code >= 500:
             wait = 5 * (attempt + 1)
             logger.warning(f"[API] HTTP {resp.status_code} attempt={attempt+1} wait={wait}s")
-            time.sleep(wait)
+            _bounded_sleep(wait, deadline_monotonic)
             continue
 
         return resp
@@ -669,40 +718,11 @@ def _fetch_details_gross_profit(
     return None
 
 
-def _fetch_details_actual_metrics(
-    session: requests.Session,
-    auth_headers: dict,
-    summary_item: dict,
-) -> dict[str, int | None]:
-    """Fetch the matching details disclosure and extract strict actual metrics."""
+def _extract_details_actual_metrics(
+    item: dict, summary_item: dict
+) -> dict[str, int | str | None]:
+    """Extract strict actual metrics from one already-matched details item."""
     local_code = str(summary_item.get("Code") or "")
-    disclosed_date = str(summary_item.get("DiscDate") or "")
-    response = _api_get(
-        session,
-        _DETAILS_ENDPOINT,
-        {"code": local_code, "date": disclosed_date},
-        auth_headers,
-    )
-    if response.status_code != 200:
-        logger.warning(
-            f"[DETAILS] HTTP {response.status_code}: "
-            f"local_code={local_code} date={disclosed_date}"
-        )
-        return {"gross_profit": None, "profit_before_tax": None, "operating_profit": None, "operating_profit_reason": None}
-    items = response.json().get("data") or []
-    disclosure_number = str(summary_item.get("DiscNo") or "")
-    matching = [
-        item for item in items
-        if item.get("Code") == local_code
-        and str(item.get("DiscNo") or "") == disclosure_number
-    ]
-    if len(matching) != 1:
-        logger.warning(
-            f"[DETAILS] exact disclosure match count={len(matching)} "
-            f"code={local_code} disc_no={disclosure_number}"
-        )
-        return {"gross_profit": None, "profit_before_tax": None, "operating_profit": None, "operating_profit_reason": None}
-    item = matching[0]
     pbt_record = normalize_actual_consolidated_pbt(
         item, summary_item, expected_code=local_code
     )
@@ -735,6 +755,89 @@ def _fetch_details_actual_metrics(
     }
 
 
+def _fetch_details_for_date(
+    session: requests.Session,
+    auth_headers: dict,
+    disclosed_date: str,
+    *,
+    deadline_monotonic: float | None = None,
+) -> tuple[list[dict], int]:
+    """Fetch a whole disclosure day's details in one request (plus pagination)."""
+    params: dict[str, str] = {"date": disclosed_date}
+    items: list[dict] = []
+    api_calls = 0
+    while True:
+        response = _api_get(
+            session,
+            _DETAILS_ENDPOINT,
+            params,
+            auth_headers,
+            deadline_monotonic=deadline_monotonic,
+        )
+        api_calls += 1
+        if response.status_code == 404:
+            return items, api_calls
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"[DETAILS] HTTP {response.status_code} date={disclosed_date}"
+            )
+        payload = response.json()
+        items.extend(payload.get("data") or [])
+        pagination_key = payload.get("pagination_key")
+        if not pagination_key:
+            return items, api_calls
+        params["pagination_key"] = str(pagination_key)
+
+
+def _fetch_details_actual_metrics(
+    session: requests.Session,
+    auth_headers: dict,
+    summary_item: dict,
+) -> dict[str, int | str | None]:
+    """Backward-compatible one-document helper for targeted repair tools."""
+    local_code = str(summary_item.get("Code") or "")
+    disclosed_date = str(summary_item.get("DiscDate") or "")
+    disclosure_number = str(summary_item.get("DiscNo") or "")
+    items, _api_calls = _fetch_details_for_date(
+        session, auth_headers, disclosed_date
+    )
+    matching = [
+        item
+        for item in items
+        if str(item.get("Code") or "") == local_code
+        and str(item.get("DiscNo") or "") == disclosure_number
+    ]
+    if len(matching) != 1:
+        logger.warning(
+            f"[DETAILS] exact disclosure match count={len(matching)} "
+            f"code={local_code} disc_no={disclosure_number}"
+        )
+        return {
+            "gross_profit": None,
+            "profit_before_tax": None,
+            "operating_profit": None,
+            "operating_profit_reason": None,
+        }
+    return _extract_details_actual_metrics(matching[0], summary_item)
+
+
+def _details_document_key(summary_item: dict, row: tuple) -> str:
+    disclosure_number = str(summary_item.get("DiscNo") or "").strip()
+    if disclosure_number:
+        return disclosure_number
+    # Defensive fallback for malformed historical summary rows. It remains
+    # deterministic, but cannot accidentally match a different disclosure.
+    return "missing:" + "|".join(str(value or "") for value in row[1:5])
+
+
+def _load_details_state(path: Path) -> dict:
+    state = safe_json_load(path, default={"version": 1, "documents": {}})
+    if not isinstance(state, dict) or not isinstance(state.get("documents"), dict):
+        return {"version": 1, "documents": {}}
+    state["version"] = 1
+    return state
+
+
 def _supplement_gross_profit_from_details(
     conn: sqlite3.Connection,
     session: requests.Session,
@@ -743,141 +846,217 @@ def _supplement_gross_profit_from_details(
     force: bool = False,
     date_from: str | None = None,
     date_to: str | None = None,
+    *,
+    state_path: str | Path = _DEFAULT_DETAILS_STATE,
+    budget_sec: float = _DEFAULT_DETAILS_BUDGET_SEC,
 ) -> dict:
-    """
-    jquants_financials_normalized で gross_profit IS NULL の行に対して
-    /fins/details から補完する。
+    """Incrementally enrich missing metrics with one details fetch per date.
 
-    Args:
-        target_local_code: None なら全行が対象（推奨しない）。通常は 1銘柄を指定。
-        force: True なら既存 gross_profit も上書きする。
-        date_from: 対象 disclosed_date の下限 (YYYY-MM-DD)。指定で過去履歴を除外。
-        date_to:   対象 disclosed_date の上限 (YYYY-MM-DD)。
-
-    Returns:
-        {"checked": int, "supplemented": int, "skipped": int, "errors": int,
-         "details_api_calls": int, "details_cache_hits": int}
+    Completion is checkpointed per disclosure number outside SQLite, so no DB
+    schema change is needed. A fully returned date is authoritative: documents
+    absent from that response are recorded as terminal ``no_detail`` and are not
+    retried forever. Transient request failures remain pending for the next run.
     """
     stats = {
         "checked": 0,
+        "documents_total": 0,
+        "documents_attempted": 0,
+        "dates_requested": 0,
         "supplemented": 0,
+        "details_success": 0,
+        "details_no_detail": 0,
+        "details_pending": 0,
         "skipped": 0,
         "errors": 0,
         "details_api_calls": 0,
         "details_cache_hits": 0,
+        "duplicate_detail_items": 0,
+        "budget_exhausted": False,
     }
+    deadline = time.monotonic() + max(1.0, budget_sec)
+    checkpoint = Path(state_path)
+    state = _load_details_state(checkpoint)
+    documents: dict[str, dict] = state["documents"]
 
-    # Each disclosure number is matched exactly; no cross-document fallback.
-    details_cache: dict[str, dict[str, int | None]] = {}
-
-    where_clause = "(gross_profit IS NULL OR profit_before_tax IS NULL)" if not force else "1=1"
+    clauses = ["1=1" if force else "(gross_profit IS NULL OR profit_before_tax IS NULL)"]
+    params: list[str] = []
     if target_local_code:
-        where_clause += f" AND local_code = '{target_local_code}'"
+        clauses.append("local_code = ?")
+        params.append(target_local_code)
     if date_from:
-        where_clause += f" AND disclosed_date >= '{date_from}'"
+        clauses.append("disclosed_date >= ?")
+        params.append(date_from)
     if date_to:
-        where_clause += f" AND disclosed_date <= '{date_to}'"
+        clauses.append("disclosed_date <= ?")
+        params.append(date_to)
 
     rows = conn.execute(
         f"""
-        SELECT local_code, disclosed_date,
+        SELECT rowid, local_code, disclosed_date,
                current_fiscal_year_end_date, type_of_current_period,
                gross_profit, profit_before_tax, operating_profit, raw_json
         FROM jquants_financials_normalized
-        WHERE {where_clause}
-        ORDER BY disclosed_date DESC
-        """
+        WHERE {' AND '.join(clauses)}
+        ORDER BY disclosed_date DESC, local_code, rowid
+        """,
+        params,
     ).fetchall()
+    stats["checked"] = len(rows)
+
+    by_document: dict[str, list[tuple]] = defaultdict(list)
+    summaries: dict[str, dict] = {}
+    for row in rows:
+        try:
+            summary_item = json.loads(row[8] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            summary_item = {}
+        document_key = _details_document_key(summary_item, row)
+        by_document[document_key].append(row)
+        summaries.setdefault(document_key, summary_item)
+    stats["documents_total"] = len(by_document)
+
+    pending_by_date: dict[str, list[str]] = defaultdict(list)
+    for document_key, document_rows in by_document.items():
+        saved = documents.get(document_key, {})
+        if not force and saved.get("status") in {"complete", "no_detail"}:
+            stats["details_cache_hits"] += 1
+            stats["skipped"] += len(document_rows)
+            continue
+        pending_by_date[str(document_rows[0][2])].append(document_key)
 
     logger.info(
-        f"[DETAILS] gross_profit 補完対象: {len(rows)} 行 "
-        f"(local_code={target_local_code or 'all'} "
-        f"date={date_from or '*'}~{date_to or '*'} "
-        f"force={force})"
+        f"[DETAILS] 補完対象: rows={len(rows)} documents={len(by_document)} "
+        f"pending_documents={sum(map(len, pending_by_date.values()))} "
+        f"dates={len(pending_by_date)} cache_hits={stats['details_cache_hits']} "
+        f"date={date_from or '*'}~{date_to or '*'} force={force}"
     )
 
-    for row in rows:
-        stats["checked"] += 1
-        local_code   = row[0]
-        disc_date    = row[1]
-        fy_end       = row[2]
-        period_type  = row[3]
-        existing_gp  = row[4]
-        existing_pbt = row[5]
-        existing_op  = row[6]
-        summary_item = json.loads(row[7] or "{}")
-
-        # force=False かつ既存値あり → スキップ
-        if not force and existing_gp is not None and existing_pbt is not None and existing_op is not None:
-            stats["skipped"] += 1
-            continue
-
-        cache_key = str(summary_item.get("DiscNo") or "")
-        if cache_key in details_cache:
-            metrics = details_cache[cache_key]
-            stats["details_cache_hits"] += 1
-        else:
-            metrics = _fetch_details_actual_metrics(
-                session, auth_headers, summary_item
+    ordered_dates = sorted(pending_by_date, reverse=True)
+    for date_index, disclosed_date in enumerate(ordered_dates):
+        document_keys = pending_by_date[disclosed_date]
+        if time.monotonic() >= deadline:
+            stats["budget_exhausted"] = True
+            stats["details_pending"] += sum(
+                len(pending_by_date[value]) for value in ordered_dates[date_index:]
             )
-            details_cache[cache_key] = metrics
-            stats["details_api_calls"] += 1
-            time.sleep(0.3)
+            break
 
-        gp = metrics["gross_profit"]
-        pbt = metrics["profit_before_tax"]
-        op = metrics.get("operating_profit")
-        op_reason = metrics.get("operating_profit_reason")
-
-        if gp is None and pbt is None and op is None:
-            logger.debug(
-                f"[DETAILS] 取得不可: local_code={local_code} date={disc_date} period={period_type}"
-            )
-            stats["skipped"] += 1
-            continue
-
-        if op_reason:
-            summary_item["_operating_profit_proxy"] = {
-                "value": op,
-                "reason": op_reason,
-                "source": "jquants_details",
-            }
+        started = time.perf_counter()
         try:
-            conn.execute(
-                """
-                UPDATE jquants_financials_normalized
-                SET gross_profit = COALESCE(?, gross_profit),
-                    profit_before_tax = COALESCE(?, profit_before_tax),
-                    operating_profit = COALESCE(?, operating_profit),
-                    raw_json = ?
-                WHERE local_code = ?
-                  AND disclosed_date = ?
-                  AND current_fiscal_year_end_date = ?
-                  AND type_of_current_period = ?
-                """,
-                (
-                    gp, pbt, op, json.dumps(summary_item, ensure_ascii=False),
-                    local_code, disc_date, fy_end, period_type,
-                ),
+            detail_items, api_calls = _fetch_details_for_date(
+                session,
+                auth_headers,
+                disclosed_date,
+                deadline_monotonic=deadline,
             )
-            conn.commit()
-            logger.info(
-                f"[DETAILS] ✅ gross_profit 補完: local_code={local_code} "
-                f"date={disc_date} period={fy_end}/{period_type} "
-                f"gp={gp} pbt={pbt} op={op} reason={op_reason} (force={force})"
+            stats["dates_requested"] += 1
+            stats["details_api_calls"] += api_calls
+        except DetailsBudgetExhausted as exc:
+            logger.warning(f"[DETAILS] budget exhausted date={disclosed_date}: {exc}")
+            stats["budget_exhausted"] = True
+            stats["details_pending"] += sum(
+                len(pending_by_date[value]) for value in ordered_dates[date_index:]
             )
-            stats["supplemented"] += 1
-        except Exception as e:
-            logger.warning(f"[DETAILS] UPDATE error: {e}")
+            break
+        except Exception as exc:
+            logger.warning(f"[DETAILS] transient date fetch error date={disclosed_date}: {exc}")
             stats["errors"] += 1
+            stats["details_pending"] += len(document_keys)
+            now = datetime.now(JST).isoformat()
+            for document_key in document_keys:
+                previous = documents.get(document_key, {})
+                documents[document_key] = {
+                    "status": "transient_error",
+                    "attempts": int(previous.get("attempts", 0)) + 1,
+                    "last_attempt_at": now,
+                    "last_error": str(exc)[:500],
+                }
+            state["updated_at"] = now
+            atomic_json_save(checkpoint, state)
+            continue
+
+        detail_by_key: dict[tuple[str, str], dict] = {}
+        for item in detail_items:
+            item_key = (
+                str(item.get("Code") or ""),
+                str(item.get("DiscNo") or ""),
+            )
+            if item_key in detail_by_key:
+                stats["duplicate_detail_items"] += 1
+                continue
+            detail_by_key[item_key] = item
+
+        now = datetime.now(JST).isoformat()
+        for document_key in document_keys:
+            stats["documents_attempted"] += 1
+            summary_item = summaries[document_key]
+            match_key = (
+                str(summary_item.get("Code") or ""),
+                str(summary_item.get("DiscNo") or ""),
+            )
+            detail_item = detail_by_key.get(match_key)
+            if detail_item is None:
+                documents[document_key] = {
+                    "status": "no_detail",
+                    "attempts": int(documents.get(document_key, {}).get("attempts", 0)) + 1,
+                    "last_attempt_at": now,
+                    "disclosed_date": disclosed_date,
+                }
+                stats["details_no_detail"] += 1
+                continue
+
+            stats["details_success"] += 1
+            documents[document_key] = {
+                "status": "complete",
+                "attempts": int(documents.get(document_key, {}).get("attempts", 0)) + 1,
+                "last_attempt_at": now,
+                "disclosed_date": disclosed_date,
+            }
+            for row in by_document[document_key]:
+                row_summary = json.loads(row[8] or "{}")
+                metrics = _extract_details_actual_metrics(detail_item, row_summary)
+                gp = metrics["gross_profit"] if force or row[5] is None else None
+                pbt = metrics["profit_before_tax"] if force or row[6] is None else None
+                op = metrics.get("operating_profit") if force or row[7] is None else None
+                op_reason = metrics.get("operating_profit_reason")
+                if gp is None and pbt is None and op is None:
+                    stats["skipped"] += 1
+                    continue
+                if op_reason and op is not None:
+                    row_summary["_operating_profit_proxy"] = {
+                        "value": op,
+                        "reason": op_reason,
+                        "source": "jquants_details",
+                    }
+                conn.execute(
+                    """
+                    UPDATE jquants_financials_normalized
+                    SET gross_profit = COALESCE(?, gross_profit),
+                        profit_before_tax = COALESCE(?, profit_before_tax),
+                        operating_profit = COALESCE(?, operating_profit),
+                        raw_json = ?
+                    WHERE rowid = ?
+                    """,
+                    (gp, pbt, op, json.dumps(row_summary, ensure_ascii=False), row[0]),
+                )
+                stats["supplemented"] += 1
+
+        conn.commit()
+        state["updated_at"] = now
+        atomic_json_save(checkpoint, state)
+        logger.info(
+            f"[DETAILS] date={disclosed_date} candidates={len(document_keys)} "
+            f"returned={len(detail_items)} elapsed={time.perf_counter()-started:.3f}s"
+        )
+        time.sleep(_SLEEP_BETWEEN_DATES)
 
     logger.info(
         f"[DETAILS] 補完完了: checked={stats['checked']} "
-        f"supplemented={stats['supplemented']} "
-        f"skipped={stats['skipped']} "
-        f"errors={stats['errors']} "
-        f"api_calls={stats['details_api_calls']} "
-        f"cache_hits={stats['details_cache_hits']}"
+        f"documents={stats['documents_total']} attempted={stats['documents_attempted']} "
+        f"success={stats['details_success']} no_detail={stats['details_no_detail']} "
+        f"supplemented={stats['supplemented']} pending={stats['details_pending']} "
+        f"errors={stats['errors']} api_calls={stats['details_api_calls']} "
+        f"cache_hits={stats['details_cache_hits']} dates={stats['dates_requested']}"
     )
     return stats
 
@@ -894,6 +1073,8 @@ def fetch_and_save(
     db_path: str = _DEFAULT_DB,
     enable_details_gp: bool = False,
     force_details_gp: bool = False,
+    details_state_path: str | Path = _DEFAULT_DETAILS_STATE,
+    details_budget_sec: float = _DEFAULT_DETAILS_BUDGET_SEC,
 ) -> dict:
     """
     J-Quants V2 /fins/summary から財務データを取得し jquants.db に保存する。
@@ -916,6 +1097,13 @@ def fetch_and_save(
         "errors": 0,
         "dry_run": dry_run,
         "details_gp_supplemented": 0,
+        "details_candidates": 0,
+        "details_attempted": 0,
+        "details_success": 0,
+        "details_no_detail": 0,
+        "details_pending": 0,
+        "details_api_calls": 0,
+        "details_cache_hits": 0,
     }
 
     auth_headers = _get_auth_headers()
@@ -1052,21 +1240,34 @@ def fetch_and_save(
             f"force={force_details_gp}"
         )
         conn2 = sqlite3.connect(db_path)
+        details_session = requests.Session()
         try:
             d_stats = _supplement_gross_profit_from_details(
-                conn2, session, auth_headers=_get_auth_headers(),
+                conn2, details_session, auth_headers=_get_auth_headers(),
                 target_local_code=target_lc,
                 force=force_details_gp,
                 date_from=from_date,
                 date_to=to_date,
+                state_path=details_state_path,
+                budget_sec=details_budget_sec,
             )
             stats["details_gp_supplemented"] = d_stats["supplemented"]
+            stats["details_candidates"] = d_stats["documents_total"]
+            stats["details_attempted"] = d_stats["documents_attempted"]
+            stats["details_success"] = d_stats["details_success"]
+            stats["details_no_detail"] = d_stats["details_no_detail"]
+            stats["details_pending"] = d_stats["details_pending"]
+            stats["details_api_calls"] = d_stats["details_api_calls"]
+            stats["details_cache_hits"] = d_stats["details_cache_hits"]
+            stats["errors"] += d_stats["errors"]
             logger.info(
                 f"[DETAILS] 補完完了: checked={d_stats['checked']} "
+                f"attempted={d_stats['documents_attempted']} "
                 f"supplemented={d_stats['supplemented']} "
-                f"skipped={d_stats['skipped']} errors={d_stats['errors']}"
+                f"pending={d_stats['details_pending']} errors={d_stats['errors']}"
             )
         finally:
+            details_session.close()
             conn2.close()
     elif dry_run and enable_details_gp:
         logger.info(
@@ -1151,6 +1352,14 @@ def main() -> None:
         help="--enable-details-gp 時に既存 gross_profit も上書きする",
     )
     parser.add_argument(
+        "--details-state", type=str, default=_DEFAULT_DETAILS_STATE,
+        help="details完了documentのcheckpoint JSON path",
+    )
+    parser.add_argument(
+        "--details-budget-sec", type=float, default=_DEFAULT_DETAILS_BUDGET_SEC,
+        help="details工程の内部wall-clock予算（scheduler timeoutより短くする）",
+    )
+    parser.add_argument(
         "--details-only", action="store_true",
         help="summaryに無い訂正開示をdetailsの正確なDEI periodから取り込む",
     )
@@ -1213,6 +1422,8 @@ def main() -> None:
             db_path=args.db,
             enable_details_gp=args.enable_details_gp,
             force_details_gp=args.force_details_gp,
+            details_state_path=args.details_state,
+            details_budget_sec=args.details_budget_sec,
         )
     except RuntimeError as e:
         logger.error(f"FATAL: {e}")
@@ -1234,6 +1445,17 @@ def main() -> None:
     print(f"  FY rows           : {stats['fy_rows']:,}  (TypeOfCurrentPeriod=FY)")
     print(f"  upserted          : {stats['upserted']:,}  (DB保存件数)")
     print(f"  details_gp_patched: {stats.get('details_gp_supplemented', 0):,}  (/fins/details 補完)")
+    if args.enable_details_gp and not is_dry_run:
+        print(
+            "  details documents : "
+            f"candidates={stats.get('details_candidates', 0):,} "
+            f"attempted={stats.get('details_attempted', 0):,} "
+            f"success={stats.get('details_success', 0):,} "
+            f"no_detail={stats.get('details_no_detail', 0):,} "
+            f"pending={stats.get('details_pending', 0):,} "
+            f"api_calls={stats.get('details_api_calls', 0):,} "
+            f"cache_hits={stats.get('details_cache_hits', 0):,}"
+        )
     print(f"  errors            : {stats['errors']}")
     print("-" * 55)
     if is_dry_run:
@@ -1249,6 +1471,12 @@ def main() -> None:
         print("    python -X utf8 tools/sync_financials.py --apply")
     print("=" * 55)
     print()
+    if stats.get("details_pending", 0) > 0:
+        logger.warning(
+            "[DETAILS] partial completion: pending=%s; checkpoint preserved for resume",
+            stats["details_pending"],
+        )
+        sys.exit(2)
 
 
 # ============================================================
