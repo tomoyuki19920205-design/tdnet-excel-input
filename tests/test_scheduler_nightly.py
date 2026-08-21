@@ -134,6 +134,16 @@ def test_market_commands_match_existing_cli_contracts():
     ]
 
 
+def test_jquants_details_has_internal_budget_below_outer_timeout():
+    call_kwargs = {}
+    _return_code, calls, _summary = _run_nightly(call_kwargs=call_kwargs)
+    command = dict(calls)["fetch-jquants-fin"]
+
+    budget_index = command.index("--details-budget-sec")
+    assert float(command[budget_index + 1]) < call_kwargs["fetch-jquants-fin"]["timeout_sec"]
+    assert call_kwargs["fetch-jquants-fin"]["timeout_sec"] == 900
+
+
 def test_existing_edinet_extract_failure_still_skips_event_step():
     return_code, calls, summary = _run_nightly(
         failures={"edinet-order-extract-nightly": 1}
