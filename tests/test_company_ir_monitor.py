@@ -347,6 +347,46 @@ def test_default_fetch_does_not_retry_404(conn, monkeypatch):
     assert len(calls) == 1 and stats.failed_sources == 1
 
 
+def test_default_fetch_retries_403_once_with_standard_browser_user_agent():
+    class Response:
+        def __init__(self, status_code, content=b""):
+            self.status_code = status_code
+            self.content = content
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                response = requests.Response()
+                response.status_code = self.status_code
+                raise requests.HTTPError(response=response)
+
+    class Session:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, url, **kwargs):
+            self.calls.append((url, kwargs))
+            return Response(403) if len(self.calls) == 1 else Response(200, b"<html>IR</html>")
+
+    session = Session()
+    body = company_ir_monitor._default_fetch("https://example.com/ir", session)
+
+    assert body == b"<html>IR</html>"
+    assert len(session.calls) == 2
+    assert "User-Agent" not in session.calls[0][1].get("headers", {})
+    assert session.calls[1][1]["headers"]["User-Agent"].startswith("Mozilla/5.0")
+
+
+def test_normalize_url_removes_php_session_identity_parameter():
+    first = company_ir_monitor.normalize_url(
+        "https://example.com/ir/document.pdf?PHPSESSID=first&year=2026"
+    )
+    second = company_ir_monitor.normalize_url(
+        "https://example.com/ir/document.pdf?year=2026&PHPSESSID=second"
+    )
+
+    assert first == second == "https://example.com/ir/document.pdf?year=2026"
+
+
 def test_default_fetch_limits_parallelism_per_host(conn, monkeypatch):
     for index in range(4):
         add_source(conn, str(5000 + index), f"会社{index}", f"https://same.test/ir/{index}")

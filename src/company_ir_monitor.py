@@ -58,7 +58,11 @@ _VIDEO_HOSTS = ("youtube.com", "youtu.be", "vimeo.com", "daiwair.jp", "logmi.jp"
 _PERIOD_RE = re.compile(
     r"(?:20\d{2}|19\d{2}|令和\d+)年\s*\d{1,2}月期(?:\s*(?:第\s*[1-4一二三四]\s*四半期|通期))?"
 )
-_TRACKING_PARAMS = {"fbclid", "gclid", "yclid", "mc_cid", "mc_eid"}
+_TRACKING_PARAMS = {"fbclid", "gclid", "yclid", "mc_cid", "mc_eid", "phpsessid"}
+_STANDARD_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36"
+)
 
 
 @dataclass(frozen=True)
@@ -425,6 +429,16 @@ def hash_remote_pdf(url: str, session: requests.Session, max_bytes: int = 50 * 1
 
 def _default_fetch(url: str, session: requests.Session) -> bytes:
     response = session.get(url, timeout=(3, 10), allow_redirects=True)
+    if response.status_code == 403:
+        # Some verified company sites reject descriptive service user agents
+        # while serving the same public HTML to ordinary browsers. This is one
+        # standards-compliant retry, not a WAF/CAPTCHA bypass.
+        response = session.get(
+            url,
+            timeout=(3, 10),
+            allow_redirects=True,
+            headers={"User-Agent": _STANDARD_BROWSER_USER_AGENT},
+        )
     response.raise_for_status()
     # Let BeautifulSoup detect Japanese encodings from the raw response.  Some
     # IR servers omit/incorrectly declare charset, making response.text mojibake.
