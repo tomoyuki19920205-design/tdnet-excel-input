@@ -18,6 +18,7 @@ from .common_ticker import strip_tdnet_trailing_zero
 from .models import DisclosureItem, DisclosureType, FINANCIAL_STATEMENT_KEYWORDS
 from .pdf_only_materials import classify_pdf_only_material
 from .review_completion import classify_procedural_review_completion
+from .security_eligibility import classify_disclosure_security
 from .utils import sha256, today_yyyymmdd
 from lib.backfill.xbrl_url_inference import infer_xbrl_url_from_pdf
 
@@ -149,39 +150,19 @@ def _matches_filter(title: str) -> bool:
 
 def is_instrument_excluded(ticker: str, title: str, company_name: str) -> bool:
     """
-    ETF/投信/ファンド等の開示かどうかを判定する。
+    Backward-compatible wrapper around the security-first eligibility rule.
 
-    判定方法（OR条件）:
-    - 正規化後のタイトルまたは銘柄名にINSTRUMENT_EXCLUDE_KEYWORDSいずれかを含む
-    - 銘柄コードがETF帯（1300-1799）かつタイトル/銘柄名にキーワードを含む
+    J-Quants/TDnet official attributes are resolved first.  Text matching is
+    used only when no authoritative master classification is available.
 
     Returns:
         True = 除外対象（スキップする）
     """
-    n_title = normalize_title(title)
-    n_name = normalize_title(company_name)
-
-    # キーワード判定（正規化後で部分一致）
-    for kw in INSTRUMENT_EXCLUDE_KEYWORDS:
-        if kw in n_title or kw in n_name:
-            return True
-
-    # ETFコード帯（1300-1799）+ キーワード併用
-    # コード帯だけでは誤判定があるため、タイトル/銘柄名に
-    # 一般的なETF関連語が含まれるか簡易チェック
-    # ETFコード帯チェック: 英字付きコードは数値変換できないのでスキップ
-    if ticker.isdigit():
-        code_num = int(ticker)
-        if 1300 <= code_num <= 1799:
-            # コード帯に該当する場合、追加の簡易キーワードでも判定
-            etf_hints = ["連動", "指数", "日経", "topix", "s&p", "ナスダック",
-                         "nasdaq", "ダウ", "reit", "リート", "レバレッジ",
-                         "インバース", "ブル", "ベア", "原油", "金価格"]
-            for hint in etf_hints:
-                if hint in n_title or hint in n_name:
-                    return True
-
-    return False
+    item = DisclosureItem(
+        disclosure_id="", ticker=ticker, company_name=company_name,
+        title=title, doc_url="", published_at="",
+    )
+    return classify_disclosure_security(item).is_etf_like
 
 
 def _matches_watchlist(ticker: str, watch_tickers: list[str]) -> bool:
@@ -533,7 +514,7 @@ def _fetch_via_jquants(
         # disclosure_id は既存仕様に合わせて sha256(doc_url)
         disclosure_id = sha256(doc_url)
 
-        results.append(DisclosureItem(
+        item = DisclosureItem(
             disclosure_id=disclosure_id,
             ticker=jq.ticker,
             company_name=jq.company_name,
@@ -543,7 +524,9 @@ def _fetch_via_jquants(
             xbrl_url=jq.xbrl_url,  # Shadow Run と同様に None (lazy)
             disclosure_type=jq.disclosure_type,
             source_doc_id=jq.disclosure_id,
-        ))
+        )
+        item.tdnet_public_items = tuple(jq.disc_items)
+        results.append(item)
 
     logger.info(
         f"[JQUANTS_PRIMARY_FETCH_DONE] "
@@ -604,11 +587,14 @@ def fetch_new_disclosures(
             instrument_skipped = 0
             after_instrument: list[DisclosureItem] = []
             for item in fetched_items:
-                if is_instrument_excluded(item.ticker, item.title, item.company_name):
+                decision = classify_disclosure_security(item, as_of_date=date_str)
+                if decision.is_etf_like:
                     instrument_skipped += 1
                     logger.info(
-                        f"[{source}] skip_reason=instrument_excluded, "
+                        f"[{source}] skip_reason=etf_like_security, "
                         f"code={item.ticker}, name={item.company_name}, "
+                        f"classification_source={decision.source}, "
+                        f"product_category={decision.product_category or '-'}, "
                         f"title={item.title[:50]}"
                     )
                     continue
@@ -797,11 +783,14 @@ def fetch_new_disclosures(
     instrument_skipped = 0
     after_instrument: list[DisclosureItem] = []
     for item in fetched_items:
-        if is_instrument_excluded(item.ticker, item.title, item.company_name):
+        decision = classify_disclosure_security(item, as_of_date=_parse_target_date(target_date))
+        if decision.is_etf_like:
             instrument_skipped += 1
             logger.info(
-                f"[{source}] skip_reason=instrument_excluded, "
+                f"[{source}] skip_reason=etf_like_security, "
                 f"code={item.ticker}, name={item.company_name}, "
+                f"classification_source={decision.source}, "
+                f"product_category={decision.product_category or '-'}, "
                 f"title={item.title[:50]}"
             )
             continue

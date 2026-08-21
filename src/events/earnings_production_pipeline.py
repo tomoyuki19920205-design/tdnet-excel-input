@@ -1563,16 +1563,36 @@ def run_earnings_production(
     xbrl_dir = str(get_project_root() / "data" / "xbrl_archive")
     docs_dir = str(get_project_root() / "data" / "docs")
 
+    # ---- Phase 0: security eligibility (before document classification) ----
+    # Direct/backfill callers may bypass fetch_new_disclosures.  Drop ETF/ETN
+    # securities before XBRL/PDF retrieval, parsing, canonical writes or alerts.
+    from src.security_eligibility import classify_disclosure_security
+    eligible_docs = []
+    for doc in docs:
+        security_decision = classify_disclosure_security(doc)
+        if security_decision.is_etf_like:
+            logger.info(
+                "[EARNINGS] skip_reason=etf_like_security ticker=%s "
+                "classification_source=%s product_category=%s",
+                getattr(doc, "ticker", ""),
+                security_decision.source,
+                security_decision.product_category or "-",
+            )
+            continue
+        eligible_docs.append(doc)
+
     # ---- Phase 0-1: 決算短信フィルタ ----
     tanshin_docs = []
-    for doc in docs:
+    for doc in eligible_docs:
         if not _is_tanshin_title(doc.title):
             continue
         tanshin_docs.append(doc)
 
     result.tanshin_count = len(tanshin_docs)
     logger.info(
-        f"[EARNINGS] total_disclosures={len(docs)} tanshin_candidates={len(tanshin_docs)}"
+        f"[EARNINGS] total_disclosures={len(docs)} "
+        f"security_eligible={len(eligible_docs)} "
+        f"tanshin_candidates={len(tanshin_docs)}"
     )
 
     if not tanshin_docs:

@@ -860,6 +860,31 @@ def save_event_to_supabase(
     """
     result = {"action": "error", "dedupe_key": ""}
 
+    # Final persistence guard for callers that bypass TDnet discovery/ingest.
+    # Resolve from the official security master before building any Viewer row.
+    from src.security_eligibility import classify_security_eligibility
+    security_decision = classify_security_eligibility(
+        event.ticker,
+        as_of_date=event.disclosure_datetime,
+        title=event.title,
+        company_name=event.company_name,
+    )
+    if security_decision.is_etf_like and security_decision.authoritative:
+        logger.info(
+            "[STORE] security_excluded_etf_like ticker=%s source=%s "
+            "product_category=%s",
+            event.ticker,
+            security_decision.source,
+            security_decision.product_category or "-",
+        )
+        return {
+            "action": "security_excluded",
+            "reason": "etf_like_security",
+            "dedupe_key": "",
+            "classification_source": security_decision.source,
+            "product_category": security_decision.product_category,
+        }
+
     # Some canonical/backfill inputs preserve only a calendar date.  Do not
     # let PostgreSQL coerce that value to UTC midnight (which the card renders
     # as 09:00 JST).  Resolve the original TDNET listing time before any

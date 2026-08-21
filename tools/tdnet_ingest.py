@@ -33,6 +33,7 @@ from src.db import StateDB
 from src.downloader import download_document
 from src.extractor import extract_financials, extract_order_metrics, extract_segment_financials
 from src.fetcher import fetch_new_disclosures
+from src.security_eligibility import classify_disclosure_security
 from src.migration.migration_db import MigrationDB
 from src.models import Status, DisclosureType
 from src.utils import (
@@ -151,6 +152,25 @@ def _process_single(
     """
     disclosure_id = item.disclosure_id
     code = item.ticker
+
+    # Defense in depth for direct/backfill callers that bypass fetch_new_disclosures.
+    # This guard must run before PDF/XBRL download and financial parsing.
+    security_decision = classify_disclosure_security(item)
+    if security_decision.is_etf_like:
+        logger.info(
+            "[INGEST] status=skipped_etf_like code=%s doc_id=%s "
+            "classification_source=%s product_category=%s",
+            code,
+            disclosure_id[:16],
+            security_decision.source,
+            security_decision.product_category or "-",
+        )
+        return {
+            "status": "skipped",
+            "detail": "etf_like_security",
+            "code": code,
+            "classification_source": security_decision.source,
+        }
 
     # 冪等性チェック
     if state_db.is_processed(disclosure_id):

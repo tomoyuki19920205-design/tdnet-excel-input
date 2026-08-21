@@ -18,6 +18,7 @@ import logging
 from typing import Any
 
 from .common_models import EventRecord, EventType
+from src.security_eligibility import classify_security_eligibility
 
 logger = logging.getLogger("notify_rules")
 
@@ -44,6 +45,21 @@ def should_notify_event(event: EventRecord) -> bool:
 
     DB保存は別途行われている前提。ここでは通知段階のフィルタのみ。
     """
+    security_decision = classify_security_eligibility(
+        event.ticker,
+        as_of_date=event.disclosure_datetime,
+        title=event.title,
+        company_name=event.company_name,
+    )
+    if security_decision.is_etf_like and security_decision.authoritative:
+        logger.info(
+            "[NOTIFY] blocked_etf_like ticker=%s source=%s product_category=%s",
+            event.ticker,
+            security_decision.source,
+            security_decision.product_category or "-",
+        )
+        return False
+
     if event.event_type == EventType.BUYBACK:
         return _should_notify_buyback(event)
     elif event.event_type == EventType.FORECAST_REVISION:

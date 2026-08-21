@@ -89,7 +89,7 @@ class JQuantsDisclosure:
 
     def to_disclosure_item(self) -> DisclosureItem:
         """既存 DisclosureItem 形式に変換（Shadow Run内部での比較用）"""
-        return DisclosureItem(
+        item = DisclosureItem(
             disclosure_id=self.disclosure_id,
             ticker=self.ticker,
             company_name=self.company_name,
@@ -99,6 +99,10 @@ class JQuantsDisclosure:
             xbrl_url=self.xbrl_url,
             disclosure_type=self.disclosure_type,
         )
+        # DisclosureItem is intentionally kept backward-compatible; official
+        # provider attributes travel as optional dynamic metadata.
+        item.tdnet_public_items = tuple(self.disc_items)
+        return item
 
 
 # ============================================================
