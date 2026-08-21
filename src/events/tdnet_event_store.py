@@ -39,6 +39,7 @@ DISPLAY_SHAREHOLDER = "shareholder"
 DISPLAY_OTHER = "other"
 DISPLAY_EARNINGS_MATERIAL = "earnings_material"
 DISPLAY_MONTHLY_UPDATE = "monthly_update"
+DISPLAY_MANAGEMENT_STRATEGY = "management_strategy"
 DISPLAY_COMPANY_IR_MATERIAL = "company_ir_material"
 DISPLAY_COMPANY_IR_VIDEO = "company_ir_video"
 
@@ -52,6 +53,7 @@ _EVENT_TYPE_TO_CATEGORY = {
     "other": DISPLAY_OTHER,
     "earnings_material": DISPLAY_EARNINGS_MATERIAL,
     "monthly_update": DISPLAY_MONTHLY_UPDATE,
+    "management_strategy": DISPLAY_MANAGEMENT_STRATEGY,
     "company_ir_material": DISPLAY_COMPANY_IR_MATERIAL,
     "company_ir_video": DISPLAY_COMPANY_IR_VIDEO,
 }
@@ -184,6 +186,7 @@ _PRIORITY_MAP = {
     (EventType.DIVIDEND_REVISION, "commemorative_dividend"): 30,
     ("earnings", None): 40,
     (EventType.EARNINGS_MATERIAL, None): 40,
+    (EventType.MANAGEMENT_STRATEGY, None): 45,
     (EventType.MONTHLY_UPDATE, None): 80,
     (EventType.FORECAST_REVISION, "downward"): 50,
     (EventType.FORECAST_REVISION, "difference"): 50,
@@ -749,7 +752,7 @@ def build_supabase_row(event: EventRecord, client=None) -> tuple[dict, dict, str
     metric_name, metric_value, metric_yoy = _extract_primary_metric(event)
     strength = _compute_strength_score(event)
     notify_discord = False if event.event_type in (
-        EventType.EARNINGS_MATERIAL, EventType.MONTHLY_UPDATE,
+        EventType.EARNINGS_MATERIAL, EventType.MONTHLY_UPDATE, EventType.MANAGEMENT_STRATEGY,
         DISPLAY_COMPANY_IR_MATERIAL, DISPLAY_COMPANY_IR_VIDEO,
     ) else should_notify_event(event)
 
@@ -815,6 +818,7 @@ def build_supabase_row(event: EventRecord, client=None) -> tuple[dict, dict, str
         "pdf_url": event.doc_url if display_category in (
             "earnings", "forecast", "dividend", "buyback",
             DISPLAY_EARNINGS_MATERIAL, DISPLAY_MONTHLY_UPDATE,
+            DISPLAY_MANAGEMENT_STRATEGY,
             DISPLAY_COMPANY_IR_MATERIAL, DISPLAY_COMPANY_IR_VIDEO,
         ) else None,
         "raw_payload": json.dumps(raw_payload, ensure_ascii=False, default=str),

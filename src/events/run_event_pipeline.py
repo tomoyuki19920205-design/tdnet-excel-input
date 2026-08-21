@@ -143,7 +143,10 @@ def main():
     )
     parser.add_argument("--date", type=str, default=None, help="対象日付 (YYYY-MM-DD)")
     parser.add_argument("--event-type", type=str, default=None,
-                        choices=["buyback", "forecast_revision", "dividend_revision"],
+                        choices=[
+                            "buyback", "forecast_revision", "dividend_revision",
+                            "earnings_material", "monthly_update", "management_strategy",
+                        ],
                         help="処理するイベント種別")
     parser.add_argument("--dry-run", action="store_true", help="DB保存・通知なし")
     parser.add_argument("--doc-id", type=str, default=None, help="特定文書IDを再処理")

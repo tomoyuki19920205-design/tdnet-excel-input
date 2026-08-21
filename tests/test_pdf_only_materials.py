@@ -65,11 +65,70 @@ class TestPdfOnlyMaterialClassifier(unittest.TestCase):
             self.assertIsNone(classify_pdf_only_material(title, PDF), title)
         self.assertIsNone(classify_pdf_only_material("2026年6月度 月次売上高", "https://example.com/a.html"))
 
+    def test_management_strategy_must_match(self):
+        titles = (
+            "中期経営計画2029策定のお知らせ",
+            "新中期経営計画について",
+            "中期経営計画の更新に関するお知らせ",
+            "中期経営計画説明会資料",
+            "中期事業計画策定について",
+            "事業計画及び成長可能性に関する事項",
+            "事業計画および成長可能性に関する事項",
+            "成長可能性に関する説明資料",
+            "資本コストや株価を意識した経営の実現に向けた対応について",
+            "資本コストと株価を意識した経営について",
+            "ＰＢＲ 改善に向けた取組み",
+            "PBRの向上に向けた対応",
+        )
+        for title in titles:
+            self.assertMatch(title, "management_strategy", "中期経営・戦略")
+
+    def test_management_strategy_safe_compound_rules(self):
+        positives = (
+            "今後の成長戦略についての説明資料",
+            "事業成長戦略資料に関するお知らせ",
+            "中期経営戦略 Vision2030の進捗状況について",
+            "今後の企業価値向上に向けた取組みについて",
+            "長期ビジョン En-Vision2035策定に関するお知らせ",
+        )
+        negatives = (
+            "ニッポン国家成長戦略ファンド募集開始のお知らせ",
+            "海外成長戦略の中核拠点となる製造所建設を推進",
+            "大学経営戦略セミナーに当社社員が登壇",
+            "企業価値向上委員会の設置に関するお知らせ",
+            "企業価値向上に向けた役員報酬制度の改定",
+        )
+        for title in positives:
+            self.assertMatch(title, "management_strategy", "中期経営・戦略")
+        for title in negatives:
+            self.assertIsNone(classify_pdf_only_material(title, PDF), title)
+
+    def test_earnings_material_keeps_primary_type_for_combined_title(self):
+        self.assertMatch(
+            "2027年3月期決算説明資料・中期経営計画",
+            "earnings_material",
+            "決算説明資料",
+        )
+
+    def test_jquants_title_fallback_reaches_prefetch_filter(self):
+        from src.fetcher import classify_disclosure
+        from src.jquants.classifier import classify_disclosure_jquants
+
+        title = "中期経営計画2029策定のお知らせ"
+        self.assertEqual(classify_disclosure(title), "management_strategy")
+        self.assertEqual(classify_disclosure_jquants([], title), "management_strategy")
+
     def test_rollout_boundary_blocks_same_day_catchup(self):
         self.assertFalse(is_after_pdf_only_material_activation("2026-07-21 16:59:00"))
         self.assertTrue(is_after_pdf_only_material_activation("2026-07-21T16:59:01+09:00"))
         self.assertTrue(is_after_pdf_only_material_activation("2026-07-21T08:00:00Z"))
         self.assertFalse(is_after_pdf_only_material_activation(""))
+        self.assertFalse(is_after_pdf_only_material_activation(
+            "2026-08-21 19:53:12", "management_strategy"
+        ))
+        self.assertTrue(is_after_pdf_only_material_activation(
+            "2026-08-21 19:53:13", "management_strategy"
+        ))
 
 
 class TestPdfOnlyMaterialPipeline(unittest.TestCase):
@@ -79,6 +138,13 @@ class TestPdfOnlyMaterialPipeline(unittest.TestCase):
             title="2027年２月期売上高前年比速報（７月度）",
             disclosure_datetime="2026-07-21 17:00", doc_url=PDF,
             source_doc_id="jquants-native-id-1",
+        )
+
+    def _strategy_doc(self, title="中期経営計画2029策定のお知らせ"):
+        return DocumentMeta(
+            doc_id="strategy-doc-1", ticker="1234", company_name="戦略株式会社",
+            title=title, disclosure_datetime="2026-08-21 20:00", doc_url=PDF,
+            source_doc_id="jquants-strategy-id-1",
         )
 
     @patch("src.events.event_pipeline._get_text_and_pdf", side_effect=AssertionError("PDF must not be fetched"))
@@ -127,6 +193,30 @@ class TestPdfOnlyMaterialPipeline(unittest.TestCase):
         self.assertEqual(dedupe, build_dedupe_key(record))
         raw = json.loads(row["raw_payload"])
         self.assertEqual(raw["extracted"]["source_doc_id"], "jquants-native-id-1")
+
+    @patch("src.events.event_pipeline._get_text_and_pdf", side_effect=AssertionError("PDF must not be fetched"))
+    def test_management_strategy_realtime_path_reaches_viewer_row(self, _fetch):
+        result = process_documents([self._strategy_doc()], ":memory:", dry_run=True)
+        self.assertEqual(result.detected, 1)
+        self.assertEqual(len(result.details), 1)
+        record = result.details[0]["_event_record"]
+        self.assertEqual(record.event_type, EventType.MANAGEMENT_STRATEGY)
+        row, payload, _, category, _ = build_supabase_row(record)
+        self.assertEqual(category, "management_strategy")
+        self.assertEqual(row["event_type"], "management_strategy")
+        self.assertEqual(row["pdf_url"], PDF)
+        self.assertEqual(row["display_summary"], "中期経営・戦略")
+        self.assertFalse(row["notify_to_discord"])
+        self.assertEqual(payload["extracted"]["notification_type"], "management_strategy")
+
+    @patch("src.events.event_pipeline._get_text_and_pdf", return_value=("", ""))
+    def test_mixed_forecast_and_strategy_does_not_create_strategy_duplicate(self, _fetch):
+        doc = self._strategy_doc("業績予想及び中期経営計画の修正に関するお知らせ")
+        result = process_documents([doc], ":memory:", dry_run=True)
+        self.assertEqual(result.detected, 0)
+        self.assertEqual(len(result.details), 1)
+        self.assertEqual(result.details[0]["event_type"], EventType.FORECAST_REVISION)
+        self.assertEqual(result.details[0]["action"], "no_change_detected")
 
 
 if __name__ == "__main__":

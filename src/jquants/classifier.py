@@ -16,6 +16,7 @@ from typing import Optional
 
 # 既存モデルの参照（読み取りのみ）
 from src.models import DisclosureType
+from src.pdf_only_materials import classify_pdf_only_material
 from src.review_completion import classify_procedural_review_completion
 
 
@@ -147,6 +148,13 @@ def classify_by_title_fallback(title: str) -> Optional[str]:
     # 配当予想修正
     if "配当" in n and has_revision:
         return DisclosureType.DIVIDEND_REVISION
+
+    # Viewer-only PDF material categories must be recognized here as well as
+    # in fetcher.classify_disclosure(), otherwise the J-Quants primary path can
+    # pass the pre-fetch filter with an empty disclosure_type.
+    material = classify_pdf_only_material(title)
+    if material:
+        return material.event_type
 
     if classify_procedural_review_completion(title):
         return DisclosureType.REVIEW_COMPLETION

@@ -40,7 +40,7 @@ from .price_service import get_last_close
 from src.pdf_only_materials import classify_pdf_only_material, is_after_pdf_only_material_activation
 
 logger = logging.getLogger("event_pipeline")
-PDF_ONLY_MATERIAL_ALERTS_VERSION = "2026-07-21.v1"
+PDF_ONLY_MATERIAL_ALERTS_VERSION = "2026-08-21.management-strategy.v1"
 
 # buyback event_type → subtype マッピング
 _BUYBACK_SUBTYPE_MAP = {
@@ -426,7 +426,7 @@ def _process_single_document(
     title = doc.title
     allowed = event_types or {
         EventType.BUYBACK, EventType.FORECAST_REVISION, EventType.DIVIDEND_REVISION,
-        EventType.EARNINGS_MATERIAL, EventType.MONTHLY_UPDATE,
+        EventType.EARNINGS_MATERIAL, EventType.MONTHLY_UPDATE, EventType.MANAGEMENT_STRATEGY,
     }
 
     # ================================================================
@@ -436,7 +436,9 @@ def _process_single_document(
     _pre_forecast = classify_forecast(title, "")             # title のみで十分判定可能
     _pre_dividend = classify_dividend(title, "")             # title のみで十分判定可能
     _pre_material = classify_pdf_only_material(title, doc.doc_url)
-    if _pre_material and not is_after_pdf_only_material_activation(doc.disclosure_datetime):
+    if _pre_material and not is_after_pdf_only_material_activation(
+        doc.disclosure_datetime, _pre_material.event_type
+    ):
         logger.info(
             "[PDF_ONLY_MATERIAL_ALERTS] pre-activation skip ticker=%s disclosed_at=%s",
             doc.ticker, doc.disclosure_datetime,
@@ -447,6 +449,15 @@ def _process_single_document(
     _need_forecast = (EventType.FORECAST_REVISION in allowed) and _pre_forecast.is_target
     _need_dividend = (EventType.DIVIDEND_REVISION in allowed) and _pre_dividend.is_target
     _need_material = bool(_pre_material and _pre_material.event_type in allowed)
+    if (
+        _need_material
+        and _pre_material.event_type == EventType.MANAGEMENT_STRATEGY
+        and (_need_buyback or _need_forecast or _need_dividend)
+    ):
+        # Keep the established event as the primary type for mixed titles.
+        # A single disclosure must never create both a strategy card and an
+        # existing forecast/dividend/buyback card.
+        _need_material = False
 
     logger.info(
         f"[FORECAST_CALL] doc_id={doc.doc_id[:16] if doc.doc_id else '?'} "
@@ -786,7 +797,7 @@ def process_documents(
             title = doc.title
             allowed = event_types or {
                 EventType.BUYBACK, EventType.FORECAST_REVISION, EventType.DIVIDEND_REVISION,
-                EventType.EARNINGS_MATERIAL, EventType.MONTHLY_UPDATE,
+                EventType.EARNINGS_MATERIAL, EventType.MONTHLY_UPDATE, EventType.MANAGEMENT_STRATEGY,
             }
             _pre_buyback_subtype = classify_buyback_subtype(title)
             _pre_forecast = classify_forecast(title, "")

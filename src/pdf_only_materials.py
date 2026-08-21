@@ -10,9 +10,11 @@ from urllib.parse import unquote
 
 EARNINGS_MATERIAL = "earnings_material"
 MONTHLY_UPDATE = "monthly_update"
+MANAGEMENT_STRATEGY = "management_strategy"
 JST = timezone(timedelta(hours=9))
 # Rollout boundary: do not turn previously filtered same-day disclosures into a backfill.
 PDF_ONLY_MATERIAL_ALERTS_ACTIVATED_AT = datetime(2026, 7, 21, 16, 59, 1, tzinfo=JST)
+MANAGEMENT_STRATEGY_ALERTS_ACTIVATED_AT = datetime(2026, 8, 21, 19, 53, 13, tzinfo=JST)
 
 
 @dataclass(frozen=True)
@@ -33,7 +35,7 @@ def is_pdf_url(url: str) -> bool:
     )
 
 
-def is_after_pdf_only_material_activation(disclosed_at: str) -> bool:
+def is_after_pdf_only_material_activation(disclosed_at: str, event_type: str = "") -> bool:
     """Return true only for disclosures published at/after the production rollout."""
     value = (disclosed_at or "").strip()
     if not value:
@@ -44,7 +46,12 @@ def is_after_pdf_only_material_activation(disclosed_at: str) -> bool:
         return False
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=JST)
-    return parsed >= PDF_ONLY_MATERIAL_ALERTS_ACTIVATED_AT
+    boundary = (
+        MANAGEMENT_STRATEGY_ALERTS_ACTIVATED_AT
+        if event_type == MANAGEMENT_STRATEGY
+        else PDF_ONLY_MATERIAL_ALERTS_ACTIVATED_AT
+    )
+    return parsed >= boundary
 
 
 _EARNINGS_TERMS = (
@@ -81,6 +88,77 @@ _MONTHLY_TERMS = (
     "既存店売上高", "monthlysales", "monthlykpi", "monthlybusinessupdate",
     "月次前年比速報", "月次データ", "月次仕入", "月次開示", "月次に関する",
 )
+
+# High-confidence management strategy titles. Matching is performed against the
+# NFKC/space/case-normalized title while the original title remains untouched.
+MANAGEMENT_STRATEGY_STRONG_TERMS = (
+    "中期経営計画",
+    "中期事業計画",
+    "中長期経営計画",
+    "中長期事業計画",
+    "中期経営方針",
+    "中長期経営方針",
+    "経営計画",
+    "成長可能性",
+    "資本コスト",
+    "株価を意識",
+    "pbr改善",
+    "pbrの改善",
+    "pbr向上",
+    "pbrの向上",
+)
+
+_GROWTH_STRATEGY_CONTEXTS = (
+    "説明資料", "成長戦略資料", "説明会", "に関する見解", "の推進状況", "について",
+    "事業計画", "経営計画",
+)
+_GROWTH_STRATEGY_EXCLUDES = (
+    "ファンド", "統合報告書", "登壇", "増資", "業務提携", "資本提携",
+)
+
+_MANAGEMENT_STRATEGY_CONTEXTS = (
+    "説明資料", "説明会", "中期", "中長期", "長期", "進捗", "策定", "公表",
+)
+_MANAGEMENT_STRATEGY_EXCLUDES = (
+    "登壇", "人材戦略", "大学経営戦略", "セミナー",
+)
+
+_CORPORATE_VALUE_CONTEXTS = (
+    "取組", "取り組み", "対応", "方針", "計画", "戦略", "ロードマップ",
+)
+_CORPORATE_VALUE_EXCLUDES = (
+    "提携", "報酬", "委員会", "セミナー", "パートナーシップ", "事業譲受", "増資",
+)
+
+_LONG_TERM_VISION_CONTEXTS = (
+    "策定", "公表", "説明", "進捗", "見直し", "更新",
+)
+
+
+def _is_management_strategy_title(normalized_title: str) -> bool:
+    if any(term in normalized_title for term in MANAGEMENT_STRATEGY_STRONG_TERMS):
+        return True
+
+    if "成長戦略" in normalized_title:
+        if not any(term in normalized_title for term in _GROWTH_STRATEGY_EXCLUDES):
+            if any(term in normalized_title for term in _GROWTH_STRATEGY_CONTEXTS):
+                return True
+
+    if "経営戦略" in normalized_title:
+        if not any(term in normalized_title for term in _MANAGEMENT_STRATEGY_EXCLUDES):
+            if any(term in normalized_title for term in _MANAGEMENT_STRATEGY_CONTEXTS):
+                return True
+
+    if "企業価値向上" in normalized_title:
+        if not any(term in normalized_title for term in _CORPORATE_VALUE_EXCLUDES):
+            if any(term in normalized_title for term in _CORPORATE_VALUE_CONTEXTS):
+                return True
+
+    if any(term in normalized_title for term in ("長期ビジョン", "経営ビジョン")):
+        if any(term in normalized_title for term in _LONG_TERM_VISION_CONTEXTS):
+            return True
+
+    return False
 
 
 def _extract_quarter(title: str) -> str:
@@ -132,6 +210,11 @@ def classify_pdf_only_material(title: str, pdf_url: str | None = None) -> PdfOnl
             quarter = _extract_quarter(title)
             label = f"{quarter}決算説明資料" if quarter else "決算説明資料"
             return PdfOnlyMaterialMatch(EARNINGS_MATERIAL, label)
+
+    # Earnings material retains precedence for a title matching both groups,
+    # so one disclosure creates one event/card and keeps existing behavior.
+    if _is_management_strategy_title(n):
+        return PdfOnlyMaterialMatch(MANAGEMENT_STRATEGY, "中期経営・戦略")
 
     if any(term in n for term in _MONTHLY_TERMS):
         if not any(term in n for term in _MONTHLY_EXCLUDES):
