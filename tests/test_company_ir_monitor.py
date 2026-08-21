@@ -387,6 +387,98 @@ def test_normalize_url_removes_php_session_identity_parameter():
     assert first == second == "https://example.com/ir/document.pdf?year=2026"
 
 
+@pytest.mark.parametrize(
+    "baseline_url, alias_url",
+    [
+        (
+            "https://example.com/material.pdf?1787271203=",
+            "https://example.com/material.pdf?1787271686=",
+        ),
+        (
+            "https://example.com/material.pdf?PHPSESSID=first",
+            "https://example.com/material.pdf?PHPSESSID=second",
+        ),
+    ],
+)
+def test_post_baseline_cachebuster_alias_is_not_a_new_asset(conn, baseline_url, alias_url):
+    add_source(conn)
+    title = "2026年3月期 決算説明会資料"
+    run_monitor(
+        conn,
+        fetch=lambda _: page([(title, baseline_url)]),
+        now_iso="2026-08-17T19:00:00+09:00",
+    )
+
+    stats = run_monitor(
+        conn,
+        fetch=lambda _: page([(title, alias_url)]),
+        allow_notifications=True,
+        tdnet_lookup=lambda _: [],
+        pdf_hasher=lambda _: "1" * 64,
+        publish=lambda *_: pytest.fail("URL alias must not publish"),
+        now_iso="2026-08-18T19:00:00+09:00",
+    )
+
+    assert stats.new_assets == stats.pending == stats.notified == 0
+    assert conn.execute("SELECT COUNT(*) FROM company_ir_assets").fetchone()[0] == 1
+
+
+def test_post_baseline_content_hash_duplicate_is_suppressed(conn):
+    add_source(conn)
+    title = "2026年3月期 決算説明会資料"
+    run_monitor(
+        conn,
+        fetch=lambda _: page([(title, "/baseline.pdf")]),
+        now_iso="2026-08-17T19:00:00+09:00",
+    )
+    conn.execute("UPDATE company_ir_assets SET content_sha256=?", ("2" * 64,))
+    conn.commit()
+
+    stats = run_monitor(
+        conn,
+        fetch=lambda _: page([(title, "/baseline.pdf"), (title, "/alias.pdf")]),
+        allow_notifications=False,
+        tdnet_lookup=lambda _: [],
+        pdf_hasher=lambda _: "2" * 64,
+        now_iso="2026-08-18T19:00:00+09:00",
+    )
+
+    assert stats.new_assets == 1 and stats.pending == stats.notified == 0
+    assert conn.execute(
+        "SELECT notification_status,suppression_reason FROM company_ir_assets "
+        "WHERE asset_url LIKE '%/alias.pdf'"
+    ).fetchone() == ("suppressed", "content_duplicate")
+
+
+def test_unavailable_publisher_keeps_pending_and_reports_failure(conn):
+    add_source(conn)
+    old = page([("2025年3月期 決算説明会資料", "/old.pdf")])
+    current = old + page([("2026年3月期 決算説明会資料", "/new.pdf")])
+    run_monitor(conn, fetch=lambda _: old, now_iso="2026-08-17T19:00:00+09:00")
+    run_monitor(
+        conn,
+        fetch=lambda _: current,
+        allow_notifications=False,
+        tdnet_lookup=lambda _: [],
+        pdf_hasher=lambda _: "3" * 64,
+        now_iso="2026-08-18T19:00:00+09:00",
+    )
+
+    stats = run_monitor(
+        conn,
+        fetch=lambda _: old,
+        allow_notifications=True,
+        publish=lambda *_: False,
+        now_iso="2026-08-19T19:00:00+09:00",
+    )
+
+    assert stats.publish_failed == 1 and stats.notified == 0
+    assert conn.execute(
+        "SELECT notification_status,notified FROM company_ir_assets "
+        "WHERE asset_url LIKE '%/new.pdf'"
+    ).fetchone() == ("pending", 0)
+
+
 def test_default_fetch_limits_parallelism_per_host(conn, monkeypatch):
     for index in range(4):
         add_source(conn, str(5000 + index), f"会社{index}", f"https://same.test/ir/{index}")

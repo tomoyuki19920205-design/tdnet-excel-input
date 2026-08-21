@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sqlite3
 import sys
 from datetime import datetime, timezone
@@ -15,9 +16,28 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.company_ir_monitor import import_sources_csv, init_db, notifications_enabled, run_monitor
+from src.events.env_loader import load_project_env
+
+
+def publisher_configuration_available() -> bool:
+    """Whether the existing Supabase publisher has its required credentials."""
+    return bool(
+        os.environ.get("SUPABASE_URL", "").strip()
+        and os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    )
+
+
+def publisher_preflight_failure(
+    *, gate: bool, dry_run: bool, pending: int, configured: bool
+) -> bool:
+    """Fail only when a production run already has durable publish work."""
+    return gate and not dry_run and pending > 0 and not configured
 
 
 def main() -> int:
+    # Reuse the project-wide loader so Task Scheduler and direct CLI runs have
+    # identical publish configuration without bespoke Company IR secret logic.
+    load_project_env()
     parser = argparse.ArgumentParser(description="Nightly company IR material/video monitor")
     parser.add_argument("--db", default="data/company_ir_monitor.db")
     parser.add_argument("--sources", default="config/company_ir_sources.csv")
@@ -61,6 +81,36 @@ def main() -> int:
                 }, ensure_ascii=False, sort_keys=True))
                 return 0
         gate = notifications_enabled(conn)
+        publisher_configured = publisher_configuration_available()
+        pending_before = conn.execute(
+            "SELECT COUNT(*) FROM company_ir_assets "
+            "WHERE notification_status='pending' AND notified=0"
+        ).fetchone()[0]
+        if publisher_preflight_failure(
+            gate=gate,
+            dry_run=args.dry_run,
+            pending=pending_before,
+            configured=publisher_configured,
+        ):
+            logging.error(
+                "COMPANY_IR_PUBLISHER_UNAVAILABLE gate=ON pending=%s; "
+                "pending assets remain unchanged",
+                pending_before,
+            )
+            print("COMPANY_IR_NIGHTLY " + json.dumps({
+                "status": "publisher_unavailable",
+                "notifications_enabled": True,
+                "publisher_configured": False,
+                "pending": pending_before,
+                "notified": 0,
+                "publish_failed": pending_before,
+            }, ensure_ascii=False, sort_keys=True))
+            return 1
+        if gate and not args.dry_run and not publisher_configured:
+            logging.warning(
+                "COMPANY_IR_PUBLISHER_UNAVAILABLE gate=ON pending=0; "
+                "any newly discovered asset will remain pending and make this stage fail"
+            )
         audit_records: list[dict[str, object]] | None = [] if args.audit_output else None
         run_id = datetime.now(timezone.utc).strftime("company_ir_%Y%m%dT%H%M%SZ")
         timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -87,6 +137,7 @@ def main() -> int:
             "sources_imported": imported,
             "baseline_only": args.baseline_only,
             "notifications_enabled": gate,
+            "publisher_configured": publisher_configured,
             "run_id": run_id,
             "audit_output": str(audit_path) if audit_path else None,
             **stats.__dict__,

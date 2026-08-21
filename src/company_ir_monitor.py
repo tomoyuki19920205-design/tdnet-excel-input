@@ -136,6 +136,7 @@ def normalize_url(value: str) -> str:
         if not key.lower().startswith("utm_") and key.lower() not in _TRACKING_PARAMS
         and not (is_pdf and key.lower() in {"h", "w", "height", "width"})
         and not (is_pdf and not val and re.fullmatch(r"[0-9a-f]{16,}", key, re.IGNORECASE))
+        and not (is_pdf and not val and re.fullmatch(r"\d{8,}", key))
     ]
     path = re.sub(r"/{2,}", "/", parts.path or "/")
     return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, urlencode(query), ""))
