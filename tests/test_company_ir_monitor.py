@@ -129,11 +129,12 @@ def test_unchanged_after_baseline_emits_zero(conn):
     assert stats.new_assets == stats.notified == 0
 
 
-def test_pdf_numbered_www_host_alias_is_one_identity(conn):
+@pytest.mark.parametrize("numbered_host", ["www2.example.test", "www3.example.test"])
+def test_pdf_numbered_www_host_alias_is_one_identity(conn, numbered_host):
     add_source(conn)
     title = "2026年3月期 決算説明会資料"
     baseline = page([(title, "https://www.example.test/ir/archive/result.pdf")])
-    alias = page([(title, "https://www2.example.test/ir/archive/result.pdf")])
+    alias = page([(title, f"https://{numbered_host}/ir/archive/result.pdf")])
     run_monitor(conn, fetch=lambda _: baseline, now_iso="2026-08-17T19:00:00+09:00")
 
     stats = run_monitor(
@@ -144,7 +145,7 @@ def test_pdf_numbered_www_host_alias_is_one_identity(conn):
         now_iso="2026-08-18T19:00:00+09:00",
     )
 
-    assert normalize_url("https://www2.example.test/ir/archive/result.pdf") == (
+    assert normalize_url(f"https://{numbered_host}/ir/archive/result.pdf") == (
         "https://www.example.test/ir/archive/result.pdf"
     )
     assert stats.new_assets == stats.pending == stats.notified == 0
