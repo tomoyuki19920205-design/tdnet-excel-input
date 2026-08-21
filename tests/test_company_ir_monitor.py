@@ -14,6 +14,7 @@ from src.company_ir_monitor import (
     extract_assets,
     init_db,
     normalize_company_ir_display_title,
+    normalize_url,
     run_monitor,
 )
 import src.company_ir_monitor as company_ir_monitor
@@ -126,6 +127,63 @@ def test_unchanged_after_baseline_emits_zero(conn):
     stats = run_monitor(conn, fetch=lambda _: html, tdnet_lookup=lambda _: [],
                         publish=lambda *_: True, now_iso="2026-08-18T19:00:00+09:00")
     assert stats.new_assets == stats.notified == 0
+
+
+def test_pdf_numbered_www_host_alias_is_one_identity(conn):
+    add_source(conn)
+    title = "2026年3月期 決算説明会資料"
+    baseline = page([(title, "https://www.example.test/ir/archive/result.pdf")])
+    alias = page([(title, "https://www2.example.test/ir/archive/result.pdf")])
+    run_monitor(conn, fetch=lambda _: baseline, now_iso="2026-08-17T19:00:00+09:00")
+
+    stats = run_monitor(
+        conn,
+        fetch=lambda _: alias,
+        allow_notifications=True,
+        publish=lambda *_: pytest.fail("numbered www PDF alias must not publish"),
+        now_iso="2026-08-18T19:00:00+09:00",
+    )
+
+    assert normalize_url("https://www2.example.test/ir/archive/result.pdf") == (
+        "https://www.example.test/ir/archive/result.pdf"
+    )
+    assert stats.new_assets == stats.pending == stats.notified == 0
+    assert conn.execute("SELECT COUNT(*) FROM company_ir_assets").fetchone()[0] == 1
+
+
+def test_new_source_baseline_can_persist_pdf_hash_for_future_alias_dedup(conn):
+    add_source(conn)
+    baseline = page([("2026年3月期 決算説明会資料", "/original.pdf")])
+    run_monitor(
+        conn,
+        fetch=lambda _: baseline,
+        hash_initial_baseline=True,
+        pdf_hasher=lambda _: "9" * 64,
+        now_iso="2026-08-17T19:00:00+09:00",
+    )
+    assert conn.execute(
+        "SELECT content_sha256,notification_status FROM company_ir_assets"
+    ).fetchone() == ("9" * 64, "baseline")
+
+    current = baseline + page(
+        [("2026年3月期 決算説明会資料", "/cms-replacement.pdf")]
+    )
+    stats = run_monitor(
+        conn,
+        fetch=lambda _: current,
+        allow_notifications=True,
+        tdnet_lookup=lambda _: [],
+        pdf_hasher=lambda _: "9" * 64,
+        publish=lambda *_: pytest.fail("same baseline content must not publish"),
+        now_iso="2026-08-18T19:00:00+09:00",
+    )
+
+    assert stats.new_assets == 1
+    assert stats.pending == stats.notified == 0
+    assert conn.execute(
+        "SELECT notification_status,suppression_reason FROM company_ir_assets "
+        "WHERE asset_url LIKE '%cms-replacement.pdf'"
+    ).fetchone() == ("suppressed", "content_duplicate")
 
 
 def test_global_gate_keeps_post_baseline_asset_pending(conn):

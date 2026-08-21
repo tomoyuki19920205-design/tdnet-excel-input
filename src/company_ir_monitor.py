@@ -139,7 +139,13 @@ def normalize_url(value: str) -> str:
         and not (is_pdf and not val and re.fullmatch(r"\d{8,}", key))
     ]
     path = re.sub(r"/{2,}", "/", parts.path or "/")
-    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, urlencode(query), ""))
+    netloc = parts.netloc.lower()
+    # Public company sites commonly alternate absolute PDF links between
+    # www.example.jp and www2/www3.example.jp while serving identical bytes.
+    # Restrict this alias rule to PDFs; source/navigation hosts stay exact.
+    if is_pdf:
+        netloc = re.sub(r"^www\d+\.", "www.", netloc)
+    return urlunsplit((parts.scheme.lower(), netloc, path, urlencode(query), ""))
 
 
 def _is_pdf_url(url: str) -> bool:
@@ -604,6 +610,7 @@ def run_monitor(
     now_iso: str | None = None,
     max_workers: int | None = None,
     baseline_only: bool = False,
+    hash_initial_baseline: bool = False,
     allow_notifications: bool = True,
     source_ids: Sequence[int] | None = None,
     request_interval_seconds: float | None = None,
@@ -864,7 +871,9 @@ def run_monitor(
                     continue
             else:
                 content_hash = None
-                if not initial_baseline and raw_asset.asset_type == ASSET_MATERIAL:
+                if raw_asset.asset_type == ASSET_MATERIAL and (
+                    not initial_baseline or hash_initial_baseline
+                ):
                     content_hash = pdf_hasher(raw_asset.asset_url)
                 asset = IrAsset(raw_asset.asset_type, raw_asset.title, raw_asset.asset_url,
                                 raw_asset.source_page_url, content_hash)

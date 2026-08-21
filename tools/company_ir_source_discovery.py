@@ -178,6 +178,7 @@ def main() -> int:
                 )
     baseline_stats = run_monitor(
         conn, baseline_only=True, allow_notifications=False,
+        hash_initial_baseline=True,
         source_ids=sorted(set(baseline_source_ids)), max_workers=min(args.workers, 64),
         request_interval_seconds=args.request_interval,
     )
