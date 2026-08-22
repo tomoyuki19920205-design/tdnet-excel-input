@@ -515,6 +515,40 @@ def _derive_fiscal_year_end_period(title: str) -> str | None:
     return None
 
 
+def _resolve_exact_fiscal_period(
+    *,
+    ticker: str,
+    quarter: str,
+    title: str,
+    xbrl_path: str | None,
+) -> str | None:
+    """Prefer the filing's exact fiscal-year end over a title month-end hint.
+
+    A title such as ``2027年3月期`` does not say whether the issuer closes on
+    March 20 or March 31.  Only use ZIP metadata when its ticker and quarter
+    match the disclosure; otherwise retain the title-derived value as a weak
+    fallback for non-XBRL disclosures.
+    """
+    title_period = _derive_fiscal_year_end_period(title)
+    if not xbrl_path or not os.path.exists(xbrl_path):
+        return title_period
+
+    from src.common_ticker import normalize_ticker
+    from src.segment.zip_identity_verifier import extract_actual_metadata_from_zip
+
+    metadata = extract_actual_metadata_from_zip(
+        xbrl_path,
+        expected_quarter=quarter,
+    )
+    identity_matches = (
+        normalize_ticker(metadata.get("ticker") or "") == normalize_ticker(ticker)
+        and (not quarter or metadata.get("quarter") == quarter)
+    )
+    if identity_matches and metadata.get("period"):
+        return metadata["period"]
+    return title_period
+
+
 def _sync_canonical_financials(
     ticker: str,
     period: str,
@@ -1744,6 +1778,12 @@ def run_earnings_production(
                         _cp_period = _cp_payload_ext.get("period") or _cp_payload_ext.get("fiscal_year_end") or _derive_fiscal_year_end_period(_cp_title)
 
                         _cp_q = _cp_args.get("quarter", "")
+                        _cp_period = _resolve_exact_fiscal_period(
+                            ticker=_ticker,
+                            quarter=_cp_q,
+                            title=_cp_title,
+                            xbrl_path=doc_j.get("zip_path"),
+                        ) or _cp_period
                         _cp_sales = _cp_args.get("sales_value")
                         _cp_op = _cp_args.get("op_value")
                         _cp_gross = _cp_args.get("gross_profit_value")
@@ -1830,6 +1870,12 @@ def run_earnings_production(
                                     _cp_disclosure_no = extract_common_disclosure_no(doc_j.get("pdf_url", "")) or ""
 
                                 _cp_resolved_zip = _find_cached_xbrl(xbrl_dir, _ticker, doc_id=_cp_disclosure_no)
+                                _cp_period = _resolve_exact_fiscal_period(
+                                    ticker=_ticker,
+                                    quarter=_cp_q,
+                                    title=_cp_title,
+                                    xbrl_path=_cp_resolved_zip,
+                                ) or _cp_period
 
                                 _cp_pl_vals = {
                                     "sales": _cp_sales,
@@ -1904,6 +1950,12 @@ def run_earnings_production(
                     _pre_target_segs = None
                     _pre_detailed_result = None
                     _resolved_zip = _find_cached_xbrl(xbrl_dir, _ticker, doc_id=_disclosure_no)
+                    _period = _resolve_exact_fiscal_period(
+                        ticker=_ticker,
+                        quarter=_q,
+                        title=_title,
+                        xbrl_path=_resolved_zip,
+                    ) or _period
 
                     try:
                         # ZIP 内部書類 ID の検証を追加
@@ -2041,11 +2093,17 @@ def run_earnings_production(
                         doc_id=_disclosure_no,
                         ticker=_ticker,
                         expected_quarter=_q,
-                        expected_period=_period,
+                        expected_period="",
                         persist_provenance=(not dry_run),
                     )
                     _resolved_zip = resolved.zip_path
                     _sub_provenance = resolved.trusted_provenance
+                    _period = _resolve_exact_fiscal_period(
+                        ticker=_ticker,
+                        quarter=_q,
+                        title=_title,
+                        xbrl_path=_resolved_zip,
+                    ) or _period
 
                     if _resolved_zip and os.path.exists(_resolved_zip):
                         # verify_zip_identity を呼んで ID検証 (Path A/B 共通検証)
@@ -2248,25 +2306,12 @@ def run_earnings_production(
             _seq_provenance = resolved.trusted_provenance
 
             if xbrl_path:
-                from src.segment.zip_identity_verifier import extract_actual_metadata_from_zip
-                _exact_meta = extract_actual_metadata_from_zip(
-                    xbrl_path,
-                    expected_quarter=_resolver_expected_quarter,
-                )
-                from src.common_ticker import normalize_ticker
-                exact_identity_matches = (
-                    normalize_ticker(_exact_meta.get("ticker") or "")
-                    == normalize_ticker(ticker)
-                    and (
-                        not _resolver_expected_quarter
-                        or _exact_meta.get("quarter") == _resolver_expected_quarter
-                    )
-                )
-                _resolver_expected_period = (
-                    _exact_meta.get("period")
-                    if exact_identity_matches and _exact_meta.get("period")
-                    else _resolver_title_period
-                )
+                _resolver_expected_period = _resolve_exact_fiscal_period(
+                    ticker=ticker,
+                    quarter=_resolver_expected_quarter,
+                    title=doc.title,
+                    xbrl_path=xbrl_path,
+                ) or _resolver_title_period
                 logger.info(f"[EARNINGS] {ticker} resolved ZIP: {Path(xbrl_path).name}")
             else:
                 _resolver_expected_period = _resolver_title_period
@@ -2893,7 +2938,12 @@ def run_earnings_production(
 
                     try:
                         # 重複ブロック内で通常経路と同じ生成式を使ってローカル変数を構築
-                        _seq_period = _derive_fiscal_year_end_period(doc.title)
+                        _seq_period = _resolve_exact_fiscal_period(
+                            ticker=ticker,
+                            quarter=quarter,
+                            title=doc.title,
+                            xbrl_path=xbrl_path,
+                        )
                         _seq_doc_id = str(getattr(doc, "disclosure_id", "") or "").strip()
                         _seq_external_doc_id = str(getattr(doc, "source_doc_id", "") or getattr(doc, "doc_id", "") or "").strip()
 
