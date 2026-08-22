@@ -345,9 +345,24 @@ def main() -> int:
         else:
             logger.error(f"[PER_SHARE] sync done rc={per_share_sync_step.rc} status={per_share_sync_step.status} (Supabase sync FAILED)")
 
-        # Publish only after all price/per-share dependencies have completed.
+        # Revision counts require TDnet titles/items to distinguish corrections,
+        # retractions, and review-completion copies from economic forecast events.
+        logger.info("[SCREENER] step=tdnet-revision-metadata-sync START")
+        revision_metadata_step = run_step("tdnet-revision-metadata-sync", [
+            PYTHON, "-X", "utf8",
+            "tools/sync_jquants_tdnet_metadata.py",
+            *([] if args.dry_run else ["--apply"]),
+        ], timeout_sec=1800)
+        steps.append(revision_metadata_step)
+
+        # Publish only after all price/per-share/revision dependencies have completed.
         # The publish RPC swaps the current pointer after validating all 3,889 rows.
-        if market_fetch_step.rc == 0 and market_sync_step.rc == 0 and per_share_sync_step.rc == 0:
+        if (
+            market_fetch_step.rc == 0
+            and market_sync_step.rc == 0
+            and per_share_sync_step.rc == 0
+            and revision_metadata_step.rc == 0
+        ):
             screener_step = run_step("screener-snapshot-sync", [
                 PYTHON, "-X", "utf8",
                 "tools/sync_screener_snapshot.py",
@@ -358,7 +373,8 @@ def main() -> int:
             logger.warning(
                 "[SCREENER] publish skipped: dependency failure "
                 f"market_fetch={market_fetch_step.rc} market_sync={market_sync_step.rc} "
-                f"per_share_sync={per_share_sync_step.rc}"
+                f"per_share_sync={per_share_sync_step.rc} "
+                f"revision_metadata={revision_metadata_step.rc}"
             )
             screener_step = StepResult("screener-snapshot-sync")
             screener_step.rc = -1

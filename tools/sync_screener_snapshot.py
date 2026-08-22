@@ -78,8 +78,11 @@ class SupabaseWriter:
         return response
 
     def upsert(self, table: str, rows: list[dict[str, Any]], on_conflict: str) -> None:
-        for chunk in _chunks(rows, BATCH_SIZE):
+        chunks = list(_chunks(rows, BATCH_SIZE))
+        for index, chunk in enumerate(chunks, 1):
             self.request("POST", f"/{table}", params={"on_conflict": on_conflict}, json=chunk)
+            if index % 25 == 0 or index == len(chunks):
+                print(f"upsert {table}: {index}/{len(chunks)} chunks", flush=True)
 
 
 def batch_payload(build: SnapshotBuild) -> dict[str, Any]:
@@ -98,18 +101,18 @@ def publish(build: SnapshotBuild, writer: SupabaseWriter) -> None:
     batch = batch_payload(build)
     writer.upsert("screener_batches", [batch], "batch_id")
     try:
-        events = [
-            {key: value for key, value in event.items() if key != "batch_id"}
-            for event in build.revision_events
-        ]
         writer.upsert(
-            "forecast_revision_events", events,
-            "ticker,disclosure_id,target_fiscal_year,metric,source",
+            "forecast_revision_events_staging", build.revision_events,
+            "batch_id,ticker,disclosure_id,target_fiscal_year,metric,source",
         )
         writer.upsert("screener_metrics", build.rows, "batch_id,ticker")
         writer.request(
             "POST", "/rpc/publish_screener_batch",
-            json={"p_batch_id": build.batch_id, "p_expected_rows": len(build.rows)},
+            json={
+                "p_batch_id": build.batch_id,
+                "p_expected_rows": len(build.rows),
+                "p_expected_revision_events": len(build.revision_events),
+            },
         )
     except Exception as exc:
         try:

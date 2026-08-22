@@ -16,6 +16,13 @@ import sqlite3
 from typing import Any, Iterable
 from uuid import uuid4
 
+from lib.forecast_revision_canonical import (
+    canonical_forecast_anchors,
+    canonicalize_statement_rows,
+    is_forecast_retraction,
+    metadata_role,
+)
+from lib.jquants_values import parse_optional_boolean
 from src.common_ticker import normalize_ticker
 
 
@@ -107,7 +114,7 @@ class ScreenerSnapshotBuilder:
         universe = self._load_universe(universe_date)
         prices, actions, sessions = self._load_prices(set(universe))
         per_share = self._load_per_share(set(universe))
-        actuals, forecasts, forecast_points = self._load_financials(set(universe))
+        actuals, forecasts, forecast_points = self._load_financials(set(universe), universe_date)
         revision_events = self._build_revision_events(forecast_points, actions, universe_date)
         revision_counts = self._revision_counts(revision_events, forecast_points, universe_date)
         rows = [
@@ -194,7 +201,7 @@ class ScreenerSnapshotBuilder:
         return result
 
     def _load_financials(
-        self, universe: set[str]
+        self, universe: set[str], universe_date: str
     ) -> tuple[
         dict[str, dict[tuple[str, str], dict[str, Any]]],
         dict[str, dict[tuple[str, str], dict[str, Any]]],
@@ -202,6 +209,7 @@ class ScreenerSnapshotBuilder:
     ]:
         actuals: dict[str, dict[tuple[str, str], dict[str, Any]]] = defaultdict(dict)
         forecast_points: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+        raw_rows: list[dict[str, Any]] = []
         for (raw_json,) in self.connection.execute(
             "SELECT raw_json FROM jquants_financials_normalized WHERE raw_json IS NOT NULL"
         ):
@@ -212,6 +220,27 @@ class ScreenerSnapshotBuilder:
             ticker = normalize_ticker(raw.get("Code") or raw.get("LocalCode") or "")
             if ticker not in universe:
                 continue
+            raw_rows.append(raw)
+
+        metadata = self._load_revision_metadata()
+        for raw in raw_rows:
+            disclosure_id = str(raw.get("DiscNo") or "")
+            disclosure_metadata = metadata.get(disclosure_id)
+            if not disclosure_metadata:
+                continue
+            raw["_raw_disclosed_date"] = raw.get("DiscDate")
+            raw["DiscDate"] = disclosure_metadata["disclosed_date"]
+            if disclosure_metadata.get("disclosed_time"):
+                raw["DiscTime"] = disclosure_metadata["disclosed_time"]
+        self._validate_revision_metadata_coverage(raw_rows, metadata, universe_date)
+        forecast_anchors, retracted_disclosures = canonical_forecast_anchors(
+            raw_rows, metadata
+        )
+        raw_by_disclosure = {
+            str(raw.get("DiscNo") or ""): raw for raw in raw_rows if raw.get("DiscNo")
+        }
+        for raw in canonicalize_statement_rows(raw_rows, metadata):
+            ticker = normalize_ticker(raw.get("Code") or raw.get("LocalCode") or "")
             disclosed = str(raw.get("DiscDate") or "")
             disclosed_time = str(raw.get("DiscTime") or "")
             disclosure_id = str(raw.get("DiscNo") or f"{ticker}:{disclosed}:{disclosed_time}")
@@ -246,6 +275,33 @@ class ScreenerSnapshotBuilder:
             def append_forecast(target: str | None, prefix: str) -> None:
                 if not target:
                     return
+                role = (
+                    "original" if raw.get("_canonical_statement")
+                    else metadata_role(metadata.get(disclosure_id))
+                )
+                suppress_revision_event = bool(raw.get("_suppress_revision_event"))
+                canonical_disclosure_id = disclosure_id
+                canonical_disclosed = disclosed
+                canonical_disclosed_time = disclosed_time
+                if is_forecast_retraction(raw, metadata.get(disclosure_id), prefix):
+                    return
+                if role == "correction":
+                    canonical_disclosure_id = forecast_anchors.get(
+                        (disclosure_id, target, prefix), ""
+                    )
+                    if not canonical_disclosure_id:
+                        canonical_disclosure_id = disclosure_id
+                        suppress_revision_event = True
+                    else:
+                        anchor = raw_by_disclosure.get(canonical_disclosure_id, {})
+                        canonical_disclosed = str(anchor.get("DiscDate") or disclosed)
+                        canonical_disclosed_time = str(anchor.get("DiscTime") or disclosed_time)
+                if canonical_disclosure_id in retracted_disclosures:
+                    return
+                canonical_order_key = (
+                    f"{canonical_disclosed} {canonical_disclosed_time} "
+                    f"{canonical_disclosure_id}"
+                )
                 key_map = {
                     "sales": (f"{prefix}Sales", f"{prefix}NCSales"),
                     "operating_profit": (f"{prefix}OP", f"{prefix}NCOP"),
@@ -262,11 +318,12 @@ class ScreenerSnapshotBuilder:
                         "target_fiscal_year": target,
                         "metric": metric,
                         "value": value,
-                        "disclosed_at": disclosed,
-                        "disclosure_id": disclosure_id,
+                        "disclosed_at": canonical_disclosed,
+                        "disclosure_id": canonical_disclosure_id,
                         "document_type": document_type,
-                        "order_key": order_key,
-                        "is_correction": bool(raw.get("RetroRst")),
+                        "order_key": canonical_order_key,
+                        "is_correction": suppress_revision_event,
+                        "retrospective_restatement": parse_optional_boolean(raw.get("RetroRst")),
                     })
 
             append_forecast(fiscal_year_end or None, "F")
@@ -286,6 +343,69 @@ class ScreenerSnapshotBuilder:
                 deduped.values(), key=lambda point: point["order_key"]
             )
         return actuals, forecasts, forecast_points
+
+    def _load_revision_metadata(self) -> dict[str, dict[str, Any]]:
+        table = self.connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='jquants_tdnet_metadata'"
+        ).fetchone()
+        if table is None:
+            return {}
+        result: dict[str, dict[str, Any]] = {}
+        for row in self.connection.execute(
+            "SELECT disclosure_id,disclosed_date,disclosed_time,title,disc_items_json,rev_no,disc_status "
+            "FROM jquants_tdnet_metadata"
+        ):
+            try:
+                disc_items = json.loads(row["disc_items_json"] or "[]")
+            except (TypeError, json.JSONDecodeError):
+                disc_items = []
+            result[str(row["disclosure_id"])] = {
+                "title": row["title"],
+                "disclosed_date": row["disclosed_date"],
+                "disclosed_time": row["disclosed_time"],
+                "disc_items": disc_items,
+                "rev_no": row["rev_no"],
+                "disc_status": row["disc_status"],
+            }
+        return result
+
+    def _validate_revision_metadata_coverage(
+        self,
+        raw_rows: list[dict[str, Any]],
+        metadata: dict[str, dict[str, Any]],
+        universe_date: str,
+    ) -> None:
+        cutoff_date = date.fromisoformat(universe_date)
+        cutoff = cutoff_date.replace(year=cutoff_date.year - 3).isoformat()
+        required_rows = [
+            raw for raw in raw_rows if str(raw.get("DiscDate") or "") >= cutoff
+        ]
+        required_dates = {str(raw.get("DiscDate")) for raw in required_rows}
+        date_table = self.connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='jquants_tdnet_metadata_dates'"
+        ).fetchone()
+        if date_table is None:
+            raise RuntimeError(
+                "jquants_tdnet_metadata_dates is required for revision canonicalization"
+            )
+        cached_dates = {
+            str(row[0]) for row in self.connection.execute(
+                "SELECT disclosed_date FROM jquants_tdnet_metadata_dates "
+                "WHERE disclosed_date>=?", (cutoff,)
+            )
+        }
+        missing_dates = sorted(required_dates - cached_dates)
+        required_ids = {
+            str(raw.get("DiscNo")) for raw in required_rows if raw.get("DiscNo")
+        }
+        missing_ids = sorted(required_ids - set(metadata))
+        if missing_dates or missing_ids:
+            raise RuntimeError(
+                "revision TDnet metadata incomplete: "
+                f"missing_dates={len(missing_dates)} sample_dates={missing_dates[:5]} "
+                f"missing_disclosures={len(missing_ids)} sample_ids={missing_ids[:5]}"
+            )
 
     @staticmethod
     def _accounting_standard(document_type: str) -> str:
@@ -370,7 +490,7 @@ class ScreenerSnapshotBuilder:
         universe_date: str,
     ) -> dict[str, tuple[int, int]]:
         cutoff = (date.fromisoformat(universe_date).replace(year=date.fromisoformat(universe_date).year - 3)).isoformat()
-        op_counts: Counter[str] = Counter()
+        op_disclosures: dict[str, set[str]] = defaultdict(set)
         any_disclosures: dict[str, set[str]] = defaultdict(set)
         history_available = {
             ticker
@@ -389,11 +509,11 @@ class ScreenerSnapshotBuilder:
                 continue
             ticker = event["ticker"]
             if event["metric"] == "operating_profit":
-                op_counts[ticker] += 1
+                op_disclosures[ticker].add(event["disclosure_id"])
             if event["metric"] in FORECAST_METRICS:
                 any_disclosures[ticker].add(event["disclosure_id"])
         return {
-            ticker: (op_counts[ticker], len(any_disclosures[ticker]))
+            ticker: (len(op_disclosures[ticker]), len(any_disclosures[ticker]))
             for ticker in history_available
         }
 
