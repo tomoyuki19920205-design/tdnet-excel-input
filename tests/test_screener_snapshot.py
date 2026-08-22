@@ -42,6 +42,36 @@ def test_psychological_line_requires_n_plus_one_valid_observations(periods: int)
     assert ScreenerSnapshotBuilder._psychological(_prices(periods + 1), periods) == 100.0
 
 
+@pytest.mark.parametrize(
+    ("bars", "expected_bullish", "expected_bearish"),
+    [
+        ([(100, 101), (100, 102), (100, 103)], 100.0, 0.0),
+        ([(100, 101), (100, 102), (100, 99)], 200 / 3, 100 / 3),
+        ([(100, 101), (100, 99), (100, 100)], 100 / 3, 100 / 3),
+        ([(100, 99), (100, 98), (100, 97)], 0.0, 100.0),
+    ],
+)
+def test_three_day_candle_ratios_keep_doji_in_denominator(
+    bars: list[tuple[float, float]], expected_bullish: float, expected_bearish: float
+) -> None:
+    prices = [
+        {"date": f"2026-08-{index + 18:02d}", "open": open_, "close": close}
+        for index, (open_, close) in enumerate(bars)
+    ]
+    bullish, bearish = ScreenerSnapshotBuilder._candle_ratio(prices, 3)
+    assert bullish == pytest.approx(expected_bullish)
+    assert bearish == pytest.approx(expected_bearish)
+
+
+def test_three_day_candle_ratio_requires_three_valid_ohlc_bars() -> None:
+    prices = [
+        {"date": "2026-08-18", "open": 100, "close": 101},
+        {"date": "2026-08-19", "open": None, "close": 102},
+        {"date": "2026-08-20", "open": 100, "close": 99},
+    ]
+    assert ScreenerSnapshotBuilder._candle_ratio(prices, 3) == (None, None)
+
+
 def test_per_share_normalization_reuses_corporate_action_product() -> None:
     builder = object.__new__(ScreenerSnapshotBuilder)
     actions = [("2026-02-01", 0.5), ("2026-04-01", 2.0)]

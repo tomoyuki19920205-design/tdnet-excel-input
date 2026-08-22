@@ -751,6 +751,7 @@ class ScreenerSnapshotBuilder:
         if growth_rate_not_meaningful:
             cumulative_op_growth = None
 
+        candles3 = self._candle_ratio(prices, 3)
         candles5 = self._candle_ratio(prices, 5)
         candles10 = self._candle_ratio(prices, 10)
         return5 = self._return(prices, 5)
@@ -783,8 +784,10 @@ class ScreenerSnapshotBuilder:
             "actual_sales_growth_yoy_pct": _reason(actual_sales_growth, "fiscal_period_changed" if fiscal_period_changed else "prior_actual_missing"),
             "forecast_sales_growth_yoy_pct": _reason(forecast_sales_growth, "target_fy_mismatch" if target_mismatch else "forecast_missing"),
             "equity_ratio_pct": _reason(equity_ratio, "financial_missing"),
+            "bullish_candle_ratio_3d_pct": None if candles3[0] is not None else "insufficient_price_history",
             "bullish_candle_ratio_5d_pct": None if candles5[0] is not None else "insufficient_price_history",
             "bullish_candle_ratio_10d_pct": None if candles10[0] is not None else "insufficient_price_history",
+            "bearish_candle_ratio_3d_pct": None if candles3[1] is not None else "insufficient_price_history",
             "bearish_candle_ratio_5d_pct": None if candles5[1] is not None else "insufficient_price_history",
             "bearish_candle_ratio_10d_pct": None if candles10[1] is not None else "insufficient_price_history",
             "new_ytd_high_last_5d": None if ytd_high is not None else "insufficient_price_history",
@@ -839,8 +842,10 @@ class ScreenerSnapshotBuilder:
             "actual_sales_growth_yoy_pct": actual_sales_growth,
             "forecast_sales_growth_yoy_pct": forecast_sales_growth,
             "equity_ratio_pct": equity_ratio,
+            "bullish_candle_ratio_3d_pct": candles3[0],
             "bullish_candle_ratio_5d_pct": candles5[0],
             "bullish_candle_ratio_10d_pct": candles10[0],
+            "bearish_candle_ratio_3d_pct": candles3[1],
             "bearish_candle_ratio_5d_pct": candles5[1],
             "bearish_candle_ratio_10d_pct": candles10[1],
             "new_ytd_high_last_5d": ytd_high,
@@ -929,8 +934,8 @@ class ScreenerSnapshotBuilder:
             "forward_per", "actual_per", "actual_dividend_yield_pct",
             "forecast_dividend_yield_pct", "actual_sales_growth_yoy_pct",
             "forecast_sales_growth_yoy_pct", "equity_ratio_pct",
-            "bullish_candle_ratio_5d_pct", "bullish_candle_ratio_10d_pct",
-            "bearish_candle_ratio_5d_pct", "bearish_candle_ratio_10d_pct",
+            "bullish_candle_ratio_3d_pct", "bullish_candle_ratio_5d_pct", "bullish_candle_ratio_10d_pct",
+            "bearish_candle_ratio_3d_pct", "bearish_candle_ratio_5d_pct", "bearish_candle_ratio_10d_pct",
             "new_ytd_high_last_5d", "return_5d_pct", "return_20d_pct",
             "return_60d_pct", "sales_growth_beat_pp",
             "operating_profit_growth_beat_pp", "op_upward_revision_count_3y",
