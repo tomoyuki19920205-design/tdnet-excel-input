@@ -334,16 +334,38 @@ def main() -> int:
 
         # ── Step 5d: sync_per_share_data（per_share_data → Supabase） ──
         logger.info("[PER_SHARE] sync start")
-        step = run_step("per-share-sync", [
+        per_share_sync_step = run_step("per-share-sync", [
             PYTHON, "-X", "utf8",
             "tools/sync_per_share_data.py",
             *([] if args.dry_run else ["--apply"]),
         ], timeout_sec=300)
-        steps.append(step)
-        if step.rc == 0:
-            logger.info(f"[PER_SHARE] sync done rc={step.rc}")
+        steps.append(per_share_sync_step)
+        if per_share_sync_step.rc == 0:
+            logger.info(f"[PER_SHARE] sync done rc={per_share_sync_step.rc}")
         else:
-            logger.error(f"[PER_SHARE] sync done rc={step.rc} status={step.status} (Supabase sync FAILED)")
+            logger.error(f"[PER_SHARE] sync done rc={per_share_sync_step.rc} status={per_share_sync_step.status} (Supabase sync FAILED)")
+
+        # Publish only after all price/per-share dependencies have completed.
+        # The publish RPC swaps the current pointer after validating all 3,889 rows.
+        if market_fetch_step.rc == 0 and market_sync_step.rc == 0 and per_share_sync_step.rc == 0:
+            screener_step = run_step("screener-snapshot-sync", [
+                PYTHON, "-X", "utf8",
+                "tools/sync_screener_snapshot.py",
+                *([] if args.dry_run else ["--apply"]),
+            ], timeout_sec=1200)
+            steps.append(screener_step)
+        else:
+            logger.warning(
+                "[SCREENER] publish skipped: dependency failure "
+                f"market_fetch={market_fetch_step.rc} market_sync={market_sync_step.rc} "
+                f"per_share_sync={per_share_sync_step.rc}"
+            )
+            screener_step = StepResult("screener-snapshot-sync")
+            screener_step.rc = -1
+            screener_step.status = "warning"
+            screener_step.duration = 0.0
+            screener_step.stdout_tail = "SKIPPED: screener dependency failed"
+            steps.append(screener_step)
 
         # ── Step 7a: EDINET受注抽出・edinet_order_data更新（前段） ──
         # 当日提出有報のXBRL/HTMLを取得し、受注高・受注残高を抽出してDBに保存する。

@@ -1,0 +1,322 @@
+{
+  "accounting_standard": {
+    "IFRS": 295,
+    "JP_GAAP": 3389,
+    "None": 199,
+    "US_GAAP": 6
+  },
+  "batch_id": "2026-08-21-a4e704cc-b973-4bd9-9c54-329c65cd151f",
+  "coverage": {
+    "actual_dividend_yield_pct": {
+      "coverage_pct": 94.81,
+      "null": 202,
+      "numeric": 3687,
+      "universe": 3889
+    },
+    "actual_per": {
+      "coverage_pct": 84.03,
+      "null": 621,
+      "numeric": 3268,
+      "universe": 3889
+    },
+    "actual_sales_growth_yoy_pct": {
+      "coverage_pct": 92.11,
+      "null": 307,
+      "numeric": 3582,
+      "universe": 3889
+    },
+    "any_earnings_upward_revision_event_count_3y": {
+      "coverage_pct": 93.73,
+      "null": 244,
+      "numeric": 3645,
+      "universe": 3889
+    },
+    "bearish_candle_ratio_10d_pct": {
+      "coverage_pct": 95.24,
+      "null": 185,
+      "numeric": 3704,
+      "universe": 3889
+    },
+    "bearish_candle_ratio_5d_pct": {
+      "coverage_pct": 95.24,
+      "null": 185,
+      "numeric": 3704,
+      "universe": 3889
+    },
+    "bullish_candle_ratio_10d_pct": {
+      "coverage_pct": 95.24,
+      "null": 185,
+      "numeric": 3704,
+      "universe": 3889
+    },
+    "bullish_candle_ratio_5d_pct": {
+      "coverage_pct": 95.24,
+      "null": 185,
+      "numeric": 3704,
+      "universe": 3889
+    },
+    "equity_ratio_pct": {
+      "coverage_pct": 95.14,
+      "null": 189,
+      "numeric": 3700,
+      "universe": 3889
+    },
+    "forecast_dividend_yield_pct": {
+      "coverage_pct": 88.48,
+      "null": 448,
+      "numeric": 3441,
+      "universe": 3889
+    },
+    "forecast_sales_growth_per_forward_per": {
+      "coverage_pct": 81.82,
+      "null": 707,
+      "numeric": 3182,
+      "universe": 3889
+    },
+    "forecast_sales_growth_yoy_pct": {
+      "coverage_pct": 87.66,
+      "null": 480,
+      "numeric": 3409,
+      "universe": 3889
+    },
+    "forward_peg": {
+      "coverage_pct": 49.37,
+      "null": 1969,
+      "numeric": 1920,
+      "universe": 3889
+    },
+    "forward_per": {
+      "coverage_pct": 84.57,
+      "null": 600,
+      "numeric": 3289,
+      "universe": 3889
+    },
+    "market_cap": {
+      "coverage_pct": 95.17,
+      "null": 188,
+      "numeric": 3701,
+      "universe": 3889
+    },
+    "market_code": {
+      "coverage_pct": 100.0,
+      "null": 0,
+      "numeric": 3889,
+      "universe": 3889
+    },
+    "new_ytd_high_last_5d": {
+      "coverage_pct": 95.24,
+      "null": 185,
+      "numeric": 3704,
+      "universe": 3889
+    },
+    "op_upward_revision_count_3y": {
+      "coverage_pct": 93.73,
+      "null": 244,
+      "numeric": 3645,
+      "universe": 3889
+    },
+    "operating_profit_growth_beat_pp": {
+      "coverage_pct": 65.08,
+      "null": 1358,
+      "numeric": 2531,
+      "universe": 3889
+    },
+    "psychological_line_10d_pct": {
+      "coverage_pct": 95.24,
+      "null": 185,
+      "numeric": 3704,
+      "universe": 3889
+    },
+    "psychological_line_5d_pct": {
+      "coverage_pct": 95.24,
+      "null": 185,
+      "numeric": 3704,
+      "universe": 3889
+    },
+    "return_20d_pct": {
+      "coverage_pct": 95.17,
+      "null": 188,
+      "numeric": 3701,
+      "universe": 3889
+    },
+    "return_5d_pct": {
+      "coverage_pct": 95.24,
+      "null": 185,
+      "numeric": 3704,
+      "universe": 3889
+    },
+    "return_60d_pct": {
+      "coverage_pct": 94.99,
+      "null": 195,
+      "numeric": 3694,
+      "universe": 3889
+    },
+    "sales_growth_beat_pp": {
+      "coverage_pct": 79.63,
+      "null": 792,
+      "numeric": 3097,
+      "universe": 3889
+    },
+    "sector17_code": {
+      "coverage_pct": 100.0,
+      "null": 0,
+      "numeric": 3889,
+      "universe": 3889
+    },
+    "sector33_code": {
+      "coverage_pct": 100.0,
+      "null": 0,
+      "numeric": 3889,
+      "universe": 3889
+    }
+  },
+  "fiscal_year_end_months": {
+    "01": 1699,
+    "02": 5379,
+    "03": 57946,
+    "04": 1064,
+    "05": 2235,
+    "06": 3842,
+    "07": 1433,
+    "08": 2428,
+    "09": 4807,
+    "10": 1585,
+    "11": 1590,
+    "12": 13016
+  },
+  "flags": {
+    "fiscal_period_changed": 32,
+    "insufficient_price_history": 195,
+    "loss_expansion": 168,
+    "peg_denominator_small": 103,
+    "profit_to_loss": 135,
+    "turnaround": 188
+  },
+  "multi_revision_tickers": 948,
+  "null_reasons": {
+    "actual_dividend_yield_pct": {
+      "dividend_missing": 17,
+      "price_missing": 185
+    },
+    "actual_per": {
+      "actual_missing": 13,
+      "price_missing": 185,
+      "prior_loss": 423
+    },
+    "actual_sales_growth_yoy_pct": {
+      "fiscal_period_changed": 32,
+      "prior_actual_missing": 275
+    },
+    "any_earnings_upward_revision_event_count_3y": {
+      "revision_history_missing": 244
+    },
+    "bearish_candle_ratio_10d_pct": {
+      "insufficient_price_history": 185
+    },
+    "bearish_candle_ratio_5d_pct": {
+      "insufficient_price_history": 185
+    },
+    "bullish_candle_ratio_10d_pct": {
+      "insufficient_price_history": 185
+    },
+    "bullish_candle_ratio_5d_pct": {
+      "insufficient_price_history": 185
+    },
+    "equity_ratio_pct": {
+      "financial_missing": 189
+    },
+    "forecast_dividend_yield_pct": {
+      "forecast_missing": 263,
+      "price_missing": 185
+    },
+    "forecast_sales_growth_per_forward_per": {
+      "fiscal_period_changed": 23,
+      "forecast_loss": 112,
+      "forecast_missing": 285,
+      "forecast_sales_missing": 76,
+      "previous_fy_sales_missing_or_nonpositive": 5,
+      "price_missing": 185,
+      "target_fy_mismatch": 21
+    },
+    "forecast_sales_growth_yoy_pct": {
+      "forecast_missing": 477,
+      "target_fy_mismatch": 3
+    },
+    "forward_peg": {
+      "actual_missing": 13,
+      "fiscal_period_changed": 23,
+      "forecast_loss": 25,
+      "forecast_missing": 166,
+      "negative_eps_growth": 1112,
+      "price_missing": 185,
+      "prior_loss": 423,
+      "target_fy_mismatch": 22
+    },
+    "forward_per": {
+      "forecast_loss": 112,
+      "forecast_missing": 285,
+      "price_missing": 185,
+      "target_fy_mismatch": 18
+    },
+    "market_cap": {
+      "price_or_shares_missing": 188
+    },
+    "new_ytd_high_last_5d": {
+      "insufficient_price_history": 185
+    },
+    "op_upward_revision_count_3y": {
+      "revision_history_missing": 244
+    },
+    "operating_profit_growth_beat_pp": {
+      "forecast_missing": 512,
+      "growth_rate_not_meaningful": 549,
+      "same_quarter_missing": 297
+    },
+    "psychological_line_10d_pct": {
+      "insufficient_price_history": 185
+    },
+    "psychological_line_5d_pct": {
+      "insufficient_price_history": 185
+    },
+    "return_20d_pct": {
+      "insufficient_price_history": 188
+    },
+    "return_5d_pct": {
+      "insufficient_price_history": 185
+    },
+    "return_60d_pct": {
+      "insufficient_price_history": 195
+    },
+    "sales_growth_beat_pp": {
+      "forecast_missing": 480,
+      "same_quarter_missing": 312
+    }
+  },
+  "price_stale_sessions": {
+    "1": 24,
+    "2": 7,
+    "3": 1,
+    "4": 1
+  },
+  "price_status": {
+    "current": 3671,
+    "no_trade": 33,
+    "source_ineligible": 185
+  },
+  "revision_event_count": 190977,
+  "row_count": 3889,
+  "split_ticker_count": 282,
+  "split_validation_sample": [
+    "1333",
+    "1414",
+    "1436",
+    "1491",
+    "1515",
+    "1518",
+    "1663",
+    "1723",
+    "1798",
+    "1847"
+  ],
+  "universe_date": "2026-08-21"
+}

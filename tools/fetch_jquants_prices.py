@@ -86,6 +86,9 @@ def _ensure_table(conn: sqlite3.Connection):
           market_code TEXT NOT NULL, is_common_stock INTEGER NOT NULL,
           is_ordinary_stock INTEGER NOT NULL,
           is_jquants_price_eligible INTEGER NOT NULL,
+          sector17_code TEXT, sector17_name TEXT,
+          sector33_code TEXT, sector33_name TEXT,
+          market_name TEXT,
           rule_version TEXT NOT NULL, fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
           PRIMARY KEY (date, ticker)
         )
@@ -113,6 +116,14 @@ def _ensure_table(conn: sqlite3.Connection):
             "UPDATE market_data_universe "
             "SET is_jquants_price_eligible=is_common_stock"
         )
+    for column in (
+        "sector17_code", "sector17_name", "sector33_code", "sector33_name",
+        "market_name",
+    ):
+        if column not in universe_columns:
+            conn.execute(
+                f"ALTER TABLE market_data_universe ADD COLUMN {column} TEXT"
+            )
     conn.execute("CREATE INDEX IF NOT EXISTS ix_market_data_universe_common "
                  "ON market_data_universe(date, is_common_stock, ticker)")
     conn.execute("CREATE INDEX IF NOT EXISTS ix_market_data_universe_jquants_price "
@@ -227,18 +238,30 @@ def store_universe_snapshot(conn: sqlite3.Connection, date_str: str, items: list
                      str(item.get("CoName") or item.get("CompanyName") or ""),
                      str(item.get("ProdCat") or ""), str(item.get("Mkt") or ""),
                      int(ordinary), int(ordinary), int(jquants_price_eligible),
+                     str(item.get("S17") or "") or None,
+                     str(item.get("S17Nm") or "") or None,
+                     str(item.get("S33") or "") or None,
+                     str(item.get("S33Nm") or "") or None,
+                     str(item.get("MktNm") or "") or None,
                      UNIVERSE_RULE_VERSION))
     conn.executemany("""
         INSERT INTO market_data_universe
           (date,ticker,code,company_name,product_category,market_code,
-           is_common_stock,is_ordinary_stock,is_jquants_price_eligible,rule_version)
-        VALUES (?,?,?,?,?,?,?,?,?,?)
+           is_common_stock,is_ordinary_stock,is_jquants_price_eligible,
+           sector17_code,sector17_name,sector33_code,sector33_name,market_name,
+           rule_version)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(date,ticker) DO UPDATE SET
           code=excluded.code, company_name=excluded.company_name,
           product_category=excluded.product_category, market_code=excluded.market_code,
           is_common_stock=excluded.is_common_stock,
           is_ordinary_stock=excluded.is_ordinary_stock,
           is_jquants_price_eligible=excluded.is_jquants_price_eligible,
+          sector17_code=excluded.sector17_code,
+          sector17_name=excluded.sector17_name,
+          sector33_code=excluded.sector33_code,
+          sector33_name=excluded.sector33_name,
+          market_name=excluded.market_name,
           rule_version=excluded.rule_version,
           fetched_at=datetime('now')
     """, rows)

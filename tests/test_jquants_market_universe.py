@@ -18,6 +18,23 @@ def _master(**overrides):
     return row
 
 
+def test_store_universe_snapshot_persists_screening_classifications():
+    conn = sqlite3.connect(":memory:")
+    _ensure_table(conn)
+    item = _master(
+        S17="8", S17Nm="情報通信・サービスその他",
+        S33="5250", S33Nm="情報・通信業", MktNm="プライム",
+    )
+
+    store_universe_snapshot(conn, "2026-08-21", [item])
+
+    row = conn.execute(
+        "SELECT sector17_code,sector17_name,sector33_code,sector33_name,market_name "
+        "FROM market_data_universe"
+    ).fetchone()
+    assert row == ("8", "情報通信・サービスその他", "5250", "情報・通信業", "プライム")
+
+
 def test_tse_common_stock_is_in_scope():
     assert is_ordinary_stock(_master())
     assert is_jquants_price_eligible(_master())
