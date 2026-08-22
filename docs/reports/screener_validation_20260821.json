@@ -5,7 +5,7 @@
     "None": 199,
     "US_GAAP": 6
   },
-  "batch_id": "2026-08-21-a4e704cc-b973-4bd9-9c54-329c65cd151f",
+  "batch_id": "2026-08-21-4e69c39d-7dce-49bf-88f4-92101bf1d1db",
   "coverage": {
     "actual_dividend_yield_pct": {
       "coverage_pct": 94.81,
@@ -67,12 +67,6 @@
       "numeric": 3441,
       "universe": 3889
     },
-    "forecast_sales_growth_per_forward_per": {
-      "coverage_pct": 81.82,
-      "null": 707,
-      "numeric": 3182,
-      "universe": 3889
-    },
     "forecast_sales_growth_yoy_pct": {
       "coverage_pct": 87.66,
       "null": 480,
@@ -89,6 +83,12 @@
       "coverage_pct": 84.57,
       "null": 600,
       "numeric": 3289,
+      "universe": 3889
+    },
+    "forward_per_per_forecast_sales_growth": {
+      "coverage_pct": 72.8,
+      "null": 1058,
+      "numeric": 2831,
       "universe": 3889
     },
     "market_cap": {
@@ -229,15 +229,6 @@
       "forecast_missing": 263,
       "price_missing": 185
     },
-    "forecast_sales_growth_per_forward_per": {
-      "fiscal_period_changed": 23,
-      "forecast_loss": 112,
-      "forecast_missing": 285,
-      "forecast_sales_missing": 76,
-      "previous_fy_sales_missing_or_nonpositive": 5,
-      "price_missing": 185,
-      "target_fy_mismatch": 21
-    },
     "forecast_sales_growth_yoy_pct": {
       "forecast_missing": 477,
       "target_fy_mismatch": 3
@@ -257,6 +248,16 @@
       "forecast_missing": 285,
       "price_missing": 185,
       "target_fy_mismatch": 18
+    },
+    "forward_per_per_forecast_sales_growth": {
+      "fiscal_period_changed": 23,
+      "forecast_loss": 112,
+      "forecast_missing": 285,
+      "forecast_sales_missing": 76,
+      "nonpositive_forecast_sales_growth": 351,
+      "previous_fy_sales_missing_or_nonpositive": 5,
+      "price_missing": 185,
+      "target_fy_mismatch": 21
     },
     "market_cap": {
       "price_or_shares_missing": 188
@@ -305,6 +306,78 @@
   },
   "revision_event_count": 190977,
   "row_count": 3889,
+  "sales_valuation_validation_sample": [
+    {
+      "calculated_score": 0.8691713532582254,
+      "forecast_sales_growth_yoy_pct": 9.081563123856885,
+      "forward_per": 7.893434510062685,
+      "manual_score": 0.8691713532582254,
+      "ticker": "1301"
+    },
+    {
+      "calculated_score": 1.8490860252265184,
+      "forecast_sales_growth_yoy_pct": 7.380820711612701,
+      "forward_per": 13.647772432545493,
+      "manual_score": 1.8490860252265184,
+      "ticker": "1332"
+    },
+    {
+      "calculated_score": 35.552781035138935,
+      "forecast_sales_growth_yoy_pct": 0.3716463662751357,
+      "forward_per": 13.213061882684944,
+      "manual_score": 35.552781035138935,
+      "ticker": "1333"
+    },
+    {
+      "calculated_score": 0.98199132338064,
+      "forecast_sales_growth_yoy_pct": 47.13239780353875,
+      "forward_per": 46.28360569319979,
+      "manual_score": 0.98199132338064,
+      "ticker": "135A"
+    },
+    {
+      "calculated_score": 2.829681738633148,
+      "forecast_sales_growth_yoy_pct": 6.475331624539282,
+      "forward_per": 18.32312764955252,
+      "manual_score": 2.829681738633148,
+      "ticker": "1375"
+    },
+    {
+      "calculated_score": 3.2526821877986087,
+      "forecast_sales_growth_yoy_pct": 3.3469652901835234,
+      "forward_per": 10.886614382560149,
+      "manual_score": 3.2526821877986087,
+      "ticker": "1376"
+    },
+    {
+      "calculated_score": 3.4862118399708737,
+      "forecast_sales_growth_yoy_pct": 5.485232067510548,
+      "forward_per": 19.122680978743187,
+      "manual_score": 3.4862118399708737,
+      "ticker": "1377"
+    },
+    {
+      "calculated_score": 4.966189048696986,
+      "forecast_sales_growth_yoy_pct": 2.543211313507543,
+      "forward_per": 12.630068173663437,
+      "manual_score": 4.966189048696986,
+      "ticker": "1379"
+    },
+    {
+      "calculated_score": 1.617268791814247,
+      "forecast_sales_growth_yoy_pct": 10.64270905321354,
+      "forward_per": 17.21212121212121,
+      "manual_score": 1.617268791814247,
+      "ticker": "137A"
+    },
+    {
+      "calculated_score": 12.974933606233177,
+      "forecast_sales_growth_yoy_pct": 4.008209585898825,
+      "forward_per": 52.006253256904635,
+      "manual_score": 12.974933606233177,
+      "ticker": "1380"
+    }
+  ],
   "split_ticker_count": 282,
   "split_validation_sample": [
     "1333",

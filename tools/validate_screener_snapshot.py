@@ -53,6 +53,17 @@ def main() -> int:
             for key in ("fiscal_period_changed", "turnaround", "loss_expansion", "profit_to_loss", "insufficient_price_history", "peg_denominator_small")
         },
         "revision_event_count": len(build.revision_events),
+        "sales_valuation_validation_sample": [
+            {
+                "ticker": row["ticker"],
+                "forward_per": row["forward_per"],
+                "forecast_sales_growth_yoy_pct": row["forecast_sales_growth_yoy_pct"],
+                "calculated_score": row["forward_per_per_forecast_sales_growth"],
+                "manual_score": row["forward_per"] / row["forecast_sales_growth_yoy_pct"],
+            }
+            for row in build.rows
+            if row["forward_per_per_forecast_sales_growth"] is not None
+        ][:10],
     }
     rendered = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
     if args.output:

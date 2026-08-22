@@ -552,20 +552,24 @@ class ScreenerSnapshotBuilder:
             actual_sales_growth = None if fiscal_period_changed else actual_sales_growth
             forecast_sales_growth = None
 
-        sales_per_reason = None
+        sales_valuation_reason = None
         if forward_per is None:
-            sales_per_reason = forward_per_reason
+            sales_valuation_reason = forward_per_reason
+        elif forward_per <= 0:
+            sales_valuation_reason = "nonpositive_forward_per"
         elif completed is None or completed.get("sales") in (None, 0) or completed["sales"] < 0:
-            sales_per_reason = "previous_fy_sales_missing_or_nonpositive"
+            sales_valuation_reason = "previous_fy_sales_missing_or_nonpositive"
         elif fiscal_period_changed:
-            sales_per_reason = "fiscal_period_changed"
+            sales_valuation_reason = "fiscal_period_changed"
         elif target_mismatch or valuation_target_mismatch:
-            sales_per_reason = "target_fy_mismatch"
+            sales_valuation_reason = "target_fy_mismatch"
         elif sales_forecast is None:
-            sales_per_reason = "forecast_sales_missing"
-        sales_per = (
-            forecast_sales_growth / forward_per
-            if sales_per_reason is None and forecast_sales_growth is not None and forward_per
+            sales_valuation_reason = "forecast_sales_missing"
+        elif forecast_sales_growth is None or forecast_sales_growth <= 0:
+            sales_valuation_reason = "nonpositive_forecast_sales_growth"
+        forward_per_per_sales_growth = (
+            forward_per / forecast_sales_growth
+            if sales_valuation_reason is None and forecast_sales_growth and forward_per
             else None
         )
 
@@ -683,7 +687,7 @@ class ScreenerSnapshotBuilder:
             "market_code": _reason(master.get("market_code"), "master_missing"),
             "psychological_line_5d_pct": None if psychological5 is not None else "insufficient_price_history",
             "psychological_line_10d_pct": None if psychological10 is not None else "insufficient_price_history",
-            "forecast_sales_growth_per_forward_per": sales_per_reason,
+            "forward_per_per_forecast_sales_growth": sales_valuation_reason,
             "forward_peg": peg_reason,
         }
         return {
@@ -735,7 +739,7 @@ class ScreenerSnapshotBuilder:
             "any_earnings_upward_revision_event_count_3y": revision_counts[1] if revision_counts else None,
             "psychological_line_5d_pct": psychological5,
             "psychological_line_10d_pct": psychological10,
-            "forecast_sales_growth_per_forward_per": sales_per,
+            "forward_per_per_forecast_sales_growth": forward_per_per_sales_growth,
             "forecast_eps_growth_yoy_pct": eps_growth,
             "forward_peg": forward_peg,
             "peg_denominator_small": bool(eps_growth is not None and 0 < eps_growth < 1),
@@ -813,7 +817,7 @@ class ScreenerSnapshotBuilder:
             "any_earnings_upward_revision_event_count_3y", "market_cap",
             "sector17_code", "sector33_code", "market_code",
             "psychological_line_5d_pct", "psychological_line_10d_pct",
-            "forecast_sales_growth_per_forward_per", "forward_peg",
+            "forward_per_per_forecast_sales_growth", "forward_peg",
         )
         universe = len(rows)
         result: dict[str, dict[str, int | float]] = {}

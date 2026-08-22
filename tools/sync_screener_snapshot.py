@@ -18,7 +18,7 @@ from lib.screener_snapshot import SnapshotBuild, build_snapshot
 
 BATCH_SIZE = 250
 COVERAGE_GATES = {
-    "forecast_sales_growth_per_forward_per": 80.0,
+    "forward_per_per_forecast_sales_growth": 70.0,
     "forward_peg": 47.0,
     "return_5d_pct": 94.0,
     "sector17_code": 99.9,

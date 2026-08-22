@@ -39,9 +39,20 @@ def test_per_share_normalization_reuses_corporate_action_product() -> None:
     assert builder._normalized_per_share(200, "2026-01-01", "2026-05-01", actions) == 200
 
 
-def test_negative_sales_growth_score_is_retained() -> None:
-    growth_pct = (90 / 100 - 1) * 100
-    assert growth_pct / 10 == pytest.approx(-1.0)
+@pytest.mark.parametrize(
+    ("forward_per", "growth_pct", "expected"),
+    [(10, 20, 0.5), (20, 20, 1.0), (10, 10, 1.0), (10, 5, 2.0)],
+)
+def test_forward_per_per_forecast_sales_growth_examples(
+    forward_per: float, growth_pct: float, expected: float
+) -> None:
+    assert forward_per / growth_pct == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("growth_pct", [0, -0.01, -10])
+def test_nonpositive_forecast_sales_growth_has_no_score(growth_pct: float) -> None:
+    score = 10 / growth_pct if growth_pct > 0 else None
+    assert score is None
 
 
 def test_batch_payload_keeps_null_reasons_inside_coverage_json() -> None:

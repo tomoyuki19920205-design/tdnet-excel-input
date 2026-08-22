@@ -15,7 +15,7 @@ DB = Path(__file__).resolve().parents[1] / "data" / "jquants.db"
 def test_current_universe_coverage_gates_against_real_data() -> None:
     result = build_snapshot(DB)
     assert len(result.rows) == 3889
-    assert result.coverage["forecast_sales_growth_per_forward_per"]["coverage_pct"] >= 80
+    assert result.coverage["forward_per_per_forecast_sales_growth"]["coverage_pct"] >= 70
     assert result.coverage["forward_peg"]["coverage_pct"] >= 47
     assert result.coverage["return_5d_pct"]["coverage_pct"] >= 94
     assert result.coverage["op_upward_revision_count_3y"]["coverage_pct"] >= 90
@@ -54,3 +54,24 @@ def test_real_split_revision_fiscal_and_profit_state_cases() -> None:
     assert sum(row["loss_expansion"] for row in result.rows) > 0
     assert sum(row["profit_to_loss"] for row in result.rows) > 0
     assert sum(row["insufficient_price_history"] for row in result.rows) > 0
+
+
+@pytest.mark.skipif(not DB.exists(), reason="canonical J-Quants DB is not available")
+def test_inverse_sales_valuation_matches_manual_calculation_for_ten_real_stocks() -> None:
+    result = build_snapshot(DB)
+    nonpositive = [
+        row for row in result.rows
+        if row["forecast_sales_growth_yoy_pct"] is not None
+        and row["forecast_sales_growth_yoy_pct"] <= 0
+    ]
+    assert nonpositive
+    assert all(row["forward_per_per_forecast_sales_growth"] is None for row in nonpositive)
+    candidates = [
+        row for row in result.rows
+        if row["forward_per_per_forecast_sales_growth"] is not None
+    ][:10]
+    assert len(candidates) == 10
+    for row in candidates:
+        expected = row["forward_per"] / row["forecast_sales_growth_yoy_pct"]
+        assert row["forecast_sales_growth_yoy_pct"] > 0
+        assert row["forward_per_per_forecast_sales_growth"] == pytest.approx(expected)
