@@ -82,17 +82,20 @@ class SupabaseWriter:
             self.request("POST", f"/{table}", params={"on_conflict": on_conflict}, json=chunk)
 
 
-def publish(build: SnapshotBuild, writer: SupabaseWriter) -> None:
-    batch = {
+def batch_payload(build: SnapshotBuild) -> dict[str, Any]:
+    return {
         "batch_id": build.batch_id,
         "universe_date": build.universe_date,
         "status": "building",
         "expected_row_count": len(build.rows),
         "revision_event_count": len(build.revision_events),
         "coverage": {"metrics": build.coverage, "null_reasons": build.null_reasons},
-        "null_reasons": build.null_reasons,
         "calculated_at": build.rows[0]["calculated_at"],
     }
+
+
+def publish(build: SnapshotBuild, writer: SupabaseWriter) -> None:
+    batch = batch_payload(build)
     writer.upsert("screener_batches", [batch], "batch_id")
     try:
         events = [

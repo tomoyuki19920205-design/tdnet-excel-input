@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from lib.screener_snapshot import ScreenerSnapshotBuilder
+from lib.screener_snapshot import ScreenerSnapshotBuilder, SnapshotBuild
+from tools.sync_screener_snapshot import batch_payload
 
 
 def _prices(count: int) -> list[dict]:
@@ -42,3 +43,14 @@ def test_negative_sales_growth_score_is_retained() -> None:
     growth_pct = (90 / 100 - 1) * 100
     assert growth_pct / 10 == pytest.approx(-1.0)
 
+
+def test_batch_payload_keeps_null_reasons_inside_coverage_json() -> None:
+    build = SnapshotBuild(
+        batch_id="batch", universe_date="2026-08-21",
+        rows=[{"calculated_at": "2026-08-22T00:00:00Z"}],
+        revision_events=[], coverage={"forward_per": {"numeric": 1}},
+        null_reasons={"forward_per": {"forecast_missing": 1}},
+    )
+    payload = batch_payload(build)
+    assert "null_reasons" not in payload
+    assert payload["coverage"]["null_reasons"] == build.null_reasons
