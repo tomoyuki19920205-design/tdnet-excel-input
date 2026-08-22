@@ -177,6 +177,18 @@ def main() -> int:
     connection.row_factory = sqlite3.Row
     metadata = _metadata(connection)
     raw_by_id = _raw_by_id(connection)
+    boolean_distribution: Counter[str] = Counter()
+    for raw in raw_by_id.values():
+        raw_value = raw.get("RetroRst")
+        parsed = parse_optional_boolean(raw_value)
+        if parsed is True:
+            boolean_distribution["true"] += 1
+        elif parsed is False:
+            boolean_distribution["false"] += 1
+        elif raw_value is None:
+            boolean_distribution["null"] += 1
+        else:
+            boolean_distribution["blank"] += 1
     verification = []
     for (ticker, disclosure_id, target), events in sorted(grouped.items()):
         raw = raw_by_id.get(disclosure_id, {})
@@ -222,9 +234,7 @@ def main() -> int:
         "top50_after": top50,
         "required_and_sample_tickers": selected,
         "manual_verification_events": verification,
-        "strict_boolean_distribution": {
-            "true": 29, "false": 76007, "blank": 20987, "null": 6
-        },
+        "strict_boolean_distribution": dict(sorted(boolean_distribution.items())),
         "unmatched_metadata_status_distribution": dict(sorted(Counter(
             str(value.get("metadata_status")) for value in metadata.values()
             if value.get("metadata_status") != "verified"
