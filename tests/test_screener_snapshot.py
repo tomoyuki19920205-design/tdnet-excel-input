@@ -29,14 +29,14 @@ def _prices(count: int) -> list[dict]:
     ]
 
 
-@pytest.mark.parametrize("periods", [5, 20, 60])
+@pytest.mark.parametrize("periods", [1, 5, 20, 60])
 def test_return_requires_n_plus_one_valid_observations(periods: int) -> None:
     assert ScreenerSnapshotBuilder._return(_prices(periods), periods) is None
     expected = ((100 + periods) / 100 - 1) * 100
     assert ScreenerSnapshotBuilder._return(_prices(periods + 1), periods) == pytest.approx(expected)
 
 
-@pytest.mark.parametrize("periods", [5, 10])
+@pytest.mark.parametrize("periods", [1, 3, 5, 10])
 def test_psychological_line_requires_n_plus_one_valid_observations(periods: int) -> None:
     assert ScreenerSnapshotBuilder._psychological(_prices(periods), periods) is None
     assert ScreenerSnapshotBuilder._psychological(_prices(periods + 1), periods) == 100.0
@@ -70,6 +70,36 @@ def test_three_day_candle_ratio_requires_three_valid_ohlc_bars() -> None:
         {"date": "2026-08-20", "open": 100, "close": 99},
     ]
     assert ScreenerSnapshotBuilder._candle_ratio(prices, 3) == (None, None)
+
+
+@pytest.mark.parametrize(
+    ("open_", "close", "expected"),
+    [(100, 110, (100.0, 0.0)), (100, 90, (0.0, 100.0)), (100, 100, (0.0, 0.0))],
+)
+def test_daily_candle_ratio(open_: float, close: float, expected: tuple[float, float]) -> None:
+    assert ScreenerSnapshotBuilder._candle_ratio([{"open": open_, "close": close}], 1) == expected
+
+
+def test_three_comparison_psychological_line_counts_two_rises() -> None:
+    prices = [{"adj_close": close} for close in (100, 110, 105, 120)]
+    assert ScreenerSnapshotBuilder._psychological(prices, 3) == pytest.approx(200 / 3)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(10.0, (10.0, None)), (-10.0, (None, 10.0)), (0.0, (None, None)), (None, (None, None))],
+)
+def test_directional_returns_are_disjoint_and_positive(
+    value: float | None, expected: tuple[float | None, float | None]
+) -> None:
+    assert ScreenerSnapshotBuilder._directional_return(value) == expected
+
+
+def test_three_month_directional_return_reuses_60_session_return() -> None:
+    value = ScreenerSnapshotBuilder._return(_prices(61), 60)
+    rise, decline = ScreenerSnapshotBuilder._directional_return(value)
+    assert rise == value
+    assert decline is None
 
 
 def test_per_share_normalization_reuses_corporate_action_product() -> None:
@@ -138,7 +168,7 @@ def test_publish_stages_revision_events_before_atomic_pointer_swap() -> None:
         coverage={}, null_reasons={},
     )
     writer = Writer()
-    publish(build, writer)  # type: ignore[arg-type]
+    publish(build, writer, verify_current=False)  # type: ignore[arg-type]
     assert writer.calls[1][1] == "forecast_revision_events_staging"
     assert writer.calls[2][1] == "screener_metrics"
     assert writer.calls[3][2] == "/rpc/publish_screener_batch"

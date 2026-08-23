@@ -754,15 +754,26 @@ class ScreenerSnapshotBuilder:
         if growth_rate_not_meaningful:
             cumulative_op_growth = None
 
+        candles1 = self._candle_ratio(prices, 1)
         candles3 = self._candle_ratio(prices, 3)
         candles5 = self._candle_ratio(prices, 5)
         candles10 = self._candle_ratio(prices, 10)
+        return1 = self._return(prices, 1)
         return5 = self._return(prices, 5)
         return20 = self._return(prices, 20)
         return60 = self._return(prices, 60)
+        psychological1 = self._psychological(prices, 1)
+        psychological3 = self._psychological(prices, 3)
         psychological5 = self._psychological(prices, 5)
         psychological10 = self._psychological(prices, 10)
-        ytd_high = self._new_ytd_high(prices, actions, universe_date)
+        ytd_high1 = self._new_ytd_high(prices, actions, universe_date, 1)
+        ytd_high3 = self._new_ytd_high(prices, actions, universe_date, 3)
+        ytd_high5 = self._new_ytd_high(prices, actions, universe_date, 5)
+        ytd_high10 = self._new_ytd_high(prices, actions, universe_date, 10)
+        rise1, decline1 = self._directional_return(return1)
+        rise5, decline5 = self._directional_return(return5)
+        rise20, decline20 = self._directional_return(return20)
+        rise60, decline60 = self._directional_return(return60)
         insufficient_history = len(prices) < 61
 
         equity_row = _latest(
@@ -787,16 +798,30 @@ class ScreenerSnapshotBuilder:
             "actual_sales_growth_yoy_pct": _reason(actual_sales_growth, "fiscal_period_changed" if fiscal_period_changed else "prior_actual_missing"),
             "forecast_sales_growth_yoy_pct": _reason(forecast_sales_growth, "target_fy_mismatch" if target_mismatch else "forecast_missing"),
             "equity_ratio_pct": _reason(equity_ratio, "financial_missing"),
+            "bullish_candle_ratio_1d_pct": None if candles1[0] is not None else "insufficient_price_history",
             "bullish_candle_ratio_3d_pct": None if candles3[0] is not None else "insufficient_price_history",
             "bullish_candle_ratio_5d_pct": None if candles5[0] is not None else "insufficient_price_history",
             "bullish_candle_ratio_10d_pct": None if candles10[0] is not None else "insufficient_price_history",
+            "bearish_candle_ratio_1d_pct": None if candles1[1] is not None else "insufficient_price_history",
             "bearish_candle_ratio_3d_pct": None if candles3[1] is not None else "insufficient_price_history",
             "bearish_candle_ratio_5d_pct": None if candles5[1] is not None else "insufficient_price_history",
             "bearish_candle_ratio_10d_pct": None if candles10[1] is not None else "insufficient_price_history",
-            "new_ytd_high_last_5d": None if ytd_high is not None else "insufficient_price_history",
+            "new_ytd_high_last_1d": None if ytd_high1 is not None else "insufficient_price_history",
+            "new_ytd_high_last_3d": None if ytd_high3 is not None else "insufficient_price_history",
+            "new_ytd_high_last_5d": None if ytd_high5 is not None else "insufficient_price_history",
+            "new_ytd_high_last_10d": None if ytd_high10 is not None else "insufficient_price_history",
+            "return_1d_pct": None if return1 is not None else "insufficient_price_history",
             "return_5d_pct": None if return5 is not None else "insufficient_price_history",
             "return_20d_pct": None if return20 is not None else "insufficient_price_history",
             "return_60d_pct": None if return60 is not None else "insufficient_price_history",
+            "rise_rate_1d_pct": None if rise1 is not None else ("nonpositive_return" if return1 is not None else "insufficient_price_history"),
+            "rise_rate_5d_pct": None if rise5 is not None else ("nonpositive_return" if return5 is not None else "insufficient_price_history"),
+            "rise_rate_20d_pct": None if rise20 is not None else ("nonpositive_return" if return20 is not None else "insufficient_price_history"),
+            "rise_rate_60d_pct": None if rise60 is not None else ("nonpositive_return" if return60 is not None else "insufficient_price_history"),
+            "decline_rate_1d_pct": None if decline1 is not None else ("nonnegative_return" if return1 is not None else "insufficient_price_history"),
+            "decline_rate_5d_pct": None if decline5 is not None else ("nonnegative_return" if return5 is not None else "insufficient_price_history"),
+            "decline_rate_20d_pct": None if decline20 is not None else ("nonnegative_return" if return20 is not None else "insufficient_price_history"),
+            "decline_rate_60d_pct": None if decline60 is not None else ("nonnegative_return" if return60 is not None else "insufficient_price_history"),
             "sales_growth_beat_pp": None if (
                 cumulative_sales_growth is not None and forecast_sales_growth is not None
             ) else ("forecast_missing" if forecast_sales_growth is None else "same_quarter_missing"),
@@ -811,6 +836,8 @@ class ScreenerSnapshotBuilder:
             "sector17_code": _reason(master.get("sector17_code"), "master_missing"),
             "sector33_code": _reason(master.get("sector33_code"), "master_missing"),
             "market_code": _reason(master.get("market_code"), "master_missing"),
+            "psychological_line_1d_pct": None if psychological1 is not None else "insufficient_price_history",
+            "psychological_line_3d_pct": None if psychological3 is not None else "insufficient_price_history",
             "psychological_line_5d_pct": None if psychological5 is not None else "insufficient_price_history",
             "psychological_line_10d_pct": None if psychological10 is not None else "insufficient_price_history",
             "forward_per_per_forecast_sales_growth": sales_valuation_reason,
@@ -845,16 +872,30 @@ class ScreenerSnapshotBuilder:
             "actual_sales_growth_yoy_pct": actual_sales_growth,
             "forecast_sales_growth_yoy_pct": forecast_sales_growth,
             "equity_ratio_pct": equity_ratio,
+            "bullish_candle_ratio_1d_pct": candles1[0],
             "bullish_candle_ratio_3d_pct": candles3[0],
             "bullish_candle_ratio_5d_pct": candles5[0],
             "bullish_candle_ratio_10d_pct": candles10[0],
+            "bearish_candle_ratio_1d_pct": candles1[1],
             "bearish_candle_ratio_3d_pct": candles3[1],
             "bearish_candle_ratio_5d_pct": candles5[1],
             "bearish_candle_ratio_10d_pct": candles10[1],
-            "new_ytd_high_last_5d": ytd_high,
+            "new_ytd_high_last_1d": ytd_high1,
+            "new_ytd_high_last_3d": ytd_high3,
+            "new_ytd_high_last_5d": ytd_high5,
+            "new_ytd_high_last_10d": ytd_high10,
+            "return_1d_pct": return1,
             "return_5d_pct": return5,
             "return_20d_pct": return20,
             "return_60d_pct": return60,
+            "rise_rate_1d_pct": rise1,
+            "rise_rate_5d_pct": rise5,
+            "rise_rate_20d_pct": rise20,
+            "rise_rate_60d_pct": rise60,
+            "decline_rate_1d_pct": decline1,
+            "decline_rate_5d_pct": decline5,
+            "decline_rate_20d_pct": decline20,
+            "decline_rate_60d_pct": decline60,
             "sales_growth_beat_pp": (
                 cumulative_sales_growth - forecast_sales_growth
                 if cumulative_sales_growth is not None and forecast_sales_growth is not None else None
@@ -865,6 +906,8 @@ class ScreenerSnapshotBuilder:
             ),
             "op_upward_revision_count_3y": revision_counts[0] if revision_counts else None,
             "any_earnings_upward_revision_event_count_3y": revision_counts[1] if revision_counts else None,
+            "psychological_line_1d_pct": psychological1,
+            "psychological_line_3d_pct": psychological3,
             "psychological_line_5d_pct": psychological5,
             "psychological_line_10d_pct": psychological10,
             "forward_per_per_forecast_sales_growth": forward_per_per_sales_growth,
@@ -900,6 +943,12 @@ class ScreenerSnapshotBuilder:
         return (observations[-1]["adj_close"] / observations[-periods - 1]["adj_close"] - 1) * 100
 
     @staticmethod
+    def _directional_return(value: float | None) -> tuple[float | None, float | None]:
+        if value is None:
+            return None, None
+        return (value if value > 0 else None, -value if value < 0 else None)
+
+    @staticmethod
     def _psychological(prices: list[dict[str, Any]], periods: int) -> float | None:
         observations = [row for row in prices if row.get("adj_close") is not None]
         if len(observations) < periods + 1:
@@ -909,11 +958,12 @@ class ScreenerSnapshotBuilder:
 
     @staticmethod
     def _new_ytd_high(
-        prices: list[dict[str, Any]], actions: list[tuple[str, float]], universe_date: str
+        prices: list[dict[str, Any]], actions: list[tuple[str, float]], universe_date: str,
+        periods: int = 5,
     ) -> bool | None:
         year_start = f"{universe_date[:4]}-01-01"
         observations = [row for row in prices if row["date"] >= year_start and row.get("high") is not None]
-        if len(observations) < 5:
+        if len(observations) < periods:
             return None
         adjusted: list[float] = []
         for row in observations:
@@ -924,7 +974,7 @@ class ScreenerSnapshotBuilder:
             adjusted.append(float(row["high"]) * factor)
         running: float | None = None
         hit = False
-        boundary = len(adjusted) - 5
+        boundary = len(adjusted) - periods
         for index, value in enumerate(adjusted):
             if index >= boundary and (running is None or value > running):
                 hit = True
@@ -937,14 +987,19 @@ class ScreenerSnapshotBuilder:
             "forward_per", "actual_per", "actual_dividend_yield_pct",
             "forecast_dividend_yield_pct", "actual_sales_growth_yoy_pct",
             "forecast_sales_growth_yoy_pct", "equity_ratio_pct",
+            "bullish_candle_ratio_1d_pct",
             "bullish_candle_ratio_3d_pct", "bullish_candle_ratio_5d_pct", "bullish_candle_ratio_10d_pct",
+            "bearish_candle_ratio_1d_pct",
             "bearish_candle_ratio_3d_pct", "bearish_candle_ratio_5d_pct", "bearish_candle_ratio_10d_pct",
-            "new_ytd_high_last_5d", "return_5d_pct", "return_20d_pct",
+            "new_ytd_high_last_1d", "new_ytd_high_last_3d", "new_ytd_high_last_5d", "new_ytd_high_last_10d",
+            "return_1d_pct", "return_5d_pct", "return_20d_pct",
             "return_60d_pct", "sales_growth_beat_pp",
+            "rise_rate_1d_pct", "rise_rate_5d_pct", "rise_rate_20d_pct", "rise_rate_60d_pct",
+            "decline_rate_1d_pct", "decline_rate_5d_pct", "decline_rate_20d_pct", "decline_rate_60d_pct",
             "operating_profit_growth_beat_pp", "op_upward_revision_count_3y",
             "any_earnings_upward_revision_event_count_3y", "market_cap",
             "sector17_code", "sector33_code", "market_code",
-            "psychological_line_5d_pct", "psychological_line_10d_pct",
+            "psychological_line_1d_pct", "psychological_line_3d_pct", "psychological_line_5d_pct", "psychological_line_10d_pct",
             "forward_per_per_forecast_sales_growth", "forward_peg",
         )
         universe = len(rows)
