@@ -79,6 +79,18 @@ def test_per_share_normalization_reuses_corporate_action_product() -> None:
     assert builder._normalized_per_share(200, "2026-01-01", "2026-05-01", actions) == 200
 
 
+def test_future_split_basis_factor_unwinds_as_actions_become_effective() -> None:
+    builder = object.__new__(ScreenerSnapshotBuilder)
+    actions = [("2026-10-01", 0.5)]
+
+    assert builder._normalized_per_share(
+        139.3, "2026-07-31", "2026-08-21", actions, 2.0
+    ) == pytest.approx(278.6)
+    assert builder._normalized_per_share(
+        139.3, "2026-07-31", "2026-10-01", actions, 2.0
+    ) == pytest.approx(139.3)
+
+
 @pytest.mark.parametrize(
     ("forward_per", "growth_pct", "expected"),
     [(10, 20, 0.5), (20, 20, 1.0), (10, 10, 1.0), (10, 5, 2.0)],

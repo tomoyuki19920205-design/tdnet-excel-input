@@ -95,7 +95,7 @@ _COLS = [
     "eps", "diluted_eps", "bps",
     "dividend_q1", "dividend_q2", "dividend_q3", "dividend_fy_end",
     "dividend_annual", "payout_ratio",
-    "forecast_eps", "initial_forecast_eps",
+    "forecast_eps", "forecast_eps_basis_factor", "initial_forecast_eps",
     "forecast_dividend_annual", "forecast_payout_ratio",
     "shares_outstanding", "treasury_stock", "avg_shares",
     "total_assets", "equity", "equity_ratio",
@@ -103,15 +103,25 @@ _COLS = [
 ]
 
 
-def read_sqlite(db_path: str, limit: int = 0, ticker: str | None = None):
+def read_sqlite(
+    db_path: str,
+    limit: int = 0,
+    ticker: str | None = None,
+    basis_adjusted_only: bool = False,
+):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
 
     query = f"SELECT {', '.join(_COLS)} FROM per_share_data"
     params: list[str] = []
+    conditions: list[str] = []
     if ticker:
-        query += " WHERE ticker = ?"
+        conditions.append("ticker = ?")
         params.append(ticker)
+    if basis_adjusted_only:
+        conditions.append("forecast_eps_basis_factor != 1")
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
     query += " ORDER BY ticker, period DESC"
     if limit > 0:
         query += f" LIMIT {limit}"
@@ -128,8 +138,21 @@ def read_sqlite(db_path: str, limit: int = 0, ticker: str | None = None):
     return data
 
 
-def sync(db_path, supabase_url, supabase_key, dry_run=True, limit=0, ticker=None):
-    data = read_sqlite(db_path, limit=limit, ticker=ticker)
+def sync(
+    db_path,
+    supabase_url,
+    supabase_key,
+    dry_run=True,
+    limit=0,
+    ticker=None,
+    basis_adjusted_only=False,
+):
+    data = read_sqlite(
+        db_path,
+        limit=limit,
+        ticker=ticker,
+        basis_adjusted_only=basis_adjusted_only,
+    )
     logger.info(f"[SYNC] {len(data):,} rows from SQLite per_share_data")
 
     if not data:
@@ -166,6 +189,11 @@ def main():
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--ticker", help="対象銘柄だけを同期（例: 7480）")
+    parser.add_argument(
+        "--basis-adjusted-only",
+        action="store_true",
+        help="forecast EPS basis factorが非1の行だけを同期",
+    )
     args = parser.parse_args()
 
     is_dry_run = not args.apply
@@ -198,6 +226,7 @@ def main():
         dry_run=is_dry_run,
         limit=args.limit,
         ticker=args.ticker,
+        basis_adjusted_only=args.basis_adjusted_only,
     )
     sys.exit(1 if stats["errors"] > 0 else 0)
 

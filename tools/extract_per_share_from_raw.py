@@ -55,6 +55,7 @@ def _ensure_table(conn: sqlite3.Connection):
         # 既存テーブルへのカラム追加 migration（冪等: 失敗しても続行）
         _migrations = [
             "ALTER TABLE per_share_data ADD COLUMN initial_forecast_eps REAL",
+            "ALTER TABLE per_share_data ADD COLUMN forecast_eps_basis_factor REAL NOT NULL DEFAULT 1.0",
         ]
         for sql in _migrations:
             try:
@@ -142,31 +143,29 @@ def _snap_corporate_action_multiplier(value: float) -> float | None:
         return None
 
     rational = Fraction(value).limit_denominator(20)
+    if rational.numerator <= 0:
+        return None
+    is_whole_ratio = rational.numerator == 1 or rational.denominator == 1
+    is_three_for_two = {rational.numerator, rational.denominator} == {2, 3}
+    if not (is_whole_ratio or is_three_for_two):
+        return None
+    if max(rational.numerator, rational.denominator) > 10:
+        return None
     snapped = rational.numerator / rational.denominator
     if not math.isclose(value, snapped, rel_tol=0.025, abs_tol=0.005):
         return None
     return snapped
 
 
-def _forecast_basis_multiplier(raw: dict) -> float:
-    """Convert forecast per-share facts to the disclosure-date share basis.
+def _inferred_forecast_share_basis_factor(raw: dict) -> float:
+    """Infer the factor converting disclosed FEPS to disclosure-date basis.
 
-    After a forward split is announced, issuer FEPS and remaining forecast DPS
-    can already use the future post-action basis while paid interim DPS and the
-    raw share price remain pre-action.  FNP / FEPS exposes that forecast share
-    denominator.  It is accepted only when both average shares and period-end
-    net issued shares independently yield the same small rational ratio.
-
-    The inference is restricted to mixed actual/forecast rows whose annual
-    forecast is absent.  That is the structured fail-close signal emitted when
-    the components cannot safely be added as reported, and it prevents normal
-    capital issuance from being mistaken for a split.
+    FNP / FEPS exposes the forecast share denominator.  Accept a non-unit
+    factor only when both average shares and period-end net issued shares
+    independently produce the same small rational ratio.  The raw FEPS stays
+    untouched; consumers combine this metadata with effective-date market
+    adjustment factors to normalize it to their price date.
     """
-    if safe_float(raw.get("FDivAnn")) is not None:
-        return 1.0
-    if not _has_mixed_dividend_components(raw):
-        return 1.0
-
     forecast_profit = safe_float(raw.get("FNP") or raw.get("FNCNP"))
     forecast_eps = safe_float(raw.get("FEPS"))
     average_shares = safe_float(raw.get("AvgSh"))
@@ -201,6 +200,15 @@ def _forecast_basis_multiplier(raw: dict) -> float:
     ):
         return 1.0
     return from_average
+
+
+def _forecast_component_basis_multiplier(raw: dict) -> float:
+    """Return a safe multiplier for homogeneous remaining DPS components."""
+    if safe_float(raw.get("FDivAnn")) is not None:
+        return 1.0
+    if not _has_mixed_dividend_components(raw):
+        return 1.0
+    return _inferred_forecast_share_basis_factor(raw)
 
 
 def _mixed_forecast_annual_dividend(
@@ -378,13 +386,9 @@ def extract_per_share(
     quarter = _normalize_period(period_type)
 
     # forecast: 当期予想のみ (案A — NxF系は入れない)
-    forecast_multiplier = _forecast_basis_multiplier(raw)
+    forecast_eps_basis_factor = _inferred_forecast_share_basis_factor(raw)
+    forecast_multiplier = _forecast_component_basis_multiplier(raw)
     raw_forecast_eps = safe_float(raw.get("FEPS"))
-    forecast_eps = (
-        raw_forecast_eps * forecast_multiplier
-        if raw_forecast_eps is not None
-        else None
-    )
     forecast_div = _mixed_forecast_annual_dividend(
         raw,
         actual_adjustments=actual_dividend_adjustments,
@@ -425,7 +429,8 @@ def extract_per_share(
         "dividend_annual": actual_dividend_annual,
         "payout_ratio": safe_float(raw.get("PayoutRatioAnn")),
         # 予想 (FEPS/FDivAnn 優先, Nx系フォールバック)
-        "forecast_eps": forecast_eps,
+        "forecast_eps": raw_forecast_eps,
+        "forecast_eps_basis_factor": forecast_eps_basis_factor,
         "forecast_dividend_annual": forecast_div,
         "forecast_payout_ratio": forecast_payout,
         # 株式数
@@ -484,6 +489,7 @@ def _extract_next_year_forecast(raw: dict, fy_record: dict) -> dict | None:
         "dividend_annual":          None,
         "payout_ratio":             None,
         "forecast_eps":             nx_feps,
+        "forecast_eps_basis_factor": 1.0,
         "initial_forecast_eps":     nx_feps,   # 本決算発表時のNxFEPS = 期初予想。原則不変。
         "forecast_dividend_annual": _annual_dividend(
             raw,
@@ -570,6 +576,7 @@ def _merge_next_year_record(best: dict[tuple, dict], next_row: dict) -> None:
     # まだ実績なし → より新しい開示日の NxFEPS で上書き
     if (next_row.get("disclosed_date") or "") >= (existing.get("disclosed_date") or ""):
         existing["forecast_eps"] = next_row["forecast_eps"]
+        existing["forecast_eps_basis_factor"] = next_row["forecast_eps_basis_factor"]
         existing["forecast_dividend_annual"] = next_row.get("forecast_dividend_annual")
         existing["forecast_payout_ratio"] = next_row.get("forecast_payout_ratio")
         existing["disclosed_date"] = next_row["disclosed_date"]
@@ -707,7 +714,7 @@ def run(
         "eps", "diluted_eps", "bps",
         "dividend_q1", "dividend_q2", "dividend_q3", "dividend_fy_end",
         "dividend_annual", "payout_ratio",
-        "forecast_eps", "initial_forecast_eps",
+        "forecast_eps", "forecast_eps_basis_factor", "initial_forecast_eps",
         "forecast_dividend_annual", "forecast_payout_ratio",
         "shares_outstanding", "treasury_stock", "avg_shares",
         "total_assets", "equity", "equity_ratio",
@@ -737,21 +744,25 @@ def run(
     # initial_forecast_eps は「期初予想」なので一度書いたら原則上書きしない (COALESCE)。
     _NXF_COLS = [
         "ticker", "period", "quarter", "disclosed_date",
-        "forecast_eps", "initial_forecast_eps",
+        "forecast_eps", "forecast_eps_basis_factor", "initial_forecast_eps",
         "forecast_dividend_annual", "forecast_payout_ratio",
         "source", "updated_at",
     ]
     sql_nxf = """
         INSERT INTO per_share_data (ticker, period, quarter, disclosed_date,
-            forecast_eps, initial_forecast_eps,
+            forecast_eps, forecast_eps_basis_factor, initial_forecast_eps,
             forecast_dividend_annual, forecast_payout_ratio,
             source, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(ticker, period, quarter)
         DO UPDATE SET
             forecast_eps = CASE
                 WHEN per_share_data.eps IS NOT NULL THEN per_share_data.forecast_eps
                 ELSE excluded.forecast_eps
+            END,
+            forecast_eps_basis_factor = CASE
+                WHEN per_share_data.eps IS NOT NULL THEN per_share_data.forecast_eps_basis_factor
+                ELSE excluded.forecast_eps_basis_factor
             END,
             initial_forecast_eps = COALESCE(
                 per_share_data.initial_forecast_eps,

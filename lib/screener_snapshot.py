@@ -435,10 +435,11 @@ class ScreenerSnapshotBuilder:
         disclosed_at: str | None,
         price_date: str,
         actions: list[tuple[str, float]],
+        basis_factor: float = 1.0,
     ) -> float | None:
         if value is None:
             return None
-        return value * self._action_factor(actions, disclosed_at, price_date)
+        return value * basis_factor * self._action_factor(actions, disclosed_at, price_date)
 
     def _build_revision_events(
         self,
@@ -603,6 +604,8 @@ class ScreenerSnapshotBuilder:
             forecast_ps.get("disclosed_date") if forecast_ps else None,
             price_as_of or universe_date,
             actions,
+            float(forecast_ps.get("forecast_eps_basis_factor") or 1.0)
+            if forecast_ps else 1.0,
         )
         normalized_actual_eps = self._normalized_per_share(
             actual_eps,

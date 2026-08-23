@@ -116,8 +116,29 @@ def test_forward_split_not_yet_in_market_data_uses_forecast_share_basis():
     )
 
     assert row is not None
-    assert row["forecast_eps"] == 477.2
+    assert row["forecast_eps"] == 119.3
+    assert row["forecast_eps_basis_factor"] == 4
     assert row["forecast_dividend_annual"] == 476.5
+
+
+def test_ryoden_future_split_keeps_raw_feps_and_records_basis_factor():
+    row = extract_per_share(
+        _raw(
+            Code="80840",
+            DiscDate="2026-07-31",
+            FEPS="139.30",
+            FNP="6000000000",
+            AvgSh="21536878",
+            ShOutFY="21612037",
+            TrShFY="115301",
+            FDiv2Q="85.0",
+            FDivFY="42.5",
+        )
+    )
+
+    assert row is not None
+    assert row["forecast_eps"] == 139.3
+    assert row["forecast_eps_basis_factor"] == 2
 
 
 def test_annual_forecast_only_remains_authoritative():
@@ -150,7 +171,8 @@ def test_forward_reverse_split_direction_is_not_inverted():
     )
 
     assert row is not None
-    assert row["forecast_eps"] == 10
+    assert row["forecast_eps"] == 20
+    assert row["forecast_eps_basis_factor"] == 0.5
     assert row["forecast_dividend_annual"] == 25
 
 
@@ -169,7 +191,23 @@ def test_matching_post_split_forecast_share_basis_is_not_adjusted_again():
 
     assert row is not None
     assert row["forecast_eps"] == 20
+    assert row["forecast_eps_basis_factor"] == 1
     assert row["forecast_dividend_annual"] == 35
+
+
+def test_noncanonical_share_ratio_does_not_masquerade_as_a_split():
+    row = extract_per_share(
+        _raw(
+            FNP="7900",
+            FEPS="10",
+            AvgSh="200",
+            ShOutFY="220",
+            TrShFY="20",
+        )
+    )
+
+    assert row is not None
+    assert row["forecast_eps_basis_factor"] == 1
 
 
 def test_partial_interim_dividend_does_not_masquerade_as_annual():
