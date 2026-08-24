@@ -9,6 +9,7 @@ import re
 from typing import Optional
 
 from .dividend_models import DividendRevisionEvent
+from .dividend_policy import detect_dividend_policy_change
 from .common_normalizers import normalize_jp_number, parse_number
 
 logger = logging.getLogger("dividend_extractor")
@@ -197,6 +198,20 @@ def extract_dividend_revision(
 
     confidence = 0.0
 
+    # Policy change is a secondary attribute of the same dividend event.  Run
+    # this before numeric extraction so an explicit title survives empty/OCR-
+    # failed PDF text.
+    policy = detect_dividend_policy_change(title, text)
+    event.policy_change_detected = policy.detected
+    event.policy_change_scope = policy.scope
+    event.policy_change_label = policy.label
+    event.policy_change_action = policy.action
+    event.policy_change_summary = policy.summary
+    event.policy_change_before = policy.before
+    event.policy_change_after = policy.after
+    event.policy_change_metrics = policy.metrics
+    event.policy_change_evidence = policy.evidence
+
     # テーブル値抽出
     table_vals = _find_dividend_table_values(text)
     prev_vals = table_vals.get("previous_values", [])
@@ -265,8 +280,12 @@ def extract_dividend_revision(
             pass
 
     event.confidence = min(round(confidence, 2), 1.0)
+    if event.policy_change_detected:
+        event.confidence = max(event.confidence, 0.8)
     event.subtype = _determine_subtype(event, title)
     event.importance = _calc_importance(event)
+    if event.policy_change_detected:
+        event.importance = max(event.importance, 80)
 
     # ---- FITZ 年間合計抽出 (pdf_path がある場合) ----
     if pdf_path and os.path.exists(pdf_path):
@@ -287,6 +306,8 @@ def extract_dividend_revision(
                 )
             event.subtype = _determine_subtype(event, title)
             event.importance = _calc_importance(event)
+            if event.policy_change_detected:
+                event.importance = max(event.importance, 80)
             logger.info(
                 f"[dividend_fitz] annual_prev={event.annual_total_previous} "
                 f"annual_rev={event.annual_total_revised} "

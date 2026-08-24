@@ -788,7 +788,8 @@ def build_supabase_row(event: EventRecord, client=None) -> tuple[dict, dict, str
             "shares_limit", "amount_limit_million_yen",
         ]
         has_any_number = any(extracted.get(f) is not None for f in numeric_fields)
-        if not has_any_number:
+        has_semantic_event = extracted.get("policy_change_detected") is True
+        if not has_any_number and not has_semantic_event:
             raw_payload["text_extract_status"] = "empty"
             raw_payload["text_empty"] = True
         else:

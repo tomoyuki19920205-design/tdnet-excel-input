@@ -2,7 +2,7 @@
 """dividend_models.py — 配当予想修正イベントのデータモデル"""
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Optional
 import json
 
@@ -24,6 +24,19 @@ class DividendRevisionEvent:
     annual_total_revised: Optional[float] = None
 
     payout_ratio: Optional[float] = None
+
+    # Durable dividend/shareholder-return policy change (secondary event).
+    # The primary event remains dividend_revision so one disclosure produces
+    # one notification card.
+    policy_change_detected: bool = False
+    policy_change_scope: str = ""
+    policy_change_label: str = ""
+    policy_change_action: str = ""
+    policy_change_summary: str = ""
+    policy_change_before: str = ""
+    policy_change_after: str = ""
+    policy_change_metrics: list[dict] = field(default_factory=list)
+    policy_change_evidence: list[str] = field(default_factory=list)
 
     subtype: str = "undecided"  # increase/decrease/special_dividend/commemorative_dividend/maintain/undecided
     importance: int = 50

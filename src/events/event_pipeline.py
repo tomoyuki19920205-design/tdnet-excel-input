@@ -352,10 +352,15 @@ def _dividend_to_event_record(
     ]
     fingerprint = compute_fingerprint(*fp_parts)
 
-    summary_parts = [dividend_event.subtype]
+    summary_parts = ["配当修正"]
+    if getattr(dividend_event, "policy_change_detected", False):
+        summary_parts.append(getattr(dividend_event, "policy_change_label", "") or "配当方針変更")
     if dividend_event.fiscal_period:
         summary_parts.append(dividend_event.fiscal_period)
-    summary = " ".join(summary_parts)
+    summary = "／".join(part for part in summary_parts if part)
+    policy_summary = getattr(dividend_event, "policy_change_summary", "")
+    if policy_summary and policy_summary not in summary:
+        summary = f"{summary}\n{policy_summary}"
 
     return EventRecord(
         source_doc_id=doc.doc_id,
