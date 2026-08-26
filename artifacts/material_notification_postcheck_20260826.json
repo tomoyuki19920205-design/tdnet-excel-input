@@ -1,0 +1,15 @@
+{
+  "mode": "dry_run",
+  "since": "2025-08-26T00:00:00+09:00",
+  "scanned_rows": 1450,
+  "scanned_tickers": 1262,
+  "unique_urls": 1450,
+  "valid_rows": 1357,
+  "request_error_rows": 0,
+  "cleanup_candidates": 0,
+  "cleanup_tickers": 0,
+  "candidates": [],
+  "unresolved": [],
+  "archived_ids": [],
+  "local_rows_marked_invalid": 0
+}
