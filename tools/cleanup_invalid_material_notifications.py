@@ -67,13 +67,20 @@ def validate_url(url: str) -> dict[str, Any]:
     if not re.match(r"^https?://", url, re.IGNORECASE):
         return {"result": "invalid_format", "definitive": True}
     last: dict[str, Any] = {"result": "request_error", "definitive": False}
-    for _attempt in range(3):
+    user_agents = (
+        "TDnetExcelInput/1.0",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36",
+    )
+    for user_agent in user_agents:
         session = requests.Session()
         session.trust_env = False
         try:
             response = session.get(
                 url,
-                headers={"User-Agent": "TDnetExcelInput/1.0", "Range": "bytes=0-31"},
+                headers={"User-Agent": user_agent, "Range": "bytes=0-31"},
                 timeout=(5, 25),
                 stream=True,
                 allow_redirects=True,

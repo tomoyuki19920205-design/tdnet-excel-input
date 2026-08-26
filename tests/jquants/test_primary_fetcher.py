@@ -364,6 +364,15 @@ class TestMaterialUrlValidation:
         def get(self, *_args, **_kwargs):
             return self.response
 
+    class SequenceSession:
+        def __init__(self, responses):
+            self.responses = iter(responses)
+            self.headers = []
+
+        def get(self, *_args, **kwargs):
+            self.headers.append(kwargs.get("headers", {}))
+            return next(self.responses)
+
     def test_valid_pdf_is_retained_and_marked(self):
         item = _make_jq_disclosure(
             title="FY2026 Financial Results Presentation",
@@ -391,6 +400,19 @@ class TestMaterialUrlValidation:
         assert _filter_linkable_materials(
             [item], session=self.Session(self.Response(404, "text/html", b"<html>")),
         ) == []
+
+    def test_403_retries_with_browser_user_agent(self):
+        item = DisclosureItem(
+            disclosure_id="official", ticker="9069", company_name="センコーＧＨＤ",
+            title="第1四半期決算説明資料",
+            doc_url="https://example.test/restricted.pdf",
+            published_at="2026-08-12 15:30", disclosure_type="earnings_material",
+        )
+        session = self.SequenceSession([
+            self.Response(403, "text/html", b"<html>"), self.Response(206),
+        ])
+        assert _filter_linkable_materials([item], session=session) == [item]
+        assert session.headers[1]["User-Agent"].startswith("Mozilla/5.0")
 
     def test_non_material_events_are_untouched(self):
         item = _make_legacy_item()

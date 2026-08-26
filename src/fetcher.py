@@ -36,6 +36,10 @@ INSTRUMENT_EXCLUDE_KEYWORDS = [
 ]
 
 _USER_AGENT = "TDnetExcelInput/1.0"
+_STANDARD_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36"
+)
 
 # yanoshin.jp API の既知上限件数（実測: 決算集中日に300件固定で返る）
 # この件数に到達した場合、301件目以降を静かに取りこぼすリスクがある。
@@ -202,6 +206,15 @@ def _is_resolvable_pdf_url(
             stream=True,
             allow_redirects=True,
         )
+        if response.status_code == 403:
+            response.close()
+            response = client.get(
+                value,
+                headers={"User-Agent": _STANDARD_BROWSER_USER_AGENT, "Range": "bytes=0-31"},
+                timeout=timeout_sec,
+                stream=True,
+                allow_redirects=True,
+            )
         if response.status_code not in (200, 206):
             return False
         first = next(response.iter_content(32), b"")

@@ -417,6 +417,15 @@ def hash_remote_pdf(url: str, session: requests.Session, max_bytes: int = 50 * 1
     """Hash a new PDF in memory; abort large/non-PDF responses and persist no body."""
     try:
         response = session.get(url, timeout=(5, 30), stream=True, allow_redirects=True)
+        if response.status_code == 403:
+            response.close()
+            response = session.get(
+                url,
+                timeout=(5, 30),
+                stream=True,
+                allow_redirects=True,
+                headers={"User-Agent": _STANDARD_BROWSER_USER_AGENT},
+            )
         response.raise_for_status()
         content_type = response.headers.get("Content-Type", "").lower()
         if "pdf" not in content_type and not _is_pdf_url(response.url or url):
