@@ -248,6 +248,45 @@ def test_new_material_or_video_notifies_once_then_never_again(conn, title, url, 
     assert second.notified == 0
 
 
+def test_unresolvable_company_material_is_never_published(conn):
+    add_source(conn)
+    run_monitor(conn, fetch=lambda _: page([]), now_iso="2026-08-17T19:00:00+09:00")
+    sent = []
+    stats = run_monitor(
+        conn,
+        fetch=lambda _: page([("第1四半期決算説明資料", "/missing.pdf")]),
+        tdnet_lookup=lambda _: [],
+        pdf_hasher=lambda _: None,
+        publish=lambda *args: sent.append(args) or True,
+        now_iso="2026-08-18T19:00:00+09:00",
+    )
+    assert stats.notified == 0 and stats.url_unverified == 1
+    assert sent == []
+    assert conn.execute(
+        "SELECT notification_status,suppression_reason FROM company_ir_assets "
+        "WHERE asset_url LIKE '%/missing.pdf'"
+    ).fetchone() == ("url_unverified", "url_unverified")
+
+
+def test_url_unverified_company_material_retries_and_publishes_when_valid(conn):
+    add_source(conn)
+    run_monitor(conn, fetch=lambda _: page([]), now_iso="2026-08-17T19:00:00+09:00")
+    current = page([("第1四半期決算説明資料", "/delayed.pdf")])
+    first = run_monitor(
+        conn, fetch=lambda _: current, tdnet_lookup=lambda _: [],
+        pdf_hasher=lambda _: None, now_iso="2026-08-18T19:00:00+09:00",
+    )
+    sent = []
+    second = run_monitor(
+        conn, fetch=lambda _: current, tdnet_lookup=lambda _: [],
+        pdf_hasher=lambda _: "9" * 64,
+        publish=lambda _source, asset, *_: sent.append(asset.asset_url) or True,
+        now_iso="2026-08-19T19:00:00+09:00",
+    )
+    assert first.notified == 0 and first.url_unverified == 1
+    assert second.notified == 1 and sent == ["https://example.test/delayed.pdf"]
+
+
 def test_tdnet_same_title_suppresses_company_event(conn):
     add_source(conn)
     run_monitor(conn, fetch=lambda _: page([]), now_iso="2026-08-17T19:00:00+09:00")

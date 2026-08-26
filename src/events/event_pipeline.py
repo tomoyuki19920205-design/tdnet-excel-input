@@ -388,6 +388,8 @@ def _pdf_only_material_to_event_record(doc: DocumentMeta, match) -> EventRecord:
         "notification_type": match.event_type,
         "source_doc_id": source_doc_id,
         "pdf_url": doc.doc_url,
+        "url_validated": doc.link_validated is True,
+        "url_validation_source": "upstream_streamed_get",
     }
     return EventRecord(
         source_doc_id=source_doc_id,
@@ -441,6 +443,13 @@ def _process_single_document(
     _pre_forecast = classify_forecast(title, "")             # title のみで十分判定可能
     _pre_dividend = classify_dividend(title, "")             # title のみで十分判定可能
     _pre_material = classify_pdf_only_material(title, doc.doc_url)
+    if _pre_material and doc.link_validated is not True:
+        logger.warning(
+            "[MATERIAL_EVENT_SUPPRESSED] ticker=%s source_doc_id=%s "
+            "reason=url_not_verified url=%s",
+            doc.ticker, doc.source_doc_id or doc.doc_id, doc.doc_url,
+        )
+        _pre_material = None
     if _pre_material and not is_after_pdf_only_material_activation(
         doc.disclosure_datetime, _pre_material.event_type
     ):

@@ -93,6 +93,7 @@ class RunStats:
     tdnet_suppressed: int = 0
     notified: int = 0
     publish_failed: int = 0
+    url_unverified: int = 0
     individual_retries: int = 0
     delayed_retries: int = 0
     delayed_retry_successes: int = 0
@@ -561,7 +562,8 @@ def _default_tdnet_lookup(ticker: str, session: requests.Session) -> list[dict]:
         base.rstrip("/") + "/rest/v1/tdnet_events",
         headers={"apikey": key, "Authorization": f"Bearer {key}"},
         params={
-            "select": "headline,source_title,display_title,source_url,pdf_url,raw_payload",
+            "select": "id,headline,source_title,display_title,source_url,pdf_url,"
+                      "source_doc_id,disclosed_at,raw_payload",
             "ticker": f"eq.{ticker}",
             "event_type": "not.in.(company_ir_material,company_ir_video)",
             "limit": "1000",
@@ -866,6 +868,27 @@ def run_monitor(
                                 raw_asset.source_page_url, existing[2])
                 first_seen = existing[1]
                 asset_id = existing[0]
+                if asset.asset_type == ASSET_MATERIAL and not asset.content_sha256:
+                    content_hash = pdf_hasher(asset.asset_url)
+                    if not content_hash:
+                        stats.url_unverified += 1
+                        if not dry_run:
+                            conn.execute("""
+                                UPDATE company_ir_assets
+                                SET notification_status='url_unverified',
+                                    suppression_reason='url_unverified'
+                                WHERE id=?
+                            """, (asset_id,))
+                        continue
+                    asset = IrAsset(asset.asset_type, asset.title, asset.asset_url,
+                                    asset.source_page_url, content_hash)
+                    if not dry_run:
+                        conn.execute("""
+                            UPDATE company_ir_assets
+                            SET content_sha256=?,notification_status='pending',
+                                suppression_reason=NULL
+                            WHERE id=?
+                        """, (content_hash, asset_id))
                 if not allow_notifications:
                     stats.pending += 1
                     continue
@@ -896,15 +919,25 @@ def run_monitor(
                 suppression = (
                     "content_duplicate" if content_duplicate
                     else "tdnet_duplicate" if tdnet_duplicate
+                    else "url_unverified" if (
+                        raw_asset.asset_type == ASSET_MATERIAL and not content_hash
+                    )
                     else None
                 )
-                notification_status = "baseline" if initial_baseline else ("suppressed" if duplicate else "pending")
+                url_verified = raw_asset.asset_type != ASSET_MATERIAL or bool(content_hash)
+                notification_status = (
+                    "baseline" if initial_baseline else
+                    "suppressed" if duplicate else
+                    "pending" if url_verified else
+                    "url_unverified"
+                )
                 if initial_baseline:
                     stats.baseline += 1
                 else:
                     stats.new_assets += 1
                     stats.tdnet_suppressed += int(tdnet_duplicate)
-                    stats.pending += int(not duplicate)
+                    stats.pending += int(not duplicate and url_verified)
+                    stats.url_unverified += int(not duplicate and not url_verified)
                 if dry_run:
                     continue
                 cur = conn.execute("""
@@ -919,7 +952,7 @@ def run_monitor(
                       notification_status))
                 asset_id = cur.lastrowid
                 first_seen = now
-                if initial_baseline or duplicate or not allow_notifications:
+                if initial_baseline or duplicate or not url_verified or not allow_notifications:
                     continue
 
             try:

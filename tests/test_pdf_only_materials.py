@@ -138,6 +138,7 @@ class TestPdfOnlyMaterialPipeline(unittest.TestCase):
             title="2027年２月期売上高前年比速報（７月度）",
             disclosure_datetime="2026-07-21 17:00", doc_url=PDF,
             source_doc_id="jquants-native-id-1",
+            link_validated=True,
         )
 
     def _strategy_doc(self, title="中期経営計画2029策定のお知らせ"):
@@ -145,7 +146,16 @@ class TestPdfOnlyMaterialPipeline(unittest.TestCase):
             doc_id="strategy-doc-1", ticker="1234", company_name="戦略株式会社",
             title=title, disclosure_datetime="2026-08-21 20:00", doc_url=PDF,
             source_doc_id="jquants-strategy-id-1",
+            link_validated=True,
         )
+
+    @patch("src.events.event_pipeline._get_text_and_pdf", side_effect=AssertionError("PDF must not be fetched"))
+    def test_unvalidated_material_never_becomes_event(self, _fetch):
+        doc = self._doc()
+        doc.link_validated = False
+        result = process_documents([doc], ":memory:", dry_run=True)
+        self.assertEqual(result.detected, 0)
+        self.assertEqual(result.skipped_all_doc_ids, [doc.doc_id])
 
     @patch("src.events.event_pipeline._get_text_and_pdf", side_effect=AssertionError("PDF must not be fetched"))
     def test_pipeline_creates_event_without_pdf_fetch(self, _fetch):

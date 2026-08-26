@@ -27,7 +27,9 @@ _ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from src.fetcher import fetch_new_disclosures, _fetch_via_jquants
+from src.fetcher import (
+    fetch_new_disclosures, _fetch_via_jquants, _filter_linkable_materials,
+)
 from src.models import DisclosureItem, DisclosureType
 from src.jquants.adapter import JQuantsDisclosure
 
@@ -340,6 +342,85 @@ class TestFetchViaJquants:
             with patch(_PATCH_JQ_FETCH, side_effect=RuntimeError("API error")):
                 with pytest.raises(RuntimeError):
                     _fetch_via_jquants("20260703")
+
+
+class TestMaterialUrlValidation:
+    class Response:
+        def __init__(self, status, content_type="application/pdf", body=b"%PDF-1.7"):
+            self.status_code = status
+            self.headers = {"Content-Type": content_type}
+            self._body = body
+
+        def iter_content(self, _size):
+            yield self._body
+
+        def close(self):
+            pass
+
+    class Session:
+        def __init__(self, response):
+            self.response = response
+
+        def get(self, *_args, **_kwargs):
+            return self.response
+
+    def test_valid_pdf_is_retained_and_marked(self):
+        item = _make_jq_disclosure(
+            title="FY2026 Financial Results Presentation",
+            disc_items=["11443"],
+        )
+        converted = DisclosureItem(
+            disclosure_id="valid", ticker=item.ticker, company_name=item.company_name,
+            title=item.title, doc_url=item.doc_url, published_at=item.published_at,
+            disclosure_type="earnings_material", source_doc_id=item.disclosure_id,
+        )
+        result = _filter_linkable_materials(
+            [converted], session=self.Session(self.Response(200)),
+        )
+        assert result == [converted]
+        assert converted.link_validated is True
+
+    def test_404_guessed_pdf_is_dropped(self):
+        item = DisclosureItem(
+            disclosure_id="broken", ticker="6294", company_name="オカダアイヨン",
+            title="Financial Results Presentation for Q1 FY3/27",
+            doc_url="https://www.release.tdnet.info/inbs/140120260826525430.pdf",
+            published_at="2026-08-26 13:00", disclosure_type="earnings_material",
+            source_doc_id="20260826525430",
+        )
+        assert _filter_linkable_materials(
+            [item], session=self.Session(self.Response(404, "text/html", b"<html>")),
+        ) == []
+
+    def test_non_material_events_are_untouched(self):
+        item = _make_legacy_item()
+        assert _filter_linkable_materials([item], session=None) == [item]
+
+    def test_two_distinct_same_day_materials_are_both_retained(self):
+        first = DisclosureItem(
+            disclosure_id="first", ticker="8218", company_name="Test",
+            title="第1四半期決算説明資料",
+            doc_url="https://example.test/presentation.pdf",
+            published_at="2026-08-26 13:00", disclosure_type="earnings_material",
+        )
+        second = DisclosureItem(
+            disclosure_id="second", ticker="8218", company_name="Test",
+            title="第1四半期決算補足データ",
+            doc_url="https://example.test/data-sheet.pdf",
+            published_at="2026-08-26 13:00", disclosure_type="earnings_material",
+        )
+        result = _filter_linkable_materials(
+            [first, second], session=self.Session(self.Response(200)),
+        )
+        assert result == [first, second]
+
+    def test_internal_guessed_route_is_dropped_without_request(self):
+        item = DisclosureItem(
+            disclosure_id="internal", ticker="6294", company_name="Test",
+            title="第1四半期決算説明資料", doc_url="/api/pdf/guessed",
+            published_at="2026-08-26 13:00", disclosure_type="earnings_material",
+        )
+        assert _filter_linkable_materials([item], session=None) == []
 
 
 # ============================================================

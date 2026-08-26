@@ -35,6 +35,7 @@ class DocumentMeta:
     pdf_path: str = ""
     text_body: str = ""  # 取得済みの場合
     source_doc_id: str = ""  # provider-native ID; doc_id remains the stable fallback
+    link_validated: bool | None = None  # upstream URL/PDF verification result
 
 
 # ============================================================

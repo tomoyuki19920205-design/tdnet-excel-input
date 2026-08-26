@@ -40,6 +40,11 @@ _USER_AGENT = "TDnetExcelInput/1.0"
 # yanoshin.jp API の既知上限件数（実測: 決算集中日に300件固定で返る）
 # この件数に到達した場合、301件目以降を静かに取りこぼすリスクがある。
 TDNET_API_FETCH_LIMIT = 300
+_LINK_VALIDATED_EVENT_TYPES = {
+    DisclosureType.EARNINGS_MATERIAL,
+    DisclosureType.MONTHLY_UPDATE,
+    "management_strategy",
+}
 
 
 # ============================================================
@@ -170,6 +175,67 @@ def _matches_watchlist(ticker: str, watch_tickers: list[str]) -> bool:
     if not watch_tickers:
         return True
     return ticker in watch_tickers
+
+
+def _is_resolvable_pdf_url(
+    url: str,
+    *,
+    session: requests.Session | None = None,
+    timeout_sec: float = 20.0,
+) -> bool:
+    """Confirm that a material URL resolves to a PDF using a streamed GET.
+
+    Some official servers reject HEAD, so only the first response chunk is
+    read. Redirects are followed and either a PDF content type or signature is
+    required. A guessed URL, 404, HTML error page, or internal path fails.
+    """
+    value = (url or "").strip()
+    if not re.match(r"^https?://", value, re.IGNORECASE):
+        return False
+    client = session or requests
+    response = None
+    try:
+        response = client.get(
+            value,
+            headers={"User-Agent": _USER_AGENT, "Range": "bytes=0-31"},
+            timeout=timeout_sec,
+            stream=True,
+            allow_redirects=True,
+        )
+        if response.status_code not in (200, 206):
+            return False
+        first = next(response.iter_content(32), b"")
+        content_type = (response.headers.get("Content-Type") or "").lower()
+        return "pdf" in content_type or first.startswith(b"%PDF")
+    except requests.RequestException as exc:
+        logger.warning("[MATERIAL_URL_VALIDATION_FAILED] url=%s reason=%s", value, exc)
+        return False
+    finally:
+        if response is not None:
+            response.close()
+
+
+def _filter_linkable_materials(
+    items: list[DisclosureItem],
+    *,
+    session: requests.Session | None = None,
+) -> list[DisclosureItem]:
+    """Drop unresolvable viewer-only materials before event generation."""
+    kept: list[DisclosureItem] = []
+    for item in items:
+        if item.disclosure_type not in _LINK_VALIDATED_EVENT_TYPES:
+            kept.append(item)
+            continue
+        if not _is_resolvable_pdf_url(item.doc_url, session=session):
+            logger.warning(
+                "[MATERIAL_EVENT_SUPPRESSED] ticker=%s source_doc_id=%s "
+                "reason=unresolvable_pdf_url url=%s",
+                item.ticker, item.source_doc_id or item.disclosure_id, item.doc_url,
+            )
+            continue
+        item.link_validated = True
+        kept.append(item)
+    return kept
 
 
 # ============================================================
@@ -654,7 +720,7 @@ def fetch_new_disclosures(
                     f"[{source}] already_processed_tickers="
                     f"{','.join(already_processed_tickers[:20])}"
                 )
-            return new_items
+            return _filter_linkable_materials(new_items, session=session)
 
         except Exception as jq_err:
             # J-Quants 失敗 → 既存 YANOSHIN/HTML へ fallback
@@ -853,5 +919,5 @@ def fetch_new_disclosures(
             f"[{source}] already_processed_tickers="
             f"{','.join(already_processed_tickers[:20])}"
         )
-    return new_items
+    return _filter_linkable_materials(new_items, session=session)
 
