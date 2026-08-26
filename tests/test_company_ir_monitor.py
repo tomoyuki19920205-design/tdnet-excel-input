@@ -18,6 +18,7 @@ from src.company_ir_monitor import (
     run_monitor,
 )
 import src.company_ir_monitor as company_ir_monitor
+from src.material_url_retry import init_retry_db
 
 
 SOURCE_URL = "https://example.test/ir/presentation.html"
@@ -266,6 +267,31 @@ def test_unresolvable_company_material_is_never_published(conn):
         "SELECT notification_status,suppression_reason FROM company_ir_assets "
         "WHERE asset_url LIKE '%/missing.pdf'"
     ).fetchone() == ("url_unverified", "url_unverified")
+
+
+def test_unverified_company_material_is_durably_queued_with_original_time(conn):
+    retry_conn = sqlite3.connect(":memory:")
+    retry_conn.row_factory = sqlite3.Row
+    init_retry_db(retry_conn)
+    add_source(conn)
+    run_monitor(conn, fetch=lambda _: page([]), now_iso="2026-08-17T19:00:00+09:00")
+    run_monitor(
+        conn,
+        fetch=lambda _: page([("第1四半期決算説明資料", "/delayed.pdf")]),
+        tdnet_lookup=lambda _: [],
+        pdf_hasher=lambda _: None,
+        now_iso="2026-08-18T19:00:00+09:00",
+        material_retry_conn=retry_conn,
+    )
+    row = retry_conn.execute("""
+        SELECT source,ticker,title,disclosure_datetime,status,source_page_url
+        FROM material_url_retries
+    """).fetchone()
+    assert tuple(row) == (
+        "company_ir", "4022", "2026年3月期 第1四半期決算説明資料",
+        "2026-08-18T19:00:00+09:00", "pending_retry", SOURCE_URL,
+    )
+    retry_conn.close()
 
 
 def test_url_unverified_company_material_retries_and_publishes_when_valid(conn):

@@ -813,6 +813,9 @@ def run_ingest(
             target_date=getattr(config, "start_date", None),
             session=session,
             yanoshin_timeout_sec=yanoshin_timeout_sec,
+            material_retry_db_path=os.path.join(
+                _PROJECT_ROOT, "data", "material_url_retry.db"
+            ) if not dry_run else None,
         )
 
         # [JQUANTS_SHADOW] Phase 2: Shadow Run — JQUANTS_SHADOW_ENABLED=1 の場合のみ実行

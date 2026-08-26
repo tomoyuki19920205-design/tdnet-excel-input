@@ -29,6 +29,12 @@ from bs4 import BeautifulSoup, Tag
 
 from src.events.common_models import EventRecord
 from src.events.tdnet_event_store import save_event_to_supabase
+from src.material_url_retry import (
+    STATUS_PENDING,
+    RetryCandidate,
+    ValidationResult,
+    record_failed_candidate,
+)
 
 logger = logging.getLogger("company_ir_monitor")
 JST = timezone(timedelta(hours=9))
@@ -634,6 +640,7 @@ def run_monitor(
     resolver_cooldown_seconds: float | None = None,
     resolver_clock: Callable[[], float] = time.monotonic,
     resolver_sleep: Callable[[float], None] = time.sleep,
+    material_retry_conn: sqlite3.Connection | None = None,
 ) -> RunStats:
     """Crawl every active source independently; one failure never stops the run."""
     init_db(conn)
@@ -708,6 +715,28 @@ def run_monitor(
     publish = publish or _default_publish
     pdf_hasher = pdf_hasher or (lambda url: (pace(), hash_remote_pdf(url, session))[1])
     stats = RunStats()
+
+    def queue_unverified(source: IrSource, asset: IrAsset, first_seen: str) -> None:
+        if dry_run or material_retry_conn is None:
+            return
+        key = _asset_key(source.ticker, asset)
+        record_failed_candidate(
+            material_retry_conn,
+            RetryCandidate(
+                source_key=key,
+                source="company_ir",
+                ticker=source.ticker,
+                company_name=source.company_name,
+                title=asset.title,
+                document_url=asset.asset_url,
+                disclosure_datetime=first_seen,
+                disclosure_type=ASSET_MATERIAL,
+                source_doc_id=key,
+                source_page_url=asset.source_page_url,
+            ),
+            ValidationResult(STATUS_PENDING, "company_ir_url_unverified"),
+            now=now,
+        )
     where = ["status='active'"]
     params: list[object] = []
     if baseline_only:
@@ -881,6 +910,7 @@ def run_monitor(
                     content_hash = pdf_hasher(asset.asset_url)
                     if not content_hash:
                         stats.url_unverified += 1
+                        queue_unverified(source, asset, first_seen)
                         if not dry_run:
                             conn.execute("""
                                 UPDATE company_ir_assets
@@ -962,6 +992,8 @@ def run_monitor(
                 asset_id = cur.lastrowid
                 first_seen = now
                 if initial_baseline or duplicate or not url_verified or not allow_notifications:
+                    if not initial_baseline and not duplicate and not url_verified:
+                        queue_unverified(source, asset, first_seen)
                     continue
 
             try:

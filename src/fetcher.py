@@ -16,6 +16,12 @@ from bs4 import BeautifulSoup
 
 from .common_ticker import strip_tdnet_trailing_zero
 from .models import DisclosureItem, DisclosureType, FINANCIAL_STATEMENT_KEYWORDS
+from .material_url_retry import (
+    RetryCandidate,
+    connect_retry_db,
+    record_failed_candidate,
+    validate_material_url,
+)
 from .pdf_only_materials import classify_pdf_only_material
 from .review_completion import classify_procedural_review_completion
 from .security_eligibility import classify_disclosure_security
@@ -187,67 +193,56 @@ def _is_resolvable_pdf_url(
     session: requests.Session | None = None,
     timeout_sec: float = 20.0,
 ) -> bool:
-    """Confirm that a material URL resolves to a PDF using a streamed GET.
-
-    Some official servers reject HEAD, so only the first response chunk is
-    read. Redirects are followed and either a PDF content type or signature is
-    required. A guessed URL, 404, HTML error page, or internal path fails.
-    """
-    value = (url or "").strip()
-    if not re.match(r"^https?://", value, re.IGNORECASE):
-        return False
-    client = session or requests
-    response = None
-    try:
-        response = client.get(
-            value,
-            headers={"User-Agent": _USER_AGENT, "Range": "bytes=0-31"},
-            timeout=timeout_sec,
-            stream=True,
-            allow_redirects=True,
-        )
-        if response.status_code == 403:
-            response.close()
-            response = client.get(
-                value,
-                headers={"User-Agent": _STANDARD_BROWSER_USER_AGENT, "Range": "bytes=0-31"},
-                timeout=timeout_sec,
-                stream=True,
-                allow_redirects=True,
-            )
-        if response.status_code not in (200, 206):
-            return False
-        first = next(response.iter_content(32), b"")
-        content_type = (response.headers.get("Content-Type") or "").lower()
-        return "pdf" in content_type or first.startswith(b"%PDF")
-    except requests.RequestException as exc:
-        logger.warning("[MATERIAL_URL_VALIDATION_FAILED] url=%s reason=%s", value, exc)
-        return False
-    finally:
-        if response is not None:
-            response.close()
+    """Backward-compatible bool wrapper around the classified validator."""
+    return validate_material_url(
+        url, session=session, timeout_sec=timeout_sec,
+    ).is_valid
 
 
 def _filter_linkable_materials(
     items: list[DisclosureItem],
     *,
     session: requests.Session | None = None,
+    retry_db_path: str | None = None,
+    source: str = "tdnet",
 ) -> list[DisclosureItem]:
-    """Drop unresolvable viewer-only materials before event generation."""
+    """Pass verified materials and durably queue every failed validation."""
     kept: list[DisclosureItem] = []
+    retry_conn = connect_retry_db(retry_db_path) if retry_db_path else None
     for item in items:
         if item.disclosure_type not in _LINK_VALIDATED_EVENT_TYPES:
             kept.append(item)
             continue
-        if not _is_resolvable_pdf_url(item.doc_url, session=session):
+        validation = validate_material_url(item.doc_url, session=session)
+        if not validation.is_valid:
+            retry_status = "not_recorded"
+            if retry_conn is not None:
+                retry_status = record_failed_candidate(
+                    retry_conn,
+                    RetryCandidate(
+                        source_key=item.source_doc_id or item.disclosure_id,
+                        source=source,
+                        ticker=item.ticker,
+                        company_name=item.company_name,
+                        title=item.title,
+                        document_url=item.doc_url,
+                        disclosure_datetime=item.published_at,
+                        disclosure_type=item.disclosure_type,
+                        source_doc_id=item.source_doc_id or item.disclosure_id,
+                    ),
+                    validation,
+                )
             logger.warning(
                 "[MATERIAL_EVENT_SUPPRESSED] ticker=%s source_doc_id=%s "
-                "reason=unresolvable_pdf_url url=%s",
-                item.ticker, item.source_doc_id or item.disclosure_id, item.doc_url,
+                "reason=%s http_status=%s retry_status=%s url=%s",
+                item.ticker, item.source_doc_id or item.disclosure_id,
+                validation.reason, validation.http_status, retry_status, item.doc_url,
             )
             continue
         item.link_validated = True
         kept.append(item)
+    if retry_conn is not None:
+        retry_conn.close()
     return kept
 
 
@@ -625,6 +620,7 @@ def fetch_new_disclosures(
     target_date: str | date_type | None = None,
     session: requests.Session | None = None,
     yanoshin_timeout_sec: float | None = None,
+    material_retry_db_path: str | None = None,
 ) -> list[DisclosureItem]:
     """
     新着開示を取得（API優先 + HTML FB）。新規のみを返す。
@@ -733,7 +729,10 @@ def fetch_new_disclosures(
                     f"[{source}] already_processed_tickers="
                     f"{','.join(already_processed_tickers[:20])}"
                 )
-            return _filter_linkable_materials(new_items, session=session)
+            return _filter_linkable_materials(
+                new_items, session=session, retry_db_path=material_retry_db_path,
+                source=source,
+            )
 
         except Exception as jq_err:
             # J-Quants 失敗 → 既存 YANOSHIN/HTML へ fallback
@@ -932,5 +931,8 @@ def fetch_new_disclosures(
             f"[{source}] already_processed_tickers="
             f"{','.join(already_processed_tickers[:20])}"
         )
-    return _filter_linkable_materials(new_items, session=session)
+    return _filter_linkable_materials(
+        new_items, session=session, retry_db_path=material_retry_db_path,
+        source=source,
+    )
 

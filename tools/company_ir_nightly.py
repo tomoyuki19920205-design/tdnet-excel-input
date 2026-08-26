@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
 
 from src.company_ir_monitor import import_sources_csv, init_db, notifications_enabled, run_monitor
 from src.events.env_loader import load_project_env
+from src.material_url_retry import connect_retry_db
 
 
 def publisher_configuration_available() -> bool:
@@ -61,6 +62,7 @@ def main() -> int:
     db_path = ROOT / args.db
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
+    retry_conn = connect_retry_db(ROOT / "data/material_url_retry.db")
     try:
         init_db(conn)
         imported = import_sources_csv(conn, ROOT / args.sources)
@@ -119,6 +121,7 @@ def main() -> int:
             allow_notifications=gate, max_workers=args.workers,
             request_interval_seconds=args.request_interval,
             audit_records=audit_records,
+            material_retry_conn=retry_conn,
         )
         audit_path = None
         if args.audit_output:
@@ -145,6 +148,7 @@ def main() -> int:
         print("COMPANY_IR_NIGHTLY " + json.dumps(result, ensure_ascii=False, sort_keys=True))
         return 1 if stats.publish_failed else 0
     finally:
+        retry_conn.close()
         conn.close()
 
 
