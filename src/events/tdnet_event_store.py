@@ -20,6 +20,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
 from .common_models import EventRecord, EventType
+from .notification_policy import is_correction_disclosure_title
 from .notify_rules import should_notify_event
 from lib.pipeline.retry_helper import with_retry
 from src.tdnet_disclosure_time import is_date_only, resolve_official_disclosure_datetime
@@ -864,6 +865,25 @@ def save_event_to_supabase(
         {"action": "inserted"|"dedup_skipped"|"error"|"dry_run", ...}
     """
     result = {"action": "error", "dedupe_key": ""}
+
+    # Notification-only policy.  Correction disclosures must continue through
+    # acquisition, parsing, and canonical field-wise merge; this final store
+    # boundary only prevents a Company Viewer notification row from being
+    # created.  Keep the established dedup_skipped action for all batch/direct
+    # callers while exposing the exact reason for audit logs and tests.
+    if is_correction_disclosure_title(event.title):
+        logger.info(
+            "[STORE] notification_suppressed correction_disclosure "
+            "ticker=%s title=%s",
+            event.ticker,
+            event.title,
+        )
+        return {
+            "action": "dedup_skipped",
+            "reason": "correction_disclosure",
+            "notification_suppressed": True,
+            "dedupe_key": "",
+        }
 
     # Final persistence guard for callers that bypass TDnet discovery/ingest.
     # Resolve from the official security master before building any Viewer row.
