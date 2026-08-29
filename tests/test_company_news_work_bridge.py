@@ -1,10 +1,12 @@
 import json
+import os
 import sqlite3
 from datetime import date
 from pathlib import Path
 
 import pytest
 
+import tools.company_news_work_bridge as bridge_module
 from tools.company_news_work_bridge import (
     BridgeError,
     BridgePaths,
@@ -146,11 +148,33 @@ def test_v1_refuses_automatic_next_assignment(bridge, tmp_path):
         create_assignment(paths, master, assignment_id="bridge-smoke-002", ticker="7203", search_from=date(2026, 8, 22), search_to=date(2026, 8, 29))
 
 
-def test_stale_process_lock_is_recovered(bridge):
+def test_stale_process_lock_is_recovered(bridge, monkeypatch):
     paths, db_path, assignment = bridge
     paths.lock.parent.mkdir(parents=True, exist_ok=True)
     paths.lock.write_text("pid=99999999 at=2026-08-29T00:00:00+09:00\n", encoding="utf-8")
+    monkeypatch.setattr(bridge_module, "_pid_is_alive", lambda _pid: False)
     write_json(expected_output_path(paths, assignment), output_payload())
     result = process_assignment(paths, db_path, sync_func=lambda *_: {"canonical_news_events": 1, "canonical_news_scan_runs": 1})
     assert result["status"] == "completed"
     assert not paths.lock.exists()
+
+
+def test_live_process_slot_lock_is_busy_and_test_lock_is_cleaned(bridge, monkeypatch):
+    paths, db_path, _ = bridge
+    other_worker_pid = 42424244
+    paths.lock.parent.mkdir(parents=True, exist_ok=True)
+    paths.lock.write_text(f"pid={other_worker_pid}\n", encoding="utf-8")
+    monkeypatch.setattr(bridge_module, "_pid_is_alive", lambda pid: pid == other_worker_pid)
+    try:
+        with pytest.raises(BridgeError, match="already being processed"):
+            process_assignment(paths, db_path, sync_func=lambda *_: {})
+    finally:
+        paths.lock.unlink(missing_ok=True)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PID probing regression")
+def test_bridge_windows_pid_probe_is_non_destructive():
+    current_pid = os.getpid()
+    assert bridge_module._pid_is_alive(current_pid) is True
+    assert os.getpid() == current_pid
+    assert bridge_module._pid_is_alive(0xFFFFFFFF) is False

@@ -9,6 +9,7 @@ There is intentionally no watch loop or automatic next-company advance in v1.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -84,6 +85,65 @@ def _append_log(paths: BridgePaths, event: str, **details: Any) -> None:
         handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
 
 
+def _pid_is_alive(pid: int) -> bool:
+    """Return whether *pid* is running without signalling it on Windows."""
+    if pid <= 0:
+        return False
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+
+    # On Windows, os.kill(pid, 0) calls TerminateProcess rather than performing
+    # the non-destructive existence probe provided by POSIX.  Open a waitable
+    # process handle instead and poll it with a zero timeout.
+    import ctypes
+    from ctypes import wintypes
+
+    synchronize = 0x00100000
+    wait_object_0 = 0x00000000
+    wait_timeout = 0x00000102
+    error_access_denied = 5
+    error_invalid_parameter = 87
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    open_process = kernel32.OpenProcess
+    open_process.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    open_process.restype = wintypes.HANDLE
+    wait_for_single_object = kernel32.WaitForSingleObject
+    wait_for_single_object.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    wait_for_single_object.restype = wintypes.DWORD
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+
+    ctypes.set_last_error(0)
+    handle = open_process(synchronize, False, pid)
+    if not handle:
+        error = ctypes.get_last_error()
+        if error == error_invalid_parameter:
+            return False
+        if error == error_access_denied:
+            return True
+        # An indeterminate probe must not make an active lock look stale.
+        return True
+    try:
+        status = wait_for_single_object(handle, 0)
+        if status == wait_timeout:
+            return True
+        if status == wait_object_0:
+            return False
+        return True
+    finally:
+        close_handle(handle)
+
+
 @contextmanager
 def _slot_lock(paths: BridgePaths):
     paths.lock.parent.mkdir(parents=True, exist_ok=True)
@@ -96,8 +156,8 @@ def _slot_lock(paths: BridgePaths):
             try:
                 match = re.search(r"pid=(\d+)", paths.lock.read_text(encoding="utf-8"))
                 lock_pid = int(match.group(1)) if match else None
-                if lock_pid:
-                    os.kill(lock_pid, 0)
+                if lock_pid and not _pid_is_alive(lock_pid):
+                    raise ProcessLookupError(lock_pid)
             except (OSError, ValueError):
                 paths.lock.unlink(missing_ok=True)
                 if attempt == 0:
@@ -223,9 +283,57 @@ def _quarantine_result(paths: BridgePaths, path: Path, error: Exception) -> None
     quarantine = paths.inbox / "quarantine"
     quarantine.mkdir(parents=True, exist_ok=True)
     target = quarantine / path.name
+    if target.exists():
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()[:12] if path.exists() else "missing"
+        target = quarantine / f"{path.stem}.{digest}{path.suffix}"
     if path.exists():
         shutil.move(str(path), str(target))
     target.with_suffix(target.suffix + ".error.txt").write_text(str(error), encoding="utf-8")
+
+
+def quarantine_work_output(paths: BridgePaths, path: Path, error: Exception) -> Path:
+    """Quarantine one Work payload without aborting an outer inbox scan."""
+    _quarantine_result(paths, path, error)
+    target = paths.inbox / "quarantine" / path.name
+    if not target.exists():
+        matches = sorted((paths.inbox / "quarantine").glob(f"{path.stem}.*{path.suffix}"))
+        target = matches[-1] if matches else target
+    _append_log(paths, "quarantined", file=path.name, error=str(error))
+    return target
+
+
+def _archive_completed_duplicate(paths: BridgePaths, output: Path, processed: Path) -> None:
+    if not output.exists():
+        return
+    if processed.exists() and output.read_bytes() != processed.read_bytes():
+        raise BridgeError("completed assignment received a conflicting payload")
+    duplicates = paths.inbox / "processed" / "duplicates"
+    duplicates.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256(output.read_bytes()).hexdigest()[:12]
+    target = duplicates / f"{output.stem}.{digest}{output.suffix}"
+    if target.exists():
+        output.unlink()
+    else:
+        shutil.move(str(output), str(target))
+
+
+def _record_output_arrival(
+    paths: BridgePaths,
+    assignment: dict[str, Any],
+    state: dict[str, Any],
+    output: Path,
+    *,
+    detected_by: str | None = None,
+) -> None:
+    details: dict[str, Any] = {
+        "expected_output": str(expected_output_path(paths, assignment)),
+        "assignment_created_at": assignment["created_at"],
+    }
+    if output.exists():
+        details["output_arrived_at"] = datetime.fromtimestamp(output.stat().st_mtime, _JST).isoformat(timespec="seconds")
+    if detected_by:
+        details["output_detected_by"] = detected_by
+    _save_state(paths, state, state.get("phase", "waiting"), **details)
 
 
 def bridge_status(paths: BridgePaths, db_path: Path) -> dict[str, Any]:
@@ -242,6 +350,9 @@ def bridge_status(paths: BridgePaths, db_path: Path) -> dict[str, Any]:
         "output_present": output.exists(),
         "processed_present": processed.exists(),
         "canonical_run_present": _run_exists(db_path, assignment["assignment_id"]),
+        "assignment_created_at": assignment["created_at"],
+        "output_arrived_at": state.get("output_arrived_at"),
+        "output_detected_by": state.get("output_detected_by"),
     }
 
 
@@ -251,17 +362,26 @@ def process_assignment(
     *,
     sync_func: Callable[[Path, bool], dict[str, int]] = sync_company_news,
     dry_run_sync: bool = False,
+    detected_by: str | None = None,
 ) -> dict[str, Any]:
     with _slot_lock(paths):
         assignment = validate_assignment(_read_json(paths.assignment), paths)
         assignment_id = assignment["assignment_id"]
         state = _load_state(paths, assignment_id)
+        output = expected_output_path(paths, assignment)
+        processed = _processed_output_path(paths, assignment)
+        if output.exists():
+            _record_output_arrival(paths, assignment, state, output, detected_by=detected_by)
+            state = _load_state(paths, assignment_id)
         if assignment["status"] == "completed":
+            try:
+                _archive_completed_duplicate(paths, output, processed)
+            except Exception as exc:
+                quarantine_work_output(paths, output, exc)
+                raise
             _append_log(paths, "already_completed", assignment_id=assignment_id)
             return {"status": "already_completed", "assignment_id": assignment_id}
 
-        output = expected_output_path(paths, assignment)
-        processed = _processed_output_path(paths, assignment)
         if not output.exists() and not (processed.exists() and _run_exists(db_path, assignment_id)):
             _append_log(paths, "waiting_for_output", assignment_id=assignment_id, expected=str(output))
             return {"status": "waiting", "assignment_id": assignment_id, "expected_output": str(output)}
@@ -269,6 +389,7 @@ def process_assignment(
         try:
             result_path = output if output.exists() else processed
             _validate_result(result_path, assignment)
+            _append_log(paths, "validated", assignment_id=assignment_id, file=result_path.name)
             if state.get("phase") != "ingested" and not _run_exists(db_path, assignment_id):
                 if not output.exists():
                     raise BridgeError("processed output exists but canonical run is missing; manual review required")
@@ -276,17 +397,24 @@ def process_assignment(
                     raise BridgeError("existing ingestion adapter quarantined Work output")
                 _save_state(paths, state, "ingested", processed_file=str(processed))
                 _append_log(paths, "ingested", assignment_id=assignment_id)
-            else:
+            elif state.get("phase") not in {"synced", "completed"}:
                 _save_state(paths, state, "ingested", processed_file=str(processed), resumed=True)
 
-            sync_result = sync_func(db_path, dry_run_sync)
-            _save_state(paths, state, "synced", sync_result=sync_result, dry_run_sync=dry_run_sync)
+            state = _load_state(paths, assignment_id)
+            if state.get("phase") in {"synced", "completed"}:
+                sync_result = state.get("sync_result", {})
+            else:
+                sync_result = sync_func(db_path, dry_run_sync)
+                _save_state(paths, state, "synced", sync_result=sync_result, dry_run_sync=dry_run_sync)
+                _append_log(paths, "synced", assignment_id=assignment_id, sync_result=sync_result, dry_run_sync=dry_run_sync)
             _set_assignment_status(paths, assignment, "completed")
+            state = _load_state(paths, assignment_id)
+            _save_state(paths, state, "completed", sync_result=sync_result, dry_run_sync=dry_run_sync)
             _append_log(paths, "completed", assignment_id=assignment_id, sync_result=sync_result, dry_run_sync=dry_run_sync)
             return {"status": "completed", "assignment_id": assignment_id, "sync_result": sync_result, "dry_run_sync": dry_run_sync}
         except Exception as exc:
             if output.exists() and not _run_exists(db_path, assignment_id):
-                _quarantine_result(paths, output, exc)
+                quarantine_work_output(paths, output, exc)
             _set_assignment_status(paths, assignment, "failed", str(exc))
             _save_state(paths, state, state.get("phase", "waiting"), last_error=str(exc))
             _append_log(paths, "failed", assignment_id=assignment_id, error=str(exc))

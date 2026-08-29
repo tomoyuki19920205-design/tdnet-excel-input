@@ -51,6 +51,61 @@ The transport layer is replaceable. A local file, cloud endpoint, or ChatGPT Wor
 connector can produce the same contract without changing the canonical schema or
 anything downstream.
 
+## Scheduled transport bridge v2
+
+V2 automates transport only; the `company_news_v1`, canonical SQLite, Supabase,
+and Viewer contracts remain unchanged:
+
+```text
+ChatGPT Desktop Scheduled Work (local project, slot01 only)
+        ↓ atomic .tmp → .json rename
+data/news_inbox/work_slot01_<assignment_id>.json
+        ↓ CompanyNewsInboxWorker, every 1 minute
+validate → canonical ingest → Supabase sync
+        ↓
+assignment completed → processed archive → STOP
+```
+
+`tools/company_news_inbox_worker.py --once --trigger task_scheduler` performs one
+bounded scan. Windows Task Scheduler supplies polling; there is no resident watcher
+and no automatic next-company advance. `tools/install_company_news_worker_task.ps1`
+registers `CompanyNewsInboxWorker` for the current interactive user, uses the repo
+`.venv`, sets a one-minute repetition interval, and configures `IgnoreNew`. A second
+PID-sentinel lock provides application-level overlap protection. PID liveness uses
+non-destructive Windows process handles and closes every handle after polling.
+
+The worker isolates invalid payloads in `quarantine`, archives successful and exact
+duplicate payloads under `processed`, and persists generic-run sync resume state in
+`data/news_work/state/inbox_worker.json`. Work assignment resume state stays in
+`state/slot01.json`. JSONL logs record `detected`, `validated`, `ingested`, `synced`,
+`completed`, `quarantined`, and `failed`. Assignment status changes to `completed`
+only after sync succeeds.
+
+The Scheduled Work prompt is `data/news_work/SCHEDULED_TASK_SMOKE_PROMPT.txt`.
+The task must run in the local project, read the current assignment on every run,
+and stop without writing when its status is not `ready`. It may write only the final
+contract JSON; it must not access SQLite, credentials, Supabase, or transport scripts.
+Per official OpenAI guidance, the computer and ChatGPT Desktop app must be running
+when a Scheduled task needs local project files.
+
+The unattended fixture uses a temporary task and isolated root/database with
+`--dry-run-sync`. It validates natural Task Scheduler launch, inbox detection,
+canonical ingest, completion, and cleanup without touching production news tables or
+Supabase. The real one-slot Scheduled Work run is the separate production smoke that
+can advance the verdict from ready to fully unattended confirmation.
+
+The 2026-08-29 natural-run fixture completed with Windows Task Scheduler result `0`,
+one isolated canonical event, one isolated scan run, assignment phase `completed`,
+processed archive present, and `output_detected_by=task_scheduler`. Its temporary
+task, files, and database were then removed. The production worker subsequently ran
+an empty-inbox poll with result `0`; no production news row was created by either
+verification.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/install_company_news_worker_task.ps1
+Get-ScheduledTask -TaskName CompanyNewsInboxWorker
+```
+
 ## Contract and atomicity
 
 `company_news_v1` requires `run_id`, ticker, timezone-aware `checked_at`, collector

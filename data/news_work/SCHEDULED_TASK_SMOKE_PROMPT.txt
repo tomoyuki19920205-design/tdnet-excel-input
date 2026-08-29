@@ -1,0 +1,22 @@
+Company News Monitorのslot01について、1社・1回だけのScheduled Work transport smokeを実行してください。次銘柄への自動進行や別の定期task作成は行わないでください。
+
+このScheduled taskはChatGPT Desktopの次のlocal projectで実行してください。
+C:\Users\takuy\OneDrive\tdnet-excel-input
+
+各runの最初に、必ず次の2ファイルを読み直してください。
+C:\Users\takuy\OneDrive\tdnet-excel-input\data\news_work\WORK_TASK_INSTRUCTIONS.md
+C:\Users\takuy\OneDrive\tdnet-excel-input\data\news_work\slots\slot01\assignment.json
+
+assignment.jsonのstatusがreadyでなければ、ファイルを一切変更せず終了してください。statusがreadyでも、expected outputのwork_slot01_<assignment_id>.jsonが既に存在する場合は何もせず終了してください。
+
+statusがreadyの場合だけ、assignmentに指定されたticker/company_nameについてsearch_fromからsearch_toまでのWeb情報を調査してください。会社IRと信頼できる主要ニュースを優先し、受注・受注残、需要・販売数量、価格改定、原材料・人件費・エネルギー・物流コスト、設備投資・生産能力・稼働率、新製品、M&A・事業売却・再編、主要顧客・supplier、競合・業界・規制を必要に応じて確認してください。
+
+会社業績に関係する新しい定性情報だけを既存company_news_v1形式へ変換してください。重要な新情報がなければitems=[]とし、無理にeventを作らないでください。run_idとtask_idはassignment_id、tickerはassignmentのticker、collector_typeはchatgpt_workにしてください。checked_atとpublished_atはタイムゾーン付きISO-8601、source_urlは実際に確認した原典または記事のhttp/https URLにしてください。
+
+完成したJSONは、まず次の一時名へ保存してください。
+C:\Users\takuy\OneDrive\tdnet-excel-input\data\news_inbox\work_slot01_<assignment_id>.json.tmp
+
+JSON全体の書き込みが完了してから、同じdirectory内で次の最終名へrenameしてください。
+C:\Users\takuy\OneDrive\tdnet-excel-input\data\news_inbox\work_slot01_<assignment_id>.json
+
+最終JSONを1ファイル保存したら終了してください。assignment.json、state、logs、decision_db.db、ingest/sync/bridge/worker、Supabase、Company Viewer、その他のファイルは読書き・実行しないでください。
