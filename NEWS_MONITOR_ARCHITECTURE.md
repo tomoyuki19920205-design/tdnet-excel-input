@@ -189,3 +189,87 @@ Successful inbox files move to `processed`; invalid files move to `quarantine` w
 an adjacent error message. Viewer read models omit `raw_payload`, join the existing
 company master for display, and are indexed and queried with server-side filters,
 sort keys, and limits.
+
+## Five-slot global queue (v4)
+
+The v4 coordinator generalizes the proven slot01 path without changing
+`company_news_v1`, canonical tables, Supabase, or Viewer contracts:
+
+```text
+one global company_queue.jsonl
+        |
+        +-- slot01 assignment -- Scheduled Work 01 --+
+        +-- slot02 assignment -- Scheduled Work 02 --+
+        +-- slot03 assignment -- Scheduled Work 03 --+--> common news_inbox
+        +-- slot04 assignment -- Scheduled Work 04 --+          |
+        +-- slot05 assignment -- Scheduled Work 05 --+          v
+                                                    one CompanyNewsInboxWorker
+                                                             |
+                                                   canonical DB -> Supabase -> Viewer
+                                                             |
+                                                   completed slot is refilled
+```
+
+There is one queue, not five queues. Each entry records `assigned_slot` and
+`assignment_id`; an assigned company can therefore belong to only one slot. The
+queue state records a configurable `slot_count`, per-slot state, and a per-slot
+transition journal. New queues accept `--slots` and `--count`; the existing defaults
+remain one slot and five companies.
+
+Lock order is strictly:
+
+```text
+worker lock -> global queue lock -> one slot lock
+```
+
+The coordinator never holds two slot locks simultaneously. Assignment selection,
+entry ownership, and transition creation occur under the global lock. Each slot
+assignment is then atomically replaced under that slot lock. A crash after planning
+or during a slot write leaves a durable transition for only that slot; the next
+worker run completes it before selecting another company. A slot assignment is
+owned only when `queue_id`, `slot_id`, `queue_position`, and the persisted
+`assignment_id` agree. Assignment-name pattern matching is not ownership.
+
+The single worker routes `work_slotNN_<assignment_id>.json` to the matching current
+slot. A late file for an old assignment is quarantined and cannot complete or advance
+the current assignment. Canonical run IDs preserve existing database idempotency.
+Duplicate completion therefore cannot increment queue completion or allocate a
+second next company.
+
+Completion immediately refills only the freed slot; there is no batch barrier.
+Validation failure retries the same company in the same slot once, then marks that
+entry failed and refills the slot. Ingested data with failed Supabase sync stays on
+the same assignment and resumes from the processed payload. While paused, completed
+or failed assignments may be reconciled, but empty slots are not refilled. Resume
+fills every empty slot under the global lock. The queue becomes completed only when
+every entry is completed or failed, no transition remains, and all slots are idle.
+
+Terminal unmanaged assignments are copied verbatim to
+`slots/slotNN/history/<assignment_id>.json` before replacement. Non-terminal
+unmanaged assignments (`ready`, `running`, `processing`, or an unknown status) block
+only their slot and are never overwritten.
+
+For the isolated 15-company real pilot, initialize but do not activate with:
+
+```powershell
+python tools/company_news_queue.py init-pilot --slots 5 --count 15
+python tools/company_news_queue.py status
+```
+
+If the runtime files contain a completed predecessor queue, `init-pilot` first
+copies its exact JSONL/state files to `data/news_work/queue/history/<queue_id>/`.
+Active, paused, fixture, partially missing, or conflicting history files are never
+replaced. This preserves the successful five-company pilot while allowing the new
+pilot to receive a different queue ID.
+
+After the five Scheduled Work tasks are configured, activation is explicit:
+
+```powershell
+python tools/company_news_queue.py activate
+python tools/company_news_queue.py status
+```
+
+Scheduled Work prompts share
+`data/news_work/SCHEDULED_TASK_COMMON_PROMPT.txt`; each thin slot prompt reads only
+its own `slots/slotNN/assignment.json`. Recommended staggering is slot01 at `:00`,
+slot02 at `:10`, slot03 at `:20`, slot04 at `:30`, and slot05 at `:40` each hour.

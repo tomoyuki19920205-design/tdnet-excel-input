@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""One-slot deterministic company queue for the Company News Work bridge.
+"""Crash-recoverable global company queue with configurable parallel slots.
 
-Queue files are inert until an operator explicitly activates a pilot.  The inbox
-worker calls :func:`reconcile_queue` after its normal bridge processing; when no
-queue exists, the function is a read-only no-op.
+Lock order is always worker lock -> global queue lock -> one slot lock.  Queue
+code never holds two slot locks at once.  Queue files remain inert until an
+operator explicitly activates them.
 """
 from __future__ import annotations
 
@@ -41,8 +41,11 @@ ENTRY_STATUSES = frozenset({"pending", "assigned", "completed", "failed", "pause
 TERMINAL_ASSIGNMENT_STATUSES = frozenset({"completed", "failed"})
 MAX_ATTEMPTS = 2
 PILOT_SIZE = 5
+DEFAULT_SLOT_COUNT = 1
+MAX_SLOT_COUNT = 99
 _JST = timezone(timedelta(hours=9))
 _LOCK_PID_RE = re.compile(r"pid=(\d+)")
+_ASSIGNMENT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 class QueueError(RuntimeError):
@@ -84,6 +87,16 @@ def _iso(now: datetime | None = None) -> str:
     return _now(now).isoformat(timespec="seconds")
 
 
+def _slot_ids(slot_count: int) -> list[str]:
+    if not isinstance(slot_count, int) or not 1 <= slot_count <= MAX_SLOT_COUNT:
+        raise QueueError(f"slot_count must be between 1 and {MAX_SLOT_COUNT}")
+    return [f"slot{index:02d}" for index in range(1, slot_count + 1)]
+
+
+def _empty_slot() -> dict[str, Any]:
+    return {"queue_position": None, "assignment_id": None, "status": "idle", "next_assignment": None}
+
+
 def _atomic_json(path: Path, value: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -96,6 +109,13 @@ def _atomic_jsonl(path: Path, values: list[dict[str, Any]]) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     body = "".join(json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n" for value in values)
     temporary.write_text(body, encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def _atomic_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(text, encoding="utf-8")
     os.replace(temporary, path)
 
 
@@ -145,13 +165,13 @@ def _read_entries(paths: QueuePaths) -> list[dict[str, Any]]:
         lines = paths.entries.read_text(encoding="utf-8").splitlines()
     except OSError as exc:
         raise QueueError(f"cannot read queue {paths.entries}: {exc}") from exc
-    values: list[dict[str, Any]] = []
-    seen_positions: set[int] = set()
-    seen_tickers: set[str] = set()
     required = {
         "schema_version", "ticker", "company_name", "sector", "queue_position", "status",
         "last_checked_at", "next_eligible_at", "attempt_count", "last_error",
     }
+    values: list[dict[str, Any]] = []
+    positions: set[int] = set()
+    tickers: set[str] = set()
     for line_number, line in enumerate(lines, start=1):
         if not line.strip():
             continue
@@ -173,12 +193,33 @@ def _read_entries(paths: QueuePaths) -> list[dict[str, Any]]:
             raise QueueError(f"unsupported queue entry status: {value['status']}")
         if not isinstance(value["attempt_count"], int) or value["attempt_count"] < 0:
             raise QueueError("attempt_count must be a non-negative integer")
-        if value["queue_position"] in seen_positions or value["ticker"] in seen_tickers:
+        value.setdefault("assignment_id", None)
+        value.setdefault("assigned_slot", None)
+        if value["status"] == "assigned" and not value["assigned_slot"]:
+            value["assigned_slot"] = "slot01"  # v3.1 compatibility
+        if value["assigned_slot"] is not None and not re.fullmatch(r"slot\d{2}", str(value["assigned_slot"])):
+            raise QueueError("assigned_slot must be null or slotNN")
+        if value["queue_position"] in positions or value["ticker"] in tickers:
             raise QueueError("queue entries must have unique positions and tickers")
-        seen_positions.add(value["queue_position"])
-        seen_tickers.add(value["ticker"])
+        positions.add(value["queue_position"])
+        tickers.add(value["ticker"])
         values.append(value)
     return sorted(values, key=lambda item: item["queue_position"])
+
+
+def _sync_legacy_slot01_fields(state: dict[str, Any]) -> None:
+    slot = state["slots"].get("slot01", _empty_slot())
+    state.update({
+        "current_queue_position": slot.get("queue_position"),
+        "current_assignment_id": slot.get("assignment_id"),
+        "slot_status": slot.get("status", "idle"),
+        "next_assignment": slot.get("next_assignment"),
+    })
+    slot01_transition = state.get("transitions", {}).get("slot01")
+    if state.get("slot_count", 1) == 1 and isinstance(slot01_transition, dict):
+        state["transition"] = slot01_transition
+    else:
+        state.pop("transition", None)
 
 
 def _read_state(paths: QueuePaths) -> dict[str, Any]:
@@ -189,16 +230,86 @@ def _read_state(paths: QueuePaths) -> dict[str, Any]:
         raise QueueError(f"unsupported queue_status: {state.get('queue_status')}")
     if not isinstance(state.get("assignment_sequence"), int) or state["assignment_sequence"] < 0:
         raise QueueError("assignment_sequence must be a non-negative integer")
+    slot_count = state.get("slot_count", DEFAULT_SLOT_COUNT)
+    if not isinstance(slot_count, int) or not 1 <= slot_count <= MAX_SLOT_COUNT:
+        raise QueueError(f"slot_count must be between 1 and {MAX_SLOT_COUNT}")
+    state["slot_count"] = slot_count
+    slots = state.get("slots")
+    if not isinstance(slots, dict):
+        slots = {
+            "slot01": {
+                "queue_position": state.get("current_queue_position"),
+                "assignment_id": state.get("current_assignment_id"),
+                "status": state.get("slot_status", "idle"),
+                "next_assignment": state.get("next_assignment"),
+            }
+        }
+    for slot_id in _slot_ids(slot_count):
+        slots.setdefault(slot_id, _empty_slot())
+    state["slots"] = slots
+    transitions = state.get("transitions")
+    if not isinstance(transitions, dict):
+        transitions = {}
+        if isinstance(state.get("transition"), dict):
+            legacy = dict(state["transition"])
+            assignment = legacy.get("assignment")
+            slot_id = assignment.get("slot_id", "slot01") if isinstance(assignment, dict) else "slot01"
+            transitions[slot_id] = legacy
+    state["transitions"] = transitions
     return state
+
+
+def _write_state(paths: QueuePaths, state: dict[str, Any]) -> None:
+    _sync_legacy_slot01_fields(state)
+    _atomic_json(paths.state, state)
 
 
 def _queue_exists(paths: QueuePaths) -> bool:
     return paths.entries.exists() and paths.state.exists()
 
 
-def _master_sample(master_db: Path, limit: int = PILOT_SIZE) -> list[dict[str, Any]]:
+def _archive_completed_queue(paths: QueuePaths, state: dict[str, Any]) -> Path:
+    if state["queue_status"] != "completed":
+        raise QueueError("only a completed queue can be archived for replacement")
+    queue_id = state.get("queue_id")
+    if not isinstance(queue_id, str) or not _ASSIGNMENT_ID_RE.fullmatch(queue_id):
+        raise QueueError("completed queue has an invalid queue_id")
+    target = paths.queue_dir / "history" / queue_id
+    sources = {
+        "company_queue.jsonl": paths.entries.read_text(encoding="utf-8"),
+        "queue_state.json": paths.state.read_text(encoding="utf-8"),
+    }
+    for name, body in sources.items():
+        destination = target / name
+        if destination.exists():
+            if destination.read_text(encoding="utf-8") != body:
+                raise QueueError(f"completed queue history conflict: {destination}")
+            continue
+        _atomic_text(destination, body)
+    return target
+
+
+def configured_slot_ids(paths: QueuePaths) -> list[str]:
+    if _queue_exists(paths):
+        return _slot_ids(_read_state(paths)["slot_count"])
+    discovered = sorted(
+        path.parent.name
+        for path in (paths.work_dir / "slots").glob("slot??/assignment.json")
+        if re.fullmatch(r"slot\d{2}", path.parent.name)
+    )
+    return discovered or ["slot01"]
+
+
+def _bridges(base: BridgePaths, slot_count: int) -> dict[str, BridgePaths]:
+    return {
+        slot_id: BridgePaths.from_root(base.root, base.work_dir, base.inbox, slot_id=slot_id)
+        for slot_id in _slot_ids(slot_count)
+    }
+
+
+def _master_sample(master_db: Path, limit: int) -> list[dict[str, Any]]:
     if limit < 1:
-        raise QueueError("pilot size must be positive")
+        raise QueueError("company count must be positive")
     connection = sqlite3.connect(master_db)
     connection.row_factory = sqlite3.Row
     try:
@@ -223,7 +334,6 @@ def _master_sample(master_db: Path, limit: int = PILOT_SIZE) -> list[dict[str, A
             )
         else:
             raise QueueError(f"no supported company master table in {master_db}")
-
         selected: list[dict[str, Any]] = []
         seen: set[str] = set()
         for row in rows:
@@ -234,12 +344,14 @@ def _master_sample(master_db: Path, limit: int = PILOT_SIZE) -> list[dict[str, A
                 ticker = normalize_ticker(raw_ticker)
             except NewsValidationError:
                 continue
-            if ticker in seen:
-                continue
             company_name = str(row["company_name"]).strip()
-            if not company_name:
+            if ticker in seen or not company_name:
                 continue
-            selected.append({"ticker": ticker, "company_name": company_name, "sector": str(row["sector"] or "unknown").strip() or "unknown"})
+            selected.append({
+                "ticker": ticker,
+                "company_name": company_name,
+                "sector": str(row["sector"] or "unknown").strip() or "unknown",
+            })
             seen.add(ticker)
             if len(selected) == limit:
                 break
@@ -293,15 +405,15 @@ def _search_period(db_path: Path, ticker: str, now: datetime) -> tuple[date, dat
 
 
 def _assignment_for_entry(
-    state: dict[str, Any], entry: dict[str, Any], db_path: Path, now: datetime
+    state: dict[str, Any], entry: dict[str, Any], slot_id: str, db_path: Path, now: datetime
 ) -> tuple[dict[str, Any], int]:
     sequence = state["assignment_sequence"] + 1
-    queue_token = str(state["queue_id"]).removeprefix("pilot5-")
-    assignment_id = f"slot01-{queue_token}-{sequence:06d}"
+    queue_token = str(state["queue_id"]).split("-", 1)[-1]
+    assignment_id = f"{slot_id}-{queue_token}-{sequence:06d}"
     search_from, search_to = _search_period(db_path, entry["ticker"], now)
-    assignment = {
+    return ({
         "schema_version": ASSIGNMENT_SCHEMA,
-        "slot_id": "slot01",
+        "slot_id": slot_id,
         "assignment_id": assignment_id,
         "ticker": entry["ticker"],
         "company_name": entry["company_name"],
@@ -313,8 +425,7 @@ def _assignment_for_entry(
         "queue_id": state["queue_id"],
         "queue_position": entry["queue_position"],
         "queue_attempt": entry["attempt_count"] + 1,
-    }
-    return assignment, sequence
+    }, sequence)
 
 
 def _read_assignment_if_present(bridge: BridgePaths) -> dict[str, Any] | None:
@@ -324,11 +435,6 @@ def _read_assignment_if_present(bridge: BridgePaths) -> dict[str, Any] | None:
     try:
         return validate_assignment(assignment, bridge)
     except BridgeError:
-        # Queue activation must fail closed for legacy/non-canonical in-flight
-        # status values such as ``running`` or ``processing``.  They are not
-        # accepted by the bridge contract, but retaining the minimal identity
-        # lets the queue report ``unmanaged_assignment`` instead of overwriting
-        # the slot or mistaking a validation error for an empty slot.
         status = assignment.get("status")
         assignment_id = assignment.get("assignment_id")
         if (
@@ -342,93 +448,89 @@ def _read_assignment_if_present(bridge: BridgePaths) -> dict[str, Any] | None:
 
 
 def _assignment_entry(
-    assignment: dict[str, Any], entries: list[dict[str, Any]], state: dict[str, Any]
+    assignment: dict[str, Any], entries: list[dict[str, Any]], state: dict[str, Any], slot_id: str
 ) -> dict[str, Any] | None:
-    """Return the owning queue entry using explicit queue metadata."""
-    if assignment.get("queue_id") != state.get("queue_id"):
+    if assignment.get("queue_id") != state.get("queue_id") or assignment.get("slot_id") != slot_id:
         return None
     position = assignment.get("queue_position")
     assignment_id = assignment.get("assignment_id")
     if not isinstance(position, int) or not isinstance(assignment_id, str):
         return None
     entry = next((item for item in entries if item["queue_position"] == position), None)
-    if entry is None:
+    slot = state["slots"].get(slot_id, {})
+    if entry is None or entry.get("assigned_slot") not in {None, slot_id}:
         return None
-    if assignment_id not in {entry.get("assignment_id"), state.get("current_assignment_id")}:
+    if assignment.get("ticker") != entry.get("ticker") or assignment.get("company_name") != entry.get("company_name"):
+        return None
+    if assignment_id not in {entry.get("assignment_id"), slot.get("assignment_id")}:
         return None
     return entry
 
 
-def _archive_terminal_unmanaged_assignment(
-    bridge: BridgePaths, assignment: dict[str, Any]
-) -> Path:
-    """Preserve a terminal legacy assignment before replacing the slot."""
+def _archive_terminal_unmanaged_assignment(bridge: BridgePaths, assignment: dict[str, Any]) -> Path:
     assignment_id = assignment.get("assignment_id")
-    if not isinstance(assignment_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", assignment_id):
+    if not isinstance(assignment_id, str) or not _ASSIGNMENT_ID_RE.fullmatch(assignment_id):
         raise QueueError("terminal unmanaged assignment has an invalid assignment_id")
-    preserved_assignment = assignment
+    preserved = assignment
     if bridge.assignment.exists():
-        source_assignment = _read_object(bridge.assignment)
-        if source_assignment.get("assignment_id") == assignment_id:
-            preserved_assignment = source_assignment
-    history = bridge.assignment.parent / "history"
-    target = history / f"{assignment_id}.json"
+        source = _read_object(bridge.assignment)
+        if source.get("assignment_id") == assignment_id:
+            preserved = source
+    target = bridge.assignment.parent / "history" / f"{assignment_id}.json"
     if target.exists():
-        preserved = _read_object(target)
-        if preserved != preserved_assignment:
+        if _read_object(target) != preserved:
             raise QueueError(f"assignment history conflict: {target}")
         return target
-    _atomic_json(target, preserved_assignment)
+    _atomic_json(target, preserved)
     return target
 
 
-def _commit_assignment_transition(
+def _commit_transition(
     paths: QueuePaths,
     bridge: BridgePaths,
     entries: list[dict[str, Any]],
     state: dict[str, Any],
 ) -> dict[str, Any]:
-    transition = state.get("transition")
+    transition = state["transitions"].get(bridge.slot_id)
     if not isinstance(transition, dict) or transition.get("kind") != "assign":
-        raise QueueError("queue assignment transition is missing")
+        raise QueueError(f"queue assignment transition is missing for {bridge.slot_id}")
     assignment = transition.get("assignment")
     position = transition.get("queue_position")
     sequence = transition.get("assignment_sequence")
     if not isinstance(assignment, dict) or not isinstance(position, int) or not isinstance(sequence, int):
         raise QueueError("queue assignment transition is invalid")
     validate_assignment(dict(assignment), bridge)
-
     current = _read_assignment_if_present(bridge)
-    if current and current["assignment_id"] != assignment["assignment_id"]:
+    if current and current.get("assignment_id") != assignment["assignment_id"]:
         if current.get("status") not in TERMINAL_ASSIGNMENT_STATUSES:
-            raise QueueError(f"slot01 already has an unfinished assignment: {current['assignment_id']}")
-        if _assignment_entry(current, entries, state) is None:
+            raise QueueError(f"{bridge.slot_id} already has an unfinished assignment: {current.get('assignment_id')}")
+        if _assignment_entry(current, entries, state, bridge.slot_id) is None:
             _archive_terminal_unmanaged_assignment(bridge, current)
-    if not current or current["assignment_id"] != assignment["assignment_id"]:
+    if not current or current.get("assignment_id") != assignment["assignment_id"]:
         _atomic_json(bridge.assignment, assignment)
-
-    matching = next((entry for entry in entries if entry["queue_position"] == position), None)
-    if matching is None:
+    entry = next((item for item in entries if item["queue_position"] == position), None)
+    if entry is None:
         raise QueueError(f"queue position {position} is absent")
-    matching.update({
+    entry.update({
         "status": "assigned",
+        "assigned_slot": bridge.slot_id,
         "attempt_count": assignment["queue_attempt"],
         "assignment_id": assignment["assignment_id"],
         "next_eligible_at": None,
     })
-    state.update({
-        "assignment_sequence": sequence,
-        "current_queue_position": position,
-        "current_assignment_id": assignment["assignment_id"],
-        "slot_status": "ready",
+    state["assignment_sequence"] = sequence
+    state["slots"][bridge.slot_id] = {
+        "queue_position": position,
+        "assignment_id": assignment["assignment_id"],
+        "status": "ready",
         "next_assignment": assignment["assignment_id"],
-        "updated_at": _iso(),
-    })
+    }
     if transition.get("activate_queue"):
         state.update({"queue_status": "active", "fixture_mode": False})
-    state.pop("transition", None)
+    state["transitions"].pop(bridge.slot_id, None)
+    state["updated_at"] = _iso()
     _atomic_jsonl(paths.entries, entries)
-    _atomic_json(paths.state, state)
+    _write_state(paths, state)
     return assignment
 
 
@@ -443,124 +545,124 @@ def _plan_assignment(
     *,
     activate_queue: bool = False,
 ) -> dict[str, Any]:
-    assignment, sequence = _assignment_for_entry(state, entry, db_path, now)
-    state["transition"] = {
+    assignment, sequence = _assignment_for_entry(state, entry, bridge.slot_id, db_path, now)
+    state["transitions"][bridge.slot_id] = {
         "kind": "assign",
+        "slot_id": bridge.slot_id,
         "queue_position": entry["queue_position"],
         "assignment_sequence": sequence,
         "assignment": assignment,
         "activate_queue": activate_queue,
     }
     state["updated_at"] = _iso(now)
-    _atomic_json(paths.state, state)
-    return _commit_assignment_transition(paths, bridge, entries, state)
+    _write_state(paths, state)
+    return _commit_transition(paths, bridge, entries, state)
 
 
-def _recover_transition(
-    paths: QueuePaths, bridge: BridgePaths, entries: list[dict[str, Any]], state: dict[str, Any]
-) -> dict[str, Any] | None:
-    if state.get("transition") is None:
-        return None
-    return _commit_assignment_transition(paths, bridge, entries, state)
+def _recover_transitions(
+    paths: QueuePaths,
+    bridges: dict[str, BridgePaths],
+    entries: list[dict[str, Any]],
+    state: dict[str, Any],
+) -> list[dict[str, Any]]:
+    recovered: list[dict[str, Any]] = []
+    for slot_id in sorted(list(state["transitions"])):
+        bridge = bridges.get(slot_id)
+        if bridge is None:
+            raise QueueError(f"transition references unconfigured slot: {slot_id}")
+        with _slot_lock(bridge):
+            recovered.append(_commit_transition(paths, bridge, entries, state))
+    return recovered
+
+
+def _clear_slot(state: dict[str, Any], slot_id: str, status: str = "idle") -> None:
+    state["slots"][slot_id] = {**_empty_slot(), "status": status}
 
 
 def _set_bridge_idle(bridge: BridgePaths, state: dict[str, Any], now: datetime) -> None:
-    bridge_state = {
+    _atomic_json(bridge.state, {
         "schema_version": "company_news_bridge_state_v1",
-        "slot_id": "slot01",
+        "slot_id": bridge.slot_id,
         "assignment_id": state.get("last_assignment_id"),
         "phase": "idle",
         "queue_id": state["queue_id"],
         "updated_at": _iso(now),
-    }
-    _atomic_json(bridge.state, bridge_state)
+    })
 
 
-def _finish_or_assign_next(
+def _fill_idle_slots(
     paths: QueuePaths,
-    bridge: BridgePaths,
+    bridges: dict[str, BridgePaths],
     entries: list[dict[str, Any]],
     state: dict[str, Any],
     db_path: Path,
     now: datetime,
-) -> dict[str, Any]:
-    pending = next((entry for entry in entries if entry["status"] == "pending"), None)
-    if state["queue_status"] == "paused":
-        state.update({"current_queue_position": None, "current_assignment_id": None, "slot_status": "paused", "next_assignment": None, "updated_at": _iso(now)})
-        _atomic_json(paths.state, state)
-        return {"status": "paused"}
-    if pending is None:
-        state.update({"queue_status": "completed", "current_queue_position": None, "current_assignment_id": None, "slot_status": "idle", "next_assignment": None, "updated_at": _iso(now)})
-        _atomic_json(paths.state, state)
-        _set_bridge_idle(bridge, state, now)
-        return {"status": "queue_completed"}
-    assignment = _plan_assignment(paths, bridge, entries, state, pending, db_path, now)
-    return {"status": "assigned", "assignment": assignment}
+    *,
+    activate_queue: bool = False,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    assignments: list[dict[str, Any]] = []
+    blocked: list[dict[str, Any]] = []
+    activation_pending = activate_queue and state["queue_status"] != "active"
+    for slot_id, bridge in bridges.items():
+        slot = state["slots"][slot_id]
+        if slot.get("assignment_id"):
+            continue
+        with _slot_lock(bridge):
+            current = _read_assignment_if_present(bridge)
+            if current is not None:
+                owner = _assignment_entry(current, entries, state, slot_id)
+                if owner is None and current.get("status") not in TERMINAL_ASSIGNMENT_STATUSES:
+                    blocked.append({"slot_id": slot_id, "assignment_id": current.get("assignment_id")})
+                    continue
+                if owner is not None and current.get("status") not in TERMINAL_ASSIGNMENT_STATUSES:
+                    state["slots"][slot_id] = {
+                        "queue_position": owner["queue_position"],
+                        "assignment_id": current["assignment_id"],
+                        "status": current.get("status", "ready"),
+                        "next_assignment": current["assignment_id"],
+                    }
+                    state["updated_at"] = _iso(now)
+                    _write_state(paths, state)
+                    continue
+                if owner is None:
+                    _archive_terminal_unmanaged_assignment(bridge, current)
+            pending = next((entry for entry in entries if entry["status"] == "pending"), None)
+            if pending is None:
+                continue
+            assignment = _plan_assignment(
+                paths,
+                bridge,
+                entries,
+                state,
+                pending,
+                db_path,
+                now,
+                activate_queue=activation_pending,
+            )
+            activation_pending = False
+            assignments.append(assignment)
+    return assignments, blocked
 
 
-def _activate_queue_locked(
+def _all_slots_inactive(state: dict[str, Any]) -> bool:
+    return all(not slot.get("assignment_id") for slot in state["slots"].values())
+
+
+def _maybe_complete(
     paths: QueuePaths,
-    bridge: BridgePaths,
+    bridges: dict[str, BridgePaths],
     entries: list[dict[str, Any]],
     state: dict[str, Any],
-    db_path: Path,
     now: datetime,
-) -> dict[str, Any]:
-    """Activate an inert queue while both the queue and slot locks are held."""
-    recovered = _recover_transition(paths, bridge, entries, state)
-    if recovered:
-        return {"status": "transition_recovered", "assignment": recovered}
-
-    current = _read_assignment_if_present(bridge)
-    if current is not None:
-        owner = _assignment_entry(current, entries, state)
-        if owner is None:
-            if current.get("status") not in TERMINAL_ASSIGNMENT_STATUSES:
-                return {"status": "unmanaged_assignment", "assignment_id": current.get("assignment_id")}
-            _archive_terminal_unmanaged_assignment(bridge, current)
-        else:
-            # A paused queue may already own an assignment.  Resuming it does
-            # not create another assignment; only the queue state changes.
-            for entry in entries:
-                if entry["status"] == "paused":
-                    entry["status"] = "pending"
-            state.update({"queue_status": "active", "fixture_mode": False, "updated_at": _iso(now)})
-            _atomic_jsonl(paths.entries, entries)
-            _atomic_json(paths.state, state)
-            if current.get("status") in TERMINAL_ASSIGNMENT_STATUSES:
-                return {"status": "activation_reconcile_required"}
-            return {"status": "waiting", "assignment_id": current["assignment_id"]}
-
-    for entry in entries:
-        if entry["status"] == "paused":
-            entry["status"] = "pending"
-    pending = next((entry for entry in entries if entry["status"] == "pending"), None)
-    if pending is None:
-        state.update({
-            "queue_status": "completed",
-            "fixture_mode": False,
-            "current_queue_position": None,
-            "current_assignment_id": None,
-            "slot_status": "idle",
-            "next_assignment": None,
-            "updated_at": _iso(now),
-        })
-        _atomic_jsonl(paths.entries, entries)
-        _atomic_json(paths.state, state)
+) -> bool:
+    terminal = all(entry["status"] in {"completed", "failed"} for entry in entries)
+    if not terminal or state["transitions"] or not _all_slots_inactive(state):
+        return False
+    state.update({"queue_status": "completed", "fixture_mode": False, "updated_at": _iso(now)})
+    _write_state(paths, state)
+    for bridge in bridges.values():
         _set_bridge_idle(bridge, state, now)
-        return {"status": "queue_completed"}
-
-    assignment = _plan_assignment(
-        paths,
-        bridge,
-        entries,
-        state,
-        pending,
-        db_path,
-        now,
-        activate_queue=True,
-    )
-    return {"status": "assigned", "assignment": assignment}
+    return True
 
 
 def initialize_pilot(
@@ -571,54 +673,68 @@ def initialize_pilot(
     *,
     activate: bool = False,
     now: datetime | None = None,
+    slot_count: int = DEFAULT_SLOT_COUNT,
+    count: int = PILOT_SIZE,
 ) -> dict[str, Any]:
     timestamp = _now(now)
+    slot_ids = _slot_ids(slot_count)
+    if count < slot_count:
+        raise QueueError("company count must be at least slot_count")
     with _queue_lock(paths):
-        if paths.entries.exists() or paths.state.exists():
-            raise QueueError("company queue already exists; inspect status or use reset-pilot")
-        companies = _master_sample(master_db, PILOT_SIZE)
-        entries = [
-            {
-                "schema_version": QUEUE_SCHEMA,
-                **company,
-                "queue_position": index,
-                "status": "pending",
-                "last_checked_at": None,
-                "next_eligible_at": None,
-                "attempt_count": 0,
-                "last_error": None,
-                "assignment_id": None,
-            }
-            for index, company in enumerate(companies, start=1)
-        ]
+        if paths.entries.exists() != paths.state.exists():
+            raise QueueError("incomplete queue runtime files require manual review")
+        archived_queue: str | None = None
+        if _queue_exists(paths):
+            previous_state = _read_state(paths)
+            archived_queue = str(_archive_completed_queue(paths, previous_state))
+        companies = _master_sample(master_db, count)
+        entries = [{
+            "schema_version": QUEUE_SCHEMA,
+            **company,
+            "queue_position": index,
+            "status": "pending",
+            "assigned_slot": None,
+            "assignment_id": None,
+            "last_checked_at": None,
+            "next_eligible_at": None,
+            "attempt_count": 0,
+            "last_error": None,
+        } for index, company in enumerate(companies, start=1)]
         state = {
             "schema_version": QUEUE_STATE_SCHEMA,
-            "queue_id": f"pilot5-{timestamp:%Y%m%dT%H%M%S%f}",
-            # Even explicit activation starts from an inert state.  The final
-            # active state is committed only after the slot assignment has
-            # been atomically written.
+            "queue_id": f"pilot{count}-{timestamp:%Y%m%dT%H%M%S%f}",
             "queue_status": "fixture_ready",
             "fixture_mode": True,
+            "slot_count": slot_count,
+            "slots": {slot_id: _empty_slot() for slot_id in slot_ids},
+            "transitions": {},
             "total": len(entries),
             "max_attempts": MAX_ATTEMPTS,
             "assignment_sequence": 0,
-            "current_queue_position": None,
-            "current_assignment_id": None,
-            "slot_status": "idle",
             "last_completed": None,
             "last_assignment_id": None,
-            "next_assignment": None,
             "created_at": _iso(timestamp),
             "updated_at": _iso(timestamp),
         }
+        _sync_legacy_slot01_fields(state)
         _atomic_jsonl(paths.entries, entries)
-        _atomic_json(paths.state, state)
-        assignment = None
+        _write_state(paths, state)
+        assignments: list[dict[str, Any]] = []
+        blocked: list[dict[str, Any]] = []
         if activate:
-            with _slot_lock(bridge):
-                activation = _activate_queue_locked(paths, bridge, entries, state, db_path, timestamp)
-                assignment = activation.get("assignment")
-        return {"queue_id": state["queue_id"], "queue_status": state["queue_status"], "companies": companies, "assignment": assignment}
+            assignments, blocked = _fill_idle_slots(
+                paths, _bridges(bridge, slot_count), entries, state, db_path, timestamp, activate_queue=True
+            )
+        return {
+            "queue_id": state["queue_id"],
+            "queue_status": state["queue_status"],
+            "slot_count": slot_count,
+            "companies": companies,
+            "assignment": assignments[0] if slot_count == 1 and assignments else None,
+            "assignments": assignments,
+            "blocked_slots": blocked,
+            "archived_queue": archived_queue,
+        }
 
 
 def reconcile_queue(
@@ -634,72 +750,166 @@ def reconcile_queue(
     with _queue_lock(paths):
         entries = _read_entries(paths)
         state = _read_state(paths)
-        with _slot_lock(bridge):
-            recovered = _recover_transition(paths, bridge, entries, state)
-            if recovered:
-                return {"status": "transition_recovered", "assignment": recovered}
-            if state["queue_status"] == "fixture_ready":
-                return {"status": "fixture_ready"}
-            if state["queue_status"] == "completed":
-                return {"status": "queue_completed"}
-            assignment = _read_assignment_if_present(bridge)
-            if assignment is None:
-                if state["queue_status"] == "active":
-                    return _finish_or_assign_next(paths, bridge, entries, state, db_path, timestamp)
-                return {"status": state["queue_status"]}
-            entry = _assignment_entry(assignment, entries, state)
-            if entry is None:
+        bridges = _bridges(bridge, state["slot_count"])
+        recovered = _recover_transitions(paths, bridges, entries, state)
+        if state["queue_status"] == "fixture_ready":
+            return {"status": "fixture_ready", "recovered": recovered}
+        if state["queue_status"] == "completed":
+            return {"status": "queue_completed", "recovered": recovered}
+
+        slot_results: dict[str, dict[str, Any]] = {}
+        for slot_id, slot_bridge in bridges.items():
+            with _slot_lock(slot_bridge):
+                assignment = _read_assignment_if_present(slot_bridge)
+                if assignment is None:
+                    _clear_slot(state, slot_id)
+                    slot_results[slot_id] = {"status": "idle"}
+                    continue
+                entry = _assignment_entry(assignment, entries, state, slot_id)
+                if entry is None:
+                    if assignment.get("status") not in TERMINAL_ASSIGNMENT_STATUSES:
+                        slot_results[slot_id] = {
+                            "status": "unmanaged_assignment",
+                            "assignment_id": assignment.get("assignment_id"),
+                        }
+                        continue
+                    expected_assignment_id = state["slots"][slot_id].get("assignment_id")
+                    if expected_assignment_id:
+                        slot_results[slot_id] = {
+                            "status": "assignment_mismatch",
+                            "expected_assignment_id": expected_assignment_id,
+                            "actual_assignment_id": assignment.get("assignment_id"),
+                        }
+                        continue
+                    _archive_terminal_unmanaged_assignment(slot_bridge, assignment)
+                    _clear_slot(state, slot_id)
+                    slot_results[slot_id] = {
+                        "status": "terminal_unmanaged_archived",
+                        "assignment_id": assignment.get("assignment_id"),
+                    }
+                    continue
                 if assignment.get("status") not in TERMINAL_ASSIGNMENT_STATUSES:
-                    return {"status": "unmanaged_assignment", "assignment_id": assignment.get("assignment_id")}
-                _archive_terminal_unmanaged_assignment(bridge, assignment)
-                if state["queue_status"] == "active":
-                    return _finish_or_assign_next(paths, bridge, entries, state, db_path, timestamp)
-                return {"status": state["queue_status"], "archived_assignment_id": assignment.get("assignment_id")}
+                    state["slots"][slot_id]["status"] = assignment.get("status", "ready")
+                    slot_results[slot_id] = {"status": "waiting", "assignment_id": assignment["assignment_id"]}
+                    continue
+                if assignment["status"] == "completed":
+                    checked_at = _successful_checked_at(db_path, run_id=assignment["assignment_id"])
+                    if checked_at is None:
+                        slot_results[slot_id] = {
+                            "status": "blocked_missing_canonical_run",
+                            "assignment_id": assignment["assignment_id"],
+                        }
+                        continue
+                    entry.update({
+                        "status": "completed",
+                        "assigned_slot": None,
+                        "last_checked_at": checked_at,
+                        "next_eligible_at": None,
+                        "last_error": None,
+                    })
+                    state.update({
+                        "last_completed": {
+                            "ticker": entry["ticker"],
+                            "company_name": entry["company_name"],
+                            "checked_at": checked_at,
+                            "slot_id": slot_id,
+                        },
+                        "last_assignment_id": assignment["assignment_id"],
+                        "updated_at": _iso(timestamp),
+                    })
+                    _clear_slot(state, slot_id)
+                    _atomic_jsonl(paths.entries, entries)
+                    _write_state(paths, state)
+                    slot_results[slot_id] = {"status": "completed", "assignment_id": assignment["assignment_id"]}
+                    continue
 
-            if assignment.get("status") not in TERMINAL_ASSIGNMENT_STATUSES:
-                return {"status": "waiting", "assignment_id": assignment["assignment_id"]}
+                bridge_state = _read_object(slot_bridge.state) if slot_bridge.state.exists() else {}
+                error = str(assignment.get("error_message") or bridge_state.get("last_error") or "assignment failed")[:1000]
+                entry.update({"last_error": error, "next_eligible_at": _iso(timestamp)})
+                state.update({"last_assignment_id": assignment["assignment_id"], "updated_at": _iso(timestamp)})
+                if bridge_state.get("phase") in {"ingested", "synced"}:
+                    _atomic_jsonl(paths.entries, entries)
+                    _write_state(paths, state)
+                    slot_results[slot_id] = {
+                        "status": "blocked_sync_retry",
+                        "assignment_id": assignment["assignment_id"],
+                    }
+                    continue
+                if state["queue_status"] == "paused":
+                    _atomic_jsonl(paths.entries, entries)
+                    _write_state(paths, state)
+                    slot_results[slot_id] = {"status": "paused", "assignment_id": assignment["assignment_id"]}
+                    continue
+                if entry["attempt_count"] < state.get("max_attempts", MAX_ATTEMPTS):
+                    _atomic_jsonl(paths.entries, entries)
+                    _write_state(paths, state)
+                    retry = _plan_assignment(paths, slot_bridge, entries, state, entry, db_path, timestamp)
+                    slot_results[slot_id] = {"status": "retry_assigned", "assignment": retry}
+                    continue
+                entry.update({"status": "failed", "assigned_slot": None, "next_eligible_at": None})
+                _clear_slot(state, slot_id, "failed")
+                _atomic_jsonl(paths.entries, entries)
+                _write_state(paths, state)
+                slot_results[slot_id] = {"status": "failed", "assignment_id": assignment["assignment_id"]}
 
-            if assignment["status"] == "completed":
-                checked_at = _successful_checked_at(db_path, run_id=assignment["assignment_id"])
-                if checked_at is None:
-                    return {"status": "blocked_missing_canonical_run", "assignment_id": assignment["assignment_id"]}
-                entry.update({"status": "completed", "last_checked_at": checked_at, "next_eligible_at": None, "last_error": None})
-                state.update({
-                    "last_completed": {"ticker": entry["ticker"], "company_name": entry["company_name"], "checked_at": checked_at},
-                    "last_assignment_id": assignment["assignment_id"],
-                    "current_queue_position": None,
-                    "current_assignment_id": None,
-                    "slot_status": "completed",
-                    "updated_at": _iso(timestamp),
-                })
-                _atomic_jsonl(paths.entries, entries)
-                _atomic_json(paths.state, state)
-                return _finish_or_assign_next(paths, bridge, entries, state, db_path, timestamp)
-
-            bridge_state = _read_object(bridge.state) if bridge.state.exists() else {}
-            error = str(assignment.get("error_message") or bridge_state.get("last_error") or "assignment failed")[:1000]
-            entry["last_error"] = error
-            entry["next_eligible_at"] = _iso(timestamp)
-            state.update({"last_assignment_id": assignment["assignment_id"], "updated_at": _iso(timestamp)})
-            if bridge_state.get("phase") in {"ingested", "synced"}:
-                _atomic_jsonl(paths.entries, entries)
-                _atomic_json(paths.state, state)
-                return {"status": "blocked_sync_retry", "assignment_id": assignment["assignment_id"]}
-            if state["queue_status"] == "paused":
-                _atomic_jsonl(paths.entries, entries)
-                _atomic_json(paths.state, state)
-                return {"status": "paused", "assignment_id": assignment["assignment_id"]}
-            if entry["attempt_count"] < state.get("max_attempts", MAX_ATTEMPTS):
-                _atomic_jsonl(paths.entries, entries)
-                _atomic_json(paths.state, state)
-                retry = _plan_assignment(paths, bridge, entries, state, entry, db_path, timestamp)
-                return {"status": "retry_assigned", "assignment": retry}
-
-            entry.update({"status": "failed", "next_eligible_at": None})
-            state.update({"current_queue_position": None, "current_assignment_id": None, "slot_status": "failed", "updated_at": _iso(timestamp)})
-            _atomic_jsonl(paths.entries, entries)
-            _atomic_json(paths.state, state)
-            return _finish_or_assign_next(paths, bridge, entries, state, db_path, timestamp)
+        if state["queue_status"] == "paused":
+            _write_state(paths, state)
+            return {"status": "paused", "slots": slot_results, "recovered": recovered}
+        assignments, blocked = _fill_idle_slots(paths, bridges, entries, state, db_path, timestamp)
+        unmanaged_active = any(
+            value.get("status") in {"unmanaged_assignment", "assignment_mismatch"}
+            for value in slot_results.values()
+        )
+        if not blocked and not unmanaged_active and _maybe_complete(paths, bridges, entries, state, timestamp):
+            return {"status": "queue_completed", "slots": slot_results, "recovered": recovered}
+        if assignments:
+            return {
+                "status": "assigned",
+                "assignment": assignments[0] if state["slot_count"] == 1 else None,
+                "assignments": assignments,
+                "slots": slot_results,
+                "blocked_slots": blocked,
+                "recovered": recovered,
+            }
+        retries = [
+            value["assignment"]
+            for value in slot_results.values()
+            if value.get("status") == "retry_assigned" and isinstance(value.get("assignment"), dict)
+        ]
+        if retries:
+            return {
+                "status": "retry_assigned",
+                "assignment": retries[0] if state["slot_count"] == 1 else None,
+                "assignments": retries,
+                "slots": slot_results,
+                "recovered": recovered,
+            }
+        sync_blocks = [value for value in slot_results.values() if value.get("status") == "blocked_sync_retry"]
+        if sync_blocks:
+            return {
+                "status": "blocked_sync_retry",
+                "assignment_id": sync_blocks[0].get("assignment_id") if state["slot_count"] == 1 else None,
+                "slots": slot_results,
+                "recovered": recovered,
+            }
+        if blocked:
+            response = {"status": "unmanaged_assignment", "blocked_slots": blocked, "slots": slot_results}
+            if state["slot_count"] == 1:
+                response["assignment_id"] = blocked[0].get("assignment_id")
+            return response
+        if recovered:
+            return {
+                "status": "transition_recovered",
+                "assignment": recovered[0] if state["slot_count"] == 1 else None,
+                "assignments": recovered,
+                "slots": slot_results,
+            }
+        if state["slot_count"] == 1 and slot_results.get("slot01", {}).get("status") == "waiting":
+            return {
+                "status": "waiting",
+                "assignment_id": slot_results["slot01"].get("assignment_id"),
+            }
+        return {"status": "waiting", "slots": slot_results, "recovered": recovered}
 
 
 def queue_status(paths: QueuePaths, bridge: BridgePaths) -> dict[str, Any]:
@@ -707,22 +917,48 @@ def queue_status(paths: QueuePaths, bridge: BridgePaths) -> dict[str, Any]:
         return {"initialized": False, "queue_status": "absent"}
     entries = _read_entries(paths)
     state = _read_state(paths)
-    current = next((entry for entry in entries if entry["queue_position"] == state.get("current_queue_position")), None)
+    bridges = _bridges(bridge, state["slot_count"])
+    slots: dict[str, Any] = {}
+    for slot_id, slot_bridge in bridges.items():
+        assignment = _read_assignment_if_present(slot_bridge)
+        slot = state["slots"][slot_id]
+        entry = next((item for item in entries if item["queue_position"] == slot.get("queue_position")), None)
+        assignment_matches = bool(
+            assignment and assignment.get("assignment_id") == slot.get("assignment_id")
+        )
+        unmanaged_active = bool(
+            assignment
+            and not assignment_matches
+            and assignment.get("status") not in TERMINAL_ASSIGNMENT_STATUSES
+        )
+        slots[slot_id] = {
+            "status": "unmanaged_assignment" if unmanaged_active else slot.get("status", "idle"),
+            "company": entry["company_name"] if entry else None,
+            "ticker": entry["ticker"] if entry else None,
+            "queue_position": entry["queue_position"] if entry else None,
+            "assignment_id": assignment.get("assignment_id") if unmanaged_active else slot.get("assignment_id"),
+            "assignment_status": assignment.get("status") if assignment_matches or unmanaged_active else None,
+        }
     completed = [entry for entry in entries if entry["status"] == "completed"]
     failed = [entry for entry in entries if entry["status"] == "failed"]
     pending = [entry for entry in entries if entry["status"] in {"pending", "paused"}]
-    assignment = _read_assignment_if_present(bridge)
+    active_entries = [entry for entry in entries if entry["status"] == "assigned"]
+    current = active_entries[0] if active_entries else None
+    slot01_assignment = _read_assignment_if_present(bridges["slot01"])
     return {
         "initialized": True,
         "queue_id": state["queue_id"],
         "queue_status": state["queue_status"],
+        "slot_count": state["slot_count"],
         "current_company": current,
         "completed": len(completed),
         "total": len(entries),
         "pending": len(pending),
+        "active": len(active_entries),
         "failed": len(failed),
         "last_completed": state.get("last_completed"),
-        "next_assignment": assignment if assignment and assignment.get("status") == "ready" else None,
+        "next_assignment": slot01_assignment if slot01_assignment and slot01_assignment.get("status") == "ready" else None,
+        "slots": slots,
     }
 
 
@@ -737,31 +973,70 @@ def pause_queue(paths: QueuePaths) -> dict[str, Any]:
                 entry["status"] = "paused"
         state.update({"queue_status": "paused", "updated_at": _iso()})
         _atomic_jsonl(paths.entries, entries)
-        _atomic_json(paths.state, state)
+        _write_state(paths, state)
         return {"queue_status": "paused"}
 
 
 def resume_queue(paths: QueuePaths, bridge: BridgePaths, db_path: Path, *, activate: bool = False) -> dict[str, Any]:
-    reconcile_active = False
-    activation_result: dict[str, Any] | None = None
+    reconcile_after = False
+    result: dict[str, Any] | None = None
     with _queue_lock(paths):
         entries = _read_entries(paths)
         state = _read_state(paths)
         if state.get("fixture_mode") and not activate:
-            raise QueueError("fixture queue requires resume --activate before it can write slot01")
+            raise QueueError("fixture queue requires resume --activate before it can write slots")
         if state["queue_status"] == "active":
-            reconcile_active = True
+            reconcile_after = True
         elif state["queue_status"] not in {"paused", "fixture_ready"}:
             return {"queue_status": state["queue_status"]}
         else:
-            with _slot_lock(bridge):
-                activation_result = _activate_queue_locked(paths, bridge, entries, state, db_path, _now())
-    if reconcile_active or (
-        activation_result is not None and activation_result.get("status") == "activation_reconcile_required"
-    ):
+            bridges = _bridges(bridge, state["slot_count"])
+            recovered = _recover_transitions(paths, bridges, entries, state)
+            for entry in entries:
+                if entry["status"] == "paused":
+                    entry["status"] = "pending"
+            existing_active_slot = any(
+                slot.get("assignment_id") for slot in state["slots"].values()
+            )
+            if existing_active_slot:
+                # Existing durable assignments make this a valid active state;
+                # no new slot write is required to complete the resume.
+                state.update({"queue_status": "active", "fixture_mode": False, "updated_at": _iso()})
+                _atomic_jsonl(paths.entries, entries)
+                _write_state(paths, state)
+            assignments, blocked = _fill_idle_slots(
+                paths,
+                bridges,
+                entries,
+                state,
+                db_path,
+                _now(),
+                activate_queue=not existing_active_slot,
+            )
+            if assignments:
+                result = {
+                    "status": "assigned",
+                    "assignment": assignments[0] if state["slot_count"] == 1 else None,
+                    "assignments": assignments,
+                    "blocked_slots": blocked,
+                    "recovered": recovered,
+                }
+            elif recovered:
+                result = {"status": "transition_recovered", "assignments": recovered}
+                reconcile_after = True
+            elif blocked:
+                if state["slot_count"] == 1:
+                    result = {"status": "unmanaged_assignment", "assignment_id": blocked[0].get("assignment_id")}
+                else:
+                    result = {"status": "unmanaged_assignment", "blocked_slots": blocked}
+            elif not blocked and _maybe_complete(paths, bridges, entries, state, _now()):
+                result = {"status": "queue_completed"}
+            else:
+                reconcile_after = True
+    if reconcile_after:
         return reconcile_queue(paths, bridge, db_path)
-    if activation_result is not None:
-        return activation_result
+    if result is not None:
+        return result
     raise QueueError("queue resume reached an invalid state")
 
 
@@ -786,9 +1061,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--master-db", type=Path)
     commands = parser.add_subparsers(dest="command", required=True)
     init = commands.add_parser("init-pilot")
-    init.add_argument("--activate", action="store_true", help="explicitly create the first real slot01 assignment")
+    init.add_argument("--activate", action="store_true", help="explicitly create real slot assignments")
+    init.add_argument("--slots", type=int, default=DEFAULT_SLOT_COUNT)
+    init.add_argument("--count", type=int, default=PILOT_SIZE)
     commands.add_parser("status")
     commands.add_parser("pause")
+    commands.add_parser("activate")
     resume = commands.add_parser("resume")
     resume.add_argument("--activate", action="store_true", help="activate an inert fixture queue")
     reset = commands.add_parser("reset-pilot")
@@ -804,18 +1082,28 @@ def main(argv: list[str] | None = None) -> int:
     bridge = BridgePaths.from_root(root, work_dir, inbox)
     try:
         if args.command == "init-pilot":
-            result = initialize_pilot(paths, bridge, master_db, db_path, activate=args.activate)
+            result = initialize_pilot(
+                paths,
+                bridge,
+                master_db,
+                db_path,
+                activate=args.activate,
+                slot_count=args.slots,
+                count=args.count,
+            )
         elif args.command == "status":
             result = queue_status(paths, bridge)
         elif args.command == "pause":
             result = pause_queue(paths)
+        elif args.command == "activate":
+            result = resume_queue(paths, bridge, db_path, activate=True)
         elif args.command == "resume":
             result = resume_queue(paths, bridge, db_path, activate=args.activate)
         else:
             result = reset_pilot(paths, confirmation=args.confirm)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
-    except (QueueError, OSError, sqlite3.Error, ValueError) as exc:
+    except (QueueError, BridgeError, OSError, sqlite3.Error, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 

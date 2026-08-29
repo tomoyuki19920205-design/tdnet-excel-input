@@ -359,13 +359,16 @@ def test_live_queue_lock_prevents_operator_mutation(tmp_path, monkeypatch):
 
 
 def test_slot_prompt_is_generic_and_stops_without_ready_assignment():
-    prompt = (Path(__file__).resolve().parents[1] / "data" / "news_work" / "SCHEDULED_TASK_SLOT01_PROMPT.txt").read_text(encoding="utf-8")
+    work = Path(__file__).resolve().parents[1] / "data" / "news_work"
+    prompt = (work / "SCHEDULED_TASK_SLOT01_PROMPT.txt").read_text(encoding="utf-8")
+    common = (work / "SCHEDULED_TASK_COMMON_PROMPT.txt").read_text(encoding="utf-8")
+    combined = prompt + common
     assert "statusがreadyでない場合" in prompt
-    assert "assignment.jsonが存在しない" in prompt
-    assert "<assignment_id>" in prompt
-    assert "<current assignmentのtickerと完全一致>" in prompt
-    assert "7203" not in prompt
-    assert "schema-retry-003" not in prompt
+    assert "assignmentが存在しない" in prompt
+    assert "<assignment_id>" in combined
+    assert "<current assignmentのtickerと完全一致>" in combined
+    assert "7203" not in combined
+    assert "schema-retry-003" not in combined
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PID probing regression")

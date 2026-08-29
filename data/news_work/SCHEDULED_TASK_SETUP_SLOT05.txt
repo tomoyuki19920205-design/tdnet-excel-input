@@ -1,0 +1,3 @@
+次の内容で繰り返しScheduled Taskを作成してください。Task名は「Company News Monitor Slot05」、local projectは`C:\Users\takuy\OneDrive\tdnet-excel-input`、実行時刻は毎時40分です。1回につき最大1社だけ処理してください。
+
+毎回の実行開始時に最初に`C:\Users\takuy\OneDrive\tdnet-excel-input\data\news_work\SCHEDULED_TASK_SLOT05_PROMPT.txt`を読み、その内容を完全に守ってください。ticker、会社名、assignment IDをTask本文へ固定しないでください。Task作成後は手動実行しないでください。

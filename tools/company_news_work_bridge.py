@@ -31,9 +31,12 @@ from tools.ingest_company_news import ingest_file
 from tools.sync_company_news import sync as sync_company_news
 
 ASSIGNMENT_SCHEMA = "company_news_assignment_v1"
-SLOT_ID = "slot01"
+DEFAULT_SLOT_ID = "slot01"
+# Backward-compatible import used by existing callers/tests.
+SLOT_ID = DEFAULT_SLOT_ID
 ASSIGNMENT_STATUSES = frozenset({"ready", "completed", "failed"})
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_SLOT_ID_RE = re.compile(r"^slot\d{2}$")
 _JST = timezone(timedelta(hours=9))
 
 
@@ -46,24 +49,34 @@ class BridgePaths:
     root: Path
     work_dir: Path
     inbox: Path
+    slot_id: str
     assignment: Path
     state: Path
     log: Path
     lock: Path
 
     @classmethod
-    def from_root(cls, root: Path = ROOT, work_dir: Path | None = None, inbox: Path | None = None) -> "BridgePaths":
+    def from_root(
+        cls,
+        root: Path = ROOT,
+        work_dir: Path | None = None,
+        inbox: Path | None = None,
+        slot_id: str = DEFAULT_SLOT_ID,
+    ) -> "BridgePaths":
         root = root.resolve()
         work_dir = (work_dir or root / "data" / "news_work").resolve()
         inbox = (inbox or root / "data" / "news_inbox").resolve()
+        if not _SLOT_ID_RE.fullmatch(slot_id):
+            raise BridgeError(f"invalid slot_id: {slot_id}")
         return cls(
             root=root,
             work_dir=work_dir,
             inbox=inbox,
-            assignment=work_dir / "slots" / SLOT_ID / "assignment.json",
-            state=work_dir / "state" / f"{SLOT_ID}.json",
-            log=work_dir / "logs" / f"{SLOT_ID}.jsonl",
-            lock=work_dir / "state" / f"{SLOT_ID}.lock",
+            slot_id=slot_id,
+            assignment=work_dir / "slots" / slot_id / "assignment.json",
+            state=work_dir / "state" / f"{slot_id}.json",
+            log=work_dir / "logs" / f"{slot_id}.jsonl",
+            lock=work_dir / "state" / f"{slot_id}.lock",
         )
 
 
@@ -80,7 +93,7 @@ def _atomic_json(path: Path, value: dict[str, Any]) -> None:
 
 def _append_log(paths: BridgePaths, event: str, **details: Any) -> None:
     paths.log.parent.mkdir(parents=True, exist_ok=True)
-    record = {"at": _now(), "slot_id": SLOT_ID, "event": event, **details}
+    record = {"at": _now(), "slot_id": paths.slot_id, "event": event, **details}
     with paths.log.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
 
@@ -162,9 +175,9 @@ def _slot_lock(paths: BridgePaths):
                 paths.lock.unlink(missing_ok=True)
                 if attempt == 0:
                     continue
-            raise BridgeError(f"{SLOT_ID} is already being processed ({paths.lock})") from exc
+            raise BridgeError(f"{paths.slot_id} is already being processed ({paths.lock})") from exc
     if descriptor is None:
-        raise BridgeError(f"could not acquire {SLOT_ID} lock")
+        raise BridgeError(f"could not acquire {paths.slot_id} lock")
     try:
         os.write(descriptor, f"pid={os.getpid()} at={_now()}\n".encode())
         os.close(descriptor)
@@ -192,8 +205,8 @@ def validate_assignment(value: dict[str, Any], paths: BridgePaths) -> dict[str, 
         raise BridgeError(f"assignment missing field(s): {', '.join(missing)}")
     if value["schema_version"] != ASSIGNMENT_SCHEMA:
         raise BridgeError(f"schema_version must be {ASSIGNMENT_SCHEMA}")
-    if value["slot_id"] != SLOT_ID:
-        raise BridgeError(f"slot_id must be {SLOT_ID}")
+    if value["slot_id"] != paths.slot_id:
+        raise BridgeError(f"slot_id must be {paths.slot_id}")
     assignment_id = value["assignment_id"]
     if not isinstance(assignment_id, str) or not _ID_RE.fullmatch(assignment_id):
         raise BridgeError("assignment_id contains unsupported characters")
@@ -223,10 +236,10 @@ def validate_assignment(value: dict[str, Any], paths: BridgePaths) -> dict[str, 
 
 def _load_state(paths: BridgePaths, assignment_id: str) -> dict[str, Any]:
     if not paths.state.exists():
-        return {"schema_version": "company_news_bridge_state_v1", "slot_id": SLOT_ID, "assignment_id": assignment_id, "phase": "waiting", "updated_at": _now()}
+        return {"schema_version": "company_news_bridge_state_v1", "slot_id": paths.slot_id, "assignment_id": assignment_id, "phase": "waiting", "updated_at": _now()}
     state = _read_json(paths.state)
     if state.get("assignment_id") != assignment_id:
-        return {"schema_version": "company_news_bridge_state_v1", "slot_id": SLOT_ID, "assignment_id": assignment_id, "phase": "waiting", "updated_at": _now()}
+        return {"schema_version": "company_news_bridge_state_v1", "slot_id": paths.slot_id, "assignment_id": assignment_id, "phase": "waiting", "updated_at": _now()}
     return state
 
 
@@ -246,7 +259,7 @@ def _set_assignment_status(paths: BridgePaths, assignment: dict[str, Any], statu
 
 
 def expected_output_path(paths: BridgePaths, assignment: dict[str, Any]) -> Path:
-    return paths.inbox / f"work_{SLOT_ID}_{assignment['assignment_id']}.json"
+    return paths.inbox / f"work_{paths.slot_id}_{assignment['assignment_id']}.json"
 
 
 def _processed_output_path(paths: BridgePaths, assignment: dict[str, Any]) -> Path:
@@ -342,7 +355,7 @@ def bridge_status(paths: BridgePaths, db_path: Path) -> dict[str, Any]:
     processed = _processed_output_path(paths, assignment)
     state = _load_state(paths, assignment["assignment_id"])
     return {
-        "slot_id": SLOT_ID,
+        "slot_id": paths.slot_id,
         "assignment_id": assignment["assignment_id"],
         "assignment_status": assignment["status"],
         "bridge_phase": state.get("phase", "waiting"),
@@ -465,7 +478,7 @@ def create_assignment(
     selected_ticker, company_name = _company_from_master(master_db, normalize_ticker(ticker) if ticker else None)
     assignment = {
         "schema_version": ASSIGNMENT_SCHEMA,
-        "slot_id": SLOT_ID,
+        "slot_id": paths.slot_id,
         "assignment_id": assignment_id,
         "ticker": selected_ticker,
         "company_name": company_name,
@@ -493,6 +506,7 @@ def main() -> int:
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--work-dir", type=Path)
     parser.add_argument("--inbox", type=Path)
+    parser.add_argument("--slot-id", default=DEFAULT_SLOT_ID)
     parser.add_argument("--db", type=Path, default=ROOT / "decision_db.db")
     subparsers = parser.add_subparsers(dest="command", required=True)
     create = subparsers.add_parser("create")
@@ -506,7 +520,7 @@ def main() -> int:
     process.add_argument("--dry-run-sync", action="store_true")
     args = parser.parse_args()
 
-    paths = BridgePaths.from_root(args.root, args.work_dir, args.inbox)
+    paths = BridgePaths.from_root(args.root, args.work_dir, args.inbox, slot_id=args.slot_id)
     try:
         if args.command == "create":
             result = create_assignment(paths, args.master_db, assignment_id=args.assignment_id, ticker=args.ticker, search_from=args.search_from, search_to=args.search_to)

@@ -1,0 +1,5 @@
+Company News Monitorのslot04を1回だけ処理してください。最初に`C:\Users\takuy\OneDrive\tdnet-excel-input\data\news_work\SCHEDULED_TASK_COMMON_PROMPT.txt`を全文読み、その内容を完全に守ってください。
+
+current assignmentは`C:\Users\takuy\OneDrive\tdnet-excel-input\data\news_work\slots\slot04\assignment.json`です。存在しない、読めない、slot_idがslot04でない、またはstatusがreadyでない場合は何も変更せず終了してください。readyでも`C:\Users\takuy\OneDrive\tdnet-excel-input\data\news_inbox\work_slot04_<assignment_id>.json`が存在する場合は終了してください。
+
+指定された1社だけを調査し、完成JSONを`work_slot04_<assignment_id>.json.tmp`へ保存・自己検証後、同じinbox内の`work_slot04_<assignment_id>.json`へatomic renameしてください。保存後は終了してください。

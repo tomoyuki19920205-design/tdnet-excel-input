@@ -1,0 +1,71 @@
+Company News Monitorの共通調査・出力contractです。slot固有promptで指定されたcurrent assignmentの1社だけを処理してください。ticker、company_name、assignment_id、期間、slot_idを推測または固定しないでください。
+
+statusがreadyの場合だけ、assignmentのticker/company_nameについてsearch_fromからsearch_toまでに公開されたWeb情報を調査してください。会社IRと信頼できる主要ニュースを優先し、受注・受注残、需要・販売数量、価格改定、原材料・人件費・エネルギー・物流コスト、設備投資・生産能力・稼働率、新製品、M&A・事業売却・再編、主要顧客・supplier、競合・業界・規制を必要に応じて確認してください。search_toより未来の情報や別企業の情報をitemにしないでください。
+
+会社業績に関係する新しい定性情報だけを、次の完全なcompany_news_v1 templateへ変換してください。自由形式JSON、fieldの追加・変更・省略、alias、独自enumは禁止です。headline、published_at、source_name、source_urlのいずれかを確認できない情報はitem全体を保存しないでください。重要な新情報または全必須fieldを満たすitemがなければitemsを空配列[]にしてください。
+
+```json
+{
+  "schema_version": "company_news_v1",
+  "run_id": "<current assignment_idと完全一致>",
+  "ticker": "<current assignmentのtickerと完全一致>",
+  "checked_at": "<タイムゾーン付きISO-8601 datetime>",
+  "collector_type": "chatgpt_work",
+  "collector_version": "desktop_work_bridge_v1",
+  "analysis_version": "company_news_v1",
+  "task_id": "<current assignment_idと完全一致>",
+  "sources_checked_count": 0,
+  "items": [
+    {
+      "headline": "<必須・非空の原典または記事見出し>",
+      "published_at": "<必須・タイムゾーン付きISO-8601 datetime>",
+      "source_type": "news",
+      "source_name": "<必須・非空の媒体名または発表主体名>",
+      "source_url": "https://example.com/original-article",
+      "category": "demand",
+      "subcategory": null,
+      "direction": "neutral",
+      "importance": "medium",
+      "earnings_relevance": "likely",
+      "summary": "<必須・非空の短い事実要約>",
+      "why_it_matters": "<必須・非空の会社業績との関係>",
+      "evidence_excerpt": "<短い根拠。取得できない場合はnull>",
+      "temporal_scope": "current",
+      "valid_from": null,
+      "valid_until": null,
+      "temporal_status": "current",
+      "tags": []
+    }
+  ]
+}
+```
+
+items=[]の場合もtop-level fieldはすべて残してください。
+
+許可enum:
+
+- source_type: news | ir | company | government | exchange | research | other
+- category: orders | backlog | pricing | demand | volume | product_mix | margin | raw_material | labor_cost | energy_cost | logistics | capacity | utilization | capex | new_factory | new_product | customer | supplier | competitor | industry | regulation | m_and_a | divestiture | reorganization | large_project | inventory | fx | shareholder_return | guidance | management_comment | other
+- direction: positive | negative | mixed | neutral | unknown
+- importance: high | medium | low
+- earnings_relevance: direct | likely | general | context | unknown
+- temporal_scope: current | fiscal_year | multi_year | ongoing | historical | unknown
+- temporal_status: current | ongoing | historical | expired | unknown
+
+checked_atとpublished_atはtimezone付きISO-8601です。valid_from/valid_untilはnullまたはtimezone付きISO-8601です。source_urlは確認した原典または記事の絶対http/https URLです。sources_checked_countは0以上の整数、tagsは非空文字列だけのarrayです。記事全文、HTML、script、推測値は保存しないでください。
+
+保存前に必ず自己検証してください。
+
+1. JSONとしてparseできる。
+2. schema_versionがcompany_news_v1と完全一致する。
+3. run_idとtask_idがcurrent assignment_idに、tickerがcurrent assignmentのtickerに完全一致する。
+4. itemsがarrayである。情報なしの場合はitems: []である。
+5. 各itemがtemplateの全fieldを持ち、必須field欠損が0である。
+6. headline、source_name、summary、why_it_mattersが非空文字列である。
+7. source_urlが絶対http/https URLである。
+8. datetimeが有効でtimezone付きである。
+9. 全enumが許可値だけである。
+10. title、news_title、source_title、url、event_type、validityその他のalias・未定義fieldが0である。
+11. 各published_atの日付がsearch_fromからsearch_toまでに収まる。
+
+違反itemは修正するかitem全体を削除してください。検証合格前にfinal filenameへrenameしないでください。Workはassignment、queue、state、logs、DB、Supabase、ingest/sync/bridge/worker、Company Viewer、次assignmentを変更・実行してはいけません。

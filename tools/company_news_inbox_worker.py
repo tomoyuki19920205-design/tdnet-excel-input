@@ -33,11 +33,11 @@ from tools.company_news_work_bridge import (
     quarantine_work_output,
     validate_assignment,
 )
-from tools.company_news_queue import QueueError, QueuePaths, reconcile_queue
+from tools.company_news_queue import QueueError, QueuePaths, configured_slot_ids, reconcile_queue
 from tools.ingest_company_news import ingest_file
 from tools.sync_company_news import sync as sync_company_news
 
-WORK_FILENAME_RE = re.compile(r"^work_(slot\d+)_([A-Za-z0-9][A-Za-z0-9._-]{0,127})\.json$")
+WORK_FILENAME_RE = re.compile(r"^work_(slot\d{2})_([A-Za-z0-9][A-Za-z0-9._-]{0,127})\.json$")
 STATE_SCHEMA = "company_news_inbox_worker_state_v1"
 _JST = timezone(timedelta(hours=9))
 
@@ -77,8 +77,8 @@ class WorkerPaths:
             lock=work_dir / "state" / "inbox_worker.lock",
         )
 
-    def bridge(self) -> BridgePaths:
-        return BridgePaths.from_root(self.root, self.work_dir, self.inbox)
+    def bridge(self, slot_id: str = "slot01") -> BridgePaths:
+        return BridgePaths.from_root(self.root, self.work_dir, self.inbox, slot_id=slot_id)
 
 
 def _now() -> str:
@@ -144,8 +144,8 @@ def _worker_lock(paths: WorkerPaths):
         paths.lock.unlink(missing_ok=True)
 
 
-def _read_assignment(paths: WorkerPaths) -> dict[str, Any] | None:
-    bridge = paths.bridge()
+def _read_assignment(paths: WorkerPaths, slot_id: str = "slot01") -> dict[str, Any] | None:
+    bridge = paths.bridge(slot_id)
     if not bridge.assignment.exists():
         return None
     try:
@@ -269,7 +269,9 @@ def run_once(
 
     try:
         state = _load_state(paths)
-        assignment = _read_assignment(paths)
+        queue_paths = QueuePaths.from_values(paths.root, paths.work_dir)
+        slot_ids = configured_slot_ids(queue_paths)
+        assignments = {slot_id: _read_assignment(paths, slot_id) for slot_id in slot_ids}
         candidates = sorted(path for path in paths.inbox.glob("*.json") if path.is_file())
         work_files = [path for path in candidates if path.name.startswith("work_")]
         generic_files = [path for path in candidates if path not in work_files]
@@ -277,18 +279,43 @@ def run_once(
             paths, generic_files, state, sync_func=sync_func, dry_run_sync=dry_run_sync
         )
 
-        bridge = paths.bridge()
-        expected = expected_output_path(bridge, assignment) if assignment else None
         unattended_candidate = False
+        handled_slots: set[str] = set()
         for path in work_files:
-            _append_log(paths, "detected", file=path.name, payload_type="work", trigger=trigger)
-            if assignment is None or expected is None or path.resolve() != expected.resolve():
+            match = WORK_FILENAME_RE.fullmatch(path.name)
+            slot_id = match.group(1) if match else "slot01"
+            bridge = paths.bridge(slot_id)
+            assignment = assignments.get(slot_id)
+            expected = expected_output_path(bridge, assignment) if assignment else None
+            _append_log(
+                paths,
+                "detected",
+                file=path.name,
+                slot_id=slot_id,
+                payload_type="work",
+                trigger=trigger,
+            )
+            if (
+                match is None
+                or slot_id not in assignments
+                or assignment is None
+                or expected is None
+                or path.resolve() != expected.resolve()
+            ):
                 error = BridgeError("Work payload has no matching current assignment")
                 quarantine_work_output(bridge, path, error)
-                _append_log(paths, "quarantined", file=path.name, error=str(error), payload_type="work")
-                results.append({"file": path.name, "status": "quarantined", "error": str(error)})
+                _append_log(
+                    paths,
+                    "quarantined",
+                    file=path.name,
+                    slot_id=slot_id,
+                    error=str(error),
+                    payload_type="work",
+                )
+                results.append({"file": path.name, "slot_id": slot_id, "status": "quarantined", "error": str(error)})
                 failures += 1
                 continue
+            handled_slots.add(slot_id)
             try:
                 result = process_assignment(
                     bridge,
@@ -298,16 +325,40 @@ def run_once(
                     detected_by=trigger,
                 )
                 result["file"] = path.name
+                result["slot_id"] = slot_id
                 results.append(result)
                 if result["status"] in {"completed", "already_completed"}:
-                    _append_log(paths, "completed", file=path.name, assignment_id=assignment["assignment_id"], payload_type="work")
-                    unattended_candidate = trigger == "task_scheduler" and result["status"] == "completed"
+                    _append_log(
+                        paths,
+                        "completed",
+                        file=path.name,
+                        slot_id=slot_id,
+                        assignment_id=assignment["assignment_id"],
+                        payload_type="work",
+                    )
+                    unattended_candidate = unattended_candidate or (
+                        trigger == "task_scheduler" and result["status"] == "completed"
+                    )
             except Exception as exc:
                 failures += 1
-                _append_log(paths, "failed", file=path.name, assignment_id=assignment["assignment_id"], error=str(exc), payload_type="work")
-                results.append({"file": path.name, "status": "failed", "error": str(exc)})
+                _append_log(
+                    paths,
+                    "failed",
+                    file=path.name,
+                    slot_id=slot_id,
+                    assignment_id=assignment["assignment_id"],
+                    error=str(exc),
+                    payload_type="work",
+                )
+                results.append({"file": path.name, "slot_id": slot_id, "status": "failed", "error": str(exc)})
 
-        if assignment is not None and expected is not None and expected not in work_files and assignment["status"] != "completed":
+        # A failed Supabase sync has already moved the payload to processed.
+        # Resume each affected slot independently without waiting for a new file.
+        for slot_id, assignment in assignments.items():
+            if assignment is None or slot_id in handled_slots or assignment["status"] == "completed":
+                continue
+            bridge = paths.bridge(slot_id)
+            expected = expected_output_path(bridge, assignment)
             try:
                 result = process_assignment(
                     bridge,
@@ -317,20 +368,36 @@ def run_once(
                     detected_by=trigger,
                 )
                 if result["status"] != "waiting":
-                    result["file"] = expected.name
+                    result.update({"file": expected.name, "slot_id": slot_id})
                     results.append(result)
-                    _append_log(paths, "completed", file=expected.name, assignment_id=assignment["assignment_id"], payload_type="work_resume")
-                    unattended_candidate = trigger == "task_scheduler" and result["status"] == "completed"
+                    _append_log(
+                        paths,
+                        "completed",
+                        file=expected.name,
+                        slot_id=slot_id,
+                        assignment_id=assignment["assignment_id"],
+                        payload_type="work_resume",
+                    )
+                    unattended_candidate = unattended_candidate or (
+                        trigger == "task_scheduler" and result["status"] == "completed"
+                    )
             except Exception as exc:
                 failures += 1
-                _append_log(paths, "failed", file=expected.name, assignment_id=assignment["assignment_id"], error=str(exc), payload_type="work_resume")
-                results.append({"file": expected.name, "status": "failed", "error": str(exc)})
+                _append_log(
+                    paths,
+                    "failed",
+                    file=expected.name,
+                    slot_id=slot_id,
+                    assignment_id=assignment["assignment_id"],
+                    error=str(exc),
+                    payload_type="work_resume",
+                )
+                results.append({"file": expected.name, "slot_id": slot_id, "status": "failed", "error": str(exc)})
 
         queue_result: dict[str, Any] | None = None
-        queue_paths = QueuePaths.from_values(paths.root, paths.work_dir)
         if queue_paths.entries.exists() and queue_paths.state.exists():
             try:
-                queue_result = reconcile_queue(queue_paths, bridge, paths.db)
+                queue_result = reconcile_queue(queue_paths, paths.bridge(), paths.db)
                 _append_log(paths, "queue_reconciled", queue_result=queue_result.get("status"))
             except (QueueError, BridgeError, OSError, ValueError) as exc:
                 failures += 1
