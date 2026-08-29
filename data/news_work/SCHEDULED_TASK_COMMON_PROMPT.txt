@@ -1,4 +1,4 @@
-Company News Monitorの共通調査・出力contractです。slot固有promptで指定されたcurrent assignmentの1社だけを処理してください。ticker、company_name、assignment_id、期間、slot_idを推測または固定しないでください。
+Company News Monitorの共通調査・出力contractです。task固有promptがrun開始時に作成したimmutable snapshot内のassignmentだけを、記載順に独立して処理してください。snapshot後にassignment fileを再読込せず、途中でslotへ補充された4社目を処理してはいけません。ticker、company_name、assignment_id、期間、slot_idを推測または固定しないでください。
 
 statusがreadyの場合だけ、assignmentのticker/company_nameについてsearch_fromからsearch_toまでに公開されたWeb情報を調査してください。会社IRと信頼できる主要ニュースを優先し、受注・受注残、需要・販売数量、価格改定、原材料・人件費・エネルギー・物流コスト、設備投資・生産能力・稼働率、新製品、M&A・事業売却・再編、主要顧客・supplier、競合・業界・規制を必要に応じて確認してください。search_toより未来の情報や別企業の情報をitemにしないでください。
 
@@ -68,4 +68,23 @@ checked_atとpublished_atはtimezone付きISO-8601です。valid_from/valid_unti
 10. title、news_title、source_title、url、event_type、validityその他のalias・未定義fieldが0である。
 11. 各published_atの日付がsearch_fromからsearch_toまでに収まる。
 
-違反itemは修正するかitem全体を削除してください。検証合格前にfinal filenameへrenameしないでください。Workはassignment、queue、state、logs、DB、Supabase、ingest/sync/bridge/worker、Company Viewer、次assignmentを変更・実行してはいけません。
+違反itemは修正するかitem全体を削除してください。検証合格前にfinal filenameへrenameしないでください。
+
+正常に必要sourceを確認して重要情報がなかった場合だけitems=[]を使用できます。Webアクセス不能、検索失敗、必要source未確認、その他のoperational failureをitems=[]へ偽装してはいけません。そのassignmentについて次のfailure sidecarを`work_failure_<slot_id>_<assignment_id>.json.tmp`へ書き、検証後に`.json`へatomic renameして、残りのsnapshot assignmentを続行してください。
+
+```json
+{
+  "schema_version": "company_news_work_failure_v1",
+  "task_id": "<taskNN>",
+  "slot_id": "<snapshot slot_id>",
+  "assignment_id": "<snapshot assignment_id>",
+  "ticker": "<snapshot ticker>",
+  "queue_id": "<snapshot queue_id>",
+  "error_type": "<非空の短い分類>",
+  "error_message": "<非空の具体的説明>",
+  "sources_attempted": ["<確認を試みたURLまたはsource名>"],
+  "created_at": "<timezone付きISO-8601 datetime>"
+}
+```
+
+1社の失敗で同一snapshot内の正常成果を破棄してはいけません。各社の成功JSONまたはfailure sidecarを独立して保存してください。Workはassignment、queue、queue state、DB、Supabase、ingest/sync/bridge/worker、Company Viewer、次assignmentを変更・実行してはいけません。task run guardとrun metricsはtask固有promptで指定されたbatch helperだけを使用してください。

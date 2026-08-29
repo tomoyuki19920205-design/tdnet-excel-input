@@ -273,3 +273,82 @@ Scheduled Work prompts share
 `data/news_work/SCHEDULED_TASK_COMMON_PROMPT.txt`; each thin slot prompt reads only
 its own `slots/slotNN/assignment.json`. Recommended staggering is slot01 at `:00`,
 slot02 at `:10`, slot03 at `:20`, slot04 at `:30`, and slot05 at `:40` each hour.
+
+## v5: eight batched Scheduled Tasks and 24 logical slots
+
+The 100-company soak uses eight Scheduled Work tasks while retaining one global
+queue and one Windows inbox worker:
+
+```text
+GLOBAL QUEUE
+     |
+24 logical slots
+     |
+8 Scheduled Tasks (each owns 3 slots)
+     |
+Web research (immutable start-of-run snapshot)
+     |
+common news_inbox
+     |
+single Windows worker
+     |
+canonical DB -> Supabase -> NEWS Viewer
+     |
+logical slot refill
+```
+
+The centralized mapping is `task01 -> slot01..03`, `task02 -> slot04..06`,
+through `task08 -> slot22..24`. Queue state persists `task_count`, `batch_size`,
+`logical_slot_count`, and the exact `task_slots` mapping. Legacy one-slot and
+five-slot queues are read as one company per task and retain their existing CLI
+and assignment behavior.
+
+Each task acquires an atomic task-level guard and snapshots its three assignment
+files once with `tools/company_news_task_batch.py`. Only ready assignments in that
+snapshot may be processed. Slot refill can happen immediately after any result,
+but a task never rereads assignments and therefore cannot process a fourth company
+in the same run. A second overlapping run sees the guard and exits; abandoned
+guards become recoverable after two hours. Release records task-run counts outside
+queue state for soak metrics.
+
+Companies in one snapshot are researched sequentially and independently. A valid
+no-news result is a normal `company_news_v1` payload with `items=[]`. An operational
+research failure is instead an atomic `company_news_work_failure_v1` sidecar. The
+single worker validates its task, slot, assignment, ticker, and queue ownership,
+marks only that assignment failed, and lets the existing two-attempt retry policy
+refill the slot. The other two companies remain usable. Late success or failure
+files are quarantined and cannot complete a new assignment.
+
+All queue mutation remains under the global queue lock. Lock order remains
+`worker lock -> global queue lock -> one slot lock`; code never holds two slot
+locks simultaneously. Assignment transitions are durable, so restart recovery
+replays the same assignment IDs without incrementing the sequence twice. Pause
+continues accepting terminal results but suppresses refill; resume fills all idle
+logical slots. Completion requires every company terminal, every slot idle, and no
+pending transition.
+
+The soak sample is deterministic and sector-stratified using fixed hash ordering
+within sectors and round-robin selection across sectors. Companies without a
+successful canonical scan are selected first, avoiding heavy reuse of the recent
+5- and 15-company pilots without considering news volume, stock performance, or
+investment merit.
+
+Initialize the inert 100-company fixture with:
+
+```powershell
+python tools/company_news_queue.py init-soak --count 100 --tasks 8 --batch-size 3
+python tools/company_news_queue.py status
+```
+
+Only after all eight Scheduled Tasks are reviewed should a human run:
+
+```powershell
+python tools/company_news_queue.py activate
+```
+
+Activation fills at most 24 unique companies; later completion refills only the
+freed logical slot. The theoretical ceiling is 24 companies/hour and 576/day.
+Status reports actual elapsed throughput, retry and result counts, per-task and
+per-slot completions, and a 3,800-company duration estimate; theoretical and
+measured values must not be conflated. Weekly queue regeneration is intentionally
+outside v5.

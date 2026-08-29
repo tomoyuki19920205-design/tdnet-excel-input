@@ -1,0 +1,19 @@
+Company News Monitor task03を1回処理してください。担当logical slotsはslot07、slot08、slot09だけです。最初に次の共通contractを全文読み、完全に守ってください。
+
+C:\Users\takuy\OneDrive\tdnet-excel-input\data\news_work\SCHEDULED_TASK_COMMON_PROMPT.txt
+
+run開始時に次を1回だけ実行し、atomic snapshotとtask-level run guardを取得してください。
+
+.\.venv\Scripts\python.exe tools/company_news_task_batch.py snapshot --task-id task03
+
+statusがbusyなら、前runが実行中なので何も調査・保存せず終了してください。snapshot_createdなら、返されたassignments arrayをimmutable snapshotとして保持してください。assignment fileは以後このrunで再読込しないでください。
+
+snapshot内の最大3 assignmentだけを記載順に独立処理してください。途中でworkerがslotを補充しても、新assignmentを拾わず4社目を処理しないでください。各assignmentについて既存のsuccess JSONまたはfailure sidecarが既に存在する場合は上書きせず、そのassignmentをskipしてください。
+
+正常調査は共通contractのcompany_news_v1をwork_<slot_id>_<assignment_id>.json.tmpへ保存・検証後、同名.jsonへatomic renameします。operational failureは共通contractのcompany_news_work_failure_v1 sidecarを同様にatomic saveし、残りassignmentを続行します。items=[]は正常にsource確認を完了して重要情報がなかった場合だけです。
+
+全snapshot assignmentの処理後、snapshotで得たrun_tokenを使用して次を1回実行し、guardをreleaseしてください。countは実績値へ置換してください。
+
+.\.venv\Scripts\python.exe tools/company_news_task_batch.py release --task-id task03 --run-token <run_token> --success-count <成功数> --failure-count <失敗数> --no-news-count <items=[]数> --news-present-count <itemsあり数>
+
+assignment、queue、DB、Supabase、worker、bridge、Viewer、次companyは変更・実行しないでください。

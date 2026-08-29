@@ -31,6 +31,7 @@ from tools.ingest_company_news import ingest_file
 from tools.sync_company_news import sync as sync_company_news
 
 ASSIGNMENT_SCHEMA = "company_news_assignment_v1"
+WORK_FAILURE_SCHEMA = "company_news_work_failure_v1"
 DEFAULT_SLOT_ID = "slot01"
 # Backward-compatible import used by existing callers/tests.
 SLOT_ID = DEFAULT_SLOT_ID
@@ -248,18 +249,31 @@ def _save_state(paths: BridgePaths, state: dict[str, Any], phase: str, **details
     _atomic_json(paths.state, state)
 
 
-def _set_assignment_status(paths: BridgePaths, assignment: dict[str, Any], status: str, error: str | None = None) -> None:
+def _set_assignment_status(
+    paths: BridgePaths,
+    assignment: dict[str, Any],
+    status: str,
+    error: str | None = None,
+    *,
+    news_item_count: int | None = None,
+) -> None:
     assignment["status"] = status
     assignment["updated_at"] = _now()
     if error:
         assignment["error_message"] = error[:1000]
     else:
         assignment.pop("error_message", None)
+    if news_item_count is not None:
+        assignment["news_item_count"] = news_item_count
     _atomic_json(paths.assignment, assignment)
 
 
 def expected_output_path(paths: BridgePaths, assignment: dict[str, Any]) -> Path:
     return paths.inbox / f"work_{paths.slot_id}_{assignment['assignment_id']}.json"
+
+
+def expected_failure_path(paths: BridgePaths, assignment: dict[str, Any]) -> Path:
+    return paths.inbox / f"work_failure_{paths.slot_id}_{assignment['assignment_id']}.json"
 
 
 def _processed_output_path(paths: BridgePaths, assignment: dict[str, Any]) -> Path:
@@ -277,7 +291,7 @@ def _run_exists(db_path: Path, assignment_id: str) -> bool:
         connection.close()
 
 
-def _validate_result(path: Path, assignment: dict[str, Any]) -> None:
+def _validate_result(path: Path, assignment: dict[str, Any]) -> int:
     payload = _read_json(path)
     run = validate_payload(payload)
     if payload.get("run_id") != assignment["assignment_id"]:
@@ -290,6 +304,56 @@ def _validate_result(path: Path, assignment: dict[str, Any]) -> None:
         published = datetime.fromisoformat(event["published_at"]).date()
         if published < search_from or published > search_to:
             raise BridgeError(f"items[{index}].published_at is outside assignment search range")
+    return len(run.events)
+
+
+def record_work_failure(paths: BridgePaths, path: Path) -> dict[str, Any]:
+    with _slot_lock(paths):
+        assignment = validate_assignment(_read_json(paths.assignment), paths)
+        value = _read_json(path)
+        required = {
+            "schema_version", "task_id", "slot_id", "assignment_id", "ticker", "queue_id",
+            "error_type", "error_message", "sources_attempted", "created_at",
+        }
+        missing = sorted(required.difference(value))
+        if missing:
+            raise BridgeError(f"Work failure missing field(s): {', '.join(missing)}")
+        if value["schema_version"] != WORK_FAILURE_SCHEMA:
+            raise BridgeError(f"schema_version must be {WORK_FAILURE_SCHEMA}")
+        for field in ("slot_id", "assignment_id", "ticker", "queue_id"):
+            if value[field] != assignment.get(field):
+                raise BridgeError(f"Work failure {field} does not match current assignment")
+        if value["task_id"] != assignment.get("scheduled_task_id", value["task_id"]):
+            raise BridgeError("Work failure task_id does not own current assignment")
+        if not isinstance(value["error_type"], str) or not value["error_type"].strip():
+            raise BridgeError("Work failure error_type must be a non-empty string")
+        if not isinstance(value["error_message"], str) or not value["error_message"].strip():
+            raise BridgeError("Work failure error_message must be a non-empty string")
+        if not isinstance(value["sources_attempted"], list) or any(
+            not isinstance(source, str) or not source.strip() for source in value["sources_attempted"]
+        ):
+            raise BridgeError("Work failure sources_attempted must contain only non-empty strings")
+        try:
+            created_at = datetime.fromisoformat(str(value["created_at"]).replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise BridgeError("Work failure created_at must use ISO-8601") from exc
+        if created_at.tzinfo is None:
+            raise BridgeError("Work failure created_at must include a timezone")
+        message = f"{value['error_type']}: {value['error_message']}"
+        _set_assignment_status(paths, assignment, "failed", message)
+        state = _load_state(paths, assignment["assignment_id"])
+        _save_state(paths, state, state.get("phase", "waiting"), last_error=message, failure=value)
+        target_dir = paths.inbox / "processed" / "failures"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / path.name
+        if target.exists():
+            if target.read_bytes() != path.read_bytes():
+                raise BridgeError("conflicting duplicate Work failure sidecar")
+            path.unlink()
+        else:
+            shutil.move(str(path), str(target))
+        _append_log(paths, "operational_failure", assignment_id=assignment["assignment_id"], error=message)
+        return {"status": "failure_recorded", "assignment_id": assignment["assignment_id"], "error": message}
 
 
 def _quarantine_result(paths: BridgePaths, path: Path, error: Exception) -> None:
@@ -401,7 +465,7 @@ def process_assignment(
 
         try:
             result_path = output if output.exists() else processed
-            _validate_result(result_path, assignment)
+            news_item_count = _validate_result(result_path, assignment)
             _append_log(paths, "validated", assignment_id=assignment_id, file=result_path.name)
             if state.get("phase") != "ingested" and not _run_exists(db_path, assignment_id):
                 if not output.exists():
@@ -420,7 +484,7 @@ def process_assignment(
                 sync_result = sync_func(db_path, dry_run_sync)
                 _save_state(paths, state, "synced", sync_result=sync_result, dry_run_sync=dry_run_sync)
                 _append_log(paths, "synced", assignment_id=assignment_id, sync_result=sync_result, dry_run_sync=dry_run_sync)
-            _set_assignment_status(paths, assignment, "completed")
+            _set_assignment_status(paths, assignment, "completed", news_item_count=news_item_count)
             state = _load_state(paths, assignment_id)
             _save_state(paths, state, "completed", sync_result=sync_result, dry_run_sync=dry_run_sync)
             _append_log(paths, "completed", assignment_id=assignment_id, sync_result=sync_result, dry_run_sync=dry_run_sync)

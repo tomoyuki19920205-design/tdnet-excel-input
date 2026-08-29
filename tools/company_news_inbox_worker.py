@@ -28,16 +28,27 @@ from tools.company_news_work_bridge import (
     BridgeError,
     BridgePaths,
     _pid_is_alive,
+    expected_failure_path,
     expected_output_path,
     process_assignment,
     quarantine_work_output,
+    record_work_failure,
     validate_assignment,
 )
-from tools.company_news_queue import QueueError, QueuePaths, configured_slot_ids, reconcile_queue
+from tools.company_news_queue import (
+    QueueError,
+    QueuePaths,
+    configured_slot_ids,
+    increment_queue_metrics,
+    reconcile_queue,
+)
 from tools.ingest_company_news import ingest_file
 from tools.sync_company_news import sync as sync_company_news
 
 WORK_FILENAME_RE = re.compile(r"^work_(slot\d{2})_([A-Za-z0-9][A-Za-z0-9._-]{0,127})\.json$")
+WORK_FAILURE_FILENAME_RE = re.compile(
+    r"^work_failure_(slot\d{2})_([A-Za-z0-9][A-Za-z0-9._-]{0,127})\.json$"
+)
 STATE_SCHEMA = "company_news_inbox_worker_state_v1"
 _JST = timezone(timedelta(hours=9))
 
@@ -273,14 +284,60 @@ def run_once(
         slot_ids = configured_slot_ids(queue_paths)
         assignments = {slot_id: _read_assignment(paths, slot_id) for slot_id in slot_ids}
         candidates = sorted(path for path in paths.inbox.glob("*.json") if path.is_file())
-        work_files = [path for path in candidates if path.name.startswith("work_")]
-        generic_files = [path for path in candidates if path not in work_files]
+        failure_files = [path for path in candidates if path.name.startswith("work_failure_")]
+        work_files = [
+            path for path in candidates
+            if path.name.startswith("work_") and path not in failure_files
+        ]
+        generic_files = [path for path in candidates if path not in work_files and path not in failure_files]
         results, failures = _process_generic_files(
             paths, generic_files, state, sync_func=sync_func, dry_run_sync=dry_run_sync
         )
 
         unattended_candidate = False
         handled_slots: set[str] = set()
+        stale_payloads = 0
+        validation_failures = 0
+        sync_retries = 0
+        for path in failure_files:
+            match = WORK_FAILURE_FILENAME_RE.fullmatch(path.name)
+            slot_id = match.group(1) if match else "slot01"
+            bridge = paths.bridge(slot_id)
+            assignment = assignments.get(slot_id)
+            expected = expected_failure_path(bridge, assignment) if assignment else None
+            if (
+                match is None
+                or slot_id not in assignments
+                or assignment is None
+                or expected is None
+                or path.resolve() != expected.resolve()
+            ):
+                error = BridgeError("Work failure has no matching current assignment")
+                quarantine_work_output(bridge, path, error)
+                results.append({"file": path.name, "slot_id": slot_id, "status": "quarantined", "error": str(error)})
+                failures += 1
+                stale_payloads += 1
+                continue
+            handled_slots.add(slot_id)
+            try:
+                result = record_work_failure(bridge, path)
+                result.update({"file": path.name, "slot_id": slot_id})
+                results.append(result)
+                failures += 1
+                _append_log(
+                    paths,
+                    "operational_failure",
+                    file=path.name,
+                    slot_id=slot_id,
+                    assignment_id=assignment["assignment_id"],
+                )
+            except Exception as exc:
+                failures += 1
+                validation_failures += 1
+                if path.exists():
+                    quarantine_work_output(bridge, path, exc)
+                results.append({"file": path.name, "slot_id": slot_id, "status": "failed", "error": str(exc)})
+
         for path in work_files:
             match = WORK_FILENAME_RE.fullmatch(path.name)
             slot_id = match.group(1) if match else "slot01"
@@ -314,6 +371,7 @@ def run_once(
                 )
                 results.append({"file": path.name, "slot_id": slot_id, "status": "quarantined", "error": str(error)})
                 failures += 1
+                stale_payloads += 1
                 continue
             handled_slots.add(slot_id)
             try:
@@ -341,6 +399,18 @@ def run_once(
                     )
             except Exception as exc:
                 failures += 1
+                slot_state_path = bridge.state
+                if slot_state_path.exists():
+                    try:
+                        slot_state = json.loads(slot_state_path.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        slot_state = {}
+                    if slot_state.get("phase") in {"ingested", "synced"}:
+                        sync_retries += 1
+                    else:
+                        validation_failures += 1
+                else:
+                    validation_failures += 1
                 _append_log(
                     paths,
                     "failed",
@@ -383,6 +453,7 @@ def run_once(
                     )
             except Exception as exc:
                 failures += 1
+                sync_retries += 1
                 _append_log(
                     paths,
                     "failed",
@@ -397,6 +468,12 @@ def run_once(
         queue_result: dict[str, Any] | None = None
         if queue_paths.entries.exists() and queue_paths.state.exists():
             try:
+                increment_queue_metrics(
+                    queue_paths,
+                    stale_payload_count=stale_payloads,
+                    validation_failure_count=validation_failures,
+                    sync_retry_count=sync_retries,
+                )
                 queue_result = reconcile_queue(queue_paths, paths.bridge(), paths.db)
                 _append_log(paths, "queue_reconciled", queue_result=queue_result.get("status"))
             except (QueueError, BridgeError, OSError, ValueError) as exc:

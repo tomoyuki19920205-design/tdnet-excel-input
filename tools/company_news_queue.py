@@ -8,6 +8,7 @@ operator explicitly activates them.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -43,6 +44,10 @@ MAX_ATTEMPTS = 2
 PILOT_SIZE = 5
 DEFAULT_SLOT_COUNT = 1
 MAX_SLOT_COUNT = 99
+DEFAULT_BATCH_SIZE = 1
+SOAK_TASK_COUNT = 8
+SOAK_BATCH_SIZE = 3
+SOAK_COMPANY_COUNT = 100
 _JST = timezone(timedelta(hours=9))
 _LOCK_PID_RE = re.compile(r"pid=(\d+)")
 _ASSIGNMENT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -91,6 +96,25 @@ def _slot_ids(slot_count: int) -> list[str]:
     if not isinstance(slot_count, int) or not 1 <= slot_count <= MAX_SLOT_COUNT:
         raise QueueError(f"slot_count must be between 1 and {MAX_SLOT_COUNT}")
     return [f"slot{index:02d}" for index in range(1, slot_count + 1)]
+
+
+def task_slot_mapping(task_count: int, batch_size: int) -> dict[str, list[str]]:
+    if not isinstance(task_count, int) or task_count < 1:
+        raise QueueError("task_count must be a positive integer")
+    if not isinstance(batch_size, int) or batch_size < 1:
+        raise QueueError("batch_size must be a positive integer")
+    slot_ids = _slot_ids(task_count * batch_size)
+    return {
+        f"task{index:02d}": slot_ids[(index - 1) * batch_size:index * batch_size]
+        for index in range(1, task_count + 1)
+    }
+
+
+def _task_for_slot(state: dict[str, Any], slot_id: str) -> str:
+    for task_id, slots in state["task_slots"].items():
+        if slot_id in slots:
+            return task_id
+    raise QueueError(f"no scheduled task owns {slot_id}")
 
 
 def _empty_slot() -> dict[str, Any]:
@@ -195,6 +219,12 @@ def _read_entries(paths: QueuePaths) -> list[dict[str, Any]]:
             raise QueueError("attempt_count must be a non-negative integer")
         value.setdefault("assignment_id", None)
         value.setdefault("assigned_slot", None)
+        value.setdefault("assigned_task", None)
+        value.setdefault("completed_slot", None)
+        value.setdefault("completed_task", None)
+        value.setdefault("first_assigned_at", None)
+        value.setdefault("completed_at", None)
+        value.setdefault("news_item_count", None)
         if value["status"] == "assigned" and not value["assigned_slot"]:
             value["assigned_slot"] = "slot01"  # v3.1 compatibility
         if value["assigned_slot"] is not None and not re.fullmatch(r"slot\d{2}", str(value["assigned_slot"])):
@@ -234,6 +264,22 @@ def _read_state(paths: QueuePaths) -> dict[str, Any]:
     if not isinstance(slot_count, int) or not 1 <= slot_count <= MAX_SLOT_COUNT:
         raise QueueError(f"slot_count must be between 1 and {MAX_SLOT_COUNT}")
     state["slot_count"] = slot_count
+    task_count = state.get("task_count", slot_count)
+    batch_size = state.get("batch_size", DEFAULT_BATCH_SIZE)
+    if not isinstance(task_count, int) or not isinstance(batch_size, int):
+        raise QueueError("task_count and batch_size must be integers")
+    if task_count * batch_size != slot_count:
+        raise QueueError("task_count * batch_size must equal slot_count")
+    expected_mapping = task_slot_mapping(task_count, batch_size)
+    task_slots = state.get("task_slots", expected_mapping)
+    if task_slots != expected_mapping:
+        raise QueueError("task_slots does not match task_count and batch_size")
+    state.update({
+        "task_count": task_count,
+        "batch_size": batch_size,
+        "logical_slot_count": slot_count,
+        "task_slots": task_slots,
+    })
     slots = state.get("slots")
     if not isinstance(slots, dict):
         slots = {
@@ -263,6 +309,12 @@ def _read_state(paths: QueuePaths) -> dict[str, Any]:
         elif existing != legacy:
             raise QueueError(f"conflicting assignment transitions for {slot_id}")
     state["transitions"] = transitions
+    metrics = state.get("metrics")
+    if not isinstance(metrics, dict):
+        metrics = {}
+    for name in ("total_scheduled_runs", "stale_payload_count", "validation_failure_count", "sync_retry_count"):
+        metrics.setdefault(name, 0)
+    state["metrics"] = metrics
     return state
 
 
@@ -314,7 +366,13 @@ def _bridges(base: BridgePaths, slot_count: int) -> dict[str, BridgePaths]:
     }
 
 
-def _master_sample(master_db: Path, limit: int) -> list[dict[str, Any]]:
+def _master_sample(
+    master_db: Path,
+    limit: int,
+    *,
+    db_path: Path | None = None,
+    stratified: bool = False,
+) -> list[dict[str, Any]]:
     if limit < 1:
         raise QueueError("company count must be positive")
     connection = sqlite3.connect(master_db)
@@ -341,7 +399,7 @@ def _master_sample(master_db: Path, limit: int) -> list[dict[str, Any]]:
             )
         else:
             raise QueueError(f"no supported company master table in {master_db}")
-        selected: list[dict[str, Any]] = []
+        candidates: list[dict[str, Any]] = []
         seen: set[str] = set()
         for row in rows:
             raw_ticker = str(row["ticker"]).upper()
@@ -354,17 +412,58 @@ def _master_sample(master_db: Path, limit: int) -> list[dict[str, Any]]:
             company_name = str(row["company_name"]).strip()
             if ticker in seen or not company_name:
                 continue
-            selected.append({
+            candidates.append({
                 "ticker": ticker,
                 "company_name": company_name,
                 "sector": str(row["sector"] or "unknown").strip() or "unknown",
             })
             seen.add(ticker)
-            if len(selected) == limit:
-                break
-        if len(selected) != limit:
-            raise QueueError(f"company master provided only {len(selected)} eligible companies")
-        return selected
+        if len(candidates) < limit:
+            raise QueueError(f"company master provided only {len(candidates)} eligible companies")
+        if not stratified:
+            return candidates[:limit]
+
+        successful: set[str] = set()
+        if db_path and db_path.exists():
+            news = sqlite3.connect(db_path)
+            try:
+                table = news.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='canonical_news_scan_runs'"
+                ).fetchone()
+                if table:
+                    for row in news.execute(
+                        "SELECT DISTINCT ticker FROM canonical_news_scan_runs WHERE status='completed'"
+                    ):
+                        try:
+                            successful.add(normalize_ticker(row[0]))
+                        except NewsValidationError:
+                            continue
+            finally:
+                news.close()
+
+        def round_robin(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            sectors: dict[str, list[dict[str, Any]]] = {}
+            for company in values:
+                sectors.setdefault(company["sector"], []).append(company)
+            for sector_values in sectors.values():
+                sector_values.sort(
+                    key=lambda company: hashlib.sha256(
+                        f"company-news-soak-v1:{company['ticker']}".encode()
+                    ).hexdigest()
+                )
+            ordered: list[dict[str, Any]] = []
+            sector_names = sorted(sectors)
+            index = 0
+            while len(ordered) < len(values):
+                for sector in sector_names:
+                    if index < len(sectors[sector]):
+                        ordered.append(sectors[sector][index])
+                index += 1
+            return ordered
+
+        never_scanned = round_robin([company for company in candidates if company["ticker"] not in successful])
+        previously_scanned = round_robin([company for company in candidates if company["ticker"] in successful])
+        return (never_scanned + previously_scanned)[:limit]
     finally:
         connection.close()
 
@@ -415,12 +514,14 @@ def _assignment_for_entry(
     state: dict[str, Any], entry: dict[str, Any], slot_id: str, db_path: Path, now: datetime
 ) -> tuple[dict[str, Any], int]:
     sequence = state["assignment_sequence"] + 1
+    task_id = _task_for_slot(state, slot_id)
     queue_token = str(state["queue_id"]).split("-", 1)[-1]
     assignment_id = f"{slot_id}-{queue_token}-{sequence:06d}"
     search_from, search_to = _search_period(db_path, entry["ticker"], now)
     return ({
         "schema_version": ASSIGNMENT_SCHEMA,
         "slot_id": slot_id,
+        "scheduled_task_id": task_id,
         "assignment_id": assignment_id,
         "ticker": entry["ticker"],
         "company_name": entry["company_name"],
@@ -459,6 +560,8 @@ def _assignment_entry(
 ) -> dict[str, Any] | None:
     if assignment.get("queue_id") != state.get("queue_id") or assignment.get("slot_id") != slot_id:
         return None
+    if assignment.get("scheduled_task_id", _task_for_slot(state, slot_id)) != _task_for_slot(state, slot_id):
+        return None
     position = assignment.get("queue_position")
     assignment_id = assignment.get("assignment_id")
     if not isinstance(position, int) or not isinstance(assignment_id, str):
@@ -466,6 +569,8 @@ def _assignment_entry(
     entry = next((item for item in entries if item["queue_position"] == position), None)
     slot = state["slots"].get(slot_id, {})
     if entry is None or entry.get("assigned_slot") not in {None, slot_id}:
+        return None
+    if entry.get("assigned_task") not in {None, _task_for_slot(state, slot_id)}:
         return None
     if assignment.get("ticker") != entry.get("ticker") or assignment.get("company_name") != entry.get("company_name"):
         return None
@@ -521,10 +626,12 @@ def _commit_transition(
     entry.update({
         "status": "assigned",
         "assigned_slot": bridge.slot_id,
+        "assigned_task": _task_for_slot(state, bridge.slot_id),
         "attempt_count": assignment["queue_attempt"],
         "assignment_id": assignment["assignment_id"],
         "next_eligible_at": None,
     })
+    entry["first_assigned_at"] = entry.get("first_assigned_at") or assignment["created_at"]
     state["assignment_sequence"] = sequence
     state["slots"][bridge.slot_id] = {
         "queue_position": position,
@@ -533,7 +640,11 @@ def _commit_transition(
         "next_assignment": assignment["assignment_id"],
     }
     if transition.get("activate_queue"):
-        state.update({"queue_status": "active", "fixture_mode": False})
+        state.update({
+            "queue_status": "active",
+            "fixture_mode": False,
+            "started_at": state.get("started_at") or _iso(),
+        })
     state["transitions"].pop(bridge.slot_id, None)
     state["updated_at"] = _iso()
     _atomic_jsonl(paths.entries, entries)
@@ -665,7 +776,12 @@ def _maybe_complete(
     terminal = all(entry["status"] in {"completed", "failed"} for entry in entries)
     if not terminal or state["transitions"] or not _all_slots_inactive(state):
         return False
-    state.update({"queue_status": "completed", "fixture_mode": False, "updated_at": _iso(now)})
+    state.update({
+        "queue_status": "completed",
+        "fixture_mode": False,
+        "completed_at": _iso(now),
+        "updated_at": _iso(now),
+    })
     _write_state(paths, state)
     for bridge in bridges.values():
         _set_bridge_idle(bridge, state, now)
@@ -680,10 +796,25 @@ def initialize_pilot(
     *,
     activate: bool = False,
     now: datetime | None = None,
-    slot_count: int = DEFAULT_SLOT_COUNT,
+    slot_count: int | None = None,
     count: int = PILOT_SIZE,
+    task_count: int | None = None,
+    batch_size: int | None = None,
+    stratified: bool = False,
 ) -> dict[str, Any]:
     timestamp = _now(now)
+    if task_count is None and batch_size is None:
+        slot_count = slot_count or DEFAULT_SLOT_COUNT
+        task_count = slot_count
+        batch_size = DEFAULT_BATCH_SIZE
+    elif task_count is None or batch_size is None:
+        raise QueueError("task_count and batch_size must be specified together")
+    else:
+        calculated_slots = task_count * batch_size
+        if slot_count is not None and slot_count != calculated_slots:
+            raise QueueError("--slots conflicts with --tasks * --batch-size")
+        slot_count = calculated_slots
+    task_slots = task_slot_mapping(task_count, batch_size)
     slot_ids = _slot_ids(slot_count)
     if count < slot_count:
         raise QueueError("company count must be at least slot_count")
@@ -694,18 +825,24 @@ def initialize_pilot(
         if _queue_exists(paths):
             previous_state = _read_state(paths)
             archived_queue = str(_archive_completed_queue(paths, previous_state))
-        companies = _master_sample(master_db, count)
+        companies = _master_sample(master_db, count, db_path=db_path, stratified=stratified)
         entries = [{
             "schema_version": QUEUE_SCHEMA,
             **company,
             "queue_position": index,
             "status": "pending",
             "assigned_slot": None,
+            "assigned_task": None,
             "assignment_id": None,
             "last_checked_at": None,
             "next_eligible_at": None,
             "attempt_count": 0,
             "last_error": None,
+            "completed_slot": None,
+            "completed_task": None,
+            "first_assigned_at": None,
+            "completed_at": None,
+            "news_item_count": None,
         } for index, company in enumerate(companies, start=1)]
         state = {
             "schema_version": QUEUE_STATE_SCHEMA,
@@ -713,6 +850,10 @@ def initialize_pilot(
             "queue_status": "fixture_ready",
             "fixture_mode": True,
             "slot_count": slot_count,
+            "logical_slot_count": slot_count,
+            "task_count": task_count,
+            "batch_size": batch_size,
+            "task_slots": task_slots,
             "slots": {slot_id: _empty_slot() for slot_id in slot_ids},
             "transitions": {},
             "total": len(entries),
@@ -721,6 +862,14 @@ def initialize_pilot(
             "last_completed": None,
             "last_assignment_id": None,
             "created_at": _iso(timestamp),
+            "started_at": None,
+            "completed_at": None,
+            "metrics": {
+                "total_scheduled_runs": 0,
+                "stale_payload_count": 0,
+                "validation_failure_count": 0,
+                "sync_retry_count": 0,
+            },
             "updated_at": _iso(timestamp),
         }
         _sync_legacy_slot01_fields(state)
@@ -736,6 +885,10 @@ def initialize_pilot(
             "queue_id": state["queue_id"],
             "queue_status": state["queue_status"],
             "slot_count": slot_count,
+            "task_count": task_count,
+            "batch_size": batch_size,
+            "logical_slot_count": slot_count,
+            "task_slots": task_slots,
             "companies": companies,
             "assignment": assignments[0] if slot_count == 1 and assignments else None,
             "assignments": assignments,
@@ -810,6 +963,11 @@ def reconcile_queue(
                     entry.update({
                         "status": "completed",
                         "assigned_slot": None,
+                        "assigned_task": None,
+                        "completed_slot": slot_id,
+                        "completed_task": _task_for_slot(state, slot_id),
+                        "completed_at": checked_at,
+                        "news_item_count": assignment.get("news_item_count"),
                         "last_checked_at": checked_at,
                         "next_eligible_at": None,
                         "last_error": None,
@@ -820,6 +978,7 @@ def reconcile_queue(
                             "company_name": entry["company_name"],
                             "checked_at": checked_at,
                             "slot_id": slot_id,
+                            "task_id": _task_for_slot(state, slot_id),
                         },
                         "last_assignment_id": assignment["assignment_id"],
                         "updated_at": _iso(timestamp),
@@ -853,7 +1012,15 @@ def reconcile_queue(
                     retry = _plan_assignment(paths, slot_bridge, entries, state, entry, db_path, timestamp)
                     slot_results[slot_id] = {"status": "retry_assigned", "assignment": retry}
                     continue
-                entry.update({"status": "failed", "assigned_slot": None, "next_eligible_at": None})
+                entry.update({
+                    "status": "failed",
+                    "assigned_slot": None,
+                    "assigned_task": None,
+                    "completed_slot": slot_id,
+                    "completed_task": _task_for_slot(state, slot_id),
+                    "completed_at": _iso(timestamp),
+                    "next_eligible_at": None,
+                })
                 _clear_slot(state, slot_id, "failed")
                 _atomic_jsonl(paths.entries, entries)
                 _write_state(paths, state)
@@ -952,11 +1119,105 @@ def queue_status(paths: QueuePaths, bridge: BridgePaths) -> dict[str, Any]:
     active_entries = [entry for entry in entries if entry["status"] == "assigned"]
     current = active_entries[0] if active_entries else None
     slot01_assignment = _read_assignment_if_present(bridges["slot01"])
+    tasks = {
+        task_id: {slot_id: slots[slot_id] for slot_id in task_slots}
+        for task_id, task_slots in state["task_slots"].items()
+    }
+    started_at = state.get("started_at")
+    ended_at = state.get("completed_at") or _iso()
+    elapsed_seconds: float | None = None
+    if started_at:
+        try:
+            elapsed_seconds = max(
+                0.0,
+                (datetime.fromisoformat(ended_at) - datetime.fromisoformat(started_at)).total_seconds(),
+            )
+        except (TypeError, ValueError):
+            elapsed_seconds = None
+    latencies: list[float] = []
+    for entry in completed:
+        if entry.get("first_assigned_at") and entry.get("completed_at"):
+            try:
+                latencies.append(
+                    max(
+                        0.0,
+                        (
+                            datetime.fromisoformat(entry["completed_at"])
+                            - datetime.fromisoformat(entry["first_assigned_at"])
+                        ).total_seconds(),
+                    )
+                )
+            except (TypeError, ValueError):
+                pass
+    completions_per_task = {
+        task_id: sum(
+            entry["status"] == "completed" and entry.get("completed_task") == task_id
+            for entry in entries
+        )
+        for task_id in state["task_slots"]
+    }
+    completions_per_slot = {
+        slot_id: sum(
+            entry["status"] == "completed" and entry.get("completed_slot") == slot_id
+            for entry in entries
+        )
+        for slot_id in slots
+    }
+    task_run_ids: set[str] = set()
+    for log_path in (paths.work_dir / "task_runs").glob("task??/runs.jsonl"):
+        try:
+            for line in log_path.read_text(encoding="utf-8").splitlines():
+                record = json.loads(line)
+                if record.get("queue_id") == state["queue_id"]:
+                    task_run_ids.add(str(record.get("run_id")))
+        except (OSError, json.JSONDecodeError):
+            continue
+    guard_paths = list((paths.work_dir / "task_runs").glob("task??/active.json"))
+    guard_paths.extend((paths.work_dir / "task_runs").glob("task??/history/*.stale.json"))
+    for guard_path in guard_paths:
+        try:
+            record = json.loads(guard_path.read_text(encoding="utf-8"))
+            if record.get("queue_id") == state["queue_id"] and record.get("run_id"):
+                task_run_ids.add(str(record["run_id"]))
+        except (OSError, json.JSONDecodeError):
+            continue
+    task_run_count = len(task_run_ids)
+    completed_count = len(completed)
+    companies_per_hour = (
+        completed_count / (elapsed_seconds / 3600)
+        if elapsed_seconds and completed_count
+        else None
+    )
+    metrics = {
+        **state["metrics"],
+        "queue_started_at": started_at,
+        "queue_completed_at": state.get("completed_at"),
+        "elapsed_seconds": elapsed_seconds,
+        "retry_count": sum(max(0, entry["attempt_count"] - 1) for entry in entries),
+        "total_scheduled_runs": task_run_count,
+        "company_completions_per_task": completions_per_task,
+        "company_completions_per_slot": completions_per_slot,
+        "average_companies_per_run": completed_count / task_run_count if task_run_count else None,
+        "average_completion_latency_seconds": sum(latencies) / len(latencies) if latencies else None,
+        "max_completion_latency_seconds": max(latencies) if latencies else None,
+        "no_news_count": sum(entry.get("news_item_count") == 0 for entry in completed),
+        "news_present_count": sum(
+            isinstance(entry.get("news_item_count"), int) and entry["news_item_count"] > 0
+            for entry in completed
+        ),
+        "companies_per_hour": companies_per_hour,
+        "companies_per_day": companies_per_hour * 24 if companies_per_hour is not None else None,
+        "estimated_hours_for_3800": 3800 / companies_per_hour if companies_per_hour else None,
+        "estimated_days_for_3800": 3800 / companies_per_hour / 24 if companies_per_hour else None,
+    }
     return {
         "initialized": True,
         "queue_id": state["queue_id"],
         "queue_status": state["queue_status"],
         "slot_count": state["slot_count"],
+        "logical_slot_count": state["slot_count"],
+        "task_count": state["task_count"],
+        "batch_size": state["batch_size"],
         "current_company": current,
         "completed": len(completed),
         "total": len(entries),
@@ -966,6 +1227,8 @@ def queue_status(paths: QueuePaths, bridge: BridgePaths) -> dict[str, Any]:
         "last_completed": state.get("last_completed"),
         "next_assignment": slot01_assignment if slot01_assignment and slot01_assignment.get("status") == "ready" else None,
         "slots": slots,
+        "tasks": tasks,
+        "metrics": metrics,
     }
 
 
@@ -982,6 +1245,24 @@ def pause_queue(paths: QueuePaths) -> dict[str, Any]:
         _atomic_jsonl(paths.entries, entries)
         _write_state(paths, state)
         return {"queue_status": "paused"}
+
+
+def increment_queue_metrics(paths: QueuePaths, **increments: int) -> None:
+    if not _queue_exists(paths):
+        return
+    allowed = {"stale_payload_count", "validation_failure_count", "sync_retry_count"}
+    if set(increments).difference(allowed) or any(
+        not isinstance(value, int) or value < 0 for value in increments.values()
+    ):
+        raise QueueError("invalid queue metric increment")
+    if not any(increments.values()):
+        return
+    with _queue_lock(paths):
+        state = _read_state(paths)
+        for name, value in increments.items():
+            state["metrics"][name] = state["metrics"].get(name, 0) + value
+        state["updated_at"] = _iso()
+        _write_state(paths, state)
 
 
 def resume_queue(paths: QueuePaths, bridge: BridgePaths, db_path: Path, *, activate: bool = False) -> dict[str, Any]:
@@ -1008,7 +1289,12 @@ def resume_queue(paths: QueuePaths, bridge: BridgePaths, db_path: Path, *, activ
             if existing_active_slot:
                 # Existing durable assignments make this a valid active state;
                 # no new slot write is required to complete the resume.
-                state.update({"queue_status": "active", "fixture_mode": False, "updated_at": _iso()})
+                state.update({
+                    "queue_status": "active",
+                    "fixture_mode": False,
+                    "started_at": state.get("started_at") or _iso(),
+                    "updated_at": _iso(),
+                })
                 _atomic_jsonl(paths.entries, entries)
                 _write_state(paths, state)
             assignments, blocked = _fill_idle_slots(
@@ -1069,8 +1355,14 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     init = commands.add_parser("init-pilot")
     init.add_argument("--activate", action="store_true", help="explicitly create real slot assignments")
-    init.add_argument("--slots", type=int, default=DEFAULT_SLOT_COUNT)
+    init.add_argument("--slots", type=int)
+    init.add_argument("--tasks", type=int)
+    init.add_argument("--batch-size", type=int)
     init.add_argument("--count", type=int, default=PILOT_SIZE)
+    soak = commands.add_parser("init-soak")
+    soak.add_argument("--count", type=int, default=SOAK_COMPANY_COUNT)
+    soak.add_argument("--tasks", type=int, default=SOAK_TASK_COUNT)
+    soak.add_argument("--batch-size", type=int, default=SOAK_BATCH_SIZE)
     commands.add_parser("status")
     commands.add_parser("pause")
     commands.add_parser("activate")
@@ -1097,6 +1389,20 @@ def main(argv: list[str] | None = None) -> int:
                 activate=args.activate,
                 slot_count=args.slots,
                 count=args.count,
+                task_count=args.tasks,
+                batch_size=args.batch_size,
+            )
+        elif args.command == "init-soak":
+            result = initialize_pilot(
+                paths,
+                bridge,
+                master_db,
+                db_path,
+                activate=False,
+                count=args.count,
+                task_count=args.tasks,
+                batch_size=args.batch_size,
+                stratified=True,
             )
         elif args.command == "status":
             result = queue_status(paths, bridge)
