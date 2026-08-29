@@ -18,6 +18,35 @@ Company Viewer News Monitor
 future earnings carry research
 ```
 
+## Desktop Work local bridge v1
+
+The first transport smoke test uses one explicit slot and never advances by itself:
+
+```text
+data/news_work/slots/slot01/assignment.json (read-only to Work)
+        ↓ Desktop Work web research
+data/news_inbox/work_slot01_<assignment_id>.json
+        ↓ tools/company_news_work_bridge.py process
+existing company_news_v1 validator + inbox ingestion
+        ↓
+existing SQLite canonical tables + Supabase sync
+        ↓
+STOP after one completed assignment
+```
+
+The coordinator owns assignment status, state, locking, logs, validation, ingestion,
+and sync. Desktop Work must not access the local database, Supabase credentials, or
+the ingestion/sync scripts. `state/slot01.json` makes a post-ingestion sync retry
+resume-safe; exact event and run idempotency remains owned by the canonical layer.
+
+```powershell
+python tools/company_news_work_bridge.py status
+python tools/company_news_work_bridge.py process
+```
+
+`process --dry-run-sync` is reserved for local transport tests. Normal Desktop Work
+output must be finalized with `process` so the existing production sync runs.
+
 The transport layer is replaceable. A local file, cloud endpoint, or ChatGPT Work
 connector can produce the same contract without changing the canonical schema or
 anything downstream.

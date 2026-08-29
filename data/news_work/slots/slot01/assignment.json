@@ -1,0 +1,12 @@
+{
+  "schema_version": "company_news_assignment_v1",
+  "slot_id": "slot01",
+  "assignment_id": "slot01-20260829-smoke-001",
+  "ticker": "7203",
+  "company_name": "トヨタ自動車",
+  "search_from": "2026-08-22",
+  "search_to": "2026-08-29",
+  "status": "ready",
+  "output_directory": "data/news_inbox",
+  "created_at": "2026-08-29T11:58:00+09:00"
+}
