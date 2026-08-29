@@ -26,6 +26,8 @@ if str(ROOT) not in sys.path:
 from lib.news_monitor import NewsValidationError, normalize_ticker
 from tools.company_news_work_bridge import (
     ASSIGNMENT_SCHEMA,
+    ASSIGNMENT_STATUSES,
+    BridgeError,
     BridgePaths,
     _pid_is_alive,
     _slot_lock,
@@ -36,6 +38,7 @@ QUEUE_SCHEMA = "company_news_queue_v1"
 QUEUE_STATE_SCHEMA = "company_news_queue_state_v1"
 QUEUE_STATUSES = frozenset({"fixture_ready", "active", "paused", "completed"})
 ENTRY_STATUSES = frozenset({"pending", "assigned", "completed", "failed", "paused"})
+TERMINAL_ASSIGNMENT_STATUSES = frozenset({"completed", "failed"})
 MAX_ATTEMPTS = 2
 PILOT_SIZE = 5
 _JST = timezone(timedelta(hours=9))
@@ -317,7 +320,66 @@ def _assignment_for_entry(
 def _read_assignment_if_present(bridge: BridgePaths) -> dict[str, Any] | None:
     if not bridge.assignment.exists():
         return None
-    return validate_assignment(_read_object(bridge.assignment), bridge)
+    assignment = _read_object(bridge.assignment)
+    try:
+        return validate_assignment(assignment, bridge)
+    except BridgeError:
+        # Queue activation must fail closed for legacy/non-canonical in-flight
+        # status values such as ``running`` or ``processing``.  They are not
+        # accepted by the bridge contract, but retaining the minimal identity
+        # lets the queue report ``unmanaged_assignment`` instead of overwriting
+        # the slot or mistaking a validation error for an empty slot.
+        status = assignment.get("status")
+        assignment_id = assignment.get("assignment_id")
+        if (
+            isinstance(status, str)
+            and status not in ASSIGNMENT_STATUSES
+            and isinstance(assignment_id, str)
+            and assignment_id
+        ):
+            return assignment
+        raise
+
+
+def _assignment_entry(
+    assignment: dict[str, Any], entries: list[dict[str, Any]], state: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Return the owning queue entry using explicit queue metadata."""
+    if assignment.get("queue_id") != state.get("queue_id"):
+        return None
+    position = assignment.get("queue_position")
+    assignment_id = assignment.get("assignment_id")
+    if not isinstance(position, int) or not isinstance(assignment_id, str):
+        return None
+    entry = next((item for item in entries if item["queue_position"] == position), None)
+    if entry is None:
+        return None
+    if assignment_id not in {entry.get("assignment_id"), state.get("current_assignment_id")}:
+        return None
+    return entry
+
+
+def _archive_terminal_unmanaged_assignment(
+    bridge: BridgePaths, assignment: dict[str, Any]
+) -> Path:
+    """Preserve a terminal legacy assignment before replacing the slot."""
+    assignment_id = assignment.get("assignment_id")
+    if not isinstance(assignment_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", assignment_id):
+        raise QueueError("terminal unmanaged assignment has an invalid assignment_id")
+    preserved_assignment = assignment
+    if bridge.assignment.exists():
+        source_assignment = _read_object(bridge.assignment)
+        if source_assignment.get("assignment_id") == assignment_id:
+            preserved_assignment = source_assignment
+    history = bridge.assignment.parent / "history"
+    target = history / f"{assignment_id}.json"
+    if target.exists():
+        preserved = _read_object(target)
+        if preserved != preserved_assignment:
+            raise QueueError(f"assignment history conflict: {target}")
+        return target
+    _atomic_json(target, preserved_assignment)
+    return target
 
 
 def _commit_assignment_transition(
@@ -338,8 +400,10 @@ def _commit_assignment_transition(
 
     current = _read_assignment_if_present(bridge)
     if current and current["assignment_id"] != assignment["assignment_id"]:
-        if current["status"] in {"ready", "running"}:
+        if current.get("status") not in TERMINAL_ASSIGNMENT_STATUSES:
             raise QueueError(f"slot01 already has an unfinished assignment: {current['assignment_id']}")
+        if _assignment_entry(current, entries, state) is None:
+            _archive_terminal_unmanaged_assignment(bridge, current)
     if not current or current["assignment_id"] != assignment["assignment_id"]:
         _atomic_json(bridge.assignment, assignment)
 
@@ -360,6 +424,8 @@ def _commit_assignment_transition(
         "next_assignment": assignment["assignment_id"],
         "updated_at": _iso(),
     })
+    if transition.get("activate_queue"):
+        state.update({"queue_status": "active", "fixture_mode": False})
     state.pop("transition", None)
     _atomic_jsonl(paths.entries, entries)
     _atomic_json(paths.state, state)
@@ -374,6 +440,8 @@ def _plan_assignment(
     entry: dict[str, Any],
     db_path: Path,
     now: datetime,
+    *,
+    activate_queue: bool = False,
 ) -> dict[str, Any]:
     assignment, sequence = _assignment_for_entry(state, entry, db_path, now)
     state["transition"] = {
@@ -381,6 +449,7 @@ def _plan_assignment(
         "queue_position": entry["queue_position"],
         "assignment_sequence": sequence,
         "assignment": assignment,
+        "activate_queue": activate_queue,
     }
     state["updated_at"] = _iso(now)
     _atomic_json(paths.state, state)
@@ -429,6 +498,71 @@ def _finish_or_assign_next(
     return {"status": "assigned", "assignment": assignment}
 
 
+def _activate_queue_locked(
+    paths: QueuePaths,
+    bridge: BridgePaths,
+    entries: list[dict[str, Any]],
+    state: dict[str, Any],
+    db_path: Path,
+    now: datetime,
+) -> dict[str, Any]:
+    """Activate an inert queue while both the queue and slot locks are held."""
+    recovered = _recover_transition(paths, bridge, entries, state)
+    if recovered:
+        return {"status": "transition_recovered", "assignment": recovered}
+
+    current = _read_assignment_if_present(bridge)
+    if current is not None:
+        owner = _assignment_entry(current, entries, state)
+        if owner is None:
+            if current.get("status") not in TERMINAL_ASSIGNMENT_STATUSES:
+                return {"status": "unmanaged_assignment", "assignment_id": current.get("assignment_id")}
+            _archive_terminal_unmanaged_assignment(bridge, current)
+        else:
+            # A paused queue may already own an assignment.  Resuming it does
+            # not create another assignment; only the queue state changes.
+            for entry in entries:
+                if entry["status"] == "paused":
+                    entry["status"] = "pending"
+            state.update({"queue_status": "active", "fixture_mode": False, "updated_at": _iso(now)})
+            _atomic_jsonl(paths.entries, entries)
+            _atomic_json(paths.state, state)
+            if current.get("status") in TERMINAL_ASSIGNMENT_STATUSES:
+                return {"status": "activation_reconcile_required"}
+            return {"status": "waiting", "assignment_id": current["assignment_id"]}
+
+    for entry in entries:
+        if entry["status"] == "paused":
+            entry["status"] = "pending"
+    pending = next((entry for entry in entries if entry["status"] == "pending"), None)
+    if pending is None:
+        state.update({
+            "queue_status": "completed",
+            "fixture_mode": False,
+            "current_queue_position": None,
+            "current_assignment_id": None,
+            "slot_status": "idle",
+            "next_assignment": None,
+            "updated_at": _iso(now),
+        })
+        _atomic_jsonl(paths.entries, entries)
+        _atomic_json(paths.state, state)
+        _set_bridge_idle(bridge, state, now)
+        return {"status": "queue_completed"}
+
+    assignment = _plan_assignment(
+        paths,
+        bridge,
+        entries,
+        state,
+        pending,
+        db_path,
+        now,
+        activate_queue=True,
+    )
+    return {"status": "assigned", "assignment": assignment}
+
+
 def initialize_pilot(
     paths: QueuePaths,
     bridge: BridgePaths,
@@ -460,8 +594,11 @@ def initialize_pilot(
         state = {
             "schema_version": QUEUE_STATE_SCHEMA,
             "queue_id": f"pilot5-{timestamp:%Y%m%dT%H%M%S%f}",
-            "queue_status": "active" if activate else "fixture_ready",
-            "fixture_mode": not activate,
+            # Even explicit activation starts from an inert state.  The final
+            # active state is committed only after the slot assignment has
+            # been atomically written.
+            "queue_status": "fixture_ready",
+            "fixture_mode": True,
             "total": len(entries),
             "max_attempts": MAX_ATTEMPTS,
             "assignment_sequence": 0,
@@ -479,7 +616,8 @@ def initialize_pilot(
         assignment = None
         if activate:
             with _slot_lock(bridge):
-                assignment = _finish_or_assign_next(paths, bridge, entries, state, db_path, timestamp).get("assignment")
+                activation = _activate_queue_locked(paths, bridge, entries, state, db_path, timestamp)
+                assignment = activation.get("assignment")
         return {"queue_id": state["queue_id"], "queue_status": state["queue_status"], "companies": companies, "assignment": assignment}
 
 
@@ -496,12 +634,12 @@ def reconcile_queue(
     with _queue_lock(paths):
         entries = _read_entries(paths)
         state = _read_state(paths)
-        if state["queue_status"] == "fixture_ready":
-            return {"status": "fixture_ready"}
         with _slot_lock(bridge):
             recovered = _recover_transition(paths, bridge, entries, state)
             if recovered:
                 return {"status": "transition_recovered", "assignment": recovered}
+            if state["queue_status"] == "fixture_ready":
+                return {"status": "fixture_ready"}
             if state["queue_status"] == "completed":
                 return {"status": "queue_completed"}
             assignment = _read_assignment_if_present(bridge)
@@ -509,19 +647,17 @@ def reconcile_queue(
                 if state["queue_status"] == "active":
                     return _finish_or_assign_next(paths, bridge, entries, state, db_path, timestamp)
                 return {"status": state["queue_status"]}
-            if assignment["status"] in {"ready", "running"}:
-                return {"status": "waiting", "assignment_id": assignment["assignment_id"]}
-
-            entry = next(
-                (
-                    item for item in entries
-                    if item.get("assignment_id") == assignment["assignment_id"]
-                    or item["queue_position"] == assignment.get("queue_position")
-                ),
-                None,
-            )
+            entry = _assignment_entry(assignment, entries, state)
             if entry is None:
-                return {"status": "unmanaged_assignment", "assignment_id": assignment["assignment_id"]}
+                if assignment.get("status") not in TERMINAL_ASSIGNMENT_STATUSES:
+                    return {"status": "unmanaged_assignment", "assignment_id": assignment.get("assignment_id")}
+                _archive_terminal_unmanaged_assignment(bridge, assignment)
+                if state["queue_status"] == "active":
+                    return _finish_or_assign_next(paths, bridge, entries, state, db_path, timestamp)
+                return {"status": state["queue_status"], "archived_assignment_id": assignment.get("assignment_id")}
+
+            if assignment.get("status") not in TERMINAL_ASSIGNMENT_STATUSES:
+                return {"status": "waiting", "assignment_id": assignment["assignment_id"]}
 
             if assignment["status"] == "completed":
                 checked_at = _successful_checked_at(db_path, run_id=assignment["assignment_id"])
@@ -606,20 +742,27 @@ def pause_queue(paths: QueuePaths) -> dict[str, Any]:
 
 
 def resume_queue(paths: QueuePaths, bridge: BridgePaths, db_path: Path, *, activate: bool = False) -> dict[str, Any]:
+    reconcile_active = False
+    activation_result: dict[str, Any] | None = None
     with _queue_lock(paths):
         entries = _read_entries(paths)
         state = _read_state(paths)
         if state.get("fixture_mode") and not activate:
             raise QueueError("fixture queue requires resume --activate before it can write slot01")
-        if state["queue_status"] not in {"paused", "fixture_ready"}:
+        if state["queue_status"] == "active":
+            reconcile_active = True
+        elif state["queue_status"] not in {"paused", "fixture_ready"}:
             return {"queue_status": state["queue_status"]}
-        for entry in entries:
-            if entry["status"] == "paused":
-                entry["status"] = "pending"
-        state.update({"queue_status": "active", "fixture_mode": False, "updated_at": _iso()})
-        _atomic_jsonl(paths.entries, entries)
-        _atomic_json(paths.state, state)
-    return reconcile_queue(paths, bridge, db_path)
+        else:
+            with _slot_lock(bridge):
+                activation_result = _activate_queue_locked(paths, bridge, entries, state, db_path, _now())
+    if reconcile_active or (
+        activation_result is not None and activation_result.get("status") == "activation_reconcile_required"
+    ):
+        return reconcile_queue(paths, bridge, db_path)
+    if activation_result is not None:
+        return activation_result
+    raise QueueError("queue resume reached an invalid state")
 
 
 def reset_pilot(paths: QueuePaths, *, confirmation: str) -> dict[str, Any]:

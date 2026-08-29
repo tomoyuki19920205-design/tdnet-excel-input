@@ -76,6 +76,21 @@ def _assignment(bridge: BridgePaths) -> dict:
     return json.loads(bridge.assignment.read_text(encoding="utf-8"))
 
 
+def _legacy_assignment(status: str) -> dict:
+    return {
+        "schema_version": "company_news_assignment_v1",
+        "slot_id": "slot01",
+        "assignment_id": f"legacy-{status}-assignment",
+        "ticker": "7203",
+        "company_name": "Legacy Company",
+        "search_from": "2026-08-23",
+        "search_to": "2026-08-29",
+        "status": status,
+        "output_directory": "data/news_inbox",
+        "created_at": "2026-08-29T14:00:00+09:00",
+    }
+
+
 def _entries(queue: QueuePaths) -> list[dict]:
     return [json.loads(line) for line in queue.entries.read_text(encoding="utf-8").splitlines() if line]
 
@@ -241,6 +256,95 @@ def test_pause_resume_status_and_fixture_reset(tmp_path):
     assert reset_pilot(fixture, confirmation="RESET-PILOT")["status"] == "reset"
     assert not fixture.entries.exists()
     assert not fixture.state.exists()
+
+
+@pytest.mark.parametrize("terminal_status", ["completed", "failed"])
+def test_terminal_unmanaged_assignment_is_preserved_and_activation_continues(tmp_path, terminal_status):
+    queue, bridge, worker, _ = _setup(tmp_path, activate=False)
+    legacy = _legacy_assignment(terminal_status)
+    _write_json(bridge.assignment, legacy)
+
+    result = resume_queue(queue, bridge, worker.db, activate=True)
+
+    assert result["status"] == "assigned"
+    assert result["assignment"]["ticker"] == "1301"
+    assert _assignment(bridge)["queue_id"] == json.loads(queue.state.read_text(encoding="utf-8"))["queue_id"]
+    history = bridge.assignment.parent / "history" / f"{legacy['assignment_id']}.json"
+    assert json.loads(history.read_text(encoding="utf-8")) == legacy
+    state = json.loads(queue.state.read_text(encoding="utf-8"))
+    assert state["queue_status"] == "active"
+    assert state["current_queue_position"] == 1
+
+
+@pytest.mark.parametrize("nonterminal_status", ["ready", "running", "processing"])
+def test_nonterminal_unmanaged_assignment_blocks_activation_without_mutation(tmp_path, nonterminal_status):
+    queue, bridge, worker, _ = _setup(tmp_path, activate=False)
+    legacy = _legacy_assignment(nonterminal_status)
+    _write_json(bridge.assignment, legacy)
+    entries_before = queue.entries.read_bytes()
+    state_before = queue.state.read_bytes()
+
+    result = resume_queue(queue, bridge, worker.db, activate=True)
+
+    assert result == {"status": "unmanaged_assignment", "assignment_id": legacy["assignment_id"]}
+    assert queue.entries.read_bytes() == entries_before
+    assert queue.state.read_bytes() == state_before
+    assert _assignment(bridge) == legacy
+    assert not (bridge.assignment.parent / "history").exists()
+
+
+def test_assignment_write_failure_does_not_mark_queue_active(tmp_path, monkeypatch):
+    queue, bridge, worker, _ = _setup(tmp_path, activate=False)
+    original_atomic_json = queue_module._atomic_json
+
+    def fail_assignment_write(path, value):
+        if path == bridge.assignment:
+            raise OSError("simulated assignment write failure")
+        return original_atomic_json(path, value)
+
+    monkeypatch.setattr(queue_module, "_atomic_json", fail_assignment_write)
+    with pytest.raises(OSError, match="simulated assignment write failure"):
+        resume_queue(queue, bridge, worker.db, activate=True)
+
+    state = json.loads(queue.state.read_text(encoding="utf-8"))
+    assert state["queue_status"] == "fixture_ready"
+    assert state["current_queue_position"] is None
+    assert state["next_assignment"] is None
+    assert state["transition"]["activate_queue"] is True
+    assert not bridge.assignment.exists()
+    assert {entry["status"] for entry in _entries(queue)} == {"pending"}
+
+
+def test_active_partial_state_recovers_on_resume(tmp_path):
+    queue, bridge, worker, _ = _setup(tmp_path, activate=False)
+    state = json.loads(queue.state.read_text(encoding="utf-8"))
+    state.update({"queue_status": "active", "fixture_mode": False})
+    _write_json(queue.state, state)
+
+    result = resume_queue(queue, bridge, worker.db, activate=True)
+
+    assert result["status"] == "assigned"
+    assignment = _assignment(bridge)
+    assert assignment["ticker"] == "1301"
+    recovered = json.loads(queue.state.read_text(encoding="utf-8"))
+    assert recovered["queue_status"] == "active"
+    assert recovered["current_queue_position"] == 1
+    assert recovered["next_assignment"] == assignment["assignment_id"]
+
+
+def test_resume_is_idempotent_after_assignment_activation(tmp_path):
+    queue, bridge, worker, _ = _setup(tmp_path, activate=False)
+    _write_json(bridge.assignment, _legacy_assignment("completed"))
+
+    first = resume_queue(queue, bridge, worker.db, activate=True)
+    first_assignment = _assignment(bridge)
+    second = resume_queue(queue, bridge, worker.db, activate=True)
+
+    assert first["status"] == "assigned"
+    assert second == {"status": "waiting", "assignment_id": first_assignment["assignment_id"]}
+    assert _assignment(bridge) == first_assignment
+    assert json.loads(queue.state.read_text(encoding="utf-8"))["assignment_sequence"] == 1
+    assert _entries(queue)[0]["attempt_count"] == 1
 
 
 def test_live_queue_lock_prevents_operator_mutation(tmp_path, monkeypatch):
