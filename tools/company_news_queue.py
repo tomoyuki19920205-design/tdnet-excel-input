@@ -247,14 +247,21 @@ def _read_state(paths: QueuePaths) -> dict[str, Any]:
     for slot_id in _slot_ids(slot_count):
         slots.setdefault(slot_id, _empty_slot())
     state["slots"] = slots
-    transitions = state.get("transitions")
-    if not isinstance(transitions, dict):
-        transitions = {}
-        if isinstance(state.get("transition"), dict):
-            legacy = dict(state["transition"])
-            assignment = legacy.get("assignment")
-            slot_id = assignment.get("slot_id", "slot01") if isinstance(assignment, dict) else "slot01"
+    raw_transitions = state.get("transitions")
+    transitions = dict(raw_transitions) if isinstance(raw_transitions, dict) else {}
+    if isinstance(state.get("transition"), dict):
+        legacy = dict(state["transition"])
+        assignment = legacy.get("assignment")
+        slot_id = legacy.get("slot_id")
+        if not isinstance(slot_id, str) and isinstance(assignment, dict):
+            slot_id = assignment.get("slot_id")
+        if not isinstance(slot_id, str):
+            slot_id = "slot01"
+        existing = transitions.get(slot_id)
+        if existing is None:
             transitions[slot_id] = legacy
+        elif existing != legacy:
+            raise QueueError(f"conflicting assignment transitions for {slot_id}")
     state["transitions"] = transitions
     return state
 

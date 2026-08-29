@@ -213,7 +213,7 @@ def test_persisted_assignment_transition_is_recovered_after_restart(tmp_path):
     assignment = {
         "schema_version": "company_news_assignment_v1",
         "slot_id": "slot01",
-        "assignment_id": "slot01-20260829T160000000000-000001",
+        "assignment_id": "slot01-persisted-transition-000001",
         "ticker": entries[0]["ticker"],
         "company_name": entries[0]["company_name"],
         "search_from": "2026-08-23",
@@ -233,10 +233,20 @@ def test_persisted_assignment_transition_is_recovered_after_restart(tmp_path):
     _write_json(queue.state, state)
 
     result = reconcile_queue(queue, bridge, worker.db, now=NOW)
+    recovered_assignment = _assignment(bridge)
+    recovered_entries = _entries(queue)
+    recovered_state = json.loads(queue.state.read_text(encoding="utf-8"))
     assert result["status"] == "transition_recovered"
-    assert _assignment(bridge)["assignment_id"] == assignment["assignment_id"]
-    assert _entries(queue)[0]["status"] == "assigned"
-    assert "transition" not in json.loads(queue.state.read_text(encoding="utf-8"))
+    assert result["assignment"]["assignment_id"] == assignment["assignment_id"]
+    assert recovered_assignment["assignment_id"] == assignment["assignment_id"]
+    assert recovered_assignment["queue_position"] == assignment["queue_position"]
+    assert recovered_entries[0]["status"] == "assigned"
+    assert recovered_entries[0]["assigned_slot"] == "slot01"
+    assert recovered_entries[0]["assignment_id"] == assignment["assignment_id"]
+    assert sum(entry["status"] == "assigned" for entry in recovered_entries) == 1
+    assert recovered_state["assignment_sequence"] == 1
+    assert recovered_state["transitions"] == {}
+    assert "transition" not in recovered_state
 
 
 def test_pause_resume_status_and_fixture_reset(tmp_path):
