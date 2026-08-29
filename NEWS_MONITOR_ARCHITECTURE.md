@@ -106,6 +106,59 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/install_company_news_w
 Get-ScheduledTask -TaskName CompanyNewsInboxWorker
 ```
 
+## One-slot company queue and auto advance v3
+
+V3 keeps the successful schema, ingestion, sync, and Viewer path unchanged and
+adds a durable queue before the existing slot assignment:
+
+```text
+data/news_work/queue/company_queue.jsonl + queue_state.json
+        ↓ deterministic pending company
+data/news_work/slots/slot01/assignment.json
+        ↓ same generic Scheduled Work reads current assignment every run
+company_news_v1 JSON → news_inbox
+        ↓ CompanyNewsInboxWorker
+validate → canonical ingest → Supabase sync → assignment completed
+        ↓ only after the completed canonical scan and successful sync
+queue entry completed → atomic next assignment → next company
+        ↓ after the fifth pilot company
+queue_status completed → slot phase idle → STOP
+```
+
+`tools/company_news_queue.py` owns the queue files, queue PID lock, deterministic
+ordering, retry count, scan-history window, and assignment transition journal. The
+worker calls its reconciliation hook only when runtime queue files exist, so an
+uninitialized queue leaves the V2 production path unchanged. Assignment replacement
+uses both the queue lock and the existing Windows-safe slot lock. The transition is
+persisted before the assignment is atomically replaced; after a crash, the next
+worker run either finishes that exact transition or observes the already-written
+assignment, preventing duplicate advance.
+
+The initial search window is seven calendar days inclusive. A future revisit uses
+the last successful `canonical_news_scan_runs.checked_at` date, clamped to the
+current date. An `items=[]` payload is a normal completed scan. A validation-stage
+failure gets one retry (`max_attempts=2`, including the first attempt), then the
+entry becomes `failed` and the queue moves on. A sync-stage failure never advances:
+the existing processed payload and `ingested` bridge state resume sync first.
+
+The tracked `data/news_work/queue/README.md` is documentation only; no production
+queue JSON is committed or initialized by this implementation. `init-pilot` creates
+an inert five-company fixture queue by default. Writing the first real slot01
+assignment requires an explicit human `--activate`:
+
+```powershell
+python tools/company_news_queue.py status
+python tools/company_news_queue.py init-pilot
+python tools/company_news_queue.py resume --activate
+python tools/company_news_queue.py pause
+python tools/company_news_queue.py reset-pilot --confirm RESET-PILOT
+```
+
+The reusable Work instruction is
+`data/news_work/SCHEDULED_TASK_SLOT01_PROMPT.txt`. It contains no ticker, company,
+or assignment ID; every Scheduled run reads `slot01/assignment.json` and exits
+without research or output unless the current status is `ready`.
+
 ## Contract and atomicity
 
 `company_news_v1` requires `run_id`, ticker, timezone-aware `checked_at`, collector

@@ -33,6 +33,7 @@ from tools.company_news_work_bridge import (
     quarantine_work_output,
     validate_assignment,
 )
+from tools.company_news_queue import QueueError, QueuePaths, reconcile_queue
 from tools.ingest_company_news import ingest_file
 from tools.sync_company_news import sync as sync_company_news
 
@@ -325,6 +326,17 @@ def run_once(
                 _append_log(paths, "failed", file=expected.name, assignment_id=assignment["assignment_id"], error=str(exc), payload_type="work_resume")
                 results.append({"file": expected.name, "status": "failed", "error": str(exc)})
 
+        queue_result: dict[str, Any] | None = None
+        queue_paths = QueuePaths.from_values(paths.root, paths.work_dir)
+        if queue_paths.entries.exists() and queue_paths.state.exists():
+            try:
+                queue_result = reconcile_queue(queue_paths, bridge, paths.db)
+                _append_log(paths, "queue_reconciled", queue_result=queue_result.get("status"))
+            except (QueueError, BridgeError, OSError, ValueError) as exc:
+                failures += 1
+                queue_result = {"status": "failed", "error": str(exc)}
+                _append_log(paths, "queue_failed", error=str(exc))
+
         completed = sum(item.get("status") in {"completed", "already_completed"} for item in results)
         quarantined = sum(item.get("status") == "quarantined" for item in results)
         response: dict[str, Any] = {
@@ -336,6 +348,8 @@ def run_once(
             "failed": failures,
             "results": results,
         }
+        if queue_result is not None:
+            response["queue"] = queue_result
         if unattended_candidate:
             response["unattended_local_write_candidate"] = "UNATTENDED_LOCAL_WRITE_PASS"
             _append_log(paths, "unattended_local_write_candidate", verdict="UNATTENDED_LOCAL_WRITE_PASS")
