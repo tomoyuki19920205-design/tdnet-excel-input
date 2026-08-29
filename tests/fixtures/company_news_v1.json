@@ -1,0 +1,25 @@
+{
+  "schema_version": "company_news_v1",
+  "run_id": "fixture-run-001",
+  "ticker": "7203",
+  "checked_at": "2026-08-29T11:00:00+09:00",
+  "collector_type": "manual_fixture",
+  "sources_checked_count": 2,
+  "items": [{
+    "headline": "Fixture headline",
+    "published_at": "2026-08-29T09:00:00+09:00",
+    "source_name": "Fixture Source",
+    "source_url": "https://example.com/news/1?utm_source=test",
+    "category": "orders",
+    "direction": "positive",
+    "importance": "high",
+    "earnings_relevance": "likely",
+    "summary": "Fixture summary.",
+    "why_it_matters": "Fixture rationale.",
+    "evidence_excerpt": "Short fixture excerpt.",
+    "temporal_scope": "current",
+    "valid_from": null,
+    "valid_until": null,
+    "tags": ["AI", "data_center"]
+  }]
+}
