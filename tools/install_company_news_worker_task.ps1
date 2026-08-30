@@ -41,15 +41,18 @@ if (-not (Test-Path -LiteralPath $workerScript -PathType Leaf)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($PythonPath)) {
-    $venvPython = Join-Path $RepositoryRoot ".venv\Scripts\python.exe"
-    if (Test-Path -LiteralPath $venvPython -PathType Leaf) {
-        $PythonPath = $venvPython
+    $venvPythonw = Join-Path $RepositoryRoot ".venv\Scripts\pythonw.exe"
+    if (Test-Path -LiteralPath $venvPythonw -PathType Leaf) {
+        $PythonPath = $venvPythonw
     }
     else {
-        $PythonPath = (Get-Command python.exe -ErrorAction Stop).Source
+        $PythonPath = (Get-Command pythonw.exe -ErrorAction Stop).Source
     }
 }
 $PythonPath = (Resolve-Path -LiteralPath $PythonPath).Path
+if ([System.IO.Path]::GetFileName($PythonPath) -ine "pythonw.exe") {
+    throw "CompanyNewsInboxWorker requires non-console pythonw.exe: $PythonPath"
+}
 
 function ConvertTo-QuotedTaskArgument {
     param([Parameter(Mandatory = $true)][string]$Value)
@@ -106,7 +109,7 @@ $task = New-ScheduledTask `
     -Trigger $trigger `
     -Settings $settings `
     -Principal $principal `
-    -Description "Poll company_news_v1 inbox payloads and run canonical ingest/sync."
+    -Description "Poll company_news_v1 inbox payloads and run canonical ingest/sync without a console window."
 
 if ($PSCmdlet.ShouldProcess($TaskName, "Register scheduled task")) {
     Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null

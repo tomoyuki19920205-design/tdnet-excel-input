@@ -70,7 +70,10 @@ assignment completed → processed archive → STOP
 bounded scan. Windows Task Scheduler supplies polling; there is no resident watcher
 and no automatic next-company advance. `tools/install_company_news_worker_task.ps1`
 registers `CompanyNewsInboxWorker` for the current interactive user, uses the repo
-`.venv`, sets a one-minute repetition interval, and configures `IgnoreNew`. A second
+`.venv`'s non-console `pythonw.exe`, sets a one-minute repetition interval, and
+configures `IgnoreNew`. The action keeps the repository root as its working directory,
+so interactive-logon polling does not create a terminal window or steal foreground
+focus. A second
 PID-sentinel lock provides application-level overlap protection. PID liveness uses
 non-destructive Windows process handles and closes every handle after polling.
 
@@ -78,8 +81,11 @@ The worker isolates invalid payloads in `quarantine`, archives successful and ex
 duplicate payloads under `processed`, and persists generic-run sync resume state in
 `data/news_work/state/inbox_worker.json`. Work assignment resume state stays in
 `state/slot01.json`. JSONL logs record `detected`, `validated`, `ingested`, `synced`,
-`completed`, `quarantined`, and `failed`. Assignment status changes to `completed`
-only after sync succeeds.
+`completed`, `quarantined`, and `failed`, plus invocation-level `worker_started`,
+`worker_error`, and `worker_finished` records. The finish record includes trigger,
+exit status, detected/completed/quarantined/failed counts, and processed count so
+background failures remain auditable without stdout or stderr. Assignment status
+changes to `completed` only after sync succeeds.
 
 The Scheduled Work prompt is `data/news_work/SCHEDULED_TASK_SMOKE_PROMPT.txt`.
 The task must run in the local project, read the current assignment on every run,

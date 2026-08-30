@@ -109,6 +109,12 @@ def _append_log(paths: WorkerPaths, event: str, **details: Any) -> None:
         handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
 
 
+def _write_console(stream: Any, value: str) -> None:
+    """Write optional CLI output without requiring a console (pythonw has none)."""
+    if stream is not None:
+        print(value, file=stream)
+
+
 def _load_state(paths: WorkerPaths) -> dict[str, Any]:
     if not paths.state.exists():
         return {"schema_version": STATE_SCHEMA, "runs": {}, "updated_at": _now()}
@@ -513,13 +519,33 @@ def main() -> int:
         parser.error("--once is required; v2 intentionally has no resident watch loop")
 
     paths = WorkerPaths.from_values(args.root, args.work_dir, args.inbox, args.db)
+    _append_log(paths, "worker_started", trigger=args.trigger)
     try:
         result = run_once(paths, dry_run_sync=args.dry_run_sync, trigger=args.trigger)
     except (WorkerError, BridgeError, NewsValidationError, OSError, ValueError) as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
+        _append_log(paths, "worker_error", trigger=args.trigger, error=str(exc), error_type=type(exc).__name__)
+        _append_log(paths, "worker_finished", trigger=args.trigger, exit_status=1, processed_count=0)
+        _write_console(sys.stderr, f"ERROR: {exc}")
         return 1
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 1 if result["failed"] else 0
+    except Exception as exc:
+        _append_log(paths, "worker_error", trigger=args.trigger, error=str(exc), error_type=type(exc).__name__)
+        _append_log(paths, "worker_finished", trigger=args.trigger, exit_status=1, processed_count=0)
+        raise
+    exit_status = 1 if result["failed"] else 0
+    processed_count = result["completed"] + result["quarantined"]
+    _append_log(
+        paths,
+        "worker_finished",
+        trigger=args.trigger,
+        exit_status=exit_status,
+        processed_count=processed_count,
+        detected=result["detected"],
+        completed=result["completed"],
+        quarantined=result["quarantined"],
+        failed=result["failed"],
+    )
+    _write_console(sys.stdout, json.dumps(result, ensure_ascii=False, indent=2))
+    return exit_status
 
 
 if __name__ == "__main__":

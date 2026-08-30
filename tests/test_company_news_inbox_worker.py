@@ -192,6 +192,38 @@ def test_windows_pid_probe_is_non_destructive_and_reports_liveness():
     assert worker_module._pid_is_alive(0xFFFFFFFF) is False
 
 
+def test_optional_console_output_accepts_pythonw_streams():
+    worker_module._write_console(None, "pythonw has no console stream")
+
+
+def test_main_writes_invocation_audit_log(tmp_path, monkeypatch):
+    result = {
+        "status": "completed",
+        "trigger": "task_scheduler",
+        "detected": 2,
+        "completed": 1,
+        "quarantined": 1,
+        "failed": 0,
+        "results": [],
+    }
+    monkeypatch.setattr(worker_module, "run_once", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr(
+        worker_module.sys,
+        "argv",
+        ["company_news_inbox_worker.py", "--once", "--root", str(tmp_path), "--trigger", "task_scheduler"],
+    )
+
+    assert worker_module.main() == 0
+
+    paths = WorkerPaths.from_values(tmp_path)
+    records = [json.loads(line) for line in paths.log.read_text(encoding="utf-8").splitlines()]
+    assert records[0]["event"] == "worker_started"
+    assert records[0]["trigger"] == "task_scheduler"
+    assert records[-1]["event"] == "worker_finished"
+    assert records[-1]["exit_status"] == 0
+    assert records[-1]["processed_count"] == 2
+
+
 def test_generic_payload_sync_resume_and_processed_ignore(tmp_path):
     worker = WorkerPaths.from_values(tmp_path, db=tmp_path / "news.db")
     generic = _payload("generic-run-001")
