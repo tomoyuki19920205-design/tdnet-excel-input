@@ -1,33 +1,28 @@
 #!/usr/bin/env python3
-"""Independent hourly scheduler for TSE 33-sector weekly research."""
+"""Queue one TSE 33-sector weekly assignment on each scheduled hourly run."""
 from __future__ import annotations
 
 import argparse
 import json
 import os
 import re
-import shutil
 import sys
-import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from lib.pipeline.db import load_env
 from lib.sector_weekly import (
     JST, SCHEMA_VERSION, REPORT_TYPE, SectorValidationError, WeeklyWindow, connect_sector_db,
-    dedupe_key, ensure_week_runs, in_retry_window, iso_seconds, mark_run, now_jst,
-    scheduled_sector, sector_name, upsert_report, validate_report, weekly_window,
+    dedupe_key, in_retry_window, iso_seconds, now_jst, scheduled_sector, sector_name,
+    sector_research_context, weekly_window,
 )
-from tools.sync_sector_weekly import sync as sync_sector_weekly
-from tools.company_news_work_bridge import _pid_is_alive
+from lib.sector_weekly_work import enqueue_assignment, enqueue_retry_candidate
 
 PROMPT_PATH = ROOT / "config" / "sector_weekly_prompt.txt"
-DEFAULT_INBOX = ROOT / "data" / "sector_report_inbox"
 DEFAULT_LOG = ROOT / "data" / "sector_weekly" / "scheduler.jsonl"
 DEFAULT_LOCK = ROOT / "data" / "sector_weekly" / "scheduler.lock"
 
@@ -36,36 +31,42 @@ class SchedulerError(RuntimeError):
     pass
 
 
-class SyncError(SchedulerError):
-    pass
+def _pid_is_alive(pid: int) -> bool:
+    """Probe a scheduler PID without signalling it on Windows."""
+    if pid <= 0:
+        return False
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    open_process = kernel32.OpenProcess
+    open_process.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    open_process.restype = wintypes.HANDLE
+    wait_for_single_object = kernel32.WaitForSingleObject
+    wait_for_single_object.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    wait_for_single_object.restype = wintypes.DWORD
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+    handle = open_process(0x00100000, False, pid)
+    if not handle:
+        return ctypes.get_last_error() != 87
+    try:
+        return wait_for_single_object(handle, 0) == 0x00000102
+    finally:
+        close_handle(handle)
 
 
-REPORT_JSON_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["importance", "direction", "summary_bullets", "watchlist_companies", "next_week_watchpoints", "missed_candidates", "full_report_md", "sources"],
-    "properties": {
-        "importance": {"type": "string", "enum": ["A+", "A", "B", "C"]},
-        "direction": {"type": "string", "enum": ["positive", "negative", "mixed", "neutral"]},
-        "summary_bullets": {"type": "array", "minItems": 3, "maxItems": 6, "items": {"type": "string"}},
-        "watchlist_companies": {"type": "array", "maxItems": 20, "items": {
-            "type": "object", "additionalProperties": False, "required": ["code", "name", "direction"],
-            "properties": {"code": {"type": "string"}, "name": {"type": "string"}, "direction": {"type": "string", "enum": ["positive", "negative", "mixed", "neutral"]}},
-        }},
-        "next_week_watchpoints": {"type": "array", "maxItems": 20, "items": {"type": "string"}},
-        "missed_candidates": {"type": "array", "maxItems": 20, "items": {"type": "string"}},
-        "full_report_md": {"type": "string"},
-        "sources": {"type": "array", "minItems": 1, "maxItems": 100, "items": {
-            "type": "object", "additionalProperties": False,
-            "required": ["title", "url", "source_name", "source_type", "published_at"],
-            "properties": {
-                "title": {"type": "string"}, "url": {"type": "string"}, "source_name": {"type": "string"},
-                "source_type": {"type": "string", "enum": ["company_ir", "government", "regulator", "industry_association", "news", "market_data", "other"]},
-                "published_at": {"type": ["string", "null"]},
-            },
-        }},
-    },
-}
 
 
 def _log(path: Path, event: str, **details: Any) -> None:
@@ -100,39 +101,9 @@ def scheduler_lock(path: Path):
 
 def build_prompt(code: int, window: WeeklyWindow) -> str:
     return PROMPT_PATH.read_text(encoding="utf-8").format(
-        sector_code=code, sector_name=sector_name(code), period_start=iso_seconds(window.period_start), period_end=iso_seconds(window.period_end)
+        sector_code=code, sector_name=sector_name(code), sector_context=sector_research_context(code),
+        period_start=iso_seconds(window.period_start), period_end=iso_seconds(window.period_end),
     )
-
-
-def call_openai(code: int, window: WeeklyWindow, *, model: str | None = None) -> dict[str, Any]:
-    load_env()
-    if not os.environ.get("OPENAI_API_KEY"):
-        raise SchedulerError("OPENAI_API_KEY is not configured")
-    from openai import OpenAI
-
-    client = OpenAI(timeout=300.0, max_retries=0)
-    response = client.responses.create(
-        model=model or os.environ.get("SECTOR_WEEKLY_MODEL", "gpt-5.4"),
-        instructions="一次資料中心の日本株業界アナリストとして、指定期間とJSON schemaを厳守してください。",
-        input=build_prompt(code, window),
-        tools=[{"type": "web_search"}],
-        tool_choice="auto",
-        include=["web_search_call.action.sources"],
-        reasoning={"effort": "high"},
-        max_tool_calls=40,
-        max_output_tokens=30000,
-        text={"format": {"type": "json_schema", "name": "sector_weekly_report", "strict": True, "schema": REPORT_JSON_SCHEMA}},
-        store=False,
-    )
-    if getattr(response, "status", None) != "completed" or not response.output_text:
-        raise SchedulerError(f"incomplete OpenAI response: {getattr(response, 'status', None)}")
-    try:
-        value = json.loads(response.output_text)
-    except json.JSONDecodeError as exc:
-        raise SectorValidationError("OpenAI response was not valid JSON") from exc
-    if not isinstance(value, dict):
-        raise SectorValidationError("OpenAI response must be an object")
-    return value
 
 
 def clean_summary_bullets(bullets: Any) -> Any:
@@ -150,10 +121,32 @@ def clean_summary_bullets(bullets: Any) -> Any:
     return cleaned
 
 
+def clean_full_report_md(value: Any, code: int) -> Any:
+    if not isinstance(value, str):
+        return value
+    report = value.strip()
+    report = re.sub(r"\s*\(\[[^\]]+\]\(https?://[^)]+\)\)\s*", " ", report)
+    report = re.sub(r"\[[^\]]+\]\(https?://[^)]+\)", "", report)
+    # Generated reports occasionally concatenate a Markdown heading to the preceding
+    # paragraph. Restore only unambiguous heading boundaries before validation.
+    report = re.sub(r"(?<!\n) (?=#{1,3} [^#\n])", "\n\n", report)
+    lines = report.splitlines()
+    expected_title = f"# 【東証33業種週次】{sector_name(code)}"
+    if lines and lines[0].startswith("# "):
+        lines[0] = expected_title
+    else:
+        lines.insert(0, expected_title)
+        lines.insert(1, "")
+    return "\n".join(line.rstrip() for line in lines).strip()
+
+
 def assemble_payload(content: dict[str, Any], code: int, window: WeeklyWindow, generated_at: datetime | None = None) -> dict[str, Any]:
     key = dedupe_key(window, code)
     content = dict(content)
     content["summary_bullets"] = clean_summary_bullets(content.get("summary_bullets"))
+    content["full_report_md"] = clean_full_report_md(content.get("full_report_md"), code)
+    if content.get("importance") != "A+" and isinstance(content["full_report_md"], str) and len(content["full_report_md"]) > 5500:
+        raise SectorValidationError("full_report_md exceeds the 5,500-character normal limit")
     return {
         "schema_version": SCHEMA_VERSION, "report_type": REPORT_TYPE, "sector_code": code,
         "sector_name": sector_name(code), "period_start": iso_seconds(window.period_start), "period_end": iso_seconds(window.period_end),
@@ -161,105 +154,27 @@ def assemble_payload(content: dict[str, Any], code: int, window: WeeklyWindow, g
     }
 
 
-def _atomic_payload(inbox: Path, payload: dict[str, Any]) -> Path:
-    inbox.mkdir(parents=True, exist_ok=True)
-    name = f"sector_weekly_{payload['dedupe_key'].replace(':', '_')}.json"
-    target = inbox / name
-    temporary = target.with_suffix(".json.tmp")
-    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    os.replace(temporary, target)
-    return target
-
-
-def _archive(path: Path, inbox: Path) -> Path:
-    destination = inbox / "processed"
-    destination.mkdir(parents=True, exist_ok=True)
-    target = destination / path.name
-    if target.exists():
-        target = destination / f"{path.stem}.{int(time.time())}{path.suffix}"
-    shutil.move(str(path), str(target))
-    return target
-
-
-def _sync(db_path: Path, dry_run_sync: bool) -> dict[str, int]:
-    try:
-        return sync_sector_weekly(db_path, dry_run_sync)
-    except Exception as exc:
-        raise SyncError(str(exc)) from exc
-
-
-def choose_retry(conn, window: WeeklyWindow) -> int | None:
-    row = conn.execute(
-        "SELECT sector_code FROM canonical_sector_report_runs WHERE period_end=? AND status IN ('pending','retry_pending','failed') "
-        "ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'retry_pending' THEN 1 ELSE 2 END, sector_code LIMIT 1",
-        (iso_seconds(window.period_end),),
-    ).fetchone()
-    return int(row[0]) if row else None
-
-
-def run_sector(
-    code: int,
-    window: WeeklyWindow,
-    *,
-    db_path: Path,
-    inbox: Path = DEFAULT_INBOX,
-    log_path: Path = DEFAULT_LOG,
-    model: str | None = None,
-    dry_run_sync: bool = False,
-    research_func: Callable[[int, WeeklyWindow], dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    key = dedupe_key(window, code)
-    conn = connect_sector_db(db_path)
-    try:
-        ensure_week_runs(conn, window)
-        existing = conn.execute("SELECT status,last_error_type FROM canonical_sector_report_runs WHERE run_id=?", (key,)).fetchone()
-        if existing and existing[0] == "success":
-            return {"status": "already_success", "sector_code": code, "dedupe_key": key}
-        if existing and existing[0] == "retry_pending" and existing[1] == "SyncError":
-            sync_result = _sync(db_path, dry_run_sync)
-            mark_run(conn, key, "success")
-            sync_result = _sync(db_path, dry_run_sync)
-            return {"status": "success", "sector_code": code, "dedupe_key": key, "sync_result": sync_result, "resumed_sync": True}
-        last_error: Exception | None = None
-        for attempt in range(1, 4):
-            mark_run(conn, key, "running", increment=True)
-            try:
-                content = research_func(code, window) if research_func else call_openai(code, window, model=model)
-                payload = assemble_payload(content, code, window)
-                validated = validate_report(payload, expected_code=code, expected_window=window)
-                path = _atomic_payload(inbox, payload)
-                upsert_report(conn, validated)
-                archived = _archive(path, inbox)
-                mark_run(conn, key, "success")
-                sync_result = _sync(db_path, dry_run_sync)
-                _log(log_path, "success", sector_code=code, dedupe_key=key, attempt=attempt, archived=str(archived), sync_result=sync_result)
-                return {"status": "success", "sector_code": code, "dedupe_key": key, "attempt": attempt, "sync_result": sync_result}
-            except Exception as exc:
-                last_error = exc
-                _log(log_path, "attempt_failed", sector_code=code, dedupe_key=key, attempt=attempt, error_type=type(exc).__name__, error=str(exc))
-                if attempt < 3:
-                    time.sleep(5 * attempt)
-        row = conn.execute("SELECT attempt_count FROM canonical_sector_report_runs WHERE run_id=?", (key,)).fetchone()
-        terminal = bool(row and int(row[0]) >= 6)
-        mark_run(conn, key, "failed" if terminal else "retry_pending", error=last_error)
-        try:
-            _sync(db_path, dry_run_sync)
-        except Exception as sync_exc:
-            _log(log_path, "failure_sync_failed", sector_code=code, error=str(sync_exc))
-        return {"status": "failed" if terminal else "retry_pending", "sector_code": code, "dedupe_key": key, "error": str(last_error)}
-    finally:
-        conn.close()
+def _public_assignment(row: dict[str, Any] | None) -> dict[str, Any]:
+    if row is None:
+        return {}
+    return {
+        "assignment_id": row["assignment_id"],
+        "stable_key": row["stable_key"],
+        "sector_code": row["sector_code"],
+        "sector_name": row["sector_name"],
+        "period_start": row["period_start"],
+        "period_end": row["period_end"],
+        "assignment_status": row["status"],
+        "attempt_count": row["attempt_count"],
+    }
 
 
 def run_scheduled(
     at: datetime,
     *,
     db_path: Path,
-    inbox: Path = DEFAULT_INBOX,
     log_path: Path = DEFAULT_LOG,
     lock_path: Path = DEFAULT_LOCK,
-    model: str | None = None,
-    dry_run_sync: bool = False,
     not_before: datetime | None = None,
 ) -> dict[str, Any]:
     with scheduler_lock(lock_path):
@@ -269,27 +184,50 @@ def run_scheduled(
         code = scheduled_sector(at)
         conn = connect_sector_db(db_path)
         try:
-            ensure_week_runs(conn, window)
-            if code is None and in_retry_window(at):
-                code = choose_retry(conn, window)
+            if code is not None:
+                assignment, created = enqueue_assignment(conn, code, window, now=at)
+                event = "assignment_queued" if created else "assignment_already_exists"
+            elif in_retry_window(at):
+                assignment, created = enqueue_retry_candidate(conn, window, now=at)
+                event = "retry_queued" if assignment else "retry_complete"
+            else:
+                assignment = None
+                created = False
+                event = "not_scheduled"
         finally:
             conn.close()
-        if code is None:
-            return {"status": "not_scheduled", "at": iso_seconds(at), "period_start": iso_seconds(window.period_start), "period_end": iso_seconds(window.period_end)}
-        return run_sector(code, window, db_path=db_path, inbox=inbox, log_path=log_path, model=model, dry_run_sync=dry_run_sync)
+        result = {
+            "status": "queued" if assignment else event,
+            "created": created,
+            "at": iso_seconds(at),
+            "period_start": iso_seconds(window.period_start),
+            "period_end": iso_seconds(window.period_end),
+            **_public_assignment(assignment),
+        }
+        _log(log_path, event, **result)
+        return result
+
+
+def enqueue_manual(code: int, at: datetime, *, db_path: Path, log_path: Path = DEFAULT_LOG) -> dict[str, Any]:
+    window = weekly_window(at)
+    conn = connect_sector_db(db_path)
+    try:
+        assignment, created = enqueue_assignment(conn, code, window, now=at)
+    finally:
+        conn.close()
+    result = {"status": "queued", "created": created, **_public_assignment(assignment)}
+    _log(log_path, "manual_assignment_queued" if created else "manual_assignment_already_exists", **result)
+    return result
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", type=Path, default=ROOT / "decision_db.db")
-    parser.add_argument("--inbox", type=Path, default=DEFAULT_INBOX)
     parser.add_argument("--log", type=Path, default=DEFAULT_LOG)
     parser.add_argument("--lock", type=Path, default=DEFAULT_LOCK)
     parser.add_argument("--at", help="timezone-aware ISO-8601 test time")
-    parser.add_argument("--sector", type=int, help="manual/smoke sector override")
-    parser.add_argument("--model")
+    parser.add_argument("--sector", type=int, help="manual assignment override")
     parser.add_argument("--not-before", help="do not schedule automatic sectors before this timezone-aware timestamp")
-    parser.add_argument("--dry-run-sync", action="store_true")
     args = parser.parse_args()
     at = datetime.fromisoformat(args.at.replace("Z", "+00:00")) if args.at else now_jst()
     if at.tzinfo is None:
@@ -299,12 +237,12 @@ def main() -> int:
         parser.error("--not-before must include a timezone")
     try:
         if args.sector:
-            result = run_sector(args.sector, weekly_window(at), db_path=args.db, inbox=args.inbox, log_path=args.log, model=args.model, dry_run_sync=args.dry_run_sync)
+            result = enqueue_manual(args.sector, at, db_path=args.db, log_path=args.log)
         else:
-            result = run_scheduled(at, db_path=args.db, inbox=args.inbox, log_path=args.log, lock_path=args.lock, model=args.model, dry_run_sync=args.dry_run_sync, not_before=not_before)
+            result = run_scheduled(at, db_path=args.db, log_path=args.log, lock_path=args.lock, not_before=not_before)
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0 if result["status"] not in {"failed", "retry_pending"} else 1
-    except SchedulerError as exc:
+        return 0
+    except (SchedulerError, SectorValidationError, ValueError) as exc:
         print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
         return 2
 

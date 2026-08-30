@@ -381,15 +381,24 @@ tables, sync, and viewer read models are unchanged.
 Windows Task Scheduler: SectorWeeklyScheduler (hourly)
         ↓ no-op outside eligible JST hours
 Saturday 06:00..Sunday 14:00 → exactly one fixed TSE sector
-        ↓ OpenAI Responses API + Web Search + strict JSON schema
-data/sector_report_inbox (atomic JSON, then processed archive)
+        ↓ idempotent dedicated assignment queue only
+SQLite sector_weekly_work_assignments (ready)
+        ↓ ChatGPT Scheduled Task: Sector Weekly Worker (weekends hourly, +5 minutes)
+claim one → ChatGPT-plan Web research → structured JSON + Markdown → atomic submit
+        ↓ Sector Weekly dedicated bridge
+owner/lease/sector/period/schema validation → canonical upsert → Supabase sync
         ↓
 SQLite canonical_sector_reports + canonical_sector_report_runs
-        ↓ dedicated sync
 Supabase canonical tables → api_latest_news_stream
         ↓
 company-memo-app /news (company news + sector reports)
 ```
+
+The Windows scheduler never calls an LLM, Web Search, OpenAI SDK, Responses API,
+or an API key. The ChatGPT task performs research within the user's ChatGPT plan
+and uses only `tools/sector_weekly_work_bridge.py` claim/start/submit/fail operations.
+The Sector Weekly queue, payload namespace, schema, lease, and canonical tables are
+separate from Company News Task01-08.
 
 All 33 reports in one weekly batch share the exact period from the prior Saturday
 06:00:00 JST through the current Saturday 05:59:59 JST. The scheduler derives the
@@ -399,6 +408,7 @@ or failed-sector retry, one sector per run. The stable identity is
 `sector_weekly:<Saturday period-end date>:<two-digit sector code>`.
 
 The installer records a `--not-before` value for the first Saturday 06:00 after
-installation, so enabling the task after the production smoke does not backfill
-or partially execute the current week. Invalid JSON, missing Markdown, invalid
-sources, or a period mismatch is rejected before canonical insertion.
+installation and registers the task disabled unless `-Enable` is explicitly supplied.
+Invalid JSON, owner mismatch, lease expiry, missing Markdown, invalid sources, or a
+period mismatch is rejected before assignment completion. Same-payload resubmission
+is idempotent; conflicting payloads fail closed.

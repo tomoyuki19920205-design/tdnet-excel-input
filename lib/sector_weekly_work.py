@@ -1,0 +1,408 @@
+"""Dedicated local assignment queue for ChatGPT-driven Sector Weekly research."""
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import sqlite3
+import uuid
+from contextlib import contextmanager
+from datetime import datetime, timedelta
+from typing import Any, Iterator
+
+from lib.sector_weekly import (
+    JST,
+    REPORT_TYPE,
+    WeeklyWindow,
+    dedupe_key,
+    ensure_week_runs,
+    iso_seconds,
+    now_jst,
+    sector_name,
+)
+
+ASSIGNMENT_SCHEMA = "sector_weekly_assignment_v1"
+ASSIGNMENT_STATUSES = frozenset({
+    "pending", "ready", "claimed", "running", "success", "retry_pending", "failed",
+})
+ACTIVE_STATUSES = frozenset({"claimed", "running"})
+MAX_ATTEMPTS = 3
+DEFAULT_LEASE_SECONDS = 55 * 60
+_OWNER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+
+
+class SectorWorkError(RuntimeError):
+    pass
+
+
+def _now(value: datetime | None = None) -> datetime:
+    result = value or now_jst()
+    if result.tzinfo is None:
+        raise SectorWorkError("work timestamps must include a timezone")
+    return result.astimezone(JST)
+
+
+def _parse(value: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, ValueError) as exc:
+        raise SectorWorkError("assignment contains an invalid timestamp") from exc
+    if parsed.tzinfo is None:
+        raise SectorWorkError("assignment timestamp must include a timezone")
+    return parsed.astimezone(JST)
+
+
+def _validate_owner(owner: str) -> str:
+    if not isinstance(owner, str) or not _OWNER_RE.fullmatch(owner):
+        raise SectorWorkError("claim owner must match the safe owner pattern")
+    return owner
+
+
+def assignment_id_for(stable_key: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"tse-sector-weekly-work:{stable_key}"))
+
+
+def payload_hash(payload: Any) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _row(value: sqlite3.Row | None) -> dict[str, Any] | None:
+    return dict(value) if value is not None else None
+
+
+@contextmanager
+def _immediate(conn: sqlite3.Connection) -> Iterator[None]:
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        yield
+    except Exception:
+        conn.rollback()
+        raise
+    else:
+        conn.commit()
+
+
+def get_assignment(conn: sqlite3.Connection, assignment_id: str) -> dict[str, Any] | None:
+    return _row(conn.execute(
+        "SELECT * FROM sector_weekly_work_assignments WHERE assignment_id=?", (assignment_id,),
+    ).fetchone())
+
+
+def get_assignment_by_key(conn: sqlite3.Connection, stable_key: str) -> dict[str, Any] | None:
+    return _row(conn.execute(
+        "SELECT * FROM sector_weekly_work_assignments WHERE stable_key=?", (stable_key,),
+    ).fetchone())
+
+
+def enqueue_assignment(
+    conn: sqlite3.Connection,
+    code: int,
+    window: WeeklyWindow,
+    *,
+    now: datetime | None = None,
+    available_at: datetime | None = None,
+) -> tuple[dict[str, Any], bool]:
+    timestamp = _now(now)
+    available = _now(available_at or timestamp)
+    ensure_week_runs(conn, window)
+    key = dedupe_key(window, code)
+    assignment_id = assignment_id_for(key)
+    initial_status = "ready" if available <= timestamp else "pending"
+    created = False
+    with _immediate(conn):
+        existing = get_assignment_by_key(conn, key)
+        if existing is None:
+            conn.execute(
+                "INSERT INTO sector_weekly_work_assignments "
+                "(assignment_id,schema_version,stable_key,sector_code,sector_name,period_start,period_end,status,"
+                "attempt_count,available_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    assignment_id, ASSIGNMENT_SCHEMA, key, code, sector_name(code),
+                    iso_seconds(window.period_start), iso_seconds(window.period_end), initial_status, 0,
+                    iso_seconds(available), iso_seconds(timestamp), iso_seconds(timestamp),
+                ),
+            )
+            created = True
+        elif existing["status"] in {"pending", "retry_pending"} and available <= timestamp:
+            conn.execute(
+                "UPDATE sector_weekly_work_assignments SET status='ready',available_at=?,updated_at=? "
+                "WHERE assignment_id=?",
+                (iso_seconds(available), iso_seconds(timestamp), existing["assignment_id"]),
+            )
+        result = get_assignment(conn, assignment_id)
+    if result is None:
+        raise SectorWorkError("failed to read back enqueued assignment")
+    return result, created
+
+
+def _set_run_state(
+    conn: sqlite3.Connection,
+    stable_key: str,
+    status: str,
+    timestamp: datetime,
+    *,
+    attempt_count: int | None = None,
+    error_type: str | None = None,
+    error_message: str | None = None,
+) -> None:
+    started_at = iso_seconds(timestamp) if status == "running" else None
+    completed_at = iso_seconds(timestamp) if status in {"success", "failed"} else None
+    fields = [
+        "status=?", "last_error_type=?", "last_error_message=?",
+        "started_at=COALESCE(?,started_at)", "completed_at=?", "updated_at=?",
+    ]
+    values: list[Any] = [status, error_type, error_message, started_at, completed_at, iso_seconds(timestamp)]
+    if attempt_count is not None:
+        fields.append("attempt_count=?")
+        values.append(attempt_count)
+    values.append(stable_key)
+    conn.execute(
+        f"UPDATE canonical_sector_report_runs SET {','.join(fields)} WHERE run_id=?", values,
+    )
+
+
+def _recover_expired_in_transaction(conn: sqlite3.Connection, timestamp: datetime) -> int:
+    rows = conn.execute(
+        "SELECT assignment_id,stable_key,attempt_count FROM sector_weekly_work_assignments "
+        "WHERE status IN ('claimed','running') AND lease_expires_at IS NOT NULL AND lease_expires_at<=?",
+        (iso_seconds(timestamp),),
+    ).fetchall()
+    for row in rows:
+        terminal = int(row["attempt_count"]) >= MAX_ATTEMPTS
+        status = "failed" if terminal else "retry_pending"
+        conn.execute(
+            "UPDATE sector_weekly_work_assignments SET status=?,available_at=?,claim_owner=NULL,claimed_at=NULL,"
+            "lease_expires_at=NULL,last_error_type='LeaseExpired',last_error_message='worker lease expired before submit',"
+            "updated_at=? WHERE assignment_id=?",
+            (status, iso_seconds(timestamp), iso_seconds(timestamp), row["assignment_id"]),
+        )
+        _set_run_state(
+            conn, row["stable_key"], status if status == "failed" else "retry_pending", timestamp,
+            attempt_count=int(row["attempt_count"]), error_type="LeaseExpired",
+            error_message="worker lease expired before submit",
+        )
+    return len(rows)
+
+
+def recover_expired_leases(conn: sqlite3.Connection, *, now: datetime | None = None) -> int:
+    timestamp = _now(now)
+    with _immediate(conn):
+        return _recover_expired_in_transaction(conn, timestamp)
+
+
+def claim_next(
+    conn: sqlite3.Connection,
+    owner: str,
+    *,
+    now: datetime | None = None,
+    lease_seconds: int = DEFAULT_LEASE_SECONDS,
+) -> dict[str, Any] | None:
+    owner = _validate_owner(owner)
+    if not isinstance(lease_seconds, int) or not 60 <= lease_seconds <= 60 * 60:
+        raise SectorWorkError("lease_seconds must be between 60 and 3600")
+    timestamp = _now(now)
+    lease_expires = timestamp + timedelta(seconds=lease_seconds)
+    with _immediate(conn):
+        _recover_expired_in_transaction(conn, timestamp)
+        active = conn.execute(
+            "SELECT assignment_id FROM sector_weekly_work_assignments "
+            "WHERE status IN ('claimed','running') AND lease_expires_at>? LIMIT 1",
+            (iso_seconds(timestamp),),
+        ).fetchone()
+        if active is not None:
+            return None
+        conn.execute(
+            "UPDATE sector_weekly_work_assignments SET status='ready',updated_at=? "
+            "WHERE status IN ('pending','retry_pending') AND available_at<=?",
+            (iso_seconds(timestamp), iso_seconds(timestamp)),
+        )
+        selected = conn.execute(
+            "SELECT * FROM sector_weekly_work_assignments WHERE status='ready' AND available_at<=? "
+            "ORDER BY CASE WHEN attempt_count=0 THEN 0 ELSE 1 END,period_end,sector_code LIMIT 1",
+            (iso_seconds(timestamp),),
+        ).fetchone()
+        if selected is None:
+            return None
+        attempts = int(selected["attempt_count"]) + 1
+        cursor = conn.execute(
+            "UPDATE sector_weekly_work_assignments SET status='claimed',attempt_count=?,claim_owner=?,claimed_at=?,"
+            "lease_expires_at=?,started_at=NULL,last_error_type=NULL,last_error_message=NULL,"
+            "submitted_payload_hash=NULL,updated_at=? "
+            "WHERE assignment_id=? AND status='ready'",
+            (
+                attempts, owner, iso_seconds(timestamp), iso_seconds(lease_expires),
+                iso_seconds(timestamp), selected["assignment_id"],
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise SectorWorkError("assignment claim lost an atomic race")
+        _set_run_state(conn, selected["stable_key"], "running", timestamp, attempt_count=attempts)
+        return get_assignment(conn, selected["assignment_id"])
+
+
+def mark_running(
+    conn: sqlite3.Connection,
+    assignment_id: str,
+    owner: str,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    owner = _validate_owner(owner)
+    timestamp = _now(now)
+    with _immediate(conn):
+        row = get_assignment(conn, assignment_id)
+        if row is None:
+            raise SectorWorkError("assignment not found")
+        if row["status"] == "running" and row["claim_owner"] == owner:
+            return row
+        if row["status"] != "claimed" or row["claim_owner"] != owner:
+            raise SectorWorkError("assignment is not claimed by this owner")
+        if _parse(row["lease_expires_at"]) <= timestamp:
+            raise SectorWorkError("assignment lease has expired")
+        conn.execute(
+            "UPDATE sector_weekly_work_assignments SET status='running',started_at=?,updated_at=? WHERE assignment_id=?",
+            (iso_seconds(timestamp), iso_seconds(timestamp), assignment_id),
+        )
+        return get_assignment(conn, assignment_id) or row
+
+
+def fail_assignment(
+    conn: sqlite3.Connection,
+    assignment_id: str,
+    owner: str,
+    error: Exception,
+    *,
+    now: datetime | None = None,
+    retry_delay_seconds: int = 0,
+) -> dict[str, Any]:
+    owner = _validate_owner(owner)
+    timestamp = _now(now)
+    available = timestamp + timedelta(seconds=max(0, retry_delay_seconds))
+    with _immediate(conn):
+        row = get_assignment(conn, assignment_id)
+        if row is None:
+            raise SectorWorkError("assignment not found")
+        if row["status"] == "success":
+            return row
+        if row["claim_owner"] != owner or row["status"] not in ACTIVE_STATUSES:
+            raise SectorWorkError("assignment failure owner does not match active claim")
+        terminal = int(row["attempt_count"]) >= MAX_ATTEMPTS
+        status = "failed" if terminal else "retry_pending"
+        error_type = type(error).__name__
+        message = str(error)[:2000]
+        conn.execute(
+            "UPDATE sector_weekly_work_assignments SET status=?,available_at=?,claim_owner=NULL,claimed_at=NULL,"
+            "lease_expires_at=NULL,last_error_type=?,last_error_message=?,updated_at=? WHERE assignment_id=?",
+            (status, iso_seconds(available), error_type, message, iso_seconds(timestamp), assignment_id),
+        )
+        _set_run_state(
+            conn, row["stable_key"], status if status == "failed" else "retry_pending", timestamp,
+            attempt_count=int(row["attempt_count"]), error_type=error_type, error_message=message,
+        )
+        return get_assignment(conn, assignment_id) or row
+
+
+def complete_assignment(
+    conn: sqlite3.Connection,
+    assignment_id: str,
+    owner: str,
+    submitted_hash: str,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    owner = _validate_owner(owner)
+    if not re.fullmatch(r"[0-9a-f]{64}", submitted_hash):
+        raise SectorWorkError("submitted payload hash must be SHA-256 hex")
+    timestamp = _now(now)
+    with _immediate(conn):
+        row = get_assignment(conn, assignment_id)
+        if row is None:
+            raise SectorWorkError("assignment not found")
+        if row["status"] == "success":
+            if row["submitted_payload_hash"] != submitted_hash:
+                raise SectorWorkError("completed assignment received a conflicting payload")
+            return row
+        if row["claim_owner"] != owner or row["status"] not in ACTIVE_STATUSES:
+            raise SectorWorkError("submit owner does not match active claim")
+        if _parse(row["lease_expires_at"]) <= timestamp:
+            raise SectorWorkError("assignment lease expired before submit")
+        conn.execute(
+            "UPDATE sector_weekly_work_assignments SET status='success',completed_at=?,submitted_payload_hash=?,"
+            "lease_expires_at=NULL,last_error_type=NULL,last_error_message=NULL,updated_at=? WHERE assignment_id=?",
+            (iso_seconds(timestamp), submitted_hash, iso_seconds(timestamp), assignment_id),
+        )
+        _set_run_state(
+            conn, row["stable_key"], "success", timestamp, attempt_count=int(row["attempt_count"]),
+        )
+        return get_assignment(conn, assignment_id) or row
+
+
+def prepare_submission(
+    conn: sqlite3.Connection,
+    assignment_id: str,
+    owner: str,
+    submitted_hash: str,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Record a validated payload and expose canonical success for the sync phase.
+
+    The assignment remains leased and active until the external sync succeeds.
+    A sync error can therefore transition it normally to retry_pending.
+    """
+    owner = _validate_owner(owner)
+    if not re.fullmatch(r"[0-9a-f]{64}", submitted_hash):
+        raise SectorWorkError("submitted payload hash must be SHA-256 hex")
+    timestamp = _now(now)
+    with _immediate(conn):
+        row = get_assignment(conn, assignment_id)
+        if row is None:
+            raise SectorWorkError("assignment not found")
+        if row["claim_owner"] != owner or row["status"] not in ACTIVE_STATUSES:
+            raise SectorWorkError("submit owner does not match active claim")
+        if _parse(row["lease_expires_at"]) <= timestamp:
+            raise SectorWorkError("assignment lease expired before submit")
+        conn.execute(
+            "UPDATE sector_weekly_work_assignments SET submitted_payload_hash=?,updated_at=? WHERE assignment_id=?",
+            (submitted_hash, iso_seconds(timestamp), assignment_id),
+        )
+        _set_run_state(
+            conn, row["stable_key"], "success", timestamp, attempt_count=int(row["attempt_count"]),
+        )
+        return get_assignment(conn, assignment_id) or row
+
+
+def enqueue_retry_candidate(
+    conn: sqlite3.Connection,
+    window: WeeklyWindow,
+    *,
+    now: datetime | None = None,
+) -> tuple[dict[str, Any] | None, bool]:
+    timestamp = _now(now)
+    recover_expired_leases(conn, now=timestamp)
+    ensure_week_runs(conn, window)
+    for code in range(1, 34):
+        key = dedupe_key(window, code)
+        row = get_assignment_by_key(conn, key)
+        if row is None:
+            return enqueue_assignment(conn, code, window, now=timestamp)
+        if row["status"] == "success":
+            continue
+        if row["status"] in ACTIVE_STATUSES:
+            continue
+        if row["status"] == "ready":
+            return row, False
+        with _immediate(conn):
+            conn.execute(
+                "UPDATE sector_weekly_work_assignments SET status='ready',available_at=?,claim_owner=NULL,"
+                "claimed_at=NULL,lease_expires_at=NULL,updated_at=? WHERE assignment_id=?",
+                (iso_seconds(timestamp), iso_seconds(timestamp), row["assignment_id"]),
+            )
+            _set_run_state(
+                conn, key, "retry_pending" if int(row["attempt_count"]) else "pending", timestamp,
+                attempt_count=int(row["attempt_count"]),
+            )
+            refreshed = get_assignment(conn, row["assignment_id"])
+        return refreshed, False
+    return None, False

@@ -4,6 +4,7 @@ param(
     [string]$RepositoryRoot,
     [string]$PythonPath,
     [string]$DatabasePath,
+    [switch]$Enable,
     [switch]$RunNow,
     [switch]$Uninstall
 )
@@ -44,11 +45,15 @@ $action = New-ScheduledTaskAction -Execute $PythonPath -Argument $argumentString
 $trigger = New-ScheduledTaskTrigger -Once -At $nextHour -RepetitionInterval (New-TimeSpan -Hours 1)
 $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 59)
 $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
-$task = New-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description "Generate one TSE sector weekly report per eligible JST hour; no-op outside the weekly window."
+$task = New-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description "Queue one Sector Weekly assignment per eligible JST hour; never runs LLM or Web Search."
 
 if ($PSCmdlet.ShouldProcess($TaskName, "Register scheduled task")) {
     Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
-    if ($RunNow) { Start-ScheduledTask -TaskName $TaskName }
+    if (-not $Enable) { Disable-ScheduledTask -TaskName $TaskName | Out-Null }
+    if ($RunNow) {
+        if (-not $Enable) { throw "-RunNow requires -Enable" }
+        Start-ScheduledTask -TaskName $TaskName
+    }
 }
 
 [pscustomobject]@{
@@ -59,5 +64,6 @@ if ($PSCmdlet.ShouldProcess($TaskName, "Register scheduled task")) {
     Arguments = $argumentString
     MultipleInstances = "IgnoreNew"
     ExistingCompanyNewsTasksChanged = $false
+    Enabled = [bool]$Enable
     NotBefore = $notBefore
 }

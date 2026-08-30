@@ -28,6 +28,65 @@ SECTORS: tuple[str, ...] = (
     "証券・商品先物取引業", "保険業", "その他金融業", "不動産業", "サービス業",
 )
 
+OUTSIDE_IN_SECTORS = frozenset({
+    "鉱業", "石油・石炭製品", "化学", "ゴム製品", "ガラス・土石製品", "鉄鋼", "非鉄金属",
+    "機械", "電気機器", "輸送用機器", "精密機器", "海運業", "空運業",
+})
+
+OUTSIDE_IN_WORKFLOW = """この業種は海外需給の影響が大きいグローバル業種です。日本企業名や国内ニュースから検索を始めず、必ず次の順序でoutside-in調査を行ってください。
+1. 世界の価格・需給・在庫・設備投資・政策・規制を横断探索する
+2. 海外大手企業の決算、CAPEX、生産計画、稼働率、受注、値上げ、顧客認定を確認する
+3. 今週変化した重要ドライバー候補を抽出する
+4. 日本企業名が書かれていない海外材料も含め、日本上場企業のどの事業へ波及するかmappingする
+5. 数量、単価、稼働率、感応度等から売上・営業利益への影響を可能な範囲で定量化する
+6. 会社計画・市場予想・株価への織り込みを評価する
+7. 仮説が崩れる反証を確認する"""
+
+MINING_NONFERROUS_PLAYBOOK = """【鉱業・非鉄金属プレイブック】
+毎週、金・銀・銅だけで終わらず、原油、天然ガス、LNG、一般炭、原料炭、ウラン、鉄鉱石、銅、金、銀、亜鉛、鉛、アルミ、ニッケル、錫、リチウム、コバルト、マンガン、モリブデン、バナジウム、レアアース、アンチモン、タングステン、ガリウム、ゲルマニウム、チタン、タンタル、ニオブ、プラチナ・パラジウム等のPGM、その他日本上場企業に利益感応度があるマイナー金属をスクリーニングしてください。
+日本企業へのmappingへ進む前に、少なくとも次の5群を別々の検索queryで確認してください。(1) エネルギー・バルク、(2) LME等のベースメタル、(3) リチウム・コバルト・マンガン等の電池金属、(4) レアアース・アンチモン・タングステン・ガリウム・ゲルマニウム・チタン・タンタル・ニオブ等の重要/マイナー金属、(5) 金銀・PGM。各群について、採用材料がなくても確認元と「重要変動なし」または不採用理由をmissed_candidatesへ残してください。5群の検索証跡がない状態で調査完了としてはいけません。
+さらに、ExxonMobil・Chevron・Shell・QatarEnergy等の海外エネルギー大手と、BHP・Rio Tinto・Vale・Glencore・Freeport-McMoRan・Anglo American・Kazatomprom等の海外鉱山大手から、今週の決算、CAPEX、生産計画、稼働率または供給障害を確認してください。採用材料がない場合も、確認した企業群と不採用理由をmissed_candidatesへ残し、確認した一次資料をsourcesへ含めてください。
+候補の目安は5営業日で概ね±8%以上、20営業日で概ね±15%以上、取引所在庫・現物プレミアム・TC/RC・加工賃の急変、鉱山/製錬所の停止・事故・ストライキ、輸出規制・関税・国家備蓄・制裁、海外大手の生産/CAPEX計画変更です。閾値は機械的な除外条件ではなく、値動きが小さくても日本企業の利益感応度が大きければ採用してください。"""
+
+SEMICONDUCTOR_PLAYBOOK = """【半導体・電気機器・精密機器・機械プレイブック】
+少なくとも次を分けて海外動向を確認してください。
+- メモリ: Samsung Electronics、SK hynix、Micron等
+- Foundry: TSMC、Samsung、Intel、UMC、GlobalFoundries、SMIC等
+- 製造装置: ASML、Applied Materials、Lam Research、KLA等
+- 後工程・テスト: ASE、Amkor、PTI等
+- パッケージ基板: 台湾・韓国の主要基板メーカー
+- 光通信: Broadcom、Marvell、Semtech、Coherent、Lumentum等
+- 受動部品: Samsung Electro-Mechanics、Yageo等
+- AIサーバー・ネットワーク: NVIDIA、AMD、主要ODM・スイッチ企業
+- HDD、NAND、データセンター電源・冷却・送電設備
+メモリはSamsung Electronics、SK hynix、Micronをそれぞれ個別に検索し、3社すべてについて対象期間内の一次資料または「確認したが採用材料なし」という不採用理由をmissed_candidatesへ残してください。会社名を列挙しただけで確認済みとしてはいけません。他の各サブセクターも、採用しない場合は確認先と不採用理由をmissed_candidatesへ残してください。
+CAPEX変更は投資される工程・装置、日本企業の受注までの時間差、売上・営業利益感応度、会社計画への包含まで追ってください。「NVIDIAの売上増なので日本の半導体株にプラス」のような粗い結論は禁止します。"""
+
+STEEL_PLAYBOOK = """【鉄鋼プレイブック】
+高炉、電炉、特殊鋼、ステンレス、鉄鉱石、原料炭、鉄スクラップ、中国鋼材輸出、HRC等の地域別鋼材価格、メタルスプレッドを分離して分析してください。"""
+
+SHIPPING_PLAYBOOK = """【海運プレイブック】
+VLCC・原油タンカー、Product tanker、Dry bulk、Container、LNG船、LPG船、自動車船を別市場として分析してください。一つの運賃指数だけで海運全体を判断してはいけません。"""
+
+
+def sector_research_context(code: int) -> str:
+    """Return mandatory research routing and sector playbooks for one TSE sector."""
+    name = sector_name(code)
+    sections: list[str] = []
+    if name in OUTSIDE_IN_SECTORS:
+        sections.append(OUTSIDE_IN_WORKFLOW)
+    if name in {"鉱業", "非鉄金属"}:
+        sections.append(MINING_NONFERROUS_PLAYBOOK)
+    if name in {"機械", "電気機器", "精密機器"}:
+        sections.append(SEMICONDUCTOR_PLAYBOOK)
+    if name == "鉄鋼":
+        sections.append(STEEL_PLAYBOOK)
+    if name == "海運業":
+        sections.append(SHIPPING_PLAYBOOK)
+    if not sections:
+        return "この業種は共通調査手順を適用してください。海外材料が日本企業の利益に強く効く場合は国内の小規模材料より優先してください。"
+    return "\n\n".join(sections)
+
 
 class SectorValidationError(ValueError):
     pass
@@ -239,8 +298,17 @@ CREATE TABLE IF NOT EXISTS canonical_sector_report_runs (
  attempt_count INTEGER NOT NULL DEFAULT 0, last_error_type TEXT, last_error_message TEXT, started_at TEXT,
  completed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS sector_weekly_work_assignments (
+ assignment_id TEXT PRIMARY KEY, schema_version TEXT NOT NULL, stable_key TEXT NOT NULL UNIQUE,
+ sector_code INTEGER NOT NULL, sector_name TEXT NOT NULL, period_start TEXT NOT NULL, period_end TEXT NOT NULL,
+ status TEXT NOT NULL, attempt_count INTEGER NOT NULL DEFAULT 0, available_at TEXT NOT NULL,
+ claim_owner TEXT, claimed_at TEXT, lease_expires_at TEXT, started_at TEXT, completed_at TEXT,
+ last_error_type TEXT, last_error_message TEXT, submitted_payload_hash TEXT,
+ created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS ix_sector_reports_generated ON canonical_sector_reports(generated_at DESC);
 CREATE INDEX IF NOT EXISTS ix_sector_runs_status ON canonical_sector_report_runs(status, period_end DESC);
+CREATE INDEX IF NOT EXISTS ix_sector_work_ready ON sector_weekly_work_assignments(status,available_at,sector_code);
 """
 
 
