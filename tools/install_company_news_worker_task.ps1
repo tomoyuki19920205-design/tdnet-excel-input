@@ -2,7 +2,7 @@
 param(
     [string]$TaskName = "CompanyNewsInboxWorker",
     [ValidateRange(1, 1440)]
-    [int]$IntervalMinutes = 1,
+    [int]$IntervalMinutes = 5,
     [string]$RepositoryRoot,
     [string]$WorkerRoot,
     [string]$PythonPath,

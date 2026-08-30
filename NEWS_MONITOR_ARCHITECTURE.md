@@ -60,7 +60,7 @@ and Viewer contracts remain unchanged:
 ChatGPT Desktop Scheduled Work (local project, slot01 only)
         ↓ atomic .tmp → .json rename
 data/news_inbox/work_slot01_<assignment_id>.json
-        ↓ CompanyNewsInboxWorker, every 1 minute
+        ↓ CompanyNewsInboxWorker, every 5 minutes
 validate → canonical ingest → Supabase sync
         ↓
 assignment completed → processed archive → STOP
@@ -70,10 +70,12 @@ assignment completed → processed archive → STOP
 bounded scan. Windows Task Scheduler supplies polling; there is no resident watcher
 and no automatic next-company advance. `tools/install_company_news_worker_task.ps1`
 registers `CompanyNewsInboxWorker` for the current interactive user, uses the repo
-`.venv`'s non-console `pythonw.exe`, sets a one-minute repetition interval, and
+`.venv`'s non-console `pythonw.exe`, sets a five-minute repetition interval, and
 configures `IgnoreNew`. The action keeps the repository root as its working directory,
 so interactive-logon polling does not create a terminal window or steal foreground
-focus. A second
+focus. Scheduled Work runs each task hourly, so a refill delay of at most five minutes
+still leaves ample time before the next run while reducing Windows process launches
+from 1,440 to 288 per day. A second
 PID-sentinel lock provides application-level overlap protection. PID liveness uses
 non-destructive Windows process handles and closes every handle after polling.
 
