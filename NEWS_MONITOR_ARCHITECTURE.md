@@ -69,13 +69,23 @@ assignment completed → processed archive → STOP
 `tools/company_news_inbox_worker.py --once --trigger task_scheduler` performs one
 bounded scan. Windows Task Scheduler supplies polling; there is no resident watcher
 and no automatic next-company advance. `tools/install_company_news_worker_task.ps1`
-registers `CompanyNewsInboxWorker` for the current interactive user, uses the repo
-`.venv`'s non-console `pythonw.exe`, sets a five-minute repetition interval, and
-configures `IgnoreNew`. The action keeps the repository root as its working directory,
-so interactive-logon polling does not create a terminal window or steal foreground
-focus. Scheduled Work runs each task hourly, so a refill delay of at most five minutes
-still leaves ample time before the next run while reducing Windows process launches
-from 1,440 to 288 per day. A second
+registers `CompanyNewsInboxWorker` for the current interactive user, sets a five-minute
+repetition interval, and configures `IgnoreNew`. Its Task Action is the GUI-subsystem
+`wscript.exe //B //NoLogo`, which invokes
+`tools/run_company_news_worker_hidden.vbs`. The wrapper uses window style `0`, waits
+for the repo `.venv`'s `pythonw.exe`, and returns the worker's exact exit code to Task
+Scheduler. The action keeps the repository root as its working directory.
+
+This wrapper is required even though the selected executable is named `pythonw.exe`.
+The uv-created Windows virtual environment launcher was measured as PE subsystem
+`WINDOWS_CUI`; a natural scheduled launch produced
+`Task Scheduler -> venv pythonw.exe -> conhost.exe / uv base python.exe`. The worker
+business path itself has no subprocess, shell, PowerShell, or command-interpreter
+launch. Hiding that measured launcher chain at its GUI parent removes the visible
+console/focus-steal source while preserving stdout/stderr independence, synchronous
+completion, timeout handling, logs, and exit status. Scheduled Work runs each task
+hourly, so a refill delay of at most five minutes still leaves ample time before the
+next run while reducing scheduled worker polls from 1,440 to 288 per day. A second
 PID-sentinel lock provides application-level overlap protection. PID liveness uses
 non-destructive Windows process handles and closes every handle after polling.
 

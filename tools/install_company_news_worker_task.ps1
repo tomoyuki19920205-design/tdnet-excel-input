@@ -39,6 +39,15 @@ $workerScript = Join-Path $RepositoryRoot "tools\company_news_inbox_worker.py"
 if (-not (Test-Path -LiteralPath $workerScript -PathType Leaf)) {
     throw "Worker script not found: $workerScript"
 }
+$hiddenLauncher = Join-Path $RepositoryRoot "tools\run_company_news_worker_hidden.vbs"
+if (-not (Test-Path -LiteralPath $hiddenLauncher -PathType Leaf)) {
+    throw "Hidden worker launcher not found: $hiddenLauncher"
+}
+$wscriptPath = Join-Path ([Environment]::GetFolderPath("System")) "wscript.exe"
+if (-not (Test-Path -LiteralPath $wscriptPath -PathType Leaf)) {
+    throw "Windows Script Host not found: $wscriptPath"
+}
+$wscriptPath = (Resolve-Path -LiteralPath $wscriptPath).Path
 
 if ([string]::IsNullOrWhiteSpace($PythonPath)) {
     $venvPythonw = Join-Path $RepositoryRoot ".venv\Scripts\pythonw.exe"
@@ -51,7 +60,7 @@ if ([string]::IsNullOrWhiteSpace($PythonPath)) {
 }
 $PythonPath = (Resolve-Path -LiteralPath $PythonPath).Path
 if ([System.IO.Path]::GetFileName($PythonPath) -ine "pythonw.exe") {
-    throw "CompanyNewsInboxWorker requires non-console pythonw.exe: $PythonPath"
+    throw "CompanyNewsInboxWorker requires pythonw.exe: $PythonPath"
 }
 
 function ConvertTo-QuotedTaskArgument {
@@ -82,10 +91,17 @@ if (-not [string]::IsNullOrWhiteSpace($DatabasePath)) {
 if ($DryRunSync) {
     $workerArguments += "--dry-run-sync"
 }
-$argumentString = ($workerArguments | ForEach-Object { ConvertTo-QuotedTaskArgument $_ }) -join " "
+$launcherArguments = @(
+    "//B",
+    "//NoLogo",
+    $hiddenLauncher,
+    $PythonPath,
+    $RepositoryRoot
+) + $workerArguments
+$argumentString = ($launcherArguments | ForEach-Object { ConvertTo-QuotedTaskArgument $_ }) -join " "
 
 $action = New-ScheduledTaskAction `
-    -Execute $PythonPath `
+    -Execute $wscriptPath `
     -Argument $argumentString `
     -WorkingDirectory $RepositoryRoot
 $trigger = New-ScheduledTaskTrigger `
@@ -109,7 +125,7 @@ $task = New-ScheduledTask `
     -Trigger $trigger `
     -Settings $settings `
     -Principal $principal `
-    -Description "Poll company_news_v1 inbox payloads and run canonical ingest/sync without a console window."
+    -Description "Poll company_news_v1 inbox payloads and run canonical ingest/sync through a hidden Windows Script Host launcher."
 
 if ($PSCmdlet.ShouldProcess($TaskName, "Register scheduled task")) {
     Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
@@ -121,8 +137,10 @@ if ($PSCmdlet.ShouldProcess($TaskName, "Register scheduled task")) {
 [pscustomobject]@{
     TaskName = $TaskName
     IntervalMinutes = $IntervalMinutes
-    Execute = $PythonPath
+    Execute = $wscriptPath
     Arguments = $argumentString
+    WorkerPython = $PythonPath
+    HiddenLauncher = $hiddenLauncher
     WorkingDirectory = $RepositoryRoot
     WorkerRoot = $WorkerRoot
     MultipleInstances = "IgnoreNew"
