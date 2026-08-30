@@ -7,13 +7,15 @@ $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $RealtimeBat = Join-Path $ProjectRoot "run_realtime.bat"
+$RealtimeLauncher = Join-Path $ProjectRoot "tools\run_tdnet_realtime_background.py"
+$Pythonw = Join-Path $ProjectRoot ".venv\Scripts\pythonw.exe"
 $NightlyBat  = Join-Path $ProjectRoot "run_nightly.bat"
 $ReconcileBat = Join-Path $ProjectRoot "run_reconcile_scheduled.bat"
 
 # ── ヘルパー関数 ──────────────────────────────────────
 
 function Test-RequiredPaths {
-    $required = @($RealtimeBat, $NightlyBat, $ReconcileBat)
+    $required = @($RealtimeBat, $RealtimeLauncher, $Pythonw, $NightlyBat, $ReconcileBat)
     foreach ($path in $required) {
         if (-not (Test-Path $path)) {
             throw "Required file not found: $path"
@@ -79,20 +81,26 @@ function Install-TDNETTasks {
     Delete-TaskIfExists -TaskName "TDNET_Nightly"
     Delete-TaskIfExists -TaskName "TDNET_Reconcile"
 
-    # Realtime: 平日 08:30-18:00, 10分間隔
+    # Realtime: 平日 08:32-18:02, 10分間隔
     # /SC WEEKLY + /RI + /DU で MINUTE+D 非互換を回避
+    $realtimeCommand = '"' + $Pythonw + '" "' + $RealtimeLauncher + '"'
     Invoke-Schtasks -SchtasksArgs @(
         "/Create",
         "/TN", "TDNET_Realtime",
-        "/TR", $RealtimeBat,
+        "/TR", $realtimeCommand,
         "/SC", "WEEKLY",
         "/D", "MON,TUE,WED,THU,FRI",
         "/MO", "1",
-        "/ST", "08:30",
+        "/ST", "08:32",
         "/RI", "10",
         "/DU", "09:30",
         "/F"
     )
+    $realtimeSettings = New-ScheduledTaskSettingsSet `
+        -MultipleInstances IgnoreNew `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries
+    Set-ScheduledTask -TaskName "TDNET_Realtime" -Settings $realtimeSettings | Out-Null
     Write-Host "Created: TDNET_Realtime"
 
     # Nightly: 毎日 19:00
