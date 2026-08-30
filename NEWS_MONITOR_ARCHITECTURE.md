@@ -352,3 +352,35 @@ Status reports actual elapsed throughput, retry and result counts, per-task and
 per-slot completions, and a 3,800-company duration estimate; theoretical and
 measured values must not be conflated. Weekly queue regeneration is intentionally
 outside v5.
+
+## Additive TSE 33-sector weekly stream
+
+Sector weekly research is independent from Company News Task01-08 and from
+`CompanyNewsInboxWorker`. The existing company queue, slots, prompts, canonical
+tables, sync, and viewer read models are unchanged.
+
+```text
+Windows Task Scheduler: SectorWeeklyScheduler (hourly)
+        ↓ no-op outside eligible JST hours
+Saturday 06:00..Sunday 14:00 → exactly one fixed TSE sector
+        ↓ OpenAI Responses API + Web Search + strict JSON schema
+data/sector_report_inbox (atomic JSON, then processed archive)
+        ↓
+SQLite canonical_sector_reports + canonical_sector_report_runs
+        ↓ dedicated sync
+Supabase canonical tables → api_latest_news_stream
+        ↓
+company-memo-app /news (company news + sector reports)
+```
+
+All 33 reports in one weekly batch share the exact period from the prior Saturday
+06:00:00 JST through the current Saturday 05:59:59 JST. The scheduler derives the
+sector from the launch hour: Saturday 06:00 is 01, Saturday 23:00 is 18, Sunday
+00:00 is 19, and Sunday 14:00 is 33. Sunday 15:00..23:00 is reserved for pending
+or failed-sector retry, one sector per run. The stable identity is
+`sector_weekly:<Saturday period-end date>:<two-digit sector code>`.
+
+The installer records a `--not-before` value for the first Saturday 06:00 after
+installation, so enabling the task after the production smoke does not backfill
+or partially execute the current week. Invalid JSON, missing Markdown, invalid
+sources, or a period mismatch is rejected before canonical insertion.
