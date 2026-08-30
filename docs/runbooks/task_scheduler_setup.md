@@ -8,7 +8,7 @@ TDNET パイプラインは以下の **3系統** に統合されている。
 
 | タスク名 | バッチ | スケジュール | 目的 |
 |:---|:---|:---|:---|
-| `TDNET_Realtime` | `pythonw.exe` → background launcher → `run_realtime.bat` | 平日 08:32-18:02, 10分間隔 | 日中軽量処理 |
+| `TDNET_Realtime` | `wscript.exe` → hidden VBS → `pythonw.exe` → background launcher → `run_realtime.bat` | 平日 08:32-18:02, 10分間隔 | 日中軽量処理 |
 | `TDNET_Nightly` | `run_nightly.bat` | 毎日 19:00 | 夜間重処理 |
 | `TDNET_Reconcile` | `run_reconcile_scheduled.bat` | 毎日 18:35 | 取りこぼし修復 |
 
@@ -124,5 +124,5 @@ Python 側で `logs/` に自動出力:
 
 - Windows Task Scheduler
 - Python venv: `.venv\Scripts\python.exe`
-- Realtime Task Action: `.venv\Scripts\pythonw.exe tools\run_tdnet_realtime_background.py`
+- Realtime Task Action: `wscript.exe //B //NoLogo tools\run_tdnet_realtime_hidden.vbs .venv\Scripts\pythonw.exe <project-root> tools\run_tdnet_realtime_background.py`
 - プロジェクト: `C:\Users\takuy\OneDrive\tdnet-excel-input`

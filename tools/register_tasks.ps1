@@ -8,14 +8,24 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $RealtimeBat = Join-Path $ProjectRoot "run_realtime.bat"
 $RealtimeLauncher = Join-Path $ProjectRoot "tools\run_tdnet_realtime_background.py"
+$RealtimeHiddenLauncher = Join-Path $ProjectRoot "tools\run_tdnet_realtime_hidden.vbs"
 $Pythonw = Join-Path $ProjectRoot ".venv\Scripts\pythonw.exe"
+$WscriptPath = Join-Path ([Environment]::GetFolderPath("System")) "wscript.exe"
 $NightlyBat  = Join-Path $ProjectRoot "run_nightly.bat"
 $ReconcileBat = Join-Path $ProjectRoot "run_reconcile_scheduled.bat"
 
 # ── ヘルパー関数 ──────────────────────────────────────
 
 function Test-RequiredPaths {
-    $required = @($RealtimeBat, $RealtimeLauncher, $Pythonw, $NightlyBat, $ReconcileBat)
+    $required = @(
+        $RealtimeBat,
+        $RealtimeLauncher,
+        $RealtimeHiddenLauncher,
+        $Pythonw,
+        $WscriptPath,
+        $NightlyBat,
+        $ReconcileBat
+    )
     foreach ($path in $required) {
         if (-not (Test-Path $path)) {
             throw "Required file not found: $path"
@@ -43,6 +53,17 @@ function Invoke-Schtasks {
     if ($LASTEXITCODE -ne 0) {
         throw "schtasks failed with exit code $LASTEXITCODE"
     }
+}
+
+function ConvertTo-QuotedTaskArgument {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Value
+    )
+    if ($Value.Contains('"')) {
+        throw "Task argument contains an unsupported quote character"
+    }
+    return '"' + $Value + '"'
 }
 
 function Disable-TaskIfExists {
@@ -83,7 +104,18 @@ function Install-TDNETTasks {
 
     # Realtime: 平日 08:32-18:02, 10分間隔
     # /SC WEEKLY + /RI + /DU で MINUTE+D 非互換を回避
-    $realtimeCommand = '"' + $Pythonw + '" "' + $RealtimeLauncher + '"'
+    $realtimeLauncherArguments = @(
+        "//B",
+        "//NoLogo",
+        $RealtimeHiddenLauncher,
+        $Pythonw,
+        $ProjectRoot,
+        $RealtimeLauncher
+    )
+    $realtimeArgumentString = (
+        $realtimeLauncherArguments | ForEach-Object { ConvertTo-QuotedTaskArgument $_ }
+    ) -join " "
+    $realtimeCommand = (ConvertTo-QuotedTaskArgument $WscriptPath) + " " + $realtimeArgumentString
     Invoke-Schtasks -SchtasksArgs @(
         "/Create",
         "/TN", "TDNET_Realtime",
@@ -96,11 +128,18 @@ function Install-TDNETTasks {
         "/DU", "09:30",
         "/F"
     )
+    $realtimeAction = New-ScheduledTaskAction `
+        -Execute $WscriptPath `
+        -Argument $realtimeArgumentString `
+        -WorkingDirectory $ProjectRoot
     $realtimeSettings = New-ScheduledTaskSettingsSet `
         -MultipleInstances IgnoreNew `
         -AllowStartIfOnBatteries `
         -DontStopIfGoingOnBatteries
-    Set-ScheduledTask -TaskName "TDNET_Realtime" -Settings $realtimeSettings | Out-Null
+    Set-ScheduledTask `
+        -TaskName "TDNET_Realtime" `
+        -Action $realtimeAction `
+        -Settings $realtimeSettings | Out-Null
     Write-Host "Created: TDNET_Realtime"
 
     # Nightly: 毎日 19:00
