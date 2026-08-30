@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 import tools.company_news_queue as queue_module
+import tools.company_news_work_bridge as bridge_module
 from tools.company_news_inbox_worker import WorkerPaths, run_once
 from tools.company_news_queue import (
     QueueError,
@@ -97,6 +98,12 @@ def _entries(queue: QueuePaths) -> list[dict]:
 
 def _sync(*_):
     return {"canonical_news_events": 0, "canonical_news_scan_runs": 1}
+
+
+def _windows_permission_error() -> PermissionError:
+    error = PermissionError(5, "transient Windows file lock")
+    error.winerror = 5
+    return error
 
 
 def test_queue_initialization_is_deterministic_and_inert_by_default(tmp_path):
@@ -204,6 +211,34 @@ def test_duplicate_worker_run_does_not_advance_twice(tmp_path):
     assert duplicate["failed"] == 0
     assert duplicate["queue"]["status"] == "waiting"
     assert _assignment(bridge)["assignment_id"] == second["assignment_id"]
+
+
+def test_completed_canonical_run_is_not_researched_after_final_state_write_failure(tmp_path, monkeypatch):
+    queue, bridge, worker, _ = _setup(tmp_path, activate=True)
+    first = _assignment(bridge)
+    _write_json(expected_output_path(bridge, first), _payload(first))
+    original_atomic_json = bridge_module._atomic_json
+    failed_once = False
+
+    def fail_completed_state_once(path, value):
+        nonlocal failed_once
+        if path == bridge.state and value.get("phase") == "completed" and not failed_once:
+            failed_once = True
+            raise _windows_permission_error()
+        return original_atomic_json(path, value)
+
+    monkeypatch.setattr(bridge_module, "_atomic_json", fail_completed_state_once)
+    result = run_once(worker, sync_func=_sync)
+
+    entries = _entries(queue)
+    assert result["failed"] == 1
+    assert failed_once
+    assert entries[0]["status"] == "completed"
+    assert entries[0]["attempt_count"] == 1
+    assert _assignment(bridge)["ticker"] == "1332"
+    metrics = queue_status(queue, bridge)["metrics"]
+    assert metrics["validation_failure_count"] == 0
+    assert metrics["sync_retry_count"] == 1
 
 
 def test_persisted_assignment_transition_is_recovered_after_restart(tmp_path):

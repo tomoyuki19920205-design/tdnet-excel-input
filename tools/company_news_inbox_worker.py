@@ -24,9 +24,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from lib.news_monitor import NewsValidationError, validate_payload
+from tools.company_news_atomic import atomic_write_json
 from tools.company_news_work_bridge import (
     BridgeError,
     BridgePaths,
+    WorkPayloadValidationError,
     _pid_is_alive,
     expected_failure_path,
     expected_output_path,
@@ -97,10 +99,7 @@ def _now() -> str:
 
 
 def _atomic_json(path: Path, value: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    os.replace(temporary, path)
+    atomic_write_json(path, value)
 
 
 def _append_log(paths: WorkerPaths, event: str, **details: Any) -> None:
@@ -400,17 +399,15 @@ def run_once(
             except Exception as exc:
                 failures += 1
                 slot_state_path = bridge.state
-                if slot_state_path.exists():
+                if isinstance(exc, WorkPayloadValidationError):
+                    validation_failures += 1
+                elif slot_state_path.exists():
                     try:
                         slot_state = json.loads(slot_state_path.read_text(encoding="utf-8"))
                     except (OSError, json.JSONDecodeError):
                         slot_state = {}
-                    if slot_state.get("phase") in {"ingested", "synced"}:
+                    if slot_state.get("phase") in {"ingested", "synced", "completed"}:
                         sync_retries += 1
-                    else:
-                        validation_failures += 1
-                else:
-                    validation_failures += 1
                 _append_log(
                     paths,
                     "failed",

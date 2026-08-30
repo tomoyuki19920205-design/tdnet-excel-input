@@ -160,6 +160,27 @@ def test_one_operational_failure_does_not_discard_two_successes(tmp_path):
     }
 
 
+def test_one_schema_validation_failure_retries_while_batch_peers_complete(tmp_path):
+    queue, bridge, worker, _ = _setup(tmp_path)
+    failed10 = _assignment(tmp_path, "slot10")
+    invalid = _payload(failed10)
+    invalid["items"] = [{"source_url": "https://example.com/missing-headline"}]
+    _write_json(expected_output_path(_bridge(tmp_path, "slot10"), failed10), invalid)
+    success11 = _save_success(tmp_path, "slot11")
+    success12 = _save_success(tmp_path, "slot12")
+
+    result = run_once(worker, sync_func=_sync)
+
+    assert result["completed"] == 2
+    assert queue_status(queue, bridge)["metrics"]["validation_failure_count"] == 1
+    retry10 = _assignment(tmp_path, "slot10")
+    assert retry10["ticker"] == failed10["ticker"]
+    assert retry10["queue_attempt"] == 2
+    assert {entry["assignment_id"] for entry in _entries(queue) if entry["status"] == "completed"} == {
+        success11["assignment_id"], success12["assignment_id"],
+    }
+
+
 def test_three_no_news_payloads_complete_normally(tmp_path):
     queue, _, worker, _ = _setup(tmp_path)
     for slot_id in ("slot01", "slot02", "slot03"):

@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from tools.company_news_atomic import atomic_write_json, replace_with_retry
 from tools.company_news_queue import QueueError, QueuePaths, _read_state
 from tools.company_news_work_bridge import BridgePaths, BridgeError, validate_assignment
 
@@ -107,7 +108,7 @@ def snapshot_task(
                 history = directory / "history"
                 history.mkdir(parents=True, exist_ok=True)
                 stale = history / f"{existing.get('run_id', 'unknown')}.stale.json"
-                os.replace(active_path, stale)
+                replace_with_retry(active_path, stale)
                 continue
             raise TaskBatchError(f"could not recover stale guard {active_path}")
     if descriptor is not None:
@@ -139,9 +140,7 @@ def snapshot_task(
                 })
         run_id = f"{task_id}-{timestamp:%Y%m%dT%H%M%S%f}-{run_token[:8]}"
         snapshot = {**placeholder, "run_id": run_id, "assignments": assignments}
-        temporary = active_path.with_suffix(".json.tmp")
-        temporary.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        os.replace(temporary, active_path)
+        atomic_write_json(active_path, snapshot)
         return {"status": "snapshot_created", **snapshot}
     except Exception:
         current = _read_json(active_path) if active_path.exists() else {}

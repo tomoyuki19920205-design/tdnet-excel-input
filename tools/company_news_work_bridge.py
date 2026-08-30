@@ -27,6 +27,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from lib.news_monitor import NewsValidationError, normalize_ticker, validate_payload
+from tools.company_news_atomic import atomic_write_json
 from tools.ingest_company_news import ingest_file
 from tools.sync_company_news import sync as sync_company_news
 
@@ -42,6 +43,12 @@ _JST = timezone(timedelta(hours=9))
 
 
 class BridgeError(RuntimeError):
+    pass
+
+
+class WorkPayloadValidationError(BridgeError):
+    """A Work payload violates the canonical or assignment contract."""
+
     pass
 
 
@@ -86,10 +93,7 @@ def _now() -> str:
 
 
 def _atomic_json(path: Path, value: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    os.replace(temporary, path)
+    atomic_write_json(path, value)
 
 
 def _append_log(paths: BridgePaths, event: str, **details: Any) -> None:
@@ -292,18 +296,21 @@ def _run_exists(db_path: Path, assignment_id: str) -> bool:
 
 
 def _validate_result(path: Path, assignment: dict[str, Any]) -> int:
-    payload = _read_json(path)
-    run = validate_payload(payload)
+    try:
+        payload = _read_json(path)
+        run = validate_payload(payload)
+    except (BridgeError, NewsValidationError) as exc:
+        raise WorkPayloadValidationError(str(exc)) from exc
     if payload.get("run_id") != assignment["assignment_id"]:
-        raise BridgeError("Work output run_id must equal assignment_id")
+        raise WorkPayloadValidationError("Work output run_id must equal assignment_id")
     if run.scan["ticker"] != assignment["ticker"]:
-        raise BridgeError("Work output ticker does not match assignment ticker")
+        raise WorkPayloadValidationError("Work output ticker does not match assignment ticker")
     search_from = date.fromisoformat(assignment["search_from"])
     search_to = date.fromisoformat(assignment["search_to"])
     for index, event in enumerate(run.events):
         published = datetime.fromisoformat(event["published_at"]).date()
         if published < search_from or published > search_to:
-            raise BridgeError(f"items[{index}].published_at is outside assignment search range")
+            raise WorkPayloadValidationError(f"items[{index}].published_at is outside assignment search range")
     return len(run.events)
 
 
@@ -492,8 +499,11 @@ def process_assignment(
         except Exception as exc:
             if output.exists() and not _run_exists(db_path, assignment_id):
                 quarantine_work_output(paths, output, exc)
-            _set_assignment_status(paths, assignment, "failed", str(exc))
-            _save_state(paths, state, state.get("phase", "waiting"), last_error=str(exc))
+            durable_assignment = validate_assignment(_read_json(paths.assignment), paths)
+            durable_completed = durable_assignment["status"] == "completed" and _run_exists(db_path, assignment_id)
+            if not durable_completed:
+                _set_assignment_status(paths, assignment, "failed", str(exc))
+                _save_state(paths, state, state.get("phase", "waiting"), last_error=str(exc))
             _append_log(paths, "failed", assignment_id=assignment_id, error=str(exc))
             raise
 

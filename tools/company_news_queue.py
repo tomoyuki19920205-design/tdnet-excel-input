@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from lib.news_monitor import NewsValidationError, normalize_ticker
+from tools.company_news_atomic import atomic_write_json, atomic_write_jsonl, atomic_write_text
 from tools.company_news_work_bridge import (
     ASSIGNMENT_SCHEMA,
     ASSIGNMENT_STATUSES,
@@ -122,25 +123,15 @@ def _empty_slot() -> dict[str, Any]:
 
 
 def _atomic_json(path: Path, value: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    os.replace(temporary, path)
+    atomic_write_json(path, value)
 
 
 def _atomic_jsonl(path: Path, values: list[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    body = "".join(json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n" for value in values)
-    temporary.write_text(body, encoding="utf-8")
-    os.replace(temporary, path)
+    atomic_write_jsonl(path, values)
 
 
 def _atomic_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(text, encoding="utf-8")
-    os.replace(temporary, path)
+    atomic_write_text(path, text)
 
 
 @contextmanager
@@ -1163,13 +1154,13 @@ def queue_status(paths: QueuePaths, bridge: BridgePaths) -> dict[str, Any]:
         )
         for slot_id in slots
     }
-    task_run_ids: set[str] = set()
+    task_run_records: dict[str, dict[str, Any]] = {}
     for log_path in (paths.work_dir / "task_runs").glob("task??/runs.jsonl"):
         try:
             for line in log_path.read_text(encoding="utf-8").splitlines():
                 record = json.loads(line)
-                if record.get("queue_id") == state["queue_id"]:
-                    task_run_ids.add(str(record.get("run_id")))
+                if record.get("queue_id") == state["queue_id"] and record.get("run_id"):
+                    task_run_records[str(record["run_id"])] = record
         except (OSError, json.JSONDecodeError):
             continue
     guard_paths = list((paths.work_dir / "task_runs").glob("task??/active.json"))
@@ -1178,10 +1169,15 @@ def queue_status(paths: QueuePaths, bridge: BridgePaths) -> dict[str, Any]:
         try:
             record = json.loads(guard_path.read_text(encoding="utf-8"))
             if record.get("queue_id") == state["queue_id"] and record.get("run_id"):
-                task_run_ids.add(str(record["run_id"]))
+                task_run_records.setdefault(str(record["run_id"]), record)
         except (OSError, json.JSONDecodeError):
             continue
-    task_run_count = len(task_run_ids)
+    task_run_count = len(task_run_records)
+    productive_run_count = sum(
+        isinstance(record.get("snapshot_count"), int) and record["snapshot_count"] > 0
+        for record in task_run_records.values()
+    )
+    empty_run_count = sum(record.get("snapshot_count") == 0 for record in task_run_records.values())
     completed_count = len(completed)
     companies_per_hour = (
         completed_count / (elapsed_seconds / 3600)
@@ -1195,9 +1191,14 @@ def queue_status(paths: QueuePaths, bridge: BridgePaths) -> dict[str, Any]:
         "elapsed_seconds": elapsed_seconds,
         "retry_count": sum(max(0, entry["attempt_count"] - 1) for entry in entries),
         "total_scheduled_runs": task_run_count,
+        "productive_runs": productive_run_count,
+        "empty_runs": empty_run_count,
         "company_completions_per_task": completions_per_task,
         "company_completions_per_slot": completions_per_slot,
         "average_companies_per_run": completed_count / task_run_count if task_run_count else None,
+        "companies_per_productive_run": (
+            completed_count / productive_run_count if productive_run_count else None
+        ),
         "average_completion_latency_seconds": sum(latencies) / len(latencies) if latencies else None,
         "max_completion_latency_seconds": max(latencies) if latencies else None,
         "no_news_count": sum(entry.get("news_item_count") == 0 for entry in completed),
