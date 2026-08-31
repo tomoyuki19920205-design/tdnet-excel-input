@@ -127,6 +127,10 @@ def test_wrong_period_and_invalid_json_shape_are_rejected():
     payload["period_start"] = "2026-08-30T06:00:00+09:00"
     with pytest.raises(SectorValidationError, match="common weekly window"):
         validate_report(payload, expected_code=20, expected_window=window)
+    payload = assemble_payload(_content(), 20, window)
+    payload["summary_bullets"] = [f"bullet-{index}" for index in range(6)]
+    with pytest.raises(SectorValidationError, match="3..5"):
+        validate_report(payload, expected_code=20, expected_window=window)
 
 
 def test_source_date_precision_is_preserved_without_inventing_time():
@@ -183,7 +187,7 @@ def test_scheduler_enqueues_idempotently_without_research(tmp_path: Path, monkey
     assert first["status"] == "queued"
     assert first["assignment_status"] == "ready"
     assert first["created"] is True
-    assert second["status"] == "queued"
+    assert second["status"] == "slot_already_processed"
     assert second["created"] is False
     assert first["assignment_id"] == second["assignment_id"]
     conn = sqlite3.connect(db)
@@ -213,6 +217,8 @@ def test_chatgpt_worker_prompt_has_transport_research_and_schema_contracts():
         "foundry", "VLCC", "Fact / Transmission / Magnitude / Pricing-in / Counterevidence",
         "重要材料は", "3〜5件", "3,000〜4,500文字", "missed_candidates",
         "sector_weekly_work_result_v1", "company_ir | government | regulator",
+        "heartbeat --assignment-id", "10分ごと", "時間予算は50分以内", "残り時間が5分未満",
+        "owner、sector、period", "隔離SQLite DB",
     ):
         assert term in prompt
     for forbidden in ("APIキー", "Responses API", "API料金", "max_tool_calls", "API timeout", "token料金"):
