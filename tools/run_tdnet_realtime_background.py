@@ -44,13 +44,15 @@ def run_realtime(
 
     default_comspec = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "cmd.exe"
     comspec = os.environ.get("COMSPEC", str(default_comspec))
-    command = [comspec, "/d", "/s", "/c", f'""{batch}""']
+    command = [comspec, "/d", "/c", "call", str(batch)]
     started = time.monotonic()
     _append_event(
         audit_log,
         "launcher_started",
         pid=os.getpid(),
         command=command,
+        bat_path=str(batch),
+        cwd=str(root),
         working_directory=str(root),
         creationflags=_creation_flags(),
     )

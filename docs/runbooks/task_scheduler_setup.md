@@ -93,7 +93,7 @@ Python 側で `logs/` に自動出力:
 | ログファイル | 対応タスク |
 |:---|:---|
 | `logs/realtime_YYYYMMDD.log` | Realtime |
-| `logs/realtime_launcher.jsonl` | Realtime background launcher start/end/error/return code |
+| `logs/realtime_launcher.jsonl` | Realtime background launcher start/end/error/return code、絶対bat pathとsanitized command argv |
 | `logs/realtime_console_YYYYMMDD.log` | Realtime batch stdout/stderr capture |
 | `logs/nightly_YYYYMMDD.log` | Nightly |
 | `logs/reconcile_scheduled_YYYYMMDD.log` | Reconcile |
@@ -125,4 +125,5 @@ Python 側で `logs/` に自動出力:
 - Windows Task Scheduler
 - Python venv: `.venv\Scripts\python.exe`
 - Realtime Task Action: `wscript.exe //B //NoLogo tools\run_tdnet_realtime_hidden.vbs .venv\Scripts\pythonw.exe <project-root> tools\run_tdnet_realtime_background.py`
+- Background launcher: `cmd.exe`, `/d`, `/c`, `call`, `<absolute-run_realtime.bat>`を独立argvとして起動（`shell=False`、`CREATE_NO_WINDOW`、HTML/XML entity不使用）
 - プロジェクト: `C:\Users\takuy\OneDrive\tdnet-excel-input`
