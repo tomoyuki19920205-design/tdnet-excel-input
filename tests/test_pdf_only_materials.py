@@ -34,13 +34,28 @@ class TestPdfOnlyMaterialClassifier(unittest.TestCase):
         from src.fetcher import classify_disclosure
         self.assertEqual(classify_disclosure("2026年5月期通期決算説明資料"), "earnings_material")
 
+    def test_earnings_briefing_transcript_summary_qa_and_faq_variants(self):
+        cases = (
+            ("2026年12月期 第２四半期 決算説明会 エグゼクティブサマリー", "2Q決算説明会 要約"),
+            ("2026年12月期 第２四半期 決算説明会 書き起こし要約", "2Q決算説明会 書き起こし"),
+            ("2026年６月期 決算説明会（書き起こし）", "決算説明会 書き起こし"),
+            ("第１四半期 決算説明会　質疑応答・Ｑ＆Ａ", "1Q決算説明会 Q&A"),
+            ("よくある質問と回答（2026年８月）", "IR FAQ"),
+            ("よくあるご質問", "IR FAQ"),
+            ("ＦＡＱ", "IR FAQ"),
+        )
+        for title, label in cases:
+            self.assertMatch(title, "earnings_material", label)
+
     def test_earnings_near_negatives(self):
         titles = (
             "2027年3月期第1四半期決算短信〔日本基準〕(連結)",
             "決算説明会を開催いたしました",
-            "第1四半期決算説明会 質疑応答要旨",
             "第3四半期決算説明会 書き起こし公開のお知らせ",
             "（訂正）第1四半期決算説明資料の一部訂正について",
+            "会社説明のお知らせ",
+            "資料",
+            "お知らせ",
         )
         for title in titles:
             self.assertIsNone(classify_pdf_only_material(title, PDF), title)
@@ -117,6 +132,17 @@ class TestPdfOnlyMaterialClassifier(unittest.TestCase):
         title = "中期経営計画2029策定のお知らせ"
         self.assertEqual(classify_disclosure(title), "management_strategy")
         self.assertEqual(classify_disclosure_jquants([], title), "management_strategy")
+
+    def test_jquants_broad_disc_item_does_not_override_material_semantics(self):
+        from src.jquants.classifier import classify_disclosure_jquants
+
+        self.assertEqual(
+            classify_disclosure_jquants(
+                ["11322"],
+                "2026年12月期 第２四半期 決算説明会 エグゼクティブサマリー",
+            ),
+            "earnings_material",
+        )
 
     def test_rollout_boundary_blocks_same_day_catchup(self):
         self.assertFalse(is_after_pdf_only_material_activation("2026-07-21 16:59:00"))
@@ -203,6 +229,29 @@ class TestPdfOnlyMaterialPipeline(unittest.TestCase):
         self.assertEqual(dedupe, build_dedupe_key(record))
         raw = json.loads(row["raw_payload"])
         self.assertEqual(raw["extracted"]["source_doc_id"], "jquants-native-id-1")
+        self.assertEqual(raw["text_extract_status"], "empty")
+
+    def test_distinct_same_time_materials_keep_distinct_document_keys(self):
+        first = self._doc()
+        first.ticker = "3928"
+        first.title = "2026年12月期 第２四半期 決算説明会 エグゼクティブサマリー"
+        first.source_doc_id = "20260831528661"
+        first.doc_url = "https://www.release.tdnet.info/inbs/140120260831528661.pdf"
+        second = self._doc()
+        second.ticker = "3928"
+        second.title = "2026年12月期 第２四半期 決算説明会 書き起こし要約"
+        second.source_doc_id = "20260831528656"
+        second.doc_url = "https://www.release.tdnet.info/inbs/140120260831528656.pdf"
+        first_record = process_documents([first], ":memory:", dry_run=True).details[0]["_event_record"]
+        second_record = process_documents([second], ":memory:", dry_run=True).details[0]["_event_record"]
+        self.assertNotEqual(build_dedupe_key(first_record), build_dedupe_key(second_record))
+
+    def test_same_disclosure_retry_keeps_same_document_key(self):
+        record = process_documents([self._doc()], ":memory:", dry_run=True).details[0]["_event_record"]
+        first = build_dedupe_key(record)
+        record.title = "表記だけが変わっても同じ資料"
+        record.disclosure_datetime = "2026-07-21 17:01"
+        self.assertEqual(first, build_dedupe_key(record))
 
     @patch("src.events.event_pipeline._get_text_and_pdf", side_effect=AssertionError("PDF must not be fetched"))
     def test_management_strategy_realtime_path_reaches_viewer_row(self, _fetch):

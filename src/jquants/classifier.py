@@ -192,9 +192,19 @@ def classify_disclosure_jquants(disc_items: list[str], title: str) -> Optional[s
     if classify_procedural_review_completion(title):
         return DisclosureType.REVIEW_COMPLETION
 
+    # Semantic material titles take precedence over broad DiscItems containers
+    # (for example 11322).  Otherwise briefing transcripts/summaries can be
+    # misrouted into numeric statement extraction and discarded as non-tanshin.
+    title_result = classify_by_title_fallback(title)
+    if title_result in (
+        DisclosureType.EARNINGS_MATERIAL,
+        DisclosureType.MONTHLY_UPDATE,
+        "management_strategy",
+    ):
+        return title_result
+
     # Conversely, a mixed-code document explicitly advertising a forecast or
     # dividend revision must retain that investor-facing event type.
-    title_result = classify_by_title_fallback(title)
     if title_result in (DisclosureType.FORECAST_REVISION, DisclosureType.DIVIDEND_REVISION):
         return title_result
 

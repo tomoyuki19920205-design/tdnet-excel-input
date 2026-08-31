@@ -70,8 +70,27 @@ _EARNINGS_TERMS = (
 
 _EARNINGS_EXCLUDES = (
     "決算短信", "決算報告", "開催のお知らせ", "開催いたしました", "開催中止",
-    "質疑応答", "q&a", "qa要旨", "書き起こし", "文字おこし", "transcript",
-    "スクリプト", "株主総会", "株主向け", "訂正", "修正について",
+    "公開のお知らせ", "株主総会", "株主向け", "訂正", "修正について",
+)
+
+# These are intentionally compound/high-signal rules.  Generic words such as
+# ``資料`` / ``説明`` / ``お知らせ`` must never classify a disclosure by
+# themselves.  NFKC + whitespace removal in ``_normalize`` absorbs full-width
+# ASCII, bracket and spacing variants without weakening the semantic match.
+_EARNINGS_BRIEFING_CONTEXTS = (
+    "決算説明会", "決算説明", "決算補足説明", "業績説明会",
+    "financialresultsbriefing", "earningscall", "earningspresentation",
+)
+
+_EARNINGS_BRIEFING_CONTENT_TERMS = (
+    "エグゼクティブサマリー", "サマリー", "要約",
+    "書き起こし", "文字起こし", "文字おこし", "transcript", "スクリプト",
+    "質疑応答", "q&a", "qa要旨", "qa概要",
+)
+
+_FAQ_TERMS = (
+    "よくある質問と回答", "よくあるご質問と回答", "よくあるご質問",
+    "よくいただく質問", "frequentlyaskedquestions",
 )
 
 _MONTHLY_EXCLUDES = (
@@ -210,6 +229,24 @@ def classify_pdf_only_material(title: str, pdf_url: str | None = None) -> PdfOnl
             quarter = _extract_quarter(title)
             label = f"{quarter}決算説明資料" if quarter else "決算説明資料"
             return PdfOnlyMaterialMatch(EARNINGS_MATERIAL, label)
+
+    if (
+        any(context in n for context in _EARNINGS_BRIEFING_CONTEXTS)
+        and any(term in n for term in _EARNINGS_BRIEFING_CONTENT_TERMS)
+        and not any(term in n for term in _EARNINGS_EXCLUDES)
+    ):
+        quarter = _extract_quarter(title)
+        if any(term in n for term in ("質疑応答", "q&a", "qa要旨", "qa概要")):
+            base_label = "決算説明会 Q&A"
+        elif any(term in n for term in ("書き起こし", "文字起こし", "文字おこし", "transcript", "スクリプト")):
+            base_label = "決算説明会 書き起こし"
+        else:
+            base_label = "決算説明会 要約"
+        label = f"{quarter}{base_label}" if quarter else base_label
+        return PdfOnlyMaterialMatch(EARNINGS_MATERIAL, label)
+
+    if any(term in n for term in _FAQ_TERMS) or re.search(r"(?:^|[^a-z])faq(?:[^a-z]|$)", n):
+        return PdfOnlyMaterialMatch(EARNINGS_MATERIAL, "IR FAQ")
 
     # Earnings material retains precedence for a title matching both groups,
     # so one disclosure creates one event/card and keeps existing behavior.

@@ -18,6 +18,7 @@ import os
 import re
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
+from urllib.parse import unquote, urlparse, urlunparse
 
 from .common_models import EventRecord, EventType
 from .notification_policy import is_correction_disclosure_title
@@ -160,8 +161,22 @@ def _normalize_headline(text: str) -> str:
 def build_dedupe_key(event: EventRecord) -> str:
     """EventRecord → dedupe_key (SHA-256 hex 先頭40文字)
 
-    ticker + event_type + normalized(title) + disclosed_at(分単位)
+    Viewer-only material events use a document identity (provider disclosure
+    ID, otherwise canonical PDF URL).  This prevents same-company/same-day
+    materials from being merged while keeping exact retries idempotent.
+    Legacy numeric events retain their established semantic key.
     """
+    if event.event_type in (
+        EventType.EARNINGS_MATERIAL, EventType.MONTHLY_UPDATE,
+        EventType.MANAGEMENT_STRATEGY, DISPLAY_COMPANY_IR_MATERIAL,
+        DISPLAY_COMPANY_IR_VIDEO,
+    ):
+        source_doc_id = (event.source_doc_id or "").strip()
+        identity = source_doc_id or _canonical_document_url(event.doc_url)
+        if identity:
+            combined = "|".join((event.ticker or "", event.event_type or "", identity))
+            return hashlib.sha256(combined.encode("utf-8")).hexdigest()[:40]
+
     dt_part = ""
     if event.disclosure_datetime:
         dt_part = event.disclosure_datetime[:16]  # YYYY-MM-DD HH:MM
@@ -174,6 +189,23 @@ def build_dedupe_key(event: EventRecord) -> str:
     ]
     combined = "|".join(parts)
     return hashlib.sha256(combined.encode("utf-8")).hexdigest()[:40]
+
+
+def _canonical_document_url(value: str) -> str:
+    """Return a stable URL identity, unwrapping the known Yanoshin redirect."""
+    raw = unquote((value or "").strip())
+    if not raw:
+        return ""
+    marker = "rd.php?"
+    if marker in raw and "release.tdnet.info/" in raw:
+        raw = raw.split(marker, 1)[1]
+    try:
+        parsed = urlparse(raw)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return ""
+        return urlunparse((parsed.scheme.lower(), parsed.netloc.lower(), parsed.path, "", "", ""))
+    except ValueError:
+        return ""
 
 
 # ============================================================
@@ -1030,6 +1062,23 @@ def save_event_to_supabase(
                             break
                             
                         r_headline = str(r.get("headline") or "")
+                        if display_category in (
+                            DISPLAY_EARNINGS_MATERIAL, DISPLAY_MONTHLY_UPDATE,
+                            DISPLAY_MANAGEMENT_STRATEGY, DISPLAY_COMPANY_IR_MATERIAL,
+                            DISPLAY_COMPANY_IR_VIDEO,
+                        ):
+                            old_urls = {
+                                _canonical_document_url(str(r.get("source_url") or "")),
+                                _canonical_document_url(str(r.get("pdf_url") or "")),
+                            }
+                            new_url = _canonical_document_url(event.doc_url)
+                            if new_url and new_url in old_urls:
+                                matched_row = r
+                                match_reason = "canonical_document_url_match"
+                                break
+                            # Material identity is disclosure ID/URL only.  Do
+                            # not merge recurring or sibling PDFs by title.
+                            continue
                         if norm_title and _normalize_headline(r_headline) == norm_title:
                             if display_category == "buyback":
                                 new_ids = set()
