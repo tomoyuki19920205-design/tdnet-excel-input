@@ -16,7 +16,9 @@ from lib.sector_weekly_work import (
 from tools.sector_weekly_work_bridge import (
     RESULT_SCHEMA,
     SectorBridgeError,
+    abandon_one,
     claim_one,
+    heartbeat_one,
     start_one,
     submit_one,
 )
@@ -115,6 +117,34 @@ def test_lease_expiry_recovers_assignment_for_retry(tmp_path: Path):
         assert recovered["claim_owner"] is None
     finally:
         conn.close()
+
+
+def test_abandon_rejects_late_bridge_submit_and_next_hour_reclaims(tmp_path: Path):
+    db = tmp_path / "db.sqlite"
+    work = tmp_path / "work"
+    _enqueue(db)
+    claimed = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
+    start_one(db, claimed["assignment_id"], OWNER, at=AT)
+    for minute in (10, 20, 30, 40):
+        heartbeat_one(db, claimed["assignment_id"], OWNER, at=AT + timedelta(minutes=minute))
+    draft = tmp_path / "result.json"
+    draft.write_text(json.dumps(_envelope(claimed), ensure_ascii=False), encoding="utf-8")
+    released = abandon_one(
+        db, claimed["assignment_id"], OWNER, work_root=work,
+        at=AT + timedelta(minutes=49), reason="fixture budget",
+    )
+    assert released["status"] == "retry_pending"
+    with pytest.raises(SectorBridgeError, match="does not own"):
+        submit_one(
+            db, claimed["assignment_id"], OWNER, draft, work_root=work,
+            at=AT + timedelta(minutes=50), sync_func=lambda *_: {},
+        )
+    reclaimed = claim_one(db, OWNER, work_root=work, at=AT + timedelta(hours=1))["assignment"]
+    assert reclaimed["assignment_id"] == claimed["assignment_id"]
+    assert reclaimed["attempt_count"] == 2
+    conn = sqlite3.connect(db)
+    assert conn.execute("SELECT count(*) FROM canonical_sector_reports").fetchone()[0] == 0
+    conn.close()
 
 
 def test_valid_submit_upserts_canonical_syncs_and_is_idempotent(tmp_path: Path):

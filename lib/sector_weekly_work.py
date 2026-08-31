@@ -27,7 +27,8 @@ ASSIGNMENT_STATUSES = frozenset({
 })
 ACTIVE_STATUSES = frozenset({"claimed", "running"})
 MAX_ATTEMPTS = 3
-DEFAULT_LEASE_SECONDS = 55 * 60
+DEFAULT_LEASE_SECONDS = 15 * 60
+MAX_LEASE_LIFETIME_SECONDS = 55 * 60
 _OWNER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
@@ -203,22 +204,29 @@ def claim_next(
     *,
     now: datetime | None = None,
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    window: WeeklyWindow | None = None,
 ) -> dict[str, Any] | None:
     owner = _validate_owner(owner)
     if not isinstance(lease_seconds, int) or not 60 <= lease_seconds <= 60 * 60:
         raise SectorWorkError("lease_seconds must be between 60 and 3600")
     timestamp = _now(now)
     lease_expires = timestamp + timedelta(seconds=lease_seconds)
+    period_filter = ""
+    period_values: tuple[Any, ...] = ()
+    if window is not None:
+        period_filter = " AND period_start=? AND period_end=?"
+        period_values = (_utc_text(window.period_start), _utc_text(window.period_end))
     actionable = conn.execute(
         "SELECT 1 FROM sector_weekly_work_assignments WHERE "
-        "(status='ready' AND attempt_count<? AND available_at<=?) OR "
+        "((status='ready' AND attempt_count<? AND available_at<=?) OR "
         "(status IN ('pending','retry_pending') AND available_at<=?) OR "
-        "(status IN ('claimed','running') AND lease_expires_at IS NOT NULL AND lease_expires_at<=?) LIMIT 1",
-        (MAX_ATTEMPTS, _utc_text(timestamp), _utc_text(timestamp), _utc_text(timestamp)),
+        "(status IN ('claimed','running') AND lease_expires_at IS NOT NULL AND lease_expires_at<=?))"
+        f"{period_filter} LIMIT 1",
+        (MAX_ATTEMPTS, _utc_text(timestamp), _utc_text(timestamp), _utc_text(timestamp), *period_values),
     ).fetchone()
     active = conn.execute(
         "SELECT 1 FROM sector_weekly_work_assignments WHERE status IN ('claimed','running') "
-        "AND lease_expires_at>? LIMIT 1", (_utc_text(timestamp),),
+        f"AND lease_expires_at>?{period_filter} LIMIT 1", (_utc_text(timestamp), *period_values),
     ).fetchone()
     if active is not None or actionable is None:
         return None
@@ -226,20 +234,20 @@ def claim_next(
         _recover_expired_in_transaction(conn, timestamp)
         active = conn.execute(
             "SELECT assignment_id FROM sector_weekly_work_assignments "
-            "WHERE status IN ('claimed','running') AND lease_expires_at>? LIMIT 1",
-            (_utc_text(timestamp),),
+            f"WHERE status IN ('claimed','running') AND lease_expires_at>?{period_filter} LIMIT 1",
+            (_utc_text(timestamp), *period_values),
         ).fetchone()
         if active is not None:
             return None
         conn.execute(
             "UPDATE sector_weekly_work_assignments SET status='ready',updated_at=? "
-            "WHERE status IN ('pending','retry_pending') AND available_at<=?",
-            (_utc_text(timestamp), _utc_text(timestamp)),
+            f"WHERE status IN ('pending','retry_pending') AND available_at<=?{period_filter}",
+            (_utc_text(timestamp), _utc_text(timestamp), *period_values),
         )
         selected = conn.execute(
             "SELECT * FROM sector_weekly_work_assignments WHERE status='ready' AND attempt_count<? AND available_at<=? "
-            "ORDER BY CASE WHEN attempt_count=0 THEN 0 ELSE 1 END,period_end,sector_code LIMIT 1",
-            (MAX_ATTEMPTS, _utc_text(timestamp)),
+            f"{period_filter} ORDER BY CASE WHEN attempt_count=0 THEN 0 ELSE 1 END,sector_code LIMIT 1",
+            (MAX_ATTEMPTS, _utc_text(timestamp), *period_values),
         ).fetchone()
         if selected is None:
             return None
@@ -258,6 +266,45 @@ def claim_next(
             raise SectorWorkError("assignment claim lost an atomic race")
         _set_run_state(conn, selected["stable_key"], "running", timestamp, attempt_count=attempts)
         return get_assignment(conn, selected["assignment_id"])
+
+
+def heartbeat_assignment(
+    conn: sqlite3.Connection,
+    assignment_id: str,
+    owner: str,
+    *,
+    now: datetime | None = None,
+    lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    max_lifetime_seconds: int = MAX_LEASE_LIFETIME_SECONDS,
+) -> dict[str, Any]:
+    """Atomically renew an active lease without exceeding its total lifetime."""
+    owner = _validate_owner(owner)
+    if not isinstance(lease_seconds, int) or not 60 <= lease_seconds <= 60 * 60:
+        raise SectorWorkError("lease_seconds must be between 60 and 3600")
+    if not isinstance(max_lifetime_seconds, int) or not lease_seconds <= max_lifetime_seconds <= 4 * 60 * 60:
+        raise SectorWorkError("max_lifetime_seconds must be between lease_seconds and 14400")
+    timestamp = _now(now)
+    with _immediate(conn):
+        row = get_assignment(conn, assignment_id)
+        if row is None:
+            raise SectorWorkError("assignment not found")
+        if row["status"] not in ACTIVE_STATUSES or row["claim_owner"] != owner:
+            raise SectorWorkError("heartbeat owner does not match active claim")
+        if _parse(row["lease_expires_at"]) <= timestamp:
+            raise SectorWorkError("assignment lease has expired")
+        claimed_at = _parse(row["claimed_at"])
+        maximum = claimed_at + timedelta(seconds=max_lifetime_seconds)
+        renewed_until = min(timestamp + timedelta(seconds=lease_seconds), maximum)
+        if renewed_until <= timestamp or renewed_until <= _parse(row["lease_expires_at"]):
+            raise SectorWorkError("assignment maximum lease lifetime has been reached")
+        cursor = conn.execute(
+            "UPDATE sector_weekly_work_assignments SET lease_expires_at=?,updated_at=? "
+            "WHERE assignment_id=? AND claim_owner=? AND status IN ('claimed','running') AND lease_expires_at>?",
+            (_utc_text(renewed_until), _utc_text(timestamp), assignment_id, owner, _utc_text(timestamp)),
+        )
+        if cursor.rowcount != 1:
+            raise SectorWorkError("heartbeat lost an atomic ownership race")
+        return get_assignment(conn, assignment_id) or row
 
 
 def mark_running(
@@ -318,6 +365,46 @@ def fail_assignment(
         _set_run_state(
             conn, row["stable_key"], status if status == "failed" else "retry_pending", timestamp,
             attempt_count=int(row["attempt_count"]), error_type=error_type, error_message=message,
+        )
+        return get_assignment(conn, assignment_id) or row
+
+
+def abandon_assignment(
+    conn: sqlite3.Connection,
+    assignment_id: str,
+    owner: str,
+    *,
+    now: datetime | None = None,
+    reason: str = "worker hard time budget reached",
+) -> dict[str, Any]:
+    """Atomically release an owned, unexpired claim for a later attempt."""
+    owner = _validate_owner(owner)
+    timestamp = _now(now)
+    message = str(reason).strip()[:2000] or "worker hard time budget reached"
+    with _immediate(conn):
+        row = get_assignment(conn, assignment_id)
+        if row is None:
+            raise SectorWorkError("assignment not found")
+        if row["claim_owner"] != owner or row["status"] not in ACTIVE_STATUSES:
+            raise SectorWorkError("abandon owner does not match active claim")
+        if _parse(row["lease_expires_at"]) <= timestamp:
+            raise SectorWorkError("assignment lease has expired")
+        terminal = int(row["attempt_count"]) >= MAX_ATTEMPTS
+        status = "failed" if terminal else "retry_pending"
+        cursor = conn.execute(
+            "UPDATE sector_weekly_work_assignments SET status=?,available_at=?,claim_owner=NULL,claimed_at=NULL,"
+            "lease_expires_at=NULL,started_at=NULL,last_error_type='WorkerAbandoned',last_error_message=?,updated_at=? "
+            "WHERE assignment_id=? AND claim_owner=? AND status IN ('claimed','running') AND lease_expires_at>?",
+            (
+                status, _utc_text(timestamp), message, _utc_text(timestamp), assignment_id, owner,
+                _utc_text(timestamp),
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise SectorWorkError("abandon lost an atomic ownership race")
+        _set_run_state(
+            conn, row["stable_key"], status if terminal else "retry_pending", timestamp,
+            attempt_count=int(row["attempt_count"]), error_type="WorkerAbandoned", error_message=message,
         )
         return get_assignment(conn, assignment_id) or row
 
@@ -413,7 +500,7 @@ def enqueue_retry_candidate(
         if int(row["attempt_count"]) >= MAX_ATTEMPTS:
             continue
         if row["status"] == "ready":
-            return row, False
+            continue
         with _immediate(conn):
             conn.execute(
                 "UPDATE sector_weekly_work_assignments SET status='ready',available_at=?,claim_owner=NULL,"
@@ -427,3 +514,90 @@ def enqueue_retry_candidate(
             refreshed = get_assignment(conn, row["assignment_id"])
         return refreshed, False
     return None, False
+
+
+STATUS_EXIT_CODES = {
+    "COMPLETE_33_OF_33": 0,
+    "IN_PROGRESS": 10,
+    "INCOMPLETE_RETRYABLE": 11,
+    "FAILED_FINAL": 12,
+    "STALE_PREVIOUS_PERIOD": 13,
+    "DATA_INCONSISTENT": 20,
+}
+
+
+def completion_status(conn: sqlite3.Connection, window: WeeklyWindow) -> dict[str, Any]:
+    """Summarize one target week without exposing report payloads or secrets."""
+    start, end = _utc_text(window.period_start), _utc_text(window.period_end)
+    rows = [dict(row) for row in conn.execute(
+        "SELECT assignment_id,stable_key,sector_code,sector_name,status,attempt_count,completed_at "
+        "FROM sector_weekly_work_assignments WHERE period_start=? AND period_end=? ORDER BY sector_code",
+        (start, end),
+    ).fetchall()]
+    counts = {status: 0 for status in ASSIGNMENT_STATUSES}
+    sectors: dict[int, list[dict[str, Any]]] = {}
+    attempts = 0
+    completed: list[str] = []
+    inconsistent = 0
+    for row in rows:
+        status = str(row["status"])
+        if status not in counts:
+            inconsistent += 1
+            continue
+        counts[status] += 1
+        attempts += int(row["attempt_count"])
+        code = int(row["sector_code"])
+        sectors.setdefault(code, []).append(row)
+        if row["sector_name"] != sector_name(code) or row["stable_key"] != dedupe_key(window, code):
+            inconsistent += 1
+        if row["completed_at"]:
+            completed.append(str(row["completed_at"]))
+    missing = [code for code in range(1, 34) if code not in sectors]
+    duplicates = sum(max(0, len(items) - 1) for items in sectors.values())
+    stale_rows = conn.execute(
+        "SELECT assignment_id,stable_key,sector_code,sector_name,status,attempt_count,period_start,period_end,last_error_type "
+        "FROM sector_weekly_work_assignments WHERE period_end<? AND status<>'success' ORDER BY period_end,sector_code",
+        (end,),
+    ).fetchall()
+    stale = [dict(row) for row in stale_rows]
+    active = counts["claimed"] + counts["running"]
+    retryable = counts["pending"] + counts["ready"] + counts["retry_pending"]
+    if inconsistent or duplicates or len(rows) > 33:
+        state = "DATA_INCONSISTENT"
+    elif counts["failed"]:
+        state = "FAILED_FINAL"
+    elif counts["success"] == 33 and not missing:
+        state = "COMPLETE_33_OF_33"
+    elif active:
+        state = "IN_PROGRESS"
+    elif not rows and stale:
+        state = "STALE_PREVIOUS_PERIOD"
+    elif rows or missing:
+        state = "INCOMPLETE_RETRYABLE"
+    else:
+        state = "INCOMPLETE_RETRYABLE"
+    conditions = [state]
+    if stale and "STALE_PREVIOUS_PERIOD" not in conditions:
+        conditions.append("STALE_PREVIOUS_PERIOD")
+    event_key = f"sector_weekly_completion:{window.week_key}" if state == "COMPLETE_33_OF_33" else None
+    return {
+        "state": state,
+        "conditions": conditions,
+        "exit_code": STATUS_EXIT_CODES[state],
+        "period_start": iso_seconds(window.period_start),
+        "period_end": iso_seconds(window.period_end),
+        "total_sectors": 33,
+        "assignments": len(rows),
+        **{status: counts[status] for status in sorted(counts)},
+        "missing_count": len(missing),
+        "missing_sectors": [{"sector_code": code, "sector_name": sector_name(code)} for code in missing],
+        "stale_count": len(stale),
+        "stale_assignments": stale,
+        "duplicate_count": duplicates,
+        "inconsistency_count": inconsistent,
+        "retryable_count": retryable,
+        "attempts": attempts,
+        "last_success_at": max(completed) if completed else None,
+        "complete": state == "COMPLETE_33_OF_33",
+        "completion_event": ({"event": "sector_weekly_33_of_33_complete", "event_key": event_key} if event_key else None),
+    }

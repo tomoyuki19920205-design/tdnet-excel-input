@@ -127,6 +127,10 @@ def test_wrong_period_and_invalid_json_shape_are_rejected():
     payload["period_start"] = "2026-08-30T06:00:00+09:00"
     with pytest.raises(SectorValidationError, match="common weekly window"):
         validate_report(payload, expected_code=20, expected_window=window)
+    payload = assemble_payload(_content(), 20, window)
+    payload["summary_bullets"] = [f"bullet-{index}" for index in range(6)]
+    with pytest.raises(SectorValidationError, match="3..5"):
+        validate_report(payload, expected_code=20, expected_window=window)
 
 
 def test_source_date_precision_is_preserved_without_inventing_time():
@@ -183,7 +187,7 @@ def test_scheduler_enqueues_idempotently_without_research(tmp_path: Path, monkey
     assert first["status"] == "queued"
     assert first["assignment_status"] == "ready"
     assert first["created"] is True
-    assert second["status"] == "queued"
+    assert second["status"] == "slot_already_processed"
     assert second["created"] is False
     assert first["assignment_id"] == second["assignment_id"]
     conn = sqlite3.connect(db)
@@ -213,6 +217,10 @@ def test_chatgpt_worker_prompt_has_transport_research_and_schema_contracts():
         "foundry", "VLCC", "Fact / Transmission / Magnitude / Pricing-in / Counterevidence",
         "重要材料は", "3〜5件", "3,000〜4,500文字", "missed_candidates",
         "sector_weekly_work_result_v1", "company_ir | government | regulator",
+        "heartbeat --assignment-id", "10分ごと", "hard time budgetは50分", "45分時点",
+        "abandon --assignment-id", "atomicにretry_pending", "調査品質を落として無理にsubmit",
+        "1実行で複数sectorを処理してはいけません", "月曜08:05 JST",
+        "owner、sector、period", "隔離SQLite DB",
     ):
         assert term in prompt
     for forbidden in ("APIキー", "Responses API", "API料金", "max_tool_calls", "API timeout", "token料金"):
@@ -226,6 +234,19 @@ def test_company_news_schema_is_not_modified_by_sector_migration():
         assert "ALTER TABLE canonical_news_events" not in sql
         assert "company_news_work" not in sql
     assert "api_latest_news_stream" in (root / "migrations" / "017_sector_weekly_reports.sql").read_text(encoding="utf-8")
+
+
+def test_sector_weekly_task_installer_uses_hourly_disabled_safe_schedule():
+    script = (Path(__file__).parents[1] / "tools" / "install_sector_weekly_task.ps1").read_text(encoding="utf-8")
+    assert "-At $firstSaturday -RepetitionInterval (New-TimeSpan -Hours 1)" in script
+    assert 'Repetition = "PT1H"' in script
+    assert 'RepetitionDuration = "Indefinite"' in script
+    assert "EligibleSlots = 51" in script
+    assert "EligibleWindowEnd = $firstSaturday.AddHours(50)" in script
+    assert "-MultipleInstances IgnoreNew" in script
+    assert "if (-not $Enable) { Disable-ScheduledTask" in script
+    assert "New-TimeSpan -Minutes 45" not in script
+    assert 'Repetition = "PT45M"' not in script
 
 
 def test_scheduler_can_be_enabled_without_running_before_first_saturday(tmp_path: Path):
