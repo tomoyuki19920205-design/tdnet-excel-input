@@ -69,6 +69,8 @@ def _fetch_docs_for_date(target_date: str | None = None) -> list[DocumentMeta]:
             title=item.title,
             disclosure_datetime=item.published_at,
             doc_url=item.doc_url,
+            source_doc_id=item.source_doc_id or item.disclosure_id,
+            link_validated=getattr(item, "link_validated", None),
         ))
     return docs
 
