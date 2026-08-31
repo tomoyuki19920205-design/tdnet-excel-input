@@ -7,12 +7,23 @@ import pytest
 
 import tools.sector_weekly_scheduler as scheduler
 from lib.sector_weekly import (
-    JST, OUTSIDE_IN_SECTORS, SECTORS, SectorValidationError, connect_sector_db, dedupe_key,
+    CANONICAL_SQLITE_SCHEMA, JST, OUTSIDE_IN_SECTORS, SECTORS, SectorValidationError, connect_sector_db, dedupe_key,
     scheduled_sector, sector_name, validate_report, weekly_window,
 )
 from tools.sector_weekly_scheduler import (
     assemble_payload, run_scheduled,
 )
+from tools.apply_sector_weekly_work_sqlite_migration import apply_sqlite_migration
+
+
+def _migrate_fixture(db: Path) -> None:
+    db.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db)
+    conn.executescript(CANONICAL_SQLITE_SCHEMA)
+    conn.close()
+    apply_sqlite_migration(
+        db, expected_db_path=db, backup_dir=db.parent / "migration_backups",
+    )
 
 
 def _content() -> dict:
@@ -164,6 +175,7 @@ def test_full_report_restores_concatenated_markdown_headings():
 
 def test_scheduler_enqueues_idempotently_without_research(tmp_path: Path, monkeypatch):
     db = tmp_path / "news.db"
+    _migrate_fixture(db)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     at = datetime.fromisoformat("2026-09-05T06:00:00+09:00")
     first = run_scheduled(at, db_path=db, log_path=tmp_path / "log.jsonl", lock_path=tmp_path / "lock")

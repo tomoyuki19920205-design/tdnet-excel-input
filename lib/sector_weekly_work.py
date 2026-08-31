@@ -7,7 +7,7 @@ import re
 import sqlite3
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator
 
 from lib.sector_weekly import (
@@ -50,6 +50,12 @@ def _parse(value: str) -> datetime:
     if parsed.tzinfo is None:
         raise SectorWorkError("assignment timestamp must include a timezone")
     return parsed.astimezone(JST)
+
+
+def _utc_text(value: datetime) -> str:
+    if value.tzinfo is None:
+        raise SectorWorkError("work timestamps must include a timezone")
+    return value.astimezone(timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _validate_owner(owner: str) -> str:
@@ -119,8 +125,8 @@ def enqueue_assignment(
                 "attempt_count,available_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     assignment_id, ASSIGNMENT_SCHEMA, key, code, sector_name(code),
-                    iso_seconds(window.period_start), iso_seconds(window.period_end), initial_status, 0,
-                    iso_seconds(available), iso_seconds(timestamp), iso_seconds(timestamp),
+                    _utc_text(window.period_start), _utc_text(window.period_end), initial_status, 0,
+                    _utc_text(available), _utc_text(timestamp), _utc_text(timestamp),
                 ),
             )
             created = True
@@ -128,7 +134,7 @@ def enqueue_assignment(
             conn.execute(
                 "UPDATE sector_weekly_work_assignments SET status='ready',available_at=?,updated_at=? "
                 "WHERE assignment_id=?",
-                (iso_seconds(available), iso_seconds(timestamp), existing["assignment_id"]),
+                (_utc_text(available), _utc_text(timestamp), existing["assignment_id"]),
             )
         result = get_assignment(conn, assignment_id)
     if result is None:
@@ -166,7 +172,7 @@ def _recover_expired_in_transaction(conn: sqlite3.Connection, timestamp: datetim
     rows = conn.execute(
         "SELECT assignment_id,stable_key,attempt_count FROM sector_weekly_work_assignments "
         "WHERE status IN ('claimed','running') AND lease_expires_at IS NOT NULL AND lease_expires_at<=?",
-        (iso_seconds(timestamp),),
+        (_utc_text(timestamp),),
     ).fetchall()
     for row in rows:
         terminal = int(row["attempt_count"]) >= MAX_ATTEMPTS
@@ -175,7 +181,7 @@ def _recover_expired_in_transaction(conn: sqlite3.Connection, timestamp: datetim
             "UPDATE sector_weekly_work_assignments SET status=?,available_at=?,claim_owner=NULL,claimed_at=NULL,"
             "lease_expires_at=NULL,last_error_type='LeaseExpired',last_error_message='worker lease expired before submit',"
             "updated_at=? WHERE assignment_id=?",
-            (status, iso_seconds(timestamp), iso_seconds(timestamp), row["assignment_id"]),
+            (status, _utc_text(timestamp), _utc_text(timestamp), row["assignment_id"]),
         )
         _set_run_state(
             conn, row["stable_key"], status if status == "failed" else "retry_pending", timestamp,
@@ -203,24 +209,37 @@ def claim_next(
         raise SectorWorkError("lease_seconds must be between 60 and 3600")
     timestamp = _now(now)
     lease_expires = timestamp + timedelta(seconds=lease_seconds)
+    actionable = conn.execute(
+        "SELECT 1 FROM sector_weekly_work_assignments WHERE "
+        "(status='ready' AND attempt_count<? AND available_at<=?) OR "
+        "(status IN ('pending','retry_pending') AND available_at<=?) OR "
+        "(status IN ('claimed','running') AND lease_expires_at IS NOT NULL AND lease_expires_at<=?) LIMIT 1",
+        (MAX_ATTEMPTS, _utc_text(timestamp), _utc_text(timestamp), _utc_text(timestamp)),
+    ).fetchone()
+    active = conn.execute(
+        "SELECT 1 FROM sector_weekly_work_assignments WHERE status IN ('claimed','running') "
+        "AND lease_expires_at>? LIMIT 1", (_utc_text(timestamp),),
+    ).fetchone()
+    if active is not None or actionable is None:
+        return None
     with _immediate(conn):
         _recover_expired_in_transaction(conn, timestamp)
         active = conn.execute(
             "SELECT assignment_id FROM sector_weekly_work_assignments "
             "WHERE status IN ('claimed','running') AND lease_expires_at>? LIMIT 1",
-            (iso_seconds(timestamp),),
+            (_utc_text(timestamp),),
         ).fetchone()
         if active is not None:
             return None
         conn.execute(
             "UPDATE sector_weekly_work_assignments SET status='ready',updated_at=? "
             "WHERE status IN ('pending','retry_pending') AND available_at<=?",
-            (iso_seconds(timestamp), iso_seconds(timestamp)),
+            (_utc_text(timestamp), _utc_text(timestamp)),
         )
         selected = conn.execute(
-            "SELECT * FROM sector_weekly_work_assignments WHERE status='ready' AND available_at<=? "
+            "SELECT * FROM sector_weekly_work_assignments WHERE status='ready' AND attempt_count<? AND available_at<=? "
             "ORDER BY CASE WHEN attempt_count=0 THEN 0 ELSE 1 END,period_end,sector_code LIMIT 1",
-            (iso_seconds(timestamp),),
+            (MAX_ATTEMPTS, _utc_text(timestamp)),
         ).fetchone()
         if selected is None:
             return None
@@ -231,8 +250,8 @@ def claim_next(
             "submitted_payload_hash=NULL,updated_at=? "
             "WHERE assignment_id=? AND status='ready'",
             (
-                attempts, owner, iso_seconds(timestamp), iso_seconds(lease_expires),
-                iso_seconds(timestamp), selected["assignment_id"],
+                attempts, owner, _utc_text(timestamp), _utc_text(lease_expires),
+                _utc_text(timestamp), selected["assignment_id"],
             ),
         )
         if cursor.rowcount != 1:
@@ -262,7 +281,7 @@ def mark_running(
             raise SectorWorkError("assignment lease has expired")
         conn.execute(
             "UPDATE sector_weekly_work_assignments SET status='running',started_at=?,updated_at=? WHERE assignment_id=?",
-            (iso_seconds(timestamp), iso_seconds(timestamp), assignment_id),
+            (_utc_text(timestamp), _utc_text(timestamp), assignment_id),
         )
         return get_assignment(conn, assignment_id) or row
 
@@ -294,7 +313,7 @@ def fail_assignment(
         conn.execute(
             "UPDATE sector_weekly_work_assignments SET status=?,available_at=?,claim_owner=NULL,claimed_at=NULL,"
             "lease_expires_at=NULL,last_error_type=?,last_error_message=?,updated_at=? WHERE assignment_id=?",
-            (status, iso_seconds(available), error_type, message, iso_seconds(timestamp), assignment_id),
+            (status, _utc_text(available), error_type, message, _utc_text(timestamp), assignment_id),
         )
         _set_run_state(
             conn, row["stable_key"], status if status == "failed" else "retry_pending", timestamp,
@@ -330,7 +349,7 @@ def complete_assignment(
         conn.execute(
             "UPDATE sector_weekly_work_assignments SET status='success',completed_at=?,submitted_payload_hash=?,"
             "lease_expires_at=NULL,last_error_type=NULL,last_error_message=NULL,updated_at=? WHERE assignment_id=?",
-            (iso_seconds(timestamp), submitted_hash, iso_seconds(timestamp), assignment_id),
+            (_utc_text(timestamp), submitted_hash, _utc_text(timestamp), assignment_id),
         )
         _set_run_state(
             conn, row["stable_key"], "success", timestamp, attempt_count=int(row["attempt_count"]),
@@ -365,7 +384,7 @@ def prepare_submission(
             raise SectorWorkError("assignment lease expired before submit")
         conn.execute(
             "UPDATE sector_weekly_work_assignments SET submitted_payload_hash=?,updated_at=? WHERE assignment_id=?",
-            (submitted_hash, iso_seconds(timestamp), assignment_id),
+            (submitted_hash, _utc_text(timestamp), assignment_id),
         )
         _set_run_state(
             conn, row["stable_key"], "success", timestamp, attempt_count=int(row["attempt_count"]),
@@ -391,13 +410,15 @@ def enqueue_retry_candidate(
             continue
         if row["status"] in ACTIVE_STATUSES:
             continue
+        if int(row["attempt_count"]) >= MAX_ATTEMPTS:
+            continue
         if row["status"] == "ready":
             return row, False
         with _immediate(conn):
             conn.execute(
                 "UPDATE sector_weekly_work_assignments SET status='ready',available_at=?,claim_owner=NULL,"
                 "claimed_at=NULL,lease_expires_at=NULL,updated_at=? WHERE assignment_id=?",
-                (iso_seconds(timestamp), iso_seconds(timestamp), row["assignment_id"]),
+                (_utc_text(timestamp), _utc_text(timestamp), row["assignment_id"]),
             )
             _set_run_state(
                 conn, key, "retry_pending" if int(row["attempt_count"]) else "pending", timestamp,

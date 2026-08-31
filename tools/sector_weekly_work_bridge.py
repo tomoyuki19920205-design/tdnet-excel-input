@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from lib.sector_weekly import (
-    WeeklyWindow,
+    JST, WeeklyWindow,
     connect_sector_db,
     now_jst,
     sector_name,
@@ -60,7 +60,11 @@ def _parse_datetime(value: Any, field: str) -> datetime:
 def _window(row: dict[str, Any]) -> WeeklyWindow:
     start = _parse_datetime(row["period_start"], "period_start")
     end = _parse_datetime(row["period_end"], "period_end")
-    return WeeklyWindow(period_start=start, period_end=end, week_key=end.date().isoformat())
+    return WeeklyWindow(
+        period_start=start,
+        period_end=end,
+        week_key=end.astimezone(JST).date().isoformat(),
+    )
 
 
 def _assignment_contract(row: dict[str, Any], work_root: Path) -> dict[str, Any]:

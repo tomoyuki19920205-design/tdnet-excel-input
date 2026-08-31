@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+from lib.sector_weekly_sqlite import connect_sector_db
 from urllib.parse import urlsplit
 
 SCHEMA_VERSION = "sector_weekly_v1"
@@ -284,7 +286,7 @@ def validate_report(
     return ValidatedSectorReport(report=report)
 
 
-SQLITE_SCHEMA = """
+CANONICAL_SQLITE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS canonical_sector_reports (
  id TEXT PRIMARY KEY, schema_version TEXT NOT NULL, report_type TEXT NOT NULL, sector_code INTEGER NOT NULL,
  sector_name TEXT NOT NULL, period_start TEXT NOT NULL, period_end TEXT NOT NULL, generated_at TEXT NOT NULL,
@@ -298,25 +300,9 @@ CREATE TABLE IF NOT EXISTS canonical_sector_report_runs (
  attempt_count INTEGER NOT NULL DEFAULT 0, last_error_type TEXT, last_error_message TEXT, started_at TEXT,
  completed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS sector_weekly_work_assignments (
- assignment_id TEXT PRIMARY KEY, schema_version TEXT NOT NULL, stable_key TEXT NOT NULL UNIQUE,
- sector_code INTEGER NOT NULL, sector_name TEXT NOT NULL, period_start TEXT NOT NULL, period_end TEXT NOT NULL,
- status TEXT NOT NULL, attempt_count INTEGER NOT NULL DEFAULT 0, available_at TEXT NOT NULL,
- claim_owner TEXT, claimed_at TEXT, lease_expires_at TEXT, started_at TEXT, completed_at TEXT,
- last_error_type TEXT, last_error_message TEXT, submitted_payload_hash TEXT,
- created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-);
 CREATE INDEX IF NOT EXISTS ix_sector_reports_generated ON canonical_sector_reports(generated_at DESC);
 CREATE INDEX IF NOT EXISTS ix_sector_runs_status ON canonical_sector_report_runs(status, period_end DESC);
-CREATE INDEX IF NOT EXISTS ix_sector_work_ready ON sector_weekly_work_assignments(status,available_at,sector_code);
 """
-
-
-def connect_sector_db(db_path: str | Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
-    conn.executescript(SQLITE_SCHEMA)
-    return conn
 
 
 def ensure_week_runs(conn: sqlite3.Connection, window: WeeklyWindow) -> None:

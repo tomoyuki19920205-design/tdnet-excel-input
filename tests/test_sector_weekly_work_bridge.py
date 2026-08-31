@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from lib.sector_weekly import connect_sector_db, weekly_window
+from lib.sector_weekly import CANONICAL_SQLITE_SCHEMA, connect_sector_db, weekly_window
 from lib.sector_weekly_work import (
     claim_next,
     enqueue_assignment,
@@ -20,9 +20,22 @@ from tools.sector_weekly_work_bridge import (
     start_one,
     submit_one,
 )
+from tools.apply_sector_weekly_work_sqlite_migration import apply_sqlite_migration
 
 AT = datetime.fromisoformat("2026-09-05T06:05:00+09:00")
 OWNER = "sector-weekly-worker"
+
+
+def _migrate_fixture(db: Path) -> None:
+    if db.exists():
+        return
+    db.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db)
+    conn.executescript(CANONICAL_SQLITE_SCHEMA)
+    conn.close()
+    apply_sqlite_migration(
+        db, expected_db_path=db, backup_dir=db.parent / "migration_backups",
+    )
 
 
 def _report() -> dict:
@@ -42,6 +55,7 @@ def _report() -> dict:
 
 
 def _enqueue(db: Path, code: int = 2) -> dict:
+    _migrate_fixture(db)
     conn = connect_sector_db(db)
     try:
         row, _ = enqueue_assignment(conn, code, weekly_window(AT), now=AT)
@@ -218,6 +232,7 @@ def test_submit_rejects_owner_sector_or_period_mismatch(tmp_path: Path, field: s
 
 def test_sunday_retry_enqueues_one_missing_or_failed_sector(tmp_path: Path):
     db = tmp_path / "db.sqlite"
+    _migrate_fixture(db)
     window = weekly_window(AT)
     conn = connect_sector_db(db)
     try:

@@ -4,13 +4,14 @@ CREATE TABLE IF NOT EXISTS sector_weekly_work_assignments (
     schema_version TEXT NOT NULL CHECK (schema_version = 'sector_weekly_assignment_v1'),
     stable_key TEXT NOT NULL UNIQUE,
     sector_code INTEGER NOT NULL CHECK (sector_code BETWEEN 1 AND 33),
-    sector_name TEXT NOT NULL,
+    sector_name TEXT NOT NULL CHECK (length(btrim(sector_name)) > 0),
     period_start TIMESTAMPTZ NOT NULL,
     period_end TIMESTAMPTZ NOT NULL,
     status TEXT NOT NULL CHECK (status IN (
         'pending', 'ready', 'claimed', 'running', 'success', 'retry_pending', 'failed'
     )),
-    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    -- MAX_ATTEMPTS is the shared application invariant 3 (and therefore >= 1).
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count BETWEEN 0 AND 3),
     available_at TIMESTAMPTZ NOT NULL,
     claim_owner TEXT,
     claimed_at TIMESTAMPTZ,
@@ -22,7 +23,7 @@ CREATE TABLE IF NOT EXISTS sector_weekly_work_assignments (
     submitted_payload_hash TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CHECK (period_end >= period_start),
+    CHECK (period_end > period_start),
     CHECK (submitted_payload_hash IS NULL OR submitted_payload_hash ~ '^[0-9a-f]{64}$'),
     CHECK (
         status NOT IN ('claimed', 'running') OR
