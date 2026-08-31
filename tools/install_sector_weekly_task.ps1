@@ -38,14 +38,11 @@ if ($firstSaturday -le $now) { $firstSaturday = $firstSaturday.AddDays(7) }
 $notBefore = $firstSaturday.ToString("yyyy-MM-ddTHH:mm:sszzz")
 $arguments += @("--not-before", $notBefore)
 $argumentString = ($arguments | ForEach-Object { '"' + $_.Replace('"', '\"') + '"' }) -join " "
-$nextHour = (Get-Date).AddHours(1)
-$nextHour = Get-Date -Year $nextHour.Year -Month $nextHour.Month -Day $nextHour.Day -Hour $nextHour.Hour -Minute 0 -Second 0
-
 $action = New-ScheduledTaskAction -Execute $PythonPath -Argument $argumentString -WorkingDirectory $RepositoryRoot
-$trigger = New-ScheduledTaskTrigger -Once -At $nextHour -RepetitionInterval (New-TimeSpan -Hours 1)
+$trigger = New-ScheduledTaskTrigger -Once -At $firstSaturday -RepetitionInterval (New-TimeSpan -Hours 1)
 $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 59)
 $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
-$task = New-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description "Queue one Sector Weekly assignment per eligible JST hour; never runs LLM or Web Search."
+$task = New-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description "Queue at most one Sector Weekly assignment per eligible hourly JST slot through Monday 08:00; never runs LLM or Web Search."
 
 if ($PSCmdlet.ShouldProcess($TaskName, "Register scheduled task")) {
     Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
@@ -58,8 +55,11 @@ if ($PSCmdlet.ShouldProcess($TaskName, "Register scheduled task")) {
 
 [pscustomobject]@{
     TaskName = $TaskName
-    NextStart = $nextHour
+    NextStart = $firstSaturday
     Repetition = "PT1H"
+    RepetitionDuration = "Indefinite"
+    EligibleSlots = 51
+    EligibleWindowEnd = $firstSaturday.AddHours(50)
     Execute = $PythonPath
     Arguments = $argumentString
     MultipleInstances = "IgnoreNew"

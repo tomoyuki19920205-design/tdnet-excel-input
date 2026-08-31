@@ -8,7 +8,7 @@ import os
 import re
 import sys
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT))
 
 from lib.sector_weekly import (
     JST, SCHEMA_VERSION, REPORT_TYPE, SectorValidationError, WeeklyWindow, connect_sector_db,
-    dedupe_key, in_retry_window, iso_seconds, now_jst, sector_name,
+    dedupe_key, iso_seconds, now_jst, sector_name,
     sector_research_context, weekly_window,
 )
 from lib.sector_weekly_work import enqueue_assignment, enqueue_retry_candidate, get_assignment_by_key
@@ -25,6 +25,11 @@ from lib.sector_weekly_work import enqueue_assignment, enqueue_retry_candidate, 
 PROMPT_PATH = ROOT / "config" / "sector_weekly_prompt.txt"
 DEFAULT_LOG = ROOT / "data" / "sector_weekly" / "scheduler.jsonl"
 DEFAULT_LOCK = ROOT / "data" / "sector_weekly" / "scheduler.lock"
+SCHEDULER_CADENCE_MINUTES = 60
+SCHEDULER_SLOT_COUNT = 51
+SCHEDULER_FINAL_DAY = 0
+SCHEDULER_FINAL_HOUR = 8
+SCHEDULER_FINAL_MINUTE = 0
 
 
 class SchedulerError(RuntimeError):
@@ -171,7 +176,32 @@ def _public_assignment(row: dict[str, Any] | None) -> dict[str, Any]:
 
 def in_catchup_window(value: datetime) -> bool:
     local = value.astimezone(JST)
-    return (local.weekday() == 5 and local.hour >= 6) or local.weekday() == 6
+    if local.weekday() == 5:
+        return local.hour >= 6
+    if local.weekday() == 6:
+        return True
+    return local.weekday() == SCHEDULER_FINAL_DAY and (
+        local.hour, local.minute, local.second, local.microsecond
+    ) <= (SCHEDULER_FINAL_HOUR, SCHEDULER_FINAL_MINUTE, 0, 0)
+
+
+def in_worker_window(value: datetime) -> bool:
+    local = value.astimezone(JST)
+    if local.weekday() == 5:
+        return (local.hour, local.minute, local.second, local.microsecond) >= (6, 5, 0, 0)
+    if local.weekday() == 6:
+        return True
+    return local.weekday() == SCHEDULER_FINAL_DAY and (
+        local.hour, local.minute, local.second, local.microsecond
+    ) <= (8, 5, 0, 0)
+
+
+def scheduler_slots(saturday_start: datetime) -> tuple[datetime, ...]:
+    """Return the 51 eligible hourly invocations for one recovery window."""
+    local = saturday_start.astimezone(JST)
+    if (local.weekday(), local.hour, local.minute, local.second, local.microsecond) != (5, 6, 0, 0, 0):
+        raise SchedulerError("scheduler slot window must start Saturday 06:00:00 JST")
+    return tuple(local + timedelta(hours=index) for index in range(SCHEDULER_SLOT_COUNT))
 
 
 def _utc_text(value: datetime) -> str:
@@ -196,9 +226,7 @@ def plan_scheduled(conn: Any, at: datetime, window: WeeklyWindow) -> dict[str, A
     for code in range(1, 34):
         if get_assignment_by_key(conn, dedupe_key(window, code)) is None:
             return {"action": "enqueue", "event": "assignment_queued", "sector_code": code}
-    if in_retry_window(at):
-        return {"action": "retry", "event": "retry_queued"}
-    return {"action": "none", "event": "all_assignments_created"}
+    return {"action": "retry", "event": "retry_queued"}
 
 
 def run_scheduled(
