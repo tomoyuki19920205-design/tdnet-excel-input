@@ -8,6 +8,7 @@ import pytest
 from lib.sector_weekly import CANONICAL_SQLITE_SCHEMA, sector_name, weekly_window
 from lib.sector_weekly_sqlite import connect_sector_db
 from lib.sector_weekly_work import (
+    complete_assignment,
     completion_status,
     enqueue_assignment,
     get_assignment,
@@ -17,7 +18,7 @@ from tools.apply_sector_weekly_work_sqlite_migration import apply_sqlite_migrati
 from tools.sector_weekly_scheduler import run_scheduled
 from tools.sector_weekly_work_bridge import (
     RESULT_SCHEMA,
-    SectorBridgeError,
+    abandon_one,
     claim_one,
     heartbeat_one,
     start_one,
@@ -26,6 +27,10 @@ from tools.sector_weekly_work_bridge import (
 
 SAT = datetime.fromisoformat("2026-09-05T06:00:00+09:00")
 OWNER = "sector-weekly-soak-worker"
+CADENCE = timedelta(hours=1)
+ALL_SLOTS = [SAT + index * CADENCE for index in range(51)]
+OUTAGE_SLOT_COUNT = 12
+TEMPORARY_FAILURES = 6
 
 
 def _migrate(db: Path, root: Path) -> None:
@@ -81,7 +86,17 @@ def _envelope(claimed: dict) -> dict:
     }
 
 
-def test_accelerated_33_sector_nonproduction_soak(tmp_path: Path):
+def _available_slots(outage_start: int) -> list[datetime]:
+    return ALL_SLOTS[:outage_start] + ALL_SLOTS[outage_start + OUTAGE_SLOT_COUNT:]
+
+
+def _heartbeat_to_minute_40(db: Path, assignment_id: str, worker_at: datetime) -> None:
+    for minute in (10, 20, 30, 40):
+        renewed = heartbeat_one(db, assignment_id, OWNER, at=worker_at + timedelta(minutes=minute))
+        assert renewed["status"] == "lease_renewed"
+
+
+def test_accelerated_51_slot_33_sector_nonproduction_soak(tmp_path: Path):
     db = tmp_path / "isolated-soak.db"
     work = tmp_path / "work"
     _migrate(db, tmp_path)
@@ -95,16 +110,9 @@ def test_accelerated_33_sector_nonproduction_soak(tmp_path: Path):
 
     scheduler_log = tmp_path / "scheduler.jsonl"
     scheduler_lock = tmp_path / "scheduler.lock"
-    first = run_scheduled(SAT, db_path=db, log_path=scheduler_log, lock_path=scheduler_lock)
-    assert first["sector_code"] == 1
-    # Simulate a 12-hour PC stop, then accelerate distinct invocations without sleep.
-    resumed = SAT + timedelta(hours=13)
-    for index in range(32):
-        result = run_scheduled(
-            resumed + timedelta(minutes=index + 1), db_path=db,
-            log_path=scheduler_log, lock_path=scheduler_lock,
-        )
-        assert result["created"] is True and result["sector_code"] == index + 2
+    # A twelve-hour stop from the beginning removes exactly twelve of 51 slots.
+    slots = _available_slots(0)
+    assert len(ALL_SLOTS) == 51 and len(slots) == 39
 
     sync_calls: list[int] = []
 
@@ -112,49 +120,49 @@ def test_accelerated_33_sector_nonproduction_soak(tmp_path: Path):
         sync_calls.append(1)
         return {"canonical_sector_reports": len(sync_calls)}
 
-    cursor = resumed + timedelta(hours=1)
     completed_codes: set[int] = set()
-    malformed_done = False
-    lease_expiry_done = False
-    while len(completed_codes) < 33:
-        submit_at = cursor + timedelta(minutes=11)
-        claimed = claim_one(db, OWNER, work_root=work, at=cursor)["assignment"]
-        code = int(claimed["sector_code"])
-        start_one(db, claimed["assignment_id"], OWNER, at=cursor)
-        if code == 1 and not malformed_done:
-            malformed = tmp_path / "malformed.json"
-            malformed.write_text("{not-json", encoding="utf-8")
-            with pytest.raises(SectorBridgeError):
-                submit_one(
-                    db, claimed["assignment_id"], OWNER, malformed,
-                    work_root=work, at=cursor + timedelta(minutes=1), sync_func=fake_sync,
-                )
-            malformed_done = True
-            cursor += timedelta(hours=1)
-            continue
-        if code == 1 and not lease_expiry_done:
-            # Worker disappears; lease recovery and a fresh claim complete it.
-            recovery_conn = connect_sector_db(db)
-            try:
-                assert recover_expired_leases(recovery_conn, now=cursor + timedelta(minutes=56)) == 1
-            finally:
-                recovery_conn.close()
-            lease_expiry_done = True
-            cursor += timedelta(hours=1)
-            continue
-        heartbeat = heartbeat_one(
-            db, claimed["assignment_id"], OWNER, at=cursor + timedelta(minutes=10),
+    failed_attempts = 0
+    last_completed_at: datetime | None = None
+    last_processed: Path | None = None
+    last_claimed: dict | None = None
+    for slot in slots:
+        scheduled = run_scheduled(
+            slot, db_path=db, log_path=scheduler_log, lock_path=scheduler_lock,
         )
-        assert heartbeat["status"] == "lease_renewed"
+        assert scheduled["created"] is True or scheduled["status"] in {"retry_queued", "retry_complete"}
+        worker_at = slot + timedelta(minutes=5)
+        claimed = claim_one(db, OWNER, work_root=work, at=worker_at)["assignment"]
+        code = int(claimed["sector_code"])
+        start_one(db, claimed["assignment_id"], OWNER, at=worker_at)
+        _heartbeat_to_minute_40(db, claimed["assignment_id"], worker_at)
+        if failed_attempts < TEMPORARY_FAILURES:
+            released = abandon_one(
+                db, claimed["assignment_id"], OWNER,
+                at=worker_at + timedelta(minutes=49), reason="fixture temporary timeout",
+                work_root=work,
+            )
+            assert released["status"] == "retry_pending"
+            failed_attempts += 1
+            continue
         payload = tmp_path / f"result-{code:02d}.json"
         payload.write_text(json.dumps(_envelope(claimed), ensure_ascii=False), encoding="utf-8")
+        submit_at = worker_at + timedelta(minutes=45)
         submitted = submit_one(
             db, claimed["assignment_id"], OWNER, payload, work_root=work,
             at=submit_at, sync_func=fake_sync,
         )
         assert submitted["status"] == "success"
         completed_codes.add(code)
-        cursor += timedelta(hours=1)
+        last_completed_at = submit_at
+        last_processed = Path(submitted["processed_path"])
+        last_claimed = claimed
+
+    assert last_processed is not None and last_claimed is not None
+    repeated_submit = submit_one(
+        db, last_claimed["assignment_id"], OWNER, last_processed,
+        work_root=work, at=last_completed_at, sync_func=fake_sync,
+    )
+    assert repeated_submit["status"] == "already_success"
 
     conn = connect_sector_db(db)
     try:
@@ -173,13 +181,80 @@ def test_accelerated_33_sector_nonproduction_soak(tmp_path: Path):
     assert status["success"] == 33 and status["failed"] == 0
     assert status["missing_count"] == status["duplicate_count"] == 0
     assert status["stale_count"] == 1
-    assert malformed_done and lease_expiry_done
+    assert failed_attempts == TEMPORARY_FAILURES
+    assert status["attempts"] == 33 + TEMPORARY_FAILURES
+    assert last_completed_at is not None
+    assert last_completed_at <= datetime.fromisoformat("2026-09-07T08:55:00+09:00")
     completion_events = {status["completion_event"]["event_key"], status_again["completion_event"]["event_key"]}
     assert len(completion_events) == 1
     assert len(sync_calls) == report_count == queue_count == 33
     assert sentinel == "unchanged"
     rerun = run_scheduled(
-        datetime.fromisoformat("2026-09-06T23:30:00+09:00"), db_path=db,
+        datetime.fromisoformat("2026-09-07T09:00:00+09:00"), db_path=db,
         log_path=scheduler_log, lock_path=scheduler_lock,
     )
     assert rerun["created"] is False
+
+
+@pytest.mark.parametrize("outage_start", range(40))
+def test_every_12_hour_outage_position_retains_capacity_for_six_retries(tmp_path: Path, outage_start: int):
+    db = tmp_path / f"capacity-{outage_start:02d}.db"
+    work = tmp_path / f"work-{outage_start:02d}"
+    _migrate(db, tmp_path / f"migration-{outage_start:02d}")
+    conn = connect_sector_db(db)
+    try:
+        old, _ = enqueue_assignment(
+            conn, 1, weekly_window(SAT - timedelta(days=7)), now=SAT - timedelta(days=7),
+        )
+    finally:
+        conn.close()
+    slots = _available_slots(outage_start)
+    assert len(slots) == 39
+    failures = 0
+    completion_keys: set[str] = set()
+    last_finished_at: datetime | None = None
+    for slot in slots:
+        run_scheduled(
+            slot, db_path=db, log_path=tmp_path / f"scheduler-{outage_start:02d}.jsonl",
+            lock_path=tmp_path / f"scheduler-{outage_start:02d}.lock",
+        )
+        worker_at = slot + timedelta(minutes=5)
+        claimed = claim_one(db, OWNER, work_root=work, at=worker_at)["assignment"]
+        start_one(db, claimed["assignment_id"], OWNER, at=worker_at)
+        _heartbeat_to_minute_40(db, claimed["assignment_id"], worker_at)
+        if failures < TEMPORARY_FAILURES:
+            abandon_one(
+                db, claimed["assignment_id"], OWNER,
+                at=worker_at + timedelta(minutes=49), reason="capacity fixture retry",
+                work_root=work,
+            )
+            failures += 1
+            last_finished_at = worker_at + timedelta(minutes=49)
+            continue
+        conn = connect_sector_db(db)
+        try:
+            complete_assignment(
+                conn, claimed["assignment_id"], OWNER,
+                f"{int(claimed['sector_code']):064x}",
+                now=worker_at + timedelta(minutes=45),
+            )
+        finally:
+            conn.close()
+        last_finished_at = worker_at + timedelta(minutes=45)
+    conn = connect_sector_db(db)
+    try:
+        status = completion_status(conn, weekly_window(SAT))
+        repeated = completion_status(conn, weekly_window(SAT))
+        assert get_assignment(conn, old["assignment_id"])["status"] == "ready"
+        sentinel = conn.execute("SELECT value FROM company_news_soak_sentinel").fetchone()[0]
+    finally:
+        conn.close()
+    completion_keys.add(status["completion_event"]["event_key"])
+    completion_keys.add(repeated["completion_event"]["event_key"])
+    assert failures == 6 and status["attempts"] == 39
+    assert status["success"] == 33 and status["failed"] == 0
+    assert status["missing_count"] == status["duplicate_count"] == 0
+    assert status["stale_count"] == 1 and len(completion_keys) == 1
+    assert sentinel == "unchanged"
+    assert last_finished_at is not None
+    assert last_finished_at <= datetime.fromisoformat("2026-09-07T08:55:00+09:00")

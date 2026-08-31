@@ -24,6 +24,7 @@ from lib.sector_weekly import (
 from lib.sector_weekly_work import (
     DEFAULT_LEASE_SECONDS,
     SectorWorkError,
+    abandon_assignment,
     claim_next,
     complete_assignment,
     completion_status,
@@ -36,7 +37,7 @@ from lib.sector_weekly_work import (
     recover_expired_leases,
 )
 from tools.company_news_atomic import atomic_write_json, replace_with_retry
-from tools.sector_weekly_scheduler import assemble_payload, build_prompt
+from tools.sector_weekly_scheduler import assemble_payload, build_prompt, in_worker_window
 from tools.sync_sector_weekly import sync as sync_sector_weekly
 
 RESULT_SCHEMA = "sector_weekly_work_result_v1"
@@ -101,6 +102,8 @@ def claim_one(
     window: WeeklyWindow | None = None,
 ) -> dict[str, Any]:
     timestamp = at or now_jst()
+    if not in_worker_window(timestamp):
+        return {"status": "no_work", "claim_owner": owner, "reason": "outside_worker_window"}
     target_window = window or weekly_window(timestamp)
     conn = connect_sector_db(db_path)
     try:
@@ -138,6 +141,27 @@ def heartbeat_one(
     return {
         "status": "lease_renewed", "assignment_id": assignment_id,
         "claim_owner": owner, "lease_expires_at": row["lease_expires_at"],
+    }
+
+
+def abandon_one(
+    db_path: Path,
+    assignment_id: str,
+    owner: str,
+    *,
+    at: datetime | None = None,
+    reason: str = "worker hard time budget reached",
+    work_root: Path = DEFAULT_WORK_ROOT,
+) -> dict[str, Any]:
+    conn = connect_sector_db(db_path)
+    try:
+        row = abandon_assignment(conn, assignment_id, owner, now=at, reason=reason)
+    finally:
+        conn.close()
+    (work_root / "active" / f"{assignment_id}.json").unlink(missing_ok=True)
+    return {
+        "status": row["status"], "assignment_id": assignment_id,
+        "attempt_count": int(row["attempt_count"]), "released": True,
     }
 
 
@@ -302,6 +326,10 @@ def main() -> int:
     heartbeat_parser = subparsers.add_parser("heartbeat")
     heartbeat_parser.add_argument("--assignment-id", required=True)
     heartbeat_parser.add_argument("--owner", default=DEFAULT_OWNER)
+    abandon_parser = subparsers.add_parser("abandon")
+    abandon_parser.add_argument("--assignment-id", required=True)
+    abandon_parser.add_argument("--owner", default=DEFAULT_OWNER)
+    abandon_parser.add_argument("--reason", default="worker hard time budget reached")
     submit_parser = subparsers.add_parser("submit")
     submit_parser.add_argument("--assignment-id", required=True)
     submit_parser.add_argument("--owner", default=DEFAULT_OWNER)
@@ -323,6 +351,11 @@ def main() -> int:
             result = start_one(args.db, args.assignment_id, args.owner, at=at)
         elif args.command == "heartbeat":
             result = heartbeat_one(args.db, args.assignment_id, args.owner, at=at)
+        elif args.command == "abandon":
+            result = abandon_one(
+                args.db, args.assignment_id, args.owner, at=at,
+                reason=args.reason, work_root=args.work_root,
+            )
         elif args.command == "submit":
             result = submit_one(
                 args.db, args.assignment_id, args.owner, args.payload,

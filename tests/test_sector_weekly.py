@@ -217,7 +217,9 @@ def test_chatgpt_worker_prompt_has_transport_research_and_schema_contracts():
         "foundry", "VLCC", "Fact / Transmission / Magnitude / Pricing-in / Counterevidence",
         "重要材料は", "3〜5件", "3,000〜4,500文字", "missed_candidates",
         "sector_weekly_work_result_v1", "company_ir | government | regulator",
-        "heartbeat --assignment-id", "10分ごと", "時間予算は50分以内", "残り時間が5分未満",
+        "heartbeat --assignment-id", "10分ごと", "hard time budgetは50分", "45分時点",
+        "abandon --assignment-id", "atomicにretry_pending", "調査品質を落として無理にsubmit",
+        "1実行で複数sectorを処理してはいけません", "月曜08:05 JST",
         "owner、sector、period", "隔離SQLite DB",
     ):
         assert term in prompt
@@ -232,6 +234,19 @@ def test_company_news_schema_is_not_modified_by_sector_migration():
         assert "ALTER TABLE canonical_news_events" not in sql
         assert "company_news_work" not in sql
     assert "api_latest_news_stream" in (root / "migrations" / "017_sector_weekly_reports.sql").read_text(encoding="utf-8")
+
+
+def test_sector_weekly_task_installer_uses_hourly_disabled_safe_schedule():
+    script = (Path(__file__).parents[1] / "tools" / "install_sector_weekly_task.ps1").read_text(encoding="utf-8")
+    assert "-At $firstSaturday -RepetitionInterval (New-TimeSpan -Hours 1)" in script
+    assert 'Repetition = "PT1H"' in script
+    assert 'RepetitionDuration = "Indefinite"' in script
+    assert "EligibleSlots = 51" in script
+    assert "EligibleWindowEnd = $firstSaturday.AddHours(50)" in script
+    assert "-MultipleInstances IgnoreNew" in script
+    assert "if (-not $Enable) { Disable-ScheduledTask" in script
+    assert "New-TimeSpan -Minutes 45" not in script
+    assert 'Repetition = "PT45M"' not in script
 
 
 def test_scheduler_can_be_enabled_without_running_before_first_saturday(tmp_path: Path):

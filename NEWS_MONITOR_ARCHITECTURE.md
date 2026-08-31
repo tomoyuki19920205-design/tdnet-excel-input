@@ -380,11 +380,11 @@ tables, sync, and viewer read models are unchanged.
 ```text
 Windows Task Scheduler: SectorWeeklyScheduler (hourly)
         ↓ no-op outside eligible JST hours
-Saturday 06:00..Sunday 23:59 → oldest missing current-week sector, at most one per invocation
+Saturday 06:00..Monday 08:00 → oldest missing current-week sector, at most one per invocation
         ↓ idempotent dedicated assignment queue only
 SQLite sector_weekly_work_assignments (ready)
-        ↓ ChatGPT Scheduled Task: Sector Weekly Worker (weekends hourly, +5 minutes)
-claim one current-week item → start → 10-minute heartbeat → Web research → atomic submit
+        ↓ ChatGPT Scheduled Task: Sector Weekly Worker (hourly, +5 minutes; last claim Monday 08:05)
+claim one current-week item → start → 10-minute heartbeat → Web research → submit or atomic abandon
         ↓ Sector Weekly dedicated bridge
 owner/lease/sector/period/schema validation → canonical upsert → Supabase sync
         ↓
@@ -396,28 +396,32 @@ company-memo-app /news (company news + sector reports)
 
 The Windows scheduler never calls an LLM, Web Search, OpenAI SDK, Responses API,
 or an API key. The ChatGPT task performs research within the user's ChatGPT plan
-and uses only `tools/sector_weekly_work_bridge.py` claim/start/heartbeat/submit/fail/status operations.
+and uses only `tools/sector_weekly_work_bridge.py` claim/start/heartbeat/abandon/submit/fail/status operations.
 The Sector Weekly queue, payload namespace, schema, lease, and canonical tables are
 separate from Company News Task01-08.
 
 All 33 reports in one weekly batch share the exact period from the prior Saturday
 06:00:00 JST through the current Saturday 05:59:59 JST. The scheduler derives the
 oldest sector without an assignment rather than deriving it from the launch hour, so
-a later invocation resumes the backlog after sleep or reboot. Sunday 15:00..23:00
-also re-arms retryable work after all 33 assignments exist, one item per run. A
+a later invocation resumes the backlog after sleep or reboot. Recovery continues
+through Monday 08:00 and also re-arms retryable work after all 33 assignments exist,
+one item per run. A
 repeated invocation at the same injected clock instant is a no-op. The stable identity is
 `sector_weekly:<Saturday period-end date>:<two-digit sector code>`.
 
-The registered task remains hourly. Consequently, 33 assignments require 33 actual
-invocations; backlog selection prevents permanent gaps but cannot replay twelve missed
-hourly invocations before Sunday 23:59 when fewer than 33 eligible invocations remain.
-Changing cadence or extending the window requires a separate operational approval.
+The registered task starts Saturday 06:00 JST and repeats hourly. The last assignment
+slot is Monday 08:00: Saturday contributes 18 slots, Sunday 24, and Monday 9, for 51.
+A twelve-hour stop removes 12 slots and leaves 39: enough for 33 first attempts plus
+six temporary failures without relying on overlapping task runs. The worker follows
+five minutes later, claims at most one sector, and finishes by Monday 08:55.
 
 Claims always include the current fixed period, so previous-period retryable rows
 remain visible for manual recovery but cannot pre-empt current work. The initial lease
-is 55 minutes, heartbeat renewal requires the same owner and an unexpired lease, and
-the total claim lifetime is capped at 90 minutes. The worker budgets 50 minutes and
-stops rather than submitting near its deadline. `status` exposes human and JSON
+is 15 minutes, heartbeat renewal requires the same owner and an unexpired lease, and
+the total claim lifetime is capped at 55 minutes. The worker heartbeats every 10 minutes,
+decides at minute 45 whether a quality-preserving submit is possible, and atomically
+abandons to retry before its 50-minute hard budget when it is not. A crashed worker's
+lease expires before the next hourly worker invocation. `status` exposes human and JSON
 summaries with deterministic completion event keys and distinct exit codes for 33/33,
 in-progress, retryable, final-failure, stale, and inconsistent states without payloads.
 

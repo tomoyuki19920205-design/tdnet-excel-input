@@ -27,8 +27,8 @@ ASSIGNMENT_STATUSES = frozenset({
 })
 ACTIVE_STATUSES = frozenset({"claimed", "running"})
 MAX_ATTEMPTS = 3
-DEFAULT_LEASE_SECONDS = 55 * 60
-MAX_LEASE_LIFETIME_SECONDS = 90 * 60
+DEFAULT_LEASE_SECONDS = 15 * 60
+MAX_LEASE_LIFETIME_SECONDS = 55 * 60
 _OWNER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
@@ -365,6 +365,46 @@ def fail_assignment(
         _set_run_state(
             conn, row["stable_key"], status if status == "failed" else "retry_pending", timestamp,
             attempt_count=int(row["attempt_count"]), error_type=error_type, error_message=message,
+        )
+        return get_assignment(conn, assignment_id) or row
+
+
+def abandon_assignment(
+    conn: sqlite3.Connection,
+    assignment_id: str,
+    owner: str,
+    *,
+    now: datetime | None = None,
+    reason: str = "worker hard time budget reached",
+) -> dict[str, Any]:
+    """Atomically release an owned, unexpired claim for a later attempt."""
+    owner = _validate_owner(owner)
+    timestamp = _now(now)
+    message = str(reason).strip()[:2000] or "worker hard time budget reached"
+    with _immediate(conn):
+        row = get_assignment(conn, assignment_id)
+        if row is None:
+            raise SectorWorkError("assignment not found")
+        if row["claim_owner"] != owner or row["status"] not in ACTIVE_STATUSES:
+            raise SectorWorkError("abandon owner does not match active claim")
+        if _parse(row["lease_expires_at"]) <= timestamp:
+            raise SectorWorkError("assignment lease has expired")
+        terminal = int(row["attempt_count"]) >= MAX_ATTEMPTS
+        status = "failed" if terminal else "retry_pending"
+        cursor = conn.execute(
+            "UPDATE sector_weekly_work_assignments SET status=?,available_at=?,claim_owner=NULL,claimed_at=NULL,"
+            "lease_expires_at=NULL,started_at=NULL,last_error_type='WorkerAbandoned',last_error_message=?,updated_at=? "
+            "WHERE assignment_id=? AND claim_owner=? AND status IN ('claimed','running') AND lease_expires_at>?",
+            (
+                status, _utc_text(timestamp), message, _utc_text(timestamp), assignment_id, owner,
+                _utc_text(timestamp),
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise SectorWorkError("abandon lost an atomic ownership race")
+        _set_run_state(
+            conn, row["stable_key"], status if terminal else "retry_pending", timestamp,
+            attempt_count=int(row["attempt_count"]), error_type="WorkerAbandoned", error_message=message,
         )
         return get_assignment(conn, assignment_id) or row
 
