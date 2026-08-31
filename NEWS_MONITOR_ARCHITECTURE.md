@@ -371,6 +371,95 @@ per-slot completions, and a 3,800-company duration estimate; theoretical and
 measured values must not be conflated. Weekly queue regeneration is intentionally
 outside v5.
 
+## v6 candidate: eight tasks, four companies per run, and 32 logical slots
+
+The queue, worker, and task snapshot layers are parameterized by `task_count` and
+`batch_size`. The proven 8x3 topology remains supported; the new production
+candidate is explicitly initialized as 8x4:
+
+```text
+GLOBAL QUEUE
+     |
+32 logical slots
+     |
+8 Scheduled Tasks (each owns 4 slots)
+     |
+immutable start-of-run snapshot (maximum 4)
+     |
+common news_inbox -> one PT5M hidden worker
+     |
+canonical DB -> Supabase -> NEWS Viewer
+```
+
+The generated mapping is `task01 -> slot01..04`, `task02 -> slot05..08`, through
+`task08 -> slot29..32`. Neither queue nor worker contains a slot24/slot32 upper
+bound; the supported slot identifiers are generated from the persisted queue
+configuration. Filename routing, assignment ownership, transitions, state,
+history, locks, quarantine, and processed archives all use the same `slotNN`
+contract.
+
+Each task snapshots its four assignment files once. Refill may place a fifth
+company into a freed slot, but that assignment is absent from the immutable
+snapshot and cannot be processed until the next hourly run. A partial snapshot
+processes only the ready assignments that existed at capture time. Each success
+or `company_news_work_failure_v1` sidecar is independent, so one failure does not
+roll back the other three results. Lock order remains `worker -> global queue ->
+one slot`; no operation holds two slot locks.
+
+Task guard busy skips and expired-guard recoveries are appended to per-task
+`events.jsonl` records. This makes 8x4 overlap pressure measurable without
+changing queue state or treating a safe busy exit as an empty research run.
+
+The eight repository prompts and setup templates define the 8x4 mapping while the
+common prompt remains the schema/research source of truth. Existing ChatGPT
+Scheduled Task bodies created for v5 also contain the old three-slot mapping and
+must be updated by a human before the 200-company activation. Their schedules
+remain `:00/:08/:15/:23/:30/:38/:45/:53`; Codex does not modify the automations.
+
+Create the inert 200-company candidate and capture the pre-soak database baseline:
+
+```powershell
+python tools/company_news_queue.py init-soak --count 200 --tasks 8 --batch-size 4
+python tools/company_news_queue.py status
+python tools/company_news_soak_audit.py storage-snapshot --label before
+```
+
+Expected inert state is `fixture_ready`, 200 pending, zero active, and mapping for
+32 slots. After reviewing and updating all eight Scheduled Task bodies, a human
+may activate once:
+
+```powershell
+python tools/company_news_queue.py activate
+```
+
+The expected initial active state is 32 unique assignments and 168 pending. No
+fifth company is processed by the same task run. The 8x3 form remains available
+by passing `--tasks 8 --batch-size 3`; one-slot and five-slot modes are unchanged.
+
+After the queue reaches `completed`, capture the post-soak snapshot and calculate
+exact-window task duration, reliability, throughput, and storage projections:
+
+```powershell
+python tools/company_news_soak_audit.py audit-soak --storage-before output/news_soak_audit/<queue_id>/storage_before.json
+```
+
+This writes only sanitized audit artifacts (`storage_after.json` and
+`SOAK_METRICS.json`). SQLite is opened with `mode=ro`; Supabase uses a read-only
+PostgreSQL session. Metrics include average/p50/p95/max task duration, overlap,
+companies per productive run, measured 3,800-company time, relation deltas,
+bytes/company, 4/52/156/260-week projections, and a caveated news-only estimate
+against the operator-confirmed Pro 8 GB GP3 baseline. Database disk is not the
+same as Storage buckets, and `pg_database_size` does not include every provisioned
+disk consumer such as WAL/system overhead.
+
+The theoretical 8x4 ceiling is 32 companies/hour, 768/day, and 118.75 hours
+(4.9479 days) for 3,800 companies. It remains a candidate until a natural
+200-company soak demonstrates zero loss/duplicate/unrecovered sync failure,
+companies per productive run near four, no same-task overlap, max run under 60
+minutes, and a measured 3,800-company projection below seven days (strong target:
+six days or less). Weekly production generation, retention deletion, automatic
+reset, and Supabase capacity changes remain outside v6.
+
 ## Additive TSE 33-sector weekly stream
 
 Sector weekly research is independent from Company News Task01-08 and from

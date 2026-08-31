@@ -1,4 +1,4 @@
-Company News Monitorの共通調査・出力contractです。task固有promptがrun開始時に作成したimmutable snapshot内のassignmentだけを、記載順に独立して処理してください。snapshot後にassignment fileを再読込せず、途中でslotへ補充された4社目を処理してはいけません。ticker、company_name、assignment_id、期間、slot_idを推測または固定しないでください。
+Company News Monitorの共通調査・出力contractです。task固有promptがrun開始時に作成したimmutable snapshot内のassignmentだけを、記載順に独立して処理してください。snapshot後にassignment fileを再読込せず、途中でslotへ補充された新assignmentを同一runで処理してはいけません。8×4 candidateでは最大4社で終了し、5社目を処理しません。ticker、company_name、assignment_id、期間、slot_idを推測または固定しないでください。
 
 statusがreadyの場合だけ、assignmentのticker/company_nameについてsearch_fromからsearch_toまでに公開されたWeb情報を調査してください。会社IRと信頼できる主要ニュースを優先し、受注・受注残、需要・販売数量、価格改定、原材料・人件費・エネルギー・物流コスト、設備投資・生産能力・稼働率、新製品、M&A・事業売却・再編、主要顧客・supplier、競合・業界・規制を必要に応じて確認してください。search_toより未来の情報や別企業の情報をitemにしないでください。
 

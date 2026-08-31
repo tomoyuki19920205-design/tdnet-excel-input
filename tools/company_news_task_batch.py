@@ -22,6 +22,7 @@ from tools.company_news_work_bridge import BridgePaths, BridgeError, validate_as
 
 SNAPSHOT_SCHEMA = "company_news_task_snapshot_v1"
 RUN_RECORD_SCHEMA = "company_news_task_run_v1"
+TASK_EVENT_SCHEMA = "company_news_task_event_v1"
 _JST = timezone(timedelta(hours=9))
 _TASK_ID_PATTERN = re.compile(r"^task\d{2}$")
 
@@ -52,6 +53,17 @@ def _task_paths(root: Path, task_id: str) -> tuple[Path, Path, Path]:
         raise TaskBatchError("task_id must be taskNN")
     directory = root / "data" / "news_work" / "task_runs" / task_id
     return directory, directory / "active.json", directory / "runs.jsonl"
+
+
+def _append_task_event(directory: Path, timestamp: datetime, event: str, **details: Any) -> None:
+    record = {
+        "schema_version": TASK_EVENT_SCHEMA,
+        "at": timestamp.isoformat(timespec="seconds"),
+        "event": event,
+        **details,
+    }
+    with (directory / "events.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
 
 
 def snapshot_task(
@@ -97,6 +109,15 @@ def snapshot_task(
             except (KeyError, TypeError, ValueError) as exc:
                 raise TaskBatchError(f"invalid active task guard {active_path}") from exc
             if expires_at > timestamp:
+                _append_task_event(
+                    directory,
+                    timestamp,
+                    "busy_skip",
+                    task_id=task_id,
+                    queue_id=state["queue_id"],
+                    active_run_id=existing.get("run_id"),
+                    expires_at=existing["expires_at"],
+                )
                 return {
                     "status": "busy",
                     "task_id": task_id,
@@ -109,6 +130,15 @@ def snapshot_task(
                 history.mkdir(parents=True, exist_ok=True)
                 stale = history / f"{existing.get('run_id', 'unknown')}.stale.json"
                 replace_with_retry(active_path, stale)
+                _append_task_event(
+                    directory,
+                    timestamp,
+                    "stale_guard_recovered",
+                    task_id=task_id,
+                    queue_id=state["queue_id"],
+                    recovered_run_id=existing.get("run_id"),
+                    stale_guard=stale.name,
+                )
                 continue
             raise TaskBatchError(f"could not recover stale guard {active_path}")
     if descriptor is not None:
