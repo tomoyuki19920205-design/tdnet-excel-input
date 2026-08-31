@@ -380,11 +380,11 @@ tables, sync, and viewer read models are unchanged.
 ```text
 Windows Task Scheduler: SectorWeeklyScheduler (hourly)
         ↓ no-op outside eligible JST hours
-Saturday 06:00..Sunday 14:00 → exactly one fixed TSE sector
+Saturday 06:00..Sunday 23:59 → oldest missing current-week sector, at most one per invocation
         ↓ idempotent dedicated assignment queue only
 SQLite sector_weekly_work_assignments (ready)
         ↓ ChatGPT Scheduled Task: Sector Weekly Worker (weekends hourly, +5 minutes)
-claim one → ChatGPT-plan Web research → structured JSON + Markdown → atomic submit
+claim one current-week item → start → 10-minute heartbeat → Web research → atomic submit
         ↓ Sector Weekly dedicated bridge
 owner/lease/sector/period/schema validation → canonical upsert → Supabase sync
         ↓
@@ -396,16 +396,30 @@ company-memo-app /news (company news + sector reports)
 
 The Windows scheduler never calls an LLM, Web Search, OpenAI SDK, Responses API,
 or an API key. The ChatGPT task performs research within the user's ChatGPT plan
-and uses only `tools/sector_weekly_work_bridge.py` claim/start/submit/fail operations.
+and uses only `tools/sector_weekly_work_bridge.py` claim/start/heartbeat/submit/fail/status operations.
 The Sector Weekly queue, payload namespace, schema, lease, and canonical tables are
 separate from Company News Task01-08.
 
 All 33 reports in one weekly batch share the exact period from the prior Saturday
 06:00:00 JST through the current Saturday 05:59:59 JST. The scheduler derives the
-sector from the launch hour: Saturday 06:00 is 01, Saturday 23:00 is 18, Sunday
-00:00 is 19, and Sunday 14:00 is 33. Sunday 15:00..23:00 is reserved for pending
-or failed-sector retry, one sector per run. The stable identity is
+oldest sector without an assignment rather than deriving it from the launch hour, so
+a later invocation resumes the backlog after sleep or reboot. Sunday 15:00..23:00
+also re-arms retryable work after all 33 assignments exist, one item per run. A
+repeated invocation at the same injected clock instant is a no-op. The stable identity is
 `sector_weekly:<Saturday period-end date>:<two-digit sector code>`.
+
+The registered task remains hourly. Consequently, 33 assignments require 33 actual
+invocations; backlog selection prevents permanent gaps but cannot replay twelve missed
+hourly invocations before Sunday 23:59 when fewer than 33 eligible invocations remain.
+Changing cadence or extending the window requires a separate operational approval.
+
+Claims always include the current fixed period, so previous-period retryable rows
+remain visible for manual recovery but cannot pre-empt current work. The initial lease
+is 55 minutes, heartbeat renewal requires the same owner and an unexpired lease, and
+the total claim lifetime is capped at 90 minutes. The worker budgets 50 minutes and
+stops rather than submitting near its deadline. `status` exposes human and JSON
+summaries with deterministic completion event keys and distinct exit codes for 33/33,
+in-progress, retryable, final-failure, stale, and inconsistent states without payloads.
 
 The installer records a `--not-before` value for the first Saturday 06:00 after
 installation and registers the task disabled unless `-Enable` is explicitly supplied.

@@ -8,7 +8,7 @@ import os
 import re
 import sys
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -17,10 +17,10 @@ sys.path.insert(0, str(ROOT))
 
 from lib.sector_weekly import (
     JST, SCHEMA_VERSION, REPORT_TYPE, SectorValidationError, WeeklyWindow, connect_sector_db,
-    dedupe_key, in_retry_window, iso_seconds, now_jst, scheduled_sector, sector_name,
+    dedupe_key, in_retry_window, iso_seconds, now_jst, sector_name,
     sector_research_context, weekly_window,
 )
-from lib.sector_weekly_work import enqueue_assignment, enqueue_retry_candidate
+from lib.sector_weekly_work import enqueue_assignment, enqueue_retry_candidate, get_assignment_by_key
 
 PROMPT_PATH = ROOT / "config" / "sector_weekly_prompt.txt"
 DEFAULT_LOG = ROOT / "data" / "sector_weekly" / "scheduler.jsonl"
@@ -169,6 +169,38 @@ def _public_assignment(row: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def in_catchup_window(value: datetime) -> bool:
+    local = value.astimezone(JST)
+    return (local.weekday() == 5 and local.hour >= 6) or local.weekday() == 6
+
+
+def _utc_text(value: datetime) -> str:
+    return value.astimezone(timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def plan_scheduled(conn: Any, at: datetime, window: WeeklyWindow) -> dict[str, Any]:
+    """Return the next action without mutating the queue."""
+    if not in_catchup_window(at):
+        return {"action": "none", "event": "not_scheduled"}
+    local = at.astimezone(JST)
+    same_slot = conn.execute(
+        "SELECT * FROM sector_weekly_work_assignments WHERE period_start=? AND period_end=? "
+        "AND created_at=? ORDER BY created_at LIMIT 1",
+        (
+            _utc_text(window.period_start), _utc_text(window.period_end),
+            _utc_text(local),
+        ),
+    ).fetchone()
+    if same_slot is not None:
+        return {"action": "none", "event": "slot_already_processed", "assignment": dict(same_slot)}
+    for code in range(1, 34):
+        if get_assignment_by_key(conn, dedupe_key(window, code)) is None:
+            return {"action": "enqueue", "event": "assignment_queued", "sector_code": code}
+    if in_retry_window(at):
+        return {"action": "retry", "event": "retry_queued"}
+    return {"action": "none", "event": "all_assignments_created"}
+
+
 def run_scheduled(
     at: datetime,
     *,
@@ -176,28 +208,43 @@ def run_scheduled(
     log_path: Path = DEFAULT_LOG,
     lock_path: Path = DEFAULT_LOCK,
     not_before: datetime | None = None,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
+    if dry_run:
+        window = weekly_window(at)
+        if not_before is not None and at.astimezone(JST) < not_before.astimezone(JST):
+            return {"status": "not_started", "at": iso_seconds(at), "not_before": iso_seconds(not_before)}
+        conn = connect_sector_db(db_path)
+        try:
+            plan = plan_scheduled(conn, at, window)
+        finally:
+            conn.close()
+        return {
+            "status": "dry_run", "created": False, "at": iso_seconds(at),
+            "period_start": iso_seconds(window.period_start), "period_end": iso_seconds(window.period_end),
+            **plan,
+        }
     with scheduler_lock(lock_path):
         window = weekly_window(at)
         if not_before is not None and at.astimezone(JST) < not_before.astimezone(JST):
             return {"status": "not_started", "at": iso_seconds(at), "not_before": iso_seconds(not_before)}
-        code = scheduled_sector(at)
         conn = connect_sector_db(db_path)
         try:
-            if code is not None:
-                assignment, created = enqueue_assignment(conn, code, window, now=at)
+            plan = plan_scheduled(conn, at, window)
+            if plan["action"] == "enqueue":
+                assignment, created = enqueue_assignment(conn, int(plan["sector_code"]), window, now=at)
                 event = "assignment_queued" if created else "assignment_already_exists"
-            elif in_retry_window(at):
+            elif plan["action"] == "retry":
                 assignment, created = enqueue_retry_candidate(conn, window, now=at)
                 event = "retry_queued" if assignment else "retry_complete"
             else:
-                assignment = None
+                assignment = plan.get("assignment")
                 created = False
-                event = "not_scheduled"
+                event = str(plan["event"])
         finally:
             conn.close()
         result = {
-            "status": "queued" if assignment else event,
+            "status": "queued" if created or (event == "retry_queued" and assignment) else event,
             "created": created,
             "at": iso_seconds(at),
             "period_start": iso_seconds(window.period_start),
@@ -228,6 +275,7 @@ def main() -> int:
     parser.add_argument("--at", help="timezone-aware ISO-8601 test time")
     parser.add_argument("--sector", type=int, help="manual assignment override")
     parser.add_argument("--not-before", help="do not schedule automatic sectors before this timezone-aware timestamp")
+    parser.add_argument("--dry-run", action="store_true", help="show the next queue decision without writing DB, log, or lock")
     args = parser.parse_args()
     at = datetime.fromisoformat(args.at.replace("Z", "+00:00")) if args.at else now_jst()
     if at.tzinfo is None:
@@ -239,7 +287,10 @@ def main() -> int:
         if args.sector:
             result = enqueue_manual(args.sector, at, db_path=args.db, log_path=args.log)
         else:
-            result = run_scheduled(at, db_path=args.db, log_path=args.log, lock_path=args.lock, not_before=not_before)
+            result = run_scheduled(
+                at, db_path=args.db, log_path=args.log, lock_path=args.lock,
+                not_before=not_before, dry_run=args.dry_run,
+            )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except (SchedulerError, SectorValidationError, ValueError) as exc:

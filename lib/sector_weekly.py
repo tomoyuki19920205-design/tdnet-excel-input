@@ -226,7 +226,7 @@ def validate_report(
         raise SectorValidationError("importance must be A+, A, B, or C")
     if direction not in DIRECTIONS:
         raise SectorValidationError("direction must be positive, negative, mixed, or neutral")
-    bullets = _string_list(payload.get("summary_bullets"), "summary_bullets", 3, 6, 240)
+    bullets = _string_list(payload.get("summary_bullets"), "summary_bullets", 3, 5, 240)
     full_report = _text(payload.get("full_report_md"), "full_report_md", 100_000, 200)
     watchlist_raw = payload.get("watchlist_companies")
     if not isinstance(watchlist_raw, list) or len(watchlist_raw) > 20:

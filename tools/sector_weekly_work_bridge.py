@@ -19,14 +19,17 @@ from lib.sector_weekly import (
     sector_name,
     upsert_report,
     validate_report,
+    weekly_window,
 )
 from lib.sector_weekly_work import (
     DEFAULT_LEASE_SECONDS,
     SectorWorkError,
     claim_next,
     complete_assignment,
+    completion_status,
     fail_assignment,
     get_assignment,
+    heartbeat_assignment,
     mark_running,
     payload_hash,
     prepare_submission,
@@ -95,10 +98,13 @@ def claim_one(
     work_root: Path = DEFAULT_WORK_ROOT,
     at: datetime | None = None,
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    window: WeeklyWindow | None = None,
 ) -> dict[str, Any]:
+    timestamp = at or now_jst()
+    target_window = window or weekly_window(timestamp)
     conn = connect_sector_db(db_path)
     try:
-        row = claim_next(conn, owner, now=at, lease_seconds=lease_seconds)
+        row = claim_next(conn, owner, now=timestamp, lease_seconds=lease_seconds, window=target_window)
     finally:
         conn.close()
     if row is None:
@@ -115,6 +121,24 @@ def start_one(db_path: Path, assignment_id: str, owner: str, *, at: datetime | N
     finally:
         conn.close()
     return {"status": row["status"], "assignment_id": assignment_id, "claim_owner": owner}
+
+
+def heartbeat_one(
+    db_path: Path,
+    assignment_id: str,
+    owner: str,
+    *,
+    at: datetime | None = None,
+) -> dict[str, Any]:
+    conn = connect_sector_db(db_path)
+    try:
+        row = heartbeat_assignment(conn, assignment_id, owner, now=at)
+    finally:
+        conn.close()
+    return {
+        "status": "lease_renewed", "assignment_id": assignment_id,
+        "claim_owner": owner, "lease_expires_at": row["lease_expires_at"],
+    }
 
 
 def _read_envelope(path: Path) -> dict[str, Any]:
@@ -199,8 +223,8 @@ def submit_one(
             validated = validate_report(payload, expected_code=int(row["sector_code"]), expected_window=window)
             inbox_path = work_root / "inbox" / f"{assignment_id}.json"
             atomic_write_json(inbox_path, envelope)
-            upsert_report(conn, validated)
             prepare_submission(conn, assignment_id, owner, digest, now=timestamp)
+            upsert_report(conn, validated)
             sync_result = sync_func(db_path, dry_run_sync)
             completed = complete_assignment(conn, assignment_id, owner, digest, now=timestamp)
             processed = work_root / "processed" / f"{assignment_id}.json"
@@ -240,10 +264,34 @@ def recover(db_path: Path, *, at: datetime | None = None) -> dict[str, Any]:
     return {"status": "recovered", "count": count}
 
 
+def status_one(db_path: Path, *, at: datetime | None = None) -> dict[str, Any]:
+    timestamp = at or now_jst()
+    target_window = weekly_window(timestamp)
+    conn = connect_sector_db(db_path)
+    try:
+        return completion_status(conn, target_window)
+    finally:
+        conn.close()
+
+
+def _status_table(result: dict[str, Any]) -> str:
+    rows = [
+        ("state", result["state"]), ("period", f"{result['period_start']} .. {result['period_end']}"),
+        ("assignments", f"{result['assignments']}/33"), ("success", result["success"]),
+        ("ready", result["ready"]), ("claimed", result["claimed"]), ("running", result["running"]),
+        ("retry_pending", result["retry_pending"]), ("failed", result["failed"]),
+        ("missing", result["missing_count"]), ("stale", result["stale_count"]),
+        ("duplicate", result["duplicate_count"]), ("attempts", result["attempts"]),
+        ("last_success_at", result["last_success_at"] or "-"),
+    ]
+    return "\n".join(f"{name:18} {value}" for name, value in rows)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", type=Path, default=ROOT / "decision_db.db")
     parser.add_argument("--work-root", type=Path, default=DEFAULT_WORK_ROOT)
+    parser.add_argument("--at", help="timezone-aware ISO-8601 clock override for isolated tests and audits")
     subparsers = parser.add_subparsers(dest="command", required=True)
     claim_parser = subparsers.add_parser("claim")
     claim_parser.add_argument("--owner", default=DEFAULT_OWNER)
@@ -251,6 +299,9 @@ def main() -> int:
     start_parser = subparsers.add_parser("start")
     start_parser.add_argument("--assignment-id", required=True)
     start_parser.add_argument("--owner", default=DEFAULT_OWNER)
+    heartbeat_parser = subparsers.add_parser("heartbeat")
+    heartbeat_parser.add_argument("--assignment-id", required=True)
+    heartbeat_parser.add_argument("--owner", default=DEFAULT_OWNER)
     submit_parser = subparsers.add_parser("submit")
     submit_parser.add_argument("--assignment-id", required=True)
     submit_parser.add_argument("--owner", default=DEFAULT_OWNER)
@@ -261,23 +312,33 @@ def main() -> int:
     fail_parser.add_argument("--owner", default=DEFAULT_OWNER)
     fail_parser.add_argument("--message", required=True)
     subparsers.add_parser("recover")
+    status_parser = subparsers.add_parser("status")
+    status_parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     try:
+        at = _parse_datetime(args.at, "--at") if args.at else None
         if args.command == "claim":
-            result = claim_one(args.db, args.owner, work_root=args.work_root, lease_seconds=args.lease_seconds)
+            result = claim_one(args.db, args.owner, work_root=args.work_root, lease_seconds=args.lease_seconds, at=at)
         elif args.command == "start":
-            result = start_one(args.db, args.assignment_id, args.owner)
+            result = start_one(args.db, args.assignment_id, args.owner, at=at)
+        elif args.command == "heartbeat":
+            result = heartbeat_one(args.db, args.assignment_id, args.owner, at=at)
         elif args.command == "submit":
             result = submit_one(
                 args.db, args.assignment_id, args.owner, args.payload,
-                work_root=args.work_root, dry_run_sync=args.dry_run_sync,
+                work_root=args.work_root, dry_run_sync=args.dry_run_sync, at=at,
             )
         elif args.command == "fail":
-            result = fail_one(args.db, args.assignment_id, args.owner, args.message)
+            result = fail_one(args.db, args.assignment_id, args.owner, args.message, at=at)
+        elif args.command == "recover":
+            result = recover(args.db, at=at)
         else:
-            result = recover(args.db)
+            result = status_one(args.db, at=at)
+            if not args.json:
+                print(_status_table(result))
+                return int(result["exit_code"])
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0
+        return int(result.get("exit_code", 0))
     except (RuntimeError, ValueError, OSError) as exc:
         print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
         return 2
