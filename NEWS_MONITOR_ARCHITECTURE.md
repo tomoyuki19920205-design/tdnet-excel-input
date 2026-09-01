@@ -410,11 +410,11 @@ Task guard busy skips and expired-guard recoveries are appended to per-task
 `events.jsonl` records. This makes 8x4 overlap pressure measurable without
 changing queue state or treating a safe busy exit as an empty research run.
 
-The eight repository prompts and setup templates define the 8x4 mapping while the
-common prompt remains the schema/research source of truth. Existing ChatGPT
-Scheduled Task bodies created for v5 also contain the old three-slot mapping and
-must be updated by a human before the 200-company activation. Their schedules
-remain `:00/:08/:15/:23/:30/:38/:45/:53`; Codex does not modify the automations.
+The eight repository prompts define the 8x4 mapping while the common prompt remains
+the schema/research source of truth. The corresponding setup files are stable runtime
+routers: absent benchmark control selects the Production prompt and an explicit valid
+benchmark control selects the isolated benchmark prompt. Task schedules remain
+`:00/:08/:15/:23/:30/:38/:45/:53`.
 
 Create the inert 200-company candidate and capture the pre-soak database baseline:
 
@@ -519,3 +519,113 @@ installation and registers the task disabled unless `-Enable` is explicitly supp
 Invalid JSON, owner mismatch, lease expiry, missing Markdown, invalid sources, or a
 period mismatch is rejected before assignment completion. Same-payload resubmission
 is idempotent; conflicting payloads fail closed.
+
+## Optimal batch-size benchmark (isolated, post-8x4 baseline)
+
+The completed `pilot200-20260831T145019404335` soak establishes the Production
+baseline at eight tasks, batch size four, and 32 logical slots: 200/200 completed,
+zero failed/retry/stale/validation/sync/research failures, 50 productive runs,
+average/p50/p95/max task duration 214.7/213/280/311 seconds, and measured throughput
+31.7558 companies/hour. Production remains 8x4 until the isolated benchmark and
+human review are complete.
+
+The historical `run_duration_seconds` is not a worker or scheduler-polling metric.
+`tools/company_news_task_batch.py snapshot` writes `started_at` immediately before
+the immutable assignment snapshot is returned to ChatGPT Work. After Work completes
+Web research, constructs and validates each payload, and atomically saves every
+success/failure file, its final `release` call writes `completed_at`. The reported
+duration is the difference between those timestamps. It therefore covers Work-side
+research, payload construction, validation/save, and command overhead after snapshot;
+it does not cover the later `CompanyNewsInboxWorker` run, PT5M polling delay, local
+ingest, SQLite write, or Supabase sync.
+
+`tools/company_news_batch_benchmark.py` adds a completely separate state and output
+plane:
+
+```text
+data/news_work/batch_benchmark/<benchmark_id>/
+  cohort.json
+  runs/reference|batchNN/
+    manifest.json
+    tasks/task01..task08/{queue,active,companies,runs,events}.*
+
+data/news_benchmark_inbox/<benchmark_id>/<run_name>/
+  benchmark_taskNN_<assignment_id>.json
+```
+
+No benchmark file is written to `data/news_inbox`. The default worker scans only the
+top level of `data/news_inbox`, so it cannot discover benchmark results. The harness
+imports the canonical validator but never opens a write connection to
+`decision_db.db`, never invokes ingest/sync, and has no Supabase write path. The
+company_news_v1 payload remains unchanged; timing is recorded only in
+`company_news_benchmark_telemetry_v1` sidecars. Each company record contains the
+external `research_started_at`, `research_finished_at`, validation completion,
+atomic-save completion, elapsed values, position, source/event counts, and result
+type. Each task record contains start/first-company/last-company/finish timestamps,
+elapsed and summed research/save time, snapshot size, and success/failure counts.
+Hidden reasoning or token-thinking time is neither requested nor inferred.
+
+The eight setup files call the read-only `route` command. With no active benchmark
+control they return the existing Production task prompt. Benchmark routing requires
+all of `benchmark_mode=true`, a valid benchmark/run ID, and an output directory that
+exactly resolves under `data/news_benchmark_inbox`. A malformed or partially present
+control fails closed instead of falling back to Production. An active benchmark task
+snapshots at most its candidate batch size once; later task-queue changes cannot add
+an N+1 company to that run.
+
+The fixed cohort is 192 companies, deterministically stratified across TSE 33 sector,
+latest available market-cap tercile (large/mid/small), and prior news-present/no-news/
+unscanned history. A deterministic 48-company subset is used for single-company
+reference research. Every run uses the immutable 2026-08-25 through 2026-08-31 search
+window. Initial candidates are 4, 8, 12, and 16. If 16 passes, 20 and then 24 may be
+prepared; if it fails, binary refinement between the last passing batch and 16 is
+supported. Batch size 24 is the hard ceiling for this benchmark.
+
+Reference/candidate event matching first uses normalized source URL, then a
+reviewable ticker/date/category plus headline/substance token similarity rule;
+ambiguous matches are listed separately. Audits report event recall, high/direct
+critical-event recall, precision, no-news false negatives, URL and schema validity,
+source/event density, research failures, position-quartile degradation, task
+average/p50/p95/max, busy skips, overlap, measured throughput, 3,800-company duration,
+weekly buffer, and local output bytes. A PASS requires 100% schema validity, zero
+research failure, at least 99% valid URLs, 100% critical recall, at least 95% material
+event recall, zero major no-news false negatives, p95 below 45 minutes, max below 55
+minutes, and zero busy skip/overlap or late-position degradation.
+
+Preparation is inert and does not activate a benchmark:
+
+```powershell
+python tools/company_news_batch_benchmark.py prepare --companies 192 --reference-size 48 --search-from 2026-08-25 --search-to 2026-08-31
+python tools/company_news_batch_benchmark.py prepare-run --benchmark-id <id> --batch-size 1 --reference
+python tools/company_news_batch_benchmark.py prepare-run --benchmark-id <id> --batch-size 4
+```
+
+A human activates one prepared run at a time, observes natural hourly executions,
+deactivates it after completion, and audits it before preparing/activating the next:
+
+```powershell
+python tools/company_news_batch_benchmark.py activate-run --benchmark-id <id> --run-name reference
+python tools/company_news_batch_benchmark.py status --benchmark-id <id> --run-name reference
+python tools/company_news_batch_benchmark.py deactivate-run
+python tools/company_news_batch_benchmark.py audit --benchmark-id <id> --run-name batch04
+python tools/company_news_batch_benchmark.py recommend --benchmark-id <id>
+```
+
+Only the final candidate receives the separate integration burst fixture. It contains
+synthetic files under `data/news_benchmark_load`, requires a temporary SQLite copy,
+disables Production Supabase writes, and exposes fields for worker duration/backlog,
+SQLite waits and WinError 5/32, sync retries, IgnoreNew skips, TDNET fixture durations,
+duplicates/console visibility, and test-endpoint sync duration. Batch size changes do
+not change annual news volume; the benchmark itself has zero Supabase capacity delta
+and records only local isolated output size. The human fills the generated result
+template and audits it with:
+
+```powershell
+python tools/company_news_batch_benchmark.py audit-integration-fixture --manifest <fixture>/manifest.json --result <fixture>/human_result.json
+python tools/company_news_batch_benchmark.py recommend --benchmark-id <id>
+```
+
+Recommendation excludes candidates whose average source count falls below 80% of
+the fixed-cohort batch-4 baseline. It reports a quality/runtime recommendation before
+integration, but `ready_for_production_change` remains false until the matching final
+candidate integration audit passes. Human review remains mandatory.

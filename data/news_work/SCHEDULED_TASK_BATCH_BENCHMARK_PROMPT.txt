@@ -1,0 +1,63 @@
+Company News Monitor batch benchmark専用promptです。このpromptは、対応setup fileが実行したroute commandから`mode=benchmark`が返った場合だけ使用してください。Production routeでは使用禁止です。
+
+最初に次の共通research/schema contractを全文読み、会社IR・主要ニュースのsource priority、company_news_v1 field、enum、fixed-window validationを守ってください。
+
+C:\Users\takuy\OneDrive\tdnet-excel-input\data\news_work\SCHEDULED_TASK_COMMON_PROMPT.txt
+
+ただし保存transportは本promptを優先します。`data/news_inbox`、Production assignment、Production queue、decision_db.db、Supabaseへ保存・変更してはいけません。snapshotが返す`temp_path`と`output_path`だけを使用してください。両pathは`data/news_benchmark_inbox`配下でなければ処理を停止してください。
+
+route結果のtask_idを使い、run開始時に次を1回だけ実行します。
+
+`.\.venv\Scripts\python.exe tools/company_news_batch_benchmark.py snapshot --task-id <task_id>`
+
+statusがbusyなら調査・保存せず終了します。snapshot_createdなら、返されたassignments arrayをimmutable snapshotとして保持します。assignment fileやbenchmark task queueをrun途中に再読込せず、snapshot_company_countを超えるN+1社目を処理しません。
+
+各assignmentを記載順に独立処理します。Web research直前に次を実行します。
+
+`.\.venv\Scripts\python.exe tools/company_news_batch_benchmark.py research-start --task-id <task_id> --run-token <run_token> --assignment-id <assignment_id>`
+
+assignmentのticker/company_nameだけを、固定されたsearch_fromからsearch_toまで調査します。期間をcurrent dateまで延長しません。調査完了直後、JSON validation/saveより前に次を実行します。
+
+`.\.venv\Scripts\python.exe tools/company_news_batch_benchmark.py research-finish --task-id <task_id> --run-token <run_token> --assignment-id <assignment_id>`
+
+正常結果は共通contractのcanonical company_news_v1だけをsnapshotのtemp_pathへ保存します。run_idとtask_idはassignment_id、tickerはassignment ticker、sources_checked_countは実際に確認できたsource数です。重要な新情報がない場合だけitems=[]にします。
+
+operational failureをitems=[]で偽装してはいけません。failureの場合は次の専用sidecarをtemp_pathへ保存します。
+
+```json
+{
+  "schema_version": "company_news_benchmark_failure_v1",
+  "task_id": "<taskNN>",
+  "slot_id": "<snapshot slot_id>",
+  "assignment_id": "<snapshot assignment_id>",
+  "ticker": "<snapshot ticker>",
+  "company_name": "<snapshot company_name>",
+  "error_type": "<non-empty classification>",
+  "error_message": "<specific non-empty message>",
+  "sources_attempted": ["<URL or source name>"],
+  "created_at": "<timezone付きISO-8601>"
+}
+```
+
+temp file作成後、正常結果は次のcommandでschema validationとatomic final saveを行います。
+
+`.\.venv\Scripts\python.exe tools/company_news_batch_benchmark.py finalize-company --task-id <task_id> --run-token <run_token> --assignment-id <assignment_id>`
+
+failure sidecarは`--failure`を追加します。finalizeが成功する前にfinal filenameへrenameしません。1社が失敗しても残りのsnapshot assignmentを続行します。
+
+全snapshot assignmentをfinalizeした後、次を1回だけ実行してtask-level telemetryを確定しguardをreleaseします。
+
+`.\.venv\Scripts\python.exe tools/company_news_batch_benchmark.py release-task --task-id <task_id> --run-token <run_token>`
+
+benchmark CLIが記録する外部観測可能な時刻だけを使います。モデル内部のhidden reasoningやtoken thinking timeを推測・記録しません。
+
+禁止事項:
+
+- data/news_inboxへの保存
+- Production assignment/global queueの変更
+- decision_db.dbの変更
+- Supabase write/sync
+- CompanyNewsInboxWorker、bridge、ingest、syncの実行
+- TDNET Production処理の実行・変更
+- snapshot外の追加company処理
+- Production Scheduled Task scheduleの変更
