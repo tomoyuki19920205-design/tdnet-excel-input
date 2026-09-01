@@ -225,6 +225,38 @@ def test_company_and_task_timing_telemetry_and_atomic_isolated_save(tmp_path):
     assert released["research_elapsed_sum"] == 90
 
 
+def test_release_creates_short_history_parent_and_missing_source_stays_fail_closed(tmp_path):
+    cohort, _, _ = _prepare(tmp_path, count=32, reference_size=8)
+    run = prepare_run(tmp_path, cohort["benchmark_id"], 1, reference=True, now=NOW)
+    activate_run(tmp_path, cohort["benchmark_id"], run["run_name"], now=NOW)
+    snapshot = snapshot_task(tmp_path, "task01", now=NOW)
+    assignment = snapshot["assignments"][0]
+    active = (
+        tmp_path / "data" / "news_work" / "batch_benchmark" / cohort["benchmark_id"]
+        / "runs" / "reference" / "tasks" / "task01" / "active.json"
+    )
+    history = active.parent / "history"
+    assert active.exists()
+    assert not history.exists()
+
+    research_start(tmp_path, "task01", snapshot["run_token"], assignment["assignment_id"], now=NOW + timedelta(seconds=1))
+    research_finish(tmp_path, "task01", snapshot["run_token"], assignment["assignment_id"], now=NOW + timedelta(seconds=11))
+    _write_json(Path(assignment["temp_path"]), _payload(assignment))
+    finalize_company(tmp_path, "task01", snapshot["run_token"], assignment["assignment_id"], now=NOW + timedelta(seconds=12))
+
+    released = release_task(tmp_path, "task01", snapshot["run_token"], now=NOW + timedelta(seconds=13))
+    completed = Path(released["history_path"])
+    assert history.is_dir()
+    assert completed.parent == history
+    assert completed.name.startswith("completed-")
+    assert len(completed.name) == len("completed-") + 16 + len(".json")
+    assert completed.exists()
+    assert not active.exists()
+
+    with pytest.raises(BenchmarkError, match="invalid JSON file"):
+        release_task(tmp_path, "task01", snapshot["run_token"], now=NOW + timedelta(seconds=14))
+
+
 def test_immutable_snapshot_never_adds_n_plus_one_company(tmp_path):
     cohort, _, _ = _prepare(tmp_path)
     run = prepare_run(tmp_path, cohort["benchmark_id"], 4, now=NOW)

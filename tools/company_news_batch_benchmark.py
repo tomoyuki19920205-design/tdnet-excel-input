@@ -768,8 +768,18 @@ def release_task(
     atomic_write_json(queue_path, queue)
     history = task_directory / "history"
     history.mkdir(parents=True, exist_ok=True)
-    replace_with_retry(path, history / f"{snapshot['run_id']}.completed.json")
-    return {"status": "released", **record, "remaining": sum(a["status"] == "pending" for a in queue["assignments"]), "candidate_batch_size": manifest["batch_size"]}
+    history_name = f"completed-{hashlib.sha256(snapshot['run_id'].encode()).hexdigest()[:16]}.json"
+    history_path = history / history_name
+    if history_path.exists():
+        raise BenchmarkError("completed benchmark task history already exists")
+    replace_with_retry(path, history_path)
+    return {
+        "status": "released",
+        **record,
+        "remaining": sum(a["status"] == "pending" for a in queue["assignments"]),
+        "candidate_batch_size": manifest["batch_size"],
+        "history_path": str(history_path.resolve()),
+    }
 
 
 def benchmark_status(root: Path, benchmark_id: str, run_name: str) -> dict[str, Any]:
