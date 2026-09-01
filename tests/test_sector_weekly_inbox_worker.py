@@ -66,7 +66,9 @@ def _run_main(
     return inbox_worker.main()
 
 
-def _fixture(tmp_path: Path, code: int = 4) -> tuple[Path, Path, dict, Path]:
+def _fixture(
+    tmp_path: Path, code: int = 4, *, published_at: str = "2026-09-04",
+) -> tuple[Path, Path, dict, Path]:
     db = tmp_path / "db.sqlite"
     conn = sqlite3.connect(db)
     conn.executescript(CANONICAL_SQLITE_SCHEMA)
@@ -105,7 +107,7 @@ def _fixture(tmp_path: Path, code: int = 4) -> tuple[Path, Path, dict, Path]:
             "sources": [{
                 "title": "Primary", "url": "https://example.com/primary",
                 "source_name": "Authority", "source_type": "government",
-                "published_at": "2026-09-04",
+                "published_at": published_at,
             }],
         },
     }
@@ -285,6 +287,59 @@ def test_quality_revision_rejects_wrong_hash_and_double_reopen(tmp_path: Path):
             db, claimed["assignment_id"], claimed["stable_key"], original["payload_hash"], "reason",
             QUALITY_REOPEN_CONFIRMATION, work_root=work, at=AT, supabase_reader=lambda _key: [report],
         )
+
+
+def test_quality_revision_preflight_accepts_equivalent_source_timestamp_spelling(tmp_path: Path):
+    db, work, claimed, inbox = _fixture(
+        tmp_path, published_at="2026-09-04T00:00:00Z",
+    )
+    paths = WorkerPaths.from_values(tmp_path, db, work)
+    original = process_one(paths, inbox, sync_func=lambda *_: {})
+    conn = connect_sector_db(db)
+    try:
+        report = dict(conn.execute("SELECT * FROM canonical_sector_reports").fetchone())
+    finally:
+        conn.close()
+    remote = dict(report)
+    remote_sources = json.loads(remote["sources"])
+    remote_sources[0]["published_at"] = "2026-09-04T09:00:00+09:00"
+    remote["sources"] = remote_sources
+    reopened = reopen_quality_one(
+        db, claimed["assignment_id"], claimed["stable_key"], original["payload_hash"], "reason",
+        QUALITY_REOPEN_CONFIRMATION, work_root=work, at=AT,
+        supabase_reader=lambda _key: [remote],
+    )
+    assert reopened["processed_payload_hash"] == original["payload_hash"]
+
+
+def test_quality_revision_preflight_rejects_actual_source_timestamp_difference(tmp_path: Path):
+    db, work, claimed, inbox = _fixture(
+        tmp_path, published_at="2026-09-04T00:00:00Z",
+    )
+    paths = WorkerPaths.from_values(tmp_path, db, work)
+    original = process_one(paths, inbox, sync_func=lambda *_: {})
+    conn = connect_sector_db(db)
+    try:
+        report = dict(conn.execute("SELECT * FROM canonical_sector_reports").fetchone())
+    finally:
+        conn.close()
+    remote = dict(report)
+    remote_sources = json.loads(remote["sources"])
+    remote_sources[0]["published_at"] = "2026-09-04T00:00:01Z"
+    remote["sources"] = remote_sources
+    with pytest.raises(SectorBridgeError, match="Supabase canonical report"):
+        reopen_quality_one(
+            db, claimed["assignment_id"], claimed["stable_key"], original["payload_hash"], "reason",
+            QUALITY_REOPEN_CONFIRMATION, work_root=work, at=AT,
+            supabase_reader=lambda _key: [remote],
+        )
+    conn = connect_sector_db(db)
+    try:
+        row = get_assignment(conn, claimed["assignment_id"])
+        assert row["status"] == "success" and row["attempt_count"] == 1
+    finally:
+        conn.close()
+    assert list((work / "revisions" / claimed["assignment_id"]).glob("*.json")) == []
 
 
 @pytest.mark.parametrize("unsafe_state", ["active_lease", "attempt_limit"])

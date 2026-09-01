@@ -1,3 +1,4 @@
+import copy
 import json
 import sqlite3
 from datetime import datetime, timedelta
@@ -11,11 +12,13 @@ from lib.sector_weekly_work import (
     enqueue_assignment,
     enqueue_retry_candidate,
     get_assignment,
+    payload_hash,
     recover_expired_leases,
 )
 from tools.sector_weekly_work_bridge import (
     RESULT_SCHEMA,
     SectorBridgeError,
+    _normalized_report_row,
     abandon_one,
     claim_one,
     heartbeat_one,
@@ -84,6 +87,123 @@ def _envelope(assignment: dict, report: dict | None = None) -> dict:
         "period_end": assignment["period_end"],
         "report": report or _report(),
     }
+
+
+def _semantic_row(published_at: str | None = "2026-08-26T00:00:00Z") -> dict:
+    return {
+        "schema_version": "sector_weekly_v1", "report_type": "sector_weekly",
+        "sector_code": 9, "sector_name": "石油・石炭製品",
+        "period_start": "2026-08-21T21:00:00Z",
+        "period_end": "2026-08-28T20:59:59Z",
+        "generated_at": "2026-08-29T01:00:00Z",
+        "importance": "A", "direction": "mixed", "summary_bullets": ["要旨"],
+        "full_report_md": "本文Z +00:00は日時以外なので不変",
+        "watchlist_companies": [], "next_week_watchpoints": [], "missed_candidates": [],
+        "sources": [{
+            "title": "Primary", "url": "https://example.com/source",
+            "source_name": "Authority", "source_type": "government",
+            "published_at": published_at,
+        }],
+        "run_id": "sector_weekly:2026-08-29:09",
+        "dedupe_key": "sector_weekly:2026-08-29:09",
+    }
+
+
+@pytest.mark.parametrize(
+    "equivalent",
+    [
+        "2026-08-26T00:00:00+00:00",
+        "2026-08-26T09:00:00+09:00",
+        "2026-08-26T00:00:00.000000+00:00",
+    ],
+)
+def test_canonical_comparison_normalizes_equivalent_rfc3339_instants(equivalent: str):
+    assert _normalized_report_row(_semantic_row()) == _normalized_report_row(_semantic_row(equivalent))
+
+
+def test_canonical_comparison_normalizes_only_allowlisted_top_level_datetimes():
+    left = _semantic_row()
+    right = copy.deepcopy(left)
+    right["period_start"] = "2026-08-22T06:00:00+09:00"
+    right["period_end"] = "2026-08-29T05:59:59+09:00"
+    right["generated_at"] = "2026-08-29T10:00:00+09:00"
+    assert _normalized_report_row(left) == _normalized_report_row(right)
+    right["generated_at"] = "2026-08-29T10:00:01+09:00"
+    assert _normalized_report_row(left) != _normalized_report_row(right)
+
+
+@pytest.mark.parametrize(
+    "invalid_or_different",
+    [
+        "2026-08-26T00:00:01Z",
+        "2026-08-26T00:00:00",
+        "2026/08/26 00:00:00",
+        "2026-08-26T00:00:00.0000001Z",
+        "not-a-time",
+    ],
+)
+def test_canonical_comparison_rejects_different_or_invalid_source_times(invalid_or_different: str):
+    if invalid_or_different == "2026-08-26T00:00:01Z":
+        assert _normalized_report_row(_semantic_row()) != _normalized_report_row(
+            _semantic_row(invalid_or_different)
+        )
+    else:
+        with pytest.raises(SectorBridgeError, match="RFC3339"):
+            _normalized_report_row(_semantic_row(invalid_or_different))
+
+
+@pytest.mark.parametrize("field", ["publisher", "title", "url"])
+def test_canonical_comparison_does_not_hide_non_datetime_source_differences(field: str):
+    left = _semantic_row()
+    right = copy.deepcopy(left)
+    key = "source_name" if field == "publisher" else field
+    right["sources"][0][key] += " changed"
+    assert _normalized_report_row(left) != _normalized_report_row(right)
+
+
+def test_canonical_comparison_preserves_source_order_and_does_not_mutate_or_rehash_input():
+    left = _semantic_row()
+    left["sources"].append({
+        "title": "Second", "url": "https://example.com/second", "source_name": "Exchange",
+        "source_type": "market_data", "published_at": "2026-08-27",
+    })
+    original = copy.deepcopy(left)
+    stored_hash = payload_hash(left)
+    normalized = _normalized_report_row(left)
+    assert left == original and payload_hash(left) == stored_hash
+    assert [item["title"] for item in normalized["sources"]] == ["Primary", "Second"]
+    reordered = copy.deepcopy(left)
+    reordered["sources"].reverse()
+    assert _normalized_report_row(left) != _normalized_report_row(reordered)
+    assert normalized["full_report_md"] == "本文Z +00:00は日時以外なので不変"
+
+
+def test_sector9_shape_with_18_sources_and_10_timestamp_spellings_is_semantically_equal():
+    fixture = Path(__file__).parent / "fixtures" / "sector_weekly_sector9_processed_hash.json"
+    envelope = json.loads(fixture.read_text(encoding="utf-8"))
+    assert payload_hash(envelope) == "02667677dbe930ecdb82243aba555185bd245b2910b7516b6315a7fb5c566c61"
+    processed = {
+        "schema_version": "sector_weekly_v1", "report_type": "sector_weekly",
+        "sector_code": envelope["sector_code"], "sector_name": envelope["sector_name"],
+        "period_start": envelope["period_start"], "period_end": envelope["period_end"],
+        "generated_at": "2026-08-29T01:00:00Z",
+        "run_id": "sector_weekly:2026-08-29:09",
+        "dedupe_key": "sector_weekly:2026-08-29:09",
+        **envelope["report"],
+    }
+    canonical = copy.deepcopy(processed)
+    changed = 0
+    for source in canonical["sources"]:
+        if source["published_at"].endswith("Z"):
+            source["published_at"] = source["published_at"][:-1] + "+00:00"
+            changed += 1
+    assert len(processed["sources"]) == 18 and changed == 10
+    processed_before = copy.deepcopy(processed)
+    canonical_before = copy.deepcopy(canonical)
+    assert _normalized_report_row(processed) == _normalized_report_row(canonical)
+    assert processed == processed_before and canonical == canonical_before
+    canonical["sources"][17]["title"] = "Actually different"
+    assert _normalized_report_row(processed) != _normalized_report_row(canonical)
 
 
 def test_claim_returns_one_assignment_and_prevents_double_claim(tmp_path: Path):
