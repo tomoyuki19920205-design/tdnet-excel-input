@@ -41,6 +41,13 @@ def _migrate_fixture(db: Path) -> None:
 
 
 def _report() -> dict:
+    material = lambda number: (
+        f"### 材料{number}: 海外需給{number}\n"
+        "**Fact**: 需給変化。\n**Transmission**: 日本企業へ波及。\n"
+        "**Magnitude**: 利益感応度を試算。\n**Pricing-in**: 未織り込み。\n"
+        "**Counterevidence**: 需給反転。" +
+        ("\n**Estimate**: 10〜20億円。\n**Hypothesis**: 変化は継続。" if number == 1 else "")
+    )
     return {
         "importance": "A",
         "direction": "mixed",
@@ -48,7 +55,7 @@ def _report() -> dict:
         "watchlist_companies": [{"code": "5713", "name": "住友金属鉱山", "direction": "mixed"}],
         "next_week_watchpoints": ["取引所在庫と現物プレミアム"],
         "missed_candidates": ["マイナー金属群は確認したが重要変動なし"],
-        "full_report_md": "# 【東証33業種週次】鉱業\n\n## 今週の要旨\nFactとEstimateを区別した本文。\n\n## 重要材料\nTransmission、Magnitude、Pricing-in、Counterevidenceを確認。\n\n" + "定量的な利益波及と反証条件を簡潔に記述する。" * 8,
+        "full_report_md": "# 【東証33業種週次】鉱業\n\n## 今週の要旨\n要旨。\n\n" + "\n\n".join(material(i) for i in range(1, 4)),
         "sources": [{
             "title": "Primary market data", "url": "https://example.com/market",
             "source_name": "Exchange", "source_type": "market_data", "published_at": "2026-09-04",
@@ -169,6 +176,28 @@ def test_valid_stage_is_local_only_atomic_and_idempotent(tmp_path: Path):
     ).fetchone()
     assert row[:5] == ("retry_pending", 1, None, None, "sync_pending")
     assert len(row[5]) == 64
+
+
+def test_structurally_invalid_material_is_blocked_before_inbox_and_canonical(tmp_path: Path):
+    db = tmp_path / "db.sqlite"
+    work = tmp_path / "work"
+    _enqueue(db)
+    claimed = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
+    report = _report()
+    report["full_report_md"] = report["full_report_md"].replace(
+        "**Counterevidence**: 需給反転。", "Counterevidence: 需給反転。", 1,
+    )
+    draft = tmp_path / "bad-structure.json"
+    draft.write_text(json.dumps(_envelope(claimed, report), ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(Exception, match="material 1.*Counterevidence"):
+        stage_one(db, claimed["assignment_id"], OWNER, draft, work_root=work, at=AT)
+    assert not (work / "inbox" / f"{claimed['assignment_id']}.json").exists()
+    conn = connect_sector_db(db)
+    try:
+        assert conn.execute("SELECT count(*) FROM canonical_sector_reports").fetchone()[0] == 0
+        assert get_assignment(conn, claimed["assignment_id"])["status"] == "retry_pending"
+    finally:
+        conn.close()
 
 
 def test_restage_conflicting_payload_is_rejected_without_overwriting_inbox(tmp_path: Path):

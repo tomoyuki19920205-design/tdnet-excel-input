@@ -6,7 +6,9 @@ import argparse
 import json
 import os
 import re
+import sqlite3
 import sys
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -22,6 +24,7 @@ from lib.sector_weekly import connect_sector_db, now_jst, upsert_report, validat
 from lib.sector_weekly_work import (
     complete_staged_assignment,
     get_assignment,
+    is_quality_revision,
     mark_staged_sync_error,
     payload_hash,
     prepare_staged_sync,
@@ -134,6 +137,38 @@ def _move_atomic(source: Path, directory: Path) -> Path:
     return target
 
 
+def _replace_processed(source: Path, directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / source.name
+    replace_with_retry(source, target)
+    return target
+
+
+def _revision_sync_database(paths: WorkerPaths, validated: Any, assignment_id: str, digest: str) -> Path:
+    """Create an isolated snapshot so failed transport cannot replace local canonical data."""
+    state = paths.work_root / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    target = state / f"quality-revision-{assignment_id}-{digest[:12]}-{uuid.uuid4().hex}.sqlite"
+    source = sqlite3.connect(paths.db)
+    destination = sqlite3.connect(target)
+    try:
+        source.backup(destination)
+    finally:
+        destination.close()
+        source.close()
+    try:
+        temp_conn = connect_sector_db(target)
+        try:
+            upsert_report(temp_conn, validated)
+            prepare_staged_sync(temp_conn, assignment_id, digest)
+        finally:
+            temp_conn.close()
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+    return target
+
+
 def _remove_identical_quarantine(paths: WorkerPaths, assignment_id: str, digest: str) -> bool:
     candidate = paths.quarantine / f"{assignment_id}.json"
     if not candidate.exists():
@@ -174,7 +209,11 @@ def process_one(
             if row["submitted_payload_hash"] != digest:
                 raise SectorBridgeError("logical payload hash does not match staged assignment")
             if row["status"] == "success":
-                processed = _move_atomic(path, paths.processed)
+                revision_archive = paths.work_root / "revisions" / assignment_id
+                processed = (
+                    _replace_processed(path, paths.processed)
+                    if revision_archive.is_dir() else _move_atomic(path, paths.processed)
+                )
                 return {
                     "status": "already_success", "assignment_id": assignment_id,
                     "payload_hash": digest, "processed_path": str(processed),
@@ -197,19 +236,32 @@ def process_one(
                 "error": _safe_error(exc), "quarantine_path": str(quarantined),
             }
 
-        upsert_report(conn, validated)
-        prepare_staged_sync(conn, assignment_id, digest)
+        revision = is_quality_revision(row)
+        sync_db = paths.db
+        revision_db: Path | None = None
+        if revision:
+            revision_db = _revision_sync_database(paths, validated, assignment_id, digest)
+            sync_db = revision_db
+        else:
+            upsert_report(conn, validated)
+            prepare_staged_sync(conn, assignment_id, digest)
         try:
-            sync_result = sync_func(paths.db, dry_run_sync)
+            sync_result = sync_func(sync_db, dry_run_sync)
         except Exception as exc:
             summary = _safe_error(exc, transport=True)
             mark_staged_sync_error(conn, assignment_id, digest, RuntimeError(summary))
+            if revision_db is not None:
+                revision_db.unlink(missing_ok=True)
             return {
                 "status": "sync_error", "assignment_id": assignment_id,
                 "payload_hash": digest, "error": summary,
             }
+        if revision:
+            upsert_report(conn, validated)
         completed = complete_staged_assignment(conn, assignment_id, digest)
-        processed = _move_atomic(path, paths.processed)
+        if revision_db is not None:
+            revision_db.unlink(missing_ok=True)
+        processed = _replace_processed(path, paths.processed) if revision else _move_atomic(path, paths.processed)
         duplicate_removed = _remove_identical_quarantine(paths, assignment_id, digest)
         return {
             "status": "success", "assignment_id": assignment_id,

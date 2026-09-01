@@ -4,12 +4,21 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 import tools.sector_weekly_inbox_worker as inbox_worker
 from lib.sector_weekly import CANONICAL_SQLITE_SCHEMA, connect_sector_db, weekly_window
 from lib.sector_weekly_work import enqueue_assignment, get_assignment
 from tools.apply_sector_weekly_work_sqlite_migration import apply_sqlite_migration
 from tools.sector_weekly_inbox_worker import WorkerPaths, process_one, run_once
-from tools.sector_weekly_work_bridge import RESULT_SCHEMA, claim_one, stage_one
+from tools.sector_weekly_work_bridge import (
+    QUALITY_REOPEN_CONFIRMATION,
+    RESULT_SCHEMA,
+    SectorBridgeError,
+    claim_one,
+    reopen_quality_one,
+    stage_one,
+)
 
 AT = datetime.fromisoformat("2026-09-05T06:05:00+09:00")
 OWNER = "sector-weekly-worker"
@@ -83,10 +92,14 @@ def _fixture(tmp_path: Path, code: int = 4) -> tuple[Path, Path, dict, Path]:
             "watchlist_companies": [], "next_week_watchpoints": ["価格"],
             "missed_candidates": ["重要変動なしも確認"],
             "full_report_md": (
-                f"# 【東証33業種週次】{claimed['sector_name']}\n\n## 今週の要旨\n"
-                "**Fact** 需給変化。\n\n## 重要材料\n**Transmission** 国内波及。\n\n"
-                "**Magnitude** Estimate。 **Pricing-in** 未織込み。 "
-                "**Counterevidence** 反証。\n\n" + "fixture本文。" * 30
+                f"# 【東証33業種週次】{claimed['sector_name']}\n\n## 今週の要旨\n要旨。\n\n" +
+                "\n\n".join(
+                    f"### 材料{i}: 需給{i}\n**Fact**: 需給変化。\n"
+                    "**Transmission**: 国内波及。\n**Magnitude**: 利益感応。\n"
+                    "**Pricing-in**: 未織込み。\n**Counterevidence**: 反証。" +
+                    ("\n**Estimate**: 10〜20億円。\n**Hypothesis**: 継続する。" if i == 1 else "")
+                    for i in range(1, 4)
+                )
             ),
             "sources": [{
                 "title": "Primary", "url": "https://example.com/primary",
@@ -138,6 +151,136 @@ def test_sync_failure_preserves_payload_attempt_and_resumes_next_poll(tmp_path: 
         conn.close()
     resumed = process_one(paths, inbox, sync_func=lambda *_: {"canonical_sector_reports": 1})
     assert resumed["status"] == "success" and resumed["attempt_count"] == 1
+
+
+def test_quality_revision_archives_old_payload_and_preserves_canonical_until_sync_success(tmp_path: Path):
+    db, work, claimed, inbox = _fixture(tmp_path)
+    paths = WorkerPaths.from_values(tmp_path, db, work)
+    original = process_one(paths, inbox, sync_func=lambda *_: {"canonical_sector_reports": 1})
+    old_hash = original["payload_hash"]
+    conn = connect_sector_db(db)
+    try:
+        old_report = dict(conn.execute(
+            "SELECT * FROM canonical_sector_reports WHERE dedupe_key=?", (claimed["stable_key"],),
+        ).fetchone())
+    finally:
+        conn.close()
+    reopened = reopen_quality_one(
+        db, claimed["assignment_id"], claimed["stable_key"], old_hash, "missing material structure",
+        QUALITY_REOPEN_CONFIRMATION, work_root=work, at=AT,
+        supabase_reader=lambda _key: [dict(old_report)],
+    )
+    archive = Path(reopened["archive_path"])
+    assert {
+        reopened["assignment_payload_hash"], reopened["processed_payload_hash"],
+        reopened["local_canonical_payload_hash"], reopened["supabase_canonical_payload_hash"],
+    } == {old_hash}
+    assert archive.exists()
+    archived = json.loads(archive.read_text(encoding="utf-8"))
+    assert archived["old_payload_hash"] == old_hash
+    assert archived["original_payload"]["assignment_id"] == claimed["assignment_id"]
+    conn = connect_sector_db(db)
+    try:
+        row = get_assignment(conn, claimed["assignment_id"])
+        assert row["status"] == "retry_pending" and row["attempt_count"] == 1
+        assert row["last_error_type"] == "quality_revision"
+        assert conn.execute(
+            "SELECT full_report_md FROM canonical_sector_reports WHERE dedupe_key=?", (claimed["stable_key"],),
+        ).fetchone()[0] == old_report["full_report_md"]
+        assert conn.execute(
+            "SELECT status FROM canonical_sector_report_runs WHERE dedupe_key=?", (claimed["stable_key"],),
+        ).fetchone()[0] == "success"
+    finally:
+        conn.close()
+
+    revised_claim = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
+    assert revised_claim["attempt_count"] == 2
+    old_envelope = json.loads((work / "processed" / f"{claimed['assignment_id']}.json").read_text(encoding="utf-8"))
+    old_envelope["report"]["full_report_md"] = old_envelope["report"]["full_report_md"].replace(
+        "**Fact**: 需給変化。", "**Fact**: 改訂後の需給変化。", 1,
+    )
+    draft = tmp_path / "revision.json"
+    draft.write_text(json.dumps(old_envelope, ensure_ascii=False), encoding="utf-8")
+    stage_one(db, claimed["assignment_id"], OWNER, draft, work_root=work, at=AT)
+    revision_inbox = work / "inbox" / f"{claimed['assignment_id']}.json"
+    failed = process_one(paths, revision_inbox, sync_func=lambda *_: (_ for _ in ()).throw(RuntimeError("offline")))
+    assert failed["status"] == "sync_error" and revision_inbox.exists()
+    conn = connect_sector_db(db)
+    try:
+        assert conn.execute(
+            "SELECT full_report_md FROM canonical_sector_reports WHERE dedupe_key=?", (claimed["stable_key"],),
+        ).fetchone()[0] == old_report["full_report_md"]
+        assert get_assignment(conn, claimed["assignment_id"])["last_error_type"] == "quality_revision_sync_error"
+    finally:
+        conn.close()
+    completed = process_one(paths, revision_inbox, sync_func=lambda *_: {"canonical_sector_reports": 1})
+    assert completed["status"] == "success" and completed["attempt_count"] == 2
+    conn = connect_sector_db(db)
+    try:
+        revised = conn.execute(
+            "SELECT full_report_md FROM canonical_sector_reports WHERE dedupe_key=?", (claimed["stable_key"],),
+        ).fetchone()[0]
+        assert "改訂後の需給変化" in revised
+        assert conn.execute("SELECT count(*) FROM canonical_sector_reports WHERE dedupe_key=?", (claimed["stable_key"],)).fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_quality_revision_rejects_wrong_hash_and_double_reopen(tmp_path: Path):
+    db, work, claimed, inbox = _fixture(tmp_path)
+    paths = WorkerPaths.from_values(tmp_path, db, work)
+    original = process_one(paths, inbox, sync_func=lambda *_: {})
+    conn = connect_sector_db(db)
+    try:
+        report = dict(conn.execute("SELECT * FROM canonical_sector_reports").fetchone())
+    finally:
+        conn.close()
+    with pytest.raises((SectorBridgeError, RuntimeError), match="hash"):
+        reopen_quality_one(
+            db, claimed["assignment_id"], claimed["stable_key"], "0" * 64, "reason",
+            QUALITY_REOPEN_CONFIRMATION, work_root=work, supabase_reader=lambda _key: [report],
+        )
+    reopen_quality_one(
+        db, claimed["assignment_id"], claimed["stable_key"], original["payload_hash"], "reason",
+        QUALITY_REOPEN_CONFIRMATION, work_root=work, at=AT, supabase_reader=lambda _key: [report],
+    )
+    with pytest.raises((SectorBridgeError, RuntimeError), match="successful assignment"):
+        reopen_quality_one(
+            db, claimed["assignment_id"], claimed["stable_key"], original["payload_hash"], "reason",
+            QUALITY_REOPEN_CONFIRMATION, work_root=work, at=AT, supabase_reader=lambda _key: [report],
+        )
+
+
+@pytest.mark.parametrize("unsafe_state", ["active_lease", "attempt_limit"])
+def test_quality_revision_rejects_active_lease_and_attempt_limit(tmp_path: Path, unsafe_state: str):
+    case = tmp_path / unsafe_state
+    case.mkdir()
+    db, work, claimed, inbox = _fixture(case)
+    paths = WorkerPaths.from_values(case, db, work)
+    original = process_one(paths, inbox, sync_func=lambda *_: {})
+    conn = connect_sector_db(db)
+    try:
+        report = dict(conn.execute("SELECT * FROM canonical_sector_reports").fetchone())
+        if unsafe_state == "active_lease":
+            conn.execute(
+                "UPDATE sector_weekly_work_assignments SET claim_owner='unexpected-owner',"
+                "claimed_at='2026-09-04T21:05:00Z',lease_expires_at='2026-09-04T21:20:00Z' "
+                "WHERE assignment_id=?", (claimed["assignment_id"],),
+            )
+        else:
+            conn.execute(
+                "UPDATE sector_weekly_work_assignments SET attempt_count=3 WHERE assignment_id=?",
+                (claimed["assignment_id"],),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    expected = "claim owner or lease" if unsafe_state == "active_lease" else "attempt limit"
+    with pytest.raises(SectorBridgeError, match=expected):
+        reopen_quality_one(
+            db, claimed["assignment_id"], claimed["stable_key"], original["payload_hash"], "reason",
+            QUALITY_REOPEN_CONFIRMATION, work_root=work, at=AT, supabase_reader=lambda _key: [report],
+        )
 
 
 def test_legacy_sector4_partial_and_identical_quarantine_recover_without_attempt(tmp_path: Path):

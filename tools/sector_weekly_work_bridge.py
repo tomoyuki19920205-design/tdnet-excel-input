@@ -22,6 +22,7 @@ from lib.sector_weekly import (
 )
 from lib.sector_weekly_work import (
     DEFAULT_LEASE_SECONDS,
+    MAX_ATTEMPTS,
     SectorWorkError,
     abandon_assignment,
     claim_next,
@@ -29,17 +30,21 @@ from lib.sector_weekly_work import (
     fail_assignment,
     get_assignment,
     heartbeat_assignment,
+    is_transport_waiting,
     mark_running,
     payload_hash,
     recover_expired_leases,
+    reopen_quality_revision,
     stage_assignment,
 )
+from lib.pipeline.db import get_supabase_read_config, load_env, supabase_select
 from tools.company_news_atomic import atomic_write_json, replace_with_retry
 from tools.sector_weekly_scheduler import assemble_payload, build_prompt, in_worker_window
 
 RESULT_SCHEMA = "sector_weekly_work_result_v1"
 DEFAULT_OWNER = "sector-weekly-worker"
 DEFAULT_WORK_ROOT = ROOT / "data" / "sector_weekly_work"
+QUALITY_REOPEN_CONFIRMATION = "REOPEN_SECTOR_WEEKLY_QUALITY"
 
 
 class SectorBridgeError(RuntimeError):
@@ -215,6 +220,138 @@ def _quarantine(work_root: Path, assignment_id: str, source: Path) -> None:
     replace_with_retry(temporary, target)
 
 
+def _normalized_report_row(row: dict[str, Any]) -> dict[str, Any]:
+    json_fields = {
+        "summary_bullets", "watchlist_companies", "next_week_watchpoints",
+        "missed_candidates", "sources",
+    }
+    fields = {
+        "schema_version", "report_type", "sector_code", "sector_name", "period_start", "period_end",
+        "generated_at", "importance", "direction", "summary_bullets", "full_report_md",
+        "watchlist_companies", "next_week_watchpoints", "missed_candidates", "sources", "run_id", "dedupe_key",
+    }
+    result: dict[str, Any] = {}
+    for field in fields:
+        value = row.get(field)
+        if field in json_fields and isinstance(value, str):
+            value = json.loads(value)
+        if field in {"period_start", "period_end", "generated_at"}:
+            value = _parse_datetime(value, field).astimezone(JST).isoformat(timespec="seconds")
+        result[field] = value
+    return result
+
+
+def _read_supabase_reports(stable_key: str) -> list[dict[str, Any]]:
+    load_env(str(ROOT))
+    config = get_supabase_read_config()
+    return supabase_select(
+        "canonical_sector_reports",
+        params={"dedupe_key": f"eq.{stable_key}", "select": "*"},
+        config=config,
+    )
+
+
+def reopen_quality_one(
+    db_path: Path,
+    assignment_id: str,
+    stable_key: str,
+    expected_hash: str,
+    reason: str,
+    confirmation: str,
+    *,
+    work_root: Path = DEFAULT_WORK_ROOT,
+    at: datetime | None = None,
+    supabase_reader: Any = _read_supabase_reports,
+) -> dict[str, Any]:
+    """Archive and reopen one verified success; canonical rows remain untouched."""
+    if confirmation != QUALITY_REOPEN_CONFIRMATION:
+        raise SectorBridgeError("exact quality-reopen confirmation text is required")
+    processed = work_root / "processed" / f"{assignment_id}.json"
+    envelope = _read_envelope(processed)
+    digest = payload_hash(envelope)
+    if digest != expected_hash:
+        raise SectorBridgeError("processed payload hash does not match expected hash")
+    timestamp = at or now_jst()
+    conn = connect_sector_db(db_path)
+    try:
+        row = get_assignment(conn, assignment_id)
+        if row is None:
+            raise SectorBridgeError("assignment not found")
+        if row["stable_key"] != stable_key or envelope["assignment_id"] != assignment_id:
+            raise SectorBridgeError("assignment, stable key, and processed payload do not agree")
+        if row["status"] != "success":
+            raise SectorBridgeError("quality revision requires a successful assignment")
+        if row["claim_owner"] or row["lease_expires_at"]:
+            raise SectorBridgeError("quality revision requires no claim owner or lease")
+        if int(row["attempt_count"]) >= MAX_ATTEMPTS:
+            raise SectorBridgeError("quality revision attempt limit has been reached")
+        if row["last_error_type"] or row["last_error_message"]:
+            raise SectorBridgeError("quality revision requires no pending transport or error state")
+        if (work_root / "inbox" / f"{assignment_id}.json").exists() or (
+            work_root / "active" / f"{assignment_id}.json"
+        ).exists():
+            raise SectorBridgeError("quality revision requires no active transport files")
+        if row["submitted_payload_hash"] != expected_hash:
+            raise SectorBridgeError("assignment payload hash does not match expected hash")
+        reports = [dict(item) for item in conn.execute(
+            "SELECT * FROM canonical_sector_reports WHERE dedupe_key=?", (stable_key,),
+        ).fetchall()]
+        if len(reports) != 1:
+            raise SectorBridgeError("local canonical report count must be exactly one")
+        runs = conn.execute(
+            "SELECT status FROM canonical_sector_report_runs WHERE dedupe_key=?", (stable_key,),
+        ).fetchall()
+        if len(runs) != 1 or runs[0]["status"] != "success":
+            raise SectorBridgeError("local canonical run must be exactly one successful row")
+        window = _window(row)
+        old_payload = assemble_payload(
+            envelope["report"], int(row["sector_code"]), window,
+            generated_at=_parse_datetime(reports[0]["generated_at"], "generated_at"),
+        )
+        if _normalized_report_row(old_payload) != _normalized_report_row(reports[0]):
+            raise SectorBridgeError("local canonical report does not semantically match processed payload")
+        remote = supabase_reader(stable_key)
+        if len(remote) != 1 or _normalized_report_row(remote[0]) != _normalized_report_row(reports[0]):
+            raise SectorBridgeError("Supabase canonical report must be exactly one semantic match")
+        archive = (
+            work_root / "revisions" / assignment_id /
+            f"{timestamp.strftime('%Y%m%dT%H%M%S%f')}.{expected_hash[:16]}.json"
+        )
+        if archive.exists():
+            raise SectorBridgeError("quality revision archive already exists")
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(archive, {
+            "schema_version": "sector_weekly_quality_revision_archive_v1",
+            "assignment_id": assignment_id, "stable_key": stable_key,
+            "old_payload_hash": expected_hash, "revision_started_at": timestamp.isoformat(timespec="seconds"),
+            "reason": reason, "original_payload": envelope,
+        })
+        try:
+            reopened = reopen_quality_revision(
+                conn, assignment_id, stable_key, expected_hash, reason, now=timestamp,
+            )
+        except Exception:
+            # The archive belongs to this failed operation and no state transition
+            # occurred, so remove it to keep a later explicit retry possible.
+            archive.unlink(missing_ok=True)
+            raise
+        return {
+            "status": "quality_revision", "assignment_id": assignment_id, "stable_key": stable_key,
+            "attempt_count": int(reopened["attempt_count"]), "expected_next_attempt": int(reopened["attempt_count"]) + 1,
+            "payload_hash": expected_hash,
+            "assignment_payload_hash": expected_hash,
+            "processed_payload_hash": digest,
+            # These are logical payload hashes attested only after complete semantic
+            # comparison; storage may spell equivalent UTC offsets as Z or +00:00.
+            "local_canonical_payload_hash": expected_hash,
+            "supabase_canonical_payload_hash": expected_hash,
+            "archive_path": str(archive.resolve()),
+            "canonical_rows_changed": 0, "supabase_writes": 0,
+        }
+    finally:
+        conn.close()
+
+
 def stage_one(
     db_path: Path,
     assignment_id: str,
@@ -238,7 +375,7 @@ def stage_one(
                 if row["submitted_payload_hash"] != digest:
                     raise SectorBridgeError("completed assignment received a conflicting payload")
                 return {"status": "already_success", "assignment_id": assignment_id, "payload_hash": digest}
-            if row["last_error_type"] in {"sync_pending", "sync_error"}:
+            if is_transport_waiting(row):
                 if row["submitted_payload_hash"] != digest:
                     raise SectorBridgeError("staged assignment received a conflicting payload")
             window = _window(row)
@@ -332,6 +469,12 @@ def main() -> int:
     fail_parser.add_argument("--assignment-id", required=True)
     fail_parser.add_argument("--owner", default=DEFAULT_OWNER)
     fail_parser.add_argument("--message", required=True)
+    reopen_parser = subparsers.add_parser("reopen-quality")
+    reopen_parser.add_argument("--assignment-id", required=True)
+    reopen_parser.add_argument("--stable-key", required=True)
+    reopen_parser.add_argument("--expected-hash", required=True)
+    reopen_parser.add_argument("--reason", required=True)
+    reopen_parser.add_argument("--confirm", required=True)
     subparsers.add_parser("recover")
     status_parser = subparsers.add_parser("status")
     status_parser.add_argument("--json", action="store_true")
@@ -356,6 +499,11 @@ def main() -> int:
             )
         elif args.command == "fail":
             result = fail_one(args.db, args.assignment_id, args.owner, args.message, at=at)
+        elif args.command == "reopen-quality":
+            result = reopen_quality_one(
+                args.db, args.assignment_id, args.stable_key, args.expected_hash,
+                args.reason, args.confirm, work_root=args.work_root, at=at,
+            )
         elif args.command == "recover":
             result = recover(args.db, at=at)
         else:

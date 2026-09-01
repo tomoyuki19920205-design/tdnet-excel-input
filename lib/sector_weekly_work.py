@@ -30,11 +30,23 @@ MAX_ATTEMPTS = 3
 DEFAULT_LEASE_SECONDS = 15 * 60
 MAX_LEASE_LIFETIME_SECONDS = 55 * 60
 TRANSPORT_ERROR_TYPES = frozenset({"sync_pending", "sync_error"})
+QUALITY_REVISION_PREFIX = "quality_revision"
 _OWNER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
 class SectorWorkError(RuntimeError):
     pass
+
+
+def is_quality_revision(row: dict[str, Any] | sqlite3.Row) -> bool:
+    return str(row["last_error_type"] or "").startswith(QUALITY_REVISION_PREFIX)
+
+
+def is_transport_waiting(row: dict[str, Any] | sqlite3.Row) -> bool:
+    error_type = str(row["last_error_type"] or "")
+    return error_type in TRANSPORT_ERROR_TYPES or error_type in {
+        "quality_revision_sync_pending", "quality_revision_sync_error",
+    }
 
 
 def _now(value: datetime | None = None) -> datetime:
@@ -176,24 +188,26 @@ def _set_run_state(
 
 def _recover_expired_in_transaction(conn: sqlite3.Connection, timestamp: datetime) -> int:
     rows = conn.execute(
-        "SELECT assignment_id,stable_key,attempt_count FROM sector_weekly_work_assignments "
+        "SELECT assignment_id,stable_key,attempt_count,last_error_type FROM sector_weekly_work_assignments "
         "WHERE status IN ('claimed','running') AND lease_expires_at IS NOT NULL AND lease_expires_at<=?",
         (_utc_text(timestamp),),
     ).fetchall()
     for row in rows:
         terminal = int(row["attempt_count"]) >= MAX_ATTEMPTS
         status = "failed" if terminal else "retry_pending"
+        error_type = "quality_revision_LeaseExpired" if is_quality_revision(row) else "LeaseExpired"
         conn.execute(
             "UPDATE sector_weekly_work_assignments SET status=?,available_at=?,claim_owner=NULL,claimed_at=NULL,"
-            "lease_expires_at=NULL,last_error_type='LeaseExpired',last_error_message='worker lease expired before submit',"
+            "lease_expires_at=NULL,last_error_type=?,last_error_message='worker lease expired before submit',"
             "updated_at=? WHERE assignment_id=?",
-            (status, _utc_text(timestamp), _utc_text(timestamp), row["assignment_id"]),
+            (status, _utc_text(timestamp), error_type, _utc_text(timestamp), row["assignment_id"]),
         )
-        _set_run_state(
-            conn, row["stable_key"], status if status == "failed" else "retry_pending", timestamp,
-            attempt_count=int(row["attempt_count"]), error_type="LeaseExpired",
-            error_message="worker lease expired before submit",
-        )
+        if not is_quality_revision(row):
+            _set_run_state(
+                conn, row["stable_key"], status if status == "failed" else "retry_pending", timestamp,
+                attempt_count=int(row["attempt_count"]), error_type="LeaseExpired",
+                error_message="worker lease expired before submit",
+            )
     return len(rows)
 
 
@@ -226,7 +240,8 @@ def claim_next(
         "((status='ready' AND attempt_count<? AND available_at<=?) OR "
         "(status IN ('pending','retry_pending') AND available_at<=? "
         "AND submitted_payload_hash IS NULL "
-        "AND (last_error_type IS NULL OR last_error_type NOT IN ('sync_pending','sync_error'))) OR "
+        "AND (last_error_type IS NULL OR last_error_type NOT IN "
+        "('sync_pending','sync_error','quality_revision_sync_pending','quality_revision_sync_error'))) OR "
         "(status IN ('claimed','running') AND lease_expires_at IS NOT NULL AND lease_expires_at<=?))"
         f"{period_filter} LIMIT 1",
         (MAX_ATTEMPTS, _utc_text(timestamp), _utc_text(timestamp), _utc_text(timestamp), *period_values),
@@ -250,7 +265,8 @@ def claim_next(
             "UPDATE sector_weekly_work_assignments SET status='ready',updated_at=? "
             "WHERE status IN ('pending','retry_pending') AND available_at<=? "
             "AND submitted_payload_hash IS NULL "
-            "AND (last_error_type IS NULL OR last_error_type NOT IN ('sync_pending','sync_error'))"
+            "AND (last_error_type IS NULL OR last_error_type NOT IN "
+            "('sync_pending','sync_error','quality_revision_sync_pending','quality_revision_sync_error'))"
             f"{period_filter}",
             (_utc_text(timestamp), _utc_text(timestamp), *period_values),
         )
@@ -262,19 +278,22 @@ def claim_next(
         if selected is None:
             return None
         attempts = int(selected["attempt_count"]) + 1
+        revision = is_quality_revision(selected)
         cursor = conn.execute(
             "UPDATE sector_weekly_work_assignments SET status='claimed',attempt_count=?,claim_owner=?,claimed_at=?,"
-            "lease_expires_at=?,started_at=NULL,last_error_type=NULL,last_error_message=NULL,"
+            "lease_expires_at=?,started_at=NULL,last_error_type=?,last_error_message=NULL,"
             "submitted_payload_hash=NULL,updated_at=? "
             "WHERE assignment_id=? AND status='ready'",
             (
                 attempts, owner, _utc_text(timestamp), _utc_text(lease_expires),
+                QUALITY_REVISION_PREFIX if revision else None,
                 _utc_text(timestamp), selected["assignment_id"],
             ),
         )
         if cursor.rowcount != 1:
             raise SectorWorkError("assignment claim lost an atomic race")
-        _set_run_state(conn, selected["stable_key"], "running", timestamp, attempt_count=attempts)
+        if not revision:
+            _set_run_state(conn, selected["stable_key"], "running", timestamp, attempt_count=attempts)
         return get_assignment(conn, selected["assignment_id"])
 
 
@@ -365,17 +384,19 @@ def fail_assignment(
             raise SectorWorkError("assignment failure owner does not match active claim")
         terminal = int(row["attempt_count"]) >= MAX_ATTEMPTS
         status = "failed" if terminal else "retry_pending"
-        error_type = type(error).__name__
+        revision = is_quality_revision(row)
+        error_type = f"{QUALITY_REVISION_PREFIX}_{type(error).__name__}" if revision else type(error).__name__
         message = str(error)[:2000]
         conn.execute(
             "UPDATE sector_weekly_work_assignments SET status=?,available_at=?,claim_owner=NULL,claimed_at=NULL,"
             "lease_expires_at=NULL,last_error_type=?,last_error_message=?,updated_at=? WHERE assignment_id=?",
             (status, _utc_text(available), error_type, message, _utc_text(timestamp), assignment_id),
         )
-        _set_run_state(
-            conn, row["stable_key"], status if status == "failed" else "retry_pending", timestamp,
-            attempt_count=int(row["attempt_count"]), error_type=error_type, error_message=message,
-        )
+        if not revision:
+            _set_run_state(
+                conn, row["stable_key"], status if status == "failed" else "retry_pending", timestamp,
+                attempt_count=int(row["attempt_count"]), error_type=error_type, error_message=message,
+            )
         return get_assignment(conn, assignment_id) or row
 
 
@@ -401,21 +422,24 @@ def abandon_assignment(
             raise SectorWorkError("assignment lease has expired")
         terminal = int(row["attempt_count"]) >= MAX_ATTEMPTS
         status = "failed" if terminal else "retry_pending"
+        revision = is_quality_revision(row)
+        error_type = f"{QUALITY_REVISION_PREFIX}_abandoned" if revision else "WorkerAbandoned"
         cursor = conn.execute(
             "UPDATE sector_weekly_work_assignments SET status=?,available_at=?,claim_owner=NULL,claimed_at=NULL,"
-            "lease_expires_at=NULL,started_at=NULL,last_error_type='WorkerAbandoned',last_error_message=?,updated_at=? "
+            "lease_expires_at=NULL,started_at=NULL,last_error_type=?,last_error_message=?,updated_at=? "
             "WHERE assignment_id=? AND claim_owner=? AND status IN ('claimed','running') AND lease_expires_at>?",
             (
-                status, _utc_text(timestamp), message, _utc_text(timestamp), assignment_id, owner,
+                status, _utc_text(timestamp), error_type, message, _utc_text(timestamp), assignment_id, owner,
                 _utc_text(timestamp),
             ),
         )
         if cursor.rowcount != 1:
             raise SectorWorkError("abandon lost an atomic ownership race")
-        _set_run_state(
-            conn, row["stable_key"], status if terminal else "retry_pending", timestamp,
-            attempt_count=int(row["attempt_count"]), error_type="WorkerAbandoned", error_message=message,
-        )
+        if not revision:
+            _set_run_state(
+                conn, row["stable_key"], status if terminal else "retry_pending", timestamp,
+                attempt_count=int(row["attempt_count"]), error_type=error_type, error_message=message,
+            )
         return get_assignment(conn, assignment_id) or row
 
 
@@ -476,7 +500,7 @@ def stage_assignment(
         row = get_assignment(conn, assignment_id)
         if row is None:
             raise SectorWorkError("assignment not found")
-        if row["status"] == "success" or row["last_error_type"] in TRANSPORT_ERROR_TYPES:
+        if row["status"] == "success" or is_transport_waiting(row):
             if row["submitted_payload_hash"] != submitted_hash:
                 raise SectorWorkError("staged assignment received a conflicting payload")
             return row, False
@@ -484,24 +508,27 @@ def stage_assignment(
             raise SectorWorkError("stage owner does not match active claim")
         if _parse(row["lease_expires_at"]) <= timestamp:
             raise SectorWorkError("assignment lease expired before stage")
+        revision = is_quality_revision(row)
+        sync_type = "quality_revision_sync_pending" if revision else "sync_pending"
         cursor = conn.execute(
             "UPDATE sector_weekly_work_assignments SET status='retry_pending',available_at=?,"
             "claim_owner=NULL,claimed_at=NULL,lease_expires_at=NULL,submitted_payload_hash=?,"
-            "last_error_type='sync_pending',last_error_message='validated payload staged for local sync',"
+            "last_error_type=?,last_error_message='validated payload staged for local sync',"
             "updated_at=? WHERE assignment_id=? AND claim_owner=? "
             "AND status IN ('claimed','running') AND lease_expires_at>?",
             (
-                _utc_text(timestamp), submitted_hash, _utc_text(timestamp), assignment_id,
+                _utc_text(timestamp), submitted_hash, sync_type, _utc_text(timestamp), assignment_id,
                 owner, _utc_text(timestamp),
             ),
         )
         if cursor.rowcount != 1:
             raise SectorWorkError("stage lost an atomic ownership race")
-        _set_run_state(
-            conn, row["stable_key"], "retry_pending", timestamp,
-            attempt_count=int(row["attempt_count"]), error_type="sync_pending",
-            error_message="validated payload staged for local sync",
-        )
+        if not revision:
+            _set_run_state(
+                conn, row["stable_key"], "retry_pending", timestamp,
+                attempt_count=int(row["attempt_count"]), error_type="sync_pending",
+                error_message="validated payload staged for local sync",
+            )
         return get_assignment(conn, assignment_id) or row, True
 
 
@@ -524,10 +551,11 @@ def prepare_staged_sync(
             raise SectorWorkError("assignment is not waiting for transport sync")
         if row["submitted_payload_hash"] != submitted_hash:
             raise SectorWorkError("staged payload hash does not match assignment")
-        _set_run_state(
-            conn, row["stable_key"], "success", timestamp,
-            attempt_count=int(row["attempt_count"]),
-        )
+        if not is_quality_revision(row):
+            _set_run_state(
+                conn, row["stable_key"], "success", timestamp,
+                attempt_count=int(row["attempt_count"]),
+            )
         return row
 
 
@@ -550,15 +578,18 @@ def mark_staged_sync_error(
             raise SectorWorkError("assignment is not waiting for transport sync")
         if row["submitted_payload_hash"] != submitted_hash:
             raise SectorWorkError("staged payload hash does not match assignment")
+        revision = is_quality_revision(row)
+        error_type = "quality_revision_sync_error" if revision else "sync_error"
         conn.execute(
-            "UPDATE sector_weekly_work_assignments SET last_error_type='sync_error',"
+            "UPDATE sector_weekly_work_assignments SET last_error_type=?,"
             "last_error_message=?,updated_at=? WHERE assignment_id=?",
-            (message, _utc_text(timestamp), assignment_id),
+            (error_type, message, _utc_text(timestamp), assignment_id),
         )
-        _set_run_state(
-            conn, row["stable_key"], "retry_pending", timestamp,
-            attempt_count=int(row["attempt_count"]), error_type="sync_error", error_message=message,
-        )
+        if not revision:
+            _set_run_state(
+                conn, row["stable_key"], "retry_pending", timestamp,
+                attempt_count=int(row["attempt_count"]), error_type="sync_error", error_message=message,
+            )
         return get_assignment(conn, assignment_id) or row
 
 
@@ -572,13 +603,17 @@ def reject_staged_payload(
     """Return invalid staged research to the research retry lane, or fail at 3/3."""
     timestamp = _now(now)
     message = str(error)[:2000]
-    error_type = f"validation_{type(error).__name__}"
     with _immediate(conn):
         row = get_assignment(conn, assignment_id)
         if row is None:
             raise SectorWorkError("assignment not found")
         if row["status"] != "retry_pending" or not row["submitted_payload_hash"]:
             raise SectorWorkError("assignment is not waiting for staged validation")
+        revision = is_quality_revision(row)
+        error_type = (
+            f"quality_revision_validation_{type(error).__name__}"
+            if revision else f"validation_{type(error).__name__}"
+        )
         terminal = int(row["attempt_count"]) >= MAX_ATTEMPTS
         status = "failed" if terminal else "retry_pending"
         conn.execute(
@@ -586,10 +621,11 @@ def reject_staged_payload(
             "last_error_type=?,last_error_message=?,updated_at=? WHERE assignment_id=?",
             (status, _utc_text(timestamp), error_type, message, _utc_text(timestamp), assignment_id),
         )
-        _set_run_state(
-            conn, row["stable_key"], status, timestamp,
-            attempt_count=int(row["attempt_count"]), error_type=error_type, error_message=message,
-        )
+        if not revision:
+            _set_run_state(
+                conn, row["stable_key"], status, timestamp,
+                attempt_count=int(row["attempt_count"]), error_type=error_type, error_message=message,
+            )
         return get_assignment(conn, assignment_id) or row
 
 
@@ -629,6 +665,51 @@ def complete_staged_assignment(
         return get_assignment(conn, assignment_id) or row
 
 
+def reopen_quality_revision(
+    conn: sqlite3.Connection,
+    assignment_id: str,
+    stable_key: str,
+    expected_hash: str,
+    reason: str,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Explicitly reopen one completed assignment without changing canonical data."""
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+        raise SectorWorkError("expected payload hash must be SHA-256 hex")
+    message = str(reason).strip()[:2000]
+    if not message:
+        raise SectorWorkError("quality revision reason is required")
+    timestamp = _now(now)
+    with _immediate(conn):
+        row = get_assignment(conn, assignment_id)
+        if row is None:
+            raise SectorWorkError("assignment not found")
+        if row["stable_key"] != stable_key:
+            raise SectorWorkError("stable key does not match assignment")
+        if row["status"] != "success":
+            raise SectorWorkError("quality revision requires a successful assignment")
+        if row["claim_owner"] or row["lease_expires_at"]:
+            raise SectorWorkError("quality revision requires an unowned assignment without a lease")
+        if int(row["attempt_count"]) >= MAX_ATTEMPTS:
+            raise SectorWorkError("quality revision attempt limit has been reached")
+        if row["submitted_payload_hash"] != expected_hash:
+            raise SectorWorkError("expected payload hash does not match assignment")
+        cursor = conn.execute(
+            "UPDATE sector_weekly_work_assignments SET status='retry_pending',available_at=?,"
+            "completed_at=NULL,claim_owner=NULL,claimed_at=NULL,lease_expires_at=NULL,started_at=NULL,"
+            "submitted_payload_hash=NULL,last_error_type=?,last_error_message=?,updated_at=? "
+            "WHERE assignment_id=? AND status='success' AND stable_key=? AND submitted_payload_hash=?",
+            (
+                _utc_text(timestamp), QUALITY_REVISION_PREFIX, message, _utc_text(timestamp),
+                assignment_id, stable_key, expected_hash,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise SectorWorkError("quality revision lost an atomic state race")
+        return get_assignment(conn, assignment_id) or row
+
+
 def enqueue_retry_candidate(
     conn: sqlite3.Connection,
     window: WeeklyWindow,
@@ -647,7 +728,7 @@ def enqueue_retry_candidate(
             continue
         if row["status"] in ACTIVE_STATUSES:
             continue
-        if row["last_error_type"] in TRANSPORT_ERROR_TYPES or row["submitted_payload_hash"]:
+        if is_transport_waiting(row) or row["submitted_payload_hash"]:
             continue
         if int(row["attempt_count"]) >= MAX_ATTEMPTS:
             continue
