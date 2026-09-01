@@ -531,12 +531,16 @@ the external sync succeeds.
 
 ## Optimal batch-size benchmark (isolated, post-8x4 baseline)
 
-The completed `pilot200-20260831T145019404335` soak establishes the Production
-baseline at eight tasks, batch size four, and 32 logical slots: 200/200 completed,
-zero failed/retry/stale/validation/sync/research failures, 50 productive runs,
-average/p50/p95/max task duration 214.7/213/280/311 seconds, and measured throughput
-31.7558 companies/hour. Production remains 8x4 until the isolated benchmark and
-human review are complete.
+The completed `pilot200-20260831T145019404335` soak establishes the operational
+performance baseline at eight tasks, batch size four, and 32 logical slots: 200/200
+completed, zero failed/retry/stale/validation/sync/research failures, 50 productive
+runs, average/p50/p95/max task duration 214.7/213/280/311 seconds, and measured
+throughput 31.7558 companies/hour. The subsequent fixed-cohort `batch04` comparison
+is formally RUNTIME PASS, RELIABILITY PASS, and QUALITY FAIL: material-event recall
+is 53.45%, critical-event recall is 75%, and 7 of 30 reference news-present companies
+are false no-news results. Therefore `PRODUCTION_BATCH_4_QUALITY_VALIDATED=false`.
+The existing Scheduled Tasks are not changed by the refinement preparation, but a
+full Production queue must not start on the assumption that batch four is validated.
 
 The historical `run_duration_seconds` is not a worker or scheduler-polling metric.
 `tools/company_news_task_batch.py snapshot` writes `started_at` immediately before
@@ -586,9 +590,10 @@ The fixed cohort is 192 companies, deterministically stratified across TSE 33 se
 latest available market-cap tercile (large/mid/small), and prior news-present/no-news/
 unscanned history. A deterministic 48-company subset is used for single-company
 reference research. Every run uses the immutable 2026-08-25 through 2026-08-31 search
-window. Initial candidates are 4, 8, 12, and 16. If 16 passes, 20 and then 24 may be
-prepared; if it fails, binary refinement between the last passing batch and 16 is
-supported. Batch size 24 is the hard ceiling for this benchmark.
+window. After the batch-four quality failure, the active candidate order is strictly
+reference(1), 2, 3, then 4. Batch sizes 8, 12, 16, 20, and 24 are suspended and the
+harness refuses to prepare them during this refinement. The existing cohort and
+single-company reference are reused; neither is regenerated.
 
 Reference/candidate event matching first uses normalized source URL, then a
 reviewable ticker/date/category plus headline/substance token similarity rule;
@@ -596,28 +601,37 @@ ambiguous matches are listed separately. Audits report event recall, high/direct
 critical-event recall, precision, no-news false negatives, URL and schema validity,
 source/event density, research failures, position-quartile degradation, task
 average/p50/p95/max, busy skips, overlap, measured throughput, 3,800-company duration,
-weekly buffer, and local output bytes. A PASS requires 100% schema validity, zero
-research failure, at least 99% valid URLs, 100% critical recall, at least 95% material
+weekly buffer, and local output bytes. Global-compression metrics separately report
+candidate/reference source-count ratio, research-time ratio, and event recall so a
+batch-wide loss is visible even when late positions do not degrade. A PASS requires
+100% schema validity, zero research failure, at least 99% valid URLs, 100% critical
+recall, at least 95% material
 event recall, zero major no-news false negatives, p95 below 45 minutes, max below 55
 minutes, and zero busy skip/overlap or late-position degradation.
 
-Preparation is inert and does not activate a benchmark:
+For this refinement, reuse `batchbench-20260901T095759508419`; do not run `prepare`
+or regenerate its completed reference. Preparing either candidate is inert and does
+not activate it:
 
 ```powershell
-python tools/company_news_batch_benchmark.py prepare --companies 192 --reference-size 48 --search-from 2026-08-25 --search-to 2026-08-31
-python tools/company_news_batch_benchmark.py prepare-run --benchmark-id <id> --batch-size 1 --reference
-python tools/company_news_batch_benchmark.py prepare-run --benchmark-id <id> --batch-size 4
+python tools/company_news_batch_benchmark.py prepare-run --benchmark-id batchbench-20260901T095759508419 --batch-size 2
+python tools/company_news_batch_benchmark.py prepare-run --benchmark-id batchbench-20260901T095759508419 --batch-size 3
 ```
 
 A human activates one prepared run at a time, observes natural hourly executions,
 deactivates it after completion, and audits it before preparing/activating the next:
 
 ```powershell
-python tools/company_news_batch_benchmark.py activate-run --benchmark-id <id> --run-name reference
-python tools/company_news_batch_benchmark.py status --benchmark-id <id> --run-name reference
+python tools/company_news_batch_benchmark.py activate-run --benchmark-id batchbench-20260901T095759508419 --run-name batch02
+python tools/company_news_batch_benchmark.py status --benchmark-id batchbench-20260901T095759508419 --run-name batch02
 python tools/company_news_batch_benchmark.py deactivate-run
-python tools/company_news_batch_benchmark.py audit --benchmark-id <id> --run-name batch04
-python tools/company_news_batch_benchmark.py recommend --benchmark-id <id>
+python tools/company_news_batch_benchmark.py audit --benchmark-id batchbench-20260901T095759508419 --run-name batch02
+python tools/company_news_batch_benchmark.py recommend --benchmark-id batchbench-20260901T095759508419
+python tools/company_news_batch_benchmark.py activate-run --benchmark-id batchbench-20260901T095759508419 --run-name batch03
+python tools/company_news_batch_benchmark.py status --benchmark-id batchbench-20260901T095759508419 --run-name batch03
+python tools/company_news_batch_benchmark.py deactivate-run
+python tools/company_news_batch_benchmark.py audit --benchmark-id batchbench-20260901T095759508419 --run-name batch03
+python tools/company_news_batch_benchmark.py recommend --benchmark-id batchbench-20260901T095759508419
 ```
 
 Only the final candidate receives the separate integration burst fixture. It contains
@@ -634,7 +648,11 @@ python tools/company_news_batch_benchmark.py audit-integration-fixture --manifes
 python tools/company_news_batch_benchmark.py recommend --benchmark-id <id>
 ```
 
-Recommendation excludes candidates whose average source count falls below 80% of
-the fixed-cohort batch-4 baseline. It reports a quality/runtime recommendation before
-integration, but `ready_for_production_change` remains false until the matching final
-candidate integration audit passes. Human review remains mandatory.
+Recommendation walks 2, 3, and 4 in order and selects the largest contiguous candidate
+whose complete audit is PASS. A quality failure cannot be offset by throughput. If two
+fails, the recommendation is the single-company reference and research-architecture
+redesign is required; if three fails after two passes, two is recommended; if two and
+three pass while four fails, three is recommended. A batch-four failure blocks all
+upward candidates. Ratios use the single-company reference rather than batch four as
+their baseline. `ready_for_production_change` remains false until the matching final
+candidate integration audit passes, and human review remains mandatory.

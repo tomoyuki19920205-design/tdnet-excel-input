@@ -10,6 +10,7 @@ from tools.company_news_batch_benchmark import (
     BENCHMARK_SCHEMA,
     BenchmarkError,
     _busy_skip_incidents,
+    _global_compression_metrics,
     _quality_metrics,
     _summary,
     activate_run,
@@ -167,9 +168,11 @@ def test_fixed_deterministic_stratified_cohort_and_reference(tmp_path):
     assert len(prepared["reference_tickers"]) == 48
     assert prepared["search_from"] == "2026-08-25"
     assert prepared["search_to"] == "2026-08-31"
+    assert prepared["initial_candidates"] == [2, 3, 4]
+    assert prepared["suspended_upward_candidates"] == [8, 12, 16, 20, 24]
 
 
-@pytest.mark.parametrize("batch_size", [4, 8, 12, 16, 20, 24])
+@pytest.mark.parametrize("batch_size", [2, 3, 4])
 def test_candidate_mapping_uses_eight_full_tasks_without_production_slots(tmp_path, batch_size):
     cohort, _, _ = _prepare(tmp_path)
     manifest = prepare_run(tmp_path, cohort["benchmark_id"], batch_size, now=NOW)
@@ -180,6 +183,28 @@ def test_candidate_mapping_uses_eight_full_tasks_without_production_slots(tmp_pa
         queue = json.loads((run_dir / "tasks" / f"task{task_index:02d}" / "queue.json").read_text(encoding="utf-8"))
         assert len(queue["assignments"]) == 24
     assert Path(manifest["output_directory"]).is_relative_to(tmp_path / "data" / "news_benchmark_inbox")
+
+
+@pytest.mark.parametrize(
+    ("batch_size", "expected_slots"),
+    ((2, ["bslot015", "bslot016"]), (3, ["bslot022", "bslot023", "bslot024"])),
+)
+def test_batch2_and_batch3_snapshot_mapping_and_company_position(tmp_path, batch_size, expected_slots):
+    cohort, _, _ = _prepare(tmp_path, count=32, reference_size=8)
+    run = prepare_run(tmp_path, cohort["benchmark_id"], batch_size, now=NOW)
+    activate_run(tmp_path, cohort["benchmark_id"], run["run_name"], now=NOW)
+    snapshot = snapshot_task(tmp_path, "task08", now=NOW)
+
+    assert len(snapshot["assignments"]) == batch_size
+    assert [assignment["company_position"] for assignment in snapshot["assignments"]] == list(range(1, batch_size + 1))
+    assert [assignment["slot_id"] for assignment in snapshot["assignments"]] == expected_slots
+
+
+def test_upward_candidate_prepare_is_suspended_after_batch4_quality_failure(tmp_path):
+    cohort, _, _ = _prepare(tmp_path)
+    for batch_size in (8, 12, 16, 20, 24):
+        with pytest.raises(BenchmarkError, match="2 through 4"):
+            prepare_run(tmp_path, cohort["benchmark_id"], batch_size, now=NOW)
 
 
 def test_reference_run_is_single_company_batch_on_fixed_48_company_subset(tmp_path):
@@ -281,6 +306,41 @@ def test_completed_at_and_throughput_do_not_depend_on_late_audit_capture(tmp_pat
     assert first["captured_at"] != second["captured_at"]
     assert first["status"]["completed_at"] == second["status"]["completed_at"]
     assert first["throughput"] == second["throughput"]
+
+
+def test_candidate_audit_emits_global_compression_against_completed_reference(tmp_path):
+    cohort, _, _ = _prepare(tmp_path, count=8, reference_size=8)
+    reference = prepare_run(tmp_path, cohort["benchmark_id"], 1, reference=True, now=NOW)
+    activate_run(tmp_path, cohort["benchmark_id"], reference["run_name"], now=NOW)
+    for index in range(1, 9):
+        task_id = f"task{index:02d}"
+        snapshot = snapshot_task(tmp_path, task_id, now=NOW + timedelta(minutes=index))
+        _complete_snapshot(tmp_path, task_id, snapshot, NOW + timedelta(minutes=index, seconds=1))
+    audit_run(tmp_path, cohort["benchmark_id"], "reference", now=NOW + timedelta(hours=1))
+
+    candidate = prepare_run(tmp_path, cohort["benchmark_id"], 2, now=NOW + timedelta(hours=2))
+    activate_run(tmp_path, cohort["benchmark_id"], candidate["run_name"], now=NOW + timedelta(hours=2))
+    for index in range(1, 9):
+        task_id = f"task{index:02d}"
+        snapshot = snapshot_task(tmp_path, task_id, now=NOW + timedelta(hours=2, minutes=index))
+        _complete_snapshot(
+            tmp_path,
+            task_id,
+            snapshot,
+            NOW + timedelta(hours=2, minutes=index, seconds=1),
+        )
+
+    audit = audit_run(tmp_path, cohort["benchmark_id"], "batch02", now=NOW + timedelta(hours=3))
+    compression = audit["global_compression"]
+    assert compression["source_count_ratio_vs_reference"] == 1.0
+    assert compression["research_time_ratio_vs_reference"] == 1.0
+    assert compression["event_recall_vs_reference"] == 1.0
+    assert compression["candidate_research_elapsed_seconds"] == {
+        "average": 10.0,
+        "p50": 10.0,
+        "p95": 10.0,
+        "max": 10.0,
+    }
 
 
 def test_busy_skip_recovered_for_same_guard_is_classified_as_recoverable(tmp_path):
@@ -412,30 +472,172 @@ def test_quality_fixture_calculates_recall_precision_critical_and_false_negative
     assert ambiguous == []
 
 
-def test_runtime_percentiles_and_adaptive_recommendation(tmp_path):
+def test_global_compression_metrics_compare_source_depth_time_and_event_recall():
+    result = _global_compression_metrics(
+        [7.0, 7.0, 7.0, 8.0],
+        [4.0, 5.0],
+        [40.0, 50.0, 60.0],
+        [20.0, 30.0],
+        0.95,
+    )
+
+    assert result["reference_source_count_per_company"] == {"average": 7.25, "median": 7.0}
+    assert result["candidate_source_count_per_company"] == {"average": 4.5, "median": 4.5}
+    assert result["source_count_ratio_vs_reference"] == pytest.approx(4.5 / 7.25)
+    assert result["reference_research_elapsed_seconds"] == {
+        "average": 50.0,
+        "p50": 50.0,
+        "p95": 60.0,
+        "max": 60.0,
+    }
+    assert result["candidate_research_elapsed_seconds"] == {
+        "average": 25.0,
+        "p50": 25.0,
+        "p95": 30.0,
+        "max": 30.0,
+    }
+    assert result["research_time_ratio_vs_reference"] == 0.5
+    assert result["event_recall_vs_reference"] == 0.95
+
+
+def _recommendation_audit(decision, *, event_recall, critical_recall, no_news_false_negatives):
+    return {
+        "schema_version": AUDIT_SCHEMA,
+        "decision": decision,
+        "criteria": {
+            "complete": True,
+            "schema_validity_100pct": True,
+            "research_failure_zero": True,
+            "source_validity_at_least_99pct": True,
+            "p95_under_45_minutes": True,
+            "max_under_55_minutes": True,
+            "capacity_busy_skip_zero": True,
+            "overlap_zero": True,
+            "critical_recall_100pct": critical_recall == 1.0,
+            "material_event_recall_at_least_95pct": event_recall >= 0.95,
+            "major_no_news_false_negative_zero": no_news_false_negatives == 0,
+        },
+        "research": {"average_source_count_per_company": 6.0},
+        "runtime": {
+            "task_elapsed_seconds": {"p95": 1800, "max": 2400},
+            "company_research_elapsed_seconds": {"average": 40.0},
+        },
+        "quality": {
+            "event_recall": event_recall,
+            "critical_event_recall": critical_recall,
+            "no_news_false_negative_count": no_news_false_negatives,
+        },
+        "throughput": {
+            "companies_per_hour": 24.0,
+            "estimated_hours_for_3800": 3800 / 24,
+            "estimated_days_for_3800": 3800 / 24 / 24,
+            "weekly_buffer_hours": 168 - 3800 / 24,
+        },
+    }
+
+
+def test_downward_recommendation_selects_batch3_and_batch4_fail_blocks_upward(tmp_path):
     assert _summary([600, 1200, 2700, 3300]) == {"average": 1950, "p50": 1950.0, "p95": 3300, "max": 3300}
     cohort, _, _ = _prepare(tmp_path, count=32, reference_size=8)
     benchmark_dir = tmp_path / "data" / "news_work" / "batch_benchmark" / cohort["benchmark_id"]
-    for batch, decision in ((4, "PASS"), (8, "PASS"), (12, "PASS"), (16, "PASS")):
+    _write_json(benchmark_dir / "runs" / "reference" / "audit.json", {
+        "schema_version": AUDIT_SCHEMA,
+        "research": {"average_source_count_per_company": 7.2},
+        "runtime": {"company_research_elapsed_seconds": {"average": 50.0}},
+    })
+    for batch in (2, 3, 4):
         prepare_run(tmp_path, cohort["benchmark_id"], batch, now=NOW)
-        audit = {
-            "schema_version": AUDIT_SCHEMA,
-            "decision": decision,
-            "runtime": {"task_elapsed_seconds": {"p95": 1800}},
-            "quality": {"event_recall": 0.98, "critical_event_recall": 1.0},
-        }
+        audit = _recommendation_audit(
+            "FAIL" if batch == 4 else "PASS",
+            event_recall=0.5344827586206896 if batch == 4 else 0.98,
+            critical_recall=0.75 if batch == 4 else 1.0,
+            no_news_false_negatives=7 if batch == 4 else 0,
+        )
         _write_json(benchmark_dir / "runs" / f"batch{batch:02d}" / "audit.json", audit)
+    # Even a stray historical upward audit cannot override the batch04 quality stop.
+    _write_json(
+        benchmark_dir / "runs" / "batch08" / "audit.json",
+        _recommendation_audit("PASS", event_recall=0.99, critical_recall=1.0, no_news_false_negatives=0),
+    )
+
     result = recommendation(tmp_path, cohort["benchmark_id"])
-    assert result["max_validated_batch_size"] == 16
-    assert result["recommended_batch_size"] == 16
-    assert result["next_candidates"] == [20]
+    assert result["max_validated_batch_size"] == 3
+    assert result["recommended_batch_size"] == 3
+    assert result["next_candidates"] == []
+    assert result["suspended_upward_candidates"] == [8, 12, 16, 20, 24]
+    assert result["upward_candidates_blocked"] is True
+    assert result["batch04_formal_judgment"] == {
+        "runtime": "PASS",
+        "reliability": "PASS",
+        "quality": "FAIL",
+    }
+    assert result["production_batch_4_quality_validated"] is False
+    assert result["throughput_tradeoffs"]["4"]["quality_failure_disqualifies_speed"] is True
+    assert result["throughput_tradeoffs"]["1"]["decision"] == "REFERENCE"
+    assert result["source_count_ratio_vs_reference"]["1"] == 1.0
+    assert result["research_time_ratio_vs_reference"]["1"] == 1.0
+    assert result["event_recall_vs_reference"]["1"] == 1.0
+    assert result["source_count_ratio_vs_reference"]["4"] == pytest.approx(6.0 / 7.2)
+    assert result["research_time_ratio_vs_reference"]["4"] == 0.8
+    assert result["event_recall_vs_reference"]["4"] == pytest.approx(0.5344827586206896)
+
+
+def test_existing_batch4_fail_requests_batch2_before_any_other_candidate(tmp_path):
+    cohort, _, _ = _prepare(tmp_path, count=32, reference_size=8)
+    benchmark_dir = tmp_path / "data" / "news_work" / "batch_benchmark" / cohort["benchmark_id"]
+    prepare_run(tmp_path, cohort["benchmark_id"], 4, now=NOW)
+    _write_json(
+        benchmark_dir / "runs" / "batch04" / "audit.json",
+        _recommendation_audit(
+            "FAIL",
+            event_recall=0.5344827586206896,
+            critical_recall=0.75,
+            no_news_false_negatives=7,
+        ),
+    )
+
+    result = recommendation(tmp_path, cohort["benchmark_id"])
+    assert result["recommended_batch_size"] == 1
+    assert result["next_candidates"] == [2]
+    assert result["upward_candidates_blocked"] is True
+    assert result["upward_block_reason"] == "batch04_quality_fail"
+    assert result["production_batch_4_quality_validated"] is False
+
+
+@pytest.mark.parametrize(
+    ("decisions", "expected", "redesign"),
+    [
+        ({2: "PASS", 3: "FAIL"}, 2, False),
+        ({2: "FAIL"}, 1, True),
+    ],
+)
+def test_downward_recommendation_falls_back_to_last_contiguous_quality_pass(
+    tmp_path, decisions, expected, redesign
+):
+    cohort, _, _ = _prepare(tmp_path, count=32, reference_size=8)
+    benchmark_dir = tmp_path / "data" / "news_work" / "batch_benchmark" / cohort["benchmark_id"]
+    for batch, decision in decisions.items():
+        prepare_run(tmp_path, cohort["benchmark_id"], batch, now=NOW)
+        audit = _recommendation_audit(
+            decision,
+            event_recall=0.98 if decision == "PASS" else 0.90,
+            critical_recall=1.0,
+            no_news_false_negatives=0 if decision == "PASS" else 1,
+        )
+        _write_json(benchmark_dir / "runs" / f"batch{batch:02d}" / "audit.json", audit)
+
+    result = recommendation(tmp_path, cohort["benchmark_id"])
+    assert result["recommended_batch_size"] == expected
+    assert result["max_validated_batch_size"] == expected
+    assert result["next_candidates"] == []
+    assert result["research_architecture_redesign_required"] is redesign
 
 
 def test_integration_load_fixture_is_isolated_and_has_system_impact_metrics(tmp_path):
-    result = prepare_integration_fixture(tmp_path, 16, now=NOW)
-    assert result["file_count"] == 128
+    result = prepare_integration_fixture(tmp_path, 3, now=NOW)
+    assert result["file_count"] == 24
     assert Path(result["fixture_inbox"]).is_relative_to(tmp_path / "data" / "news_benchmark_load")
-    assert len(list(Path(result["fixture_inbox"]).glob("*.json"))) == 128
+    assert len(list(Path(result["fixture_inbox"]).glob("*.json"))) == 24
     assert result["requires_temporary_sqlite_copy"] is True
     assert result["supabase_mode"] == "disabled_or_test_endpoint_only"
     assert {"worker_run_duration_seconds", "sqlite_lock_wait_seconds", "tdnet_process_duration_seconds", "supabase_sync_duration_seconds"} <= set(result["metrics_template"])
@@ -443,7 +645,7 @@ def test_integration_load_fixture_is_isolated_and_has_system_impact_metrics(tmp_
     metrics = {key: 0 for key in result["metrics_template"]}
     metrics.update({
         "worker_run_duration_seconds": 12,
-        "max_inbox_backlog": 128,
+        "max_inbox_backlog": 24,
         "sqlite_lock_wait_seconds": 0.2,
         "tdnet_ingest_duration_seconds": 10,
         "tdnet_process_duration_seconds": 20,

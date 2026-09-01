@@ -43,9 +43,9 @@ INTEGRATION_SCHEMA = "company_news_batch_integration_fixture_v1"
 TASK_COUNT = 8
 COHORT_SIZE = 192
 REFERENCE_SIZE = 48
-INITIAL_CANDIDATES = (4, 8, 12, 16)
-EXPANSION_CANDIDATES = (20, 24)
-ALLOWED_BATCH_SIZES = (1, *range(4, 25))
+REFINEMENT_CANDIDATES = (2, 3, 4)
+SUSPENDED_UPWARD_CANDIDATES = (8, 12, 16, 20, 24)
+ALLOWED_BATCH_SIZES = (1, *REFINEMENT_CANDIDATES)
 DEFAULT_SEARCH_FROM = date(2026, 8, 25)
 DEFAULT_SEARCH_TO = date(2026, 8, 31)
 _JST = timezone(timedelta(hours=9))
@@ -311,9 +311,10 @@ def prepare_benchmark(
         "reference_size": len(reference),
         "search_from": search_from.isoformat(),
         "search_to": search_to.isoformat(),
-        "initial_candidates": list(INITIAL_CANDIDATES),
-        "conditional_candidates": list(EXPANSION_CANDIDATES),
-        "hard_ceiling": 24,
+        "initial_candidates": list(REFINEMENT_CANDIDATES),
+        "conditional_candidates": [],
+        "suspended_upward_candidates": list(SUSPENDED_UPWARD_CANDIDATES),
+        "hard_ceiling": max(REFINEMENT_CANDIDATES),
         "selection_contract": "deterministic_sector_market_cap_tercile_prior_news_stratified_v1",
         "reference_tickers": reference,
         "companies": cohort,
@@ -338,7 +339,7 @@ def prepare_run(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     if batch_size not in ALLOWED_BATCH_SIZES or (reference and batch_size != 1) or (not reference and batch_size == 1):
-        raise BenchmarkError("candidate batch must be 4 through 24; reference batch must be 1")
+        raise BenchmarkError("candidate batch must be 2 through 4; reference batch must be 1")
     cohort = _load_cohort(root, benchmark_id)
     run_name = "reference" if reference else f"batch{batch_size:02d}"
     directory = _run_dir(root, benchmark_id, run_name)
@@ -912,6 +913,40 @@ def _summary(values: list[float]) -> dict[str, float | None]:
     }
 
 
+def _ratio(value: float | None, reference: float | None) -> float | None:
+    if value is None or reference is None or reference == 0:
+        return None
+    return value / reference
+
+
+def _global_compression_metrics(
+    reference_source_counts: list[float],
+    candidate_source_counts: list[float],
+    reference_research_times: list[float],
+    candidate_research_times: list[float],
+    event_recall: float | None,
+) -> dict[str, Any]:
+    reference_sources = {
+        "average": statistics.mean(reference_source_counts) if reference_source_counts else None,
+        "median": statistics.median(reference_source_counts) if reference_source_counts else None,
+    }
+    candidate_sources = {
+        "average": statistics.mean(candidate_source_counts) if candidate_source_counts else None,
+        "median": statistics.median(candidate_source_counts) if candidate_source_counts else None,
+    }
+    reference_research = _summary(reference_research_times)
+    candidate_research = _summary(candidate_research_times)
+    return {
+        "reference_source_count_per_company": reference_sources,
+        "candidate_source_count_per_company": candidate_sources,
+        "source_count_ratio_vs_reference": _ratio(candidate_sources["average"], reference_sources["average"]),
+        "reference_research_elapsed_seconds": reference_research,
+        "candidate_research_elapsed_seconds": candidate_research,
+        "research_time_ratio_vs_reference": _ratio(candidate_research["average"], reference_research["average"]),
+        "event_recall_vs_reference": event_recall,
+    }
+
+
 def _normalized_url(value: str) -> str:
     parts = urlsplit(value)
     path = (parts.path or "/").rstrip("/") or "/"
@@ -1159,6 +1194,7 @@ def audit_run(root: Path, benchmark_id: str, run_name: str, *, now: datetime | N
             for previous, current in zip(ordered, ordered[1:])
         )
     source_counts = [float(record["source_count"]) for record in company if record["result_type"] != "failure"]
+    research_times = [float(record["research_elapsed_seconds"]) for record in company]
     news_records = [record for record in company if record["result_type"] == "news_present"]
     event_counts = [float(record["event_count"]) for record in news_records]
     urls = [event["source_url"] for values in candidate_events.values() for event in values]
@@ -1188,7 +1224,7 @@ def audit_run(root: Path, benchmark_id: str, run_name: str, *, now: datetime | N
             "busy_skip_incidents": incidents,
             "stale_guard_recovery": stale,
             "overlap": overlap,
-            "company_research_elapsed_seconds": _summary([float(record["research_elapsed_seconds"]) for record in company]),
+            "company_research_elapsed_seconds": _summary(research_times),
         },
         "local_storage_bytes": sum(path.stat().st_size for path in outputs.rglob("*") if path.is_file()) if outputs.exists() else 0,
         "production_storage_delta_expected": 0,
@@ -1197,6 +1233,8 @@ def audit_run(root: Path, benchmark_id: str, run_name: str, *, now: datetime | N
     quality_available = False
     company_recall: dict[str, float] = {}
     ambiguous: list[dict[str, Any]] = []
+    reference_source_counts = source_counts if manifest.get("reference") else []
+    reference_research_times = research_times if manifest.get("reference") else []
     if not manifest.get("reference"):
         reference_directory = _run_dir(root, benchmark_id, "reference")
         if (reference_directory / "manifest.json").exists():
@@ -1204,6 +1242,16 @@ def audit_run(root: Path, benchmark_id: str, run_name: str, *, now: datetime | N
             reference_status = benchmark_status(root, benchmark_id, "reference")
             if reference_status["pending"] == 0 and reference_status["failed"] == 0:
                 reference_events, _, reference_invalid, _ = _load_success_outputs(Path(reference_manifest["output_directory"]))
+                reference_company = _telemetry(reference_directory, "companies.jsonl")
+                reference_source_counts = [
+                    float(record["source_count"])
+                    for record in reference_company
+                    if record["result_type"] != "failure"
+                ]
+                reference_research_times = [
+                    float(record["research_elapsed_seconds"])
+                    for record in reference_company
+                ]
                 cohort = _load_cohort(root, benchmark_id)
                 reference_tickers = set(cohort["reference_tickers"])
                 quality, company_recall, ambiguous = _quality_metrics(reference_events, candidate_events, reference_tickers)
@@ -1211,6 +1259,14 @@ def audit_run(root: Path, benchmark_id: str, run_name: str, *, now: datetime | N
                 result["quality"] = {"available": quality_available, **quality, "ambiguous_matches": ambiguous}
     if "quality" not in result:
         result["quality"] = {"available": False, "reason": "completed single-company reference run is required"}
+    event_recall = 1.0 if manifest.get("reference") else result["quality"].get("event_recall")
+    result["global_compression"] = _global_compression_metrics(
+        reference_source_counts,
+        source_counts,
+        reference_research_times,
+        research_times,
+        event_recall,
+    )
 
     batch_size = int(manifest["batch_size"])
     first_limit = max(1, math.ceil(batch_size * 0.25))
@@ -1279,50 +1335,131 @@ def recommendation(root: Path, benchmark_id: str) -> dict[str, Any]:
         match = re.fullmatch(r"batch(\d{2})", path.parent.name)
         if match:
             audits[int(match.group(1))] = _read_json(path)
-    baseline_sources = audits.get(4, {}).get("research", {}).get("average_source_count_per_company")
-    source_ratios: dict[int, float | None] = {}
-    for batch, audit in audits.items():
-        current = audit.get("research", {}).get("average_source_count_per_company")
-        source_ratios[batch] = current / baseline_sources if current is not None and baseline_sources else None
-    passed = sorted(
-        batch for batch, audit in audits.items()
-        if audit.get("decision") == "PASS" and (source_ratios[batch] is None or source_ratios[batch] >= 0.8)
+
+    reference_path = _run_dir(root, benchmark_id, "reference") / "audit.json"
+    reference_audit = _read_json(reference_path) if reference_path.exists() else {}
+    reference_sources = reference_audit.get("research", {}).get("average_source_count_per_company")
+    reference_research_time = (
+        reference_audit.get("runtime", {})
+        .get("company_research_elapsed_seconds", {})
+        .get("average")
     )
-    max_validated = max(passed) if passed else None
-    conservative = [
-        batch for batch in passed
-        if (audits[batch].get("runtime", {}).get("task_elapsed_seconds", {}).get("p95") or math.inf) <= 2400
-        and audits[batch].get("quality", {}).get("event_recall", 0) >= 0.97
-        and audits[batch].get("quality", {}).get("critical_event_recall", 0) == 1.0
-    ]
-    recommended = max(conservative) if conservative else max_validated
+    source_ratios: dict[int, float | None] = {}
+    research_time_ratios: dict[int, float | None] = {}
+    event_recalls: dict[int, float | None] = {}
+    if reference_audit:
+        source_ratios[1] = 1.0 if reference_sources is not None else None
+        research_time_ratios[1] = 1.0 if reference_research_time is not None else None
+        event_recalls[1] = 1.0
+    for batch, audit in audits.items():
+        compression = audit.get("global_compression", {})
+        current_sources = audit.get("research", {}).get("average_source_count_per_company")
+        current_research_time = (
+            audit.get("runtime", {})
+            .get("company_research_elapsed_seconds", {})
+            .get("average")
+        )
+        source_ratios[batch] = compression.get(
+            "source_count_ratio_vs_reference",
+            _ratio(current_sources, reference_sources),
+        )
+        research_time_ratios[batch] = compression.get(
+            "research_time_ratio_vs_reference",
+            _ratio(current_research_time, reference_research_time),
+        )
+        event_recalls[batch] = compression.get(
+            "event_recall_vs_reference",
+            audit.get("quality", {}).get("event_recall"),
+        )
+
+    recommended = 1
     next_candidates: list[int] = []
-    if 16 in audits and audits[16].get("decision") == "PASS":
-        if 20 not in audits:
-            next_candidates = [20]
-        elif audits[20].get("decision") == "PASS" and 24 not in audits:
-            next_candidates = [24]
-    elif 16 in audits and audits[16].get("decision") == "FAIL":
-        lower = max((batch for batch in passed if batch < 16), default=4)
-        midpoint = (lower + 16) // 2
-        if midpoint not in audits and midpoint in ALLOWED_BATCH_SIZES:
-            next_candidates = [midpoint]
+    for batch in REFINEMENT_CANDIDATES:
+        audit = audits.get(batch)
+        if audit is None:
+            next_candidates = [batch]
+            break
+        if audit.get("decision") != "PASS":
+            break
+        recommended = batch
+
+    batch4 = audits.get(4)
+    if batch4:
+        criteria = batch4.get("criteria", {})
+        runtime_pass = all(criteria.get(key) is True for key in (
+            "p95_under_45_minutes",
+            "max_under_55_minutes",
+        ))
+        reliability_pass = all(criteria.get(key) is True for key in (
+            "complete",
+            "schema_validity_100pct",
+            "research_failure_zero",
+            "source_validity_at_least_99pct",
+            "capacity_busy_skip_zero",
+            "overlap_zero",
+        ))
+        quality_pass = all(criteria.get(key) is True for key in (
+            "critical_recall_100pct",
+            "material_event_recall_at_least_95pct",
+            "major_no_news_false_negative_zero",
+        ))
+        batch4_judgment = {
+            "runtime": "PASS" if runtime_pass else "FAIL",
+            "reliability": "PASS" if reliability_pass else "FAIL",
+            "quality": "PASS" if quality_pass else "FAIL",
+        }
+    else:
+        batch4_judgment = {"runtime": "NOT_AUDITED", "reliability": "NOT_AUDITED", "quality": "NOT_AUDITED"}
+    batch4_quality_validated = batch4_judgment["quality"] == "PASS"
+
     integration_audits = []
     for path in _paths(root)["load"].glob("integration-batch??-*/integration_audit.json"):
         value = _read_json(path)
         if value.get("batch_size") == recommended:
             integration_audits.append(value)
     integration_pass = any(value.get("decision") == "PASS" for value in integration_audits)
+
+    throughput_tradeoffs: dict[str, dict[str, Any]] = {}
+    if reference_audit:
+        throughput_tradeoffs["1"] = {
+            "decision": "REFERENCE",
+            "companies_per_hour": reference_audit.get("throughput", {}).get("companies_per_hour"),
+            "estimated_hours_for_3800": reference_audit.get("throughput", {}).get("estimated_hours_for_3800"),
+            "estimated_days_for_3800": reference_audit.get("throughput", {}).get("estimated_days_for_3800"),
+            "weekly_buffer_hours": reference_audit.get("throughput", {}).get("weekly_buffer_hours"),
+            "quality_failure_disqualifies_speed": False,
+        }
+    throughput_tradeoffs.update({
+        str(batch): {
+            "decision": audit.get("decision"),
+            "companies_per_hour": audit.get("throughput", {}).get("companies_per_hour"),
+            "estimated_hours_for_3800": audit.get("throughput", {}).get("estimated_hours_for_3800"),
+            "estimated_days_for_3800": audit.get("throughput", {}).get("estimated_days_for_3800"),
+            "weekly_buffer_hours": audit.get("throughput", {}).get("weekly_buffer_hours"),
+            "quality_failure_disqualifies_speed": audit.get("decision") != "PASS",
+        }
+        for batch, audit in sorted(audits.items())
+    })
     result = {
         "benchmark_id": benchmark_id,
-        "max_validated_batch_size": max_validated,
+        "max_validated_batch_size": recommended,
         "recommended_batch_size": recommended,
         "candidate_decisions": {str(batch): audit.get("decision") for batch, audit in sorted(audits.items())},
-        "source_count_ratio_vs_batch4": {str(batch): ratio for batch, ratio in sorted(source_ratios.items())},
+        "source_count_ratio_vs_reference": {str(batch): ratio for batch, ratio in sorted(source_ratios.items())},
+        "research_time_ratio_vs_reference": {str(batch): ratio for batch, ratio in sorted(research_time_ratios.items())},
+        "event_recall_vs_reference": {str(batch): recall for batch, recall in sorted(event_recalls.items())},
+        "throughput_tradeoffs": throughput_tradeoffs,
         "next_candidates": next_candidates,
-        "selection_contract": "largest quality/reliability PASS with p95<=40m and >=97% material recall preferred",
+        "candidate_order": list(REFINEMENT_CANDIDATES),
+        "suspended_upward_candidates": list(SUSPENDED_UPWARD_CANDIDATES),
+        "selection_contract": "largest contiguous batch in 2->3->4 with full audit PASS; quality FAIL cannot be offset by speed",
+        "batch04_formal_judgment": batch4_judgment,
+        "production_batch_4_quality_validated": batch4_quality_validated,
+        "upward_candidates_blocked": True,
+        "upward_block_reason": "batch04_quality_fail" if not batch4_quality_validated else "downward_refinement_only",
+        "research_architecture_redesign_required": audits.get(2, {}).get("decision") == "FAIL",
         "integration_validation_passed": integration_pass,
-        "ready_for_production_change": recommended is not None and integration_pass,
+        "ready_for_production_change": recommended in REFINEMENT_CANDIDATES and integration_pass,
         "human_review_required": True,
     }
     atomic_write_json(_benchmark_dir(root, benchmark_id) / "recommendation.json", result)
@@ -1331,7 +1468,7 @@ def recommendation(root: Path, benchmark_id: str) -> dict[str, Any]:
 
 def prepare_integration_fixture(root: Path, batch_size: int, *, now: datetime | None = None) -> dict[str, Any]:
     if batch_size not in ALLOWED_BATCH_SIZES or batch_size == 1:
-        raise BenchmarkError("integration fixture batch must be 4 through 24")
+        raise BenchmarkError("integration fixture batch must be 2 through 4")
     timestamp = _now(now)
     fixture_id = f"integration-batch{batch_size:02d}-{timestamp:%Y%m%dT%H%M%S%f}"
     directory = _paths(root)["load"] / fixture_id
