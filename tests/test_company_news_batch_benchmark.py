@@ -5,12 +5,14 @@ from pathlib import Path
 
 import pytest
 
+from tools import company_news_batch_benchmark as benchmark_module
 from tools.company_news_batch_benchmark import (
     AUDIT_SCHEMA,
     BENCHMARK_SCHEMA,
     BenchmarkError,
     _busy_skip_incidents,
     _global_compression_metrics,
+    _history_filename,
     _quality_metrics,
     _summary,
     activate_run,
@@ -353,12 +355,23 @@ def test_busy_skip_recovered_for_same_guard_is_classified_as_recoverable(tmp_pat
     research_finish(tmp_path, "task01", first["run_token"], assignment["assignment_id"], now=NOW + timedelta(seconds=10))
 
     assert snapshot_task(tmp_path, "task01", now=NOW + timedelta(hours=1))["status"] == "busy"
-    snapshot_task(tmp_path, "task01", now=NOW + timedelta(hours=2, seconds=1))
+    recovered = snapshot_task(tmp_path, "task01", now=NOW + timedelta(hours=2, seconds=1))
     run_dir = (
         tmp_path / "data" / "news_work" / "batch_benchmark" / cohort["benchmark_id"]
         / "runs" / "batch04"
     )
     incidents = _busy_skip_incidents(run_dir, [])
+    history = run_dir / "tasks" / "task01" / "history"
+    stale_files = list(history.glob("stale-*.json"))
+    legacy_path = history / f"{first['run_id']}.stale.json"
+    assert history.is_dir()
+    assert len(stale_files) == 1
+    assert stale_files[0].name.startswith("stale-")
+    assert len(stale_files[0].name) == len("stale-") + 16 + len(".json")
+    assert len(str(stale_files[0])) < len(str(legacy_path))
+    assert not legacy_path.exists()
+    assert json.loads(stale_files[0].read_text(encoding="utf-8"))["run_id"] == first["run_id"]
+    assert recovered["run_id"] != first["run_id"]
     assert len(incidents) == 1
     assert incidents[0]["run_id"] == first["run_id"]
     assert incidents[0]["run_token"] == first["run_token"]
@@ -367,6 +380,62 @@ def test_busy_skip_recovered_for_same_guard_is_classified_as_recoverable(tmp_pat
     assert incidents[0]["stale_after"] is True
     assert incidents[0]["same_incident_as_stale_guard_recovery"] is True
     assert incidents[0]["classification"] == "recoverable_stale_guard_skip"
+
+
+def test_duplicate_short_stale_history_fails_closed_without_moving_active_guard(tmp_path):
+    cohort, _, _ = _prepare(tmp_path, count=8, reference_size=8)
+    run = prepare_run(tmp_path, cohort["benchmark_id"], 4, now=NOW)
+    activate_run(tmp_path, cohort["benchmark_id"], run["run_name"], now=NOW)
+    snapshot = snapshot_task(tmp_path, "task01", now=NOW)
+    task_directory = (
+        tmp_path / "data" / "news_work" / "batch_benchmark" / cohort["benchmark_id"]
+        / "runs" / "batch04" / "tasks" / "task01"
+    )
+    active = task_directory / "active.json"
+    history = task_directory / "history"
+    history.mkdir(parents=True, exist_ok=True)
+    stale_path = history / _history_filename(
+        "stale",
+        benchmark_id=cohort["benchmark_id"],
+        run_name="batch04",
+        task_id="task01",
+        run_id=snapshot["run_id"],
+        run_token=snapshot["run_token"],
+    )
+    _write_json(stale_path, {"sentinel": "must-not-overwrite"})
+    active_before = active.read_bytes()
+
+    with pytest.raises(BenchmarkError, match="stale benchmark task history already exists"):
+        snapshot_task(tmp_path, "task01", now=NOW + timedelta(hours=2, seconds=1))
+
+    assert active.read_bytes() == active_before
+    assert json.loads(stale_path.read_text(encoding="utf-8")) == {"sentinel": "must-not-overwrite"}
+
+
+def test_stale_archive_missing_active_source_does_not_report_recovery(tmp_path, monkeypatch):
+    cohort, _, _ = _prepare(tmp_path, count=8, reference_size=8)
+    run = prepare_run(tmp_path, cohort["benchmark_id"], 4, now=NOW)
+    activate_run(tmp_path, cohort["benchmark_id"], run["run_name"], now=NOW)
+    snapshot_task(tmp_path, "task01", now=NOW)
+    task_directory = (
+        tmp_path / "data" / "news_work" / "batch_benchmark" / cohort["benchmark_id"]
+        / "runs" / "batch04" / "tasks" / "task01"
+    )
+    active = task_directory / "active.json"
+    real_replace = benchmark_module.replace_with_retry
+
+    def remove_source_before_replace(source, target):
+        source.unlink()
+        return real_replace(source, target)
+
+    monkeypatch.setattr(benchmark_module, "replace_with_retry", remove_source_before_replace)
+    with pytest.raises(FileNotFoundError):
+        snapshot_task(tmp_path, "task01", now=NOW + timedelta(hours=2, seconds=1))
+
+    assert not active.exists()
+    assert list((task_directory / "history").glob("stale-*.json")) == []
+    events = (task_directory / "events.jsonl").read_text(encoding="utf-8") if (task_directory / "events.jsonl").exists() else ""
+    assert "stale_guard_recovered" not in events
 
 
 def test_release_creates_short_history_parent_and_missing_source_stays_fail_closed(tmp_path):

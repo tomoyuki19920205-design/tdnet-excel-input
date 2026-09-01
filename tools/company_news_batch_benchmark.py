@@ -43,9 +43,10 @@ INTEGRATION_SCHEMA = "company_news_batch_integration_fixture_v1"
 TASK_COUNT = 8
 COHORT_SIZE = 192
 REFERENCE_SIZE = 48
-REFINEMENT_CANDIDATES = (2, 3, 4)
+REFERENCE_BATCH_SIZE = 1
+ALLOWED_CANDIDATE_BATCH_SIZES = (2, 3, 4)
 SUSPENDED_UPWARD_CANDIDATES = (8, 12, 16, 20, 24)
-ALLOWED_BATCH_SIZES = (1, *REFINEMENT_CANDIDATES)
+ALLOWED_BATCH_SIZES = (REFERENCE_BATCH_SIZE, *ALLOWED_CANDIDATE_BATCH_SIZES)
 DEFAULT_SEARCH_FROM = date(2026, 8, 25)
 DEFAULT_SEARCH_TO = date(2026, 8, 31)
 _JST = timezone(timedelta(hours=9))
@@ -143,9 +144,35 @@ def _benchmark_dir(root: Path, benchmark_id: str) -> Path:
 
 def _run_dir(root: Path, benchmark_id: str, run_name: str) -> Path:
     match = re.fullmatch(r"batch(\d{2})", run_name)
-    if run_name != "reference" and (not match or not 4 <= int(match.group(1)) <= 24):
+    if run_name != "reference" and (
+        not match or int(match.group(1)) not in ALLOWED_CANDIDATE_BATCH_SIZES
+    ):
         raise BenchmarkError("invalid benchmark run name")
     return _benchmark_dir(root, benchmark_id) / "runs" / run_name
+
+
+def _history_filename(
+    kind: str,
+    *,
+    benchmark_id: Any,
+    run_name: Any,
+    task_id: Any,
+    run_id: Any,
+    run_token: Any,
+) -> str:
+    if kind not in {"completed", "stale"}:
+        raise BenchmarkError("invalid benchmark task history kind")
+    identity = {
+        "benchmark_id": benchmark_id,
+        "run_name": run_name,
+        "task_id": task_id,
+        "run_id": run_id,
+        "run_token": run_token,
+    }
+    if any(not isinstance(value, str) or not value for value in identity.values()):
+        raise BenchmarkError("benchmark task history identity is incomplete")
+    encoded = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    return f"{kind}-{hashlib.sha256(encoded).hexdigest()[:16]}.json"
 
 
 def _normalize_master_ticker(value: Any) -> str | None:
@@ -311,10 +338,10 @@ def prepare_benchmark(
         "reference_size": len(reference),
         "search_from": search_from.isoformat(),
         "search_to": search_to.isoformat(),
-        "initial_candidates": list(REFINEMENT_CANDIDATES),
+        "initial_candidates": list(ALLOWED_CANDIDATE_BATCH_SIZES),
         "conditional_candidates": [],
         "suspended_upward_candidates": list(SUSPENDED_UPWARD_CANDIDATES),
-        "hard_ceiling": max(REFINEMENT_CANDIDATES),
+        "hard_ceiling": max(ALLOWED_CANDIDATE_BATCH_SIZES),
         "selection_contract": "deterministic_sector_market_cap_tercile_prior_news_stratified_v1",
         "reference_tickers": reference,
         "companies": cohort,
@@ -338,7 +365,11 @@ def prepare_run(
     reference: bool = False,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    if batch_size not in ALLOWED_BATCH_SIZES or (reference and batch_size != 1) or (not reference and batch_size == 1):
+    if (
+        batch_size not in ALLOWED_BATCH_SIZES
+        or (reference and batch_size != REFERENCE_BATCH_SIZE)
+        or (not reference and batch_size == REFERENCE_BATCH_SIZE)
+    ):
         raise BenchmarkError("candidate batch must be 2 through 4; reference batch must be 1")
     cohort = _load_cohort(root, benchmark_id)
     run_name = "reference" if reference else f"batch{batch_size:02d}"
@@ -588,6 +619,7 @@ def snapshot_task(
                 "busy_skip",
                 timestamp,
                 benchmark_id=control["benchmark_id"],
+                run_name=control["run_name"],
                 run_id=existing.get("run_id"),
                 run_token=existing.get("run_token"),
                 guard_started_at=existing.get("task_started_at"),
@@ -599,13 +631,24 @@ def snapshot_task(
             return {"status": "busy", "task_id": task_id, "assignments": [], "expires_at": existing["expires_at"]}
         history = task_directory / "history"
         history.mkdir(parents=True, exist_ok=True)
-        replace_with_retry(guard, history / f"{existing.get('run_id', 'unknown')}.stale.json")
+        stale_history_path = history / _history_filename(
+            "stale",
+            benchmark_id=control["benchmark_id"],
+            run_name=control["run_name"],
+            task_id=task_id,
+            run_id=existing.get("run_id"),
+            run_token=existing.get("run_token"),
+        )
+        if stale_history_path.exists():
+            raise BenchmarkError("stale benchmark task history already exists")
+        replace_with_retry(guard, stale_history_path)
         started = datetime.fromisoformat(str(existing["task_started_at"]).replace("Z", "+00:00"))
         _task_event(
             task_directory,
             "stale_guard_recovered",
             timestamp,
             benchmark_id=control["benchmark_id"],
+            run_name=control["run_name"],
             run_id=existing.get("run_id"),
             run_token=existing.get("run_token"),
             guard_started_at=existing.get("task_started_at"),
@@ -614,6 +657,7 @@ def snapshot_task(
             reason="guard_ttl_expired",
             stale_before=True,
             stale_after=True,
+            history_path=str(stale_history_path.resolve()),
         )
 
     queue = _task_queue(run_directory, task_id)
@@ -854,7 +898,14 @@ def release_task(
     atomic_write_json(queue_path, queue)
     history = task_directory / "history"
     history.mkdir(parents=True, exist_ok=True)
-    history_name = f"completed-{hashlib.sha256(snapshot['run_id'].encode()).hexdigest()[:16]}.json"
+    history_name = _history_filename(
+        "completed",
+        benchmark_id=snapshot.get("benchmark_id"),
+        run_name=snapshot.get("run_name"),
+        task_id=task_id,
+        run_id=snapshot.get("run_id"),
+        run_token=snapshot.get("run_token"),
+    )
     history_path = history / history_name
     if history_path.exists():
         raise BenchmarkError("completed benchmark task history already exists")
@@ -1097,7 +1148,17 @@ def _busy_skip_incidents(directory: Path, tasks: list[dict[str, Any]]) -> list[d
         )
 
         guard: dict[str, Any] = {}
-        stale_path = directory / "tasks" / task_id / "history" / f"{run_id}.stale.json"
+        history = directory / "tasks" / task_id / "history"
+        short_stale_path = history / _history_filename(
+            "stale",
+            benchmark_id=event.get("benchmark_id"),
+            run_name=event.get("run_name") or directory.name,
+            task_id=task_id,
+            run_id=run_id,
+            run_token=event.get("run_token"),
+        )
+        legacy_stale_path = history / f"{run_id}.stale.json"
+        stale_path = short_stale_path if short_stale_path.exists() else legacy_stale_path
         if stale_path.exists():
             guard = _read_json(stale_path)
         guard_started_at = event.get("guard_started_at") or guard.get("task_started_at")
@@ -1374,7 +1435,7 @@ def recommendation(root: Path, benchmark_id: str) -> dict[str, Any]:
 
     recommended = 1
     next_candidates: list[int] = []
-    for batch in REFINEMENT_CANDIDATES:
+    for batch in ALLOWED_CANDIDATE_BATCH_SIZES:
         audit = audits.get(batch)
         if audit is None:
             next_candidates = [batch]
@@ -1450,7 +1511,7 @@ def recommendation(root: Path, benchmark_id: str) -> dict[str, Any]:
         "event_recall_vs_reference": {str(batch): recall for batch, recall in sorted(event_recalls.items())},
         "throughput_tradeoffs": throughput_tradeoffs,
         "next_candidates": next_candidates,
-        "candidate_order": list(REFINEMENT_CANDIDATES),
+        "candidate_order": list(ALLOWED_CANDIDATE_BATCH_SIZES),
         "suspended_upward_candidates": list(SUSPENDED_UPWARD_CANDIDATES),
         "selection_contract": "largest contiguous batch in 2->3->4 with full audit PASS; quality FAIL cannot be offset by speed",
         "batch04_formal_judgment": batch4_judgment,
@@ -1459,7 +1520,7 @@ def recommendation(root: Path, benchmark_id: str) -> dict[str, Any]:
         "upward_block_reason": "batch04_quality_fail" if not batch4_quality_validated else "downward_refinement_only",
         "research_architecture_redesign_required": audits.get(2, {}).get("decision") == "FAIL",
         "integration_validation_passed": integration_pass,
-        "ready_for_production_change": recommended in REFINEMENT_CANDIDATES and integration_pass,
+        "ready_for_production_change": recommended in ALLOWED_CANDIDATE_BATCH_SIZES and integration_pass,
         "human_review_required": True,
     }
     atomic_write_json(_benchmark_dir(root, benchmark_id) / "recommendation.json", result)
@@ -1467,7 +1528,7 @@ def recommendation(root: Path, benchmark_id: str) -> dict[str, Any]:
 
 
 def prepare_integration_fixture(root: Path, batch_size: int, *, now: datetime | None = None) -> dict[str, Any]:
-    if batch_size not in ALLOWED_BATCH_SIZES or batch_size == 1:
+    if batch_size not in ALLOWED_BATCH_SIZES or batch_size == REFERENCE_BATCH_SIZE:
         raise BenchmarkError("integration fixture batch must be 2 through 4")
     timestamp = _now(now)
     fixture_id = f"integration-batch{batch_size:02d}-{timestamp:%Y%m%dT%H%M%S%f}"
