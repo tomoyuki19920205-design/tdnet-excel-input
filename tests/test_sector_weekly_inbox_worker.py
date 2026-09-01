@@ -96,11 +96,14 @@ def _fixture(
             "missed_candidates": ["重要変動なしも確認"],
             "full_report_md": (
                 f"# 【東証33業種週次】{claimed['sector_name']}\n\n## 今週の要旨\n要旨。\n\n" +
-                "\n\n".join(
-                    f"### 材料{i}: 需給{i}\n**Fact**: 需給変化。\n"
-                    "**Transmission**: 国内波及。\n**Magnitude**: 利益感応。\n"
-                    "**Pricing-in**: 未織込み。\n**Counterevidence**: 反証。" +
-                    ("\n**Estimate**: 10〜20億円。\n**Hypothesis**: 継続する。" if i == 1 else "")
+                "\n\n\n\n".join(
+                    f"### 材料{i}：需給{i}\n\n"
+                    "**確認できた事実**\n\n需給変化。\n\n"
+                    "**日本企業への波及**\n\n国内波及。\n\n"
+                    "**利益への影響**\n\n利益感応。\n\n"
+                    "**株価への織り込み**\n\n未織込み。\n\n"
+                    "**反対材料・注意点**\n\n反証。" +
+                    ("\n\n**試算**\n\n10〜20億円。\n\n**仮説**\n\n継続する。" if i == 1 else "")
                     for i in range(1, 4)
                 )
             ),
@@ -144,7 +147,7 @@ def _staged_revision_fixture(tmp_path: Path) -> tuple[Path, Path, dict, WorkerPa
         (work / "processed" / f"{claimed['assignment_id']}.json").read_text(encoding="utf-8")
     )
     envelope["report"]["full_report_md"] = envelope["report"]["full_report_md"].replace(
-        "**Fact**: 需給変化。", "**Fact**: crash recovery後の需給変化。", 1,
+        "**確認できた事実**\n\n需給変化。", "**確認できた事実**\n\ncrash recovery後の需給変化。", 1,
     )
     draft = tmp_path / "revision.json"
     draft.write_text(json.dumps(envelope, ensure_ascii=False), encoding="utf-8")
@@ -235,7 +238,7 @@ def test_quality_revision_archives_old_payload_and_preserves_canonical_until_syn
     assert revised_claim["attempt_count"] == 2
     old_envelope = json.loads((work / "processed" / f"{claimed['assignment_id']}.json").read_text(encoding="utf-8"))
     old_envelope["report"]["full_report_md"] = old_envelope["report"]["full_report_md"].replace(
-        "**Fact**: 需給変化。", "**Fact**: 改訂後の需給変化。", 1,
+        "**確認できた事実**\n\n需給変化。", "**確認できた事実**\n\n改訂後の需給変化。", 1,
     )
     draft = tmp_path / "revision.json"
     draft.write_text(json.dumps(old_envelope, ensure_ascii=False), encoding="utf-8")
@@ -527,10 +530,12 @@ def test_revision_permanent_validation_failure_preserves_old_canonical(tmp_path:
     )
     revised = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
     envelope = json.loads((work / "processed" / f"{claimed['assignment_id']}.json").read_text(encoding="utf-8"))
-    envelope["report"]["full_report_md"] = envelope["report"]["full_report_md"].replace("**Fact**:", "Fact:")
+    envelope["report"]["full_report_md"] = envelope["report"]["full_report_md"].replace(
+        "**確認できた事実**", "確認できた事実", 1,
+    )
     draft = tmp_path / "invalid-revision.json"
     draft.write_text(json.dumps(envelope, ensure_ascii=False), encoding="utf-8")
-    with pytest.raises(Exception, match="Fact"):
+    with pytest.raises(Exception, match="確認できた事実"):
         stage_one(db, revised["assignment_id"], OWNER, draft, work_root=work, at=AT)
     conn = connect_sector_db(db)
     try:
@@ -561,6 +566,42 @@ def test_legacy_sector4_partial_and_identical_quarantine_recover_without_attempt
     )
     assert result["status"] == "success" and result["attempt_count"] == 2
     assert result["identical_quarantine_removed"] is True and not quarantine.exists()
+
+
+def test_prechange_english_label_payload_recovers_without_new_stage_validation(tmp_path: Path):
+    db, work, claimed, inbox = _fixture(tmp_path, 4)
+    envelope = json.loads(inbox.read_text(encoding="utf-8"))
+    replacements = {
+        "**確認できた事実**\n\n": "**Fact**: ",
+        "**日本企業への波及**\n\n": "**Transmission**: ",
+        "**利益への影響**\n\n": "**Magnitude**: ",
+        "**株価への織り込み**\n\n": "**Pricing-in**: ",
+        "**反対材料・注意点**\n\n": "**Counterevidence**: ",
+        "**試算**\n\n": "**Estimate**: ",
+        "**仮説**\n\n": "**Hypothesis**: ",
+    }
+    for current, legacy in replacements.items():
+        envelope["report"]["full_report_md"] = envelope["report"]["full_report_md"].replace(
+            current, legacy,
+        )
+    legacy_hash = payload_hash(envelope)
+    inbox.write_text(json.dumps(envelope, ensure_ascii=False), encoding="utf-8")
+    conn = connect_sector_db(db)
+    try:
+        conn.execute(
+            "UPDATE sector_weekly_work_assignments SET submitted_payload_hash=? WHERE assignment_id=?",
+            (legacy_hash, claimed["assignment_id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    result = process_one(
+        WorkerPaths.from_values(tmp_path, db, work), inbox,
+        sync_func=lambda *_: {"canonical_sector_reports": 1},
+    )
+    assert result["status"] == "success"
+    assert result["payload_hash"] == legacy_hash
+    assert result["attempt_count"] == 1
 
 
 def test_corrupt_json_is_quarantined_and_returns_to_research_retry(tmp_path: Path):

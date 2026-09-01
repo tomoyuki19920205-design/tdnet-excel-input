@@ -196,16 +196,18 @@ def _http_url(value: Any, field: str) -> str:
 
 
 _MATERIAL_HEADING_RE = re.compile(r"(?m)^### 材料([1-9][0-9]*)[:：][ \t]*(\S.*)$")
-_MATERIAL_LABELS = ("Fact", "Transmission", "Magnitude", "Pricing-in", "Counterevidence")
+_CURRENT_MATERIAL_LABELS = (
+    "確認できた事実", "日本企業への波及", "利益への影響", "株価への織り込み", "反対材料・注意点",
+)
+_LEGACY_MATERIAL_LABELS = (
+    "Fact", "Transmission", "Magnitude", "Pricing-in", "Counterevidence",
+)
+_CURRENT_REPORT_LABELS = ("試算", "仮説")
+_LEGACY_REPORT_LABELS = ("Estimate", "Hypothesis")
 
 
-def validate_report_markdown(markdown: str) -> None:
-    """Validate the compact, machine-auditable material structure.
-
-    Labels count only inside numbered material sections.  Requiring them at the
-    beginning of a line avoids accidental matches in prose, Sources, or missed
-    candidate text.
-    """
+def _material_sections(markdown: str) -> tuple[list[re.Match[str]], list[str]]:
+    """Return numbered material headings and bodies shared by both validators."""
     matches = list(_MATERIAL_HEADING_RE.finditer(markdown))
     if not 3 <= len(matches) <= 5:
         raise SectorValidationError("full_report_md must contain 3..5 sections headed '### 材料N: title'")
@@ -220,19 +222,67 @@ def validate_report_markdown(markdown: str) -> None:
         report_heading = re.search(r"(?m)^#{1,6} [^\n]+$", body)
         if report_heading:
             body = body[:report_heading.start()]
+        bodies.append(body)
+    return matches, bodies
+
+
+def _has_compatible_label(body: str, current: str, legacy: str) -> bool:
+    return any(
+        re.search(rf"(?m)^\*\*{re.escape(label)}\*\*(?:[:：][ \t]*|[ \t]*$)", body)
+        for label in (current, legacy)
+    )
+
+
+def _has_current_label_paragraph(body: str, label: str) -> bool:
+    # The label is its own paragraph, followed by at least one completely blank
+    # line and then the explanatory paragraph/list.  Inline `**label**：text`
+    # is intentionally rejected for newly staged reports.
+    return bool(re.search(
+        rf"(?m)^\*\*{re.escape(label)}\*\*[ \t]*\n[ \t]*\n(?=\S)", body,
+    ))
+
+
+def validate_recovery_report_markdown(markdown: str) -> None:
+    """Validate stored/recovery payloads with Japanese and legacy label aliases."""
+    _matches, bodies = _material_sections(markdown)
+    for index, body in enumerate(bodies):
         missing = [
-            label for label in _MATERIAL_LABELS
-            if not re.search(rf"(?m)^\*\*{re.escape(label)}\*\*(?:[:：][ \t]*|[ \t]*$)", body)
+            current
+            for current, legacy in zip(_CURRENT_MATERIAL_LABELS, _LEGACY_MATERIAL_LABELS)
+            if not _has_compatible_label(body, current, legacy)
         ]
         if missing:
             raise SectorValidationError(
                 f"material {index + 1} is missing exact strong labels: {', '.join(missing)}"
             )
-        bodies.append(body)
     material_text = "\n".join(bodies)
-    for label in ("Estimate", "Hypothesis"):
-        if not re.search(rf"(?m)^\*\*{label}\*\*(?:[:：][ \t]*|[ \t]*$)", material_text):
-            raise SectorValidationError(f"material sections must contain at least one exact **{label}** label")
+    for current, legacy in zip(_CURRENT_REPORT_LABELS, _LEGACY_REPORT_LABELS):
+        if not _has_compatible_label(material_text, current, legacy):
+            raise SectorValidationError(
+                f"material sections must contain at least one exact **{current}** or legacy **{legacy}** label"
+            )
+
+
+def validate_new_report_markdown(markdown: str) -> None:
+    """Validate the reader-facing Japanese prose contract for a new stage."""
+    _matches, bodies = _material_sections(markdown)
+    for index, body in enumerate(bodies):
+        missing = [label for label in _CURRENT_MATERIAL_LABELS if not _has_current_label_paragraph(body, label)]
+        if missing:
+            raise SectorValidationError(
+                f"material {index + 1} is missing standalone Japanese label paragraphs: {', '.join(missing)}"
+            )
+    material_text = "\n".join(bodies)
+    for label in _CURRENT_REPORT_LABELS:
+        if not _has_current_label_paragraph(material_text, label):
+            raise SectorValidationError(
+                f"material sections must contain at least one standalone **{label}** paragraph"
+            )
+
+
+def validate_report_markdown(markdown: str) -> None:
+    """Backward-compatible alias used by stored payload and recovery paths."""
+    validate_recovery_report_markdown(markdown)
 
 
 def validate_report(
@@ -240,6 +290,7 @@ def validate_report(
     *,
     expected_code: int | None = None,
     expected_window: WeeklyWindow | None = None,
+    require_new_markdown_style: bool = False,
 ) -> ValidatedSectorReport:
     if not isinstance(payload, dict):
         raise SectorValidationError("payload must be an object")
@@ -268,7 +319,10 @@ def validate_report(
         raise SectorValidationError("direction must be positive, negative, mixed, or neutral")
     bullets = _string_list(payload.get("summary_bullets"), "summary_bullets", 3, 5, 240)
     full_report = _text(payload.get("full_report_md"), "full_report_md", 100_000, 200)
-    validate_report_markdown(full_report)
+    if require_new_markdown_style:
+        validate_new_report_markdown(full_report)
+    else:
+        validate_recovery_report_markdown(full_report)
     watchlist_raw = payload.get("watchlist_companies")
     if not isinstance(watchlist_raw, list) or len(watchlist_raw) > 20:
         raise SectorValidationError("watchlist_companies must be an array of at most 20 items")

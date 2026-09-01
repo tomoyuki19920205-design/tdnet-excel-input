@@ -30,14 +30,18 @@ def _migrate_fixture(db: Path) -> None:
 def _content() -> dict:
     materials = []
     for number in range(1, 4):
-        extra = "\n**Estimate**: 営業利益影響は10〜20億円。\n**Hypothesis**: 需給変化は継続する。" if number == 1 else ""
+        extra = (
+            "\n\n**試算**\n\n営業利益影響は10〜20億円。"
+            "\n\n**仮説**\n\n需給変化は継続する。"
+            if number == 1 else ""
+        )
         materials.append(
-            f"### 材料{number}: 重要ドライバー{number}\n"
-            "**Fact**: 今週の一次資料で需給が変化した。\n"
-            "**Transmission**: 日本企業の数量と単価に波及する。\n"
-            "**Magnitude**: 売上と営業利益への感応度を確認した。\n"
-            "**Pricing-in**: 会社計画への織り込みは限定的。\n"
-            "**Counterevidence**: 価格反落で仮説が崩れる。" + extra
+            f"### 材料{number}：重要ドライバー{number}\n\n"
+            "**確認できた事実**\n\n今週の一次資料で需給が変化した。\n\n"
+            "**日本企業への波及**\n\n日本企業の数量と単価に波及する。\n\n"
+            "**利益への影響**\n\n売上と営業利益への感応度を確認した。\n\n"
+            "**株価への織り込み**\n\n会社計画への織り込みは限定的。\n\n"
+            "**反対材料・注意点**\n\n価格反落で仮説が崩れる。" + extra
         )
     return {
         "importance": "A+",
@@ -46,7 +50,7 @@ def _content() -> dict:
         "watchlist_companies": [{"code": "9503", "name": "関西電力", "direction": "positive"}],
         "next_week_watchpoints": ["燃料価格を確認"],
         "missed_candidates": ["地方自治体資料の更新"],
-        "full_report_md": "# 【東証33業種週次】電気・ガス業\n\n## 今週の要旨\n結論の要約。\n\n" + "\n\n".join(materials),
+        "full_report_md": "# 【東証33業種週次】電気・ガス業\n\n## 今週の要旨\n結論の要約。\n\n" + "\n\n\n\n".join(materials),
         "sources": [{
             "title": "電気料金資料", "url": "https://example.com/primary.pdf", "source_name": "資源エネルギー庁",
             "source_type": "government", "published_at": "2026-08-28T10:00:00+09:00",
@@ -123,6 +127,19 @@ def test_final_prompt_requires_concise_report_and_bullets():
         assert term in prompt
 
 
+def test_final_prompt_requires_japanese_reader_labels_notes_and_readable_numbers():
+    prompt = scheduler.build_prompt(
+        13, weekly_window(datetime.fromisoformat("2026-09-05T06:00:00+09:00")),
+    )
+    for term in (
+        "**確認できた事実**", "**日本企業への波及**", "**利益への影響**",
+        "**株価への織り込み**", "**反対材料・注意点**", "**試算**", "**仮説**",
+        "ラベルの次に空行を1行", "空行を3行以上", "※Glencore（グレンコア）",
+        "日本語読み", "1段落1論点", "3件以上", "箇条書き", "数字だけを羅列",
+    ):
+        assert term in prompt
+
+
 def test_validate_preserves_arrays_markdown_sources_and_stable_key():
     window = weekly_window(datetime.fromisoformat("2026-09-05T06:00:00+09:00"))
     payload = assemble_payload(_content(), 20, window, datetime.fromisoformat("2026-09-06T01:02:33+09:00"))
@@ -133,44 +150,124 @@ def test_validate_preserves_arrays_markdown_sources_and_stable_key():
     assert validated["dedupe_key"] == "sector_weekly:2026-09-05:20"
 
 
-@pytest.mark.parametrize("label", ["Fact", "Transmission", "Magnitude", "Pricing-in", "Counterevidence"])
+@pytest.mark.parametrize("label", ["確認できた事実", "日本企業への波及", "利益への影響", "株価への織り込み", "反対材料・注意点"])
 def test_material_structure_requires_each_exact_core_label_per_material(label):
     window = weekly_window(datetime.fromisoformat("2026-09-05T06:00:00+09:00"))
     content = _content()
     payload = assemble_payload(content, 20, window)
-    validate_report(payload, expected_code=20, expected_window=window)
-    content["full_report_md"] = content["full_report_md"].replace(f"**{label}**:", f"{label}:", 1)
+    validate_report(
+        payload, expected_code=20, expected_window=window, require_new_markdown_style=True,
+    )
+    content["full_report_md"] = content["full_report_md"].replace(f"**{label}**", label, 1)
     with pytest.raises(SectorValidationError, match=rf"material 1.*{re.escape(label)}"):
-        validate_report(assemble_payload(content, 20, window), expected_code=20, expected_window=window)
+        validate_report(
+            assemble_payload(content, 20, window), expected_code=20, expected_window=window,
+            require_new_markdown_style=True,
+        )
 
 
-@pytest.mark.parametrize("label", ["Estimate", "Hypothesis"])
+@pytest.mark.parametrize("label", ["試算", "仮説"])
 def test_labels_outside_materials_do_not_satisfy_structure(label):
     window = weekly_window(datetime.fromisoformat("2026-09-05T06:00:00+09:00"))
     content = _content()
-    content["full_report_md"] = content["full_report_md"].replace(f"**{label}**:", f"{label}:", 1)
-    content["full_report_md"] += f"\n\n## Sources\n**{label}**: ここは対象外。"
-    with pytest.raises(SectorValidationError, match=rf"exact \*\*{label}\*\*"):
-        validate_report(assemble_payload(content, 20, window), expected_code=20, expected_window=window)
+    content["full_report_md"] = content["full_report_md"].replace(f"**{label}**", label, 1)
+    content["full_report_md"] += f"\n\n## Sources\n\n**{label}**\n\nここは対象外。"
+    with pytest.raises(SectorValidationError, match=rf"standalone \*\*{label}\*\*"):
+        validate_report(
+            assemble_payload(content, 20, window), expected_code=20, expected_window=window,
+            require_new_markdown_style=True,
+        )
 
 
-def test_material_structure_accepts_japanese_colon_and_label_newline_but_rejects_section_count():
+def test_new_stage_requires_standalone_label_paragraphs():
     window = weekly_window(datetime.fromisoformat("2026-09-05T06:00:00+09:00"))
     content = _content()
-    content["full_report_md"] = content["full_report_md"].replace("### 材料1:", "### 材料1：", 1)
-    content["full_report_md"] = content["full_report_md"].replace("**Fact**:", "**Fact**\n", 1)
-    validate_report(assemble_payload(content, 20, window), expected_code=20, expected_window=window)
+    validate_report(
+        assemble_payload(content, 20, window), expected_code=20, expected_window=window,
+        require_new_markdown_style=True,
+    )
+    inline = _content()
+    inline["full_report_md"] = inline["full_report_md"].replace(
+        "**確認できた事実**\n\n今週の一次資料で需給が変化した。",
+        "**確認できた事実**：今週の一次資料で需給が変化した。",
+        1,
+    )
+    with pytest.raises(SectorValidationError, match="standalone Japanese label paragraphs"):
+        validate_report(
+            assemble_payload(inline, 20, window), expected_code=20, expected_window=window,
+            require_new_markdown_style=True,
+        )
+
+
+@pytest.mark.parametrize("separator", ["\n\n", "\n\n\n", "\n\n\n\n", "\n\n\n\n\n"])
+def test_new_stage_does_not_reject_material_headings_for_blank_line_count(separator):
+    window = weekly_window(datetime.fromisoformat("2026-09-05T06:00:00+09:00"))
+    content = _content()
+    content["full_report_md"] = content["full_report_md"].replace(
+        "\n\n\n\n### 材料2", f"{separator}### 材料2", 1,
+    ).replace(
+        "\n\n\n\n### 材料3", f"{separator}### 材料3", 1,
+    )
+    validate_report(
+        assemble_payload(content, 20, window), expected_code=20, expected_window=window,
+        require_new_markdown_style=True,
+    )
+
+
+def test_new_stage_still_requires_material_heading_on_its_own_line():
+    window = weekly_window(datetime.fromisoformat("2026-09-05T06:00:00+09:00"))
+    content = _content()
+    content["full_report_md"] = content["full_report_md"].replace(
+        "\n\n\n\n### 材料2", "### 材料2", 1,
+    )
+    with pytest.raises(SectorValidationError, match="3..5 sections"):
+        validate_report(
+            assemble_payload(content, 20, window), expected_code=20, expected_window=window,
+            require_new_markdown_style=True,
+        )
+
+
+def test_recovery_accepts_legacy_english_labels_but_new_stage_rejects_them():
+    window = weekly_window(datetime.fromisoformat("2026-09-05T06:00:00+09:00"))
+    content = _content()
+    replacements = {
+        "**確認できた事実**\n\n": "**Fact**: ",
+        "**日本企業への波及**\n\n": "**Transmission**: ",
+        "**利益への影響**\n\n": "**Magnitude**: ",
+        "**株価への織り込み**\n\n": "**Pricing-in**: ",
+        "**反対材料・注意点**\n\n": "**Counterevidence**: ",
+        "**試算**\n\n": "**Estimate**: ",
+        "**仮説**\n\n": "**Hypothesis**: ",
+    }
+    for current, legacy in replacements.items():
+        content["full_report_md"] = content["full_report_md"].replace(current, legacy)
+    payload = assemble_payload(content, 20, window)
+    validate_report(payload, expected_code=20, expected_window=window)
+    with pytest.raises(SectorValidationError, match="standalone Japanese label paragraphs"):
+        validate_report(
+            payload, expected_code=20, expected_window=window, require_new_markdown_style=True,
+        )
+
+
+def test_new_stage_rejects_wrong_material_section_count():
+    window = weekly_window(datetime.fromisoformat("2026-09-05T06:00:00+09:00"))
     two = _content()
-    two["full_report_md"] = two["full_report_md"].split("### 材料3:", 1)[0]
+    two["full_report_md"] = two["full_report_md"].split("### 材料3：", 1)[0]
     with pytest.raises(SectorValidationError, match="3..5 sections"):
-        validate_report(assemble_payload(two, 20, window), expected_code=20, expected_window=window)
+        validate_report(
+            assemble_payload(two, 20, window), expected_code=20, expected_window=window,
+            require_new_markdown_style=True,
+        )
     six = _content()
-    third = "### 材料3:" + six["full_report_md"].split("### 材料3:", 1)[1]
-    six["full_report_md"] += "\n\n" + third.replace("材料3:", "材料4:", 1)
-    six["full_report_md"] += "\n\n" + third.replace("材料3:", "材料5:", 1)
-    six["full_report_md"] += "\n\n" + third.replace("材料3:", "材料6:", 1)
+    third = "### 材料3：" + six["full_report_md"].split("### 材料3：", 1)[1]
+    six["full_report_md"] += "\n\n\n\n" + third.replace("材料3：", "材料4：", 1)
+    six["full_report_md"] += "\n\n\n\n" + third.replace("材料3：", "材料5：", 1)
+    six["full_report_md"] += "\n\n\n\n" + third.replace("材料3：", "材料6：", 1)
     with pytest.raises(SectorValidationError, match="3..5 sections"):
-        validate_report(assemble_payload(six, 20, window), expected_code=20, expected_window=window)
+        validate_report(
+            assemble_payload(six, 20, window), expected_code=20, expected_window=window,
+            require_new_markdown_style=True,
+        )
 
 
 def test_wrong_period_and_invalid_json_shape_are_rejected():
@@ -267,7 +364,8 @@ def test_chatgpt_worker_prompt_has_transport_research_and_schema_contracts():
     for term in (
         "Sector Weekly Worker", "1回の実行でready assignmentを最大1件", "claim --owner sector-weekly-worker",
         "ChatGPTプラン内", "outside-in", "アンチモン", "Samsung Electronics", "SK hynix", "Micron",
-        "foundry", "VLCC", "Fact / Transmission / Magnitude / Pricing-in / Counterevidence",
+        "foundry", "VLCC", "確認できた事実", "日本企業への波及", "反対材料・注意点",
+        "海外企業", "日本語読み", "空行を3行以上", "数字は1段落1論点",
         "重要材料は", "3〜5件", "3,000〜4,500文字", "missed_candidates",
         "sector_weekly_work_result_v1", "company_ir | government | regulator",
         "heartbeat --assignment-id", "10分ごと", "hard time budgetは50分", "45分時点",
