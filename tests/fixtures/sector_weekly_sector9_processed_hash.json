@@ -1,0 +1,188 @@
+{
+  "schema_version": "sector_weekly_work_result_v1",
+  "assignment_id": "bbeddeb1-5f79-57b1-8b1c-da973526fdb5",
+  "claim_owner": "sector-weekly-worker",
+  "sector_code": 9,
+  "sector_name": "石油・石炭製品",
+  "period_start": "2026-08-21T21:00:00Z",
+  "period_end": "2026-08-28T20:59:59Z",
+  "report": {
+    "importance": "A",
+    "direction": "mixed",
+    "summary_bullets": [
+      "原油は週末にかけてブレント、WTIとも4-5%台の週次下落となり、ホルムズ海峡リスクプレミアムの一部剥落が在庫評価益には逆風となった。",
+      "一方でIEAとEIAのデータはガソリン、留出油の在庫逼迫と高い精製稼働を示し、製品クラックと精製マージンには追い風が残った。",
+      "国内では燃料油定額引下げ措置が8月27日以降も32.5円/Lで維持され、需要の急減を抑える一方、補助金運用と価格改定タイミングが短期損益の変動要因となる。",
+      "LNGと石炭は高止まりし、資源・石炭権益を持つ企業にはプラスだが、発電・石化向け燃料コストやナフサ連動コストには注意が必要。",
+      "来週はホルムズ通航回復、9月6日のOPECプラス会合、米国在庫、国内補助単価、円安水準を同時に見る局面で、業種全体の方向感は混合的と判断した。"
+    ],
+    "watchlist_companies": [
+      {
+        "code": "5020",
+        "name": "ENEOSホールディングス",
+        "direction": "mixed"
+      },
+      {
+        "code": "5019",
+        "name": "出光興産",
+        "direction": "positive"
+      },
+      {
+        "code": "5021",
+        "name": "コスモエネルギーホールディングス",
+        "direction": "positive"
+      },
+      {
+        "code": "5017",
+        "name": "富士石油",
+        "direction": "mixed"
+      },
+      {
+        "code": "3315",
+        "name": "日本コークス工業",
+        "direction": "positive"
+      }
+    ],
+    "next_week_watchpoints": [
+      "ホルムズ海峡のタンカー通航量と中東産原油・LNG輸出の復旧ペース",
+      "9月6日のOPECプラス会合と9月以降の増産・減産補償スケジュール",
+      "米EIA週報の原油在庫、Cushing在庫、ガソリン・留出油在庫、精製稼働率",
+      "国内燃料油補助単価、全国平均ガソリン価格、卸・小売価格改定の時間差",
+      "JKM、欧州ガス、一般炭・原料炭価格、ドル円160円近辺での調達コスト感応度"
+    ],
+    "missed_candidates": [
+      "LPGは石油流通に関連するが、今回期間中の日本上場石油・石炭製品セクターへの即時影響を示す材料は限定的だった。",
+      "アスファルト、潤滑油、石油化学用ナフサは個別事業には関係するものの、週次の業種判断では原油・製品クラック・補助金の影響を優先した。",
+      "SAF、バイオ燃料、石油コークスは中長期テーマとして確認したが、今回期間の株価材料としては相対的に弱い。"
+    ],
+    "full_report_md": "# 【東証33業種週次】石油・石炭製品\n\n## 週間評価\n\n石油・石炭製品セクターの今週の重要度はA、方向感はmixedとする。業種全体では、原油価格の週次下落が在庫評価益と資源上流には短期逆風となる一方、製品在庫の逼迫、精製マージンの強さ、国内燃料補助による需要下支え、石炭・LNG価格の高止まりが利益面の支えになっている。セクター内でも、総合石油、精製専業、石炭・コークス、資源権益を持つ企業で受ける影響が割れるため、単純な原油高メリット、原油安メリットの一方向では整理しにくい週だった。\n\n原油相場は8月28日にWTIが83.40ドル、ブレントが89.31ドルで終わり、いずれも週次では4-5%台の下落となった。背景は、ホルムズ海峡を巡る供給不安が一部後退したこと、米金融政策を巡る警戒でドルが強含んだことだ。ただし、価格水準そのものはなお高く、ゴールドマン・サックス推計では湾岸輸出は15-16百万バレル/日程度まで戻ったものの、戦前水準をなお7-8百万バレル/日下回るとされる。リスクプレミアムは縮小したが、完全に消えたわけではない。このため、ENEOS、出光、コスモのような在庫を抱える精製・元売りには、週末にかけて在庫評価益が縮む圧力が出る一方、供給不安が再燃すればすぐに原油高・製品高へ戻る不安定な環境が続く。\n\n精製マージン面では、むしろポジティブ材料が目立つ。EIA週報では米国の原油在庫が4週連続で増えた一方、ガソリン在庫は5年平均を大きく下回り、留出油在庫も低水準だった。精製稼働率は97%台まで高まり、需要期後半でも製品需給のタイトさが残っている。IEAも8月の月報で、世界の石油需要見通しを下げながら、7月の供給混乱、製品輸出減、在庫取り崩し、製品クラックの高騰を指摘している。原油そのものが少し下がっても、ガソリン、軽油、ジェット燃料などの製品価格が相対的に強ければ、精製会社のスプレッドは維持されやすい。コスモと富士石油にはこの点が比較的直接的な追い風で、ENEOSと出光にも精製・販売部門を通じて効く。\n\n国内要因では、燃料油価格激変緩和に近い定額引下げ措置が引き続き大きい。8月27日以降の補助単価はガソリン、軽油、灯油、重油で32.5円/L、航空機燃料で13.0円/Lとされ、首相会見でも全国平均ガソリン価格を170円程度に抑える方針が示された。消費者価格の急騰を抑える政策は販売数量の下支えになり、物流、個人消費、航空需要への波及悪化を抑える。一方で元売りにとっては、補助金反映のタイミング、卸価格改定、小売価格との時間差、運転資金負担が短期の利益変動要因になる。原油高局面では補助金が需要を守るが、原油安へ振れる局面では価格改定の遅れがマージンを押し上げる場合と、在庫評価損が先行する場合が混在する。\n\n日本の供給面では、石油連盟の週次統計で8月22日週の原油処理量が前週から増え、常圧蒸留装置稼働率も80%台を維持した。夏場の需要が残る中で稼働が大きく崩れていないことは、精製マージンを取りに行ける環境を示す。ただし、製品在庫統計は一部公表停止が続いており、国内のガソリン・軽油・灯油在庫を精密に読みにくい。このため、投資判断では米国・アジア製品市況、国内小売価格、元売りの価格改定発表を組み合わせて見る必要がある。\n\n石炭・LNG側も無視できない。JOGMECのLNG月報では、JKMが7月末の21ドル台前半から8月24日には23ドル台後半まで上昇した。欧州ガス貯蔵率も前年や5年平均を下回っており、冬場へ向けたLNG調達競争が意識されやすい。石炭については、米国の海上輸出が8月23日週に前週比で大きく増え、インド向け一般炭需要が支えとなったほか、豪州や中国の供給制約を背景に原料炭価格も強含んだ。出光は石炭・資源事業の寄与が相対的に大きく、日本コークス工業にも石炭・コークス市況の改善がプラス材料になりやすい。他方、LNG・石炭高は発電コストや石油化学のエネルギーコストを押し上げ、セクター外の電力・化学にも波及する。\n\n為替も見落とせない。8月末のドル円は160円前後で推移しており、円建ての原油・LNG・石炭調達コストはドル建て価格以上に重く映る。原油が週末に下げても、円安が同時に進むと国内の輸入採算は十分には改善しない。元売りは製品価格への転嫁と補助金を通じて一定程度吸収できるが、価格転嫁には時間差があり、在庫評価、輸送費、備蓄関連コスト、製油所稼働の固定費が四半期内で利益を振らせる。株式市場では原油ドル建て価格だけでなく、円建てドバイ原油、ガソリン・軽油の国内卸価格、補助金の入金タイミングを合わせて見る必要がある。\n\n会社別の質も分かれる。ENEOSは国内販売、精製、上流、金属まで含むため、製品マージン改善だけでは方向感を決めきれない。出光は石炭・資源の寄与が相対的に読みやすく、LNG・石炭高と製品クラック高の両方を取り込みやすい。コスモは原油調達と製品販売のスプレッドに素直で、精製マージンが強い局面では感応度が高い。富士石油は大型製油所の稼働と原油調達条件への依存が大きく、マージン上昇の恩恵と在庫評価損益が同時に出やすい。日本コークス工業は石油元売りとは異なり、石炭・コークス市況、鉄鋼向け需要、輸入炭価格の組み合わせで評価されるため、同じ33業種内でも見るべきドライバーが違う。\n\n投資家目線では、今週のセクターはベータよりもスプレッドの確認が重要だった。原油下落だけを見れば弱材料に見えるが、製品在庫が薄く、欧米の精製稼働が高く、アジアのLNG・石炭が強い局面では、製品・資源ミックスを持つ企業の利益は崩れにくい。一方、リスクプレミアムがさらに剥落して原油が急落する場合、在庫評価損が先に認識されやすい。逆にホルムズ不安が再燃すれば、上流・資源はプラスでも国内燃料価格と政策対応への警戒が強まる。したがって、業種判断は中立より少し強いが、方向はmixedに置くのが妥当だ。\n\n個別では、ENEOSは最も総合色が強く、精製マージン高と国内販売安定はプラスだが、原油反落による在庫評価、銅・上流など非石油要因、政策価格の時間差が混ざるためmixedとした。出光は精製に加えて石炭・資源価格の高止まりが効きやすく、相対的にはpositive。コスモは精製マージン感応度が高く、製品需給タイト化の恩恵を受けやすい。富士石油は精製専業色が強くマージン改善は追い風だが、原油在庫評価と為替影響が大きくmixed。日本コークス工業は石炭・コークス市況の上振れが主因でpositiveとした。\n\n来週の焦点は、第一にホルムズ海峡の通航量が通常水準へ戻るかどうかだ。輸出回復が続けば原油リスクプレミアムはさらに縮小し、在庫評価には逆風だが精製原料コストは下がる。第二に9月6日のOPECプラス会合で、9月の188千バレル/日の調整後にどこまで追加方針が示されるか。第三に米国のガソリン・留出油在庫がなお低水準を維持するか。第四に国内補助単価と全国平均ガソリン価格が170円近辺で安定するか。第五にドル円160円近辺の円安が輸入コストをどこまで相殺するか。総じて、原油は反落したが製品・資源スプレッドは強く、石油・石炭製品は強弱混在ながら市場注目度の高い週と判断する。",
+    "sources": [
+      {
+        "title": "Weekly Petroleum Status Report",
+        "url": "https://www.eia.gov/petroleum/supply/weekly/?trk=organization_guest_main-feed-card-text",
+        "source_name": "U.S. Energy Information Administration",
+        "source_type": "government",
+        "published_at": "2026-08-26T00:00:00Z"
+      },
+      {
+        "title": "Oil Market Report - August 2026",
+        "url": "https://www.iea.org/reports/oil-market-report-august-2026",
+        "source_name": "International Energy Agency",
+        "source_type": "government",
+        "published_at": "2026-08-12T00:00:00Z"
+      },
+      {
+        "title": "Short-Term Energy Outlook",
+        "url": "https://www.eia.gov/outlooks/STEO/",
+        "source_name": "U.S. Energy Information Administration",
+        "source_type": "government",
+        "published_at": "2026-08-11T00:00:00Z"
+      },
+      {
+        "title": "Saudi Arabia, Russia, Iraq, Kuwait, Kazakhstan, Algeria and Oman agree to implement production adjustment of 188 thousand barrels per day in September 2026",
+        "url": "https://www.opec.org/pr-detail/611-2-august-2026.html",
+        "source_name": "OPEC",
+        "source_type": "industry_association",
+        "published_at": "2026-08-02T00:00:00Z"
+      },
+      {
+        "title": "Oil Posts Weekly Loss as Hormuz Optimism and Fed Concerns Pressure Prices",
+        "url": "https://energynow.com/2026/08/oil-posts-weekly-loss-as-hormuz-optimism-and-fed-concerns-pressure-prices/",
+        "source_name": "EnergyNow",
+        "source_type": "news",
+        "published_at": "2026-08-29T00:00:00Z"
+      },
+      {
+        "title": "Oil prices steady as investors weigh impact of expanded US sanctions against Iran",
+        "url": "https://www.investing.com/news/commodities-news/oil-prices-steady-as-investors-weigh-impact-of-expanded-us-sanctions-against-iran-4874373",
+        "source_name": "Investing.com",
+        "source_type": "news",
+        "published_at": "2026-08-25T00:00:00Z"
+      },
+      {
+        "title": "Oil on track for weekly loss even as Iran tensions simmer",
+        "url": "https://www.investing.com/news/commodities-news/oil-on-track-for-weekly-loss-even-as-iran-tensions-simmer-4880409",
+        "source_name": "Investing.com",
+        "source_type": "news",
+        "published_at": "2026-08-28T00:00:00Z"
+      },
+      {
+        "title": "天然ガス・LNG月次レポート 2026年8月",
+        "url": "https://journal.jogmec.go.jp/oilgas/nglng/monthly-report/202608.html",
+        "source_name": "JOGMEC",
+        "source_type": "government",
+        "published_at": "2026-08-01T00:00:00+09:00"
+      },
+      {
+        "title": "石炭の価格推移と需給動向",
+        "url": "https://journal.jogmec.go.jp/coal/index.html",
+        "source_name": "JOGMEC",
+        "source_type": "government",
+        "published_at": "2026-08-25T00:00:00+09:00"
+      },
+      {
+        "title": "US coal exports top 2 million mt as India leads thermal surge",
+        "url": "https://www.spglobal.com/energy/en/news-research/latest-news/electric-power/082526-us-coal-exports-top-2-million-mt-as-india-leads-thermal-surge-cas",
+        "source_name": "S&P Global Commodity Insights",
+        "source_type": "news",
+        "published_at": "2026-08-25T00:00:00Z"
+      },
+      {
+        "title": "BHP results for the full year ended 30 June 2026",
+        "url": "https://www.bhp.com/news/media-centre/releases/2026/08/bhp-results-for-the-full-year-ended-30-june-2026",
+        "source_name": "BHP",
+        "source_type": "company_ir",
+        "published_at": "2026-08-18T00:00:00Z"
+      },
+      {
+        "title": "Petroleum Statistics",
+        "url": "https://www.paj.gr.jp/english/statis/",
+        "source_name": "Petroleum Association of Japan",
+        "source_type": "industry_association",
+        "published_at": "2026-08-10T00:00:00+09:00"
+      },
+      {
+        "title": "石油連盟週次原油処理量・稼働率",
+        "url": "https://fu.minkabu.jp/news/708122",
+        "source_name": "Minkabu Futures",
+        "source_type": "news",
+        "published_at": "2026-08-26T12:01:00+09:00"
+      },
+      {
+        "title": "燃料油価格定額引下げ措置",
+        "url": "https://nenryo-teigakuhikisage.go.jp/",
+        "source_name": "資源エネルギー庁",
+        "source_type": "government",
+        "published_at": "2026-08-27T00:00:00+09:00"
+      },
+      {
+        "title": "内閣総理大臣記者会見 2026年8月25日",
+        "url": "https://www.kantei.go.jp/jp/105/statement/2026/0825kaiken.html",
+        "source_name": "首相官邸",
+        "source_type": "government",
+        "published_at": "2026-08-25T00:00:00+09:00"
+      },
+      {
+        "title": "Monthly Economic Report August 2026",
+        "url": "https://www5.cao.go.jp/keizai3/getsurei-e/2026aug.html",
+        "source_name": "Cabinet Office, Government of Japan",
+        "source_type": "government",
+        "published_at": "2026-08-01T00:00:00+09:00"
+      },
+      {
+        "title": "Investors Information",
+        "url": "https://www.cosmo-energy.co.jp/en/ir.html",
+        "source_name": "Cosmo Energy Holdings",
+        "source_type": "company_ir",
+        "published_at": "2026-08-06T00:00:00+09:00"
+      },
+      {
+        "title": "US Dollar to Yen Spot Exchange Rates for 2026",
+        "url": "https://www.exchangerates.org.uk/USD-JPY-spot-exchange-rates-history-2026.html",
+        "source_name": "ExchangeRates.org.uk",
+        "source_type": "market_data",
+        "published_at": "2026-08-28T00:00:00Z"
+      }
+    ]
+  }
+}

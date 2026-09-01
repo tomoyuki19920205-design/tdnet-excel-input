@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,10 @@ RESULT_SCHEMA = "sector_weekly_work_result_v1"
 DEFAULT_OWNER = "sector-weekly-worker"
 DEFAULT_WORK_ROOT = ROOT / "data" / "sector_weekly_work"
 QUALITY_REOPEN_CONFIRMATION = "REOPEN_SECTOR_WEEKLY_QUALITY"
+_RFC3339_TIMESTAMP_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$"
+)
+_DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 class SectorBridgeError(RuntimeError):
@@ -220,7 +225,39 @@ def _quarantine(work_root: Path, assignment_id: str, source: Path) -> None:
     replace_with_retry(temporary, target)
 
 
+def _comparison_datetime(value: Any, field: str, *, allow_date_only: bool = False) -> Any:
+    """Return a canonical comparison value without changing stored payload data."""
+    if value is None and allow_date_only:
+        return None
+    if allow_date_only and isinstance(value, str) and _DATE_ONLY_RE.fullmatch(value):
+        try:
+            datetime.strptime(value, "%Y-%m-%d")
+        except ValueError as exc:
+            raise SectorBridgeError(f"{field} is not a valid calendar date") from exc
+        return value
+    if not isinstance(value, str) or not _RFC3339_TIMESTAMP_RE.fullmatch(value):
+        raise SectorBridgeError(f"{field} must be an RFC3339 timestamp with a timezone")
+    parsed = _parse_datetime(value, field)
+    return parsed.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def _comparison_sources(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise SectorBridgeError("sources must be a list for canonical comparison")
+    result: list[dict[str, Any]] = []
+    for index, source in enumerate(value):
+        if not isinstance(source, dict):
+            raise SectorBridgeError(f"sources[{index}] must be an object for canonical comparison")
+        copied = dict(source)
+        copied["published_at"] = _comparison_datetime(
+            source.get("published_at"), f"sources[{index}].published_at", allow_date_only=True,
+        )
+        result.append(copied)
+    return result
+
+
 def _normalized_report_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Build a non-mutating semantic comparison row for canonical verification only."""
     json_fields = {
         "summary_bullets", "watchlist_companies", "next_week_watchpoints",
         "missed_candidates", "sources",
@@ -236,7 +273,9 @@ def _normalized_report_row(row: dict[str, Any]) -> dict[str, Any]:
         if field in json_fields and isinstance(value, str):
             value = json.loads(value)
         if field in {"period_start", "period_end", "generated_at"}:
-            value = _parse_datetime(value, field).astimezone(JST).isoformat(timespec="seconds")
+            value = _comparison_datetime(value, field)
+        elif field == "sources":
+            value = _comparison_sources(value)
         result[field] = value
     return result
 
