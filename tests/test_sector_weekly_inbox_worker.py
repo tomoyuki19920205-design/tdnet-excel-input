@@ -7,8 +7,9 @@ from pathlib import Path
 import pytest
 
 import tools.sector_weekly_inbox_worker as inbox_worker
+import tools.sector_weekly_work_bridge as work_bridge
 from lib.sector_weekly import CANONICAL_SQLITE_SCHEMA, connect_sector_db, weekly_window
-from lib.sector_weekly_work import enqueue_assignment, get_assignment
+from lib.sector_weekly_work import enqueue_assignment, get_assignment, payload_hash
 from tools.apply_sector_weekly_work_sqlite_migration import apply_sqlite_migration
 from tools.sector_weekly_inbox_worker import WorkerPaths, process_one, run_once
 from tools.sector_weekly_work_bridge import (
@@ -113,6 +114,41 @@ def _fixture(tmp_path: Path, code: int = 4) -> tuple[Path, Path, dict, Path]:
     stage_one(db, claimed["assignment_id"], OWNER, draft, work_root=work, at=AT)
     inbox = work / "inbox" / f"{claimed['assignment_id']}.json"
     return db, work, claimed, inbox
+
+
+def _completed_fixture(tmp_path: Path) -> tuple[Path, Path, dict, WorkerPaths, dict, str]:
+    db, work, claimed, inbox = _fixture(tmp_path)
+    paths = WorkerPaths.from_values(tmp_path, db, work)
+    completed = process_one(paths, inbox, sync_func=lambda *_: {"canonical_sector_reports": 1})
+    conn = connect_sector_db(db)
+    try:
+        old_report = dict(conn.execute(
+            "SELECT * FROM canonical_sector_reports WHERE dedupe_key=?", (claimed["stable_key"],),
+        ).fetchone())
+    finally:
+        conn.close()
+    return db, work, claimed, paths, old_report, completed["payload_hash"]
+
+
+def _staged_revision_fixture(tmp_path: Path) -> tuple[Path, Path, dict, WorkerPaths, Path, dict, str, str]:
+    db, work, claimed, paths, old_report, old_hash = _completed_fixture(tmp_path)
+    reopen_quality_one(
+        db, claimed["assignment_id"], claimed["stable_key"], old_hash, "fixture revision",
+        QUALITY_REOPEN_CONFIRMATION, work_root=work, at=AT,
+        supabase_reader=lambda _key: [dict(old_report)],
+    )
+    revised_claim = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
+    envelope = json.loads(
+        (work / "processed" / f"{claimed['assignment_id']}.json").read_text(encoding="utf-8")
+    )
+    envelope["report"]["full_report_md"] = envelope["report"]["full_report_md"].replace(
+        "**Fact**: 需給変化。", "**Fact**: crash recovery後の需給変化。", 1,
+    )
+    draft = tmp_path / "revision.json"
+    draft.write_text(json.dumps(envelope, ensure_ascii=False), encoding="utf-8")
+    staged = stage_one(db, claimed["assignment_id"], OWNER, draft, work_root=work, at=AT)
+    inbox = work / "inbox" / f"{claimed['assignment_id']}.json"
+    return db, work, revised_claim, paths, inbox, old_report, old_hash, staged["payload_hash"]
 
 
 def test_worker_happy_path_upserts_syncs_completes_and_processes(tmp_path: Path):
@@ -281,6 +317,172 @@ def test_quality_revision_rejects_active_lease_and_attempt_limit(tmp_path: Path,
             db, claimed["assignment_id"], claimed["stable_key"], original["payload_hash"], "reason",
             QUALITY_REOPEN_CONFIRMATION, work_root=work, at=AT, supabase_reader=lambda _key: [report],
         )
+
+
+def test_quality_revision_crash_before_archive_leaves_success_unchanged(tmp_path: Path, monkeypatch):
+    db, work, claimed, _paths, report, old_hash = _completed_fixture(tmp_path)
+    monkeypatch.setattr(work_bridge, "atomic_write_json", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("crash")))
+    with pytest.raises(OSError, match="crash"):
+        reopen_quality_one(
+            db, claimed["assignment_id"], claimed["stable_key"], old_hash, "reason",
+            QUALITY_REOPEN_CONFIRMATION, work_root=work, at=AT, supabase_reader=lambda _key: [report],
+        )
+    conn = connect_sector_db(db)
+    try:
+        assert get_assignment(conn, claimed["assignment_id"])["status"] == "success"
+    finally:
+        conn.close()
+    assert list((work / "revisions" / claimed["assignment_id"]).glob("*.json")) == []
+
+
+def test_quality_revision_crash_after_archive_before_reopen_removes_orphan(tmp_path: Path, monkeypatch):
+    db, work, claimed, _paths, report, old_hash = _completed_fixture(tmp_path)
+    monkeypatch.setattr(
+        work_bridge, "reopen_quality_revision",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("crash after archive")),
+    )
+    with pytest.raises(RuntimeError, match="after archive"):
+        reopen_quality_one(
+            db, claimed["assignment_id"], claimed["stable_key"], old_hash, "reason",
+            QUALITY_REOPEN_CONFIRMATION, work_root=work, at=AT, supabase_reader=lambda _key: [report],
+        )
+    assert list((work / "revisions" / claimed["assignment_id"]).glob("*.json")) == []
+    conn = connect_sector_db(db)
+    try:
+        assert get_assignment(conn, claimed["assignment_id"])["status"] == "success"
+    finally:
+        conn.close()
+
+
+def test_revision_stage_state_preserves_old_canonical_and_archive(tmp_path: Path):
+    db, work, claimed, _paths, inbox, old_report, old_hash, new_hash = _staged_revision_fixture(tmp_path)
+    conn = connect_sector_db(db)
+    try:
+        row = get_assignment(conn, claimed["assignment_id"])
+        assert row["status"] == "retry_pending"
+        assert row["last_error_type"] == "quality_revision_sync_pending"
+        assert row["attempt_count"] == 2 and row["submitted_payload_hash"] == new_hash
+        assert conn.execute("SELECT full_report_md FROM canonical_sector_reports").fetchone()[0] == old_report["full_report_md"]
+    finally:
+        conn.close()
+    assert inbox.exists()
+    archive = list((work / "revisions" / claimed["assignment_id"]).glob("*.json"))
+    assert len(archive) == 1 and json.loads(archive[0].read_text(encoding="utf-8"))["old_payload_hash"] == old_hash
+
+
+def test_revision_crash_after_remote_sync_before_local_replace_converges_idempotently(tmp_path: Path, monkeypatch):
+    db, work, claimed, paths, inbox, old_report, old_hash, new_hash = _staged_revision_fixture(tmp_path)
+    original_upsert = inbox_worker.upsert_report
+    calls = {"upsert": 0, "sync": 0, "remote_hash": None}
+
+    def crash_on_real_upsert(conn, validated):
+        calls["upsert"] += 1
+        if calls["upsert"] == 2:
+            raise RuntimeError("crash after remote sync")
+        return original_upsert(conn, validated)
+
+    def idempotent_sync(_db: Path, _dry: bool):
+        calls["sync"] += 1
+        if calls["remote_hash"] is None:
+            calls["remote_hash"] = new_hash
+        assert calls["remote_hash"] == new_hash
+        return {"canonical_sector_reports": 1}
+
+    monkeypatch.setattr(inbox_worker, "upsert_report", crash_on_real_upsert)
+    with pytest.raises(RuntimeError, match="after remote sync"):
+        process_one(paths, inbox, sync_func=idempotent_sync)
+    conn = connect_sector_db(db)
+    try:
+        assert conn.execute("SELECT full_report_md FROM canonical_sector_reports").fetchone()[0] == old_report["full_report_md"]
+        row = get_assignment(conn, claimed["assignment_id"])
+        assert row["attempt_count"] == 2 and row["status"] == "retry_pending"
+    finally:
+        conn.close()
+    assert (work / "processed" / inbox.name).exists() and inbox.exists()
+    monkeypatch.setattr(inbox_worker, "upsert_report", original_upsert)
+    result = process_one(paths, inbox, sync_func=idempotent_sync)
+    assert result["status"] == "success" and result["attempt_count"] == 2
+    assert calls["sync"] == 2
+    assert len(list((work / "revisions" / claimed["assignment_id"]).glob("*.json"))) == 1
+
+
+def test_revision_crash_after_local_replace_before_assignment_success_recovers_sync_only(tmp_path: Path, monkeypatch):
+    db, work, claimed, paths, inbox, _old_report, _old_hash, _new_hash = _staged_revision_fixture(tmp_path)
+    original_complete = inbox_worker.complete_staged_assignment
+    monkeypatch.setattr(
+        inbox_worker, "complete_staged_assignment",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("crash before assignment success")),
+    )
+    with pytest.raises(RuntimeError, match="before assignment success"):
+        process_one(paths, inbox, sync_func=lambda *_: {})
+    conn = connect_sector_db(db)
+    try:
+        row = get_assignment(conn, claimed["assignment_id"])
+        assert row["status"] == "retry_pending" and row["attempt_count"] == 2
+        assert "crash recovery" in conn.execute("SELECT full_report_md FROM canonical_sector_reports").fetchone()[0]
+    finally:
+        conn.close()
+    monkeypatch.setattr(inbox_worker, "complete_staged_assignment", original_complete)
+    assert process_one(paths, inbox, sync_func=lambda *_: {})["status"] == "success"
+
+
+def test_revision_crash_before_processed_replace_recovers_without_research_attempt(tmp_path: Path, monkeypatch):
+    db, work, claimed, paths, inbox, _old_report, _old_hash, new_hash = _staged_revision_fixture(tmp_path)
+    original_replace = inbox_worker._replace_processed
+    monkeypatch.setattr(
+        inbox_worker, "_replace_processed",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("crash before processed replace")),
+    )
+    with pytest.raises(RuntimeError, match="processed replace"):
+        process_one(paths, inbox, sync_func=lambda *_: {})
+    conn = connect_sector_db(db)
+    try:
+        row = get_assignment(conn, claimed["assignment_id"])
+        assert row["status"] == "success" and row["attempt_count"] == 2
+    finally:
+        conn.close()
+    monkeypatch.setattr(inbox_worker, "_replace_processed", original_replace)
+    result = process_one(paths, inbox, sync_func=lambda *_: (_ for _ in ()).throw(AssertionError("must not resync")))
+    assert result["status"] == "already_success"
+    assert payload_hash(json.loads(Path(result["processed_path"]).read_text(encoding="utf-8"))) == new_hash
+
+
+def test_revision_crash_after_processed_replace_before_log_leaves_no_work(tmp_path: Path, monkeypatch):
+    db, work, _claimed, paths, _inbox, _old_report, _old_hash, _new_hash = _staged_revision_fixture(tmp_path)
+    original_log = inbox_worker._append_log
+
+    def crash_on_finished(worker_paths, event, **details):
+        if event == "payload_finished":
+            raise RuntimeError("crash before finish log")
+        return original_log(worker_paths, event, **details)
+
+    monkeypatch.setattr(inbox_worker, "_append_log", crash_on_finished)
+    with pytest.raises(RuntimeError, match="finish log"):
+        run_once(paths, sync_func=lambda *_: {})
+    monkeypatch.setattr(inbox_worker, "_append_log", original_log)
+    result = run_once(paths, sync_func=lambda *_: (_ for _ in ()).throw(AssertionError("must not sync")))
+    assert result["status"] == "no_work" and result["detected"] == 0
+
+
+def test_revision_permanent_validation_failure_preserves_old_canonical(tmp_path: Path):
+    db, work, claimed, paths, old_report, old_hash = _completed_fixture(tmp_path)
+    reopen_quality_one(
+        db, claimed["assignment_id"], claimed["stable_key"], old_hash, "fixture revision",
+        QUALITY_REOPEN_CONFIRMATION, work_root=work, at=AT, supabase_reader=lambda _key: [old_report],
+    )
+    revised = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
+    envelope = json.loads((work / "processed" / f"{claimed['assignment_id']}.json").read_text(encoding="utf-8"))
+    envelope["report"]["full_report_md"] = envelope["report"]["full_report_md"].replace("**Fact**:", "Fact:")
+    draft = tmp_path / "invalid-revision.json"
+    draft.write_text(json.dumps(envelope, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(Exception, match="Fact"):
+        stage_one(db, revised["assignment_id"], OWNER, draft, work_root=work, at=AT)
+    conn = connect_sector_db(db)
+    try:
+        assert conn.execute("SELECT full_report_md FROM canonical_sector_reports").fetchone()[0] == old_report["full_report_md"]
+        assert get_assignment(conn, claimed["assignment_id"])["attempt_count"] == 2
+    finally:
+        conn.close()
 
 
 def test_legacy_sector4_partial_and_identical_quarantine_recover_without_attempt(tmp_path: Path):
