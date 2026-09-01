@@ -46,14 +46,14 @@ def _migrate(db: Path, root: Path) -> None:
 
 def _report(code: int) -> dict:
     name = sector_name(code)
-    materials = "\n\n".join(
-        f"### 材料{i}: fixture需給{i}\n"
-        "**Fact**: fixture上の需給変化を検証した。\n"
-        "**Transmission**: 日本上場企業の対象事業へ波及する。\n"
-        "**Magnitude**: 感応度を確認した。\n"
-        "**Pricing-in**: 会社計画との差を確認した。\n"
-        "**Counterevidence**: 価格反転時に仮説が崩れる。" +
-        ("\n**Estimate**: 感応度は10〜20億円。\n**Hypothesis**: 需給変化は継続する。" if i == 1 else "")
+    materials = "\n\n\n\n".join(
+        f"### 材料{i}：fixture需給{i}\n\n"
+        "**確認できた事実**\n\nfixture上の需給変化を検証した。\n\n"
+        "**日本企業への波及**\n\n日本上場企業の対象事業へ波及する。\n\n"
+        "**利益への影響**\n\n感応度を確認した。\n\n"
+        "**株価への織り込み**\n\n会社計画との差を確認した。\n\n"
+        "**反対材料・注意点**\n\n価格反転時に仮説が崩れる。" +
+        ("\n\n**試算**\n\n感応度は10〜20億円。\n\n**仮説**\n\n需給変化は継続する。" if i == 1 else "")
         for i in range(1, 4)
     )
     return {

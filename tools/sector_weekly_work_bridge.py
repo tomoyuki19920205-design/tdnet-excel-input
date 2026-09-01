@@ -419,7 +419,12 @@ def stage_one(
                     raise SectorBridgeError("staged assignment received a conflicting payload")
             window = _window(row)
             payload = assemble_payload(envelope["report"], int(row["sector_code"]), window, generated_at=timestamp)
-            validate_report(payload, expected_code=int(row["sector_code"]), expected_window=window)
+            validate_report(
+                payload,
+                expected_code=int(row["sector_code"]),
+                expected_window=window,
+                require_new_markdown_style=True,
+            )
             inbox_path = work_root / "inbox" / f"{assignment_id}.json"
             atomic_write_json(inbox_path, envelope)
             staged, changed = stage_assignment(conn, assignment_id, owner, digest, now=timestamp)

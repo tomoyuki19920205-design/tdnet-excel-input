@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from lib.sector_weekly import CANONICAL_SQLITE_SCHEMA, connect_sector_db, weekly_window
+from lib.sector_weekly import CANONICAL_SQLITE_SCHEMA, SectorValidationError, connect_sector_db, weekly_window
 from lib.sector_weekly_work import (
     claim_next,
     enqueue_assignment,
@@ -45,11 +45,13 @@ def _migrate_fixture(db: Path) -> None:
 
 def _report() -> dict:
     material = lambda number: (
-        f"### 材料{number}: 海外需給{number}\n"
-        "**Fact**: 需給変化。\n**Transmission**: 日本企業へ波及。\n"
-        "**Magnitude**: 利益感応度を試算。\n**Pricing-in**: 未織り込み。\n"
-        "**Counterevidence**: 需給反転。" +
-        ("\n**Estimate**: 10〜20億円。\n**Hypothesis**: 変化は継続。" if number == 1 else "")
+        f"### 材料{number}：海外需給{number}\n\n"
+        "**確認できた事実**\n\n需給変化。\n\n"
+        "**日本企業への波及**\n\n日本企業へ波及。\n\n"
+        "**利益への影響**\n\n利益感応度を試算。\n\n"
+        "**株価への織り込み**\n\n未織り込み。\n\n"
+        "**反対材料・注意点**\n\n需給反転。" +
+        ("\n\n**試算**\n\n10〜20億円。\n\n**仮説**\n\n変化は継続。" if number == 1 else "")
     )
     return {
         "importance": "A",
@@ -58,7 +60,7 @@ def _report() -> dict:
         "watchlist_companies": [{"code": "5713", "name": "住友金属鉱山", "direction": "mixed"}],
         "next_week_watchpoints": ["取引所在庫と現物プレミアム"],
         "missed_candidates": ["マイナー金属群は確認したが重要変動なし"],
-        "full_report_md": "# 【東証33業種週次】鉱業\n\n## 今週の要旨\n要旨。\n\n" + "\n\n".join(material(i) for i in range(1, 4)),
+        "full_report_md": "# 【東証33業種週次】鉱業\n\n## 今週の要旨\n要旨。\n\n" + "\n\n\n\n".join(material(i) for i in range(1, 4)),
         "sources": [{
             "title": "Primary market data", "url": "https://example.com/market",
             "source_name": "Exchange", "source_type": "market_data", "published_at": "2026-09-04",
@@ -298,6 +300,30 @@ def test_valid_stage_is_local_only_atomic_and_idempotent(tmp_path: Path):
     assert len(row[5]) == 64
 
 
+def test_new_stage_rejects_legacy_english_labels_before_inbox(tmp_path: Path):
+    db = tmp_path / "db.sqlite"
+    work = tmp_path / "work"
+    _enqueue(db)
+    claimed = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
+    report = _report()
+    replacements = {
+        "**確認できた事実**\n\n": "**Fact**: ",
+        "**日本企業への波及**\n\n": "**Transmission**: ",
+        "**利益への影響**\n\n": "**Magnitude**: ",
+        "**株価への織り込み**\n\n": "**Pricing-in**: ",
+        "**反対材料・注意点**\n\n": "**Counterevidence**: ",
+        "**試算**\n\n": "**Estimate**: ",
+        "**仮説**\n\n": "**Hypothesis**: ",
+    }
+    for current, legacy in replacements.items():
+        report["full_report_md"] = report["full_report_md"].replace(current, legacy)
+    draft = tmp_path / "legacy.json"
+    draft.write_text(json.dumps(_envelope(claimed, report), ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(SectorValidationError, match="standalone Japanese label paragraphs"):
+        stage_one(db, claimed["assignment_id"], OWNER, draft, work_root=work, at=AT)
+    assert not (work / "inbox" / f"{claimed['assignment_id']}.json").exists()
+
+
 def test_structurally_invalid_material_is_blocked_before_inbox_and_canonical(tmp_path: Path):
     db = tmp_path / "db.sqlite"
     work = tmp_path / "work"
@@ -305,11 +331,11 @@ def test_structurally_invalid_material_is_blocked_before_inbox_and_canonical(tmp
     claimed = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
     report = _report()
     report["full_report_md"] = report["full_report_md"].replace(
-        "**Counterevidence**: 需給反転。", "Counterevidence: 需給反転。", 1,
+        "**反対材料・注意点**", "反対材料・注意点", 1,
     )
     draft = tmp_path / "bad-structure.json"
     draft.write_text(json.dumps(_envelope(claimed, report), ensure_ascii=False), encoding="utf-8")
-    with pytest.raises(Exception, match="material 1.*Counterevidence"):
+    with pytest.raises(Exception, match="material 1.*反対材料・注意点"):
         stage_one(db, claimed["assignment_id"], OWNER, draft, work_root=work, at=AT)
     assert not (work / "inbox" / f"{claimed['assignment_id']}.json").exists()
     conn = connect_sector_db(db)
