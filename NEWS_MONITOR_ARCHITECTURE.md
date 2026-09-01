@@ -384,9 +384,11 @@ Saturday 06:00..Monday 08:00 → oldest missing current-week sector, at most one
         ↓ idempotent dedicated assignment queue only
 SQLite sector_weekly_work_assignments (ready)
         ↓ ChatGPT Scheduled Task: Sector Weekly Worker (hourly, +5 minutes; last claim Monday 08:05)
-claim one current-week item → start → 10-minute heartbeat → Web research → submit or atomic abandon
+claim one current-week item → start → 10-minute heartbeat → Web research → local validation/stage or atomic abandon
         ↓ Sector Weekly dedicated bridge
-owner/lease/sector/period/schema validation → canonical upsert → Supabase sync
+owner/lease/sector/period/schema validation → atomic local inbox handoff (`sync_pending`)
+        ↓ Windows Task Scheduler: SectorWeeklyInboxWorker (PT5M, hidden VBS, IgnoreNew)
+hash/schema/assignment validation → idempotent canonical upsert → Supabase sync → assignment success
         ↓
 SQLite canonical_sector_reports + canonical_sector_report_runs
 Supabase canonical tables → api_latest_news_stream
@@ -396,7 +398,13 @@ company-memo-app /news (company news + sector reports)
 
 The Windows scheduler never calls an LLM, Web Search, OpenAI SDK, Responses API,
 or an API key. The ChatGPT task performs research within the user's ChatGPT plan
-and uses only `tools/sector_weekly_work_bridge.py` claim/start/heartbeat/abandon/submit/fail/status operations.
+and uses only local `tools/sector_weekly_work_bridge.py`
+claim/start/heartbeat/abandon/stage/fail/status operations. The bridge never performs
+external sync. `SectorWeeklyInboxWorker` is the only Sector Weekly transport worker;
+it polls the dedicated inbox every five minutes outside the ChatGPT sandbox. This
+separation is required because Scheduled Task sandbox processes receive unusable
+`HTTP_PROXY`, `HTTPS_PROXY`, and `ALL_PROXY` values pointing to `127.0.0.1:9`;
+prompt-level instructions cannot make that sandbox perform the Supabase transport.
 The Sector Weekly queue, payload namespace, schema, lease, and canonical tables are
 separate from Company News Task01-08.
 
@@ -419,7 +427,7 @@ Claims always include the current fixed period, so previous-period retryable row
 remain visible for manual recovery but cannot pre-empt current work. The initial lease
 is 15 minutes, heartbeat renewal requires the same owner and an unexpired lease, and
 the total claim lifetime is capped at 55 minutes. The worker heartbeats every 10 minutes,
-decides at minute 45 whether a quality-preserving submit is possible, and atomically
+decides at minute 45 whether a quality-preserving stage is possible, and atomically
 abandons to retry before its 50-minute hard budget when it is not. A crashed worker's
 lease expires before the next hourly worker invocation. `status` exposes human and JSON
 summaries with deterministic completion event keys and distinct exit codes for 33/33,
@@ -428,5 +436,9 @@ in-progress, retryable, final-failure, stale, and inconsistent states without pa
 The installer records a `--not-before` value for the first Saturday 06:00 after
 installation and registers the task disabled unless `-Enable` is explicitly supplied.
 Invalid JSON, owner mismatch, lease expiry, missing Markdown, invalid sources, or a
-period mismatch is rejected before assignment completion. Same-payload resubmission
-is idempotent; conflicting payloads fail closed.
+period mismatch is rejected before handoff. Same-payload restaging is idempotent;
+conflicting payloads fail closed. `sync_pending` and `sync_error` remain
+`retry_pending` under the existing schema but are excluded from research claims.
+Transport polling never increments `attempt_count`; only invalid research payloads
+return to the research retry lane. The Windows worker alone confirms `success` after
+the external sync succeeds.

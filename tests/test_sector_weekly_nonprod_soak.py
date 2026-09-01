@@ -16,13 +16,14 @@ from lib.sector_weekly_work import (
 )
 from tools.apply_sector_weekly_work_sqlite_migration import apply_sqlite_migration
 from tools.sector_weekly_scheduler import run_scheduled
+from tools.sector_weekly_inbox_worker import WorkerPaths, process_one
 from tools.sector_weekly_work_bridge import (
     RESULT_SCHEMA,
     abandon_one,
     claim_one,
     heartbeat_one,
     start_one,
-    submit_one,
+    stage_one,
 )
 
 SAT = datetime.fromisoformat("2026-09-05T06:00:00+09:00")
@@ -147,9 +148,14 @@ def test_accelerated_51_slot_33_sector_nonproduction_soak(tmp_path: Path):
         payload = tmp_path / f"result-{code:02d}.json"
         payload.write_text(json.dumps(_envelope(claimed), ensure_ascii=False), encoding="utf-8")
         submit_at = worker_at + timedelta(minutes=45)
-        submitted = submit_one(
+        staged = stage_one(
             db, claimed["assignment_id"], OWNER, payload, work_root=work,
-            at=submit_at, sync_func=fake_sync,
+            at=submit_at,
+        )
+        assert staged["status"] == "handoff_pending"
+        submitted = process_one(
+            WorkerPaths.from_values(tmp_path, db, work),
+            work / "inbox" / f"{claimed['assignment_id']}.json", sync_func=fake_sync,
         )
         assert submitted["status"] == "success"
         completed_codes.add(code)
@@ -158,9 +164,9 @@ def test_accelerated_51_slot_33_sector_nonproduction_soak(tmp_path: Path):
         last_claimed = claimed
 
     assert last_processed is not None and last_claimed is not None
-    repeated_submit = submit_one(
-        db, last_claimed["assignment_id"], OWNER, last_processed,
-        work_root=work, at=last_completed_at, sync_func=fake_sync,
+    repeated_submit = process_one(
+        WorkerPaths.from_values(tmp_path, db, work), last_processed,
+        sync_func=fake_sync,
     )
     assert repeated_submit["status"] == "already_success"
 

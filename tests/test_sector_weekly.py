@@ -202,6 +202,7 @@ def test_sector_weekly_production_reachable_modules_have_no_openai_api_calls():
         for relative in (
             "tools/sector_weekly_scheduler.py",
             "tools/sector_weekly_work_bridge.py",
+            "tools/sector_weekly_inbox_worker.py",
             "lib/sector_weekly_work.py",
         )
     )
@@ -218,12 +219,14 @@ def test_chatgpt_worker_prompt_has_transport_research_and_schema_contracts():
         "重要材料は", "3〜5件", "3,000〜4,500文字", "missed_candidates",
         "sector_weekly_work_result_v1", "company_ir | government | regulator",
         "heartbeat --assignment-id", "10分ごと", "hard time budgetは50分", "45分時点",
-        "abandon --assignment-id", "atomicにretry_pending", "調査品質を落として無理にsubmit",
+        "abandon --assignment-id", "atomicにretry_pending", "調査品質を落として無理にstage",
+        "stage --assignment-id", "handoff_pending", "sync_pending", "SectorWeeklyInboxWorker",
+        "built-in Web Search", "Responses API", "OPENAI_API_KEY",
         "1実行で複数sectorを処理してはいけません", "月曜08:05 JST",
         "owner、sector、period", "隔離SQLite DB",
     ):
         assert term in prompt
-    for forbidden in ("APIキー", "Responses API", "API料金", "max_tool_calls", "API timeout", "token料金"):
+    for forbidden in ("API料金", "max_tool_calls", "API timeout", "token料金"):
         assert forbidden not in prompt
 
 

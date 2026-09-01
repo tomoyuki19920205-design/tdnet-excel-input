@@ -7,7 +7,7 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -17,7 +17,6 @@ from lib.sector_weekly import (
     connect_sector_db,
     now_jst,
     sector_name,
-    upsert_report,
     validate_report,
     weekly_window,
 )
@@ -26,19 +25,17 @@ from lib.sector_weekly_work import (
     SectorWorkError,
     abandon_assignment,
     claim_next,
-    complete_assignment,
     completion_status,
     fail_assignment,
     get_assignment,
     heartbeat_assignment,
     mark_running,
     payload_hash,
-    prepare_submission,
     recover_expired_leases,
+    stage_assignment,
 )
 from tools.company_news_atomic import atomic_write_json, replace_with_retry
 from tools.sector_weekly_scheduler import assemble_payload, build_prompt, in_worker_window
-from tools.sync_sector_weekly import sync as sync_sector_weekly
 
 RESULT_SCHEMA = "sector_weekly_work_result_v1"
 DEFAULT_OWNER = "sector-weekly-worker"
@@ -87,7 +84,7 @@ def _assignment_contract(row: dict[str, Any], work_root: Path) -> dict[str, Any]
         "claimed_at": row["claimed_at"],
         "lease_expires_at": row["lease_expires_at"],
         "research_prompt": build_prompt(int(row["sector_code"]), _window(row)),
-        "submit_path": str((work_root / "inbox" / f"{assignment_id}.json").resolve()),
+        "submit_path": str((work_root / "drafts" / f"{assignment_id}.json").resolve()),
         "result_schema_version": RESULT_SCHEMA,
     }
 
@@ -199,10 +196,11 @@ def _validate_ownership(envelope: dict[str, Any], row: dict[str, Any], assignmen
     for field, expected_value in expected.items():
         if envelope.get(field) != expected_value:
             raise SectorBridgeError(f"submitted {field} does not match the claimed assignment")
-    if row["claim_owner"] != owner and row["status"] != "success":
+    transport_waiting = row["status"] == "retry_pending" and bool(row["submitted_payload_hash"])
+    if row["claim_owner"] != owner and row["status"] != "success" and not transport_waiting:
         raise SectorBridgeError("claim owner does not own this assignment")
-    if row["status"] not in {"claimed", "running", "success"}:
-        raise SectorBridgeError("assignment is not active or completed")
+    if row["status"] not in {"claimed", "running", "success"} and not transport_waiting:
+        raise SectorBridgeError("assignment is not active, staged, or completed")
 
 
 def _quarantine(work_root: Path, assignment_id: str, source: Path) -> None:
@@ -217,7 +215,7 @@ def _quarantine(work_root: Path, assignment_id: str, source: Path) -> None:
     replace_with_retry(temporary, target)
 
 
-def submit_one(
+def stage_one(
     db_path: Path,
     assignment_id: str,
     owner: str,
@@ -225,8 +223,6 @@ def submit_one(
     *,
     work_root: Path = DEFAULT_WORK_ROOT,
     at: datetime | None = None,
-    sync_func: Callable[[Path, bool], dict[str, int]] = sync_sector_weekly,
-    dry_run_sync: bool = False,
 ) -> dict[str, Any]:
     timestamp = at or now_jst()
     conn = connect_sector_db(db_path)
@@ -242,22 +238,20 @@ def submit_one(
                 if row["submitted_payload_hash"] != digest:
                     raise SectorBridgeError("completed assignment received a conflicting payload")
                 return {"status": "already_success", "assignment_id": assignment_id, "payload_hash": digest}
+            if row["last_error_type"] in {"sync_pending", "sync_error"}:
+                if row["submitted_payload_hash"] != digest:
+                    raise SectorBridgeError("staged assignment received a conflicting payload")
             window = _window(row)
             payload = assemble_payload(envelope["report"], int(row["sector_code"]), window, generated_at=timestamp)
-            validated = validate_report(payload, expected_code=int(row["sector_code"]), expected_window=window)
+            validate_report(payload, expected_code=int(row["sector_code"]), expected_window=window)
             inbox_path = work_root / "inbox" / f"{assignment_id}.json"
             atomic_write_json(inbox_path, envelope)
-            prepare_submission(conn, assignment_id, owner, digest, now=timestamp)
-            upsert_report(conn, validated)
-            sync_result = sync_func(db_path, dry_run_sync)
-            completed = complete_assignment(conn, assignment_id, owner, digest, now=timestamp)
-            processed = work_root / "processed" / f"{assignment_id}.json"
-            processed.parent.mkdir(parents=True, exist_ok=True)
-            replace_with_retry(inbox_path, processed)
+            staged, changed = stage_assignment(conn, assignment_id, owner, digest, now=timestamp)
             (work_root / "active" / f"{assignment_id}.json").unlink(missing_ok=True)
             return {
-                "status": completed["status"], "assignment_id": assignment_id,
-                "payload_hash": digest, "sync_result": sync_result, "processed_path": str(processed.resolve()),
+                "status": "handoff_pending" if changed else "already_staged",
+                "assignment_status": staged["status"], "assignment_id": assignment_id,
+                "payload_hash": digest, "inbox_path": str(inbox_path.resolve()),
             }
         except Exception as exc:
             if isinstance(exc, SectorBridgeError) or row["status"] != "success":
@@ -330,11 +324,10 @@ def main() -> int:
     abandon_parser.add_argument("--assignment-id", required=True)
     abandon_parser.add_argument("--owner", default=DEFAULT_OWNER)
     abandon_parser.add_argument("--reason", default="worker hard time budget reached")
-    submit_parser = subparsers.add_parser("submit")
-    submit_parser.add_argument("--assignment-id", required=True)
-    submit_parser.add_argument("--owner", default=DEFAULT_OWNER)
-    submit_parser.add_argument("--payload", type=Path, required=True)
-    submit_parser.add_argument("--dry-run-sync", action="store_true")
+    stage_parser = subparsers.add_parser("stage")
+    stage_parser.add_argument("--assignment-id", required=True)
+    stage_parser.add_argument("--owner", default=DEFAULT_OWNER)
+    stage_parser.add_argument("--payload", type=Path, required=True)
     fail_parser = subparsers.add_parser("fail")
     fail_parser.add_argument("--assignment-id", required=True)
     fail_parser.add_argument("--owner", default=DEFAULT_OWNER)
@@ -356,10 +349,10 @@ def main() -> int:
                 args.db, args.assignment_id, args.owner, at=at,
                 reason=args.reason, work_root=args.work_root,
             )
-        elif args.command == "submit":
-            result = submit_one(
+        elif args.command == "stage":
+            result = stage_one(
                 args.db, args.assignment_id, args.owner, args.payload,
-                work_root=args.work_root, dry_run_sync=args.dry_run_sync, at=at,
+                work_root=args.work_root, at=at,
             )
         elif args.command == "fail":
             result = fail_one(args.db, args.assignment_id, args.owner, args.message, at=at)

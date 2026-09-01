@@ -19,8 +19,8 @@ from tools.sector_weekly_work_bridge import (
     abandon_one,
     claim_one,
     heartbeat_one,
+    stage_one,
     start_one,
-    submit_one,
 )
 from tools.apply_sector_weekly_work_sqlite_migration import apply_sqlite_migration
 
@@ -135,9 +135,9 @@ def test_abandon_rejects_late_bridge_submit_and_next_hour_reclaims(tmp_path: Pat
     )
     assert released["status"] == "retry_pending"
     with pytest.raises(SectorBridgeError, match="does not own"):
-        submit_one(
+        stage_one(
             db, claimed["assignment_id"], OWNER, draft, work_root=work,
-            at=AT + timedelta(minutes=50), sync_func=lambda *_: {},
+            at=AT + timedelta(minutes=50),
         )
     reclaimed = claim_one(db, OWNER, work_root=work, at=AT + timedelta(hours=1))["assignment"]
     assert reclaimed["assignment_id"] == claimed["assignment_id"]
@@ -147,7 +147,7 @@ def test_abandon_rejects_late_bridge_submit_and_next_hour_reclaims(tmp_path: Pat
     conn.close()
 
 
-def test_valid_submit_upserts_canonical_syncs_and_is_idempotent(tmp_path: Path):
+def test_valid_stage_is_local_only_atomic_and_idempotent(tmp_path: Path):
     db = tmp_path / "db.sqlite"
     work = tmp_path / "work"
     _enqueue(db)
@@ -155,27 +155,41 @@ def test_valid_submit_upserts_canonical_syncs_and_is_idempotent(tmp_path: Path):
     start_one(db, claimed["assignment_id"], OWNER, at=AT)
     draft = tmp_path / "result.json"
     draft.write_text(json.dumps(_envelope(claimed), ensure_ascii=False), encoding="utf-8")
-    sync_calls: list[tuple[Path, bool]] = []
-
-    def fake_sync(path: Path, dry_run: bool) -> dict[str, int]:
-        sync_calls.append((path, dry_run))
-        return {"canonical_sector_reports": 1, "canonical_sector_report_runs": 33}
-
-    first = submit_one(db, claimed["assignment_id"], OWNER, draft, work_root=work, at=AT, sync_func=fake_sync)
-    second = submit_one(db, claimed["assignment_id"], OWNER, draft, work_root=work, at=AT, sync_func=fake_sync)
-    assert first["status"] == "success"
-    assert second["status"] == "already_success"
-    assert len(sync_calls) == 1
+    first = stage_one(db, claimed["assignment_id"], OWNER, draft, work_root=work, at=AT)
+    second = stage_one(db, claimed["assignment_id"], OWNER, draft, work_root=work, at=AT)
+    assert first["status"] == "handoff_pending"
+    assert second["status"] == "already_staged"
+    assert (work / "inbox" / f"{claimed['assignment_id']}.json").exists()
     conn = sqlite3.connect(db)
-    assert conn.execute("SELECT count(*) FROM canonical_sector_reports").fetchone()[0] == 1
+    assert conn.execute("SELECT count(*) FROM canonical_sector_reports").fetchone()[0] == 0
     row = conn.execute(
-        "SELECT status,submitted_payload_hash FROM sector_weekly_work_assignments WHERE assignment_id=?",
+        "SELECT status,attempt_count,claim_owner,lease_expires_at,last_error_type,submitted_payload_hash "
+        "FROM sector_weekly_work_assignments WHERE assignment_id=?",
         (claimed["assignment_id"],),
     ).fetchone()
-    assert row[0] == "success" and len(row[1]) == 64
+    assert row[:5] == ("retry_pending", 1, None, None, "sync_pending")
+    assert len(row[5]) == 64
 
 
-def test_sync_failure_keeps_assignment_retryable_and_never_marks_it_success(tmp_path: Path):
+def test_restage_conflicting_payload_is_rejected_without_overwriting_inbox(tmp_path: Path):
+    db = tmp_path / "db.sqlite"
+    work = tmp_path / "work"
+    _enqueue(db)
+    claimed = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
+    draft = tmp_path / "result.json"
+    draft.write_text(json.dumps(_envelope(claimed), ensure_ascii=False), encoding="utf-8")
+    stage_one(db, claimed["assignment_id"], OWNER, draft, work_root=work, at=AT)
+    inbox = work / "inbox" / f"{claimed['assignment_id']}.json"
+    original = inbox.read_bytes()
+    changed = _envelope(claimed)
+    changed["report"]["direction"] = "positive"
+    draft.write_text(json.dumps(changed, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(SectorBridgeError, match="conflicting payload"):
+        stage_one(db, claimed["assignment_id"], OWNER, draft, work_root=work, at=AT)
+    assert inbox.read_bytes() == original
+
+
+def test_staged_transport_work_is_not_reclaimed(tmp_path: Path):
     db = tmp_path / "db.sqlite"
     work = tmp_path / "work"
     _enqueue(db)
@@ -183,26 +197,19 @@ def test_sync_failure_keeps_assignment_retryable_and_never_marks_it_success(tmp_
     draft = tmp_path / "result.json"
     draft.write_text(json.dumps(_envelope(claimed), ensure_ascii=False), encoding="utf-8")
 
-    def failing_sync(path: Path, _dry_run: bool) -> dict[str, int]:
-        probe = sqlite3.connect(path)
-        status = probe.execute(
-            "SELECT status FROM canonical_sector_report_runs WHERE run_id=?", (claimed["stable_key"],),
-        ).fetchone()[0]
-        probe.close()
-        assert status == "success"
-        raise RuntimeError("fixture sync failure")
-
-    with pytest.raises(RuntimeError, match="fixture sync failure"):
-        submit_one(db, claimed["assignment_id"], OWNER, draft, work_root=work, at=AT, sync_func=failing_sync)
+    stage_one(db, claimed["assignment_id"], OWNER, draft, work_root=work, at=AT)
     conn = connect_sector_db(db)
     try:
         assignment = get_assignment(conn, claimed["assignment_id"])
-        run = conn.execute(
-            "SELECT status FROM canonical_sector_report_runs WHERE run_id=?", (claimed["stable_key"],),
-        ).fetchone()
         assert assignment["status"] == "retry_pending"
-        assert run["status"] == "retry_pending"
-        assert conn.execute("SELECT count(*) FROM canonical_sector_reports").fetchone()[0] == 1
+        assert assignment["last_error_type"] == "sync_pending"
+        assert claim_next(conn, OWNER, now=AT + timedelta(hours=1)) is None
+        conn.execute(
+            "UPDATE sector_weekly_work_assignments SET last_error_type='sync_error' WHERE assignment_id=?",
+            (claimed["assignment_id"],),
+        )
+        conn.commit()
+        assert claim_next(conn, OWNER, now=AT + timedelta(hours=2)) is None
     finally:
         conn.close()
 
@@ -215,7 +222,7 @@ def test_malformed_payload_is_quarantined_and_retried(tmp_path: Path):
     draft = tmp_path / "bad.json"
     draft.write_text("{not-json", encoding="utf-8")
     with pytest.raises(SectorBridgeError, match="valid UTF-8 JSON"):
-        submit_one(db, claimed["assignment_id"], OWNER, draft, work_root=work, at=AT, sync_func=lambda *_: {})
+        stage_one(db, claimed["assignment_id"], OWNER, draft, work_root=work, at=AT)
     conn = connect_sector_db(db)
     try:
         row = get_assignment(conn, claimed["assignment_id"])
@@ -235,7 +242,7 @@ def test_failed_sector_does_not_block_a_fresh_sector(tmp_path: Path):
     bad = tmp_path / "bad.json"
     bad.write_text("{not-json", encoding="utf-8")
     with pytest.raises(SectorBridgeError):
-        submit_one(db, first["assignment_id"], OWNER, bad, work_root=work, at=AT, sync_func=lambda *_: {})
+        stage_one(db, first["assignment_id"], OWNER, bad, work_root=work, at=AT)
     _enqueue(db, 3)
     second = claim_one(db, OWNER, work_root=work, at=AT + timedelta(hours=1))["assignment"]
     assert second["sector_code"] == 3
@@ -257,7 +264,7 @@ def test_submit_rejects_owner_sector_or_period_mismatch(tmp_path: Path, field: s
     draft = tmp_path / "wrong.json"
     draft.write_text(json.dumps(envelope, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(SectorBridgeError, match="does not match"):
-        submit_one(db, claimed["assignment_id"], OWNER, draft, work_root=work, at=AT, sync_func=lambda *_: {})
+        stage_one(db, claimed["assignment_id"], OWNER, draft, work_root=work, at=AT)
 
 
 def test_sunday_retry_enqueues_one_missing_or_failed_sector(tmp_path: Path):

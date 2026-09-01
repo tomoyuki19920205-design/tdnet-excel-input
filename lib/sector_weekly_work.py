@@ -29,6 +29,7 @@ ACTIVE_STATUSES = frozenset({"claimed", "running"})
 MAX_ATTEMPTS = 3
 DEFAULT_LEASE_SECONDS = 15 * 60
 MAX_LEASE_LIFETIME_SECONDS = 55 * 60
+TRANSPORT_ERROR_TYPES = frozenset({"sync_pending", "sync_error"})
 _OWNER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
@@ -131,7 +132,11 @@ def enqueue_assignment(
                 ),
             )
             created = True
-        elif existing["status"] in {"pending", "retry_pending"} and available <= timestamp:
+        elif (
+            existing["status"] in {"pending", "retry_pending"}
+            and existing["last_error_type"] not in TRANSPORT_ERROR_TYPES
+            and available <= timestamp
+        ):
             conn.execute(
                 "UPDATE sector_weekly_work_assignments SET status='ready',available_at=?,updated_at=? "
                 "WHERE assignment_id=?",
@@ -219,7 +224,9 @@ def claim_next(
     actionable = conn.execute(
         "SELECT 1 FROM sector_weekly_work_assignments WHERE "
         "((status='ready' AND attempt_count<? AND available_at<=?) OR "
-        "(status IN ('pending','retry_pending') AND available_at<=?) OR "
+        "(status IN ('pending','retry_pending') AND available_at<=? "
+        "AND submitted_payload_hash IS NULL "
+        "AND (last_error_type IS NULL OR last_error_type NOT IN ('sync_pending','sync_error'))) OR "
         "(status IN ('claimed','running') AND lease_expires_at IS NOT NULL AND lease_expires_at<=?))"
         f"{period_filter} LIMIT 1",
         (MAX_ATTEMPTS, _utc_text(timestamp), _utc_text(timestamp), _utc_text(timestamp), *period_values),
@@ -241,7 +248,10 @@ def claim_next(
             return None
         conn.execute(
             "UPDATE sector_weekly_work_assignments SET status='ready',updated_at=? "
-            f"WHERE status IN ('pending','retry_pending') AND available_at<=?{period_filter}",
+            "WHERE status IN ('pending','retry_pending') AND available_at<=? "
+            "AND submitted_payload_hash IS NULL "
+            "AND (last_error_type IS NULL OR last_error_type NOT IN ('sync_pending','sync_error'))"
+            f"{period_filter}",
             (_utc_text(timestamp), _utc_text(timestamp), *period_values),
         )
         selected = conn.execute(
@@ -444,18 +454,19 @@ def complete_assignment(
         return get_assignment(conn, assignment_id) or row
 
 
-def prepare_submission(
+def stage_assignment(
     conn: sqlite3.Connection,
     assignment_id: str,
     owner: str,
     submitted_hash: str,
     *,
     now: datetime | None = None,
-) -> dict[str, Any]:
-    """Record a validated payload and expose canonical success for the sync phase.
+) -> tuple[dict[str, Any], bool]:
+    """Atomically hand a validated research payload to the local transport worker.
 
-    The assignment remains leased and active until the external sync succeeds.
-    A sync error can therefore transition it normally to retry_pending.
+    This transition deliberately does not touch canonical report data and does
+    not increment the research attempt count.  The returned boolean is false
+    for an idempotent restage of the same payload.
     """
     owner = _validate_owner(owner)
     if not re.fullmatch(r"[0-9a-f]{64}", submitted_hash):
@@ -465,16 +476,155 @@ def prepare_submission(
         row = get_assignment(conn, assignment_id)
         if row is None:
             raise SectorWorkError("assignment not found")
+        if row["status"] == "success" or row["last_error_type"] in TRANSPORT_ERROR_TYPES:
+            if row["submitted_payload_hash"] != submitted_hash:
+                raise SectorWorkError("staged assignment received a conflicting payload")
+            return row, False
         if row["claim_owner"] != owner or row["status"] not in ACTIVE_STATUSES:
-            raise SectorWorkError("submit owner does not match active claim")
+            raise SectorWorkError("stage owner does not match active claim")
         if _parse(row["lease_expires_at"]) <= timestamp:
-            raise SectorWorkError("assignment lease expired before submit")
+            raise SectorWorkError("assignment lease expired before stage")
+        cursor = conn.execute(
+            "UPDATE sector_weekly_work_assignments SET status='retry_pending',available_at=?,"
+            "claim_owner=NULL,claimed_at=NULL,lease_expires_at=NULL,submitted_payload_hash=?,"
+            "last_error_type='sync_pending',last_error_message='validated payload staged for local sync',"
+            "updated_at=? WHERE assignment_id=? AND claim_owner=? "
+            "AND status IN ('claimed','running') AND lease_expires_at>?",
+            (
+                _utc_text(timestamp), submitted_hash, _utc_text(timestamp), assignment_id,
+                owner, _utc_text(timestamp),
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise SectorWorkError("stage lost an atomic ownership race")
+        _set_run_state(
+            conn, row["stable_key"], "retry_pending", timestamp,
+            attempt_count=int(row["attempt_count"]), error_type="sync_pending",
+            error_message="validated payload staged for local sync",
+        )
+        return get_assignment(conn, assignment_id) or row, True
+
+
+def prepare_staged_sync(
+    conn: sqlite3.Connection,
+    assignment_id: str,
+    submitted_hash: str,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Expose an idempotently-upserted local report to the outbound sync batch."""
+    timestamp = _now(now)
+    with _immediate(conn):
+        row = get_assignment(conn, assignment_id)
+        if row is None:
+            raise SectorWorkError("assignment not found")
+        if row["status"] == "success" and row["submitted_payload_hash"] == submitted_hash:
+            return row
+        if row["status"] != "retry_pending" or not row["submitted_payload_hash"]:
+            raise SectorWorkError("assignment is not waiting for transport sync")
+        if row["submitted_payload_hash"] != submitted_hash:
+            raise SectorWorkError("staged payload hash does not match assignment")
+        _set_run_state(
+            conn, row["stable_key"], "success", timestamp,
+            attempt_count=int(row["attempt_count"]),
+        )
+        return row
+
+
+def mark_staged_sync_error(
+    conn: sqlite3.Connection,
+    assignment_id: str,
+    submitted_hash: str,
+    error: Exception,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Record a transport-only retry without consuming a research attempt."""
+    timestamp = _now(now)
+    message = str(error)[:2000]
+    with _immediate(conn):
+        row = get_assignment(conn, assignment_id)
+        if row is None:
+            raise SectorWorkError("assignment not found")
+        if row["status"] != "retry_pending" or not row["submitted_payload_hash"]:
+            raise SectorWorkError("assignment is not waiting for transport sync")
+        if row["submitted_payload_hash"] != submitted_hash:
+            raise SectorWorkError("staged payload hash does not match assignment")
         conn.execute(
-            "UPDATE sector_weekly_work_assignments SET submitted_payload_hash=?,updated_at=? WHERE assignment_id=?",
-            (submitted_hash, _utc_text(timestamp), assignment_id),
+            "UPDATE sector_weekly_work_assignments SET last_error_type='sync_error',"
+            "last_error_message=?,updated_at=? WHERE assignment_id=?",
+            (message, _utc_text(timestamp), assignment_id),
         )
         _set_run_state(
-            conn, row["stable_key"], "success", timestamp, attempt_count=int(row["attempt_count"]),
+            conn, row["stable_key"], "retry_pending", timestamp,
+            attempt_count=int(row["attempt_count"]), error_type="sync_error", error_message=message,
+        )
+        return get_assignment(conn, assignment_id) or row
+
+
+def reject_staged_payload(
+    conn: sqlite3.Connection,
+    assignment_id: str,
+    error: Exception,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Return invalid staged research to the research retry lane, or fail at 3/3."""
+    timestamp = _now(now)
+    message = str(error)[:2000]
+    error_type = f"validation_{type(error).__name__}"
+    with _immediate(conn):
+        row = get_assignment(conn, assignment_id)
+        if row is None:
+            raise SectorWorkError("assignment not found")
+        if row["status"] != "retry_pending" or not row["submitted_payload_hash"]:
+            raise SectorWorkError("assignment is not waiting for staged validation")
+        terminal = int(row["attempt_count"]) >= MAX_ATTEMPTS
+        status = "failed" if terminal else "retry_pending"
+        conn.execute(
+            "UPDATE sector_weekly_work_assignments SET status=?,available_at=?,submitted_payload_hash=NULL,"
+            "last_error_type=?,last_error_message=?,updated_at=? WHERE assignment_id=?",
+            (status, _utc_text(timestamp), error_type, message, _utc_text(timestamp), assignment_id),
+        )
+        _set_run_state(
+            conn, row["stable_key"], status, timestamp,
+            attempt_count=int(row["attempt_count"]), error_type=error_type, error_message=message,
+        )
+        return get_assignment(conn, assignment_id) or row
+
+
+def complete_staged_assignment(
+    conn: sqlite3.Connection,
+    assignment_id: str,
+    submitted_hash: str,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Complete a transport-owned handoff after its external sync succeeds."""
+    if not re.fullmatch(r"[0-9a-f]{64}", submitted_hash):
+        raise SectorWorkError("submitted payload hash must be SHA-256 hex")
+    timestamp = _now(now)
+    with _immediate(conn):
+        row = get_assignment(conn, assignment_id)
+        if row is None:
+            raise SectorWorkError("assignment not found")
+        if row["status"] == "success":
+            if row["submitted_payload_hash"] != submitted_hash:
+                raise SectorWorkError("completed assignment received a conflicting payload")
+            return row
+        if row["status"] != "retry_pending" or not row["submitted_payload_hash"]:
+            raise SectorWorkError("assignment is not waiting for transport sync")
+        if row["submitted_payload_hash"] != submitted_hash:
+            raise SectorWorkError("staged payload hash does not match assignment")
+        conn.execute(
+            "UPDATE sector_weekly_work_assignments SET status='success',completed_at=?,claim_owner=NULL,"
+            "claimed_at=NULL,lease_expires_at=NULL,last_error_type=NULL,last_error_message=NULL,updated_at=? "
+            "WHERE assignment_id=?",
+            (_utc_text(timestamp), _utc_text(timestamp), assignment_id),
+        )
+        _set_run_state(
+            conn, row["stable_key"], "success", timestamp,
+            attempt_count=int(row["attempt_count"]),
         )
         return get_assignment(conn, assignment_id) or row
 
@@ -496,6 +646,8 @@ def enqueue_retry_candidate(
         if row["status"] == "success":
             continue
         if row["status"] in ACTIVE_STATUSES:
+            continue
+        if row["last_error_type"] in TRANSPORT_ERROR_TYPES or row["submitted_payload_hash"]:
             continue
         if int(row["attempt_count"]) >= MAX_ATTEMPTS:
             continue
