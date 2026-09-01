@@ -9,10 +9,12 @@ from tools.company_news_batch_benchmark import (
     AUDIT_SCHEMA,
     BENCHMARK_SCHEMA,
     BenchmarkError,
+    _busy_skip_incidents,
     _quality_metrics,
     _summary,
     activate_run,
     audit_integration_fixture,
+    audit_run,
     benchmark_status,
     finalize_company,
     prepare_benchmark,
@@ -131,6 +133,20 @@ def _write_json(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
 
 
+def _complete_snapshot(tmp_path: Path, task_id: str, snapshot: dict, started: datetime) -> datetime:
+    cursor = started
+    for assignment in snapshot["assignments"]:
+        research_start(tmp_path, task_id, snapshot["run_token"], assignment["assignment_id"], now=cursor)
+        cursor += timedelta(seconds=10)
+        research_finish(tmp_path, task_id, snapshot["run_token"], assignment["assignment_id"], now=cursor)
+        cursor += timedelta(seconds=1)
+        _write_json(Path(assignment["temp_path"]), _payload(assignment))
+        finalize_company(tmp_path, task_id, snapshot["run_token"], assignment["assignment_id"], now=cursor)
+        cursor += timedelta(seconds=1)
+    release_task(tmp_path, task_id, snapshot["run_token"], now=cursor)
+    return cursor
+
+
 def test_fixed_deterministic_stratified_cohort_and_reference(tmp_path):
     master = tmp_path / "master.db"
     news = tmp_path / "news.db"
@@ -223,6 +239,74 @@ def test_company_and_task_timing_telemetry_and_atomic_isolated_save(tmp_path):
     assert released["first_company_started_at"]
     assert released["last_company_finished_at"]
     assert released["research_elapsed_sum"] == 90
+
+
+def test_completed_run_auto_finalizes_once_all_snapshots_are_released(tmp_path):
+    cohort, _, _ = _prepare(tmp_path, count=8, reference_size=8)
+    run = prepare_run(tmp_path, cohort["benchmark_id"], 4, now=NOW)
+    activate_run(tmp_path, cohort["benchmark_id"], run["run_name"], now=NOW)
+    expected_completed_at = None
+    for index in range(1, 9):
+        task_id = f"task{index:02d}"
+        snapshot = snapshot_task(tmp_path, task_id, now=NOW + timedelta(minutes=index))
+        expected_completed_at = _complete_snapshot(
+            tmp_path, task_id, snapshot, NOW + timedelta(minutes=index, seconds=1)
+        )
+
+    status = benchmark_status(tmp_path, cohort["benchmark_id"], run["run_name"])
+    manifest_path = (
+        tmp_path / "data" / "news_work" / "batch_benchmark" / cohort["benchmark_id"]
+        / "runs" / "batch04" / "manifest.json"
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert status["status"] == "completed"
+    assert status["completed"] == 8
+    assert status["pending"] == 0
+    assert manifest["status"] == "completed"
+    assert manifest["completed_at"] == expected_completed_at.isoformat(timespec="milliseconds")
+    assert not (tmp_path / "data" / "news_work" / "batch_benchmark" / "active.json").exists()
+
+
+def test_completed_at_and_throughput_do_not_depend_on_late_audit_capture(tmp_path):
+    cohort, _, _ = _prepare(tmp_path, count=8, reference_size=8)
+    run = prepare_run(tmp_path, cohort["benchmark_id"], 4, now=NOW)
+    activate_run(tmp_path, cohort["benchmark_id"], run["run_name"], now=NOW)
+    for index in range(1, 9):
+        task_id = f"task{index:02d}"
+        snapshot = snapshot_task(tmp_path, task_id, now=NOW + timedelta(minutes=index))
+        _complete_snapshot(tmp_path, task_id, snapshot, NOW + timedelta(minutes=index, seconds=1))
+
+    first = audit_run(tmp_path, cohort["benchmark_id"], run["run_name"], now=NOW + timedelta(hours=2))
+    second = audit_run(tmp_path, cohort["benchmark_id"], run["run_name"], now=NOW + timedelta(hours=9))
+    assert first["captured_at"] != second["captured_at"]
+    assert first["status"]["completed_at"] == second["status"]["completed_at"]
+    assert first["throughput"] == second["throughput"]
+
+
+def test_busy_skip_recovered_for_same_guard_is_classified_as_recoverable(tmp_path):
+    cohort, _, _ = _prepare(tmp_path, count=8, reference_size=8)
+    run = prepare_run(tmp_path, cohort["benchmark_id"], 4, now=NOW)
+    activate_run(tmp_path, cohort["benchmark_id"], run["run_name"], now=NOW)
+    first = snapshot_task(tmp_path, "task01", now=NOW)
+    assignment = first["assignments"][0]
+    research_start(tmp_path, "task01", first["run_token"], assignment["assignment_id"], now=NOW + timedelta(seconds=1))
+    research_finish(tmp_path, "task01", first["run_token"], assignment["assignment_id"], now=NOW + timedelta(seconds=10))
+
+    assert snapshot_task(tmp_path, "task01", now=NOW + timedelta(hours=1))["status"] == "busy"
+    snapshot_task(tmp_path, "task01", now=NOW + timedelta(hours=2, seconds=1))
+    run_dir = (
+        tmp_path / "data" / "news_work" / "batch_benchmark" / cohort["benchmark_id"]
+        / "runs" / "batch04"
+    )
+    incidents = _busy_skip_incidents(run_dir, [])
+    assert len(incidents) == 1
+    assert incidents[0]["run_id"] == first["run_id"]
+    assert incidents[0]["run_token"] == first["run_token"]
+    assert incidents[0]["guard_age_seconds"] == 3600
+    assert incidents[0]["stale_before"] is False
+    assert incidents[0]["stale_after"] is True
+    assert incidents[0]["same_incident_as_stale_guard_recovery"] is True
+    assert incidents[0]["classification"] == "recoverable_stale_guard_skip"
 
 
 def test_release_creates_short_history_parent_and_missing_source_stays_fail_closed(tmp_path):

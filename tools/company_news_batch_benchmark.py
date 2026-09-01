@@ -450,6 +450,8 @@ def deactivate_run(root: Path, *, now: datetime | None = None) -> dict[str, Any]
     directory, manifest = _validate_manifest(root, control)
     status = benchmark_status(root, control["benchmark_id"], control["run_name"])
     manifest["status"] = "completed" if status["pending"] == 0 else "paused"
+    if manifest["status"] == "completed" and not manifest.get("completed_at"):
+        manifest["completed_at"] = status.get("completed_at") or _iso(now)
     manifest["deactivated_at"] = _iso(now)
     atomic_write_json(directory / "manifest.json", manifest)
     active.unlink()
@@ -504,6 +506,62 @@ def _task_event(task_directory: Path, event: str, now: datetime, **details: Any)
     _append_jsonl(task_directory / "events.jsonl", {"at": _iso(now), "event": event, **details})
 
 
+def _run_counts(run_directory: Path) -> tuple[dict[str, int], int]:
+    counts: dict[str, int] = defaultdict(int)
+    total = 0
+    for task_index in range(1, TASK_COUNT + 1):
+        queue = _task_queue(run_directory, f"task{task_index:02d}")
+        for assignment in queue["assignments"]:
+            counts[str(assignment["status"])] += 1
+            total += 1
+    return counts, total
+
+
+def _actual_completed_at(run_directory: Path) -> str | None:
+    """Return the last release containing real company work, never an idle poll."""
+    productive = [
+        record for record in _telemetry(run_directory, "runs.jsonl")
+        if int(record.get("snapshot_company_count", 0)) > 0 and record.get("task_finished_at")
+    ]
+    if not productive:
+        return None
+    return max(productive, key=lambda record: datetime.fromisoformat(record["task_finished_at"]))["task_finished_at"]
+
+
+def _finalize_run_if_complete(
+    root: Path,
+    run_directory: Path,
+    manifest: dict[str, Any],
+    *,
+    completed_at_hint: datetime | None = None,
+) -> dict[str, Any]:
+    """Persist the terminal run state once all queues and task guards are settled."""
+    counts, _ = _run_counts(run_directory)
+    active_guards = list((run_directory / "tasks").glob("task??/active.json"))
+    if counts["pending"] or active_guards:
+        return manifest
+
+    completed_at = manifest.get("completed_at")
+    if not completed_at:
+        completed_at = _iso(completed_at_hint) if completed_at_hint is not None else _actual_completed_at(run_directory)
+    if not completed_at:
+        raise BenchmarkError("completed benchmark run has no productive task completion telemetry")
+
+    if manifest.get("status") != "completed" or manifest.get("completed_at") != completed_at:
+        manifest = {**manifest, "status": "completed", "completed_at": completed_at}
+        atomic_write_json(run_directory / "manifest.json", manifest)
+
+    active = _paths(root)["active"]
+    if active.exists():
+        control = _read_json(active)
+        if (
+            control.get("benchmark_id") == manifest.get("benchmark_id")
+            and control.get("run_name") == manifest.get("run_name")
+        ):
+            active.unlink()
+    return manifest
+
+
 def snapshot_task(
     root: Path,
     task_id: str,
@@ -523,12 +581,39 @@ def snapshot_task(
         except (KeyError, TypeError, ValueError) as exc:
             raise BenchmarkError("invalid benchmark task guard; fail closed") from exc
         if expires > timestamp:
-            _task_event(task_directory, "busy_skip", timestamp, benchmark_id=control["benchmark_id"], run_id=existing.get("run_id"))
+            started = datetime.fromisoformat(str(existing["task_started_at"]).replace("Z", "+00:00"))
+            _task_event(
+                task_directory,
+                "busy_skip",
+                timestamp,
+                benchmark_id=control["benchmark_id"],
+                run_id=existing.get("run_id"),
+                run_token=existing.get("run_token"),
+                guard_started_at=existing.get("task_started_at"),
+                guard_expires_at=existing.get("expires_at"),
+                guard_age_seconds=(timestamp - started).total_seconds(),
+                reason="active_guard_unexpired",
+                stale_before=False,
+            )
             return {"status": "busy", "task_id": task_id, "assignments": [], "expires_at": existing["expires_at"]}
         history = task_directory / "history"
         history.mkdir(parents=True, exist_ok=True)
         replace_with_retry(guard, history / f"{existing.get('run_id', 'unknown')}.stale.json")
-        _task_event(task_directory, "stale_guard_recovered", timestamp, benchmark_id=control["benchmark_id"], run_id=existing.get("run_id"))
+        started = datetime.fromisoformat(str(existing["task_started_at"]).replace("Z", "+00:00"))
+        _task_event(
+            task_directory,
+            "stale_guard_recovered",
+            timestamp,
+            benchmark_id=control["benchmark_id"],
+            run_id=existing.get("run_id"),
+            run_token=existing.get("run_token"),
+            guard_started_at=existing.get("task_started_at"),
+            guard_expires_at=existing.get("expires_at"),
+            guard_age_seconds=(timestamp - started).total_seconds(),
+            reason="guard_ttl_expired",
+            stale_before=True,
+            stale_after=True,
+        )
 
     queue = _task_queue(run_directory, task_id)
     pending = [assignment for assignment in queue["assignments"] if assignment.get("status") == "pending"]
@@ -773,11 +858,19 @@ def release_task(
     if history_path.exists():
         raise BenchmarkError("completed benchmark task history already exists")
     replace_with_retry(path, history_path)
+    manifest = _finalize_run_if_complete(
+        root,
+        run_directory,
+        manifest,
+        completed_at_hint=finished if snapshot["assignments"] else None,
+    )
     return {
         "status": "released",
         **record,
         "remaining": sum(a["status"] == "pending" for a in queue["assignments"]),
         "candidate_batch_size": manifest["batch_size"],
+        "run_status": manifest["status"],
+        "completed_at": manifest.get("completed_at"),
         "history_path": str(history_path.resolve()),
     }
 
@@ -785,17 +878,14 @@ def release_task(
 def benchmark_status(root: Path, benchmark_id: str, run_name: str) -> dict[str, Any]:
     directory = _run_dir(root, benchmark_id, run_name)
     manifest = _read_json(directory / "manifest.json")
-    counts: dict[str, int] = defaultdict(int)
-    total = 0
-    for task_index in range(1, 9):
-        queue = _task_queue(directory, f"task{task_index:02d}")
-        for assignment in queue["assignments"]:
-            counts[str(assignment["status"])] += 1
-            total += 1
+    counts, total = _run_counts(directory)
+    logical_status = "completed" if counts["pending"] == 0 else manifest["status"]
+    completed_at = manifest.get("completed_at") or (_actual_completed_at(directory) if logical_status == "completed" else None)
     return {
         "benchmark_id": benchmark_id,
         "run_name": run_name,
-        "status": manifest["status"],
+        "status": logical_status,
+        "completed_at": completed_at,
         "batch_size": manifest["batch_size"],
         "total": total,
         "pending": counts["pending"],
@@ -938,17 +1028,126 @@ def _quality_metrics(
     return quality, company_recall, ambiguous
 
 
+def _task_events(directory: Path) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for task in sorted((directory / "tasks").glob("task??")):
+        events.extend({"task_id": task.name, **record} for record in _read_jsonl(task / "events.jsonl"))
+    return events
+
+
+def _busy_skip_incidents(directory: Path, tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Correlate busy skips with later recovery of the exact same guard."""
+    events = _task_events(directory)
+    recoveries: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for event in events:
+        if event.get("event") == "stale_guard_recovered":
+            recoveries[(str(event.get("task_id")), str(event.get("run_id")))].append(event)
+
+    incidents: list[dict[str, Any]] = []
+    for event in events:
+        if event.get("event") != "busy_skip":
+            continue
+        task_id = str(event["task_id"])
+        run_id = str(event.get("run_id"))
+        busy_at = datetime.fromisoformat(str(event["at"]).replace("Z", "+00:00"))
+        recovery_options = sorted(
+            recoveries.get((task_id, run_id), []), key=lambda value: value["at"]
+        )
+        recovery = next(
+            (
+                value for value in recovery_options
+                if datetime.fromisoformat(str(value["at"]).replace("Z", "+00:00")) >= busy_at
+            ),
+            None,
+        )
+
+        guard: dict[str, Any] = {}
+        stale_path = directory / "tasks" / task_id / "history" / f"{run_id}.stale.json"
+        if stale_path.exists():
+            guard = _read_json(stale_path)
+        guard_started_at = event.get("guard_started_at") or guard.get("task_started_at")
+        guard_expires_at = event.get("guard_expires_at") or guard.get("expires_at")
+        guard_age = event.get("guard_age_seconds")
+        if guard_age is None and guard_started_at:
+            guard_age = (
+                busy_at - datetime.fromisoformat(str(guard_started_at).replace("Z", "+00:00"))
+            ).total_seconds()
+
+        predecessors = [
+            record for record in tasks
+            if record.get("task_id") == task_id
+            and guard_started_at
+            and datetime.fromisoformat(record["task_finished_at"])
+            <= datetime.fromisoformat(str(guard_started_at).replace("Z", "+00:00"))
+        ]
+        predecessor = max(predecessors, key=lambda value: value["task_finished_at"], default=None)
+        last_activity_values = [
+            value
+            for state in guard.get("company_state", {}).values()
+            for key, value in state.items()
+            if key.endswith("_at") and isinstance(value, str)
+        ]
+        last_activity_at = max(last_activity_values, default=None)
+        stale_before = bool(
+            guard_expires_at
+            and busy_at >= datetime.fromisoformat(str(guard_expires_at).replace("Z", "+00:00"))
+        )
+        classification = "recoverable_stale_guard_skip" if recovery else "capacity_busy_skip"
+        incidents.append({
+            "timestamp": event["at"],
+            "task_id": task_id,
+            "run_id": run_id,
+            "run_token": event.get("run_token") or guard.get("run_token"),
+            "guard_started_at": guard_started_at,
+            "guard_expires_at": guard_expires_at,
+            "guard_age_seconds": guard_age,
+            "last_guard_activity_at": last_activity_at,
+            "inactivity_seconds_at_skip": (
+                (busy_at - datetime.fromisoformat(last_activity_at)).total_seconds()
+                if last_activity_at else None
+            ),
+            "guarded_run_completed_at": None,
+            "previous_run_id": predecessor.get("run_id") if predecessor else None,
+            "previous_run_start": predecessor.get("task_started_at") if predecessor else None,
+            "previous_run_end": predecessor.get("task_finished_at") if predecessor else None,
+            "reason": event.get("reason", "active_guard_unexpired"),
+            "stale_before": event.get("stale_before", stale_before),
+            "stale_after": bool(recovery),
+            "recovered_at": recovery.get("at") if recovery else None,
+            "same_incident_as_stale_guard_recovery": bool(recovery),
+            "classification": classification,
+        })
+    return incidents
+
+
 def audit_run(root: Path, benchmark_id: str, run_name: str, *, now: datetime | None = None) -> dict[str, Any]:
     directory = _run_dir(root, benchmark_id, run_name)
+    prior_audit = _read_json(directory / "audit.json") if (directory / "audit.json").exists() else None
     manifest = _read_json(directory / "manifest.json")
+    manifest = _finalize_run_if_complete(root, directory, manifest)
     status = benchmark_status(root, benchmark_id, run_name)
     outputs = Path(manifest["output_directory"])
     candidate_events, valid_files, invalid_files, validation_errors = _load_success_outputs(outputs)
     company = _telemetry(directory, "companies.jsonl")
     tasks = _telemetry(directory, "runs.jsonl")
     task_durations = [float(record["task_elapsed_seconds"]) for record in tasks]
-    busy = sum(record.get("event") == "busy_skip" for task in (directory / "tasks").glob("task??") for record in _read_jsonl(task / "events.jsonl"))
-    stale = sum(record.get("event") == "stale_guard_recovered" for task in (directory / "tasks").glob("task??") for record in _read_jsonl(task / "events.jsonl"))
+    task_duration_summary = _summary(task_durations)
+    task_duration_source = "current_task_telemetry"
+    if (
+        prior_audit
+        and prior_audit.get("schema_version") == AUDIT_SCHEMA
+        and isinstance(prior_audit.get("runtime", {}).get("task_elapsed_seconds"), dict)
+    ):
+        # Preserve the originally captured performance fact.  A historical active
+        # control may have admitted later zero-company polls, which are not new
+        # observations of company-processing performance.
+        task_duration_summary = prior_audit["runtime"]["task_elapsed_seconds"]
+        task_duration_source = "initial_audit_snapshot"
+    incidents = _busy_skip_incidents(directory, tasks)
+    busy = len(incidents)
+    capacity_busy = sum(record["classification"] == "capacity_busy_skip" for record in incidents)
+    recoverable_busy = sum(record["classification"] == "recoverable_stale_guard_skip" for record in incidents)
+    stale = sum(record.get("event") == "stale_guard_recovered" for record in _task_events(directory))
     overlap = 0
     by_task: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for record in tasks:
@@ -981,8 +1180,12 @@ def audit_run(root: Path, benchmark_id: str, run_name: str, *, now: datetime | N
             "news_present_rate": status["news_present"] / status["completed"] if status["completed"] else None,
         },
         "runtime": {
-            "task_elapsed_seconds": _summary(task_durations),
+            "task_elapsed_seconds": task_duration_summary,
+            "task_elapsed_sample_source": task_duration_source,
             "busy_skip": busy,
+            "capacity_busy_skip": capacity_busy,
+            "recoverable_stale_guard_skip": recoverable_busy,
+            "busy_skip_incidents": incidents,
             "stale_guard_recovery": stale,
             "overlap": overlap,
             "company_research_elapsed_seconds": _summary([float(record["research_elapsed_seconds"]) for record in company]),
@@ -1027,16 +1230,18 @@ def audit_run(root: Path, benchmark_id: str, run_name: str, *, now: datetime | N
     position_pass = True
     if first_metrics["event_recall"] is not None and last_metrics["event_recall"] is not None:
         position_pass &= last_metrics["event_recall"] >= first_metrics["event_recall"] - 0.05
-    if first_metrics["average_source_count"]:
+    if first_metrics["average_source_count"] and last_metrics["average_source_count"] is not None:
         position_pass &= last_metrics["average_source_count"] >= first_metrics["average_source_count"] * 0.8
     result["position_degradation"] = {"first_25_percent": first_metrics, "last_25_percent": last_metrics, "pass": position_pass}
 
-    starts = [datetime.fromisoformat(record["task_started_at"]) for record in tasks]
-    ends = [datetime.fromisoformat(record["task_finished_at"]) for record in tasks]
-    elapsed = (max(ends) - min(starts)).total_seconds() if starts and ends else None
+    activated_at = datetime.fromisoformat(manifest["activated_at"])
+    completed_at = datetime.fromisoformat(status["completed_at"]) if status.get("completed_at") else None
+    elapsed = (completed_at - activated_at).total_seconds() if completed_at else None
     completed = status["completed"]
     per_hour = completed / (elapsed / 3600) if elapsed and elapsed > 0 else None
     result["throughput"] = {
+        "elapsed_started_at": manifest["activated_at"],
+        "elapsed_completed_at": status.get("completed_at"),
         "observed_elapsed_seconds": elapsed,
         "companies_per_hour": per_hour,
         "companies_per_day": per_hour * 24 if per_hour is not None else None,
@@ -1052,7 +1257,7 @@ def audit_run(root: Path, benchmark_id: str, run_name: str, *, now: datetime | N
         "source_validity_at_least_99pct": result["research"]["source_url_validity_rate"] >= 0.99,
         "p95_under_45_minutes": runtime["p95"] is not None and runtime["p95"] < 2700,
         "max_under_55_minutes": runtime["max"] is not None and runtime["max"] < 3300,
-        "busy_skip_zero": busy == 0,
+        "capacity_busy_skip_zero": capacity_busy == 0,
         "overlap_zero": overlap == 0,
         "position_degradation_absent": position_pass,
     }
