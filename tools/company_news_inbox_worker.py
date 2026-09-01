@@ -24,6 +24,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from lib.news_monitor import NewsValidationError, validate_payload
+from lib.ny_market import (
+    NYMarketValidationError,
+    connect_db as connect_ny_market_db,
+    mark_run as mark_ny_market_run,
+    upsert_report as upsert_ny_market_report,
+    validate_payload as validate_ny_market_payload,
+)
 from tools.company_news_atomic import atomic_write_json
 from tools.company_news_work_bridge import (
     BridgeError,
@@ -46,6 +53,7 @@ from tools.company_news_queue import (
 )
 from tools.ingest_company_news import ingest_file
 from tools.sync_company_news import sync as sync_company_news
+from tools.sync_ny_market import sync as sync_ny_market
 
 WORK_FILENAME_RE = re.compile(r"^work_(slot\d{2})_([A-Za-z0-9][A-Za-z0-9._-]{0,127})\.json$")
 WORK_FAILURE_FILENAME_RE = re.compile(
@@ -234,6 +242,7 @@ def _process_generic_files(
         if ingest_file(path, paths.db, paths.inbox / "processed", paths.inbox / "quarantine"):
             processed = paths.inbox / "processed" / path.name
             runs[run_id] = {
+                "payload_type": "company_news",
                 "phase": "ingested",
                 "processed_file": str(processed),
                 "ingested_at": _now(),
@@ -246,7 +255,10 @@ def _process_generic_files(
             _append_log(paths, "quarantined", file=path.name, run_id=run_id, error="ingestion adapter rejected payload")
             results.append({"file": path.name, "status": "quarantined", "run_id": run_id})
 
-    pending = [run_id for run_id, value in runs.items() if value.get("phase") == "ingested"]
+    pending = [
+        run_id for run_id, value in runs.items()
+        if value.get("phase") == "ingested" and value.get("payload_type") != "ny_market_daily"
+    ]
     if pending:
         try:
             sync_result = sync_func(paths.db, dry_run_sync)
@@ -269,10 +281,115 @@ def _process_generic_files(
     return results, failures
 
 
+def _process_ny_market_files(
+    paths: WorkerPaths,
+    files: list[Path],
+    state: dict[str, Any],
+    *,
+    sync_func: Callable[[Path, bool], dict[str, int]],
+    dry_run_sync: bool,
+) -> tuple[list[dict[str, Any]], int]:
+    """Ingest NY payloads independently; never fall through to company-news validation."""
+    results: list[dict[str, Any]] = []
+    failures = 0
+    runs: dict[str, Any] = state["runs"]
+
+    for path in files:
+        _append_log(paths, "detected", file=path.name, payload_type="ny_market_daily")
+        validated = None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            validated = validate_ny_market_payload(payload)
+            run = validated.run
+            conn = connect_ny_market_db(paths.db)
+            try:
+                mark_ny_market_run(conn, run, "running", increment=True)
+                upsert_ny_market_report(conn, validated)
+                mark_ny_market_run(conn, run, "success")
+            finally:
+                conn.close()
+            processed_dir = paths.inbox / "processed"
+            processed_dir.mkdir(parents=True, exist_ok=True)
+            processed_path = processed_dir / path.name
+            if processed_path.exists():
+                stamp = datetime.now(_JST).strftime("%Y%m%dT%H%M%S%f")
+                processed_path = processed_dir / f"{path.stem}.{stamp}{path.suffix}"
+            shutil.move(str(path), str(processed_path))
+            stable_key = run["stable_key"]
+            runs[stable_key] = {
+                "payload_type": "ny_market_daily",
+                "phase": "ingested",
+                "run_id": run["run_id"],
+                "stable_key": stable_key,
+                "report_date_jst": run["report_date_jst"],
+                "processed_file": str(processed_path),
+                "ingested_at": _now(),
+            }
+            _save_state(paths, state)
+            _append_log(paths, "ingested", file=path.name, run_id=stable_key, payload_type="ny_market_daily")
+            results.append({"file": path.name, "status": "ingested", "run_id": stable_key})
+        except (OSError, json.JSONDecodeError, NYMarketValidationError, ValueError) as exc:
+            if validated is not None:
+                conn = connect_ny_market_db(paths.db)
+                try:
+                    mark_ny_market_run(conn, validated.run, "failed", error=exc)
+                finally:
+                    conn.close()
+            if path.exists():
+                _quarantine_generic(paths, path, exc)
+            failures += 1
+            results.append({"file": path.name, "status": "quarantined", "error": str(exc)})
+
+    pending = [
+        key for key, value in runs.items()
+        if value.get("phase") == "ingested" and value.get("payload_type") == "ny_market_daily"
+    ]
+    if pending:
+        try:
+            # A prior sync failure leaves the local run retry_pending. Promote it
+            # before building the outbound batch so Supabase receives success.
+            conn = connect_ny_market_db(paths.db)
+            try:
+                for key in pending:
+                    mark_ny_market_run(conn, runs[key], "success")
+            finally:
+                conn.close()
+            sync_result = sync_func(paths.db, dry_run_sync)
+            conn = connect_ny_market_db(paths.db)
+            try:
+                for key in pending:
+                    value = runs[key]
+                    value.update({"phase": "completed", "synced_at": _now(), "sync_result": sync_result})
+                    value.pop("last_error", None)
+                    _append_log(paths, "synced", run_id=key, payload_type="ny_market_daily", sync_result=sync_result)
+                    _append_log(paths, "completed", run_id=key, payload_type="ny_market_daily")
+            finally:
+                conn.close()
+            _save_state(paths, state)
+            for item in results:
+                if item.get("run_id") in pending and item["status"] == "ingested":
+                    item["status"] = "completed"
+                    item["sync_result"] = sync_result
+        except Exception as exc:
+            failures += len(pending)
+            conn = connect_ny_market_db(paths.db)
+            try:
+                for key in pending:
+                    mark_ny_market_run(conn, runs[key], "retry_pending", error=exc)
+                    runs[key]["last_error"] = str(exc)
+                    _append_log(paths, "failed", run_id=key, payload_type="ny_market_daily", phase="sync", error=str(exc))
+            finally:
+                conn.close()
+            _save_state(paths, state)
+
+    return results, failures
+
+
 def run_once(
     paths: WorkerPaths,
     *,
     sync_func: Callable[[Path, bool], dict[str, int]] = sync_company_news,
+    ny_sync_func: Callable[[Path, bool], dict[str, int]] = sync_ny_market,
     dry_run_sync: bool = False,
     trigger: str = "manual",
 ) -> dict[str, Any]:
@@ -294,10 +411,22 @@ def run_once(
             path for path in candidates
             if path.name.startswith("work_") and path not in failure_files
         ]
-        generic_files = [path for path in candidates if path not in work_files and path not in failure_files]
+        ny_market_files = [
+            path for path in candidates
+            if path.name.startswith("ny_market_daily_") and path not in work_files and path not in failure_files
+        ]
+        generic_files = [
+            path for path in candidates
+            if path not in work_files and path not in failure_files and path not in ny_market_files
+        ]
+        ny_results, ny_failures = _process_ny_market_files(
+            paths, ny_market_files, state, sync_func=ny_sync_func, dry_run_sync=dry_run_sync
+        )
         results, failures = _process_generic_files(
             paths, generic_files, state, sync_func=sync_func, dry_run_sync=dry_run_sync
         )
+        results = ny_results + results
+        failures += ny_failures
 
         unattended_candidate = False
         handled_slots: set[str] = set()
