@@ -46,6 +46,16 @@ def _migrate(db: Path, root: Path) -> None:
 
 def _report(code: int) -> dict:
     name = sector_name(code)
+    materials = "\n\n".join(
+        f"### 材料{i}: fixture需給{i}\n"
+        "**Fact**: fixture上の需給変化を検証した。\n"
+        "**Transmission**: 日本上場企業の対象事業へ波及する。\n"
+        "**Magnitude**: 感応度を確認した。\n"
+        "**Pricing-in**: 会社計画との差を確認した。\n"
+        "**Counterevidence**: 価格反転時に仮説が崩れる。" +
+        ("\n**Estimate**: 感応度は10〜20億円。\n**Hypothesis**: 需給変化は継続する。" if i == 1 else "")
+        for i in range(1, 4)
+    )
     return {
         "importance": "A" if code % 4 else "B",
         "direction": "mixed",
@@ -55,15 +65,7 @@ def _report(code: int) -> dict:
         "watchlist_companies": [],
         "next_week_watchpoints": ["海外価格・在庫・企業計画の更新"],
         "missed_candidates": ["横断候補を確認したが重要度不足の材料は不採用"],
-        "full_report_md": (
-            f"# 【東証33業種週次】{name}\n\n## 今週の要旨\n"
-            "**Fact** fixture上の需給変化を検証した。\n\n## 重要材料\n"
-            "**Transmission** 日本上場企業の対象事業へ波及する。\n\n"
-            "**Magnitude** Estimateとして感応度を確認した。\n\n"
-            "**Pricing-in** 会社計画との差を確認した。\n\n"
-            "**Counterevidence** 価格反転時に仮説が崩れる。\n\n"
-            + "システム完走性を確認する秘密情報のないfixture本文。" * 10
-        ),
+        "full_report_md": f"# 【東証33業種週次】{name}\n\n## 今週の要旨\nfixture要旨。\n\n{materials}",
         "sources": [{
             "title": f"Fixture primary source {code}",
             "url": f"https://example.com/sector-weekly-soak/{code}",

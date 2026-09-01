@@ -195,6 +195,46 @@ def _http_url(value: Any, field: str) -> str:
     return url
 
 
+_MATERIAL_HEADING_RE = re.compile(r"(?m)^### 材料([1-9][0-9]*)[:：][ \t]*(\S.*)$")
+_MATERIAL_LABELS = ("Fact", "Transmission", "Magnitude", "Pricing-in", "Counterevidence")
+
+
+def validate_report_markdown(markdown: str) -> None:
+    """Validate the compact, machine-auditable material structure.
+
+    Labels count only inside numbered material sections.  Requiring them at the
+    beginning of a line avoids accidental matches in prose, Sources, or missed
+    candidate text.
+    """
+    matches = list(_MATERIAL_HEADING_RE.finditer(markdown))
+    if not 3 <= len(matches) <= 5:
+        raise SectorValidationError("full_report_md must contain 3..5 sections headed '### 材料N: title'")
+    numbers = [int(match.group(1)) for match in matches]
+    if numbers != list(range(1, len(matches) + 1)):
+        raise SectorValidationError("material headings must be consecutively numbered from 1")
+    bodies: list[str] = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(markdown)
+        body = markdown[match.end():end]
+        # A report-level section after the final material is not part of that material.
+        report_heading = re.search(r"(?m)^#{1,6} [^\n]+$", body)
+        if report_heading:
+            body = body[:report_heading.start()]
+        missing = [
+            label for label in _MATERIAL_LABELS
+            if not re.search(rf"(?m)^\*\*{re.escape(label)}\*\*(?:[:：][ \t]*|[ \t]*$)", body)
+        ]
+        if missing:
+            raise SectorValidationError(
+                f"material {index + 1} is missing exact strong labels: {', '.join(missing)}"
+            )
+        bodies.append(body)
+    material_text = "\n".join(bodies)
+    for label in ("Estimate", "Hypothesis"):
+        if not re.search(rf"(?m)^\*\*{label}\*\*(?:[:：][ \t]*|[ \t]*$)", material_text):
+            raise SectorValidationError(f"material sections must contain at least one exact **{label}** label")
+
+
 def validate_report(
     payload: Any,
     *,
@@ -228,6 +268,7 @@ def validate_report(
         raise SectorValidationError("direction must be positive, negative, mixed, or neutral")
     bullets = _string_list(payload.get("summary_bullets"), "summary_bullets", 3, 5, 240)
     full_report = _text(payload.get("full_report_md"), "full_report_md", 100_000, 200)
+    validate_report_markdown(full_report)
     watchlist_raw = payload.get("watchlist_companies")
     if not isinstance(watchlist_raw, list) or len(watchlist_raw) > 20:
         raise SectorValidationError("watchlist_companies must be an array of at most 20 items")

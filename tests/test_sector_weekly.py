@@ -1,4 +1,5 @@
 import json
+import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +28,17 @@ def _migrate_fixture(db: Path) -> None:
 
 
 def _content() -> dict:
+    materials = []
+    for number in range(1, 4):
+        extra = "\n**Estimate**: 営業利益影響は10〜20億円。\n**Hypothesis**: 需給変化は継続する。" if number == 1 else ""
+        materials.append(
+            f"### 材料{number}: 重要ドライバー{number}\n"
+            "**Fact**: 今週の一次資料で需給が変化した。\n"
+            "**Transmission**: 日本企業の数量と単価に波及する。\n"
+            "**Magnitude**: 売上と営業利益への感応度を確認した。\n"
+            "**Pricing-in**: 会社計画への織り込みは限定的。\n"
+            "**Counterevidence**: 価格反落で仮説が崩れる。" + extra
+        )
     return {
         "importance": "A+",
         "direction": "mixed",
@@ -34,7 +46,7 @@ def _content() -> dict:
         "watchlist_companies": [{"code": "9503", "name": "関西電力", "direction": "positive"}],
         "next_week_watchpoints": ["燃料価格を確認"],
         "missed_candidates": ["地方自治体資料の更新"],
-        "full_report_md": "# 【東証33業種週次】電気・ガス業\n\n結論：重要度A+。\n\n## 今週の要旨\n十分な長さのテスト本文です。" * 5,
+        "full_report_md": "# 【東証33業種週次】電気・ガス業\n\n## 今週の要旨\n結論の要約。\n\n" + "\n\n".join(materials),
         "sources": [{
             "title": "電気料金資料", "url": "https://example.com/primary.pdf", "source_name": "資源エネルギー庁",
             "source_type": "government", "published_at": "2026-08-28T10:00:00+09:00",
@@ -119,6 +131,46 @@ def test_validate_preserves_arrays_markdown_sources_and_stable_key():
     assert json.loads(validated["sources"])[0]["source_type"] == "government"
     assert validated["full_report_md"].startswith("# 【東証33業種週次】")
     assert validated["dedupe_key"] == "sector_weekly:2026-09-05:20"
+
+
+@pytest.mark.parametrize("label", ["Fact", "Transmission", "Magnitude", "Pricing-in", "Counterevidence"])
+def test_material_structure_requires_each_exact_core_label_per_material(label):
+    window = weekly_window(datetime.fromisoformat("2026-09-05T06:00:00+09:00"))
+    content = _content()
+    payload = assemble_payload(content, 20, window)
+    validate_report(payload, expected_code=20, expected_window=window)
+    content["full_report_md"] = content["full_report_md"].replace(f"**{label}**:", f"{label}:", 1)
+    with pytest.raises(SectorValidationError, match=rf"material 1.*{re.escape(label)}"):
+        validate_report(assemble_payload(content, 20, window), expected_code=20, expected_window=window)
+
+
+@pytest.mark.parametrize("label", ["Estimate", "Hypothesis"])
+def test_labels_outside_materials_do_not_satisfy_structure(label):
+    window = weekly_window(datetime.fromisoformat("2026-09-05T06:00:00+09:00"))
+    content = _content()
+    content["full_report_md"] = content["full_report_md"].replace(f"**{label}**:", f"{label}:", 1)
+    content["full_report_md"] += f"\n\n## Sources\n**{label}**: ここは対象外。"
+    with pytest.raises(SectorValidationError, match=rf"exact \*\*{label}\*\*"):
+        validate_report(assemble_payload(content, 20, window), expected_code=20, expected_window=window)
+
+
+def test_material_structure_accepts_japanese_colon_and_label_newline_but_rejects_section_count():
+    window = weekly_window(datetime.fromisoformat("2026-09-05T06:00:00+09:00"))
+    content = _content()
+    content["full_report_md"] = content["full_report_md"].replace("### 材料1:", "### 材料1：", 1)
+    content["full_report_md"] = content["full_report_md"].replace("**Fact**:", "**Fact**\n", 1)
+    validate_report(assemble_payload(content, 20, window), expected_code=20, expected_window=window)
+    two = _content()
+    two["full_report_md"] = two["full_report_md"].split("### 材料3:", 1)[0]
+    with pytest.raises(SectorValidationError, match="3..5 sections"):
+        validate_report(assemble_payload(two, 20, window), expected_code=20, expected_window=window)
+    six = _content()
+    third = "### 材料3:" + six["full_report_md"].split("### 材料3:", 1)[1]
+    six["full_report_md"] += "\n\n" + third.replace("材料3:", "材料4:", 1)
+    six["full_report_md"] += "\n\n" + third.replace("材料3:", "材料5:", 1)
+    six["full_report_md"] += "\n\n" + third.replace("材料3:", "材料6:", 1)
+    with pytest.raises(SectorValidationError, match="3..5 sections"):
+        validate_report(assemble_payload(six, 20, window), expected_code=20, expected_window=window)
 
 
 def test_wrong_period_and_invalid_json_shape_are_rejected():
