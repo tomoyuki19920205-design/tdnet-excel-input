@@ -1,8 +1,10 @@
 import json
 import sqlite3
+import sys
 from datetime import datetime
 from pathlib import Path
 
+import tools.sector_weekly_inbox_worker as inbox_worker
 from lib.sector_weekly import CANONICAL_SQLITE_SCHEMA, connect_sector_db, weekly_window
 from lib.sector_weekly_work import enqueue_assignment, get_assignment
 from tools.apply_sector_weekly_work_sqlite_migration import apply_sqlite_migration
@@ -11,6 +13,47 @@ from tools.sector_weekly_work_bridge import RESULT_SCHEMA, claim_one, stage_one
 
 AT = datetime.fromisoformat("2026-09-05T06:05:00+09:00")
 OWNER = "sector-weekly-worker"
+
+
+def _read_log(paths: WorkerPaths) -> list[dict]:
+    return [json.loads(line) for line in paths.log.read_text(encoding="utf-8").splitlines()]
+
+
+def _run_main(
+    monkeypatch,
+    paths: WorkerPaths,
+    *,
+    trigger: str,
+    sync_func=lambda *_: {},
+) -> int:
+    original_run_once = inbox_worker.run_once
+
+    def fixture_run_once(worker_paths, *, dry_run_sync=False, trigger="manual"):
+        return original_run_once(
+            worker_paths,
+            sync_func=sync_func,
+            dry_run_sync=dry_run_sync,
+            trigger=trigger,
+        )
+
+    monkeypatch.setattr(inbox_worker, "run_once", fixture_run_once)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "sector_weekly_inbox_worker.py",
+            "--once",
+            "--root",
+            str(paths.root),
+            "--db",
+            str(paths.db),
+            "--work-root",
+            str(paths.work_root),
+            "--trigger",
+            trigger,
+        ],
+    )
+    return inbox_worker.main()
 
 
 def _fixture(tmp_path: Path, code: int = 4) -> tuple[Path, Path, dict, Path]:
@@ -155,5 +198,146 @@ def test_worker_lock_returns_busy(tmp_path: Path):
     paths = WorkerPaths.from_values(tmp_path, db, work)
     paths.lock.parent.mkdir(parents=True, exist_ok=True)
     paths.lock.write_text(f"pid={__import__('os').getpid()}\n", encoding="utf-8")
-    result = run_once(paths, sync_func=lambda *_: {})
+    result = run_once(paths, sync_func=lambda *_: {}, trigger="task_scheduler")
     assert result["status"] == "busy" and result["detected"] == 0
+    assert result["trigger"] == "task_scheduler"
+
+
+def test_main_no_work_finishes_once_with_clean_exit(tmp_path: Path, monkeypatch):
+    paths = WorkerPaths.from_values(tmp_path, tmp_path / "unused.sqlite", tmp_path / "work")
+    assert not paths.db.exists()
+
+    exit_code = _run_main(monkeypatch, paths, trigger="task_scheduler")
+
+    assert exit_code == 0
+    assert not paths.db.exists()
+    records = _read_log(paths)
+    assert [item["event"] for item in records] == ["worker_started", "worker_finished"]
+    finished = records[-1]
+    assert finished["status"] == "no_work"
+    assert finished["trigger"] == "task_scheduler"
+    assert finished["detected"] == finished["success"] == finished["failed"] == 0
+    assert finished["exit_status"] == 0
+    assert finished["duration_seconds"] >= 0
+    assert sum(item["event"] == "worker_finished" for item in records) == 1
+    assert sum(item["event"] == "worker_error" for item in records) == 0
+    assert all(line.count('"trigger"') == 1 for line in paths.log.read_text(encoding="utf-8").splitlines())
+
+
+def test_main_processed_finishes_after_successful_sync(tmp_path: Path, monkeypatch):
+    db, work, claimed, inbox = _fixture(tmp_path)
+    paths = WorkerPaths.from_values(tmp_path, db, work)
+    calls = []
+
+    def sync(path: Path, dry: bool):
+        calls.append((path, dry))
+        return {"canonical_sector_reports": 1, "canonical_sector_report_runs": 33}
+
+    exit_code = _run_main(
+        monkeypatch,
+        paths,
+        trigger="task_scheduler",
+        sync_func=sync,
+    )
+
+    assert exit_code == 0
+    assert len(calls) == 1 and not inbox.exists()
+    conn = connect_sector_db(db)
+    try:
+        row = get_assignment(conn, claimed["assignment_id"])
+        assert row["status"] == "success" and row["attempt_count"] == 1
+        assert conn.execute("SELECT count(*) FROM canonical_sector_reports").fetchone()[0] == 1
+    finally:
+        conn.close()
+    records = _read_log(paths)
+    assert sum(item["event"] == "worker_started" for item in records) == 1
+    assert sum(item["event"] == "worker_finished" for item in records) == 1
+    assert sum(item["event"] == "worker_error" for item in records) == 0
+    finished = records[-1]
+    assert finished["status"] == "completed" and finished["success"] == 1
+    assert finished["failed"] == 0 and finished["exit_status"] == 0
+    assert finished["trigger"] == "task_scheduler"
+    assert finished["duration_seconds"] >= 0
+    assert all(line.count('"trigger"') == 1 for line in paths.log.read_text(encoding="utf-8").splitlines())
+
+
+def test_main_sync_failure_is_nonzero_and_preserves_payload(tmp_path: Path, monkeypatch):
+    db, work, claimed, inbox = _fixture(tmp_path)
+    paths = WorkerPaths.from_values(tmp_path, db, work)
+
+    exit_code = _run_main(
+        monkeypatch,
+        paths,
+        trigger="manual",
+        sync_func=lambda *_: (_ for _ in ()).throw(RuntimeError("transport unavailable")),
+    )
+
+    assert exit_code == 1 and inbox.exists()
+    conn = connect_sector_db(db)
+    try:
+        row = get_assignment(conn, claimed["assignment_id"])
+        assert row["status"] == "retry_pending" and row["attempt_count"] == 1
+        assert row["submitted_payload_hash"]
+    finally:
+        conn.close()
+    records = _read_log(paths)
+    assert sum(item["event"] == "worker_finished" for item in records) == 1
+    assert sum(item["event"] == "worker_error" for item in records) == 0
+    finished = records[-1]
+    assert finished["status"] == "completed_with_errors"
+    assert finished["trigger"] == "manual" and finished["exit_status"] == 1
+    assert finished["duration_seconds"] >= 0
+
+
+def test_main_unhandled_exception_logs_error_and_finished(tmp_path: Path, monkeypatch):
+    paths = WorkerPaths.from_values(tmp_path, tmp_path / "unused.sqlite", tmp_path / "work")
+
+    def fail_run_once(*_args, **_kwargs):
+        raise RuntimeError("fixture failure")
+
+    monkeypatch.setattr(inbox_worker, "run_once", fail_run_once)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "sector_weekly_inbox_worker.py",
+            "--once",
+            "--root",
+            str(paths.root),
+            "--db",
+            str(paths.db),
+            "--work-root",
+            str(paths.work_root),
+            "--trigger",
+            "manual",
+        ],
+    )
+
+    assert inbox_worker.main() == 1
+    records = _read_log(paths)
+    assert [item["event"] for item in records] == [
+        "worker_started",
+        "worker_error",
+        "worker_finished",
+    ]
+    assert records[1]["trigger"] == records[2]["trigger"] == "manual"
+    assert records[2]["exit_status"] == 1
+    assert records[2]["duration_seconds"] >= 0
+
+
+def test_main_busy_result_has_trigger_and_clean_exit(tmp_path: Path, monkeypatch):
+    paths = WorkerPaths.from_values(tmp_path, tmp_path / "unused.sqlite", tmp_path / "work")
+    paths.lock.parent.mkdir(parents=True, exist_ok=True)
+    paths.lock.write_text(f"pid={__import__('os').getpid()}\n", encoding="utf-8")
+
+    assert _run_main(monkeypatch, paths, trigger="task_scheduler") == 0
+
+    records = _read_log(paths)
+    assert [item["event"] for item in records] == [
+        "worker_started",
+        "concurrent_run_ignored",
+        "worker_finished",
+    ]
+    assert records[-1]["status"] == "busy"
+    assert records[-1]["trigger"] == "task_scheduler"
+    assert records[-1]["exit_status"] == 0
