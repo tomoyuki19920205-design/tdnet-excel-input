@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from time import monotonic
 from typing import Any, Callable, Iterator
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -232,7 +233,10 @@ def run_once(
         lock.__enter__()
     except SectorInboxWorkerError as exc:
         _append_log(paths, "concurrent_run_ignored", trigger=trigger, error=_safe_error(exc))
-        return {"status": "busy", "detected": 0, "success": 0, "failed": 0, "results": []}
+        return {
+            "status": "busy", "trigger": trigger,
+            "detected": 0, "success": 0, "failed": 0, "results": [],
+        }
     try:
         candidates = sorted(path for path in paths.inbox.glob("*.json") if path.is_file())
         results: list[dict[str, Any]] = []
@@ -253,7 +257,11 @@ def run_once(
                 failures += 1
             _append_log(paths, "payload_finished", trigger=trigger, **result)
         return {
-            "status": "completed_with_errors" if failures else "completed",
+            "status": (
+                "no_work" if not candidates
+                else "completed_with_errors" if failures
+                else "completed"
+            ),
             "trigger": trigger, "detected": len(candidates),
             "success": sum(item["status"] in {"success", "already_success"} for item in results),
             "failed": failures, "results": results,
@@ -263,6 +271,7 @@ def run_once(
 
 
 def main() -> int:
+    started_at = monotonic()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--root", type=Path, default=ROOT)
@@ -278,12 +287,31 @@ def main() -> int:
     try:
         result = run_once(paths, dry_run_sync=args.dry_run_sync, trigger=args.trigger)
     except Exception as exc:
-        _append_log(paths, "worker_finished", trigger=args.trigger, exit_status=1, error=_safe_error(exc))
+        error = _safe_error(exc)
+        _append_log(paths, "worker_error", trigger=args.trigger, error=error)
+        _append_log(
+            paths,
+            "worker_finished",
+            trigger=args.trigger,
+            status="error",
+            detected=0,
+            success=0,
+            failed=1,
+            exit_status=1,
+            duration_seconds=round(monotonic() - started_at, 3),
+            error=error,
+        )
         if sys.stderr is not None:
-            print(f"ERROR: {_safe_error(exc)}", file=sys.stderr)
+            print(f"ERROR: {error}", file=sys.stderr)
         return 1
     exit_status = 1 if result["failed"] else 0
-    _append_log(paths, "worker_finished", trigger=args.trigger, exit_status=exit_status, **result)
+    _append_log(
+        paths,
+        "worker_finished",
+        exit_status=exit_status,
+        duration_seconds=round(monotonic() - started_at, 3),
+        **result,
+    )
     if sys.stdout is not None:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     return exit_status
