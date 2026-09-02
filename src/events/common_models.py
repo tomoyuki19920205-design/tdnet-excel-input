@@ -18,6 +18,7 @@ class EventType:
     EARNINGS_MATERIAL = "earnings_material"
     MONTHLY_UPDATE = "monthly_update"
     MANAGEMENT_STRATEGY = "management_strategy"
+    CAPITAL_ACTION = "capital_action"
 
 
 # ============================================================
