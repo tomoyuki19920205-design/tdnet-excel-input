@@ -1,14 +1,49 @@
-毎日、NY市場モーニングレポートを日本語で完成させ、同じ本文をCompany Viewerへ保存してください。市場休場日、土日、米国祝日も必ず実行し、スキップ・調査のみ・通知なしで終了してはいけません。
+毎日、NY市場モーニングレポートを日本語で完成させ、同じ `report_markdown` をユーザー最終回答とCompany Viewer保存の唯一の本文入力にしてください。市場休場日、土日、米国祝日も必ず実行し、スキップ・調査のみ・通知なしで終了してはいけません。
 
-このrunで必ず行うこと:
+## 絶対条件
 
-1. Webで最新情報を調査する。通常日は直近NY取引日の市場、休場日は直近営業日の市場データに加え、休場中の最新ニュースとコモディティ・マクロ材料を調べる。
-2. SOX、S&P500、Dow、Russell 2000（必要ならNasdaq）、話題の値上がり10社、話題の値下がり10社、時価総額・流動性で除外しない純粋上昇率Top20、主要決算、アフター決算、昨日夕方以降または休場中の主要ニュース10件、同一基準によるS&P500全11セクター騰落率降順、大きく動いたコモディティ、最終考察を含む完成レポートを作る。
-3. 決算各社は数字より前に事業内容、主力製品・サービス、主要顧客・収益源、重要な事業構造を1〜2文で説明する。材料不明のmicrocapに理由を捏造しない。確認できない場合は「大型当日材料未確認 / low-float / momentum / short-cover」等、確認範囲を明記する。
-4. ユーザー向けには、通常のcitationを伴う完成レポート全文を必ずこのrunの最終回答として出力する。
-5. 同時に `ny_market_daily_v1` payloadを作る。`stable_key` は必ず `ny_market_daily:{report_date_jst}`。休場日は `market_status=holiday_or_weekend`、`market_session_date` は直近NY営業日。`report_markdown` はユーザー向けと同内容の完成全文だが、Codex/ChatGPT固有citation tokenを除き、通常Markdownリンクだけを使う。`sources` は title / publisher / url / published_at の通常データにする。
-6. payloadは次の全fieldを持つ: schema_version, stable_key, report_type, report_date_jst, generated_at, market_session_date, market_status, headline, summary_bullets(5〜8), index_moves, sector_moves(11), notable_gainers(10), notable_losers(10), top_gainers_20(20; ticker/company_name/change_pct/market_cap/reason), earnings, after_hours_earnings, major_news(10), commodities, report_markdown, sources。
-7. payloadを一時ファイルへ完全に書き、そのファイルを入力に `python tools/write_ny_market_payload.py <一時ファイル>` を実行する。このhelperはvalidate後、fsync済みtempから `data/news_inbox/*.json` へatomic renameする。inboxへ直接partial JSONを書かない。
-8. 保存に失敗してもユーザー向け完成レポート全文は必ず出力し、末尾にだけ `Company Viewer保存に失敗: <短い理由>` を付ける。成功時は保存処理の説明で本文を置き換えない。
+- `schema_version=ny_market_daily_v1`、`stable_key=ny_market_daily:{report_date_jst}` を維持する。
+- 休場日は `market_status=holiday_or_weekend` とし、`market_session_date` は直近NY営業日とする。
+- `quality_contract_version=ny_market_quality_v2` を必ず付ける。
+- 市場数値を推測・LLM補完しない。指数、11 Sector SPDR、Top20は同一の機械取得snapshotを正本にする。
+- 騰落率は全て「当日通常取引終値 / 前営業日の通常取引終値 - 1」。時間外、取引中、adjusted closeを混ぜない。`price_basis=regular_close`、`adjusted=false`。
+- SOX、S&P500、Dow、Nasdaq、Russell 2000を必ず含める。
+- 11セクターは XLB/XLC/XLE/XLF/XLI/XLK/XLP/XLRE/XLU/XLV/XLY の全件を同じ式で計算し、騰落率降順にrankする。
+- Top20は時価総額や流動性で除外しない純粋上昇率順。機械取得した20社の順序、騰落率、終値を文章作成時に変更しない。
+
+## 一度だけ作るresearch cache
+
+調査開始時に `canonical_market_data` と `ticker_research` を作り、その後は話題の上昇/下落、Top20、決算、最終考察の全セクションで同じ銘柄結果を再利用する。tickerごとに次を保持する:
+
+`ticker, company_name, close, change_pct, market_cap, market_cap_method, catalyst, catalyst_type, source_url, source_type, search_status, searched_at, share_class_components`
+
+- 具体的な材料を書くときは必ずその材料を裏付けるURLを持たせ、`search_status=verified_catalyst` にする。
+- 適時資料、IR、SEC、主要報道を検索して当日材料を確認できなかった場合だけ `search_status=searched_not_found`、`catalyst_type=not_found`、`source_url=null`、`source_type=null` とし、catalystに必ず「当日材料を検索したが確認できず」を含める。「材料なし」「特に材料なし」は禁止。
+- 時価総額はissuer-total。単一表示株価×発行済株式数を原則に、dual-class/ADSは全ての経済的株式クラスを `share_class_components` に列挙して合算する。RDIB等のdual-classを片方だけで計算しない。取得不能時だけ `market_cap=null, market_cap_method=unavailable, share_class_components=[]`。
+
+## 完成レポートの内容
+
+1. 5〜8個の要点。
+2. 5指数の終値・騰落率と市場全体の解釈。
+3. 11 Sector SPDRを全件、騰落率降順で示し、上位・下位の背景を出典付きで説明。
+4. 話題の値上がり10社と値下がり10社。会社概要、終値、騰落率、issuer-total時価総額、具体的材料または厳密なsearched-not-found表現、投資家への含意を書く。
+5. 純粋上昇率Top20をcanonical rankどおり全件。会社名、終値、騰落率、issuer-total時価総額、材料、source/search statusを示す。
+6. 主要決算。数字より前に事業内容、主力製品・サービス、主要顧客・収益源、重要な事業構造を1〜2文で説明し、売上、EPS、ガイダンス、重要KPI、一過性要因、株価反応、なぜ動いたか、今後への含意を書く。一次情報はcompany IRまたはSECを必須とする。
+7. アフター決算。上記に加え `after_hours_change_pct, as_of_utc, as_of_jst, session=post_market` を必須とし、通常取引の騰落率と混同しない。
+8. 昨日夕方以降または休場中の主要ニュース10件。全件にURLを付け、同一event clusterは最大2件。決算・個別値上がりで扱った話題は、市場全体への重大な波及がある場合以外は重複させない。
+9. 大きく動いたコモディティと重要マクロ。価格・騰落率・理由の全てに対応するsourceを持たせる。
+10. 最終考察。考察時間に一切の制約を置かず、指数、セクター、個別、決算、金利・為替・コモディティを接続し、確認済み事実と推論を区別する。数値・時価総額・材料はresearch cacheからのみ引用し、別表現で再調査・再計算しない。
+
+## payloadとpublish前validator
+
+payloadは従来field全てに加え `quality_contract_version, canonical_market_data, ticker_research, final_analysis_references, report_delivery` を持つ。`canonical_market_data` はsource、market_session_date、price_basis、adjusted、indexes(5)、sectors(11)、top_gainers_20(20)を持つ。notable、Top20、earnings、after-hours、final analysis referenceの各銘柄objectにはresearch cacheの全fieldを同値で投影する。
+
+`report_markdown` を一度だけ完成させ、`report_delivery={"source_field":"report_markdown","sha256":"<UTF-8本文のSHA-256>"}` を付ける。ユーザー最終回答は、この同じpayloadに対する `python tools/write_ny_market_payload.py <一時ファイル> --validate-only --emit-report` の本文をそのまま使い、別途要約・書き直しをしない。
+
+payloadを一時ファイルへ完全に書き、まず `python tools/write_ny_market_payload.py <一時ファイル> --validate-only` を実行する。validatorは5指数、11セクター、Top20のrank/値、同一tickerの騰落率・時価総額・材料、具体的材料のsource、IR/SEC決算source、ニュースcluster、コモディティsource、本文hashを横断照合する。失敗したら修正するまでpublish禁止。
+
+validation成功後だけ `python tools/write_ny_market_payload.py <一時ファイル>` を1回実行する。helperは検証済みpayloadをfsync済みtempから `data/news_inbox/*.json` へatomic renameする。inboxへ直接partial JSONを書かない。同日成功rowが既にある場合は通常再実行しない。
+
+保存に失敗しても、検証済み `report_markdown` の完成レポート全文は必ずユーザー最終回答として出し、末尾にだけ `Company Viewer保存に失敗: <短い理由>` を付ける。成功時は保存処理の説明で本文を置き換えない。
 
 Scheduled Task自身を停止、無効化、削除、完了扱いにする操作は禁止。Company News Task01〜08、CompanyNewsInboxWorker、SectorWeeklySchedulerのschedule/prompt/assignment/queueを変更しない。

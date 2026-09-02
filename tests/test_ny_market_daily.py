@@ -17,38 +17,23 @@ from lib.ny_market import (
 from tools.company_news_inbox_worker import WorkerPaths, run_once
 from tools.write_ny_market_payload import publish
 from tools.apply_ny_market_sqlite_migration import apply as apply_sqlite_migration
+from tests.ny_market_quality_fixture import payload as quality_payload
 
 
 ROOT = Path(__file__).parents[1]
 
 
 def payload(*, report_date: str = "2026-09-01", status: str = "open", headline: str = "NY morning"):
-    stock = lambda index: {
-        "ticker": f"T{index}", "company_name": f"Company {index}", "change_pct": float(30 - index),
-        "market_cap": None if index == 0 else 1_000_000 + index, "reason": "大型当日材料未確認 / momentum",
-    }
-    return {
-        "schema_version": "ny_market_daily_v1",
-        "stable_key": f"ny_market_daily:{report_date}",
-        "report_type": "ny_market_daily",
-        "report_date_jst": report_date,
-        "generated_at": f"{report_date}T07:05:00+09:00",
-        "market_session_date": "2026-08-31" if report_date == "2026-09-01" else "2026-09-04",
-        "market_status": status,
-        "headline": headline,
-        "summary_bullets": [f"summary {i}" for i in range(5)],
-        "index_moves": {"SOX": {"change_pct": 1}, "S&P500": {"change_pct": 0.2}, "Dow": {"change_pct": -0.1}, "Russell 2000": {"change_pct": 0.4}},
-        "sector_moves": [{"sector": f"s{i}", "change_pct": i} for i in range(11)],
-        "notable_gainers": [{"ticker": f"G{i}", "change_pct": i, "reason": "news"} for i in range(10)],
-        "notable_losers": [{"ticker": f"L{i}", "change_pct": -i, "reason": "news"} for i in range(10)],
-        "top_gainers_20": [stock(i) for i in range(20)],
-        "earnings": [],
-        "after_hours_earnings": [],
-        "major_news": [{"title": f"news {i}"} for i in range(10)],
-        "commodities": [{"name": "WTI", "price": 70, "change_pct": 2, "reason": "supply"}],
-        "report_markdown": "# NY市場モーニングレポート\n\n" + ("完成した長文レポート。" * 80),
-        "sources": [{"title": "Official source", "publisher": "Publisher", "url": "https://example.com/source", "published_at": "2026-09-01T00:00:00Z"}],
-    }
+    result = quality_payload()
+    result["stable_key"] = f"ny_market_daily:{report_date}"
+    result["report_date_jst"] = report_date
+    result["generated_at"] = f"{report_date}T07:05:00+09:00"
+    session_date = "2026-08-31" if report_date == "2026-09-01" else "2026-09-04" if report_date == "2026-09-06" else "2026-09-01"
+    result["market_session_date"] = session_date
+    result["canonical_market_data"]["market_session_date"] = session_date
+    result["market_status"] = status
+    result["headline"] = headline
+    return result
 
 
 def test_schema_stable_key_and_weekend_payload():
@@ -65,9 +50,12 @@ def test_schema_stable_key_and_weekend_payload():
 def test_platform_citations_are_rejected_but_normal_markdown_links_are_allowed():
     clean = payload()
     clean["report_markdown"] += "\n[Source](https://example.com/source)"
+    from lib.ny_market import report_markdown_sha256
+    clean["report_delivery"]["sha256"] = report_markdown_sha256(clean["report_markdown"])
     validate_payload(clean)
     dirty = payload()
     dirty["report_markdown"] += " turn0search1"
+    dirty["report_delivery"]["sha256"] = report_markdown_sha256(dirty["report_markdown"])
     with pytest.raises(NYMarketValidationError, match="platform-specific"):
         validate_payload(dirty)
 
@@ -185,3 +173,68 @@ def test_scheduled_prompt_requires_report_output_on_storage_failure_and_closed_d
     prompt = (ROOT / "config" / "ny_market_daily_scheduled_prompt.txt").read_text(encoding="utf-8")
     for required in ("土日", "holiday_or_weekend", "Company Viewer保存に失敗", "完成レポート全文", "write_ny_market_payload.py"):
         assert required in prompt
+
+
+def test_20260902_canonical_values_and_top20_order_are_frozen():
+    data = quality_payload()
+    validated = validate_payload(data)
+    indexes = data["canonical_market_data"]["indexes"]
+    assert [(item["symbol"], item["change_pct"]) for item in indexes] == [
+        ("SOX", -2.136), ("S&P500", -0.711), ("Dow", -0.788),
+        ("Nasdaq", -1.028), ("Russell 2000", -1.229),
+    ]
+    assert indexes[0]["close"] == 11288.6123
+    assert [item["change_pct"] for item in data["canonical_market_data"]["sectors"]] == [
+        1.266, 0.781, 0.663, 0.318, -0.159, -0.520, -0.884, -1.177, -1.370, -1.534, -1.715,
+    ]
+    assert [item["ticker"] for item in data["top_gainers_20"]] == [
+        "SSM", "FLYE", "BIAF", "RDAC", "GPRO", "NWGL", "SWVL", "PETZ", "FRVO", "LIDR",
+        "SST", "FBLG", "GWAV", "RDIB", "MOVE", "PXS", "NVNI", "GYGY", "PTN", "PSIG",
+    ]
+    assert validated.payload["quality_contract_version"] == "ny_market_quality_v2"
+
+
+@pytest.mark.parametrize("ticker", ["SSM", "SWVL", "PETZ", "SST", "PXS"])
+def test_research_cache_projection_must_be_identical(ticker):
+    data = quality_payload()
+    row = next(item for item in data["top_gainers_20"] if item["ticker"] == ticker)
+    row["catalyst"] += " contradictory"
+    with pytest.raises(NYMarketValidationError, match="differs from canonical research"):
+        validate_payload(data)
+
+
+def test_rdib_issuer_total_dual_class_market_cap():
+    data = quality_payload()
+    rdib = next(item for item in data["ticker_research"] if item["ticker"] == "RDIB")
+    assert rdib["market_cap"] == 71_000_000
+    assert len(rdib["share_class_components"]) == 2
+    rdib["market_cap"] = 405_155_248
+    with pytest.raises(NYMarketValidationError, match="issuer-total component value"):
+        validate_payload(data)
+
+
+def test_concrete_catalyst_requires_source_and_unknown_wording_is_precise():
+    data = quality_payload()
+    ssm = next(item for item in data["ticker_research"] if item["ticker"] == "SSM")
+    ssm["source_url"] = None
+    with pytest.raises(NYMarketValidationError, match="source_url"):
+        validate_payload(data)
+    data = quality_payload()
+    unknown = next(item for item in data["ticker_research"] if item["search_status"] == "searched_not_found")
+    unknown["catalyst"] = "材料なし"
+    with pytest.raises(NYMarketValidationError, match="explicitly say"):
+        validate_payload(data)
+
+
+def test_after_hours_requires_timestamp_and_post_market_session():
+    data = quality_payload()
+    data["after_hours_earnings"][0]["session"] = "regular"
+    with pytest.raises(NYMarketValidationError, match="post_market"):
+        validate_payload(data)
+
+
+def test_report_delivery_hash_guards_common_user_and_viewer_body():
+    data = quality_payload()
+    data["report_markdown"] += "independent rewrite"
+    with pytest.raises(NYMarketValidationError, match="sha256"):
+        validate_payload(data)
