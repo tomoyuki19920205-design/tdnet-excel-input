@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from datetime import date, datetime, timezone
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -11,6 +12,7 @@ from lib.ny_market_market_data import (
     DailySeries,
     MarketDataError,
     YahooChartProvider,
+    build_canonical_market_data_packet,
     build_index_sector_snapshot,
     eligible_screener_row,
     fetch_all_or_fallback,
@@ -26,6 +28,7 @@ STAMP_AUG_28 = 1787923800
 STAMP_AUG_31 = 1788183000
 STAMP_SEP_1 = 1788269400
 NOW = datetime(2026, 9, 2, 0, 0, tzinfo=timezone.utc)
+ROOT = Path(__file__).parents[1]
 
 
 def yahoo_bytes(symbol="^SOX", timestamps=None, closes=None, adjusted=None):
@@ -274,6 +277,30 @@ def test_generic_stale_daily_bar_discrepancy_is_resolved_without_ticker_special_
     assert "discrepancy_resolved" in item["review_flags"]
 
 
+def test_historical_rdib_stale_daily_incident_remains_a_permanent_regression_fixture():
+    incident = json.loads((ROOT / "tests" / "fixtures" / "ny_market_rdib_stale_daily_incident.json").read_text(encoding="utf-8"))
+    candidate = {
+        **incident["screener"], "symbol": incident["ticker"],
+        "_change_pct": float(incident["screener"]["pctchange"]),
+        "_close": 17.70,
+    }
+    resolved = resolve_discrepancy(
+        candidate=candidate,
+        historical_provider=incident["historical"]["provider"],
+        historical_previous_close=incident["historical"]["previous_close"],
+        historical_target_close=incident["historical"]["target_close"],
+        historical_change_pct=incident["historical"]["change_pct"],
+        official=incident["official"], corporate_action=incident["corporate_action"],
+        minute_close=incident["minute_close"], independent_sources=incident["independent"],
+        tolerance_pct=0.20, resolved_at="2026-09-02T00:00:00+00:00",
+    )
+    assert resolved["discrepancy_status"] == "resolved"
+    assert resolved["discrepancy_reason"] == "stale_daily_bar"
+    assert resolved["liquidity_flag"] == "low_liquidity"
+    assert resolved["official_previous_close"] == pytest.approx(15.10)
+    assert candidate["_change_pct"] == pytest.approx(17.219)
+
+
 def test_unresolved_discrepancy_still_fails_closed():
     rows = [row("GENR", 17.219, close=17.70)] + [row(f"T{i:02}", 16 - i / 10) for i in range(19)]
     history = {"GENR": series("GENR", (15.305, 17.70), provider="yahoo_chart_query1")}
@@ -311,3 +338,29 @@ def test_query1_and_query2_are_one_yahoo_family_not_independent_evidence():
                 {"provider": "yahoo_chart_query2", "previous_close": 15.10},
             ], tolerance_pct=0.20, resolved_at="2026-09-02T00:00:00+00:00",
         )
+
+
+def test_canonical_packet_contains_full_provider_and_raw_hash_provenance():
+    class PacketProvider:
+        name = "packet_fixture"
+
+        def fetch(self, symbol, _start_date, _end_date):
+            closes = (100.0, 110.0) if symbol.startswith("^") or symbol.startswith("X") else (10.0, 11.0)
+            return series(symbol, closes, provider=self.name)
+
+    class PacketScreener:
+        def fetch(self):
+            return screener([row(f"T{i:02}", 10.0, close=11.0) for i in range(20)])
+
+    packet = build_canonical_market_data_packet(
+        date(2026, 9, 1), historical_providers=[PacketProvider()],
+        screener_provider=PacketScreener(), discrepancy_arbitrator=GenericFixtureArbitrator(),
+    )
+    assert packet["market_data_contract_version"] == "ny_market_data_v1"
+    assert len(packet["indexes"]) == 5
+    assert len(packet["sectors"]) == 11
+    assert len(packet["top_gainers_20"]) == 20
+    assert packet["discrepancy_count"] == 0
+    assert packet["providers"] == ["nasdaq_stock_screener", "packet_fixture"]
+    assert packet["screener"]["raw_response_sha256"] == "b" * 64
+    assert set(packet["raw_response_hashes"]) == {"a" * 64, "b" * 64}
