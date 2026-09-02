@@ -115,7 +115,12 @@ def _validate_projection(item: Any, field: str, research: ValidatedResearch) -> 
     canonical = research.tickers.get(ticker)
     if canonical is None:
         raise NYMarketValidationError(f"{field} ticker {ticker} has no canonical research entry")
-    for key in ("company_name", "close", "change_pct", "market_cap", "market_cap_method", "catalyst", "catalyst_type", "source_url", "source_type", "search_status", "searched_at", "share_class_components"):
+    for key in (
+        "company_name", "close", "change_pct", "market_cap", "market_cap_method",
+        "catalyst", "catalyst_type", "source_url", "source_type", "search_status",
+        "searched_at", "share_class_components", "search_attempt_count", "search_queries",
+        "searched_sources",
+    ):
         if key not in item:
             raise NYMarketValidationError(f"{field}.{key} is required")
         if item[key] != canonical[key]:

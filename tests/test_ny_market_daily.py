@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+import subprocess
+import sys
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -14,6 +18,7 @@ from lib.ny_market import (
     upsert_report,
     validate_payload,
 )
+from lib.ny_market_research import attach_market_data_packet_metadata, build_catalyst_search_plan
 from tools.company_news_inbox_worker import WorkerPaths, run_once
 from tools.write_ny_market_payload import publish
 from tools.apply_ny_market_sqlite_migration import apply as apply_sqlite_migration
@@ -33,7 +38,7 @@ def payload(*, report_date: str = "2026-09-01", status: str = "open", headline: 
     result["canonical_market_data"]["market_session_date"] = session_date
     result["market_status"] = status
     result["headline"] = headline
-    return result
+    return attach_market_data_packet_metadata(result)
 
 
 def test_schema_stable_key_and_weekend_payload():
@@ -89,8 +94,10 @@ def test_same_day_reingest_is_upsert_and_updates_newer_report(tmp_path):
 def test_atomic_publisher_leaves_only_complete_json(tmp_path):
     input_path = tmp_path / "payload.tmp.json"
     input_path.write_text(json.dumps(payload(), ensure_ascii=False), encoding="utf-8")
+    packet_path = tmp_path / "market_packet.json"
+    packet_path.write_text(json.dumps(payload()["canonical_market_data"], ensure_ascii=False), encoding="utf-8")
     inbox = tmp_path / "inbox"
-    target = publish(input_path, inbox)
+    target = publish(input_path, inbox, packet_path)
     assert validate_payload(json.loads(target.read_text(encoding="utf-8")))
     assert list(inbox.glob("*.tmp")) == []
 
@@ -171,7 +178,10 @@ def test_sqlite_migration_is_additive_and_requires_exact_target(tmp_path):
 
 def test_scheduled_prompt_requires_report_output_on_storage_failure_and_closed_days():
     prompt = (ROOT / "config" / "ny_market_daily_scheduled_prompt.txt").read_text(encoding="utf-8")
-    for required in ("土日", "holiday_or_weekend", "Company Viewer保存に失敗", "完成レポート全文", "write_ny_market_payload.py"):
+    for required in (
+        "土日", "holiday_or_weekend", "Company Viewer保存に失敗", "完成レポート全文",
+        "write_ny_market_payload.py", "--market-data-packet",
+    ):
         assert required in prompt
 
 
@@ -237,4 +247,116 @@ def test_report_delivery_hash_guards_common_user_and_viewer_body():
     data = quality_payload()
     data["report_markdown"] += "independent rewrite"
     with pytest.raises(NYMarketValidationError, match="sha256"):
+        validate_payload(data)
+
+
+def test_market_data_packet_hash_is_required_and_tamper_evident():
+    missing = quality_payload()
+    del missing["market_data_packet_sha256"]
+    with pytest.raises(NYMarketValidationError, match="market_data_packet_sha256"):
+        validate_payload(missing)
+    changed = quality_payload()
+    changed["canonical_market_data"]["top_gainers_20"][0]["change_pct"] += 0.1
+    with pytest.raises(NYMarketValidationError, match="market_data_packet_sha256"):
+        validate_payload(changed)
+
+
+def test_failed_production_smoke_shape_is_now_rejected_as_regression_fixture():
+    failed = quality_payload()
+    for key in (
+        "market_data_contract_version", "market_data_packet_sha256", "market_data_generated_at",
+        "providers", "raw_response_hashes", "discrepancy_count",
+    ):
+        failed.pop(key, None)
+    for key in (
+        "market_data_contract_version", "market_data_generated_at", "providers", "raw_response_hashes", "discrepancy_count",
+    ):
+        failed["canonical_market_data"].pop(key, None)
+    with pytest.raises(NYMarketValidationError, match="canonical market data"):
+        validate_payload(failed)
+
+
+def test_searched_not_found_requires_auditable_query_provenance():
+    data = quality_payload()
+    unknown = next(item for item in data["ticker_research"] if item["search_status"] == "searched_not_found")
+    unknown["search_queries"] = []
+    with pytest.raises(NYMarketValidationError, match="search_queries"):
+        validate_payload(data)
+
+
+def test_emit_report_after_publish_is_exact_and_nonempty(tmp_path):
+    data = quality_payload()
+    input_path = tmp_path / "payload.json"
+    input_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    packet_path = tmp_path / "market_packet.json"
+    packet_path.write_text(json.dumps(data["canonical_market_data"], ensure_ascii=False), encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "write_ny_market_payload.py"), str(input_path),
+         "--inbox", str(tmp_path / "inbox"), "--emit-report"],
+        # The saved acquisition packet must be supplied independently.
+        check=False, capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+    )
+    assert completed.returncode != 0
+    completed = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "write_ny_market_payload.py"), str(input_path),
+         "--market-data-packet", str(packet_path), "--inbox", str(tmp_path / "inbox"), "--emit-report"],
+        check=True, capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+    )
+    assert completed.stdout.rstrip("\n") == data["report_markdown"]
+    assert completed.stdout.strip()
+    assert len(list((tmp_path / "inbox").glob("*.json"))) == 1
+
+
+def test_external_market_packet_projection_mismatch_fails_before_publish(tmp_path):
+    data = quality_payload()
+    input_path = tmp_path / "payload.json"
+    packet_path = tmp_path / "market_packet.json"
+    input_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    packet = deepcopy(data["canonical_market_data"])
+    packet["indexes"][0]["close"] += 1
+    packet_path.write_text(json.dumps(packet, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(Exception, match="differs from supplied market-data packet"):
+        publish(input_path, tmp_path / "inbox", packet_path)
+
+
+def test_generic_second_pass_search_plan_has_ir_sec_and_event_patterns():
+    plan = build_catalyst_search_plan("GENR", "Generic Holdings", "2026-09-01")
+    assert len(plan["initial"]) == 2
+    assert len(plan["second_pass"]) == 3
+    combined = " ".join(plan["second_pass"])
+    assert "sec.gov" in combined
+    assert "investor relations" in combined
+    assert "press release" in combined
+    assert "GENR" in combined and "Generic Holdings" in combined
+
+
+def test_resolved_discrepancy_provenance_cannot_disappear_in_research_projection():
+    data = quality_payload()
+    canonical = data["canonical_market_data"]["top_gainers_20"][0]
+    research = next(item for item in data["ticker_research"] if item["ticker"] == canonical["ticker"])
+    provenance = {
+        "discrepancy_status": "resolved", "discrepancy_reason": "stale_daily_bar",
+        "compared_providers": ["nasdaq", "yahoo", "independent_fixture"],
+        "official_previous_close": 10.0, "official_target_close": canonical["close"],
+        "screener_change_pct": canonical["change_pct"], "screener_last_sale": canonical["close"],
+        "screener_net_change": 1.0, "screener_implied_previous_close": 10.0,
+        "historical_previous_close": 10.1, "historical_target_close": canonical["close"],
+        "historical_change_pct": canonical["change_pct"] - 0.5,
+        "corporate_action_status": "checked_none", "liquidity_flag": "low_liquidity",
+        "resolved_at": "2026-09-02T00:00:00+00:00",
+        "supporting_sources": [
+            {"provider": "nasdaq", "role": "official_market_source", "raw_response_sha256": "a" * 64},
+            {"provider": "yahoo", "role": "corporate_action_check", "raw_response_sha256": "b" * 64},
+            {"provider": "independent_fixture", "role": "independent_support", "raw_response_sha256": "c" * 64},
+        ],
+    }
+    canonical.update(provenance)
+    research.update(provenance)
+    data["canonical_market_data"]["discrepancy_count"] = 1
+    attach_market_data_packet_metadata(data)
+    validate_payload(data)
+    del research["liquidity_flag"]
+    with pytest.raises(NYMarketValidationError, match="liquidity_flag differs"):
         validate_payload(data)

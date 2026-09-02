@@ -3,6 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 from hashlib import sha256
 
+from lib.ny_market_research import attach_market_data_packet_metadata
+
 
 TOP20 = (
     ("SSM", "Sono Group N.V.", 77.425, 6_775_086),
@@ -81,6 +83,12 @@ def _research(ticker: str, company: str, change: float, cap: float | None, rank:
         "source_type": "company_press_release" if verified else None,
         "search_status": "verified_catalyst" if verified else "searched_not_found",
         "searched_at": "2026-09-02T07:20:00+09:00", "share_class_components": components,
+        "search_attempt_count": 2,
+        "search_queries": [
+            f'"{ticker}" "{company}" 2026-09-01 news catalyst',
+            f'"{company}" investor relations 2026-09-01 press release',
+        ],
+        "searched_sources": ["https://www.google.com/search", "https://www.sec.gov/edgar/search/"],
     }
 
 
@@ -148,6 +156,11 @@ def payload() -> dict:
         "market_session_date": "2026-09-01", "market_status": "open", "headline": "NY市場はハイテク主導で下落",
         "summary_bullets": [f"検証済み要点 {i}" for i in range(5)],
         "canonical_market_data": {
+            "market_data_contract_version": "ny_market_data_v1",
+            "market_data_generated_at": "2026-09-02T07:10:00+09:00",
+            "providers": ["fixture_market_data", "fixture_screener"],
+            "raw_response_hashes": ["a" * 64, "b" * 64],
+            "discrepancy_count": 0,
             "price_basis": "regular_close", "adjusted": False, "market_session_date": "2026-09-01",
             "source": {"name": "Market Data", "url": market_url, "retrieved_at": "2026-09-02T07:10:00+09:00"},
             "indexes": indexes, "sectors": sectors, "top_gainers_20": top,
@@ -165,7 +178,7 @@ def payload() -> dict:
         "report_markdown": report, "sources": sources,
     }
     result["report_delivery"] = {"source_field": "report_markdown", "sha256": sha256(report.encode("utf-8")).hexdigest()}
-    return result
+    return attach_market_data_packet_metadata(result)
 
 
 BENCHMARK_QUALITATIVE_SCORES = {"earnings_quality": 92, "news10": 90, "final_analysis": 93}

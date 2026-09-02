@@ -24,6 +24,7 @@ INDEX_SYMBOLS = {
     "Nasdaq": "^IXIC",
     "Russell 2000": "^RUT",
 }
+MARKET_DATA_CONTRACT_VERSION = "ny_market_data_v1"
 SECTOR_NAMES = {
     "XLE": "Energy", "XLU": "Utilities", "XLV": "Health Care",
     "XLP": "Consumer Staples", "XLRE": "Real Estate",
@@ -885,6 +886,70 @@ def rank_top20(
         if len(ranked) == 20:
             return ranked
     raise MarketDataError(f"only {len(ranked)} eligible Top20 records remained")
+
+
+def build_canonical_market_data_packet(
+    target_session_date: date,
+    *,
+    historical_providers: Iterable[HistoricalProvider] | None = None,
+    issuer_components: dict[str, list[dict[str, Any]]] | None = None,
+    screener_provider: NasdaqScreenerProvider | None = None,
+    discrepancy_arbitrator: DiscrepancyArbitrator | None = None,
+    candidate_limit: int = 60,
+) -> dict[str, Any]:
+    """Build the sole deterministic market-data input consumed by report generation."""
+    providers = tuple(historical_providers or (
+        YahooChartProvider(host="query1.finance.yahoo.com"),
+        YahooChartProvider(host="query2.finance.yahoo.com"),
+    ))
+    snapshot = build_index_sector_snapshot(providers, target_session_date)
+    screener = (screener_provider or NasdaqScreenerProvider()).fetch()
+    symbols = screener_candidate_symbols(screener, limit=candidate_limit)
+    historical = fetch_all_or_fallback(
+        providers, symbols, target_session_date - timedelta(days=10), target_session_date,
+    )
+    top20 = rank_top20(
+        screener,
+        target_session_date=target_session_date,
+        historical_series=historical.series,
+        issuer_components=issuer_components,
+        discrepancy_arbitrator=discrepancy_arbitrator or LiveDiscrepancyArbitrator(),
+    )
+    provider_names = {
+        snapshot["source"]["name"], screener["provider"], historical.provider,
+    }
+    raw_hashes = {screener["raw_response_sha256"]}
+    for item in (*snapshot["indexes"], *snapshot["sectors"], *top20):
+        provider = item.get("provider")
+        if provider:
+            provider_names.add(str(provider))
+        raw_hash = item.get("raw_response_sha256")
+        if isinstance(raw_hash, str):
+            raw_hashes.add(raw_hash)
+        for source in item.get("supporting_sources", []):
+            provider = source.get("provider")
+            if provider:
+                provider_names.add(str(provider))
+            hashes = source.get("raw_response_sha256")
+            hashes = hashes if isinstance(hashes, list) else [hashes]
+            raw_hashes.update(value for value in hashes if isinstance(value, str))
+    generated_at = max(
+        snapshot["source"]["retrieved_at"], screener["retrieved_at"],
+        *(item.retrieved_at for item in historical.series.values()),
+    )
+    return {
+        **snapshot,
+        "market_data_contract_version": MARKET_DATA_CONTRACT_VERSION,
+        "market_data_generated_at": generated_at,
+        "providers": sorted(provider_names),
+        "discrepancy_count": sum(item["discrepancy_status"] != "not_applicable" for item in top20),
+        "top_gainers_20": top20,
+        "screener": {key: screener[key] for key in (
+            "provider", "source_identifier", "retrieved_at", "raw_response_sha256",
+        )},
+        "top20_history_provider_attempts": [attempt.__dict__ for attempt in historical.attempts],
+        "raw_response_hashes": sorted(raw_hashes),
+    }
 
 
 def screener_candidate_symbols(screener: dict[str, Any], *, limit: int = 60) -> list[str]:

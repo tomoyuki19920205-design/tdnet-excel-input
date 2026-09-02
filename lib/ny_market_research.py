@@ -6,13 +6,16 @@ that every rendered report section must reuse.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from urllib.parse import urlsplit
 
 
 QUALITY_CONTRACT_VERSION = "ny_market_quality_v2"
+MARKET_DATA_CONTRACT_VERSION = "ny_market_data_v1"
 INDEX_ORDER = ("SOX", "S&P500", "Dow", "Nasdaq", "Russell 2000")
 SECTOR_ETFS = frozenset({"XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY"})
 SEARCH_STATUSES = frozenset({"verified_catalyst", "searched_not_found"})
@@ -38,6 +41,59 @@ class ValidatedResearch:
     top_gainers: list[dict[str, Any]]
     tickers: dict[str, dict[str, Any]]
     source_urls: frozenset[str]
+
+
+def market_data_packet_sha256(packet: dict[str, Any]) -> str:
+    """Hash the complete canonical packet with stable JSON serialization."""
+    encoded = json.dumps(
+        packet, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def attach_market_data_packet_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+    """Project immutable packet identity into a payload before rendering/publish."""
+    packet = payload["canonical_market_data"]
+    payload["market_data_contract_version"] = packet["market_data_contract_version"]
+    payload["market_data_generated_at"] = packet["market_data_generated_at"]
+    payload["providers"] = list(packet["providers"])
+    payload["raw_response_hashes"] = list(packet["raw_response_hashes"])
+    payload["discrepancy_count"] = packet["discrepancy_count"]
+    payload["market_data_packet_sha256"] = market_data_packet_sha256(packet)
+    return payload
+
+
+def verify_market_data_packet_projection(payload: dict[str, Any], packet: dict[str, Any]) -> None:
+    """Fail closed unless the persisted acquisition packet is the exact payload source."""
+    if payload.get("canonical_market_data") != packet:
+        raise NYMarketResearchError("payload canonical_market_data differs from supplied market-data packet")
+    expected_hash = market_data_packet_sha256(packet)
+    if payload.get("market_data_packet_sha256") != expected_hash:
+        raise NYMarketResearchError("payload market_data_packet_sha256 differs from supplied packet")
+    for key in (
+        "market_data_contract_version", "market_data_generated_at", "providers",
+        "raw_response_hashes", "discrepancy_count",
+    ):
+        if payload.get(key) != packet.get(key):
+            raise NYMarketResearchError(f"payload {key} differs from supplied market-data packet")
+
+
+def build_catalyst_search_plan(ticker: str, company_name: str, target_date: date | str) -> dict[str, list[str]]:
+    """Return a provider-agnostic two-pass plan for same-day catalyst research."""
+    symbol = _string(ticker, "ticker").upper()
+    company = _string(company_name, "company_name")
+    day = target_date.isoformat() if isinstance(target_date, date) else _string(target_date, "target_date")
+    return {
+        "initial": [
+            f'"{symbol}" "{company}" {day} news catalyst',
+            f'"{company}" {day} press release',
+        ],
+        "second_pass": [
+            f'site:sec.gov "{symbol}" "{company}" {day}',
+            f'"{company}" investor relations {day} press release',
+            f'"{symbol}" {day} patent contract financing earnings acquisition',
+        ],
+    }
 
 
 def _number(value: Any, field: str, *, nullable: bool = False) -> float | None:
@@ -164,6 +220,7 @@ def _validate_ticker(item: Any, index: int) -> dict[str, Any]:
         "ticker", "company_name", "close", "change_pct", "market_cap", "market_cap_method",
         "catalyst", "catalyst_type", "source_url", "source_type", "search_status", "searched_at",
         "share_class_components",
+        "search_attempt_count", "search_queries", "searched_sources",
     )
     missing = [key for key in required if key not in item]
     if missing:
@@ -199,6 +256,19 @@ def _validate_ticker(item: Any, index: int) -> dict[str, Any]:
         raise NYMarketResearchError(f"{field}.search_status is unsupported")
     catalyst = _string(item["catalyst"], f"{field}.catalyst")
     catalyst_type = _string(item["catalyst_type"], f"{field}.catalyst_type")
+    attempt_count = item["search_attempt_count"]
+    if isinstance(attempt_count, bool) or not isinstance(attempt_count, int) or attempt_count < 1:
+        raise NYMarketResearchError(f"{field}.search_attempt_count must be a positive integer")
+    queries = item["search_queries"]
+    if not isinstance(queries, list) or len(queries) != attempt_count:
+        raise NYMarketResearchError(f"{field}.search_queries must match search_attempt_count")
+    if any(not isinstance(query, str) or not query.strip() for query in queries):
+        raise NYMarketResearchError(f"{field}.search_queries must contain non-empty strings")
+    searched_sources = item["searched_sources"]
+    if not isinstance(searched_sources, list) or not searched_sources:
+        raise NYMarketResearchError(f"{field}.searched_sources must be a non-empty array")
+    for source_index, searched_source in enumerate(searched_sources):
+        _url(searched_source, f"{field}.searched_sources[{source_index}]")
     if status == "verified_catalyst":
         source_url = _url(item["source_url"], f"{field}.source_url")
         source_type = item["source_type"]
@@ -231,6 +301,33 @@ def validate_research_packet(payload: dict[str, Any]) -> ValidatedResearch:
         raise NYMarketResearchError("canonical_market_data must be an object")
     if snapshot.get("price_basis") != "regular_close" or snapshot.get("adjusted") is not False:
         raise NYMarketResearchError("market data must use unadjusted regular_close")
+    if snapshot.get("market_data_contract_version") != MARKET_DATA_CONTRACT_VERSION:
+        raise NYMarketResearchError(f"canonical market data must use {MARKET_DATA_CONTRACT_VERSION}")
+    generated_at = _timestamp(snapshot.get("market_data_generated_at"), "canonical_market_data.market_data_generated_at")
+    providers = snapshot.get("providers")
+    if not isinstance(providers, list) or not providers or any(not isinstance(value, str) or not value for value in providers):
+        raise NYMarketResearchError("canonical_market_data.providers must be a non-empty string array")
+    raw_hashes = snapshot.get("raw_response_hashes")
+    if not isinstance(raw_hashes, list) or not raw_hashes:
+        raise NYMarketResearchError("canonical_market_data.raw_response_hashes must be non-empty")
+    if any(not isinstance(value, str) or len(value) != 64 for value in raw_hashes):
+        raise NYMarketResearchError("canonical_market_data.raw_response_hashes must contain SHA-256 values")
+    discrepancy_count = snapshot.get("discrepancy_count")
+    if isinstance(discrepancy_count, bool) or not isinstance(discrepancy_count, int) or discrepancy_count < 0:
+        raise NYMarketResearchError("canonical_market_data.discrepancy_count must be a non-negative integer")
+    expected_hash = market_data_packet_sha256(snapshot)
+    if payload.get("market_data_packet_sha256") != expected_hash:
+        raise NYMarketResearchError("market_data_packet_sha256 is missing or differs from canonical packet")
+    projections = {
+        "market_data_contract_version": MARKET_DATA_CONTRACT_VERSION,
+        "market_data_generated_at": generated_at,
+        "providers": providers,
+        "raw_response_hashes": raw_hashes,
+        "discrepancy_count": discrepancy_count,
+    }
+    for key, expected in projections.items():
+        if payload.get(key) != expected:
+            raise NYMarketResearchError(f"payload {key} differs from canonical market packet")
     if snapshot.get("market_session_date") != payload.get("market_session_date"):
         raise NYMarketResearchError("canonical market session date mismatch")
     source = snapshot.get("source")
@@ -287,6 +384,9 @@ def validate_research_packet(payload: dict[str, Any]) -> ValidatedResearch:
             {**raw, "ticker": ticker, "change_pct": change},
             f"canonical top[{index}]",
         ))
+    actual_discrepancies = sum(item["discrepancy_status"] != "not_applicable" for item in top)
+    if discrepancy_count != actual_discrepancies:
+        raise NYMarketResearchError("canonical_market_data.discrepancy_count does not match Top20")
 
     raw_tickers = payload.get("ticker_research")
     if not isinstance(raw_tickers, list):
@@ -313,6 +413,9 @@ def validate_research_packet(payload: dict[str, Any]) -> ValidatedResearch:
             for key in (
                 "discrepancy_status", "discrepancy_reason", "compared_providers",
                 "official_previous_close", "official_target_close", "supporting_sources", "resolved_at",
+                "corporate_action_status", "liquidity_flag", "screener_change_pct",
+                "screener_last_sale", "screener_net_change", "screener_implied_previous_close",
+                "historical_previous_close", "historical_target_close", "historical_change_pct",
             ):
                 if canonical.get(key) != research.get(key):
                     raise NYMarketResearchError(
