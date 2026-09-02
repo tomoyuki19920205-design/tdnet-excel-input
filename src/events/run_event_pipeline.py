@@ -148,6 +148,7 @@ def main():
                         choices=[
                             "buyback", "forecast_revision", "dividend_revision",
                             "earnings_material", "monthly_update", "management_strategy",
+                            "capital_action",
                         ],
                         help="処理するイベント種別")
     parser.add_argument("--dry-run", action="store_true", help="DB保存・通知なし")

@@ -44,6 +44,7 @@ DISPLAY_MONTHLY_UPDATE = "monthly_update"
 DISPLAY_MANAGEMENT_STRATEGY = "management_strategy"
 DISPLAY_COMPANY_IR_MATERIAL = "company_ir_material"
 DISPLAY_COMPANY_IR_VIDEO = "company_ir_video"
+DISPLAY_CAPITAL_ACTION = "capital_action"
 
 # event_type → display_category 直接マッピング
 _EVENT_TYPE_TO_CATEGORY = {
@@ -58,6 +59,7 @@ _EVENT_TYPE_TO_CATEGORY = {
     "management_strategy": DISPLAY_MANAGEMENT_STRATEGY,
     "company_ir_material": DISPLAY_COMPANY_IR_MATERIAL,
     "company_ir_video": DISPLAY_COMPANY_IR_VIDEO,
+    "capital_action": DISPLAY_CAPITAL_ACTION,
 }
 
 # headline/title キーワード → display_category マッピング
@@ -169,7 +171,7 @@ def build_dedupe_key(event: EventRecord) -> str:
     if event.event_type in (
         EventType.EARNINGS_MATERIAL, EventType.MONTHLY_UPDATE,
         EventType.MANAGEMENT_STRATEGY, DISPLAY_COMPANY_IR_MATERIAL,
-        DISPLAY_COMPANY_IR_VIDEO,
+        DISPLAY_COMPANY_IR_VIDEO, EventType.CAPITAL_ACTION,
     ):
         source_doc_id = (event.source_doc_id or "").strip()
         identity = source_doc_id or _canonical_document_url(event.doc_url)
@@ -220,6 +222,7 @@ _PRIORITY_MAP = {
     ("earnings", None): 40,
     (EventType.EARNINGS_MATERIAL, None): 40,
     (EventType.MANAGEMENT_STRATEGY, None): 45,
+    (EventType.CAPITAL_ACTION, None): 15,
     (EventType.MONTHLY_UPDATE, None): 80,
     (EventType.FORECAST_REVISION, "downward"): 50,
     (EventType.FORECAST_REVISION, "difference"): 50,
@@ -787,6 +790,7 @@ def build_supabase_row(event: EventRecord, client=None) -> tuple[dict, dict, str
     notify_discord = False if event.event_type in (
         EventType.EARNINGS_MATERIAL, EventType.MONTHLY_UPDATE, EventType.MANAGEMENT_STRATEGY,
         DISPLAY_COMPANY_IR_MATERIAL, DISPLAY_COMPANY_IR_VIDEO,
+        DISPLAY_CAPITAL_ACTION,
     ) else should_notify_event(event)
 
     original_event_type = event.event_type or ""
@@ -819,6 +823,8 @@ def build_supabase_row(event: EventRecord, client=None) -> tuple[dict, dict, str
             "previous_dividend", "revised_dividend",
             "revised_dividend_per_share", "previous_dividend_per_share",
             "shares_limit", "amount_limit_million_yen",
+            "offering_shares", "offering_oa_shares", "new_shares",
+            "additional_new_shares", "distribution_shares", "issued_shares_before",
         ]
         has_any_number = any(extracted.get(f) is not None for f in numeric_fields)
         has_semantic_event = extracted.get("policy_change_detected") is True
@@ -854,6 +860,7 @@ def build_supabase_row(event: EventRecord, client=None) -> tuple[dict, dict, str
             DISPLAY_EARNINGS_MATERIAL, DISPLAY_MONTHLY_UPDATE,
             DISPLAY_MANAGEMENT_STRATEGY,
             DISPLAY_COMPANY_IR_MATERIAL, DISPLAY_COMPANY_IR_VIDEO,
+            DISPLAY_CAPITAL_ACTION,
         ) else None,
         "raw_payload": json.dumps(raw_payload, ensure_ascii=False, default=str),
         "strength_score": strength,

@@ -31,6 +31,9 @@ from .notify_rules import should_notify_event
 from .buyback_classifier import classify_buyback, classify_buyback_subtype
 from .forecast_classifier import classify_forecast
 from .dividend_classifier import classify_dividend
+from .capital_action import (
+    action_label, extract_capital_action, is_capital_action_title,
+)
 
 # extractors
 from .buyback_extractor import extract_buyback_event
@@ -408,6 +411,32 @@ def _pdf_only_material_to_event_record(doc: DocumentMeta, match) -> EventRecord:
     )
 
 
+def _capital_action_to_event_record(doc: DocumentMeta, extraction) -> EventRecord:
+    payload = extraction.to_dict()
+    label = action_label(payload["actions"])
+    status_labels = {
+        "conditions_decided": "更新", "implemented": "更新", "completed": "終了",
+        "corrected": "訂正", "cancelled": "中止",
+    }
+    prefix = status_labels.get(extraction.status)
+    summary = f"【{prefix + '：' if prefix else ''}{label}】"
+    return EventRecord(
+        source_doc_id=doc.source_doc_id or doc.doc_id,
+        ticker=doc.ticker,
+        company_name=doc.company_name,
+        disclosure_datetime=doc.disclosure_datetime,
+        title=doc.title,
+        event_type=EventType.CAPITAL_ACTION,
+        subtype=extraction.status,
+        importance=75,
+        summary_text=summary,
+        raw_payload_json=json.dumps({"title": doc.title}, ensure_ascii=False),
+        extracted_payload_json=json.dumps(payload, ensure_ascii=False),
+        fingerprint=compute_fingerprint(EventType.CAPITAL_ACTION, doc.source_doc_id or doc.doc_id),
+        doc_url=doc.doc_url or "",
+    )
+
+
 # ============================================================
 # 単一文書処理
 # ============================================================
@@ -434,6 +463,7 @@ def _process_single_document(
     allowed = event_types or {
         EventType.BUYBACK, EventType.FORECAST_REVISION, EventType.DIVIDEND_REVISION,
         EventType.EARNINGS_MATERIAL, EventType.MONTHLY_UPDATE, EventType.MANAGEMENT_STRATEGY,
+        EventType.CAPITAL_ACTION,
     }
 
     # ================================================================
@@ -443,6 +473,7 @@ def _process_single_document(
     _pre_forecast = classify_forecast(title, "")             # title のみで十分判定可能
     _pre_dividend = classify_dividend(title, "")             # title のみで十分判定可能
     _pre_material = classify_pdf_only_material(title, doc.doc_url)
+    _pre_capital_action = is_capital_action_title(title)
     if _pre_material and doc.link_validated is not True:
         logger.warning(
             "[MATERIAL_EVENT_SUPPRESSED] ticker=%s source_doc_id=%s "
@@ -463,6 +494,7 @@ def _process_single_document(
     _need_forecast = (EventType.FORECAST_REVISION in allowed) and _pre_forecast.is_target
     _need_dividend = (EventType.DIVIDEND_REVISION in allowed) and _pre_dividend.is_target
     _need_material = bool(_pre_material and _pre_material.event_type in allowed)
+    _need_capital_action = EventType.CAPITAL_ACTION in allowed and _pre_capital_action
     if (
         _need_material
         and _pre_material.event_type == EventType.MANAGEMENT_STRATEGY
@@ -489,7 +521,7 @@ def _process_single_document(
     )
 
     # 全カテゴリ対象外 → PDF取得不要で即return
-    if not (_need_buyback or _need_forecast or _need_dividend or _need_material):
+    if not (_need_buyback or _need_forecast or _need_dividend or _need_material or _need_capital_action):
         logger.info(
             f"[TITLE_PRECLASSIFY] SKIP_ALL ticker={doc.ticker} "
             f"(no event category matched, skip PDF fetch)"
@@ -533,6 +565,32 @@ def _process_single_document(
                 _text, _fetched_pdf_path = _get_text_and_pdf(doc)
             _text_fetched = True
         return _text, _fetched_pdf_path
+
+    if _need_capital_action:
+        try:
+            text, _ = _ensure_text()
+            extraction = extract_capital_action(
+                title, text, ticker=doc.ticker,
+                disclosure_datetime=doc.disclosure_datetime, db_path=db_path,
+            )
+            if extraction:
+                record = _capital_action_to_event_record(doc, extraction)
+                if dry_run:
+                    results.append({
+                        "event_type": EventType.CAPITAL_ACTION, "subtype": extraction.status,
+                        "action": "dry_run", "event_id": record.event_id,
+                        "summary": record.summary_text, "_event_record": record,
+                    })
+                else:
+                    action, eid = upsert_event(conn, record)
+                    results.append({
+                        "event_type": EventType.CAPITAL_ACTION, "subtype": extraction.status,
+                        "action": action, "event_id": eid,
+                        "_event_record": record if action in ("inserted", "updated") else None,
+                    })
+        except Exception as exc:
+            logger.warning("[EVENT] capital action failed doc_id=%s: %s", doc.doc_id[:16], exc)
+            results.append({"event_type": EventType.CAPITAL_ACTION, "action": "error", "error": str(exc)})
 
     # ---- buyback ----
     if _need_buyback:
@@ -812,6 +870,7 @@ def process_documents(
             allowed = event_types or {
                 EventType.BUYBACK, EventType.FORECAST_REVISION, EventType.DIVIDEND_REVISION,
                 EventType.EARNINGS_MATERIAL, EventType.MONTHLY_UPDATE, EventType.MANAGEMENT_STRATEGY,
+                EventType.CAPITAL_ACTION,
             }
             _pre_buyback_subtype = classify_buyback_subtype(title)
             _pre_forecast = classify_forecast(title, "")
@@ -819,8 +878,9 @@ def process_documents(
             _need_buyback  = (EventType.BUYBACK in allowed) and (_pre_buyback_subtype != "ignore")
             _need_forecast = (EventType.FORECAST_REVISION in allowed) and _pre_forecast.is_target
             _need_dividend = (EventType.DIVIDEND_REVISION in allowed) and _pre_dividend.is_target
+            _need_capital_action = (EventType.CAPITAL_ACTION in allowed) and is_capital_action_title(title)
             
-            if not (_need_buyback or _need_forecast or _need_dividend):
+            if not (_need_buyback or _need_forecast or _need_dividend or _need_capital_action):
                 return None
                 
             try:
