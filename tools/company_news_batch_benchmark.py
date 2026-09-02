@@ -39,6 +39,10 @@ TASK_TELEMETRY_SCHEMA = "company_news_benchmark_task_telemetry_v1"
 FAILURE_SCHEMA = "company_news_benchmark_failure_v1"
 AUDIT_SCHEMA = "company_news_batch_benchmark_audit_v1"
 INTEGRATION_SCHEMA = "company_news_batch_integration_fixture_v1"
+REPEATABILITY_SCHEMA = "company_news_reference_repeatability_v1"
+EVENT_UNION_SCHEMA = "company_news_quality_event_union_v1"
+GOLD_ADJUDICATION_SCHEMA = "company_news_gold_adjudication_v1"
+GOLD_AUDIT_SCHEMA = "company_news_gold_audit_v1"
 
 TASK_COUNT = 8
 COHORT_SIZE = 192
@@ -47,6 +51,22 @@ REFERENCE_BATCH_SIZE = 1
 ALLOWED_CANDIDATE_BATCH_SIZES = (2, 3, 4)
 SUSPENDED_UPWARD_CANDIDATES = (8, 12, 16, 20, 24)
 ALLOWED_BATCH_SIZES = (REFERENCE_BATCH_SIZE, *ALLOWED_CANDIDATE_BATCH_SIZES)
+REFERENCE_RUN_NAMES = ("reference", "reference02")
+QUALITY_RUN_LABELS = {
+    "reference": "reference01",
+    "reference02": "reference02",
+    "batch02": "batch02",
+    "batch04": "batch04",
+}
+GOLD_VERDICTS = (
+    "VALID_MATERIAL",
+    "VALID_NON_MATERIAL",
+    "DUPLICATE",
+    "MATCHER_FALSE_NEGATIVE",
+    "INVALID_SOURCE",
+    "OUT_OF_WINDOW",
+    "UNKNOWN",
+)
 DEFAULT_SEARCH_FROM = date(2026, 8, 25)
 DEFAULT_SEARCH_TO = date(2026, 8, 31)
 _JST = timezone(timedelta(hours=9))
@@ -144,7 +164,7 @@ def _benchmark_dir(root: Path, benchmark_id: str) -> Path:
 
 def _run_dir(root: Path, benchmark_id: str, run_name: str) -> Path:
     match = re.fullmatch(r"batch(\d{2})", run_name)
-    if run_name != "reference" and (
+    if run_name not in REFERENCE_RUN_NAMES and (
         not match or int(match.group(1)) not in ALLOWED_CANDIDATE_BATCH_SIZES
     ):
         raise BenchmarkError("invalid benchmark run name")
@@ -357,30 +377,22 @@ def _load_cohort(root: Path, benchmark_id: str) -> dict[str, Any]:
     return value
 
 
-def prepare_run(
+def _prepare_named_run(
     root: Path,
     benchmark_id: str,
+    cohort: dict[str, Any],
+    selected: list[dict[str, Any]],
     batch_size: int,
+    run_name: str,
     *,
-    reference: bool = False,
+    reference: bool,
+    reference_replication_of: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    if (
-        batch_size not in ALLOWED_BATCH_SIZES
-        or (reference and batch_size != REFERENCE_BATCH_SIZE)
-        or (not reference and batch_size == REFERENCE_BATCH_SIZE)
-    ):
-        raise BenchmarkError("candidate batch must be 2 through 4; reference batch must be 1")
-    cohort = _load_cohort(root, benchmark_id)
-    run_name = "reference" if reference else f"batch{batch_size:02d}"
     directory = _run_dir(root, benchmark_id, run_name)
-    if directory.exists():
-        raise BenchmarkError(f"benchmark run already exists: {run_name}")
-    selected = cohort["companies"]
-    if reference:
-        wanted = set(cohort["reference_tickers"])
-        selected = [company for company in selected if company["ticker"] in wanted]
     output_directory = _paths(root)["outputs"] / benchmark_id / run_name
+    if directory.exists() or output_directory.exists():
+        raise BenchmarkError(f"benchmark run already exists: {run_name}")
     assignments_by_task: dict[str, list[dict[str, Any]]] = {f"task{i:02d}": [] for i in range(1, 9)}
     for index, company in enumerate(selected):
         task_id = f"task{index % TASK_COUNT + 1:02d}"
@@ -414,7 +426,12 @@ def prepare_run(
         "search_to": cohort["search_to"],
         "output_directory": str(output_directory.resolve()),
         "production_write_forbidden": True,
+        "company_order_sha256": hashlib.sha256(
+            "\n".join(company["ticker"] for company in selected).encode()
+        ).hexdigest(),
     }
+    if reference_replication_of:
+        manifest["reference_replication_of"] = reference_replication_of
     atomic_write_json(directory / "manifest.json", manifest)
     for task_id, assignments in assignments_by_task.items():
         atomic_write_json(directory / "tasks" / task_id / "queue.json", {
@@ -427,6 +444,94 @@ def prepare_run(
         })
     output_directory.mkdir(parents=True, exist_ok=True)
     return manifest
+
+
+def prepare_run(
+    root: Path,
+    benchmark_id: str,
+    batch_size: int,
+    *,
+    reference: bool = False,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    if (
+        batch_size not in ALLOWED_BATCH_SIZES
+        or (reference and batch_size != REFERENCE_BATCH_SIZE)
+        or (not reference and batch_size == REFERENCE_BATCH_SIZE)
+    ):
+        raise BenchmarkError("candidate batch must be 2 through 4; reference batch must be 1")
+    cohort = _load_cohort(root, benchmark_id)
+    run_name = "reference" if reference else f"batch{batch_size:02d}"
+    selected = list(cohort["companies"])
+    if reference:
+        wanted = set(cohort["reference_tickers"])
+        selected = [company for company in selected if company["ticker"] in wanted]
+    return _prepare_named_run(
+        root,
+        benchmark_id,
+        cohort,
+        selected,
+        batch_size,
+        run_name,
+        reference=reference,
+        now=now,
+    )
+
+
+def _ordered_run_assignments(directory: Path) -> list[dict[str, Any]]:
+    ordered: list[tuple[int, dict[str, Any]]] = []
+    for task_index in range(TASK_COUNT):
+        task_id = f"task{task_index + 1:02d}"
+        queue = _read_json(directory / "tasks" / task_id / "queue.json")
+        for assignment in queue.get("assignments", []):
+            position = int(assignment["task_queue_position"])
+            ordered.append(((position - 1) * TASK_COUNT + task_index, assignment))
+    ordered.sort(key=lambda value: value[0])
+    return [assignment for _, assignment in ordered]
+
+
+def prepare_reference_replication(
+    root: Path,
+    benchmark_id: str,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Prepare an inert reference02 from the persisted reference01 sequence."""
+    cohort = _load_cohort(root, benchmark_id)
+    original_directory = _run_dir(root, benchmark_id, "reference")
+    original_manifest = _read_json(original_directory / "manifest.json")
+    if (
+        original_manifest.get("reference") is not True
+        or original_manifest.get("batch_size") != REFERENCE_BATCH_SIZE
+        or original_manifest.get("search_from") != cohort.get("search_from")
+        or original_manifest.get("search_to") != cohort.get("search_to")
+    ):
+        raise BenchmarkError("persisted reference run does not match the benchmark cohort")
+    original = _ordered_run_assignments(original_directory)
+    expected = list(cohort.get("reference_tickers", []))
+    if len(original) != len(expected) or {item["ticker"] for item in original} != set(expected):
+        raise BenchmarkError("persisted reference company set is incomplete")
+    selected = [
+        {
+            "ticker": item["ticker"],
+            "company_name": item["company_name"],
+            "sector": item.get("sector", "unknown"),
+            "size_bucket": item.get("size_bucket", "unknown"),
+            "prior_news_bucket": item.get("prior_news_bucket", "unscanned"),
+        }
+        for item in original
+    ]
+    return _prepare_named_run(
+        root,
+        benchmark_id,
+        cohort,
+        selected,
+        REFERENCE_BATCH_SIZE,
+        "reference02",
+        reference=True,
+        reference_replication_of="reference",
+        now=now,
+    )
 
 
 def _validate_manifest(root: Path, value: dict[str, Any]) -> tuple[Path, dict[str, Any]]:
@@ -1015,22 +1120,46 @@ def _jaccard(left: set[str], right: set[str]) -> float:
     return len(left & right) / len(left | right) if left or right else 1.0
 
 
-def _event_match(reference: dict[str, Any], candidate: dict[str, Any]) -> tuple[bool, str, float]:
-    if reference["ticker"] != candidate["ticker"]:
-        return False, "ticker_mismatch", 0.0
-    if _normalized_url(reference["source_url"]) == _normalized_url(candidate["source_url"]):
-        return True, "normalized_url", 1.0
+def _event_match_evidence(reference: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+    same_ticker = reference["ticker"] == candidate["ticker"]
+    raw_url_equal = reference["source_url"] == candidate["source_url"]
+    normalized_url_equal = _normalized_url(reference["source_url"]) == _normalized_url(candidate["source_url"])
     ref_date = datetime.fromisoformat(reference["published_at"]).date()
     candidate_date = datetime.fromisoformat(candidate["published_at"]).date()
-    if ref_date != candidate_date or reference["category"] != candidate["category"]:
-        return False, "date_or_category_mismatch", 0.0
-    headline = _jaccard(_text_tokens(reference["headline"]), _text_tokens(candidate["headline"]))
-    substance = _jaccard(
+    date_delta_days = abs((ref_date - candidate_date).days)
+    category_equal = reference["category"] == candidate["category"]
+    headline_similarity = _jaccard(
+        _text_tokens(reference["headline"]), _text_tokens(candidate["headline"])
+    )
+    substance_similarity = _jaccard(
         _text_tokens(reference["headline"] + " " + reference.get("summary", "")),
         _text_tokens(candidate["headline"] + " " + candidate.get("summary", "")),
     )
-    score = max(headline, substance)
-    return (score >= 0.55), "semantic_substance", score
+    score = max(headline_similarity, substance_similarity)
+    if not same_ticker:
+        matched, method, score = False, "ticker_mismatch", 0.0
+    elif normalized_url_equal:
+        matched, method, score = True, "normalized_url", 1.0
+    elif date_delta_days != 0 or not category_equal:
+        matched, method, score = False, "date_or_category_mismatch", score
+    else:
+        matched, method = score >= 0.55, "semantic_substance"
+    return {
+        "matched": matched,
+        "method": method,
+        "score": score,
+        "raw_url_equal": raw_url_equal,
+        "normalized_url_equal": normalized_url_equal,
+        "date_delta_days": date_delta_days,
+        "category_equal": category_equal,
+        "headline_similarity": headline_similarity,
+        "substance_similarity": substance_similarity,
+    }
+
+
+def _event_match(reference: dict[str, Any], candidate: dict[str, Any]) -> tuple[bool, str, float]:
+    evidence = _event_match_evidence(reference, candidate)
+    return evidence["matched"], evidence["method"], evidence["score"]
 
 
 def _load_success_outputs(directory: Path) -> tuple[dict[str, list[dict[str, Any]]], int, int, list[str]]:
@@ -1112,6 +1241,644 @@ def _quality_metrics(
         "ambiguous_match_count": len(ambiguous),
     }
     return quality, company_recall, ambiguous
+
+
+def _quality_v2_dir(root: Path, benchmark_id: str) -> Path:
+    return _benchmark_dir(root, benchmark_id) / "quality_v2"
+
+
+def _event_public_fields(event: dict[str, Any]) -> dict[str, Any]:
+    source_url = str(event["source_url"])
+    return {
+        "ticker": event["ticker"],
+        "date": datetime.fromisoformat(event["published_at"]).date().isoformat(),
+        "published_at": event["published_at"],
+        "headline": event["headline"],
+        "category": event["category"],
+        "source_url": source_url,
+        "normalized_source_url": _normalized_url(source_url),
+        "source_domain": (urlsplit(source_url).hostname or "").lower(),
+        "source_type": event.get("source_type", "news"),
+        "importance": event.get("importance"),
+        "earnings_relevance": event.get("earnings_relevance"),
+        "summary": event.get("summary", ""),
+        "why_it_matters": event.get("why_it_matters", ""),
+    }
+
+
+def _build_event_union(
+    run_events: dict[str, dict[str, list[dict[str, Any]]]],
+    company_names: dict[str, str],
+) -> list[dict[str, Any]]:
+    """Build deterministic cross-run match clusters; no verdict is inferred."""
+    members: list[dict[str, Any]] = []
+    run_order = list(QUALITY_RUN_LABELS)
+    for run_name in run_order:
+        label = QUALITY_RUN_LABELS[run_name]
+        for ticker in sorted(run_events.get(run_name, {})):
+            for event_index, event in enumerate(run_events[run_name][ticker]):
+                members.append({
+                    "run_name": run_name,
+                    "run_label": label,
+                    "event_index": event_index,
+                    **_event_public_fields(event),
+                })
+
+    parent = list(range(len(members)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        left_root, right_root = find(left), find(right)
+        if left_root != right_root:
+            parent[right_root] = left_root
+
+    for left in range(len(members)):
+        for right in range(left + 1, len(members)):
+            if _event_match_evidence(members[left], members[right])["matched"]:
+                union(left, right)
+
+    grouped: dict[int, list[int]] = defaultdict(list)
+    for index in range(len(members)):
+        grouped[find(index)].append(index)
+
+    clusters: list[dict[str, Any]] = []
+    for indexes in grouped.values():
+        cluster_members = [members[index] for index in indexes]
+        cluster_members.sort(key=lambda value: (
+            run_order.index(value["run_name"]), value["ticker"], value["event_index"]
+        ))
+        representative = cluster_members[0]
+        fingerprint = json.dumps(
+            sorted(
+                (
+                    member["run_label"], member["ticker"], member["normalized_source_url"],
+                    member["published_at"], member["headline"],
+                )
+                for member in cluster_members
+            ),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        cluster_id = f"event-{hashlib.sha256(fingerprint.encode()).hexdigest()[:16]}"
+        evidence: list[dict[str, Any]] = []
+        for left in range(len(cluster_members)):
+            for right in range(left + 1, len(cluster_members)):
+                match = _event_match_evidence(cluster_members[left], cluster_members[right])
+                evidence.append({
+                    "left_run": cluster_members[left]["run_label"],
+                    "left_event_index": cluster_members[left]["event_index"],
+                    "right_run": cluster_members[right]["run_label"],
+                    "right_event_index": cluster_members[right]["event_index"],
+                    **match,
+                })
+        found_by = {
+            label: any(member["run_label"] == label for member in cluster_members)
+            for label in QUALITY_RUN_LABELS.values()
+        }
+        clusters.append({
+            "match_cluster_id": cluster_id,
+            "ticker": representative["ticker"],
+            "company": company_names.get(representative["ticker"], ""),
+            "date": representative["date"],
+            "headline": representative["headline"],
+            "category": representative["category"],
+            "source_url": representative["source_url"],
+            "source_domain": representative["source_domain"],
+            "source_type": representative["source_type"],
+            "importance": representative["importance"],
+            "earnings_relevance": representative["earnings_relevance"],
+            "found_by": found_by,
+            "matcher_evidence": evidence,
+            "members": cluster_members,
+            "verdict": "UNKNOWN",
+            "automated_false_positive": False,
+        })
+    clusters.sort(key=lambda value: (value["ticker"], value["date"], value["match_cluster_id"]))
+    return clusters
+
+
+def _count_agreement(
+    left: dict[str, float], right: dict[str, float], tickers: list[str]
+) -> dict[str, Any]:
+    differences = [abs(float(left.get(ticker, 0)) - float(right.get(ticker, 0))) for ticker in tickers]
+    exact = sum(difference == 0 for difference in differences)
+    left_values = [float(left.get(ticker, 0)) for ticker in tickers]
+    right_values = [float(right.get(ticker, 0)) for ticker in tickers]
+    return {
+        "company_count": len(tickers),
+        "exact_match_count": exact,
+        "exact_match_rate": exact / len(tickers) if tickers else 1.0,
+        "mean_absolute_difference": statistics.mean(differences) if differences else 0.0,
+        "left_average": statistics.mean(left_values) if left_values else None,
+        "right_average": statistics.mean(right_values) if right_values else None,
+        "right_to_left_average_ratio": _ratio(
+            statistics.mean(right_values) if right_values else None,
+            statistics.mean(left_values) if left_values else None,
+        ),
+    }
+
+
+def _reference_repeatability_metrics(
+    left_events: dict[str, list[dict[str, Any]]],
+    right_events: dict[str, list[dict[str, Any]]],
+    tickers: list[str],
+    *,
+    left_source_counts: dict[str, float] | None = None,
+    right_source_counts: dict[str, float] | None = None,
+    company_names: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    ticker_set = set(tickers)
+    left_to_right, _, left_ambiguous = _quality_metrics(left_events, right_events, ticker_set)
+    right_to_left, _, right_ambiguous = _quality_metrics(right_events, left_events, ticker_set)
+    left_news = {ticker for ticker in tickers if left_events.get(ticker)}
+    right_news = {ticker for ticker in tickers if right_events.get(ticker)}
+    both_news = left_news & right_news
+    both_no_news = ticker_set - (left_news | right_news)
+    clusters = _build_event_union(
+        {"reference": left_events, "reference02": right_events}, company_names or {}
+    )
+    matched_clusters = [
+        cluster for cluster in clusters
+        if cluster["found_by"]["reference01"] and cluster["found_by"]["reference02"]
+    ]
+    left_only = [
+        cluster for cluster in clusters
+        if cluster["found_by"]["reference01"] and not cluster["found_by"]["reference02"]
+    ]
+    right_only = [
+        cluster for cluster in clusters
+        if cluster["found_by"]["reference02"] and not cluster["found_by"]["reference01"]
+    ]
+    stable = (
+        left_to_right["event_recall"] >= 0.90
+        and right_to_left["event_recall"] >= 0.90
+        and left_to_right["critical_event_recall"] == 1.0
+        and right_to_left["critical_event_recall"] == 1.0
+    )
+    if stable:
+        decision = "PASS"
+    elif min(left_to_right["event_recall"], right_to_left["event_recall"]) < 0.90:
+        decision = "QUALITY_METRIC_NOT_STABLE"
+    else:
+        decision = "WARN"
+    return {
+        "decision": decision,
+        "thresholds": {
+            "critical_event_recall": 1.0,
+            "minimum_overall_event_recall": 0.90,
+            "target_overall_event_recall": 0.95,
+        },
+        "reference01_to_reference02": left_to_right,
+        "reference02_to_reference01": right_to_left,
+        "ambiguous_matches": {
+            "reference01_to_reference02": left_ambiguous,
+            "reference02_to_reference01": right_ambiguous,
+        },
+        "news_presence_agreement": {
+            "both_news_present": len(both_news),
+            "both_no_news": len(both_no_news),
+            "reference01_only_news": sorted(left_news - right_news),
+            "reference02_only_news": sorted(right_news - left_news),
+            "news_present_agreement_rate": len(both_news) / len(tickers) if tickers else 1.0,
+            "no_news_agreement_rate": len(both_no_news) / len(tickers) if tickers else 1.0,
+            "agreement_rate": (len(both_news) + len(both_no_news)) / len(tickers) if tickers else 1.0,
+        },
+        "event_count_agreement": _count_agreement(
+            {ticker: len(left_events.get(ticker, [])) for ticker in tickers},
+            {ticker: len(right_events.get(ticker, [])) for ticker in tickers},
+            tickers,
+        ),
+        "source_count_agreement": _count_agreement(
+            left_source_counts or {}, right_source_counts or {}, tickers
+        ),
+        "jaccard_event_similarity": len(matched_clusters) / len(clusters) if clusters else 1.0,
+        "matched_event_clusters": len(matched_clusters),
+        "matched_events": matched_clusters,
+        "reference01_only_events": left_only,
+        "reference02_only_events": right_only,
+    }
+
+
+def _persistent_false_negative_audit(clusters: list[dict[str, Any]]) -> dict[str, Any]:
+    matcher_miss_details: list[dict[str, Any]] = []
+    for cluster in clusters:
+        found = cluster["found_by"]
+        if not found.get("reference01"):
+            continue
+        missing = [run for run in ("batch02", "batch04") if not found.get(run)]
+        if not missing:
+            continue
+        reference_member = next(
+            member for member in cluster["members"] if member["run_label"] == "reference01"
+        )
+        candidate_results: dict[str, Any] = {}
+        for run in missing:
+            candidates = [
+                member
+                for other in clusters
+                for member in other["members"]
+                if member["run_label"] == run and member["ticker"] == cluster["ticker"]
+            ]
+            if not candidates:
+                candidate_results[run] = {
+                    "result": "no_event_for_ticker",
+                    "inferred_reason": "candidate returned items=[] or no valid event",
+                    "events": [],
+                }
+                continue
+            ranked = sorted(
+                (
+                    (_event_match_evidence(reference_member, candidate), candidate)
+                    for candidate in candidates
+                ),
+                key=lambda value: (
+                    value[0]["matched"], value[0]["score"],
+                    value[0]["normalized_url_equal"], -value[0]["date_delta_days"],
+                ),
+            )
+            best_evidence, _ = ranked[-1]
+            candidate_results[run] = {
+                "result": "different_events_for_ticker",
+                "inferred_reason": best_evidence["method"],
+                "best_matcher_evidence": best_evidence,
+                "events": [
+                    {
+                        "headline": candidate["headline"],
+                        "date": candidate["date"],
+                        "category": candidate["category"],
+                        "source_url": candidate["source_url"],
+                    }
+                    for candidate in candidates
+                ],
+            }
+        matcher_miss_details.append({
+            "ticker": cluster["ticker"],
+            "company": cluster["company"],
+            "match_cluster_id": cluster["match_cluster_id"],
+            "classification": (
+                "persistent_batch02_batch04_false_negative"
+                if len(missing) == 2 else f"{missing[0]}_only_false_negative"
+            ),
+            "missing_from": missing,
+            "reference_event": {
+                "date": reference_member["date"],
+                "headline": reference_member["headline"],
+                "source_url": reference_member["source_url"],
+                "source_type": reference_member["source_type"],
+                "category": reference_member["category"],
+                "importance": reference_member["importance"],
+                "earnings_relevance": reference_member["earnings_relevance"],
+            },
+            "candidate_result": candidate_results,
+        })
+    reference_tickers = {
+        cluster["ticker"] for cluster in clusters if cluster["found_by"].get("reference01")
+    }
+    candidate_tickers = {
+        run: {cluster["ticker"] for cluster in clusters if cluster["found_by"].get(run)}
+        for run in ("batch02", "batch04")
+    }
+    batch02_missing = reference_tickers - candidate_tickers["batch02"]
+    batch04_missing = reference_tickers - candidate_tickers["batch04"]
+    persistent = batch02_missing & batch04_missing
+    batch02_only = batch02_missing - batch04_missing
+    batch04_only = batch04_missing - batch02_missing
+    classification_by_ticker = {
+        **{ticker: "persistent_batch02_batch04_false_negative" for ticker in persistent},
+        **{ticker: "batch02_only_false_negative" for ticker in batch02_only},
+        **{ticker: "batch04_only_false_negative" for ticker in batch04_only},
+    }
+    event_level_details = []
+    for detail in matcher_miss_details:
+        classification = classification_by_ticker.get(detail["ticker"])
+        if classification is None:
+            continue
+        company_missing = (
+            ["batch02", "batch04"] if detail["ticker"] in persistent
+            else ["batch02"] if detail["ticker"] in batch02_only
+            else ["batch04"]
+        )
+        event_level_details.append({
+            **detail,
+            "classification": classification,
+            "company_level_missing_from": company_missing,
+        })
+    return {
+        "classification_basis": "reference-news ticker with no candidate event for the ticker",
+        "event_level_details": event_level_details,
+        "persistent_tickers": sorted(persistent),
+        "batch02_only_tickers": sorted(batch02_only),
+        "batch04_only_tickers": sorted(batch04_only),
+        "matcher_event_miss_details": matcher_miss_details,
+    }
+
+
+def _gold_template(benchmark_id: str, union: dict[str, Any], *, now: datetime | None = None) -> dict[str, Any]:
+    union_hash = hashlib.sha256(
+        json.dumps(union, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    events = []
+    for cluster in union["events"]:
+        events.append({
+            key: cluster[key]
+            for key in (
+                "match_cluster_id", "ticker", "company", "date", "headline", "category",
+                "source_url", "source_domain", "source_type", "importance",
+                "earnings_relevance", "found_by",
+            )
+        } | {
+            "verdict": "UNKNOWN",
+            "rationale": "",
+            "official_source_url": None,
+            "adjudicator": None,
+            "adjudicated_at": None,
+        })
+    return {
+        "schema_version": GOLD_ADJUDICATION_SCHEMA,
+        "benchmark_id": benchmark_id,
+        "source_union_sha256": union_hash,
+        "created_at": _iso(now),
+        "primary_source_priority": [
+            "company_ir", "company_press_release", "tdnet", "edinet_or_sec",
+            "government", "exchange", "other_official_source",
+        ],
+        "allowed_verdicts": list(GOLD_VERDICTS),
+        "events": events,
+    }
+
+
+def validate_gold_adjudication(value: dict[str, Any]) -> dict[str, Any]:
+    if value.get("schema_version") != GOLD_ADJUDICATION_SCHEMA:
+        raise BenchmarkError("invalid gold adjudication schema_version")
+    if not isinstance(value.get("benchmark_id"), str) or not value["benchmark_id"]:
+        raise BenchmarkError("gold adjudication benchmark_id is required")
+    if not isinstance(value.get("events"), list):
+        raise BenchmarkError("gold adjudication events must be an array")
+    required = {
+        "match_cluster_id", "ticker", "company", "date", "headline", "category",
+        "source_url", "source_domain", "source_type", "importance",
+        "earnings_relevance", "found_by", "verdict", "rationale",
+        "official_source_url", "adjudicator", "adjudicated_at",
+    }
+    seen: set[str] = set()
+    expected_found_by = set(QUALITY_RUN_LABELS.values())
+    for index, event in enumerate(value["events"]):
+        if not isinstance(event, dict) or not required.issubset(event):
+            raise BenchmarkError(f"gold events[{index}] is missing required fields")
+        cluster_id = event["match_cluster_id"]
+        if not isinstance(cluster_id, str) or not cluster_id or cluster_id in seen:
+            raise BenchmarkError(f"gold events[{index}].match_cluster_id must be unique")
+        seen.add(cluster_id)
+        if event["verdict"] not in GOLD_VERDICTS:
+            raise BenchmarkError(f"gold events[{index}].verdict is invalid")
+        if set(event["found_by"]) != expected_found_by or any(
+            not isinstance(flag, bool) for flag in event["found_by"].values()
+        ):
+            raise BenchmarkError(f"gold events[{index}].found_by is invalid")
+        if not str(event["source_url"]).startswith(("http://", "https://")):
+            raise BenchmarkError(f"gold events[{index}].source_url must be HTTP(S)")
+        if event["verdict"] != "UNKNOWN":
+            if not isinstance(event["rationale"], str) or not event["rationale"].strip():
+                raise BenchmarkError(f"gold events[{index}].rationale is required after adjudication")
+            if not isinstance(event["adjudicator"], str) or not event["adjudicator"].strip():
+                raise BenchmarkError(f"gold events[{index}].adjudicator is required after adjudication")
+            try:
+                adjudicated_at = datetime.fromisoformat(str(event["adjudicated_at"]))
+            except (TypeError, ValueError) as exc:
+                raise BenchmarkError(f"gold events[{index}].adjudicated_at is invalid") from exc
+            if adjudicated_at.tzinfo is None:
+                raise BenchmarkError(f"gold events[{index}].adjudicated_at must include timezone")
+        official_url = event.get("official_source_url")
+        if official_url is not None and not str(official_url).startswith(("http://", "https://")):
+            raise BenchmarkError(f"gold events[{index}].official_source_url must be HTTP(S) or null")
+    return value
+
+
+def _gold_metrics(value: dict[str, Any]) -> dict[str, Any]:
+    validate_gold_adjudication(value)
+    unknown = [event["match_cluster_id"] for event in value["events"] if event["verdict"] == "UNKNOWN"]
+    if unknown:
+        return {
+            "available": False,
+            "decision": "INCOMPLETE_ADJUDICATION",
+            "unknown_event_count": len(unknown),
+            "unknown_match_cluster_ids": unknown,
+            "runs": {},
+        }
+    material = [event for event in value["events"] if event["verdict"] == "VALID_MATERIAL"]
+    critical = [
+        event for event in material
+        if event["importance"] == "high" or event["earnings_relevance"] == "direct"
+    ]
+    material_tickers = {event["ticker"] for event in material}
+    precision_verdicts = {
+        "VALID_MATERIAL", "VALID_NON_MATERIAL", "INVALID_SOURCE", "OUT_OF_WINDOW"
+    }
+    runs: dict[str, Any] = {}
+    for run in QUALITY_RUN_LABELS.values():
+        found_material = [event for event in material if event["found_by"][run]]
+        found_critical = [event for event in critical if event["found_by"][run]]
+        precision_denominator = [
+            event for event in value["events"]
+            if event["found_by"][run] and event["verdict"] in precision_verdicts
+        ]
+        found_material_tickers = {event["ticker"] for event in found_material}
+        found_any_tickers = {
+            event["ticker"] for event in value["events"] if event["found_by"][run]
+        }
+        material_false_negative_tickers = sorted(material_tickers - found_material_tickers)
+        no_news_false_negative_tickers = sorted(material_tickers - found_any_tickers)
+        precision = (
+            len(found_material) / len(precision_denominator)
+            if precision_denominator else (1.0 if not material else 0.0)
+        )
+        runs[run] = {
+            "gold_material_event_count": len(material),
+            "found_gold_material_event_count": len(found_material),
+            "gold_event_recall": len(found_material) / len(material) if material else 1.0,
+            "critical_gold_event_count": len(critical),
+            "critical_gold_event_recall": len(found_critical) / len(critical) if critical else 1.0,
+            "precision_denominator_count": len(precision_denominator),
+            "precision": precision,
+            "gold_material_precision": precision,
+            "material_company_false_negative_count": len(material_false_negative_tickers),
+            "material_company_false_negative_tickers": material_false_negative_tickers,
+            "no_news_false_negative_count": len(no_news_false_negative_tickers),
+            "no_news_false_negative_tickers": no_news_false_negative_tickers,
+        }
+    return {
+        "available": True,
+        "decision": "COMPLETE",
+        "unknown_event_count": 0,
+        "gold_material_event_count": len(material),
+        "critical_gold_event_count": len(critical),
+        "runs": runs,
+    }
+
+
+def _completed_run_events(
+    root: Path, benchmark_id: str, run_name: str
+) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
+    directory = _run_dir(root, benchmark_id, run_name)
+    manifest = _read_json(directory / "manifest.json")
+    status = benchmark_status(root, benchmark_id, run_name)
+    if status["pending"] != 0 or status["failed"] != 0:
+        raise BenchmarkError(f"{run_name} must complete without failures before quality v2 audit")
+    events, _, invalid, errors = _load_success_outputs(Path(manifest["output_directory"]))
+    if invalid:
+        raise BenchmarkError(f"{run_name} contains invalid output: {'; '.join(errors)}")
+    return manifest, events, _telemetry(directory, "companies.jsonl")
+
+
+def audit_reference_repeatability(
+    root: Path, benchmark_id: str, *, now: datetime | None = None
+) -> dict[str, Any]:
+    left_manifest, left_events, left_company = _completed_run_events(
+        root, benchmark_id, "reference"
+    )
+    right_manifest, right_events, right_company = _completed_run_events(
+        root, benchmark_id, "reference02"
+    )
+    left_order = [item["ticker"] for item in _ordered_run_assignments(
+        _run_dir(root, benchmark_id, "reference")
+    )]
+    right_order = [item["ticker"] for item in _ordered_run_assignments(
+        _run_dir(root, benchmark_id, "reference02")
+    )]
+    if left_order != right_order:
+        raise BenchmarkError("reference01/reference02 company order differs")
+    if (
+        left_manifest.get("search_from") != right_manifest.get("search_from")
+        or left_manifest.get("search_to") != right_manifest.get("search_to")
+    ):
+        raise BenchmarkError("reference01/reference02 search window differs")
+    left_sources = {record["ticker"]: float(record["source_count"]) for record in left_company}
+    right_sources = {record["ticker"]: float(record["source_count"]) for record in right_company}
+    if set(left_sources) != set(left_order) or set(right_sources) != set(right_order):
+        raise BenchmarkError("reference01/reference02 company telemetry is incomplete")
+    names = {company["ticker"]: company["company_name"] for company in _load_cohort(root, benchmark_id)["companies"]}
+    result = {
+        "schema_version": REPEATABILITY_SCHEMA,
+        "benchmark_id": benchmark_id,
+        "captured_at": _iso(now),
+        "runs": ["reference", "reference02"],
+        "batch_size": 1,
+        "company_count": len(left_order),
+        "same_company_order": True,
+        "search_from": left_manifest["search_from"],
+        "search_to": left_manifest["search_to"],
+        **_reference_repeatability_metrics(
+            left_events,
+            right_events,
+            left_order,
+            left_source_counts=left_sources,
+            right_source_counts=right_sources,
+            company_names=names,
+        ),
+    }
+    atomic_write_json(_quality_v2_dir(root, benchmark_id) / "reference_repeatability.json", result)
+    return result
+
+
+def build_quality_union(
+    root: Path, benchmark_id: str, *, now: datetime | None = None
+) -> dict[str, Any]:
+    cohort = _load_cohort(root, benchmark_id)
+    reference_tickers = set(cohort["reference_tickers"])
+    run_events: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for run_name in QUALITY_RUN_LABELS:
+        _, events, _ = _completed_run_events(root, benchmark_id, run_name)
+        run_events[run_name] = {
+            ticker: values for ticker, values in events.items() if ticker in reference_tickers
+        }
+    company_names = {
+        company["ticker"]: company["company_name"] for company in cohort["companies"]
+    }
+    clusters = _build_event_union(run_events, company_names)
+    union = {
+        "schema_version": EVENT_UNION_SCHEMA,
+        "benchmark_id": benchmark_id,
+        "created_at": _iso(now),
+        "runs": list(QUALITY_RUN_LABELS.values()),
+        "search_from": cohort["search_from"],
+        "search_to": cohort["search_to"],
+        "company_count": len(reference_tickers),
+        "event_cluster_count": len(clusters),
+        "matcher_contract": {
+            "primary": "ticker + normalized URL",
+            "secondary": "ticker + exact date + category + headline/substance Jaccard >= 0.55",
+            "headline_only_matching_forbidden": True,
+        },
+        "candidate_only_events_are_not_false_positives": True,
+        "events": clusters,
+    }
+    union["persistent_false_negative_audit"] = _persistent_false_negative_audit(clusters)
+    directory = _quality_v2_dir(root, benchmark_id)
+    union_path = directory / "event_union.json"
+    gold_path = directory / "gold_adjudication.json"
+    if union_path.exists() or gold_path.exists():
+        raise BenchmarkError("quality v2 union/adjudication already exists; refusing overwrite")
+    atomic_write_json(union_path, union)
+    gold = _gold_template(benchmark_id, union, now=now)
+    atomic_write_json(gold_path, gold)
+    return {
+        "schema_version": EVENT_UNION_SCHEMA,
+        "benchmark_id": benchmark_id,
+        "event_cluster_count": len(clusters),
+        "event_union_path": str(union_path.resolve()),
+        "gold_adjudication_path": str(gold_path.resolve()),
+        "candidate_only_events_are_not_false_positives": True,
+        "persistent_false_negative_audit": union["persistent_false_negative_audit"],
+    }
+
+
+def audit_gold_adjudication(
+    root: Path,
+    benchmark_id: str,
+    adjudication_path: Path,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    value = validate_gold_adjudication(_read_json(adjudication_path))
+    if value["benchmark_id"] != benchmark_id:
+        raise BenchmarkError("gold adjudication benchmark_id mismatch")
+    union_path = _quality_v2_dir(root, benchmark_id) / "event_union.json"
+    union = _read_json(union_path)
+    expected_hash = hashlib.sha256(
+        json.dumps(union, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    if value.get("source_union_sha256") != expected_hash:
+        raise BenchmarkError("gold adjudication does not match the current event union")
+    throughput: dict[str, Any] = {}
+    compression: dict[str, Any] = {}
+    for run_name in ("batch02", "batch04"):
+        audit_path = _run_dir(root, benchmark_id, run_name) / "audit.json"
+        audit = _read_json(audit_path)
+        fact = dict(audit.get("throughput", {}))
+        estimated_hours = fact.get("estimated_hours_for_3800")
+        fact["weekly_3800_feasible_with_8_tasks"] = (
+            estimated_hours is not None and float(estimated_hours) <= 168
+        )
+        throughput[run_name] = fact
+        compression[run_name] = audit.get("global_compression", {})
+    result = {
+        "schema_version": GOLD_AUDIT_SCHEMA,
+        "benchmark_id": benchmark_id,
+        "captured_at": _iso(now),
+        "adjudication_path": str(adjudication_path.resolve()),
+        **_gold_metrics(value),
+        "reference_is_not_assumed_complete": True,
+        "throughput_facts": throughput,
+        "research_compression_facts": compression,
+        "batch03_remains_on_hold": True,
+    }
+    atomic_write_json(_quality_v2_dir(root, benchmark_id) / "gold_audit.json", result)
+    return result
 
 
 def _task_events(directory: Path) -> list[dict[str, Any]]:
@@ -1501,6 +2268,19 @@ def recommendation(root: Path, benchmark_id: str) -> dict[str, Any]:
         }
         for batch, audit in sorted(audits.items())
     })
+    gold_path = _quality_v2_dir(root, benchmark_id) / "gold_audit.json"
+    gold_audit = _read_json(gold_path) if gold_path.exists() else {}
+    gold_complete = gold_audit.get("available") is True
+    gold_decisions: dict[str, str] = {}
+    if gold_complete:
+        for run_name, metrics in gold_audit.get("runs", {}).items():
+            gold_pass = (
+                metrics.get("gold_event_recall", 0) >= 0.95
+                and metrics.get("critical_gold_event_recall") == 1.0
+                and metrics.get("no_news_false_negative_count") == 0
+            )
+            gold_decisions[run_name] = "PASS" if gold_pass else "FAIL"
+    batch4_quality_validated = gold_decisions.get("batch04") == "PASS"
     result = {
         "benchmark_id": benchmark_id,
         "max_validated_batch_size": recommended,
@@ -1516,11 +2296,16 @@ def recommendation(root: Path, benchmark_id: str) -> dict[str, Any]:
         "selection_contract": "largest contiguous batch in 2->3->4 with full audit PASS; quality FAIL cannot be offset by speed",
         "batch04_formal_judgment": batch4_judgment,
         "production_batch_4_quality_validated": batch4_quality_validated,
+        "single_reference_quality_is_provisional": True,
+        "formal_quality_source": "gold_adjudication" if gold_complete else "pending_gold_adjudication",
+        "gold_quality_decisions": gold_decisions,
         "upward_candidates_blocked": True,
         "upward_block_reason": "batch04_quality_fail" if not batch4_quality_validated else "downward_refinement_only",
         "research_architecture_redesign_required": audits.get(2, {}).get("decision") == "FAIL",
         "integration_validation_passed": integration_pass,
-        "ready_for_production_change": recommended in ALLOWED_CANDIDATE_BATCH_SIZES and integration_pass,
+        "ready_for_production_change": (
+            recommended in ALLOWED_CANDIDATE_BATCH_SIZES and integration_pass and gold_complete
+        ),
         "human_review_required": True,
     }
     atomic_write_json(_benchmark_dir(root, benchmark_id) / "recommendation.json", result)
@@ -1638,6 +2423,8 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--benchmark-id", required=True)
     run.add_argument("--batch-size", type=int, required=True)
     run.add_argument("--reference", action="store_true")
+    replication = commands.add_parser("prepare-reference-replication")
+    replication.add_argument("--benchmark-id", required=True)
     activate = commands.add_parser("activate-run")
     activate.add_argument("--benchmark-id", required=True)
     activate.add_argument("--run-name", required=True)
@@ -1665,6 +2452,13 @@ def _build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--run-name", required=True)
     recommend = commands.add_parser("recommend")
     recommend.add_argument("--benchmark-id", required=True)
+    repeatability = commands.add_parser("audit-reference-repeatability")
+    repeatability.add_argument("--benchmark-id", required=True)
+    event_union = commands.add_parser("build-quality-union")
+    event_union.add_argument("--benchmark-id", required=True)
+    gold = commands.add_parser("audit-gold")
+    gold.add_argument("--benchmark-id", required=True)
+    gold.add_argument("--adjudication", type=Path, required=True)
     integration = commands.add_parser("prepare-integration-fixture")
     integration.add_argument("--batch-size", type=int, required=True)
     integration_audit = commands.add_parser("audit-integration-fixture")
@@ -1685,6 +2479,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.command == "prepare-run":
             result = prepare_run(root, args.benchmark_id, args.batch_size, reference=args.reference)
+        elif args.command == "prepare-reference-replication":
+            result = prepare_reference_replication(root, args.benchmark_id)
         elif args.command == "activate-run":
             result = activate_run(root, args.benchmark_id, args.run_name)
         elif args.command == "deactivate-run":
@@ -1707,6 +2503,14 @@ def main(argv: list[str] | None = None) -> int:
             result = audit_run(root, args.benchmark_id, args.run_name)
         elif args.command == "recommend":
             result = recommendation(root, args.benchmark_id)
+        elif args.command == "audit-reference-repeatability":
+            result = audit_reference_repeatability(root, args.benchmark_id)
+        elif args.command == "build-quality-union":
+            result = build_quality_union(root, args.benchmark_id)
+        elif args.command == "audit-gold":
+            result = audit_gold_adjudication(
+                root, args.benchmark_id, args.adjudication.resolve()
+            )
         elif args.command == "prepare-integration-fixture":
             result = prepare_integration_fixture(root, args.batch_size)
         else:

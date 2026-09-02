@@ -609,30 +609,66 @@ recall, at least 95% material
 event recall, zero major no-news false negatives, p95 below 45 minutes, max below 55
 minutes, and zero busy skip/overlap or late-position degradation.
 
-For this refinement, reuse `batchbench-20260901T095759508419`; do not run `prepare`
-or regenerate its completed reference. Preparing either candidate is inert and does
-not activate it:
+For quality benchmark v2, reuse `batchbench-20260901T095759508419`; do not run
+`prepare`, regenerate its completed reference, or prepare/activate batch03. The
+single-company reference is not assumed to be ground truth. Instead, an independent
+`reference02` is prepared from the persisted reference queue, preserving the exact
+48-company order and 2026-08-25 through 2026-08-31 search window without overwriting
+`reference`:
 
 ```powershell
-python tools/company_news_batch_benchmark.py prepare-run --benchmark-id batchbench-20260901T095759508419 --batch-size 2
-python tools/company_news_batch_benchmark.py prepare-run --benchmark-id batchbench-20260901T095759508419 --batch-size 3
+python tools/company_news_batch_benchmark.py prepare-reference-replication --benchmark-id batchbench-20260901T095759508419
+python tools/company_news_batch_benchmark.py activate-run --benchmark-id batchbench-20260901T095759508419 --run-name reference02
+python tools/company_news_batch_benchmark.py status --benchmark-id batchbench-20260901T095759508419 --run-name reference02
+python tools/company_news_batch_benchmark.py deactivate-run
 ```
 
-A human activates one prepared run at a time, observes natural hourly executions,
-deactivates it after completion, and audits it before preparing/activating the next:
+After reference02 reaches 48/48 with zero failures, a human runs the symmetric
+repeatability audit and builds the four-run event union:
 
 ```powershell
-python tools/company_news_batch_benchmark.py activate-run --benchmark-id batchbench-20260901T095759508419 --run-name batch02
-python tools/company_news_batch_benchmark.py status --benchmark-id batchbench-20260901T095759508419 --run-name batch02
-python tools/company_news_batch_benchmark.py deactivate-run
-python tools/company_news_batch_benchmark.py audit --benchmark-id batchbench-20260901T095759508419 --run-name batch02
-python tools/company_news_batch_benchmark.py recommend --benchmark-id batchbench-20260901T095759508419
-python tools/company_news_batch_benchmark.py activate-run --benchmark-id batchbench-20260901T095759508419 --run-name batch03
-python tools/company_news_batch_benchmark.py status --benchmark-id batchbench-20260901T095759508419 --run-name batch03
-python tools/company_news_batch_benchmark.py deactivate-run
-python tools/company_news_batch_benchmark.py audit --benchmark-id batchbench-20260901T095759508419 --run-name batch03
-python tools/company_news_batch_benchmark.py recommend --benchmark-id batchbench-20260901T095759508419
+python tools/company_news_batch_benchmark.py audit --benchmark-id batchbench-20260901T095759508419 --run-name reference02
+python tools/company_news_batch_benchmark.py audit-reference-repeatability --benchmark-id batchbench-20260901T095759508419
+python tools/company_news_batch_benchmark.py build-quality-union --benchmark-id batchbench-20260901T095759508419
 ```
+
+The repeatability artifact reports reference01->reference02 and
+reference02->reference01 recall, critical recall, news/no-news agreement, source and
+event-count agreement, Jaccard similarity, ambiguous matches, and events found by only
+one run. It returns `QUALITY_METRIC_NOT_STABLE` if either directional event recall is
+below 90%; 95% remains the stronger target, and critical recall targets 100%.
+
+`quality_v2/event_union.json` clusters the reference01, reference02, batch02, and
+batch04 48-company results using ticker plus normalized URL or ticker/date/category
+plus headline/substance similarity. Every cluster retains pairwise URL, date-distance,
+category, headline, and substance evidence. `found_by` has all four runs. Candidate-
+only events remain `UNKNOWN` and are never automatically labelled false positives.
+The same artifact carries an event-level persistent false-negative audit with the
+reference event, source type/category/importance, each candidate result, and the best
+available matcher-based reason; it separates shared batch02/batch04 misses from
+candidate-specific misses. The generated `quality_v2/gold_adjudication.json` is an
+isolated human-work artifact
+with verdicts `VALID_MATERIAL`, `VALID_NON_MATERIAL`, `DUPLICATE`,
+`MATCHER_FALSE_NEGATIVE`, `INVALID_SOURCE`, `OUT_OF_WINDOW`, and `UNKNOWN`.
+
+The human adjudicator should prefer company IR/press releases, TDNET, EDINET/SEC,
+government, exchange, and other official sources. Once every `UNKNOWN` has been
+adjudicated with rationale, reviewer, and timezone-bearing timestamp, calculate Gold
+metrics for all four runs (including reference01, whose recall is allowed to be below
+100%):
+
+```powershell
+python tools/company_news_batch_benchmark.py audit-gold --benchmark-id batchbench-20260901T095759508419 --adjudication data/news_work/batch_benchmark/batchbench-20260901T095759508419/quality_v2/gold_adjudication.json
+```
+
+Until that Gold audit is complete, single-reference quality values are explicitly
+provisional and `ready_for_production_change` remains false.
+
+Only then is batch03 reconsidered. Existing compression facts remain attached to the
+run audits. Batch02's measured 15.9273 companies/hour implies 9.941 days for 3,800 and
+cannot meet a weekly 3,800-company cycle in the current eight-task arrangement, even
+if its later Gold quality passes. If both batch02 and batch04 fail Gold quality, the
+next step is research-architecture redesign rather than larger batches.
 
 Only the final candidate receives the separate integration burst fixture. It contains
 synthetic files under `data/news_benchmark_load`, requires a temporary SQLite copy,

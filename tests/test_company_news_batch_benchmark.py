@@ -10,10 +10,16 @@ from tools.company_news_batch_benchmark import (
     AUDIT_SCHEMA,
     BENCHMARK_SCHEMA,
     BenchmarkError,
+    GOLD_ADJUDICATION_SCHEMA,
+    _build_event_union,
     _busy_skip_incidents,
+    _event_match_evidence,
+    _gold_metrics,
     _global_compression_metrics,
     _history_filename,
+    _persistent_false_negative_audit,
     _quality_metrics,
+    _reference_repeatability_metrics,
     _summary,
     activate_run,
     audit_integration_fixture,
@@ -22,6 +28,7 @@ from tools.company_news_batch_benchmark import (
     finalize_company,
     prepare_benchmark,
     prepare_integration_fixture,
+    prepare_reference_replication,
     prepare_run,
     recommendation,
     release_task,
@@ -30,6 +37,7 @@ from tools.company_news_batch_benchmark import (
     route_task,
     select_cohort,
     snapshot_task,
+    validate_gold_adjudication,
 )
 from tools.company_news_inbox_worker import WorkerPaths, run_once
 from tools.company_news_queue import task_slot_mapping
@@ -131,6 +139,28 @@ def _payload(assignment: dict, *, item: bool = False) -> dict:
     }
 
 
+def _quality_event(
+    ticker: str,
+    suffix: str,
+    *,
+    headline: str | None = None,
+    category: str = "guidance",
+    critical: bool = False,
+) -> dict:
+    return {
+        "ticker": ticker,
+        "headline": headline or f"Guidance revision {suffix}",
+        "summary": f"Material earnings event {suffix}.",
+        "why_it_matters": "This affects expected earnings.",
+        "source_url": f"https://example.com/{ticker}/{suffix}",
+        "published_at": "2026-08-30T10:00:00+09:00",
+        "source_type": "ir",
+        "category": category,
+        "importance": "high" if critical else "medium",
+        "earnings_relevance": "direct" if critical else "likely",
+    }
+
+
 def _write_json(path: Path, value: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
@@ -215,6 +245,39 @@ def test_reference_run_is_single_company_batch_on_fixed_48_company_subset(tmp_pa
     assert manifest["reference"] is True
     assert manifest["batch_size"] == 1
     assert manifest["company_count"] == 48
+
+
+def test_reference02_copies_persisted_reference_order_and_window_without_overwrite(tmp_path):
+    cohort, _, _ = _prepare(tmp_path, count=32, reference_size=8)
+    reference = prepare_run(tmp_path, cohort["benchmark_id"], 1, reference=True, now=NOW)
+    reference_dir = (
+        tmp_path / "data" / "news_work" / "batch_benchmark" / cohort["benchmark_id"]
+        / "runs" / "reference"
+    )
+    before = {
+        path.relative_to(reference_dir): path.read_bytes()
+        for path in reference_dir.rglob("*") if path.is_file()
+    }
+
+    replicate = prepare_reference_replication(tmp_path, cohort["benchmark_id"], now=NOW + timedelta(seconds=1))
+    reference02_dir = reference_dir.parent / "reference02"
+
+    assert replicate["run_name"] == "reference02"
+    assert replicate["reference"] is True
+    assert replicate["reference_replication_of"] == "reference"
+    assert replicate["batch_size"] == 1
+    assert replicate["company_count"] == 8
+    assert replicate["search_from"] == reference["search_from"] == "2026-08-25"
+    assert replicate["search_to"] == reference["search_to"] == "2026-08-31"
+    assert [
+        item["ticker"] for item in benchmark_module._ordered_run_assignments(reference02_dir)
+    ] == [item["ticker"] for item in benchmark_module._ordered_run_assignments(reference_dir)]
+    assert before == {
+        path.relative_to(reference_dir): path.read_bytes()
+        for path in reference_dir.rglob("*") if path.is_file()
+    }
+    with pytest.raises(BenchmarkError, match="already exists"):
+        prepare_reference_replication(tmp_path, cohort["benchmark_id"], now=NOW)
 
 
 def test_route_is_production_by_default_and_malformed_control_fails_closed(tmp_path):
@@ -539,6 +602,138 @@ def test_quality_fixture_calculates_recall_precision_critical_and_false_negative
     assert quality["no_news_false_negative_count"] == 1
     assert company_recall == {"1000": 0.5, "1001": 0.0}
     assert ambiguous == []
+
+
+def test_symmetric_matcher_exposes_url_date_category_headline_and_substance_evidence():
+    left = _quality_event("1000", "left", headline="Earnings guidance revised upward")
+    right = _quality_event("1000", "right", headline="Earnings guidance revised upward")
+
+    forward = _event_match_evidence(left, right)
+    reverse = _event_match_evidence(right, left)
+
+    assert forward["matched"] is True
+    assert reverse["matched"] is True
+    assert forward["method"] == reverse["method"] == "semantic_substance"
+    assert forward["normalized_url_equal"] is False
+    assert forward["date_delta_days"] == 0
+    assert forward["category_equal"] is True
+    assert forward["headline_similarity"] == reverse["headline_similarity"] == 1.0
+    assert forward["substance_similarity"] == reverse["substance_similarity"]
+
+
+def test_reference_repeatability_is_bidirectional_and_can_be_declared_unstable():
+    shared_left = _quality_event("1000", "a", critical=True)
+    shared_right = {**shared_left, "source_url": "https://example.com/1000/a/"}
+    left = {"1000": [shared_left], "1001": [_quality_event("1001", "left-only")]}
+    right = {"1000": [shared_right], "1002": [_quality_event("1002", "right-only")]}
+
+    result = _reference_repeatability_metrics(
+        left,
+        right,
+        ["1000", "1001", "1002", "1003"],
+        left_source_counts={"1000": 5, "1001": 4, "1002": 3, "1003": 2},
+        right_source_counts={"1000": 5, "1001": 3, "1002": 4, "1003": 2},
+    )
+
+    assert result["reference01_to_reference02"]["event_recall"] == 0.5
+    assert result["reference02_to_reference01"]["event_recall"] == 0.5
+    assert result["decision"] == "QUALITY_METRIC_NOT_STABLE"
+    assert result["news_presence_agreement"]["both_no_news"] == 1
+    assert result["event_count_agreement"]["exact_match_rate"] == 0.5
+    assert result["source_count_agreement"]["exact_match_rate"] == 0.5
+    assert len(result["reference01_only_events"]) == 1
+    assert len(result["reference02_only_events"]) == 1
+
+
+def test_event_union_has_found_by_flags_and_candidate_only_stays_unknown():
+    shared = _quality_event("1000", "shared")
+    candidate_only = _quality_event("1001", "candidate-only")
+    clusters = _build_event_union(
+        {
+            "reference": {"1000": [shared]},
+            "reference02": {"1000": [{**shared, "source_url": shared["source_url"] + "/"}]},
+            "batch02": {"1000": [shared], "1001": [candidate_only]},
+            "batch04": {},
+        },
+        {"1000": "Company A", "1001": "Company B"},
+    )
+
+    shared_cluster = next(cluster for cluster in clusters if cluster["ticker"] == "1000")
+    candidate_cluster = next(cluster for cluster in clusters if cluster["ticker"] == "1001")
+    assert shared_cluster["found_by"] == {
+        "reference01": True, "reference02": True, "batch02": True, "batch04": False,
+    }
+    assert shared_cluster["matcher_evidence"]
+    assert candidate_cluster["found_by"]["reference01"] is False
+    assert candidate_cluster["found_by"]["batch02"] is True
+    assert candidate_cluster["verdict"] == "UNKNOWN"
+    assert candidate_cluster["automated_false_positive"] is False
+
+
+def test_gold_schema_accepts_matcher_false_negative_and_reference_recall_can_be_below_one():
+    clusters = _build_event_union(
+        {
+            "reference": {"1000": [_quality_event("1000", "reference", critical=True)]},
+            "reference02": {},
+            "batch02": {
+                "1000": [_quality_event("1000", "reference", critical=True)],
+                "1001": [_quality_event("1001", "candidate-only", critical=True)],
+                "1002": [_quality_event("1002", "matcher-fn")],
+            },
+            "batch04": {},
+        },
+        {"1000": "Company A", "1001": "Company B", "1002": "Company C"},
+    )
+    union = {"events": clusters}
+    gold = benchmark_module._gold_template("batchbench-test", union, now=NOW)
+    assert gold["schema_version"] == GOLD_ADJUDICATION_SCHEMA
+    assert all(event["verdict"] == "UNKNOWN" for event in gold["events"])
+
+    for event in gold["events"]:
+        event["verdict"] = "MATCHER_FALSE_NEGATIVE" if event["ticker"] == "1002" else "VALID_MATERIAL"
+        event["rationale"] = "Human adjudication result."
+        event["adjudicator"] = "reviewer"
+        event["adjudicated_at"] = NOW.isoformat()
+    validate_gold_adjudication(gold)
+    metrics = _gold_metrics(gold)
+
+    assert metrics["available"] is True
+    assert metrics["gold_material_event_count"] == 2
+    assert metrics["runs"]["reference01"]["gold_event_recall"] == 0.5
+    assert metrics["runs"]["batch02"]["gold_event_recall"] == 1.0
+    assert metrics["runs"]["reference01"]["critical_gold_event_recall"] == 0.5
+
+
+def test_persistent_false_negative_report_is_event_level_and_separates_candidates():
+    persistent = ("1515", "2669", "2882", "5408", "583A", "8152")
+    batch02_only = ("6445", "6656")
+    batch04_only = ("9073",)
+    reference = {
+        ticker: [_quality_event(ticker, "reference", critical=True)]
+        for ticker in (*persistent, *batch02_only, *batch04_only)
+    }
+    clusters = _build_event_union(
+        {
+            "reference": reference,
+            "reference02": {},
+            "batch02": {
+                ticker: [_quality_event(ticker, "reference", critical=True)]
+                for ticker in batch04_only
+            },
+            "batch04": {
+                ticker: [_quality_event(ticker, "reference", critical=True)]
+                for ticker in batch02_only
+            },
+        },
+        {ticker: f"Company {ticker}" for ticker in reference},
+    )
+    audit = _persistent_false_negative_audit(clusters)
+
+    assert audit["persistent_tickers"] == sorted(persistent)
+    assert audit["batch02_only_tickers"] == sorted(batch02_only)
+    assert audit["batch04_only_tickers"] == ["9073"]
+    assert len(audit["event_level_details"]) == 9
+    assert all("reference_event" in detail and "candidate_result" in detail for detail in audit["event_level_details"])
 
 
 def test_global_compression_metrics_compare_source_depth_time_and_event_recall():
