@@ -227,6 +227,9 @@ def _validate_ticker(item: Any, index: int) -> dict[str, Any]:
         raise NYMarketResearchError(f"{field} missing fields: {', '.join(missing)}")
     ticker = _string(item["ticker"], f"{field}.ticker").upper()
     company_name = _string(item["company_name"], f"{field}.company_name")
+    company_description = item.get("company_description")
+    if company_description is not None:
+        company_description = _string(company_description, f"{field}.company_description")
     close = _number(item["close"], f"{field}.close")
     change_pct = _number(item["change_pct"], f"{field}.change_pct")
     market_cap = _number(item["market_cap"], f"{field}.market_cap", nullable=True)
@@ -286,11 +289,14 @@ def _validate_ticker(item: Any, index: int) -> dict[str, Any]:
         if catalyst_type != "not_found":
             raise NYMarketResearchError(f"{field}.catalyst_type must be not_found")
     searched_at = _timestamp(item["searched_at"], f"{field}.searched_at")
-    return {
-        **item, "ticker": ticker, "company_name": company_name, "close": close,
-        "change_pct": change_pct, "market_cap": market_cap, "source_url": source_url,
+    result = {
+        **item, "ticker": ticker, "company_name": company_name,
+        "close": close, "change_pct": change_pct, "market_cap": market_cap, "source_url": source_url,
         "source_type": source_type, "searched_at": searched_at,
     }
+    if company_description is not None:
+        result["company_description"] = company_description
+    return result
 
 
 def validate_research_packet(payload: dict[str, Any]) -> ValidatedResearch:

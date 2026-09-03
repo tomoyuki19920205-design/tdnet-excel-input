@@ -11,14 +11,15 @@
 - 騰落率は全て「当日通常取引終値 / 前営業日の通常取引終値 - 1」。時間外、取引中、adjusted closeを混ぜない。`price_basis=regular_close`、`adjusted=false`。
 - SOX、S&P500、Dow、Nasdaq、Russell 2000を必ず含める。
 - 11セクターは XLB/XLC/XLE/XLF/XLI/XLK/XLP/XLRE/XLU/XLV/XLY の全件を同じ式で計算し、騰落率降順にrankする。
-- Top20は時価総額や流動性で除外しない純粋上昇率順。機械取得した20社の順序、騰落率、終値を文章作成時に変更しない。
+- Top20は時価総額や流動性で除外しない純粋上昇率順。機械取得した20社の順序と騰落率を文章作成時に変更しない。終値・時価総額はcanonical payloadに保持するが、完成Markdownには表示しない。
 
 ## 一度だけ作るresearch cache
 
 調査開始時に `canonical_market_data` と `ticker_research` を作り、その後は話題の上昇/下落、Top20、決算、最終考察の全セクションで同じ銘柄結果を再利用する。tickerごとに次を保持する:
 
-`ticker, company_name, close, change_pct, market_cap, market_cap_method, catalyst, catalyst_type, source_url, source_type, search_status, searched_at, share_class_components, search_attempt_count, search_queries, searched_sources`
+`ticker, company_name, close, change_pct, market_cap, market_cap_method, catalyst, catalyst_type, source_url, source_type, search_status, searched_at, share_class_components, search_attempt_count, search_queries, searched_sources`。加えて、話題の値上がり10社だけは `company_description` を必須fieldとして保持する。
 
+- 話題の値上がり10社の `company_description` は確認済みの会社情報に基づく事業内容だけを書く。確認できない場合は空欄や一般論を補完せず、renderer/publishを停止する。`notable_gainers` へresearch cacheと同じ値を投影する。Top20だけに含まれる銘柄には `company_description` を要求しない。
 - 具体的な材料を書くときは必ずその材料を裏付けるURLを持たせ、`search_status=verified_catalyst` にする。
 - 適時資料、IR、SEC、主要報道を検索して当日材料を確認できなかった場合だけ `search_status=searched_not_found`、`catalyst_type=not_found`、`source_url=null`、`source_type=null` とし、catalystに必ず「当日材料を検索したが確認できず」を含める。「材料なし」「特に材料なし」は禁止。
 - `python tools/build_ny_market_research_plan.py <一時packet.json>` のgeneric query planを全Top20へ使う。初回検索で材料を確認できない銘柄は必ずsecond pass（ticker、会社名、日付、press release、investor relations、SEC、主要event語）を全て実行してからだけ `searched_not_found` にできる。provider名や特定tickerのif分岐は禁止。実行した全query、検索回数、確認したURLを上記search provenanceへ保存する。
@@ -27,10 +28,10 @@
 ## 完成レポートの内容
 
 1. 5〜8個の要点。
-2. 5指数の終値・騰落率と市場全体の解釈。
-3. 11 Sector SPDRを全件、騰落率降順で示し、上位・下位の背景を出典付きで説明。
-4. 話題の値上がり10社と値下がり10社。会社概要、終値、騰落率、issuer-total時価総額、具体的材料または厳密なsearched-not-found表現、投資家への含意を書く。
-5. 純粋上昇率Top20をcanonical rankどおり全件。会社名、終値、騰落率、issuer-total時価総額、材料、source/search statusを示す。
+2. `5指数` はSOX、S&P 500、Dow、Nasdaq、Russell 2000の順に「指数名＋符号付き騰落率」だけを1行ずつ示す。終値、前営業日終値、その他の絶対値を表示しない。
+3. `11業種別騰落` は騰落率降順を維持し、日本語業種名と符号付き騰落率だけを1行ずつ示す。順位、ETFコード、英語名、終値、前営業日終値、その他の絶対値を表示しない。対応は XLB=素材、XLC=コミュニケーション・サービス、XLF=金融、XLV=ヘルスケア、XLE=エネルギー、XLP=生活必需品、XLU=公益、XLY=一般消費財、XLI=資本財、XLK=情報技術、XLRE=不動産。要点を含む他の文章でもETFコードや英語名ではなく、この日本語名を使う。
+4. 話題の値上がり10社は、第1段落を「順位. ティッカー（会社名） 符号付き騰落率 — 事業内容」だけにし、空行後の第2段落以降へ上昇理由・材料・確認結果を書く。終値、時価総額、market_cap_method、その他の株価絶対値を表示しない。話題の値下がり10社は従来内容を維持する。
+5. `純粋上昇率ランキング` はcanonical rankどおり20件を示し、各行を「順位. 会社名（ティッカー） 符号付き騰落率」だけにする。事業内容、上昇理由、材料確認結果、終値、時価総額、market_cap_method、その他の株価絶対値を表示しない。
 6. 主要決算。数字より前に事業内容、主力製品・サービス、主要顧客・収益源、重要な事業構造を1〜2文で説明し、売上、EPS、ガイダンス、重要KPI、一過性要因、株価反応、なぜ動いたか、今後への含意を書く。一次情報はcompany IRまたはSECを必須とする。
 7. アフター決算。上記に加え `after_hours_change_pct, as_of_utc, as_of_jst, session=post_market` を必須とし、通常取引の騰落率と混同しない。
 8. 昨日夕方以降または休場中の主要ニュース10件。全件にURLを付け、同一event clusterは最大2件。決算・個別値上がりで扱った話題は、市場全体への重大な波及がある場合以外は重複させない。
@@ -39,13 +40,13 @@
 
 ## payloadとpublish前validator
 
-payloadは従来field全てに加え `quality_contract_version, market_data_contract_version, market_data_packet_sha256, market_data_generated_at, providers, raw_response_hashes, discrepancy_count, canonical_market_data, ticker_research, final_analysis_references, report_delivery` を持つ。`canonical_market_data` は決定論的toolが生成したpacketそのものとし、source、market_session_date、price_basis、adjusted、indexes(5)、sectors(11)、top_gainers_20(20)、provider attempts、raw response hashes、discrepancy provenanceを保持する。notable、Top20、earnings、after-hours、final analysis referenceの各銘柄objectにはresearch cacheの全fieldを同値で投影する。
+payloadは従来field全てに加え `quality_contract_version, report_display_contract_version, market_data_contract_version, market_data_packet_sha256, market_data_generated_at, providers, raw_response_hashes, discrepancy_count, canonical_market_data, ticker_research, final_analysis_references, report_delivery` を持つ。`canonical_market_data` は決定論的toolが生成したpacketそのものとし、source、market_session_date、price_basis、adjusted、indexes(5)、sectors(11)、top_gainers_20(20)、provider attempts、raw response hashes、discrepancy provenanceを保持する。notable、Top20、earnings、after-hours、final analysis referenceの各銘柄objectには共通research fieldを同値で投影し、`company_description` のresearch同値投影は話題の値上がり10社だけ必須とする。
 
-`report_markdown` を一度だけ完成させ、`report_delivery={"source_field":"report_markdown","sha256":"<UTF-8本文のSHA-256>"}` を付ける。ユーザー最終回答は、この同じpayloadに対する `python tools/write_ny_market_payload.py <一時ファイル> --market-data-packet <一時packet.json> --validate-only --emit-report` の本文をそのまま使い、別途要約・書き直しをしない。
+`report_markdown` の全セクションを完成させた後、publish前に `python tools/render_ny_market_report.py <下書きpayload.json> --output <整形済みpayload.json>` を必ず実行する。この決定的rendererが5指数、11業種別騰落、話題の値上がり10社、純粋上昇率ランキングを構造化データから再生成し、`report_display_contract_version=ny_market_display_v1` と本文SHA-256を設定する。`--migrate-legacy-projection-descriptions` は既存の旧contractレポートを明示的に移行するときだけ使用し、今後の新規生成では使用禁止。renderer後の `report_markdown` を唯一の完成本文とし、手作業で再編集しない。ユーザー最終回答は、この同じpayloadに対する `python tools/write_ny_market_payload.py <整形済みpayload.json> --market-data-packet <一時packet.json> --validate-only --emit-report` の本文をそのまま使い、別途要約・書き直しをしない。
 
-payloadを一時ファイルへ完全に書き、まず `python tools/write_ny_market_payload.py <一時ファイル> --market-data-packet <一時packet.json> --validate-only` を実行する。validatorは保存済みpacketとpayloadの`canonical_market_data`を完全一致で比較し、5指数、11セクター、Top20のrank/値、同一tickerの騰落率・時価総額・材料、具体的材料のsource、IR/SEC決算source、ニュースcluster、コモディティsource、本文hashを横断照合する。失敗したら修正するまでpublish禁止。
+整形済みpayloadを一時ファイルへ完全に書き、まず `python tools/write_ny_market_payload.py <整形済みpayload.json> --market-data-packet <一時packet.json> --validate-only` を実行する。validatorは保存済みpacketとpayloadの`canonical_market_data`を完全一致で比較し、5指数、11セクター、Top20のrank/値、同一tickerの騰落率・時価総額・材料、具体的材料のsource、IR/SEC決算source、ニュースcluster、コモディティsource、本文hashを横断照合する。さらに4表示セクションが決定的rendererの出力と完全一致し、新規レポートでは要点内の業種名が指定日本語名であること、話題の値上がり10社の `company_description` がresearch dataと同値であることを検証する。Top20だけに含まれる銘柄のdescription欠損はエラーにしない。失敗したら修正するまでpublish禁止。
 
-validation成功後だけ `python tools/write_ny_market_payload.py <一時ファイル> --market-data-packet <一時packet.json>` を1回実行する。helperは検証済みpayloadをfsync済みtempから `data/news_inbox/*.json` へatomic renameする。inboxへ直接partial JSONを書かない。同日成功rowが既にある場合は通常再実行しない。その直後に `python tools/write_ny_market_payload.py <一時ファイル> --market-data-packet <一時packet.json> --validate-only --emit-report` を実行し、標準出力の非空本文と `report_delivery.sha256` の一致を確認する。
+validation成功後だけ `python tools/write_ny_market_payload.py <整形済みpayload.json> --market-data-packet <一時packet.json>` を1回実行する。helperは検証済みpayloadをfsync済みtempから `data/news_inbox/*.json` へatomic renameする。inboxへ直接partial JSONを書かない。同日成功rowが既にある場合は通常再実行しない。その直後に `python tools/write_ny_market_payload.py <整形済みpayload.json> --market-data-packet <一時packet.json> --validate-only --emit-report` を実行し、標準出力の非空本文と `report_delivery.sha256` の一致を確認する。
 
 保存に失敗しても、検証済み `report_markdown` の完成レポート全文は必ずユーザー最終回答として出し、末尾にだけ `Company Viewer保存に失敗: <短い理由>` を付ける。成功時はemitした完成本文だけを最終回答にし、保存処理・検証結果などの運用説明で本文を置き換えることを禁止する。
 

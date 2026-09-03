@@ -21,6 +21,7 @@ from lib.ny_market_research import (
     ValidatedResearch,
     validate_research_packet,
 )
+from lib.ny_market_display import NYMarketDisplayError, validate_display_contract
 
 
 SCHEMA_VERSION = "ny_market_daily_v1"
@@ -108,7 +109,13 @@ def _same_number(left: Any, right: Any, field: str, tolerance: float = 0.015) ->
         raise NYMarketValidationError(f"{field} differs from canonical research")
 
 
-def _validate_projection(item: Any, field: str, research: ValidatedResearch) -> dict[str, Any]:
+def _validate_projection(
+    item: Any,
+    field: str,
+    research: ValidatedResearch,
+    *,
+    require_company_description: bool = False,
+) -> dict[str, Any]:
     if not isinstance(item, dict):
         raise NYMarketValidationError(f"{field} must be an object")
     ticker = _text(item.get("ticker"), f"{field}.ticker", 32).upper()
@@ -123,6 +130,14 @@ def _validate_projection(item: Any, field: str, research: ValidatedResearch) -> 
     ):
         if key not in item:
             raise NYMarketValidationError(f"{field}.{key} is required")
+        if item[key] != canonical[key]:
+            raise NYMarketValidationError(f"{field}.{key} differs from canonical research")
+    if require_company_description:
+        key = "company_description"
+        if key not in item:
+            raise NYMarketValidationError(f"{field}.{key} is required")
+        if key not in canonical:
+            raise NYMarketValidationError(f"canonical research for {ticker} requires {key}")
         if item[key] != canonical[key]:
             raise NYMarketValidationError(f"{field}.{key} differs from canonical research")
     if item.get("search_status") == "searched_not_found" and NOT_FOUND_TEXT not in str(item.get("catalyst")):
@@ -265,9 +280,15 @@ def validate_payload(payload: Any) -> ValidatedNYMarketReport:
     sector_moves = _validate_sector_moves(payload.get("sector_moves"), research)
     notable_gainers = _list(payload.get("notable_gainers"), "notable_gainers", exact=10)
     notable_losers = _list(payload.get("notable_losers"), "notable_losers", exact=10)
-    for name, items in (("notable_gainers", notable_gainers), ("notable_losers", notable_losers)):
-        for index, item in enumerate(items):
-            _validate_projection(item, f"{name}[{index}]", research)
+    for index, item in enumerate(notable_gainers):
+        _validate_projection(
+            item,
+            f"notable_gainers[{index}]",
+            research,
+            require_company_description=True,
+        )
+    for index, item in enumerate(notable_losers):
+        _validate_projection(item, f"notable_losers[{index}]", research)
     top_gainers = _list(payload.get("top_gainers_20"), "top_gainers_20", exact=20)
     for index, item in enumerate(top_gainers):
         _validate_projection(item, f"top_gainers_20[{index}]", research)
@@ -280,6 +301,10 @@ def validate_payload(payload: Any) -> ValidatedNYMarketReport:
     major_news = _list(payload.get("major_news"), "major_news", exact=10)
     commodities = _list(payload.get("commodities"), "commodities", maximum=100)
     report_markdown = _text(payload.get("report_markdown"), "report_markdown", 300_000, 500)
+    try:
+        validate_display_contract(payload)
+    except NYMarketDisplayError as exc:
+        raise NYMarketValidationError(str(exc)) from exc
     section_source_urls = set(research.source_urls)
     _validate_earnings(earnings, "earnings", section_source_urls, research)
     _validate_earnings(after_hours, "after_hours_earnings", section_source_urls, research)

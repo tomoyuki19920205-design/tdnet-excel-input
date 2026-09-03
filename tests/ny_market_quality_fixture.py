@@ -4,6 +4,7 @@ from copy import deepcopy
 from hashlib import sha256
 
 from lib.ny_market_research import attach_market_data_packet_metadata
+from lib.ny_market_display import apply_display_contract
 
 
 TOP20 = (
@@ -75,7 +76,9 @@ def _research(ticker: str, company: str, change: float, cap: float | None, rank:
         method = "issuer_total_single_class"
         components = [{"class": "common", "price": close, "shares_outstanding": cap / close}]
     return {
-        "ticker": ticker, "company_name": company, "close": close, "change_pct": change,
+        "ticker": ticker, "company_name": company,
+        "company_description": f"{company}の事業・製品・顧客基盤を持つ企業。",
+        "close": close, "change_pct": change,
         "market_cap": cap, "market_cap_method": method,
         "catalyst": catalyst or "今回の検索範囲では株価変動を説明できる大型当日材料を検索したが確認できず",
         "catalyst_type": "company_event" if verified else "not_found",
@@ -105,6 +108,8 @@ def payload() -> dict:
             "source_url": f"https://example.com/ir/{ticker.lower()}", "source_type": "company_ir",
             "search_status": "verified_catalyst",
         })
+        if ticker == "MDT":
+            item["company_description"] = "医療機器を世界で展開する企業。"
         research.append(item)
     research_by_ticker = {item["ticker"]: item for item in research}
     top = [{"rank": rank, **deepcopy(research_by_ticker[row[0]])} for rank, row in enumerate(TOP20, start=1)]
@@ -117,7 +122,14 @@ def payload() -> dict:
         _point(symbol, 100.0 * (1 + change / 100), change, rank=rank, sector=name)
         for rank, (symbol, name, change) in enumerate(SECTORS, start=1)
     ]
-    report = ("# NY市場モーニングレポート 2026-09-02\n\n" + (
+    report = ("# NY市場モーニングレポート 2026-09-02\n\n"
+        "## 要点\n\n日本株への含意を含む検証済み要点。\n\n"
+        "## 5指数\n\n下書き。\n\n"
+        "## 11 Sector SPDR（騰落率降順）\n\n下書き。\n\n"
+        "## 話題の値上がり10社\n\n下書き。\n\n"
+        "## 話題の値下がり10社\n\n下落銘柄の説明。\n\n"
+        "## 純粋上昇率Top20\n\n下書き。\n\n"
+        "## 主要決算\n\n" + (
         "5指数と11セクターの通常取引終値を同一基準で検証した。個別企業は一次情報を優先し、"
         "確認済み事実と推論を分離した。原油、金利、Fed、AI設備投資、半導体、ネットワーク、"
         "メモリ、データセンター電力・冷却、消費、信用、コモディティを接続し、日本株への含意を考察する。\n\n"
@@ -129,7 +141,7 @@ def payload() -> dict:
         "covered_elsewhere": False, "market_wide_exception": False,
     } for i in range(10)]
     earning = {
-        **deepcopy(research_by_ticker["MDT"]), "company_description": "医療機器を世界で展開する企業。",
+        **deepcopy(research_by_ticker["MDT"]),
         "revenue": "$x", "eps": "$x", "guidance": "維持", "key_kpis": ["organic growth"],
         "one_offs": ["none"], "price_reaction": "+x%", "why_stock_moved": "成長率が期待を上回ったため。",
         "forward_implication": "医療機器需要の底堅さを示す。",
@@ -154,7 +166,7 @@ def payload() -> dict:
         "stable_key": "ny_market_daily:2026-09-02", "report_type": "ny_market_daily",
         "report_date_jst": "2026-09-02", "generated_at": "2026-09-02T07:25:00+09:00",
         "market_session_date": "2026-09-01", "market_status": "open", "headline": "NY市場はハイテク主導で下落",
-        "summary_bullets": [f"検証済み要点 {i}" for i in range(5)],
+        "summary_bullets": [f"日本語の検証済み要点 {i}" for i in range(5)],
         "canonical_market_data": {
             "market_data_contract_version": "ny_market_data_v1",
             "market_data_generated_at": "2026-09-02T07:10:00+09:00",
@@ -178,7 +190,7 @@ def payload() -> dict:
         "report_markdown": report, "sources": sources,
     }
     result["report_delivery"] = {"source_field": "report_markdown", "sha256": sha256(report.encode("utf-8")).hexdigest()}
-    return attach_market_data_packet_metadata(result)
+    return apply_display_contract(attach_market_data_packet_metadata(result))
 
 
 BENCHMARK_QUALITATIVE_SCORES = {"earnings_quality": 92, "news10": 90, "final_analysis": 93}
