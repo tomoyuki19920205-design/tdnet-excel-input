@@ -21,7 +21,11 @@ from lib.ny_market_research import (
     ValidatedResearch,
     validate_research_packet,
 )
-from lib.ny_market_display import NYMarketDisplayError, validate_display_contract
+from lib.ny_market_display import (
+    AFTER_HOURS_CONTRACT_VERSION,
+    NYMarketDisplayError,
+    validate_display_contract,
+)
 
 
 SCHEMA_VERSION = "ny_market_daily_v1"
@@ -210,6 +214,202 @@ def _validate_earnings(items: list[Any], field: str, source_urls: set[str], rese
                 raise NYMarketValidationError(f"{field}[{index}] UTC/JST as-of timestamps identify different instants")
 
 
+def _validate_after_hours_contract(
+    payload: dict[str, Any],
+    after_hours: list[Any],
+    source_urls: set[str],
+) -> None:
+    canonical = _list(payload.get("after_hours_research"), "after_hours_research", maximum=10)
+    if after_hours != canonical:
+        raise NYMarketValidationError(
+            "after_hours_earnings differs from canonical after_hours_research"
+        )
+    review = payload.get("after_hours_candidate_review")
+    if not isinstance(review, dict):
+        raise NYMarketValidationError("after_hours_candidate_review must be an object")
+    if review.get("contract_version") != AFTER_HOURS_CONTRACT_VERSION:
+        raise NYMarketValidationError(
+            f"after_hours_candidate_review.contract_version must be {AFTER_HOURS_CONTRACT_VERSION}"
+        )
+    if review.get("discovery_method") != "broad_discovery_then_primary_verification":
+        raise NYMarketValidationError(
+            "after_hours_candidate_review.discovery_method must use two-stage discovery"
+        )
+    review_session_date = _date(
+        review.get("market_session_date"),
+        "after_hours_candidate_review.market_session_date",
+    )
+    if review_session_date != payload.get("market_session_date"):
+        raise NYMarketValidationError(
+            "after_hours_candidate_review.market_session_date differs from report"
+        )
+    discovery_started = datetime.fromisoformat(_timestamp(
+        review.get("discovery_started_at"),
+        "after_hours_candidate_review.discovery_started_at",
+    ))
+    discovery_completed = datetime.fromisoformat(_timestamp(
+        review.get("discovery_completed_at"),
+        "after_hours_candidate_review.discovery_completed_at",
+    ))
+    if discovery_started > discovery_completed:
+        raise NYMarketValidationError(
+            "after_hours_candidate_review discovery timestamps are reversed"
+        )
+    expected_scopes = (
+        "earnings_calendar", "after_hours_movers", "regulatory_filings", "material_events",
+    )
+    discovery_runs = _list(
+        review.get("discovery_runs"),
+        "after_hours_candidate_review.discovery_runs",
+        exact=len(expected_scopes),
+    )
+    actual_scopes: list[str] = []
+    for index, run in enumerate(discovery_runs):
+        field = f"after_hours_candidate_review.discovery_runs[{index}]"
+        if not isinstance(run, dict):
+            raise NYMarketValidationError(f"{field} must be an object")
+        scope = _text(run.get("scope"), f"{field}.scope", 64)
+        actual_scopes.append(scope)
+        _text(run.get("query"), f"{field}.query", 1000)
+        if run.get("status") != "completed":
+            raise NYMarketValidationError(f"{field}.status must be completed")
+        if run.get("source_kind") not in {"secondary_discovery", "official_registry"}:
+            raise NYMarketValidationError(
+                f"{field}.source_kind must distinguish discovery from primary verification"
+            )
+        source_urls.add(_http_url(run.get("source_url"), f"{field}.source_url"))
+    if tuple(actual_scopes) != expected_scopes:
+        raise NYMarketValidationError(
+            "after_hours_candidate_review.discovery_runs must cover every broad discovery scope"
+        )
+    coverage = review.get("coverage_status")
+    if coverage not in {"normal", "quiet_day"}:
+        raise NYMarketValidationError(
+            "after_hours_candidate_review.coverage_status must be normal or quiet_day"
+        )
+    expected_coverage = "normal" if len(after_hours) >= 5 else "quiet_day"
+    if coverage != expected_coverage:
+        raise NYMarketValidationError(
+            "after_hours_candidate_review.coverage_status must be derived from selected count"
+        )
+    candidates = _list(review.get("candidates"), "after_hours_candidate_review.candidates")
+    if review.get("discovered_candidate_count") != len(candidates):
+        raise NYMarketValidationError(
+            "after_hours_candidate_review.discovered_candidate_count differs from candidates"
+        )
+    if len(candidates) < len(after_hours):
+        raise NYMarketValidationError("candidate review cannot be smaller than selected coverage")
+    included: list[str] = []
+    included_records: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, candidate in enumerate(candidates):
+        field = f"after_hours_candidate_review.candidates[{index}]"
+        if not isinstance(candidate, dict):
+            raise NYMarketValidationError(f"{field} must be an object")
+        if candidate.get("importance_rank") != index + 1:
+            raise NYMarketValidationError(f"{field}.importance_rank must be contiguous")
+        ticker = _text(candidate.get("ticker"), f"{field}.ticker", 32).upper()
+        if ticker in seen:
+            raise NYMarketValidationError(f"duplicate after-hours candidate ticker: {ticker}")
+        seen.add(ticker)
+        discovered_by = _list(candidate.get("discovered_by"), f"{field}.discovered_by")
+        if not discovered_by or any(scope not in expected_scopes for scope in discovered_by):
+            raise NYMarketValidationError(f"{field}.discovered_by must name completed scopes")
+        if candidate.get("discovery_source_kind") not in {
+            "secondary_discovery", "official_registry",
+        }:
+            raise NYMarketValidationError(f"{field}.discovery_source_kind is unsupported")
+        discovery_source_url = _http_url(
+            candidate.get("discovery_source_url"), f"{field}.discovery_source_url"
+        )
+        source_urls.add(discovery_source_url)
+        _text(candidate.get("reason"), f"{field}.reason", 1000)
+        status = candidate.get("status")
+        if status == "included":
+            if candidate.get("reason_code") not in {
+                "verified_earnings", "verified_material_event",
+            }:
+                raise NYMarketValidationError(f"{field}.reason_code is unsupported")
+            primary_source_url = _http_url(
+                candidate.get("primary_source_url"), f"{field}.primary_source_url"
+            )
+            price_source_url = _http_url(
+                candidate.get("price_source_url"), f"{field}.price_source_url"
+            )
+            if primary_source_url == discovery_source_url:
+                raise NYMarketValidationError(
+                    f"{field} must separate discovery evidence from primary verification"
+                )
+            source_urls.update((primary_source_url, price_source_url))
+            included.append(ticker)
+            included_records.append(candidate)
+        elif status == "excluded":
+            if candidate.get("reason_code") not in {
+                "no_primary_source", "no_trusted_after_hours_price", "not_material",
+                "duplicate_event", "outside_session",
+            }:
+                raise NYMarketValidationError(f"{field}.reason_code is unsupported")
+        else:
+            raise NYMarketValidationError(f"{field}.status must be included or excluded")
+    selected = [_text(item.get("ticker"), "after_hours_earnings[].ticker", 32).upper()
+                for item in after_hours if isinstance(item, dict)]
+    if included != selected:
+        raise NYMarketValidationError(
+            "included after-hours candidates must exactly match selected canonical order"
+        )
+    for index, (item, candidate) in enumerate(zip(after_hours, included_records)):
+        if candidate["primary_source_url"] != item.get("source_url"):
+            raise NYMarketValidationError(
+                f"after_hours_candidate_review primary source differs for {selected[index]}"
+            )
+        if candidate["price_source_url"] != item.get("after_hours_price_source_url"):
+            raise NYMarketValidationError(
+                f"after_hours_candidate_review price source differs for {selected[index]}"
+            )
+    required = (
+        "display_company_name", "results_summary", "investment_takeaway",
+        "after_hours_price_source_url", "after_hours_price_provider", "display_numbers",
+    )
+    forbidden_display_tokens = (
+        "session=post_market", "searched_at", "search_status", "provider=", "as_of_utc",
+        "as_of_jst", "通常取引終値",
+    )
+    for index, item in enumerate(canonical):
+        field = f"after_hours_research[{index}]"
+        for key in required:
+            if key not in item:
+                raise NYMarketValidationError(f"{field}.{key} is required")
+        for key in required[:-1]:
+            _text(item[key], f"{field}.{key}", 5000)
+        numbers = item["display_numbers"]
+        if not isinstance(numbers, list) or not numbers:
+            raise NYMarketValidationError(f"{field}.display_numbers must be a non-empty array")
+        results = item["results_summary"]
+        for number in numbers:
+            token = _text(number, f"{field}.display_numbers[]", 100)
+            if token not in results:
+                raise NYMarketValidationError(
+                    f"{field}.results_summary is missing canonical display number {token}"
+                )
+        source_urls.add(_http_url(
+            item["after_hours_price_source_url"],
+            f"{field}.after_hours_price_source_url",
+        ))
+        observed_utc = datetime.fromisoformat(_timestamp(
+            item.get("as_of_utc"), f"{field}.as_of_utc"
+        )).astimezone(timezone.utc)
+        if observed_utc.date().isoformat() != review_session_date:
+            raise NYMarketValidationError(
+                f"{field}.as_of_utc must identify the reviewed NY market session date"
+            )
+        visible = "\n".join((
+            item["display_company_name"], item["company_description"], results,
+            item["investment_takeaway"],
+        ))
+        if any(token in visible for token in forbidden_display_tokens):
+            raise NYMarketValidationError(f"{field} exposes internal or regular-session data")
+
+
 def _validate_news(items: list[Any], source_urls: set[str]) -> None:
     cluster_counts: dict[str, int] = {}
     for index, item in enumerate(items):
@@ -308,6 +508,7 @@ def validate_payload(payload: Any) -> ValidatedNYMarketReport:
     section_source_urls = set(research.source_urls)
     _validate_earnings(earnings, "earnings", section_source_urls, research)
     _validate_earnings(after_hours, "after_hours_earnings", section_source_urls, research)
+    _validate_after_hours_contract(payload, after_hours, section_source_urls)
     _validate_news(major_news, section_source_urls)
     _validate_commodities(commodities, section_source_urls)
     final_refs = _list(payload.get("final_analysis_references"), "final_analysis_references", maximum=100)

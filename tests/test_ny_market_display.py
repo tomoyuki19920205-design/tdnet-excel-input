@@ -124,12 +124,16 @@ def test_notable_gainers_have_compact_first_paragraph_and_separate_evidence():
     first_block = body.split("\n\n2. ", 1)[0]
     paragraphs = first_block.split("\n\n")
     assert paragraphs[0] == (
-        f"1. {first_item['ticker']}（{first_item['company_name']}） +77.42%"
+        f"1. **{first_item['company_name']}（{first_item['ticker']}）　+77.42%**"
         f" — {first_item['company_description']}"
     )
-    assert "上昇理由・材料：" in paragraphs[1]
-    assert "材料確認結果：" in paragraphs[2]
+    assert paragraphs[1].startswith("    **上昇理由・材料：** ")
+    assert paragraphs[2].startswith("    **材料確認結果：** ")
     assert first_item["catalyst"] not in paragraphs[0]
+    for rank in (1, 9, 10):
+        marker = f"{rank}. "
+        block = next(value for value in body.split("\n\n") if value.startswith(marker))
+        assert block.startswith(marker)
     for item in data["notable_gainers"]:
         assert str(item["close"]) not in body
         assert str(item["market_cap"]) not in body

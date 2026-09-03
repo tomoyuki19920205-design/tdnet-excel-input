@@ -7,7 +7,8 @@ from hashlib import sha256
 from typing import Any
 
 
-DISPLAY_CONTRACT_VERSION = "ny_market_display_v1"
+DISPLAY_CONTRACT_VERSION = "ny_market_display_v2"
+AFTER_HOURS_CONTRACT_VERSION = "ny_market_after_hours_v1"
 LEGACY_MIGRATION_VERSION = "ny_market_legacy_projection_description_v1"
 LEGACY_MIGRATION_MAX_REPORT_DATE = "2026-09-03"
 IDEOGRAPHIC_SPACE = "\u3000"
@@ -43,6 +44,10 @@ _SECTIONS = (
     ("11業種別騰落", frozenset({"11業種別騰落", "11 Sector SPDR（騰落率降順）"})),
     ("話題の値上がり10社", frozenset({"話題の値上がり10社"})),
     ("純粋上昇率ランキング", frozenset({"純粋上昇率ランキング", "純粋上昇率Top20"})),
+    (
+        "引け後・アフター決算の注目株",
+        frozenset({"引け後・アフター決算の注目株", "アフター決算"}),
+    ),
 )
 
 
@@ -91,12 +96,45 @@ def _render_notable_gainers(items: Any) -> str:
         description = _text(item, "company_description", field)
         catalyst = _text(item, "catalyst", field)
         first = (
-            f"{index}. {ticker}（{company}） {format_change_pct(item.get('change_pct'))}"
-            f" — {description}"
+            f"{index}. **{company}（{ticker}）{IDEOGRAPHIC_SPACE}"
+            f"{format_change_pct(item.get('change_pct'))}** — {description}"
         )
-        second = f"上昇理由・材料：{catalyst}"
-        third = f"材料確認結果：{_source_status(item)}。"
+        second = f"    **上昇理由・材料：** {catalyst}"
+        third = f"    **材料確認結果：** {_source_status(item)}。"
         blocks.append(f"{first}\n\n{second}\n\n{third}")
+    return "\n\n".join(blocks)
+
+
+def _render_after_hours(items: Any) -> str:
+    field = "after_hours_earnings"
+    if not isinstance(items, list) or len(items) > 10:
+        raise NYMarketDisplayError(f"{field} must contain at most 10 items")
+    intro = "時間外株価は決算直後の初動で、朝までに変動します。"
+    blocks: list[str] = [intro]
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise NYMarketDisplayError(f"{field}[{index}] must be an object")
+        company = _text(item, "display_company_name", field)
+        ticker = _text(item, "ticker", field)
+        description = _text(item, "company_description", field)
+        results = _text(item, "results_summary", field)
+        takeaway = _text(item, "investment_takeaway", field)
+        source_type = {
+            "company_ir": "IR",
+            "sec": "SEC",
+        }.get(_text(item, "source_type", field))
+        if source_type is None:
+            raise NYMarketDisplayError(f"{field}[{index}].source_type must be company_ir or sec")
+        source_url = _text(item, "source_url", field)
+        price_url = _text(item, "after_hours_price_source_url", field)
+        heading = (
+            f"#### {company}（{ticker}）— 時間外 約"
+            f"{format_change_pct(item.get('after_hours_change_pct'))}"
+        )
+        source = f"出典：[{source_type}]({source_url}) / [時間外株価]({price_url})"
+        blocks.append(
+            "\n\n".join((heading, description, results, f"{takeaway}  \n{source}"))
+        )
     return "\n\n".join(blocks)
 
 
@@ -261,6 +299,9 @@ def render_display_sections(payload: dict[str, Any]) -> dict[str, str]:
         "11業種別騰落": "\n".join(sector_lines),
         "話題の値上がり10社": _render_notable_gainers(payload.get("notable_gainers")),
         "純粋上昇率ランキング": _render_top_gainers(payload.get("top_gainers_20")),
+        "引け後・アフター決算の注目株": _render_after_hours(
+            payload.get("after_hours_earnings")
+        ),
     }
 
 

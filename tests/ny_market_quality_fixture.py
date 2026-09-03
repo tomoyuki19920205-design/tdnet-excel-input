@@ -129,6 +129,7 @@ def payload() -> dict:
         "## 話題の値上がり10社\n\n下書き。\n\n"
         "## 話題の値下がり10社\n\n下落銘柄の説明。\n\n"
         "## 純粋上昇率Top20\n\n下書き。\n\n"
+        "## アフター決算\n\n下書き。\n\n"
         "## 主要決算\n\n" + (
         "5指数と11セクターの通常取引終値を同一基準で検証した。個別企業は一次情報を優先し、"
         "確認済み事実と推論を分離した。原油、金利、Fed、AI設備投資、半導体、ネットワーク、"
@@ -150,15 +151,45 @@ def payload() -> dict:
         **earning, **deepcopy(research_by_ticker["DELL"]), "after_hours_change_pct": 6.35,
         "as_of_utc": "2026-09-01T22:47:00Z", "as_of_jst": "2026-09-02T07:47:00+09:00",
         "session": "post_market",
+        "display_company_name": "Dell",
+        "results_summary": "四半期売上は$30.0B、調整後EPSは$2.00となり、会社予想を上回りました。",
+        "investment_takeaway": "AIサーバー需要と利益率の持続性が次の焦点です。",
+        "after_hours_price_source_url": "https://example.com/after-hours/dell",
+        "after_hours_price_provider": "fixture_market_data",
+        "display_numbers": ["$30.0B", "$2.00"],
     }
+    after_second = {
+        **earning,
+        "after_hours_change_pct": -2.25,
+        "as_of_utc": "2026-09-01T22:47:00Z",
+        "as_of_jst": "2026-09-02T07:47:00+09:00",
+        "session": "post_market",
+        "display_company_name": "Medtronic",
+        "results_summary": "四半期売上は$8.0B、調整後EPSは$1.50となりました。",
+        "investment_takeaway": "医療機器需要と通期ガイダンスが次の焦点です。",
+        "after_hours_price_source_url": "https://example.com/after-hours/mdt",
+        "after_hours_price_provider": "fixture_market_data",
+        "display_numbers": ["$8.0B", "$1.50"],
+    }
+    after_hours = [after, after_second]
     sources = [{"title": "Canonical market snapshot", "publisher": "Market Data", "url": market_url, "published_at": "2026-09-02T00:00:00Z"}]
     for item in research:
         if item["source_url"]:
             sources.append({"title": f"{item['ticker']} primary release", "publisher": item["company_name"], "url": item["source_url"], "published_at": "2026-09-01"})
     for item in news:
         sources.append({"title": item["title"], "publisher": "Reuters", "url": item["source_url"], "published_at": "2026-09-01T23:00:00Z"})
-    for item in (earning, after):
+    for item in (earning, *after_hours):
         sources.append({"title": f"{item['ticker']} earnings", "publisher": item["company_name"], "url": item["source_url"], "published_at": "2026-09-01"})
+    for item in after_hours:
+        sources.append({"title": f"{item['ticker']} after hours", "publisher": "Market Data", "url": item["after_hours_price_source_url"], "published_at": "2026-09-01T22:47:00Z"})
+    discovery_runs = [
+        {"scope": "earnings_calendar", "query": "US earnings calendar 2026-09-01", "source_url": "https://example.com/discovery/earnings-calendar", "source_kind": "secondary_discovery", "status": "completed"},
+        {"scope": "after_hours_movers", "query": "US after-hours movers 2026-09-01", "source_url": "https://example.com/discovery/after-hours-movers", "source_kind": "secondary_discovery", "status": "completed"},
+        {"scope": "regulatory_filings", "query": "SEC 8-K results 2026-09-01", "source_url": "https://www.sec.gov/edgar/search/", "source_kind": "official_registry", "status": "completed"},
+        {"scope": "material_events", "query": "US clinical trial FDA announcements 2026-09-01", "source_url": "https://example.com/discovery/material-events", "source_kind": "secondary_discovery", "status": "completed"},
+    ]
+    for run in discovery_runs:
+        sources.append({"title": run["scope"], "publisher": "Discovery", "url": run["source_url"], "published_at": "2026-09-01"})
     commodity_url = "https://example.com/commodities/wti"
     sources.append({"title": "WTI close", "publisher": "Market Data", "url": commodity_url, "published_at": "2026-09-01"})
     result = {
@@ -182,7 +213,34 @@ def payload() -> dict:
         "sector_moves": [{**item, "source_url": market_url} for item in sectors],
         "notable_gainers": [deepcopy(item) for item in top[:10]],
         "notable_losers": [deepcopy(item) for item in top[10:]],
-        "top_gainers_20": deepcopy(top), "earnings": [earning], "after_hours_earnings": [after],
+        "top_gainers_20": deepcopy(top), "earnings": [earning],
+        "after_hours_earnings": deepcopy(after_hours),
+        "after_hours_research": deepcopy(after_hours),
+        "after_hours_candidate_review": {
+            "contract_version": "ny_market_after_hours_v1",
+            "discovery_method": "broad_discovery_then_primary_verification",
+            "market_session_date": "2026-09-01",
+            "discovery_started_at": "2026-09-01T20:00:00Z",
+            "discovery_completed_at": "2026-09-01T22:47:00Z",
+            "discovery_runs": discovery_runs,
+            "coverage_status": "quiet_day",
+            "discovered_candidate_count": len(after_hours),
+            "candidates": [
+                {
+                    "importance_rank": index,
+                    "ticker": item["ticker"],
+                    "status": "included",
+                    "reason_code": "verified_earnings",
+                    "reason": "決算発表と時間外反応を検証できたため採用。",
+                    "discovered_by": ["earnings_calendar", "after_hours_movers"],
+                    "discovery_source_url": "https://example.com/discovery/after-hours-movers",
+                    "discovery_source_kind": "secondary_discovery",
+                    "primary_source_url": item["source_url"],
+                    "price_source_url": item["after_hours_price_source_url"],
+                }
+                for index, item in enumerate(after_hours, start=1)
+            ],
+        },
         "final_analysis_references": [deepcopy(research_by_ticker[ticker]) for ticker in ("SSM", "SWVL", "PETZ", "PXS", "MDT", "DELL")],
         "major_news": news,
         "commodities": [{"name": "WTI", "price": 70.0, "change_pct": 2.0, "reason": "供給懸念",

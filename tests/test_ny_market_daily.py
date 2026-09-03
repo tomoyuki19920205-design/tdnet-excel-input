@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import sys
 from copy import deepcopy
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -36,6 +37,15 @@ def payload(*, report_date: str = "2026-09-01", status: str = "open", headline: 
     session_date = "2026-08-31" if report_date == "2026-09-01" else "2026-09-04" if report_date == "2026-09-06" else "2026-09-01"
     result["market_session_date"] = session_date
     result["canonical_market_data"]["market_session_date"] = session_date
+    review = result["after_hours_candidate_review"]
+    review["market_session_date"] = session_date
+    review["discovery_started_at"] = f"{session_date}T20:00:00Z"
+    review["discovery_completed_at"] = f"{session_date}T22:47:00Z"
+    next_day = (date.fromisoformat(session_date) + timedelta(days=1)).isoformat()
+    for field in ("after_hours_earnings", "after_hours_research"):
+        for item in result[field]:
+            item["as_of_utc"] = f"{session_date}T22:47:00Z"
+            item["as_of_jst"] = f"{next_day}T07:47:00+09:00"
     result["market_status"] = status
     result["headline"] = headline
     return attach_market_data_packet_metadata(result)
