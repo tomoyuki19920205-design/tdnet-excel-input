@@ -706,6 +706,47 @@ cannot meet a weekly 3,800-company cycle in the current eight-task arrangement, 
 if its later Gold quality passes. If both batch02 and batch04 fail Gold quality, the
 next step is research-architecture redesign rather than larger batches.
 
+### Blind Gold v2 adjudication packets
+
+Gold v2 Web adjudication is performed outside the benchmark harness. The harness only
+builds deterministic blind packets, validates complete packet responses, and imports
+validated results. Packet generation orders all 82 clusters by ticker, event date, and
+cluster ID, keeps every company's events together, and partitions them into 8-10 event
+packets. Each packet SHA-256 covers canonical sorted-key JSON excluding only the
+`packet_sha256` field; no timestamps are included, so identical unions produce
+identical packet bytes and hashes.
+
+For `batchbench-20260901T095759508419`, this produces nine packets with event
+counts `8, 8, 9, 10, 10, 10, 10, 8, 9` (82 total).
+
+Packets contain cluster/company identity, date, canonical headline, summary,
+`why_it_matters`, and de-duplicated source URLs. They never contain `found_by`, run
+labels, candidate presence, matcher evidence, or members. The separate provenance
+manifest stays outside `gold_packets` and is joined only after Gold completion.
+
+```powershell
+python tools/company_news_batch_benchmark.py build-gold-packets-v2 --benchmark-id batchbench-20260901T095759508419
+python tools/company_news_batch_benchmark.py gold-status-v2 --benchmark-id batchbench-20260901T095759508419
+python tools/company_news_batch_benchmark.py import-gold-adjudication-v2 --benchmark-id batchbench-20260901T095759508419 --input <response.json>
+```
+
+The response contract is `company_news_gold_adjudication_response_v2`. Import rejects
+schema, benchmark, packet ID, packet SHA, cluster coverage, duplicate cluster, enum,
+URL, datetime, evidence, and duplicate-target violations before any Gold write. A
+successful import content-addresses and atomically preserves the previous Gold file in
+`gold_backups`, then atomically replaces `gold_adjudication_v2.json`. Re-importing an
+identical response is a no-op. Status remains `GOLD_INCOMPLETE` while any event is
+`UNKNOWN`; `GOLD_COMPLETE` only means every event is adjudicated and still requires
+Gold metric review before batch03 can run.
+
+Gold scoring collapses `DUPLICATE` and `MATCHER_FALSE_NEGATIVE` relationships to one
+event, treats candidate-only `VALID_MATERIAL` events as valid discoveries, and scores
+reference01, reference02, batch02, and batch04 symmetrically. It reports material
+recall, critical-material recall, material precision, and company-level material/no-
+news false negatives. `VALID_NON_MATERIAL`, `INVALID_SOURCE`, and `OUT_OF_WINDOW`
+participate in the precision denominator; candidate-only events are never classified
+as false positives without adjudication.
+
 Only the final candidate receives the separate integration burst fixture. It contains
 synthetic files under `data/news_benchmark_load`, requires a temporary SQLite copy,
 disables Production Supabase writes, and exposes fields for worker duration/backlog,

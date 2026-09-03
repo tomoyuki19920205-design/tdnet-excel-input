@@ -9,6 +9,7 @@ This module never writes to the production Company News queue, inbox,
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import math
@@ -48,6 +49,10 @@ MATCHER_V2_SCHEMA = "company_news_quality_matcher_v2"
 EVENT_UNION_V2_SCHEMA = "company_news_quality_event_union_v2"
 REPEATABILITY_V2_SCHEMA = "company_news_reference_repeatability_v2"
 MATCHER_REVIEW_SCHEMA = "company_news_matcher_review_v2"
+GOLD_PACKET_SCHEMA = "company_news_gold_adjudication_packet_v2"
+GOLD_PACKET_MANIFEST_SCHEMA = "company_news_gold_packet_manifest_v2"
+GOLD_PACKET_PROVENANCE_SCHEMA = "company_news_gold_packet_provenance_v2"
+GOLD_RESPONSE_SCHEMA = "company_news_gold_adjudication_response_v2"
 
 TASK_COUNT = 8
 COHORT_SIZE = 192
@@ -71,6 +76,20 @@ GOLD_VERDICTS = (
     "INVALID_SOURCE",
     "OUT_OF_WINDOW",
     "UNKNOWN",
+)
+GOLD_PACKET_MIN_EVENTS = 8
+GOLD_PACKET_MAX_EVENTS = 10
+GOLD_EARNINGS_CHANNELS = (
+    "revenue", "pricing", "volume", "margin", "cost", "capex", "capacity",
+    "customer", "supplier", "regulation", "capital_allocation", "balance_sheet",
+    "management", "industry", "other",
+)
+GOLD_DIRECTIONS = ("positive", "negative", "mixed", "neutral", "unknown")
+GOLD_CONFIDENCES = ("HIGH", "MEDIUM", "LOW")
+GOLD_SOURCE_TYPES = (
+    "company_ir", "company_news", "tdnet", "edinet", "government",
+    "customer_supplier_official", "industry_association", "reliable_news",
+    "secondary", "other", "none",
 )
 DEFAULT_SEARCH_FROM = date(2026, 8, 25)
 DEFAULT_SEARCH_TO = date(2026, 8, 31)
@@ -2699,6 +2718,589 @@ def audit_reference_repeatability_v2(
     return result
 
 
+def _matcher_v2_directory(root: Path, benchmark_id: str) -> Path:
+    return _quality_v2_dir(root, benchmark_id) / "matcher_v2"
+
+
+def _canonical_json_bytes(value: Any) -> bytes:
+    return json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+
+
+def _json_sha256(value: Any) -> str:
+    return hashlib.sha256(_canonical_json_bytes(value)).hexdigest()
+
+
+def _packet_sha256(packet: dict[str, Any]) -> str:
+    core = {key: value for key, value in packet.items() if key != "packet_sha256"}
+    return _json_sha256(core)
+
+
+def _partition_gold_packet_groups(
+    groups: list[tuple[str, list[dict[str, Any]]]],
+) -> list[list[tuple[str, list[dict[str, Any]]]]]:
+    """Partition contiguous ticker groups into deterministic 8-10 event packets."""
+    cache: dict[int, list[list[tuple[str, list[dict[str, Any]]]]] | None] = {}
+
+    def solve(index: int) -> list[list[tuple[str, list[dict[str, Any]]]]] | None:
+        if index == len(groups):
+            return []
+        if index in cache:
+            return cache[index]
+        total = 0
+        choices: list[list[list[tuple[str, list[dict[str, Any]]]]]] = []
+        for end in range(index + 1, len(groups) + 1):
+            total += len(groups[end - 1][1])
+            if total > GOLD_PACKET_MAX_EVENTS:
+                break
+            if total < GOLD_PACKET_MIN_EVENTS:
+                continue
+            remainder = solve(end)
+            if remainder is not None:
+                choices.append([groups[index:end], *remainder])
+        if not choices:
+            cache[index] = None
+        else:
+            cache[index] = min(
+                choices,
+                key=lambda packets: (
+                    len(packets),
+                    sum(abs(sum(len(events) for _, events in packet) - 9) for packet in packets),
+                    tuple(sum(len(events) for _, events in packet) for packet in packets),
+                ),
+            )
+        return cache[index]
+
+    result = solve(0)
+    if result is None:
+        raise BenchmarkError("cannot partition Gold events into 8-10 event company-safe packets")
+    return result
+
+
+def _blind_gold_event(cluster: dict[str, Any]) -> dict[str, Any]:
+    members = sorted(cluster.get("members", []), key=lambda item: item["observation_id"])
+    if not members:
+        raise BenchmarkError(f"Gold cluster {cluster.get('match_cluster_id')} has no members")
+    representative = members[0]
+    sources: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+    for member in members:
+        url = str(member["source_url"])
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+        sources.append({"url": url, "source_type": str(member["source_type"])})
+    return {
+        "cluster_id": cluster["match_cluster_id"],
+        "ticker": cluster["ticker"],
+        "company": cluster["company"],
+        "event_date": cluster["date"],
+        "canonical_headline": cluster["headline"],
+        "summary": representative.get("summary", ""),
+        "why_it_matters": representative.get("why_it_matters", ""),
+        "source_urls": sources,
+    }
+
+
+def _gold_response_contract() -> dict[str, Any]:
+    return {
+        "schema_version": GOLD_RESPONSE_SCHEMA,
+        "verdicts": list(GOLD_VERDICTS),
+        "earnings_channels": list(GOLD_EARNINGS_CHANNELS),
+        "directions": list(GOLD_DIRECTIONS),
+        "confidences": list(GOLD_CONFIDENCES),
+        "source_types": list(GOLD_SOURCE_TYPES),
+        "required_item_fields": [
+            "cluster_id", "verdict", "materiality_reason", "event_exists",
+            "event_within_window", "company_specific", "duplicate_of_cluster_id",
+            "primary_source_url", "primary_source_type", "primary_source_verified",
+            "original_source_verified", "earnings_channel", "direction", "confidence",
+            "notes", "evidence",
+        ],
+        "evidence_fields": ["url", "source_type", "supports"],
+        "complete_packet_required": True,
+    }
+
+
+def _expected_gold_packets(union: dict[str, Any]) -> list[dict[str, Any]]:
+    ordered = sorted(
+        union["events"],
+        key=lambda item: (item["ticker"], item["date"], item["match_cluster_id"]),
+    )
+    grouped: list[tuple[str, list[dict[str, Any]]]] = []
+    for cluster in ordered:
+        if grouped and grouped[-1][0] == cluster["ticker"]:
+            grouped[-1][1].append(cluster)
+        else:
+            grouped.append((cluster["ticker"], [cluster]))
+    partitions = _partition_gold_packet_groups(grouped)
+    packets: list[dict[str, Any]] = []
+    for index, partition in enumerate(partitions, start=1):
+        events = [
+            _blind_gold_event(cluster)
+            for _, company_events in partition
+            for cluster in company_events
+        ]
+        core = {
+            "schema_version": GOLD_PACKET_SCHEMA,
+            "benchmark_id": union["benchmark_id"],
+            "packet_id": f"gold_packet_{index:03d}",
+            "search_from": union["search_from"],
+            "search_to": union["search_to"],
+            "event_count": len(events),
+            "blind_adjudication": True,
+            "materiality_definition": (
+                "VALID_MATERIAL can reasonably update an investor's assessment of revenue, "
+                "profit, margin, orders, utilization, capacity, price, costs, customers, supply "
+                "chain, regulation, finance, capital allocation, M&A, strategy, or competitiveness."
+            ),
+            "source_priority": [
+                "company_ir", "company_news", "tdnet", "edinet", "government",
+                "customer_supplier_official", "industry_association", "reliable_news",
+                "secondary",
+            ],
+            "response_contract": _gold_response_contract(),
+            "events": events,
+        }
+        packets.append({**core, "packet_sha256": _json_sha256(core)})
+    return packets
+
+
+def _assert_blind_packet(packet: dict[str, Any]) -> None:
+    forbidden = {
+        "found_by", "reference", "reference01", "reference02", "batch02", "batch04",
+        "run_name", "run_label", "candidate_presence", "members", "matcher_evidence",
+    }
+
+    def walk(value: Any) -> None:
+        if isinstance(value, dict):
+            overlap = forbidden & set(value)
+            if overlap:
+                raise BenchmarkError(f"Gold packet leaks blind fields: {sorted(overlap)}")
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(packet)
+    serialized = json.dumps(packet, ensure_ascii=False).casefold()
+    leaked_labels = [
+        label for label in ("reference01", "reference02", "batch02", "batch04")
+        if label in serialized
+    ]
+    if leaked_labels:
+        raise BenchmarkError(f"Gold packet leaks run labels: {leaked_labels}")
+
+
+def build_gold_packets_v2(
+    root: Path, benchmark_id: str, *, now: datetime | None = None
+) -> dict[str, Any]:
+    del now  # Packet content intentionally has no clock-dependent fields.
+    matcher_directory = _matcher_v2_directory(root, benchmark_id)
+    union_path = matcher_directory / "event_union_v2.json"
+    union = _read_json(union_path)
+    if union.get("schema_version") != EVENT_UNION_V2_SCHEMA:
+        raise BenchmarkError("invalid matcher v2 event union")
+    packets = _expected_gold_packets(union)
+    for packet in packets:
+        _assert_blind_packet(packet)
+        if _packet_sha256(packet) != packet["packet_sha256"]:
+            raise BenchmarkError("internal Gold packet SHA mismatch")
+    cluster_ids = [event["cluster_id"] for packet in packets for event in packet["events"]]
+    union_ids = [event["match_cluster_id"] for event in union["events"]]
+    if len(cluster_ids) != len(set(cluster_ids)) or set(cluster_ids) != set(union_ids):
+        raise BenchmarkError("Gold packet coverage must contain every cluster exactly once")
+    packet_directory = matcher_directory / "gold_packets"
+    blind_manifest_path = packet_directory / "manifest.json"
+    provenance_path = matcher_directory / "gold_packet_provenance_manifest.json"
+    blind_manifest = {
+        "schema_version": GOLD_PACKET_MANIFEST_SCHEMA,
+        "benchmark_id": benchmark_id,
+        "event_union_sha256": _json_sha256(union),
+        "packet_count": len(packets),
+        "total_cluster_count": len(cluster_ids),
+        "ordering": ["ticker", "date", "cluster_id"],
+        "company_groups_are_not_split": True,
+        "packets": [
+            {
+                "packet_id": packet["packet_id"],
+                "packet_sha256": packet["packet_sha256"],
+                "event_count": packet["event_count"],
+                "filename": f"{packet['packet_id']}.json",
+            }
+            for packet in packets
+        ],
+    }
+    provenance = {
+        "schema_version": GOLD_PACKET_PROVENANCE_SCHEMA,
+        "benchmark_id": benchmark_id,
+        "event_union_sha256": _json_sha256(union),
+        "join_only_after_gold_completion": True,
+        "clusters": [
+            {
+                "cluster_id": cluster["match_cluster_id"],
+                "found_by": cluster["found_by"],
+            }
+            for cluster in sorted(
+                union["events"],
+                key=lambda item: (item["ticker"], item["date"], item["match_cluster_id"]),
+            )
+        ],
+    }
+    expected_files = {
+        packet_directory / f"{packet['packet_id']}.json": packet for packet in packets
+    } | {blind_manifest_path: blind_manifest, provenance_path: provenance}
+    existing = [path for path in expected_files if path.exists()]
+    if existing:
+        if len(existing) != len(expected_files) or any(
+            _read_json(path) != value for path, value in expected_files.items()
+        ):
+            raise BenchmarkError("existing Gold packet artifacts differ; refusing overwrite")
+        idempotent = True
+    else:
+        packet_directory.mkdir(parents=True, exist_ok=True)
+        for path, value in expected_files.items():
+            atomic_write_json(path, value)
+        idempotent = False
+    return {
+        "schema_version": GOLD_PACKET_MANIFEST_SCHEMA,
+        "benchmark_id": benchmark_id,
+        "packet_count": len(packets),
+        "clusters_per_packet": [packet["event_count"] for packet in packets],
+        "total_cluster_count": len(cluster_ids),
+        "blind_fields_verified": True,
+        "idempotent": idempotent,
+        "packet_directory": str(packet_directory.resolve()),
+        "manifest_path": str(blind_manifest_path.resolve()),
+        "provenance_manifest_path": str(provenance_path.resolve()),
+    }
+
+
+def _validate_gold_response_item(
+    item: Any,
+    *,
+    index: int,
+    all_cluster_ids: set[str],
+) -> dict[str, Any]:
+    required = set(_gold_response_contract()["required_item_fields"])
+    if not isinstance(item, dict) or set(item) != required:
+        raise BenchmarkError(f"Gold response items[{index}] fields do not match schema")
+    cluster_id = item["cluster_id"]
+    if not isinstance(cluster_id, str) or cluster_id not in all_cluster_ids:
+        raise BenchmarkError(f"Gold response items[{index}] has unknown cluster_id")
+    verdict = item["verdict"]
+    if verdict not in GOLD_VERDICTS:
+        raise BenchmarkError(f"Gold response items[{index}] has invalid verdict")
+    if not isinstance(item["materiality_reason"], str) or not item["materiality_reason"].strip():
+        raise BenchmarkError(f"Gold response items[{index}].materiality_reason is required")
+    for key in ("event_exists", "event_within_window", "company_specific", "primary_source_verified", "original_source_verified"):
+        if type(item[key]) is not bool:
+            raise BenchmarkError(f"Gold response items[{index}].{key} must be boolean")
+    duplicate_of = item["duplicate_of_cluster_id"]
+    needs_target = verdict in {"DUPLICATE", "MATCHER_FALSE_NEGATIVE"}
+    if needs_target:
+        if duplicate_of not in all_cluster_ids or duplicate_of == cluster_id:
+            raise BenchmarkError(f"Gold response items[{index}] requires a valid duplicate target")
+    elif duplicate_of is not None:
+        raise BenchmarkError(f"Gold response items[{index}] must not have duplicate target")
+    primary_url = item["primary_source_url"]
+    if primary_url is not None and not (
+        isinstance(primary_url, str) and primary_url.startswith(("http://", "https://"))
+    ):
+        raise BenchmarkError(f"Gold response items[{index}].primary_source_url is invalid")
+    if item["primary_source_verified"] and primary_url is None:
+        raise BenchmarkError(f"Gold response items[{index}] verified primary source requires URL")
+    if item["primary_source_type"] not in GOLD_SOURCE_TYPES:
+        raise BenchmarkError(f"Gold response items[{index}].primary_source_type is invalid")
+    if item["earnings_channel"] not in GOLD_EARNINGS_CHANNELS:
+        raise BenchmarkError(f"Gold response items[{index}].earnings_channel is invalid")
+    if item["direction"] not in GOLD_DIRECTIONS:
+        raise BenchmarkError(f"Gold response items[{index}].direction is invalid")
+    if item["confidence"] not in GOLD_CONFIDENCES:
+        raise BenchmarkError(f"Gold response items[{index}].confidence is invalid")
+    if not isinstance(item["notes"], str):
+        raise BenchmarkError(f"Gold response items[{index}].notes must be a string")
+    if not isinstance(item["evidence"], list):
+        raise BenchmarkError(f"Gold response items[{index}].evidence must be an array")
+    for evidence_index, evidence in enumerate(item["evidence"]):
+        if not isinstance(evidence, dict) or set(evidence) != {"url", "source_type", "supports"}:
+            raise BenchmarkError(
+                f"Gold response items[{index}].evidence[{evidence_index}] fields do not match schema"
+            )
+        if not isinstance(evidence["url"], str) or not evidence["url"].startswith(("http://", "https://")):
+            raise BenchmarkError(f"Gold response items[{index}].evidence[{evidence_index}].url is invalid")
+        if evidence["source_type"] not in GOLD_SOURCE_TYPES:
+            raise BenchmarkError(f"Gold response items[{index}].evidence[{evidence_index}].source_type is invalid")
+        if not isinstance(evidence["supports"], str) or not evidence["supports"].strip():
+            raise BenchmarkError(f"Gold response items[{index}].evidence[{evidence_index}].supports is required")
+    return item
+
+
+def validate_gold_adjudication_response_v2(
+    value: dict[str, Any],
+    packet: dict[str, Any],
+    all_cluster_ids: set[str],
+) -> dict[str, Any]:
+    if set(value) != {
+        "schema_version", "benchmark_id", "packet_id", "packet_sha256",
+        "adjudicated_at", "items",
+    }:
+        raise BenchmarkError("Gold response fields do not match schema")
+    if value.get("schema_version") != GOLD_RESPONSE_SCHEMA:
+        raise BenchmarkError("invalid Gold response schema_version")
+    if value.get("benchmark_id") != packet["benchmark_id"]:
+        raise BenchmarkError("Gold response benchmark_id mismatch")
+    if value.get("packet_id") != packet["packet_id"]:
+        raise BenchmarkError("Gold response packet_id mismatch")
+    if value.get("packet_sha256") != packet["packet_sha256"] or _packet_sha256(packet) != packet["packet_sha256"]:
+        raise BenchmarkError("Gold response packet SHA mismatch")
+    try:
+        adjudicated_at = datetime.fromisoformat(str(value["adjudicated_at"]))
+    except (TypeError, ValueError) as exc:
+        raise BenchmarkError("Gold response adjudicated_at is invalid") from exc
+    if adjudicated_at.tzinfo is None:
+        raise BenchmarkError("Gold response adjudicated_at must include timezone")
+    if not isinstance(value.get("items"), list):
+        raise BenchmarkError("Gold response items must be an array")
+    items = [
+        _validate_gold_response_item(item, index=index, all_cluster_ids=all_cluster_ids)
+        for index, item in enumerate(value["items"])
+    ]
+    item_ids = [item["cluster_id"] for item in items]
+    expected_ids = [item["cluster_id"] for item in packet["events"]]
+    if len(item_ids) != len(set(item_ids)):
+        raise BenchmarkError("Gold response contains duplicate cluster_id")
+    if set(item_ids) != set(expected_ids):
+        raise BenchmarkError("Gold response must adjudicate every packet cluster exactly once")
+    return value
+
+
+def _validate_gold_v2_against_union(
+    gold: dict[str, Any], union: dict[str, Any]
+) -> dict[str, Any]:
+    validate_gold_adjudication(gold)
+    if gold.get("matcher_schema_version") != MATCHER_V2_SCHEMA:
+        raise BenchmarkError("Gold v2 matcher identity mismatch")
+    if gold.get("benchmark_id") != union.get("benchmark_id"):
+        raise BenchmarkError("Gold v2 benchmark identity mismatch")
+    if gold.get("source_union_sha256") != _json_sha256(union):
+        raise BenchmarkError("Gold v2 source union SHA mismatch")
+    gold_ids = [event["match_cluster_id"] for event in gold["events"]]
+    union_ids = [event["match_cluster_id"] for event in union["events"]]
+    if len(gold_ids) != len(set(gold_ids)) or set(gold_ids) != set(union_ids):
+        raise BenchmarkError("Gold v2 must contain every union cluster exactly once")
+    by_id = {event["match_cluster_id"]: event for event in gold["events"]}
+    for event in gold["events"]:
+        target = event.get("duplicate_of_cluster_id")
+        if event["verdict"] in {"DUPLICATE", "MATCHER_FALSE_NEGATIVE"}:
+            if target not in by_id or target == event["match_cluster_id"]:
+                raise BenchmarkError("Gold v2 duplicate relationship is invalid")
+        elif target is not None:
+            raise BenchmarkError("Gold v2 non-duplicate event has a duplicate target")
+    for event in gold["events"]:
+        seen: set[str] = set()
+        current = event
+        while current["verdict"] in {"DUPLICATE", "MATCHER_FALSE_NEGATIVE"}:
+            cluster_id = current["match_cluster_id"]
+            if cluster_id in seen:
+                raise BenchmarkError("Gold v2 duplicate relationship contains a cycle")
+            seen.add(cluster_id)
+            current = by_id[current["duplicate_of_cluster_id"]]
+    return gold
+
+
+def _gold_verdict_counts(gold: dict[str, Any]) -> dict[str, int]:
+    return {
+        verdict: sum(event["verdict"] == verdict for event in gold["events"])
+        for verdict in GOLD_VERDICTS
+    }
+
+
+def gold_status_v2(root: Path, benchmark_id: str) -> dict[str, Any]:
+    directory = _matcher_v2_directory(root, benchmark_id)
+    union = _read_json(directory / "event_union_v2.json")
+    gold = _validate_gold_v2_against_union(
+        _read_json(directory / "gold_adjudication_v2.json"), union
+    )
+    counts = _gold_verdict_counts(gold)
+    complete = counts["UNKNOWN"] == 0
+    return {
+        "schema_version": "company_news_gold_status_v2",
+        "benchmark_id": benchmark_id,
+        "status": "GOLD_COMPLETE" if complete else "GOLD_INCOMPLETE",
+        "total_cluster_count": len(gold["events"]),
+        "verdict_counts": counts,
+        "imported_packet_count": len(gold.get("packet_imports", {})),
+        "batch03_allowed": False if not complete else "REQUIRES_GOLD_METRIC_REVIEW",
+    }
+
+
+def import_gold_adjudication_v2(
+    root: Path,
+    benchmark_id: str,
+    input_path: Path,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    directory = _matcher_v2_directory(root, benchmark_id)
+    response = _read_json(input_path)
+    packet_id = response.get("packet_id")
+    if not isinstance(packet_id, str) or not re.fullmatch(r"gold_packet_\d{3}", packet_id):
+        raise BenchmarkError("Gold response packet_id is invalid")
+    packet = _read_json(directory / "gold_packets" / f"{packet_id}.json")
+    union = _read_json(directory / "event_union_v2.json")
+    all_cluster_ids = {event["match_cluster_id"] for event in union["events"]}
+    validate_gold_adjudication_response_v2(response, packet, all_cluster_ids)
+    gold_path = directory / "gold_adjudication_v2.json"
+    gold = _validate_gold_v2_against_union(_read_json(gold_path), union)
+    response_hash = _json_sha256(response)
+    previous_import = gold.get("packet_imports", {}).get(packet_id)
+    if previous_import and previous_import.get("response_sha256") == response_hash:
+        return {
+            **gold_status_v2(root, benchmark_id),
+            "packet_id": packet_id,
+            "idempotent": True,
+            "gold_updated": False,
+        }
+    updated = copy.deepcopy(gold)
+    event_by_id = {event["match_cluster_id"]: event for event in updated["events"]}
+    for item in response["items"]:
+        target = event_by_id[item["cluster_id"]]
+        target.update({
+            "cluster_id": item["cluster_id"],
+            "event_date": target["date"],
+            "canonical_headline": target["headline"],
+            "verdict": item["verdict"],
+            "rationale": item["materiality_reason"],
+            "materiality_reason": item["materiality_reason"],
+            "event_exists": item["event_exists"],
+            "event_within_window": item["event_within_window"],
+            "company_specific": item["company_specific"],
+            "duplicate_of_cluster_id": item["duplicate_of_cluster_id"],
+            "primary_source_url": item["primary_source_url"],
+            "primary_source_type": item["primary_source_type"],
+            "primary_source_verified": item["primary_source_verified"],
+            "original_source_verified": item["original_source_verified"],
+            "official_source_url": item["primary_source_url"],
+            "earnings_channel": item["earnings_channel"],
+            "direction": item["direction"],
+            "confidence": item["confidence"],
+            "notes": item["notes"],
+            "evidence": item["evidence"],
+            "adjudicator": "independent_web_adjudicator_v2",
+            "adjudicated_at": response["adjudicated_at"],
+            "adjudication_packet_id": packet_id,
+        })
+    imports = dict(updated.get("packet_imports", {}))
+    imports[packet_id] = {
+        "packet_sha256": packet["packet_sha256"],
+        "response_sha256": response_hash,
+        "adjudicated_at": response["adjudicated_at"],
+        "imported_at": _iso(now),
+    }
+    updated["packet_imports"] = dict(sorted(imports.items()))
+    _validate_gold_v2_against_union(updated, union)
+    backup_directory = directory / "gold_backups"
+    current_hash = _json_sha256(gold)
+    backup_path = backup_directory / f"gold_adjudication_v2.{current_hash}.json"
+    if backup_path.exists():
+        if _read_json(backup_path) != gold:
+            raise BenchmarkError("Gold backup hash collision; refusing write")
+    else:
+        atomic_write_json(backup_path, gold)
+    atomic_write_json(gold_path, updated)
+    return {
+        **gold_status_v2(root, benchmark_id),
+        "packet_id": packet_id,
+        "idempotent": False,
+        "gold_updated": True,
+        "backup_path": str(backup_path.resolve()),
+    }
+
+
+def _gold_metrics_v2(value: dict[str, Any]) -> dict[str, Any]:
+    counts = _gold_verdict_counts(value)
+    if counts["UNKNOWN"]:
+        return {
+            "available": False,
+            "decision": "GOLD_INCOMPLETE",
+            "verdict_counts": counts,
+            "unknown_event_count": counts["UNKNOWN"],
+            "runs": {},
+        }
+    by_id = {event["match_cluster_id"]: event for event in value["events"]}
+
+    def root_id(event: dict[str, Any]) -> str:
+        current = event
+        seen: set[str] = set()
+        while current["verdict"] in {"DUPLICATE", "MATCHER_FALSE_NEGATIVE"}:
+            cluster_id = current["match_cluster_id"]
+            if cluster_id in seen:
+                raise BenchmarkError("Gold duplicate relationship contains a cycle")
+            seen.add(cluster_id)
+            target_id = current.get("duplicate_of_cluster_id")
+            if target_id not in by_id:
+                raise BenchmarkError("Gold duplicate relationship has unknown target")
+            current = by_id[target_id]
+        return current["match_cluster_id"]
+
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for event in value["events"]:
+        groups[root_id(event)].append(event)
+    material_roots = {
+        root for root in groups if by_id[root]["verdict"] == "VALID_MATERIAL"
+    }
+    critical_roots = {
+        root for root in material_roots
+        if by_id[root]["importance"] == "high"
+        or by_id[root]["earnings_relevance"] == "direct"
+    }
+    material_tickers = {by_id[root]["ticker"] for root in material_roots}
+    scorable = {"VALID_MATERIAL", "VALID_NON_MATERIAL", "INVALID_SOURCE", "OUT_OF_WINDOW"}
+    runs: dict[str, Any] = {}
+    for run in QUALITY_RUN_LABELS.values():
+        discovered_roots = {
+            root for root, members in groups.items()
+            if any(member["found_by"][run] for member in members)
+        }
+        found_material = material_roots & discovered_roots
+        found_critical = critical_roots & discovered_roots
+        denominator = {
+            root for root in discovered_roots if by_id[root]["verdict"] in scorable
+        }
+        found_material_tickers = {by_id[root]["ticker"] for root in found_material}
+        any_tickers = {
+            member["ticker"]
+            for members in groups.values()
+            for member in members
+            if member["found_by"][run]
+        }
+        runs[run] = {
+            "gold_material_event_count": len(material_roots),
+            "found_gold_material_event_count": len(found_material),
+            "gold_event_recall": len(found_material) / len(material_roots) if material_roots else 1.0,
+            "critical_gold_event_count": len(critical_roots),
+            "critical_gold_event_recall": len(found_critical) / len(critical_roots) if critical_roots else 1.0,
+            "precision_denominator_count": len(denominator),
+            "gold_material_precision": len(found_material) / len(denominator) if denominator else (1.0 if not material_roots else 0.0),
+            "material_company_false_negative_count": len(material_tickers - found_material_tickers),
+            "material_company_false_negative_tickers": sorted(material_tickers - found_material_tickers),
+            "no_news_false_negative_count": len(material_tickers - any_tickers),
+            "no_news_false_negative_tickers": sorted(material_tickers - any_tickers),
+        }
+    return {
+        "available": True,
+        "decision": "GOLD_COMPLETE",
+        "verdict_counts": counts,
+        "gold_material_event_count": len(material_roots),
+        "critical_gold_event_count": len(critical_roots),
+        "deduplicated_gold_event_count": len(groups),
+        "runs": runs,
+    }
+
+
 def audit_gold_adjudication(
     root: Path,
     benchmark_id: str,
@@ -2750,16 +3352,9 @@ def audit_gold_adjudication_v2(
     *,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    value = validate_gold_adjudication(_read_json(adjudication_path))
-    if value["benchmark_id"] != benchmark_id or value.get("matcher_schema_version") != MATCHER_V2_SCHEMA:
-        raise BenchmarkError("gold adjudication v2 benchmark/matcher identity mismatch")
     matcher_directory = _quality_v2_dir(root, benchmark_id) / "matcher_v2"
     union = _read_json(matcher_directory / "event_union_v2.json")
-    expected_hash = hashlib.sha256(
-        json.dumps(union, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-    if value.get("source_union_sha256") != expected_hash:
-        raise BenchmarkError("gold adjudication v2 does not match event_union_v2")
+    value = _validate_gold_v2_against_union(_read_json(adjudication_path), union)
     throughput: dict[str, Any] = {}
     compression: dict[str, Any] = {}
     for run_name in ("batch02", "batch04"):
@@ -2777,7 +3372,7 @@ def audit_gold_adjudication_v2(
         "benchmark_id": benchmark_id,
         "captured_at": _iso(now),
         "adjudication_path": str(adjudication_path.resolve()),
-        **_gold_metrics(value),
+        **_gold_metrics_v2(value),
         "reference_is_not_assumed_complete": True,
         "throughput_facts": throughput,
         "research_compression_facts": compression,
@@ -3373,6 +3968,13 @@ def _build_parser() -> argparse.ArgumentParser:
     gold_v2 = commands.add_parser("audit-gold-v2")
     gold_v2.add_argument("--benchmark-id", required=True)
     gold_v2.add_argument("--adjudication", type=Path, required=True)
+    packet_build = commands.add_parser("build-gold-packets-v2")
+    packet_build.add_argument("--benchmark-id", required=True)
+    packet_import = commands.add_parser("import-gold-adjudication-v2")
+    packet_import.add_argument("--benchmark-id", required=True)
+    packet_import.add_argument("--input", type=Path, required=True)
+    gold_status = commands.add_parser("gold-status-v2")
+    gold_status.add_argument("--benchmark-id", required=True)
     integration = commands.add_parser("prepare-integration-fixture")
     integration.add_argument("--batch-size", type=int, required=True)
     integration_audit = commands.add_parser("audit-integration-fixture")
@@ -3433,6 +4035,14 @@ def main(argv: list[str] | None = None) -> int:
             result = audit_gold_adjudication_v2(
                 root, args.benchmark_id, args.adjudication.resolve()
             )
+        elif args.command == "build-gold-packets-v2":
+            result = build_gold_packets_v2(root, args.benchmark_id)
+        elif args.command == "import-gold-adjudication-v2":
+            result = import_gold_adjudication_v2(
+                root, args.benchmark_id, args.input.resolve()
+            )
+        elif args.command == "gold-status-v2":
+            result = gold_status_v2(root, args.benchmark_id)
         elif args.command == "prepare-integration-fixture":
             result = prepare_integration_fixture(root, args.batch_size)
         else:
