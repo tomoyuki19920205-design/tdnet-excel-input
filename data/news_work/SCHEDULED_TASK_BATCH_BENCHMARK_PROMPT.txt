@@ -20,6 +20,53 @@ assignmentのticker/company_nameだけを、固定されたsearch_fromからsear
 
 `.\.venv\Scripts\python.exe tools/company_news_batch_benchmark.py research-finish --task-id <task_id> --run-token <run_token> --assignment-id <assignment_id>`
 
+snapshotに`strategy_version = company_news_research_strategy_v2`がある場合だけ、以下のCoverage Contractを追加適用します。strategy_versionがない従来runはこの追加contractやstrategy telemetry fileを使用しません。
+
+各社へ独立したreserved budgetを割り当て、他社の調査量によって省略しません。Official-firstは2～3 search actions、Targeted second passは1～3 actions、合計は1社3～6 actionsです。wall-clock sleepで時間を水増ししてはいけません。
+
+Stage A（Official-first）では、会社名・tickerから会社IR、会社news/press release、TDNET/適時開示、必要な法定開示を確認し、会社名と`site:go.jp`を組み合わせた一般的なgovernment queryを必ず1回含めます。特定agency名による固定branchは作りません。公式domainを特定したら同じcompany pass内で再利用します。
+
+Stage B（Targeted second pass）では、assignmentのsectorだけを広く検索せず、Stage Aで確認した公式事業説明と公開company metadataから、収益へのtransmission channelを説明できるdriverを最大3 groups抽出します。使用可能なgroupは、`demand_customer_order`、`pricing_cost_supply`、`industry_regulation_competition`です。core product、customer industry、input/raw material、capacity、pricing、regulation、commodity、industry cycleから該当するdriverだけを選びます。material candidateが0、external driver sourceが0、明確なdriver exposureが未確認、またはsource diversity不足のいずれかではsecond passを省略しません。
+
+Official coverageとexternal coverageの両方がcompleteになるまで、そのcompanyの調査完了および`items=[]`確定は禁止です。eventを1件発見しても終了せず、固定window全体を最後まで確認します。canonical schema自体にitems件数のhard capはありません。Strategy v2では1社あたりcandidate最大20件・final material event最大10件とし、複数eventを保持しながら無制限出力を防ぎます。上限超過はfailureとして記録し、eventを黙って切り捨てません。
+
+各candidateがどのstageで発見されたかを記録します。正常payloadをtemp_pathへ作成するのに加え、次のbenchmark-only telemetryをassignmentの`strategy_telemetry_temp_path`へ保存します。`strategy_telemetry_path`へ直接保存してはいけません。finalize commandが両fileを検証してatomicに確定します。
+
+```json
+{
+  "schema_version": "company_news_benchmark_strategy_telemetry_v2",
+  "strategy_version": "company_news_research_strategy_v2",
+  "assignment_id": "<assignment_id>",
+  "ticker": "<assignment ticker>",
+  "official_queries_attempted": ["<actual query; 2 to 3 entries including site:go.jp>"],
+  "official_sources_found": ["<verified http/https URL>"],
+  "official_coverage_complete": true,
+  "government_search_attempted": true,
+  "external_queries_attempted": ["<actual driver query; 1 to 3 entries>"],
+  "external_sources_found": ["<verified http/https URL>"],
+  "external_coverage_complete": true,
+  "driver_groups": [
+    {
+      "driver": "<dynamically derived driver>",
+      "query_group": "<one allowed group>",
+      "transmission_channel": "<why the driver can affect revenue, volume, price, margin, cost, capacity, customer demand, or regulation>"
+    }
+  ],
+  "source_diversity": ["<source type actually checked>"],
+  "candidate_event_count": 0,
+  "final_event_count": 0,
+  "no_news_gate_pass": true,
+  "window_review_complete": true,
+  "stopped_after_first_event": false,
+  "official_stage_elapsed_seconds": 0.0,
+  "targeted_stage_elapsed_seconds": 0.0,
+  "total_research_elapsed_seconds": 0.0,
+  "candidate_provenance": []
+}
+```
+
+`candidate_provenance`は全candidateをindex 0からexactly once含め、各要素を`candidate_index`、`stage`（`official_first` / `targeted_second_pass` / `existing_general`）、`selected_for_output`、`headline`、`source_url`で記録します。selected数はcanonical payloadのitems数と一致させます。新規candidateは既知集合にないという理由だけで除外せず、通常のmateriality contractで判定します。後段評価が未裁定candidateを自動的に誤検出扱いすることはありません。
+
 正常結果は共通contractのcanonical company_news_v1だけをsnapshotのtemp_pathへ保存します。run_idとtask_idはassignment_id、tickerはassignment ticker、sources_checked_countは実際に確認できたsource数です。重要な新情報がない場合だけitems=[]にします。
 
 operational failureをitems=[]で偽装してはいけません。failureの場合は次の専用sidecarをtemp_pathへ保存します。

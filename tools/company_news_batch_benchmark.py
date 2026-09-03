@@ -55,6 +55,10 @@ GOLD_PACKET_PROVENANCE_SCHEMA = "company_news_gold_packet_provenance_v2"
 GOLD_RESPONSE_SCHEMA = "company_news_gold_adjudication_response_v2"
 GOLD_MATERIAL_MATRIX_SCHEMA = "company_news_gold_material_discovery_matrix_v1"
 GOLD_MATERIAL_MISS_ANALYSIS_SCHEMA = "company_news_gold_material_miss_analysis_v1"
+STRATEGY_V2_VERSION = "company_news_research_strategy_v2"
+STRATEGY_V2_RUN_NAME = "batch04v2"
+STRATEGY_V2_TELEMETRY_SCHEMA = "company_news_benchmark_strategy_telemetry_v2"
+GOLD_EXTENSION_PACKET_SCHEMA = "company_news_gold_extension_packet_v1"
 
 TASK_COUNT = 8
 COHORT_SIZE = 192
@@ -190,7 +194,7 @@ def _benchmark_dir(root: Path, benchmark_id: str) -> Path:
 
 def _run_dir(root: Path, benchmark_id: str, run_name: str) -> Path:
     match = re.fullmatch(r"batch(\d{2})", run_name)
-    if run_name not in REFERENCE_RUN_NAMES and (
+    if run_name not in (*REFERENCE_RUN_NAMES, STRATEGY_V2_RUN_NAME) and (
         not match or int(match.group(1)) not in ALLOWED_CANDIDATE_BATCH_SIZES
     ):
         raise BenchmarkError("invalid benchmark run name")
@@ -403,6 +407,82 @@ def _load_cohort(root: Path, benchmark_id: str) -> dict[str, Any]:
     return value
 
 
+def _strategy_v2_contract() -> dict[str, Any]:
+    """Return the company-neutral runtime coverage and budget contract."""
+    return {
+        "strategy_version": STRATEGY_V2_VERSION,
+        "required_stages": ["official_first", "targeted_second_pass"],
+        "official_query_budget": {"reserved_minimum": 2, "maximum": 3},
+        "external_query_budget": {"reserved_minimum": 1, "maximum": 3},
+        "per_company_query_budget": {"reserved_minimum": 3, "maximum": 6},
+        "driver_group_limit": 3,
+        "candidate_event_limit": 20,
+        "final_event_limit": 10,
+        "official_query_templates": [
+            '"<company_name>" <ticker> IR お知らせ 適時開示',
+            '"<company_name>" <ticker> press release news',
+            '"<company_name>" <ticker> site:go.jp',
+        ],
+        "driver_query_groups": {
+            "demand_customer_order": ["<driver> 需要 受注", "<customer_industry> 設備投資 販売"],
+            "pricing_cost_supply": ["<input_or_product> 価格 値上げ", "<input_or_product> 供給 コスト"],
+            "industry_regulation_competition": ["<industry_driver> 規制 制度", "<industry_driver> 生産 設備投資 市況"],
+        },
+        "government_query_must_be_generic": True,
+        "government_query_required_pattern": "site:go.jp",
+        "official_coverage_required": True,
+        "external_coverage_required": True,
+        "no_news_requires_both_coverages": True,
+        "window_review_must_complete_after_last_candidate": True,
+        "stop_after_first_event_forbidden": True,
+        "production_write_forbidden": True,
+        "candidate_only_event_policy": "NOT_A_FALSE_POSITIVE_PENDING_BLIND_ADJUDICATION",
+        "precision_status_after_run": "PROVISIONAL_PENDING_GOLD_EXTENSION",
+        "quality_targets": {
+            "critical_found_minimum": 7,
+            "ir_tdnet_found_minimum": 12,
+            "known_material_found_minimum": 24,
+            "official_found_minimum": 20,
+            "noncritical_found_minimum": 17,
+            "companies_per_hour_minimum": 22.62,
+            "companies_per_hour_preferred": 24.0,
+            "task_p95_seconds_maximum": 2700,
+            "task_max_seconds_maximum": 3300,
+            "capacity_busy_skip_maximum": 0,
+            "overlap_maximum": 0,
+        },
+    }
+
+
+def _strategy_v2_firewall_scan(
+    prompt_text: str, assignments_by_task: dict[str, list[dict[str, Any]]]
+) -> dict[str, Any]:
+    """Fail closed if post-run adjudication vocabulary leaks into runtime inputs."""
+    forbidden_terms = (
+        "found_by", "materiality_reason", "gold verdict", "gold event",
+        "critical event list", "miss ticker", "reference01", "reference02",
+    )
+    prompt_lower = prompt_text.lower()
+    hits = [term for term in forbidden_terms if term in prompt_lower]
+    forbidden_keys = {"verdict", "found_by", "materiality_reason", "duplicate_of_cluster_id"}
+    assignment_key_hits: list[str] = []
+    for task_id, assignments in assignments_by_task.items():
+        for assignment in assignments:
+            for key in assignment:
+                if key.lower() in forbidden_keys or "gold" in key.lower() or "miss" in key.lower():
+                    assignment_key_hits.append(f"{task_id}:{assignment['assignment_id']}:{key}")
+    company_branch_hits = re.findall(
+        r"\bif\s+(?:ticker|company(?:_name)?)\s*(?:==|in)\s*", prompt_text, re.IGNORECASE
+    )
+    all_hits = [*hits, *assignment_key_hits, *company_branch_hits]
+    return {
+        "status": "PASS" if not all_hits else "FAIL",
+        "hit_count": len(all_hits),
+        "hits": all_hits,
+        "company_specific_branch_count": len(company_branch_hits),
+    }
+
+
 def _prepare_named_run(
     root: Path,
     benchmark_id: str,
@@ -413,6 +493,9 @@ def _prepare_named_run(
     *,
     reference: bool,
     reference_replication_of: str | None = None,
+    strategy_version: str | None = None,
+    baseline_run_name: str | None = None,
+    baseline_company_order_sha256: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     directory = _run_dir(root, benchmark_id, run_name)
@@ -424,7 +507,7 @@ def _prepare_named_run(
         task_id = f"task{index % TASK_COUNT + 1:02d}"
         task_queue_position = len(assignments_by_task[task_id]) + 1
         assignment_id = f"{benchmark_id}-{run_name}-{task_id}-{task_queue_position:03d}-{company['ticker']}"
-        assignments_by_task[task_id].append({
+        prepared_assignment = {
             "assignment_id": assignment_id,
             "ticker": company["ticker"],
             "company_name": company["company_name"],
@@ -436,7 +519,13 @@ def _prepare_named_run(
             "search_from": cohort["search_from"],
             "search_to": cohort["search_to"],
             "status": "pending",
-        })
+        }
+        if strategy_version:
+            prepared_assignment["strategy_version"] = strategy_version
+        assignments_by_task[task_id].append(prepared_assignment)
+    company_order_sha256 = hashlib.sha256(
+        "\n".join(company["ticker"] for company in selected).encode()
+    ).hexdigest()
     manifest = {
         "schema_version": RUN_SCHEMA,
         "benchmark_mode": True,
@@ -452,12 +541,30 @@ def _prepare_named_run(
         "search_to": cohort["search_to"],
         "output_directory": str(output_directory.resolve()),
         "production_write_forbidden": True,
-        "company_order_sha256": hashlib.sha256(
-            "\n".join(company["ticker"] for company in selected).encode()
-        ).hexdigest(),
+        "company_order_sha256": company_order_sha256,
     }
     if reference_replication_of:
         manifest["reference_replication_of"] = reference_replication_of
+    if strategy_version:
+        contract = _strategy_v2_contract()
+        prompt_text = _paths(root)["benchmark_prompt"].read_text(encoding="utf-8")
+        firewall = _strategy_v2_firewall_scan(prompt_text, assignments_by_task)
+        if firewall["status"] != "PASS":
+            raise BenchmarkError(f"strategy v2 runtime Gold firewall failed: {firewall['hits']}")
+        if baseline_company_order_sha256 != company_order_sha256:
+            raise BenchmarkError("strategy v2 company order differs from baseline batch04")
+        manifest.update({
+            "strategy_version": strategy_version,
+            "strategy_contract": contract,
+            "baseline_run_name": baseline_run_name,
+            "baseline_company_order_sha256": baseline_company_order_sha256,
+            "same_company_order_as_baseline": True,
+            "gold_leakage_scan": firewall,
+            "activation_gate": "READY_TO_ACTIVATE",
+            "readiness_status": "READY_TO_ACTIVATE",
+            "precision_status_after_run": contract["precision_status_after_run"],
+            "candidate_only_event_policy": contract["candidate_only_event_policy"],
+        })
     atomic_write_json(directory / "manifest.json", manifest)
     for task_id, assignments in assignments_by_task.items():
         atomic_write_json(directory / "tasks" / task_id / "queue.json", {
@@ -478,16 +585,61 @@ def prepare_run(
     batch_size: int,
     *,
     reference: bool = False,
+    run_name: str | None = None,
+    strategy: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
+    if strategy is not None:
+        if strategy != STRATEGY_V2_VERSION:
+            raise BenchmarkError("unsupported benchmark research strategy")
+        if reference or batch_size != 4:
+            raise BenchmarkError("research strategy v2 requires non-reference batch size 4")
+        if run_name not in (None, STRATEGY_V2_RUN_NAME):
+            raise BenchmarkError("research strategy v2 run_name must be batch04v2")
+        cohort = _load_cohort(root, benchmark_id)
+        if (
+            cohort.get("search_from") != DEFAULT_SEARCH_FROM.isoformat()
+            or cohort.get("search_to") != DEFAULT_SEARCH_TO.isoformat()
+        ):
+            raise BenchmarkError("research strategy v2 requires the fixed benchmark window")
+        baseline_directory = _run_dir(root, benchmark_id, "batch04")
+        baseline_manifest = _read_json(baseline_directory / "manifest.json")
+        baseline_assignments = _ordered_run_assignments(baseline_directory)
+        cohort_order = [str(company["ticker"]) for company in cohort["companies"]]
+        baseline_order = [str(assignment["ticker"]) for assignment in baseline_assignments]
+        if (
+            baseline_manifest.get("batch_size") != 4
+            or baseline_manifest.get("company_count") != len(cohort_order)
+            or baseline_manifest.get("search_from") != cohort["search_from"]
+            or baseline_manifest.get("search_to") != cohort["search_to"]
+            or baseline_order != cohort_order
+        ):
+            raise BenchmarkError("persisted batch04 does not match the fixed benchmark cohort")
+        baseline_sha = hashlib.sha256("\n".join(baseline_order).encode()).hexdigest()
+        selected = [{
+            "ticker": assignment["ticker"],
+            "company_name": assignment["company_name"],
+            "sector": assignment.get("sector", "unknown"),
+            "size_bucket": assignment.get("size_bucket", "unknown"),
+            "prior_news_bucket": assignment.get("prior_news_bucket", "unscanned"),
+        } for assignment in baseline_assignments]
+        return _prepare_named_run(
+            root, benchmark_id, cohort, selected, 4, STRATEGY_V2_RUN_NAME,
+            reference=False, strategy_version=STRATEGY_V2_VERSION,
+            baseline_run_name="batch04", baseline_company_order_sha256=baseline_sha,
+            now=now,
+        )
     if (
         batch_size not in ALLOWED_BATCH_SIZES
         or (reference and batch_size != REFERENCE_BATCH_SIZE)
         or (not reference and batch_size == REFERENCE_BATCH_SIZE)
     ):
         raise BenchmarkError("candidate batch must be 2 through 4; reference batch must be 1")
+    expected_run_name = "reference" if reference else f"batch{batch_size:02d}"
+    if run_name not in (None, expected_run_name):
+        raise BenchmarkError("run_name does not match the legacy batch configuration")
     cohort = _load_cohort(root, benchmark_id)
-    run_name = "reference" if reference else f"batch{batch_size:02d}"
+    run_name = expected_run_name
     selected = list(cohort["companies"])
     if reference:
         wanted = set(cohort["reference_tickers"])
@@ -635,7 +787,7 @@ def route_task(root: Path, task_id: str) -> dict[str, Any]:
     _, manifest = _validate_manifest(root, control)
     if manifest.get("status") != "active":
         raise BenchmarkError("benchmark control points to a non-active run; fail closed")
-    return {
+    result = {
         "mode": "benchmark",
         "task_id": task_id,
         "prompt_file": str(paths["benchmark_prompt"].resolve()),
@@ -644,6 +796,9 @@ def route_task(root: Path, task_id: str) -> dict[str, Any]:
         "batch_size": manifest["batch_size"],
         "output_directory": control["output_directory"],
     }
+    if manifest.get("strategy_version"):
+        result["strategy_version"] = manifest["strategy_version"]
+    return result
 
 
 def _active_run(root: Path) -> tuple[dict[str, Any], Path, dict[str, Any]]:
@@ -800,13 +955,22 @@ def snapshot_task(
     assignments = []
     for position, assignment in enumerate(selected, start=1):
         filename = f"benchmark_{task_id}_{assignment['assignment_id']}.json"
-        assignments.append({
+        prepared = {
             **assignment,
             "slot_id": f"bslot{(int(task_id[-2:]) - 1) * int(manifest['batch_size']) + position:03d}",
             "company_position": position,
             "output_path": str((output_directory / filename).resolve()),
             "temp_path": str((output_directory / f"{filename}.tmp").resolve()),
-        })
+        }
+        if manifest.get("strategy_version") == STRATEGY_V2_VERSION:
+            strategy_directory = run_directory / "strategy_telemetry" / task_id
+            strategy_directory.mkdir(parents=True, exist_ok=True)
+            strategy_filename = f"{assignment['assignment_id']}.json"
+            prepared.update({
+                "strategy_telemetry_path": str((strategy_directory / strategy_filename).resolve()),
+                "strategy_telemetry_temp_path": str((strategy_directory / f"{strategy_filename}.tmp").resolve()),
+            })
+        assignments.append(prepared)
     snapshot = {
         "schema_version": SNAPSHOT_SCHEMA,
         "benchmark_mode": True,
@@ -821,6 +985,9 @@ def snapshot_task(
         "assignments": assignments,
         "company_state": {},
     }
+    if manifest.get("strategy_version") == STRATEGY_V2_VERSION:
+        snapshot["strategy_version"] = STRATEGY_V2_VERSION
+        snapshot["strategy_contract"] = manifest["strategy_contract"]
     encoded = (json.dumps(snapshot, ensure_ascii=False, indent=2) + "\n").encode()
     descriptor: int | None = None
     try:
@@ -919,6 +1086,137 @@ def _validate_success(payload: dict[str, Any], assignment: dict[str, Any]) -> tu
     return source_count, len(run.events), "news_present" if run.events else "no_news"
 
 
+def validate_strategy_v2_telemetry(
+    value: dict[str, Any], assignment: dict[str, Any], event_count: int, result_type: str
+) -> dict[str, Any]:
+    """Validate benchmark-only coverage evidence before a v2 result is finalized."""
+    required = {
+        "schema_version", "strategy_version", "assignment_id", "ticker",
+        "official_queries_attempted", "official_sources_found",
+        "official_coverage_complete", "government_search_attempted",
+        "external_queries_attempted", "external_sources_found",
+        "external_coverage_complete", "driver_groups", "source_diversity",
+        "candidate_event_count", "final_event_count", "no_news_gate_pass",
+        "window_review_complete", "stopped_after_first_event",
+        "official_stage_elapsed_seconds", "targeted_stage_elapsed_seconds",
+        "total_research_elapsed_seconds", "candidate_provenance",
+    }
+    if value.get("schema_version") != STRATEGY_V2_TELEMETRY_SCHEMA or not required.issubset(value):
+        raise BenchmarkError("invalid research strategy v2 telemetry schema")
+    if value.get("strategy_version") != STRATEGY_V2_VERSION:
+        raise BenchmarkError("research strategy v2 telemetry version mismatch")
+    if value.get("assignment_id") != assignment["assignment_id"] or value.get("ticker") != assignment["ticker"]:
+        raise BenchmarkError("research strategy v2 telemetry assignment mismatch")
+    official_queries = value["official_queries_attempted"]
+    external_queries = value["external_queries_attempted"]
+    if not isinstance(official_queries, list) or any(not isinstance(query, str) or not query.strip() for query in official_queries):
+        raise BenchmarkError("official_queries_attempted must contain non-empty strings")
+    if not isinstance(external_queries, list) or any(not isinstance(query, str) or not query.strip() for query in external_queries):
+        raise BenchmarkError("external_queries_attempted must contain non-empty strings")
+    if not 2 <= len(official_queries) <= 3:
+        raise BenchmarkError("official query budget must be 2 through 3")
+    if not 1 <= len(external_queries) <= 3:
+        raise BenchmarkError("external query budget must be 1 through 3")
+    if not 3 <= len(official_queries) + len(external_queries) <= 6:
+        raise BenchmarkError("per-company query budget must be 3 through 6")
+    company_name = str(assignment.get("company_name", "")).strip()
+    ticker = str(assignment["ticker"])
+    if not company_name or any(company_name not in query or ticker not in query for query in official_queries):
+        raise BenchmarkError("every official query must identify the assigned company and ticker")
+    if value["government_search_attempted"] is not True or not any("site:go.jp" in query.lower() for query in official_queries):
+        raise BenchmarkError("generic government search is required")
+    for key in ("official_sources_found", "external_sources_found"):
+        sources = value[key]
+        if not isinstance(sources, list) or any(
+            not isinstance(source, str) or not source.startswith(("http://", "https://"))
+            for source in sources
+        ):
+            raise BenchmarkError(f"{key} must contain only HTTP(S) URLs")
+    drivers = value["driver_groups"]
+    if not isinstance(drivers, list) or not 1 <= len(drivers) <= 3:
+        raise BenchmarkError("driver_groups must contain 1 through 3 dynamic groups")
+    driver_required = {"driver", "query_group", "transmission_channel"}
+    if any(
+        not isinstance(driver, dict)
+        or not driver_required.issubset(driver)
+        or any(not isinstance(driver[key], str) or not driver[key].strip() for key in driver_required)
+        or driver["query_group"] not in {
+            "demand_customer_order", "pricing_cost_supply",
+            "industry_regulation_competition",
+        }
+        for driver in drivers
+    ):
+        raise BenchmarkError("driver_groups entries are incomplete")
+    normalized_drivers = [str(driver["driver"]).lower() for driver in drivers]
+    if any(not any(driver in query.lower() for driver in normalized_drivers) for query in external_queries):
+        raise BenchmarkError("each external query must include a dynamically derived driver")
+    if value["official_coverage_complete"] is not True or value["external_coverage_complete"] is not True:
+        raise BenchmarkError("both strategy v2 coverage stages must complete")
+    if value["window_review_complete"] is not True or value["stopped_after_first_event"] is not False:
+        raise BenchmarkError("full-window multi-event review must complete")
+    if value["no_news_gate_pass"] is not True:
+        raise BenchmarkError("strategy v2 no-news/coverage gate did not pass")
+    if result_type == "no_news" and (
+        value["official_coverage_complete"] is not True
+        or value["external_coverage_complete"] is not True
+    ):
+        raise BenchmarkError("no_news is forbidden before both coverage stages complete")
+    for key in ("candidate_event_count", "final_event_count"):
+        if not isinstance(value[key], int) or value[key] < 0:
+            raise BenchmarkError(f"{key} must be a non-negative integer")
+    if value["candidate_event_count"] > 20 or value["final_event_count"] > 10:
+        raise BenchmarkError("strategy event budget exceeds candidate/final limits")
+    if value["final_event_count"] != event_count or value["candidate_event_count"] < event_count:
+        raise BenchmarkError("strategy event counts disagree with the canonical payload")
+    diversity = value["source_diversity"]
+    if (
+        not isinstance(diversity, list) or len(diversity) < 2
+        or len(set(diversity)) != len(diversity)
+        or any(not isinstance(item, str) or not item.strip() for item in diversity)
+    ):
+        raise BenchmarkError("source_diversity must contain at least two unique source types")
+    for key in (
+        "official_stage_elapsed_seconds", "targeted_stage_elapsed_seconds",
+        "total_research_elapsed_seconds",
+    ):
+        if not isinstance(value[key], (int, float)) or isinstance(value[key], bool) or value[key] < 0:
+            raise BenchmarkError(f"{key} must be non-negative")
+    if value["total_research_elapsed_seconds"] < (
+        value["official_stage_elapsed_seconds"] + value["targeted_stage_elapsed_seconds"]
+    ):
+        raise BenchmarkError("total research time cannot be shorter than its strategy stages")
+    provenance = value["candidate_provenance"]
+    if not isinstance(provenance, list) or len(provenance) != value["candidate_event_count"]:
+        raise BenchmarkError("candidate_provenance must cover every candidate exactly once")
+    stages = {"official_first", "targeted_second_pass", "existing_general"}
+    indexes: set[int] = set()
+    selected = 0
+    for item in provenance:
+        if not isinstance(item, dict) or not {
+            "candidate_index", "stage", "selected_for_output", "headline", "source_url"
+        }.issubset(item):
+            raise BenchmarkError("candidate_provenance entry is incomplete")
+        index = item["candidate_index"]
+        if not isinstance(index, int) or index < 0 or index in indexes:
+            raise BenchmarkError("candidate_provenance indexes must be unique non-negative integers")
+        indexes.add(index)
+        if item["stage"] not in stages:
+            raise BenchmarkError("candidate_provenance stage is invalid")
+        if not isinstance(item["selected_for_output"], bool):
+            raise BenchmarkError("candidate_provenance selected_for_output must be boolean")
+        selected += item["selected_for_output"]
+        if not isinstance(item["headline"], str) or not item["headline"].strip():
+            raise BenchmarkError("candidate_provenance headline must be non-empty")
+        if not isinstance(item["source_url"], str) or not item["source_url"].startswith(("http://", "https://")):
+            raise BenchmarkError("candidate_provenance source_url must be HTTP(S)")
+    if indexes != set(range(value["candidate_event_count"])) or selected != event_count:
+        raise BenchmarkError("candidate_provenance coverage/selection count mismatch")
+    query_scan = _strategy_v2_firewall_scan("\n".join([*official_queries, *external_queries]), {})
+    if query_scan["status"] != "PASS":
+        raise BenchmarkError("post-run adjudication data leaked into research queries")
+    return value
+
+
 def finalize_company(
     root: Path,
     task_id: str,
@@ -930,6 +1228,7 @@ def finalize_company(
 ) -> dict[str, Any]:
     path, snapshot = _owned_guard(root, task_id, run_token)
     assignment = _assignment(snapshot, assignment_id)
+    _, run_directory, manifest = _active_run(root)
     state = snapshot.setdefault("company_state", {}).get(assignment_id)
     if not state or "research_finished_at" not in state:
         raise BenchmarkError("research-finish is required before finalization")
@@ -950,7 +1249,28 @@ def finalize_company(
         )
     except (NewsValidationError, ValueError) as exc:
         raise BenchmarkError(f"benchmark result validation failed: {exc}") from exc
-    replace_with_retry(temp_path, output_path)
+    strategy_telemetry: dict[str, Any] | None = None
+    strategy_temp_path: Path | None = None
+    strategy_output_path: Path | None = None
+    if manifest.get("strategy_version") == STRATEGY_V2_VERSION and not failure:
+        strategy_temp_path = Path(assignment["strategy_telemetry_temp_path"])
+        strategy_output_path = Path(assignment["strategy_telemetry_path"])
+        if not _inside(strategy_temp_path, run_directory) or not _inside(strategy_output_path, run_directory):
+            raise BenchmarkError("strategy telemetry path is not benchmark-isolated")
+        if strategy_output_path.exists():
+            raise BenchmarkError("strategy telemetry already exists; refusing overwrite")
+        strategy_telemetry = validate_strategy_v2_telemetry(
+            _read_json(strategy_temp_path), assignment, event_count, result_type
+        )
+    if strategy_telemetry is not None and strategy_temp_path is not None and strategy_output_path is not None:
+        replace_with_retry(strategy_temp_path, strategy_output_path)
+        try:
+            replace_with_retry(temp_path, output_path)
+        except OSError:
+            replace_with_retry(strategy_output_path, strategy_temp_path)
+            raise
+    else:
+        replace_with_retry(temp_path, output_path)
     saved_at = _now(now) if now is not None else _now()
     started = datetime.fromisoformat(state["research_started_at"])
     research_finished = datetime.fromisoformat(state["research_finished_at"])
@@ -978,7 +1298,25 @@ def finalize_company(
         "result_type": result_type,
         "output_path": str(output_path.resolve()),
     }
-    _, run_directory, _ = _active_run(root)
+    if manifest.get("strategy_version") == STRATEGY_V2_VERSION:
+        telemetry["strategy_version"] = STRATEGY_V2_VERSION
+        telemetry["strategy_telemetry_path"] = (
+            str(strategy_output_path.resolve()) if strategy_output_path is not None else None
+        )
+        if strategy_telemetry is not None:
+            telemetry.update({
+                key: strategy_telemetry[key]
+                for key in (
+                    "official_queries_attempted", "official_sources_found",
+                    "official_coverage_complete", "government_search_attempted",
+                    "external_queries_attempted", "external_sources_found",
+                    "external_coverage_complete", "driver_groups", "source_diversity",
+                    "candidate_event_count", "final_event_count", "no_news_gate_pass",
+                    "window_review_complete", "stopped_after_first_event",
+                    "official_stage_elapsed_seconds", "targeted_stage_elapsed_seconds",
+                    "total_research_elapsed_seconds", "candidate_provenance",
+                )
+            })
     _append_jsonl(_task_directory(run_directory, task_id) / "companies.jsonl", telemetry)
     state.update({"finalized": True, "result_type": result_type, "output_saved_at": telemetry["output_saved_at"]})
     atomic_write_json(path, snapshot)
@@ -2737,6 +3075,124 @@ def _json_sha256(value: Any) -> str:
 def _packet_sha256(packet: dict[str, Any]) -> str:
     core = {key: value for key, value in packet.items() if key != "packet_sha256"}
     return _json_sha256(core)
+
+
+def strategy_v2_known_gold_metrics(
+    gold: dict[str, Any],
+    discovered_gold_stages: dict[str, str],
+    candidate_only_events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Score known Gold only; novel candidates remain unscored until blind review."""
+    by_id, groups = _gold_normalized_groups_v2(gold)
+    material = {
+        root_id for root_id in groups if by_id[root_id]["verdict"] == "VALID_MATERIAL"
+    }
+    critical = {
+        root_id for root_id in material
+        if by_id[root_id].get("importance") == "high"
+        or by_id[root_id].get("earnings_relevance") == "direct"
+    }
+    official = {
+        root_id for root_id in material
+        if _gold_source_bucket(str(
+            by_id[root_id].get("primary_source_type")
+            or by_id[root_id].get("source_type") or "none"
+        )) in {"official_company", "ir_tdnet", "government"}
+    }
+    ir_tdnet = {
+        root_id for root_id in material
+        if str(by_id[root_id].get("primary_source_type") or by_id[root_id].get("source_type"))
+        in {"company_ir", "tdnet", "edinet"}
+    }
+    discovered = set(discovered_gold_stages)
+    unknown_ids = discovered - set(groups)
+    if unknown_ids:
+        raise BenchmarkError(f"known-Gold stage map contains unknown clusters: {sorted(unknown_ids)}")
+    invalid_stages = set(discovered_gold_stages.values()) - {
+        "official_first", "targeted_second_pass", "existing_general"
+    }
+    if invalid_stages:
+        raise BenchmarkError(f"invalid discovery stage: {sorted(invalid_stages)}")
+    baseline_found = {
+        root_id for root_id in material
+        if any(member.get("found_by", {}).get("batch04") for member in groups[root_id])
+    }
+
+    def recall(target: set[str]) -> dict[str, Any]:
+        found = target & discovered
+        return {
+            "target_count": len(target), "found": len(found),
+            "missed": len(target - discovered),
+            "recall": len(found) / len(target) if target else 1.0,
+        }
+
+    rescues = material & discovered - baseline_found
+    return {
+        "quality_status": "KNOWN_GOLD_RECALL_PROVISIONAL_PRECISION",
+        "known_gold_material": recall(material),
+        "known_gold_critical": recall(critical),
+        "known_gold_official": recall(official),
+        "known_gold_ir_tdnet": recall(ir_tdnet),
+        "baseline_batch04_material_count": len(baseline_found),
+        "baseline_regression_cluster_ids": sorted(baseline_found - discovered),
+        "rescued_cluster_ids": sorted(rescues),
+        "rescue_stage_counts": {
+            stage: sum(discovered_gold_stages[root_id] == stage for root_id in rescues)
+            for stage in ("official_first", "targeted_second_pass", "existing_general")
+        },
+        "candidate_only_event_count": len(candidate_only_events),
+        "candidate_only_events_are_false_positives": False,
+        "precision": None,
+        "precision_status": "PROVISIONAL_PENDING_GOLD_EXTENSION",
+    }
+
+
+def build_gold_extension_packet_v2(
+    benchmark_id: str, candidate_only_events: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Create a deterministic blind packet containing novel candidates only."""
+    events: list[dict[str, Any]] = []
+    for index, event in enumerate(candidate_only_events):
+        required = {
+            "ticker", "company", "date", "headline", "category", "source_url",
+            "source_type", "importance", "earnings_relevance", "summary", "why_it_matters",
+        }
+        if not isinstance(event, dict) or not required.issubset(event):
+            raise BenchmarkError(f"candidate-only event {index} is incomplete")
+        if not str(event["source_url"]).startswith(("http://", "https://")):
+            raise BenchmarkError(f"candidate-only event {index} source_url must be HTTP(S)")
+        identity = _json_sha256({key: event[key] for key in sorted(required)})[:16]
+        events.append({
+            "cluster_id": f"gold-extension-{identity}",
+            "ticker": event["ticker"],
+            "company": event["company"],
+            "date": event["date"],
+            "canonical_headline": event["headline"],
+            "category": event["category"],
+            "importance": event["importance"],
+            "earnings_relevance": event["earnings_relevance"],
+            "summary": event["summary"],
+            "why_it_matters": event["why_it_matters"],
+            "source_urls": [{"url": event["source_url"], "source_type": event["source_type"]}],
+        })
+    events.sort(key=lambda item: (str(item["ticker"]), str(item["date"]), item["cluster_id"]))
+    core = {
+        "schema_version": GOLD_EXTENSION_PACKET_SCHEMA,
+        "benchmark_id": benchmark_id,
+        "packet_purpose": "blind_adjudication_of_candidate_only_events",
+        "existing_gold_events_reincluded": False,
+        "events": events,
+    }
+    packet_sha = _json_sha256(core)
+    packet = {
+        **core,
+        "packet_id": f"gold_extension_{packet_sha[:16]}",
+        "packet_sha256": packet_sha,
+    }
+    forbidden = {"found_by", "run_name", "run_label", "members", "matcher_evidence", "verdict"}
+    if forbidden & set(json.dumps(packet, ensure_ascii=False).lower().split('"')):
+        raise BenchmarkError("Gold extension packet is not blind")
+    return packet
 
 
 def _partition_gold_packet_groups(
@@ -4631,6 +5087,8 @@ def _build_parser() -> argparse.ArgumentParser:
     run = commands.add_parser("prepare-run")
     run.add_argument("--benchmark-id", required=True)
     run.add_argument("--batch-size", type=int, required=True)
+    run.add_argument("--run-name")
+    run.add_argument("--strategy")
     run.add_argument("--reference", action="store_true")
     replication = commands.add_parser("prepare-reference-replication")
     replication.add_argument("--benchmark-id", required=True)
@@ -4703,7 +5161,10 @@ def main(argv: list[str] | None = None) -> int:
                 reference_size=args.reference_size, search_from=_parse_date(args.search_from), search_to=_parse_date(args.search_to),
             )
         elif args.command == "prepare-run":
-            result = prepare_run(root, args.benchmark_id, args.batch_size, reference=args.reference)
+            result = prepare_run(
+                root, args.benchmark_id, args.batch_size, reference=args.reference,
+                run_name=args.run_name, strategy=args.strategy,
+            )
         elif args.command == "prepare-reference-replication":
             result = prepare_reference_replication(root, args.benchmark_id)
         elif args.command == "activate-run":

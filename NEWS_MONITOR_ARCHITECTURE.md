@@ -781,6 +781,53 @@ union, packets/responses, raw run directories, or benchmark inbox output. For th
 completed benchmark the decision remains `DO_NOT_RUN_BATCH03_YET`: source-strategy
 hardening must be validated before another batch-size run.
 
+### Benchmark research strategy v2
+
+`company_news_research_strategy_v2` is an isolated batch-four research candidate. It
+reconstructs `batch04v2` from the persisted 192-company `batch04` assignment order,
+requires the same order SHA-256 and fixed 2026-08-25 through 2026-08-31 window, and
+refuses preparation if the baseline or cohort differs. Preparation is inert:
+
+```powershell
+python tools/company_news_batch_benchmark.py prepare-run `
+  --benchmark-id batchbench-20260901T095759508419 `
+  --run-name batch04v2 `
+  --batch-size 4 `
+  --strategy company_news_research_strategy_v2
+```
+
+Activation remains a separate human-approved command. The existing Task01-Task08
+setup files and schedules are unchanged; their generic router returns the existing
+benchmark prompt and includes the strategy version when this run is later active.
+
+Each company receives a reserved two-to-three-query official pass and a one-to-three-
+query targeted economic-driver pass, capped at six search actions total. The official
+pass includes company IR/news, disclosure sources, and a generic company-name plus
+`site:go.jp` search. The targeted pass derives at most three demand/order,
+pricing/cost/supply, or industry/regulation drivers from public company information;
+it contains no ticker-specific branch. Both stages and the full fixed window must be
+complete before finalization, including an empty result. Finding one event does not
+end the company review. `company_news_v1` itself has no event-count hard cap.
+
+Strategy evidence remains outside the production-compatible payload. Every snapshot
+assignment receives a benchmark-run-local telemetry temp/final path. Finalization
+validates the query budgets, generic government search, coverage booleans, full-window
+attestation, driver groups, stage timings, source diversity, candidate/final counts,
+and exactly-once candidate provenance before atomically accepting the result. These
+fields are then copied into benchmark company telemetry; no production schema changes.
+
+Preparation scans the runtime prompt and assignments for adjudication/provenance
+leakage and company-specific conditional branches. Post-run scoring may use finalized
+Gold, but runtime research inputs may not. Known-Gold scoring reports recall with
+precision explicitly `PROVISIONAL_PENDING_GOLD_EXTENSION`. Candidate-only events are
+not false positives: `build_gold_extension_packet_v2` creates a deterministic blind
+packet containing only novel candidates, strips run/provenance/matcher fields, and
+does not re-adjudicate the existing 82 events. Rescue attribution is recorded as
+official-first, targeted-second-pass, or existing/general; regression of any of the
+17 baseline material events, seven critical events, or 12 IR/TDNET events remains a
+hard failure. Throughput keeps the existing p95/max, busy-skip, overlap, and weekly
+feasibility gates.
+
 Only the final candidate receives the separate integration burst fixture. It contains
 synthetic files under `data/news_benchmark_load`, requires a temporary SQLite copy,
 disables Production Supabase writes, and exposes fields for worker duration/backlog,
