@@ -38,6 +38,16 @@
 9. 大きく動いたコモディティと重要マクロ。価格・騰落率・理由の全てに対応するsourceを持たせる。
 10. 最終考察。考察時間に一切の制約を置かず、指数、セクター、個別、決算、金利・為替・コモディティを接続し、確認済み事実と推論を区別する。数値・時価総額・材料はresearch cacheからのみ引用し、別表現で再調査・再計算しない。
 
+## 専用runtimeからProductionへ届ける実行契約
+
+- 実行cwdは `C:/Users/takuy/OneDrive/tdnet-ny-market-runtime`、Production rootは `C:/Users/takuy/OneDrive/tdnet-excel-input` とする。code checkoutとProduction rootは別物であり、暗黙のcwdから保存先を決めない。
+- 調査開始時にAsia/Tokyoでreport_date_jstを一度だけ確定し、全工程で同じ値と `ny_market_daily:{report_date_jst}` を使う。market_session_dateやUTCの日付をreport dateとして流用しない。
+- 生成前にProductionの `canonical_ny_market_reports` と `canonical_ny_market_report_runs` をstable keyで検索する。HTTPエラーを0件として扱わず、必ずraise_for_status相当で停止する。完全な本文、payload、provenance、hashとrun successが一致し、同じ日付の `api_latest_news_stream` が同じ本文を返す場合だけ再生成をskipする。不完全行やAPI不一致は成功扱いしない。
+- NY専用inboxは `C:/Users/takuy/OneDrive/tdnet-ny-market-runtime/data/ny_market_inbox`。通常の `data/news_inbox` へ書いただけで保存成功としない。既存CompanyNewsInboxWorkerは別ルートを監視しているため、処理を待つだけではProductionに届かない。
+- atomic publish後に専用runtimeのコードで `python tools/company_news_inbox_worker.py --once --root "C:/Users/takuy/OneDrive/tdnet-excel-input" --inbox "C:/Users/takuy/OneDrive/tdnet-ny-market-runtime/data/ny_market_inbox" --work-dir "C:/Users/takuy/OneDrive/tdnet-ny-market-runtime/data/ny_market_worker" --db "C:/Users/takuy/OneDrive/tdnet-excel-input/decision_db.db" --trigger manual` を実行する。専用inboxだけを処理し、会社ニュースの共有queueを処理・変更しない。workerの非zero exit、failed、quarantineは失敗である。
+- worker成功後もread-backが必須。`bootstrap_production_write_environment` に上記Production rootを渡し、`get_supabase_read_config` の認証情報を値として出力せず使用する。HTTP 200を確認してProduction report/runをstable keyで、Viewer用 `api_latest_news_stream` を `report_type=ny_market_daily` と同じreport_date_jstで取得する。report/run/API各1件、run success、report identity・日付・本文の完全一致、完成payloadと保存payloadの一致、Markdown SHA-256と `report_delivery.sha256` の一致を確認する。HTTP失敗・0件・重複・本文hash不一致ならpublish成功と報告せずBLOCKEDにする。
+- 成功判定はinbox作成ではなくProduction API read-backまでとする。失敗時は原因・stable key・停止工程を残し、完成本文がある場合の最終回答末尾にも保存失敗を明記する。Scheduled TaskはACTIVEのまま維持する。
+
 ## payloadとpublish前validator
 
 payloadは従来field全てに加え `quality_contract_version, report_display_contract_version, market_data_contract_version, market_data_packet_sha256, market_data_generated_at, providers, raw_response_hashes, discrepancy_count, canonical_market_data, ticker_research, after_hours_research, after_hours_candidate_review, final_analysis_references, report_delivery` を持つ。`canonical_market_data` は決定論的toolが生成したpacketそのものとし、source、market_session_date、price_basis、adjusted、indexes(5)、sectors(11)、top_gainers_20(20)、provider attempts、raw response hashes、discrepancy provenanceを保持する。notable、Top20、earnings、after-hours、final analysis referenceの各銘柄objectには共通research fieldを同値で投影し、`company_description` のresearch同値投影は話題の値上がり10社だけ必須とする。アフター決算の事業内容と表示数値は別途 `after_hours_research` と完全同値にする。
@@ -46,7 +56,7 @@ payloadは従来field全てに加え `quality_contract_version, report_display_c
 
 整形済みpayloadを一時ファイルへ完全に書き、まず `python tools/write_ny_market_payload.py <整形済みpayload.json> --market-data-packet <一時packet.json> --validate-only` を実行する。validatorは保存済みpacketとpayloadの`canonical_market_data`を完全一致で比較し、5指数、11セクター、Top20のrank/値、同一tickerの騰落率・時価総額・材料、具体的材料のsource、IR/SEC決算source、ニュースcluster、コモディティsource、本文hashを横断照合する。さらに5表示セクションが決定的rendererの出力と完全一致し、新規レポートでは要点内の業種名が指定日本語名であること、話題の値上がり10社の `company_description` がresearch dataと同値であることを検証する。アフター決算は表示対象と `after_hours_research` の完全一致、短い会社名、ticker、時間外騰落率、事業内容、表示した実績・予想比較・ガイダンス変更・KPI・同日材料、一次／二次source分離、session、二段階candidate監査をfail closedで検証する。`vs 市場予想`には予想値と市場source、契約・提携等にはfact sourceを必須とし、会社固有の`why_moved`、`investment_readthrough`、`watch_items`が欠損または汎用文だけなら拒否する。通常本文への終値・内部状態・観測時刻・provider露出も拒否する。Top20だけに含まれる銘柄のdescription欠損はエラーにしない。失敗したら修正するまでpublish禁止。
 
-validation成功後だけ `python tools/write_ny_market_payload.py <整形済みpayload.json> --market-data-packet <一時packet.json>` を1回実行する。helperは検証済みpayloadをfsync済みtempから `data/news_inbox/*.json` へatomic renameする。inboxへ直接partial JSONを書かない。同日成功rowが既にある場合は通常再実行しない。その直後に `python tools/write_ny_market_payload.py <整形済みpayload.json> --market-data-packet <一時packet.json> --validate-only --emit-report` を実行し、標準出力の非空本文と `report_delivery.sha256` の一致を確認する。
+validation成功後だけ `python tools/write_ny_market_payload.py <整形済みpayload.json> --market-data-packet <一時packet.json> --inbox "C:/Users/takuy/OneDrive/tdnet-ny-market-runtime/data/ny_market_inbox"` を1回実行する。helperは検証済みpayloadをfsync済みtempから `data/news_inbox/*.json` へatomic renameする。inboxへ直接partial JSONを書かない。同日成功rowが既にある場合は通常再実行しない。その直後に `python tools/write_ny_market_payload.py <整形済みpayload.json> --market-data-packet <一時packet.json> --validate-only --emit-report` を実行し、標準出力の非空本文と `report_delivery.sha256` の一致を確認する。
 
 保存に失敗しても、検証済み `report_markdown` の完成レポート全文は必ずユーザー最終回答として出し、末尾にだけ `Company Viewer保存に失敗: <短い理由>` を付ける。成功時はemitした完成本文だけを最終回答にし、保存処理・検証結果などの運用説明で本文を置き換えることを禁止する。
 
