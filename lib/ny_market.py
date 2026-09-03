@@ -191,7 +191,11 @@ def _validate_earnings(items: list[Any], field: str, source_urls: set[str], rese
         for key in required:
             if key not in item:
                 raise NYMarketValidationError(f"{field}[{index}].{key} is required")
-        _validate_projection(item, f"{field}[{index}]", research)
+        if field == "after_hours_earnings":
+            _text(item.get("ticker"), f"{field}[{index}].ticker", 32)
+            _text(item.get("company_name"), f"{field}[{index}].company_name", 500)
+        else:
+            _validate_projection(item, f"{field}[{index}]", research)
         if item["source_type"] not in {"company_ir", "sec"}:
             raise NYMarketValidationError(f"{field}[{index}] must use company IR or SEC as primary source")
         source_urls.add(_http_url(item["source_url"], f"{field}[{index}].source_url"))
