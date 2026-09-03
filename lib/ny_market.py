@@ -179,12 +179,14 @@ def _validate_sector_moves(value: Any, research: ValidatedResearch) -> list[Any]
 
 
 def _validate_earnings(items: list[Any], field: str, source_urls: set[str], research: ValidatedResearch) -> None:
-    required = (
-        "ticker", "company_name", "company_description", "revenue", "eps", "guidance", "key_kpis",
-        "one_offs", "price_reaction", "why_stock_moved", "forward_implication", "source_url", "source_type",
-    )
+    required = ("ticker", "company_name", "company_description", "source_url", "source_type")
     if field == "after_hours_earnings":
         required += ("after_hours_change_pct", "as_of_utc", "as_of_jst", "session")
+    else:
+        required += (
+            "revenue", "eps", "guidance", "key_kpis", "one_offs", "price_reaction",
+            "why_stock_moved", "forward_implication",
+        )
     for index, item in enumerate(items):
         if not isinstance(item, dict):
             raise NYMarketValidationError(f"{field}[{index}] must be an object")
@@ -199,15 +201,20 @@ def _validate_earnings(items: list[Any], field: str, source_urls: set[str], rese
         if item["source_type"] not in {"company_ir", "sec"}:
             raise NYMarketValidationError(f"{field}[{index}] must use company IR or SEC as primary source")
         source_urls.add(_http_url(item["source_url"], f"{field}[{index}].source_url"))
-        for key in ("ticker", "company_name", "company_description", "why_stock_moved", "forward_implication"):
+        for key in ("ticker", "company_name", "company_description"):
             _text(item[key], f"{field}[{index}].{key}", 5000)
-        for key in ("revenue", "eps", "guidance", "price_reaction"):
-            value = item[key]
-            if value is None or value == "" or value == {} or value == []:
-                raise NYMarketValidationError(f"{field}[{index}].{key} must contain researched detail")
-        for key in ("key_kpis", "one_offs"):
-            if not isinstance(item[key], list):
-                raise NYMarketValidationError(f"{field}[{index}].{key} must be an array")
+        if field != "after_hours_earnings":
+            for key in ("why_stock_moved", "forward_implication"):
+                _text(item[key], f"{field}[{index}].{key}", 5000)
+            for key in ("revenue", "eps", "guidance", "price_reaction"):
+                value = item[key]
+                if value is None or value == "" or value == {} or value == []:
+                    raise NYMarketValidationError(
+                        f"{field}[{index}].{key} must contain researched detail"
+                    )
+            for key in ("key_kpis", "one_offs"):
+                if not isinstance(item[key], list):
+                    raise NYMarketValidationError(f"{field}[{index}].{key} must be an array")
         if field == "after_hours_earnings":
             if item["session"] != "post_market":
                 raise NYMarketValidationError(f"{field}[{index}].session must be post_market")

@@ -264,7 +264,9 @@ def test_after_hours_canonical_does_not_require_regular_session_projection_field
     regular_only = {
         "close", "change_pct", "market_cap", "market_cap_method", "catalyst",
         "catalyst_type", "search_status", "searched_at", "share_class_components",
-        "search_attempt_count", "search_queries", "searched_sources",
+        "search_attempt_count", "search_queries", "searched_sources", "revenue", "eps",
+        "guidance", "key_kpis", "one_offs", "price_reaction", "why_stock_moved",
+        "forward_implication",
     }
     for field in ("after_hours_earnings", "after_hours_research"):
         for item in data[field]:
