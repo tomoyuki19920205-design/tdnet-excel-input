@@ -6,6 +6,7 @@
 - 休場日は `market_status=holiday_or_weekend` とし、`market_session_date` は直近NY営業日とする。
 - `quality_contract_version=ny_market_quality_v2` を必ず付ける。
 - レポート作成より先に `python tools/build_ny_market_market_data_packet.py --market-session-date <NY営業日> --output <一時packet.json> [--issuer-components <一時JSON>]` を実行する。このpacketを指数、セクター、Top20順位・騰落率・provenance・discrepancy arbitrationの唯一の入力とし、LLMによる再計算・上書き・手入力を禁止する。
+- 株式併合の通知やprovider間の価格差でpacket生成が止まった場合は、Nasdaq Traderの公式通知で銘柄・比率・市場での効力発生日を確認し、tickerから公式通知URLへのJSONを `--corporate-action-notices <一時JSON>` で同じbuilderへ渡す。通常終値は米国営業日が一致するNasdaq公式値で検証し、16:00分足のcloseを通常終値に流用しない。公式通知と別のcorporate actionが衝突する場合、または価格差を説明できない場合は停止する。packetを手編集してresolvedにしない。
 - payloadにはpacketを無変更で `canonical_market_data` として入れ、`market_data_contract_version`、`market_data_packet_sha256`、`market_data_generated_at`、`providers`、`raw_response_hashes`、`discrepancy_count` をpacketから投影する。packet hash欠落・不一致時はpublish禁止。
 - 市場数値を推測・LLM補完しない。指数、11 Sector SPDR、Top20は同一の機械取得snapshotを正本にする。
 - 騰落率は全て「当日通常取引終値 / 前営業日の通常取引終値 - 1」。時間外、取引中、adjusted closeを混ぜない。`price_basis=regular_close`、`adjusted=false`。

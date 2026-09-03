@@ -16,6 +16,9 @@ from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
+from lib.ny_market_price_basis import (official_regular_close, parse_exchange_split_notice,
+    classify_official_discrepancy, previous_on_target_basis, validate_notice_url, validate_vendor_actions)
+
 
 INDEX_SYMBOLS = {
     "SOX": "^SOX",
@@ -455,14 +458,24 @@ class NasdaqOfficialCloseProvider:
             nls_previous = _numeric(top_rows[0].get("previousClose"), "NLS previous close", nullable=True)
         if nls_previous is not None and abs(nls_previous - previous_close) > max(0.02, previous_close * 0.002):
             raise MarketDataError(f"{self.name}:{symbol}: official historical/NLS previous close mismatch")
+        info_url = f"https://api.nasdaq.com/api/quote/{quote(symbol, safe='')}/info?assetclass=stocks"
+        info_raw = self.transport(info_url, self._headers(symbol))
+        info = _raw_json(info_raw, self.name).get("data") or {}
+        try:
+            target_close, target_stamp = official_regular_close(info, symbol, target_session_date)
+        except ValueError as exc:
+            raise MarketDataError(f"{self.name}:{symbol}: {exc}") from exc
         return {
             "provider": self.name, "provider_family": self.family,
+            "target_close_verified": True, "target_timestamp": target_stamp,
+            "target_session_date": target_session_date.isoformat(),
+            "notifications": info.get("notifications", []),
             "previous_session_date": previous_day.isoformat(),
-            "previous_close": previous_close, "target_close": screener_last_sale,
+            "previous_close": previous_close, "target_close": target_close,
             "previous_volume": _numeric(previous_row.get("volume"), "official previous volume", nullable=True),
-            "source_identifiers": [historical_url, nls_url],
+            "source_identifiers": [historical_url, nls_url, info_url],
             "raw_response_sha256": [
-                hashlib.sha256(historical_raw).hexdigest(), hashlib.sha256(nls_raw).hexdigest(),
+                hashlib.sha256(historical_raw).hexdigest(), hashlib.sha256(nls_raw).hexdigest(), hashlib.sha256(info_raw).hexdigest(),
             ],
             "retrieved_at": self.now().astimezone(timezone.utc).isoformat(timespec="seconds"),
         }
@@ -523,15 +536,19 @@ class YahooMinuteCloseProvider:
         quotes = result.get("indicators", {}).get("quote")
         if not isinstance(stamps, list) or not isinstance(quotes, list) or len(quotes) != 1:
             raise MarketDataError(f"{self.name}:{symbol}: minute bars missing")
-        closes = quotes[0].get("close")
+        closes = quotes[0].get("open")
         volumes = quotes[0].get("volume")
         if not isinstance(closes, list) or len(closes) != len(stamps):
             raise MarketDataError(f"{self.name}:{symbol}: minute close mismatch")
         close_by_date: dict[date, tuple[int, float, float | None]] = {}
+        last_regular_bar: dict[date, float] = {}
+        bar_closes = quotes[0].get("close") or []
         for index, (stamp, close) in enumerate(zip(stamps, closes)):
             if close is None:
                 continue
             local = datetime.fromtimestamp(int(stamp), timezone.utc).astimezone(NY_TZ)
+            if local.time() == time(15, 59) and index < len(bar_closes) and bar_closes[index] is not None:
+                last_regular_bar[local.date()] = float(bar_closes[index])
             if local.time() == time(16, 0):
                 volume = volumes[index] if isinstance(volumes, list) and index < len(volumes) else None
                 close_by_date[local.date()] = (int(stamp), float(close), float(volume) if volume is not None else None)
@@ -539,6 +556,9 @@ class YahooMinuteCloseProvider:
             raise MarketDataError(f"{self.name}:{symbol}: 16:00 close evidence missing")
         return {
             "provider": self.name, "provider_family": self.family,
+            "price_field": "boundary_open",
+            "boundary_note": "16:00 bar open corroborates exchange close; bar close is post-market",
+            "previous_last_regular_bar_close": last_regular_bar.get(previous_date),
             "previous_close": close_by_date[previous_date][1], "target_close": close_by_date[target_date][1],
             "previous_timestamp": close_by_date[previous_date][0], "target_timestamp": close_by_date[target_date][0],
             "previous_volume": close_by_date[previous_date][2], "target_volume": close_by_date[target_date][2],
@@ -649,8 +669,11 @@ def resolve_discrepancy(
             independent_support.append(source)
             seen_families.add(family)
 
-    reason: str | None = None
-    if minute_close is not None:
+    reason, basis_evidence = classify_official_discrepancy(
+        official=official, history_previous=historical_previous_close,
+        history_target=historical_target_close, minute=minute_close, action=corporate_action,
+    )
+    if reason is None and minute_close is not None and not corporate_action.get("official_action"):
         minute_previous = float(minute_close["previous_close"])
         minute_target = float(minute_close["target_close"])
         if (
@@ -693,6 +716,8 @@ def resolve_discrepancy(
             "source_identifier": minute_close.get("source_identifier"),
             "raw_response_sha256": minute_close.get("raw_response_sha256"), "role": "stale_bar_diagnosis",
         })
+    if corporate_action.get("official_action"):
+        sources.append({**corporate_action["official_action"], "provider": "nasdaq_corporate_action_notice", "provider_family": "nasdaq", "role": "official_corporate_action"})
     sources.extend({
         "provider": item["provider"], "provider_family": item.get("provider_family"),
         "source_identifier": item.get("source_identifier"),
@@ -706,6 +731,7 @@ def resolve_discrepancy(
     })
     return {
         "discrepancy_status": "resolved", "discrepancy_reason": reason,
+        "basis_evidence": basis_evidence,
         "screener_change_pct": screener_change, "screener_last_sale": screener_last,
         "screener_net_change": screener_net, "screener_implied_previous_close": implied_previous,
         "historical_previous_close": historical_previous_close,
@@ -725,8 +751,12 @@ class LiveDiscrepancyArbitrator:
         action_provider: YahooCorporateActionProvider | None = None,
         minute_provider: YahooMinuteCloseProvider | None = None,
         independent_providers: Iterable[PublicPreviousCloseProvider] | None = None,
+        corporate_action_notices: dict[str, str] | None = None,
+        notice_transport: Transport = default_transport,
         now: Callable[[], datetime] | None = None,
     ) -> None:
+        self.corporate_action_notices = corporate_action_notices or {}
+        self.notice_transport = notice_transport
         self.official_provider = official_provider or NasdaqOfficialCloseProvider()
         self.action_provider = action_provider or YahooCorporateActionProvider()
         self.minute_provider = minute_provider or YahooMinuteCloseProvider()
@@ -745,7 +775,27 @@ class LiveDiscrepancyArbitrator:
         tolerance_pct: float,
     ) -> dict[str, Any]:
         official = self.official_provider.fetch(ticker, target_session_date, float(candidate["_close"]))
+        if official.get("previous_session_date") != previous.session_date.isoformat():
+            raise MarketDataError(f"Top20 {ticker}: official/history previous session mismatch")
         action = self.action_provider.fetch(ticker, target_session_date)
+        notice_url = self.corporate_action_notices.get(ticker)
+        split_announced = any("Stock Split" in str(item) for item in official.get("notifications", []))
+        if split_announced and not notice_url:
+            raise MarketDataError(f"Top20 {ticker}: official split notice URL required")
+        if notice_url:
+            try:
+                validate_notice_url(notice_url)
+                raw_notice = self.notice_transport(notice_url, {"User-Agent": "Mozilla/5.0"})
+                notice = parse_exchange_split_notice(raw_notice, notice_url, ticker)
+                validate_vendor_actions(action.get("events") or {}, notice)
+            except ValueError as exc:
+                raise MarketDataError(str(exc)) from exc
+            action = {**action, "status": "corporate_action_adjusted", "official_action": notice}
+            official["previous_close_raw"] = official["previous_close"]
+            official["previous_close"] = previous_on_target_basis(
+                official["previous_close"], date.fromisoformat(official["previous_session_date"]),
+                target_session_date, notice,
+            )
         minute = self.minute_provider.fetch(ticker, previous.session_date, target_session_date)
         independent: list[dict[str, Any]] = []
         errors: list[str] = []
