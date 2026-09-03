@@ -15,6 +15,7 @@ from tools.company_news_batch_benchmark import (
     _gold_template,
     _json_sha256,
     _packet_sha256,
+    _write_gold_backup,
     build_gold_packets_v2,
     gold_status_v2,
     import_gold_adjudication_v2,
@@ -267,7 +268,7 @@ def test_partial_import_fails_closed_without_touching_gold(tmp_path):
         with pytest.raises(BenchmarkError, match=message):
             import_gold_adjudication_v2(root, BENCHMARK_ID, response_path, now=FIXED_TIME)
         assert gold_path.read_bytes() == before
-        assert not (directory / "gold_backups").exists()
+        assert not (directory / "backups").exists()
 
 
 def test_import_is_atomic_backed_up_and_idempotent(tmp_path, monkeypatch):
@@ -283,18 +284,31 @@ def test_import_is_atomic_backed_up_and_idempotent(tmp_path, monkeypatch):
         original(path, value)
 
     monkeypatch.setattr(benchmark, "atomic_write_json", recording_write)
-    backup_directory = gold_path.parent / "gold_backups"
+    backup_directory = gold_path.parent / "backups"
     assert not backup_directory.exists()
     first = import_gold_adjudication_v2(root, BENCHMARK_ID, response_path, now=FIXED_TIME)
     after_first = gold_path.read_bytes()
     second = import_gold_adjudication_v2(root, BENCHMARK_ID, response_path, now=FIXED_TIME)
 
     assert first["gold_updated"] is True
-    assert Path(first["backup_path"]).exists()
+    backup_path = Path(first["backup_path"])
+    assert backup_path.exists()
+    assert backup_path.name == f"g-{first['backup_content_sha256'][:16]}.json"
+    backup_gold = json.loads(backup_path.read_text(encoding="utf-8"))
+    assert _json_sha256(backup_gold) == first["backup_content_sha256"]
+    synthetic_suffix = ".41056.18408fb002d44bf684f6b93e3ad297f9.tmp"
+    new_temporary = backup_path.parent / f".{backup_path.name}{synthetic_suffix}"
+    old_name = f"gold_adjudication_v2.{first['backup_content_sha256']}.json"
+    old_temporary = backup_path.parent / f".{old_name}{synthetic_suffix}"
+    assert len(str(new_temporary)) < 260
+    assert len(str(old_temporary)) - len(str(new_temporary)) >= 64
     assert calls[-1] == gold_path
     assert second["idempotent"] is True
     assert second["gold_updated"] is False
     assert gold_path.read_bytes() == after_first
+    write_json(backup_path, {"different": "content"})
+    with pytest.raises(BenchmarkError, match="short-hash collision"):
+        _write_gold_backup(gold_path.parent, backup_gold, first["backup_content_sha256"])
 
 
 def test_gold_status_is_incomplete_until_every_cluster_is_non_unknown(tmp_path):

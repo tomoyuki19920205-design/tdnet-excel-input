@@ -734,7 +734,9 @@ The response contract is `company_news_gold_adjudication_response_v2`. Import re
 schema, benchmark, packet ID, packet SHA, cluster coverage, duplicate cluster, enum,
 URL, datetime, evidence, and duplicate-target violations before any Gold write. A
 successful import content-addresses and atomically preserves the previous Gold file in
-`gold_backups`, then atomically replaces `gold_adjudication_v2.json`. Re-importing an
+`backups/g-<16hex>.json`, then atomically replaces `gold_adjudication_v2.json`. The
+full content SHA-256 remains in import provenance and is checked before reusing a
+short-name backup; a prefix collision fails closed. Re-importing an
 identical response is a no-op. Status remains `GOLD_INCOMPLETE` while any event is
 `UNKNOWN`; `GOLD_COMPLETE` only means every event is adjudicated and still requires
 Gold metric review before batch03 can run.

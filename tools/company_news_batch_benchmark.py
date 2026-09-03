@@ -3137,6 +3137,27 @@ def gold_status_v2(root: Path, benchmark_id: str) -> dict[str, Any]:
     }
 
 
+def _write_gold_backup(
+    directory: Path, gold: dict[str, Any], content_sha256: str
+) -> Path:
+    if not re.fullmatch(r"[0-9a-f]{64}", content_sha256):
+        raise BenchmarkError("Gold backup content SHA-256 is invalid")
+    if _json_sha256(gold) != content_sha256:
+        raise BenchmarkError("Gold backup content does not match its full SHA-256")
+    backup_directory = directory / "backups"
+    backup_directory.mkdir(parents=True, exist_ok=True)
+    if not backup_directory.is_dir():
+        raise BenchmarkError("Gold backup directory is unavailable")
+    backup_path = backup_directory / f"g-{content_sha256[:16]}.json"
+    if backup_path.exists():
+        existing = _read_json(backup_path)
+        if _json_sha256(existing) != content_sha256:
+            raise BenchmarkError("Gold backup short-hash collision; refusing write")
+    else:
+        atomic_write_json(backup_path, gold)
+    return backup_path
+
+
 def import_gold_adjudication_v2(
     root: Path,
     benchmark_id: str,
@@ -3164,6 +3185,7 @@ def import_gold_adjudication_v2(
             "idempotent": True,
             "gold_updated": False,
         }
+    current_hash = _json_sha256(gold)
     updated = copy.deepcopy(gold)
     event_by_id = {event["match_cluster_id"]: event for event in updated["events"]}
     for item in response["items"]:
@@ -3199,18 +3221,11 @@ def import_gold_adjudication_v2(
         "response_sha256": response_hash,
         "adjudicated_at": response["adjudicated_at"],
         "imported_at": _iso(now),
+        "previous_gold_sha256": current_hash,
     }
     updated["packet_imports"] = dict(sorted(imports.items()))
     _validate_gold_v2_against_union(updated, union)
-    backup_directory = directory / "gold_backups"
-    backup_directory.mkdir(parents=True, exist_ok=True)
-    current_hash = _json_sha256(gold)
-    backup_path = backup_directory / f"gold_adjudication_v2.{current_hash}.json"
-    if backup_path.exists():
-        if _read_json(backup_path) != gold:
-            raise BenchmarkError("Gold backup hash collision; refusing write")
-    else:
-        atomic_write_json(backup_path, gold)
+    backup_path = _write_gold_backup(directory, gold, current_hash)
     atomic_write_json(gold_path, updated)
     return {
         **gold_status_v2(root, benchmark_id),
@@ -3218,6 +3233,7 @@ def import_gold_adjudication_v2(
         "idempotent": False,
         "gold_updated": True,
         "backup_path": str(backup_path.resolve()),
+        "backup_content_sha256": current_hash,
     }
 
 
