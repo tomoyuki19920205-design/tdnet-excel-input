@@ -3203,6 +3203,7 @@ def import_gold_adjudication_v2(
     updated["packet_imports"] = dict(sorted(imports.items()))
     _validate_gold_v2_against_union(updated, union)
     backup_directory = directory / "gold_backups"
+    backup_directory.mkdir(parents=True, exist_ok=True)
     current_hash = _json_sha256(gold)
     backup_path = backup_directory / f"gold_adjudication_v2.{current_hash}.json"
     if backup_path.exists():

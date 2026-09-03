@@ -253,22 +253,28 @@ def test_partial_import_fails_closed_without_touching_gold(tmp_path):
     directory = Path(root) / "data" / "news_work" / "batch_benchmark" / BENCHMARK_ID / "quality_v2" / "matcher_v2"
     gold_path = directory / "gold_adjudication_v2.json"
     before = gold_path.read_bytes()
-    value = response(packets[0])
-    value["items"].pop()
-    response_path = tmp_path / "partial.json"
-    write_json(response_path, value)
+    invalid_responses = []
+    missing = response(packets[0])
+    missing["items"].pop()
+    invalid_responses.append((missing, "every packet cluster"))
+    sha_mismatch = response(packets[0])
+    sha_mismatch["packet_sha256"] = "0" * 64
+    invalid_responses.append((sha_mismatch, "packet SHA mismatch"))
 
-    with pytest.raises(BenchmarkError, match="every packet cluster"):
-        import_gold_adjudication_v2(root, BENCHMARK_ID, response_path, now=FIXED_TIME)
-
-    assert gold_path.read_bytes() == before
-    assert not (directory / "gold_backups").exists()
+    for index, (value, message) in enumerate(invalid_responses):
+        response_path = tmp_path / f"invalid-{index}.json"
+        write_json(response_path, value)
+        with pytest.raises(BenchmarkError, match=message):
+            import_gold_adjudication_v2(root, BENCHMARK_ID, response_path, now=FIXED_TIME)
+        assert gold_path.read_bytes() == before
+        assert not (directory / "gold_backups").exists()
 
 
 def test_import_is_atomic_backed_up_and_idempotent(tmp_path, monkeypatch):
     root, _, packets = build_fixture_packets(tmp_path)
     response_path = tmp_path / "response.json"
     write_json(response_path, response(packets[0]))
+    gold_path = Path(root) / "data" / "news_work" / "batch_benchmark" / BENCHMARK_ID / "quality_v2" / "matcher_v2" / "gold_adjudication_v2.json"
     calls: list[Path] = []
     original = benchmark.atomic_write_json
 
@@ -277,8 +283,9 @@ def test_import_is_atomic_backed_up_and_idempotent(tmp_path, monkeypatch):
         original(path, value)
 
     monkeypatch.setattr(benchmark, "atomic_write_json", recording_write)
+    backup_directory = gold_path.parent / "gold_backups"
+    assert not backup_directory.exists()
     first = import_gold_adjudication_v2(root, BENCHMARK_ID, response_path, now=FIXED_TIME)
-    gold_path = Path(root) / "data" / "news_work" / "batch_benchmark" / BENCHMARK_ID / "quality_v2" / "matcher_v2" / "gold_adjudication_v2.json"
     after_first = gold_path.read_bytes()
     second = import_gold_adjudication_v2(root, BENCHMARK_ID, response_path, now=FIXED_TIME)
 
