@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
 from lib.ny_market import validate_payload
 from lib.ny_market_20260903_after_hours_v3 import MIGRATION_PAYLOAD
 from lib.ny_market_display import apply_after_hours_only_contract
+from lib.production_environment import bootstrap_production_write_environment
 from tools.company_news_atomic import atomic_write_json
 
 
@@ -175,7 +176,9 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--expected-input-sha256", required=True)
     parser.add_argument("--applied-commit", required=True)
+    parser.add_argument("--production-root", required=True, type=Path)
     args = parser.parse_args()
+    environment = bootstrap_production_write_environment(args.production_root)
     payload = json.loads(args.input.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise HistoricalMigrationError("input payload must be an object")
@@ -194,6 +197,7 @@ def main() -> int:
         "payload_sha256": _payload_sha256(migrated),
         "markdown_sha256": migrated["report_delivery"]["sha256"],
         "output": str(args.output.resolve()),
+        "environment": environment.safe_metadata(),
     }, ensure_ascii=False, sort_keys=True))
     return 0
 

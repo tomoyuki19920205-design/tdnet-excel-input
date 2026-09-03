@@ -31,6 +31,10 @@ from lib.ny_market import (
     upsert_report as upsert_ny_market_report,
     validate_payload as validate_ny_market_payload,
 )
+from lib.production_environment import (
+    ProductionEnvironmentError,
+    bootstrap_production_write_environment,
+)
 from tools.company_news_atomic import atomic_write_json
 from tools.company_news_work_bridge import (
     BridgeError,
@@ -286,13 +290,43 @@ def _process_ny_market_files(
     files: list[Path],
     state: dict[str, Any],
     *,
-    sync_func: Callable[[Path, bool], dict[str, int]],
+    sync_func: Callable[[Path, bool], dict[str, int]] | None,
     dry_run_sync: bool,
 ) -> tuple[list[dict[str, Any]], int]:
     """Ingest NY payloads independently; never fall through to company-news validation."""
     results: list[dict[str, Any]] = []
     failures = 0
     runs: dict[str, Any] = state["runs"]
+
+    existing_pending = [
+        key for key, value in runs.items()
+        if value.get("phase") == "ingested" and value.get("payload_type") == "ny_market_daily"
+    ]
+    if (files or existing_pending) and sync_func is None and not dry_run_sync:
+        try:
+            environment = bootstrap_production_write_environment(paths.root)
+        except ProductionEnvironmentError as exc:
+            _append_log(
+                paths,
+                "production_environment_failed",
+                payload_type="ny_market_daily",
+                error=str(exc),
+            )
+            results.extend(
+                {"file": path.name, "status": "failed", "error": str(exc)}
+                for path in files
+            )
+            results.extend(
+                {"run_id": key, "status": "failed", "error": str(exc)}
+                for key in existing_pending
+            )
+            return results, max(1, len(files) + len(existing_pending))
+        _append_log(
+            paths,
+            "production_environment_ready",
+            payload_type="ny_market_daily",
+            **environment.safe_metadata(),
+        )
 
     for path in files:
         _append_log(paths, "detected", file=path.name, payload_type="ny_market_daily")
@@ -354,7 +388,15 @@ def _process_ny_market_files(
                     mark_ny_market_run(conn, runs[key], "success")
             finally:
                 conn.close()
-            sync_result = sync_func(paths.db, dry_run_sync)
+            if sync_func is None:
+                sync_result = sync_ny_market(
+                    paths.db,
+                    dry_run_sync,
+                    stable_keys=pending,
+                    production_root=paths.root,
+                )
+            else:
+                sync_result = sync_func(paths.db, dry_run_sync)
             conn = connect_ny_market_db(paths.db)
             try:
                 for key in pending:
@@ -389,7 +431,7 @@ def run_once(
     paths: WorkerPaths,
     *,
     sync_func: Callable[[Path, bool], dict[str, int]] = sync_company_news,
-    ny_sync_func: Callable[[Path, bool], dict[str, int]] = sync_ny_market,
+    ny_sync_func: Callable[[Path, bool], dict[str, int]] | None = None,
     dry_run_sync: bool = False,
     trigger: str = "manual",
 ) -> dict[str, Any]:
