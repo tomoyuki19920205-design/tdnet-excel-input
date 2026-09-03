@@ -7,8 +7,8 @@ from hashlib import sha256
 from typing import Any
 
 
-DISPLAY_CONTRACT_VERSION = "ny_market_display_v2"
-AFTER_HOURS_CONTRACT_VERSION = "ny_market_after_hours_v1"
+DISPLAY_CONTRACT_VERSION = "ny_market_display_v3"
+AFTER_HOURS_CONTRACT_VERSION = "ny_market_after_hours_v2"
 LEGACY_MIGRATION_VERSION = "ny_market_legacy_projection_description_v1"
 LEGACY_MIGRATION_MAX_REPORT_DATE = "2026-09-03"
 IDEOGRAPHIC_SPACE = "\u3000"
@@ -105,6 +105,35 @@ def _render_notable_gainers(items: Any) -> str:
     return "\n\n".join(blocks)
 
 
+def _sentences(items: Any, field: str) -> list[str]:
+    if not isinstance(items, list):
+        raise NYMarketDisplayError(f"{field} must be an array")
+    result: list[str] = []
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise NYMarketDisplayError(f"{field}[{index}] must be an object")
+        result.append(_text(item, "summary", f"{field}[{index}]"))
+    return result
+
+
+def _source_links(item: dict[str, Any], field: str) -> str:
+    links: list[str] = []
+    seen: set[str] = set()
+    for source_field in ("fact_sources", "market_context_sources"):
+        sources = item.get(source_field)
+        if not isinstance(sources, list) or not sources:
+            raise NYMarketDisplayError(f"{field}.{source_field} must be a non-empty array")
+        for index, source in enumerate(sources):
+            if not isinstance(source, dict):
+                raise NYMarketDisplayError(f"{field}.{source_field}[{index}] must be an object")
+            label = _text(source, "label", f"{field}.{source_field}[{index}]")
+            url = _text(source, "url", f"{field}.{source_field}[{index}]")
+            if url not in seen:
+                links.append(f"[{label}]({url})")
+                seen.add(url)
+    return " / ".join(links)
+
+
 def _render_after_hours(items: Any) -> str:
     field = "after_hours_earnings"
     if not isinstance(items, list) or len(items) > 10:
@@ -117,23 +146,45 @@ def _render_after_hours(items: Any) -> str:
         company = _text(item, "display_company_name", field)
         ticker = _text(item, "ticker", field)
         description = _text(item, "company_description", field)
-        results = _text(item, "results_summary", field)
-        takeaway = _text(item, "investment_takeaway", field)
-        source_type = {
-            "company_ir": "IR",
-            "sec": "SEC",
-        }.get(_text(item, "source_type", field))
-        if source_type is None:
-            raise NYMarketDisplayError(f"{field}[{index}].source_type must be company_ir or sec")
-        source_url = _text(item, "source_url", field)
-        price_url = _text(item, "after_hours_price_source_url", field)
+        event_type = _text(item, "event_type", field)
+        if event_type == "earnings":
+            detail_fields = (
+                "reported_results", "consensus_comparison", "guidance",
+                "guidance_comparison", "key_kpis", "background_context",
+                "same_day_developments",
+            )
+        elif event_type == "material_event":
+            detail_fields = ("event_details", "same_day_developments")
+        else:
+            raise NYMarketDisplayError(f"{field}[{index}].event_type is unsupported")
+        detail_sentences: list[str] = []
+        for detail_field in detail_fields:
+            detail_sentences.extend(_sentences(
+                item.get(detail_field), f"{field}[{index}].{detail_field}"
+            ))
+        if not detail_sentences:
+            raise NYMarketDisplayError(f"{field}[{index}] has no displayable event detail")
+        reaction = (
+            f"時間外株価は約{format_change_pct(item.get('after_hours_change_pct'))}でした。"
+        )
+        results = "".join((*detail_sentences, reaction))
+        why_moved = _text(item, "why_moved", field)
+        readthrough = _text(item, "investment_readthrough", field)
+        watch_items = item.get("watch_items")
+        if not isinstance(watch_items, list) or not watch_items:
+            raise NYMarketDisplayError(f"{field}[{index}].watch_items must be a non-empty array")
+        watch = "、".join(
+            _text({"value": value}, "value", f"{field}[{index}].watch_items")
+            for value in watch_items
+        )
         heading = (
             f"#### {company}（{ticker}）— 時間外 約"
             f"{format_change_pct(item.get('after_hours_change_pct'))}"
         )
-        source = f"出典：[{source_type}]({source_url}) / [時間外株価]({price_url})"
+        source = f"出典：{_source_links(item, f'{field}[{index}]')}"
+        analysis = f"{why_moved}{readthrough}今後は{watch}が焦点です。"
         blocks.append(
-            "\n\n".join((heading, description, results, f"{takeaway}  \n{source}"))
+            "\n\n".join((heading, description, results, f"{analysis}  \n{source}"))
         )
     return "\n\n".join(blocks)
 
@@ -334,9 +385,54 @@ def render_report_markdown(payload: dict[str, Any]) -> str:
     return "\n".join(lines).strip()
 
 
+def render_after_hours_only(payload: dict[str, Any]) -> str:
+    """Replace only the after-hours section, preserving every other byte."""
+    markdown = payload.get("report_markdown")
+    if not isinstance(markdown, str) or not markdown.strip():
+        raise NYMarketDisplayError("report_markdown must be a non-empty string")
+    canonical = "引け後・アフター決算の注目株"
+    aliases = next(aliases for name, aliases in _SECTIONS if name == canonical)
+    lines = markdown.splitlines(keepends=True)
+    matches: list[tuple[int, int]] = []
+    for index, line in enumerate(lines):
+        match = _HEADING_RE.match(line.rstrip("\r\n"))
+        if match and match.group(2) in aliases:
+            matches.append((index, len(match.group(1))))
+    if len(matches) != 1:
+        raise NYMarketDisplayError(
+            f"report_markdown must contain exactly one {canonical} section"
+        )
+    start, level = matches[0]
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        match = _HEADING_RE.match(lines[index].rstrip("\r\n"))
+        if match and len(match.group(1)) <= level:
+            end = index
+            break
+    start_offset = sum(len(line) for line in lines[:start])
+    end_offset = sum(len(line) for line in lines[:end])
+    newline = "\r\n" if "\r\n" in markdown else "\n"
+    replacement = newline.join((
+        f"## {canonical}", "", _render_after_hours(payload.get("after_hours_earnings")), "",
+    ))
+    if end < len(lines):
+        replacement += newline
+    return f"{markdown[:start_offset]}{replacement}{markdown[end_offset:]}"
+
+
 def apply_display_contract(payload: dict[str, Any]) -> dict[str, Any]:
     result = deepcopy(payload)
     result["report_markdown"] = render_report_markdown(result)
+    result["report_display_contract_version"] = DISPLAY_CONTRACT_VERSION
+    digest = sha256(result["report_markdown"].encode("utf-8")).hexdigest()
+    result["report_delivery"] = {"source_field": "report_markdown", "sha256": digest}
+    return result
+
+
+def apply_after_hours_only_contract(payload: dict[str, Any]) -> dict[str, Any]:
+    """Apply v3 to the historical after-hours section without rewriting other sections."""
+    result = deepcopy(payload)
+    result["report_markdown"] = render_after_hours_only(result)
     result["report_display_contract_version"] = DISPLAY_CONTRACT_VERSION
     digest = sha256(result["report_markdown"].encode("utf-8")).hexdigest()
     result["report_delivery"] = {"source_field": "report_markdown", "sha256": digest}

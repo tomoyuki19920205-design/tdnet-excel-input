@@ -46,11 +46,14 @@ def build_after_hours_discovery_plan(
             "verification_queries": [
                 f'"{ticker}" "{company}" "{market_session_date}" results investor relations',
                 f'site:sec.gov/Archives/edgar/data "{ticker}" "{market_session_date}" 8-K',
+                f'"{company}" "{market_session_date}" guidance partnership buyback acquisition',
+                f'"{company}" "{market_session_date}" investor relations news presentation webcast',
                 f'"{ticker}" "{company}" after-hours "{market_session_date}"',
+                f'"{ticker}" "{company}" earnings consensus estimate "{market_session_date}"',
             ],
         })
     return {
-        "contract_version": "ny_market_after_hours_v1",
+        "contract_version": "ny_market_after_hours_v2",
         "discovery_method": "broad_discovery_then_primary_verification",
         "market_session_date": market_session_date,
         "broad_discovery_queries": broad_queries,

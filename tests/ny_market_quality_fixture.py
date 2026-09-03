@@ -147,30 +147,57 @@ def payload() -> dict:
         "one_offs": ["none"], "price_reaction": "+x%", "why_stock_moved": "成長率が期待を上回ったため。",
         "forward_implication": "医療機器需要の底堅さを示す。",
     }
-    after = {
-        **earning, **deepcopy(research_by_ticker["DELL"]), "after_hours_change_pct": 6.35,
-        "as_of_utc": "2026-09-01T22:47:00Z", "as_of_jst": "2026-09-02T07:47:00+09:00",
-        "session": "post_market",
-        "display_company_name": "Dell",
-        "results_summary": "四半期売上は$30.0B、調整後EPSは$2.00となり、会社予想を上回りました。",
-        "investment_takeaway": "AIサーバー需要と利益率の持続性が次の焦点です。",
-        "after_hours_price_source_url": "https://example.com/after-hours/dell",
-        "after_hours_price_provider": "fixture_market_data",
-        "display_numbers": ["$30.0B", "$2.00"],
-    }
-    after_second = {
-        **earning,
-        "after_hours_change_pct": -2.25,
-        "as_of_utc": "2026-09-01T22:47:00Z",
-        "as_of_jst": "2026-09-02T07:47:00+09:00",
-        "session": "post_market",
-        "display_company_name": "Medtronic",
-        "results_summary": "四半期売上は$8.0B、調整後EPSは$1.50となりました。",
-        "investment_takeaway": "医療機器需要と通期ガイダンスが次の焦点です。",
-        "after_hours_price_source_url": "https://example.com/after-hours/mdt",
-        "after_hours_price_provider": "fixture_market_data",
-        "display_numbers": ["$8.0B", "$1.50"],
-    }
+    def rich_after_hours(base, display_name, change, revenue, eps, price_url, theme):
+        primary_url = base["source_url"]
+        return {
+            **base,
+            "event_type": "earnings",
+            "after_hours_change_pct": change,
+            "as_of_utc": "2026-09-01T22:47:00Z",
+            "as_of_jst": "2026-09-02T07:47:00+09:00",
+            "session": "post_market",
+            "display_company_name": display_name,
+            "reported_results": [{
+                "summary": f"四半期売上は{revenue}となり、主力事業の需要が前年同期から拡大しました。",
+                "evidence_tokens": [revenue, "主力事業"], "source_url": primary_url,
+            }],
+            "consensus_comparison": [{
+                "summary": f"調整後EPSは{eps}と市場予想$1.40を上回りました。",
+                "actual": eps, "estimate": "$1.40", "outcome": "beat", "source_url": price_url,
+            }],
+            "guidance": [{
+                "summary": "会社は次四半期も増収と利益率改善を見込む通期見通しを示しました。",
+                "evidence_tokens": ["増収", "利益率改善"], "source_url": primary_url,
+            }],
+            "guidance_comparison": [],
+            "key_kpis": [{
+                "summary": f"{theme}の受注残と継続収益が伸び、成長の再現性を支えました。",
+                "evidence_tokens": [theme, "受注残"], "source_url": primary_url,
+            }],
+            "background_context": [],
+            "same_day_developments": [],
+            "after_hours_reaction": {"change_pct": change, "source_url": price_url},
+            "why_moved": f"{theme}の受注残拡大とEPSの市場予想超過が、単なる売上増より強い利益成長を示したためです。",
+            "investment_readthrough": f"{theme}関連の需要が継続収益へ転換しており、同業の設備投資と部品需要にも追い風となります。",
+            "watch_items": [f"{theme}の受注残から売上への転換速度", "非GAAP利益率の持続性"],
+            "qualitative_evidence": {
+                "why_moved": [theme, "EPS"],
+                "investment_readthrough": [theme, "継続収益"],
+            },
+            "fact_sources": [{"label": "決算資料", "url": primary_url, "source_kind": "company_ir"}],
+            "market_context_sources": [{"label": "市場予想・時間外株価", "url": price_url, "source_kind": "trusted_market_data"}],
+            "after_hours_price_source_url": price_url,
+            "after_hours_price_provider": "fixture_market_data",
+        }
+
+    after = rich_after_hours(
+        {**earning, **deepcopy(research_by_ticker["DELL"])}, "Dell", 6.35,
+        "$30.0B", "$2.00", "https://example.com/after-hours/dell", "AIサーバー",
+    )
+    after_second = rich_after_hours(
+        deepcopy(earning), "Medtronic", -2.25, "$8.0B", "$1.50",
+        "https://example.com/after-hours/mdt", "医療機器",
+    )
     after_hours = [after, after_second]
     sources = [{"title": "Canonical market snapshot", "publisher": "Market Data", "url": market_url, "published_at": "2026-09-02T00:00:00Z"}]
     for item in research:
@@ -217,7 +244,7 @@ def payload() -> dict:
         "after_hours_earnings": deepcopy(after_hours),
         "after_hours_research": deepcopy(after_hours),
         "after_hours_candidate_review": {
-            "contract_version": "ny_market_after_hours_v1",
+            "contract_version": "ny_market_after_hours_v2",
             "discovery_method": "broad_discovery_then_primary_verification",
             "market_session_date": "2026-09-01",
             "discovery_started_at": "2026-09-01T20:00:00Z",

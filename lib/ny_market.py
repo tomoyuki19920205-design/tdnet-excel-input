@@ -378,30 +378,186 @@ def _validate_after_hours_contract(
                 f"after_hours_candidate_review price source differs for {selected[index]}"
             )
     required = (
-        "display_company_name", "results_summary", "investment_takeaway",
-        "after_hours_price_source_url", "after_hours_price_provider", "display_numbers",
+        "event_type", "display_company_name", "company_description",
+        "same_day_developments", "after_hours_reaction", "why_moved",
+        "investment_readthrough", "watch_items", "qualitative_evidence",
+        "fact_sources", "market_context_sources", "after_hours_price_source_url",
+        "after_hours_price_provider",
     )
     forbidden_display_tokens = (
         "session=post_market", "searched_at", "search_status", "provider=", "as_of_utc",
         "as_of_jst", "通常取引終値",
+    )
+    generic_qualitative_phrases = (
+        "好決算が評価されました", "業績が評価されました", "決算が好感されました",
+        "見通しが嫌気されました", "期待が評価されました",
     )
     for index, item in enumerate(canonical):
         field = f"after_hours_research[{index}]"
         for key in required:
             if key not in item:
                 raise NYMarketValidationError(f"{field}.{key} is required")
-        for key in required[:-1]:
-            _text(item[key], f"{field}.{key}", 5000)
-        numbers = item["display_numbers"]
-        if not isinstance(numbers, list) or not numbers:
-            raise NYMarketValidationError(f"{field}.display_numbers must be a non-empty array")
-        results = item["results_summary"]
-        for number in numbers:
-            token = _text(number, f"{field}.display_numbers[]", 100)
-            if token not in results:
+        event_type = _text(item["event_type"], f"{field}.event_type", 32)
+        if event_type not in {"earnings", "material_event"}:
+            raise NYMarketValidationError(f"{field}.event_type is unsupported")
+        _text(item["display_company_name"], f"{field}.display_company_name", 200)
+        _text(item["company_description"], f"{field}.company_description", 2000)
+
+        fact_urls: set[str] = set()
+        context_urls: set[str] = set()
+        source_contracts = (
+            ("fact_sources", {"company_ir", "sec", "company_presentation", "earnings_call"}, fact_urls),
+            ("market_context_sources", {"financial_media", "analyst_consensus", "trusted_market_data"}, context_urls),
+        )
+        for source_field, allowed_kinds, target_urls in source_contracts:
+            records = _list(item[source_field], f"{field}.{source_field}")
+            if not records:
+                raise NYMarketValidationError(f"{field}.{source_field} must be non-empty")
+            for source_index, source in enumerate(records):
+                source_name = f"{field}.{source_field}[{source_index}]"
+                if not isinstance(source, dict):
+                    raise NYMarketValidationError(f"{source_name} must be an object")
+                _text(source.get("label"), f"{source_name}.label", 100)
+                if source.get("source_kind") not in allowed_kinds:
+                    raise NYMarketValidationError(f"{source_name}.source_kind is unsupported")
+                url = _http_url(source.get("url"), f"{source_name}.url")
+                target_urls.add(url)
+                source_urls.add(url)
+        if item.get("source_url") not in fact_urls:
+            raise NYMarketValidationError(f"{field}.source_url must be listed in fact_sources")
+        if item.get("after_hours_price_source_url") not in context_urls:
+            raise NYMarketValidationError(
+                f"{field}.after_hours_price_source_url must be listed in market_context_sources"
+            )
+
+        collection_names = (
+            "reported_results", "consensus_comparison", "guidance",
+            "guidance_comparison", "key_kpis", "background_context",
+            "same_day_developments",
+        ) if event_type == "earnings" else ("event_details", "same_day_developments")
+        if event_type == "earnings":
+            for key in collection_names:
+                if key not in item:
+                    raise NYMarketValidationError(f"{field}.{key} is required for earnings")
+            if not item["reported_results"] or not item["consensus_comparison"] or not item["key_kpis"]:
                 raise NYMarketValidationError(
-                    f"{field}.results_summary is missing canonical display number {token}"
+                    f"{field} earnings requires results, consensus comparison, and KPI detail"
                 )
+        elif "event_details" not in item or not item["event_details"]:
+            raise NYMarketValidationError(f"{field}.event_details is required for material_event")
+
+        visible_summaries: list[str] = []
+        for collection_name in collection_names:
+            records = _list(item.get(collection_name), f"{field}.{collection_name}")
+            for record_index, record in enumerate(records):
+                record_field = f"{field}.{collection_name}[{record_index}]"
+                if not isinstance(record, dict):
+                    raise NYMarketValidationError(f"{record_field} must be an object")
+                summary = _text(record.get("summary"), f"{record_field}.summary", 2000, 8)
+                if not summary.endswith(("。", "！", "？")):
+                    raise NYMarketValidationError(f"{record_field}.summary must end as a sentence")
+                url = _http_url(record.get("source_url"), f"{record_field}.source_url")
+                expected_urls = context_urls if collection_name == "consensus_comparison" else fact_urls
+                if url not in expected_urls:
+                    raise NYMarketValidationError(
+                        f"{record_field}.source_url is not declared in the matching source list"
+                    )
+                source_urls.add(url)
+                if collection_name in {"background_context", "same_day_developments"}:
+                    announced_at = _date(
+                        record.get("announced_at"), f"{record_field}.announced_at"
+                    )
+                    temporal_status = record.get("temporal_status")
+                    if collection_name == "background_context":
+                        if temporal_status != "prior_period" or announced_at >= review_session_date:
+                            raise NYMarketValidationError(
+                                f"{record_field} must be prior-period background context"
+                            )
+                    elif temporal_status != "same_day" or announced_at != review_session_date:
+                        raise NYMarketValidationError(
+                            f"{record_field} must be a same-day development"
+                        )
+                if collection_name == "consensus_comparison":
+                    actual = _text(record.get("actual"), f"{record_field}.actual", 100)
+                    estimate = _text(record.get("estimate"), f"{record_field}.estimate", 100)
+                    if record.get("outcome") not in {"beat", "miss", "in_line"}:
+                        raise NYMarketValidationError(f"{record_field}.outcome is unsupported")
+                    if actual not in summary or estimate not in summary or "市場予想" not in summary:
+                        raise NYMarketValidationError(
+                            f"{record_field}.summary must contain actual, market estimate, and comparison"
+                        )
+                elif collection_name == "guidance_comparison":
+                    previous = _text(record.get("previous"), f"{record_field}.previous", 100)
+                    current = _text(record.get("current"), f"{record_field}.current", 100)
+                    if record.get("direction") not in {"raised", "lowered", "maintained"}:
+                        raise NYMarketValidationError(f"{record_field}.direction is unsupported")
+                    if previous not in summary or current not in summary:
+                        raise NYMarketValidationError(
+                            f"{record_field}.summary must contain previous and current guidance"
+                        )
+                else:
+                    evidence = _list(record.get("evidence_tokens"), f"{record_field}.evidence_tokens")
+                    if not evidence:
+                        raise NYMarketValidationError(f"{record_field}.evidence_tokens must be non-empty")
+                    for token_value in evidence:
+                        token = _text(token_value, f"{record_field}.evidence_tokens[]", 100)
+                        if token not in summary:
+                            raise NYMarketValidationError(
+                                f"{record_field}.summary is missing canonical evidence token {token}"
+                            )
+                visible_summaries.append(summary)
+
+        reaction = item["after_hours_reaction"]
+        if not isinstance(reaction, dict):
+            raise NYMarketValidationError(f"{field}.after_hours_reaction must be an object")
+        _same_number(
+            reaction.get("change_pct"), item.get("after_hours_change_pct"),
+            f"{field}.after_hours_reaction.change_pct", 0,
+        )
+        reaction_url = _http_url(reaction.get("source_url"), f"{field}.after_hours_reaction.source_url")
+        if reaction_url != item.get("after_hours_price_source_url") or reaction_url not in context_urls:
+            raise NYMarketValidationError(f"{field}.after_hours_reaction source differs from price evidence")
+
+        why_moved = _text(item["why_moved"], f"{field}.why_moved", 3000)
+        readthrough = _text(
+            item["investment_readthrough"], f"{field}.investment_readthrough", 3000
+        )
+        for phrase in generic_qualitative_phrases:
+            if why_moved.strip("。") == phrase.strip("。") or readthrough.strip("。") == phrase.strip("。"):
+                raise NYMarketValidationError(f"{field} contains generic qualitative analysis")
+        if len(why_moved) < 30:
+            raise NYMarketValidationError(f"{field}.why_moved length must be 30..3000")
+        if len(readthrough) < 30:
+            raise NYMarketValidationError(
+                f"{field}.investment_readthrough length must be 30..3000"
+            )
+        evidence_groups = item["qualitative_evidence"]
+        if not isinstance(evidence_groups, dict):
+            raise NYMarketValidationError(f"{field}.qualitative_evidence must be an object")
+        for evidence_field, text_value in (
+            ("why_moved", why_moved), ("investment_readthrough", readthrough),
+        ):
+            tokens = _list(
+                evidence_groups.get(evidence_field),
+                f"{field}.qualitative_evidence.{evidence_field}",
+            )
+            if len(tokens) < 2:
+                raise NYMarketValidationError(
+                    f"{field}.qualitative_evidence.{evidence_field} needs two company-specific tokens"
+                )
+            for token_value in tokens:
+                token = _text(
+                    token_value, f"{field}.qualitative_evidence.{evidence_field}[]", 100
+                )
+                if token not in text_value:
+                    raise NYMarketValidationError(
+                        f"{field}.{evidence_field} is not tied to canonical company-specific evidence"
+                    )
+        watch_items = _list(item["watch_items"], f"{field}.watch_items")
+        if not watch_items:
+            raise NYMarketValidationError(f"{field}.watch_items must be non-empty")
+        watch_items = [_text(value, f"{field}.watch_items[]", 300) for value in watch_items]
+
         source_urls.add(_http_url(
             item["after_hours_price_source_url"],
             f"{field}.after_hours_price_source_url",
@@ -414,11 +570,15 @@ def _validate_after_hours_contract(
                 f"{field}.as_of_utc must identify the reviewed NY market session date"
             )
         visible = "\n".join((
-            item["display_company_name"], item["company_description"], results,
-            item["investment_takeaway"],
+            item["display_company_name"], item["company_description"], *visible_summaries,
+            why_moved, readthrough, *watch_items,
         ))
         if any(token in visible for token in forbidden_display_tokens):
             raise NYMarketValidationError(f"{field} exposes internal or regular-session data")
+        if not 250 <= len(visible) <= 600:
+            raise NYMarketValidationError(
+                f"{field} visible narrative length must be 250..600 characters"
+            )
 
 
 def _validate_news(items: list[Any], source_urls: set[str]) -> None:
