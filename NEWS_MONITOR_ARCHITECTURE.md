@@ -651,18 +651,54 @@ isolated human-work artifact
 with verdicts `VALID_MATERIAL`, `VALID_NON_MATERIAL`, `DUPLICATE`,
 `MATCHER_FALSE_NEGATIVE`, `INVALID_SOURCE`, `OUT_OF_WINDOW`, and `UNKNOWN`.
 
-The human adjudicator should prefer company IR/press releases, TDNET, EDINET/SEC,
-government, exchange, and other official sources. Once every `UNKNOWN` has been
-adjudicated with rationale, reviewer, and timezone-bearing timestamp, calculate Gold
-metrics for all four runs (including reference01, whose recall is allowed to be below
-100%):
+The v1 union has 88 clusters and is retained unchanged as comparison evidence. Its
+Gold template must not be adjudicated because review found both false splits and a
+same-run many-to-one overmerge.
+
+Matcher v2 applies this fixed pipeline: strict within-run identity dedupe, canonical
+identity-key generation, cross-run candidates, HIGH-confidence matches only,
+deterministic one-to-one assignment, union construction, then MEDIUM-confidence review
+output. Ticker is always a hard requirement. Category, importance, and earnings
+relevance never decide identity; their agreement is reported separately. Canonical
+keys normalize Unicode/trademark/punctuation, bilingual language subdomains and path
+tokens, 14-digit disclosure IDs embedded in mirror URLs, and allowlisted stable query
+IDs such as `itemid`. Other query values remain in the page key so two articles on the
+same path are not merged. Semantic similarity alone never merges two events from the
+same run.
+
+The v2 commands read only the completed reference/reference02/batch02/batch04 raw
+artifacts and write new outputs under `quality_v2/matcher_v2`; they do not overwrite
+the v1 union or Gold template:
 
 ```powershell
-python tools/company_news_batch_benchmark.py audit-gold --benchmark-id batchbench-20260901T095759508419 --adjudication data/news_work/batch_benchmark/batchbench-20260901T095759508419/quality_v2/gold_adjudication.json
+python tools/company_news_batch_benchmark.py rebuild-quality-union-v2 --benchmark-id batchbench-20260901T095759508419
+python tools/company_news_batch_benchmark.py audit-reference-repeatability-v2 --benchmark-id batchbench-20260901T095759508419
 ```
 
-Until that Gold audit is complete, single-reference quality values are explicitly
-provisional and `ready_for_production_change` remains false.
+`event_union_v2.json` and `gold_adjudication_v2.json` are the new review inputs.
+`matcher_merge_candidates.json` holds probable or one-to-one-conflicting pairs without
+auto-merging them. `matcher_overmerge_audit.json` compares v1 and v2 same-run members,
+including the Bluebon two-product case. Human Gold v2 adjudication still prioritizes
+company IR/press releases, TDNET, EDINET/SEC, government, exchange, and other official
+sources. Until every v2 `UNKNOWN` is adjudicated, all reference and candidate quality
+scores remain provisional and `ready_for_production_change` remains false.
+
+The existing-artifact v2 rebuild produced 82 clusters from the v1 total of 88. It
+joined seven verified false-split groups, split the one Bluebon same-run overmerge,
+left zero same-run multi-member clusters, and emitted zero ambiguous candidates.
+Reference01-to-reference02 all-event recall improved from 46.55% to 60.34%, the
+reverse direction from 50.94% to 66.04%, and event Jaccard from 32.53% to 46.05%.
+Critical recall improved from 62.5%/70.0% to 75.0%/90.0%. News-presence agreement
+remained 77.08%, so the formal repeatability decision is still
+`QUALITY_METRIC_NOT_STABLE`; these improvements validate matcher behavior, not the
+research quality of any batch size. All 82 Gold v2 rows remain `UNKNOWN` pending human
+adjudication.
+
+After human adjudication is complete:
+
+```powershell
+python tools/company_news_batch_benchmark.py audit-gold-v2 --benchmark-id batchbench-20260901T095759508419 --adjudication data/news_work/batch_benchmark/batchbench-20260901T095759508419/quality_v2/matcher_v2/gold_adjudication_v2.json
+```
 
 Only then is batch03 reconsidered. Existing compression facts remain attached to the
 run audits. Batch02's measured 15.9273 companies/hour implies 9.941 days for 3,800 and

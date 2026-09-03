@@ -17,11 +17,12 @@ import re
 import sqlite3
 import statistics
 import sys
+import unicodedata
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -43,6 +44,10 @@ REPEATABILITY_SCHEMA = "company_news_reference_repeatability_v1"
 EVENT_UNION_SCHEMA = "company_news_quality_event_union_v1"
 GOLD_ADJUDICATION_SCHEMA = "company_news_gold_adjudication_v1"
 GOLD_AUDIT_SCHEMA = "company_news_gold_audit_v1"
+MATCHER_V2_SCHEMA = "company_news_quality_matcher_v2"
+EVENT_UNION_V2_SCHEMA = "company_news_quality_event_union_v2"
+REPEATABILITY_V2_SCHEMA = "company_news_reference_repeatability_v2"
+MATCHER_REVIEW_SCHEMA = "company_news_matcher_review_v2"
 
 TASK_COUNT = 8
 COHORT_SIZE = 192
@@ -1162,6 +1167,230 @@ def _event_match(reference: dict[str, Any], candidate: dict[str, Any]) -> tuple[
     return evidence["matched"], evidence["method"], evidence["score"]
 
 
+_LANGUAGE_PATH_TOKENS = {"en", "eng", "english", "ja", "jp", "japanese"}
+_LANGUAGE_SUBDOMAINS = {"en", "eng", "english", "ja", "jp"}
+_STABLE_QUERY_IDS = {"itemid", "articleid", "newsid", "documentid", "docid", "releaseid"}
+
+
+def _canonical_host(value: str) -> str:
+    labels = (urlsplit(value).hostname or "").casefold().split(".")
+    while labels and labels[0] in {"www", "m", *_LANGUAGE_SUBDOMAINS}:
+        labels.pop(0)
+    return ".".join(labels)
+
+
+def _normalize_headline_identity(value: str) -> str:
+    text = unicodedata.normalize("NFKC", value).casefold()
+    text = re.sub(r"(?:®|\(\s*r\s*\))", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bpdf\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"^\s*[\[【(（]\s*(?:press release|news release|プレスリリース|お知らせ)\s*[\]】)）]\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(r"[^0-9a-z\u3040-\u30ff\u3400-\u9fff]+", "", text)
+
+
+def _document_purpose_key(event: dict[str, Any]) -> str | None:
+    text = unicodedata.normalize("NFKC", event.get("headline", "")).casefold()
+    if "決算短信" in text or re.search(r"\b(?:financial results|earnings report)\b", text):
+        periods = re.findall(
+            r"(?:令和|平成)?\d+年|\d+月|中間|第?[1-4][q四半期]|通期|interim|annual|q[1-4]",
+            text,
+        )
+        return "earnings_summary:" + ":".join(periods)
+    return None
+
+
+def _canonical_identity_keys(event: dict[str, Any]) -> dict[str, Any]:
+    source_url = str(event["source_url"])
+    parts = urlsplit(source_url)
+    host = _canonical_host(source_url)
+    segments: list[str] = []
+    for raw_segment in parts.path.split("/"):
+        segment = unicodedata.normalize("NFKC", raw_segment).casefold().strip()
+        if not segment or segment in _LANGUAGE_PATH_TOKENS:
+            continue
+        segment = re.sub(r"_(?:en|eng|english|ja|jp)$", "", segment)
+        segment = re.sub(r"\.(?:html?|pdf)$", "", segment)
+        if segment == "index":
+            continue
+        segments.append(segment)
+    page_key = f"{host}/{'/'.join(segments)}"
+    material = unicodedata.normalize("NFKC", source_url).casefold()
+    disclosure_ids = set(re.findall(r"20\d{12}", material))
+    stable_items = {
+        f"{host}:{key.casefold()}:{value.casefold()}"
+        for key, value in parse_qsl(parts.query, keep_blank_values=False)
+        if key.casefold() in _STABLE_QUERY_IDS and re.fullmatch(r"[0-9A-Za-z._-]{1,100}", value)
+    }
+    semantic_query = sorted(
+        (key.casefold(), value.casefold())
+        for key, value in parse_qsl(parts.query, keep_blank_values=False)
+        if key.casefold() not in {"dispmid", "display", "lang", "language", "fbclid", "gclid"}
+        and not key.casefold().startswith("utm_")
+    )
+    if semantic_query:
+        page_key += "?" + "&".join(f"{key}={value}" for key, value in semantic_query)
+    path_locator = segments[-1] if segments else ""
+    return {
+        "normalized_url": _normalized_url(source_url),
+        "canonical_host": host,
+        "canonical_page_key": page_key,
+        "disclosure_document_ids": sorted(disclosure_ids),
+        "stable_item_keys": sorted(stable_items),
+        "path_locator": path_locator,
+        "normalized_headline": _normalize_headline_identity(event.get("headline", "")),
+        "document_purpose_key": _document_purpose_key(event),
+    }
+
+
+def _event_identity_evidence_v2(
+    left: dict[str, Any], right: dict[str, Any], *, same_run: bool = False
+) -> dict[str, Any]:
+    left_keys = _canonical_identity_keys(left)
+    right_keys = _canonical_identity_keys(right)
+    same_ticker = left["ticker"] == right["ticker"]
+    left_date = datetime.fromisoformat(left["published_at"]).date()
+    right_date = datetime.fromisoformat(right["published_at"]).date()
+    date_delta = abs((left_date - right_date).days)
+    headline_similarity = _jaccard(
+        _text_tokens(left_keys["normalized_headline"]),
+        _text_tokens(right_keys["normalized_headline"]),
+    )
+    substance_similarity = _jaccard(
+        _text_tokens(left.get("headline", "") + " " + left.get("summary", "")),
+        _text_tokens(right.get("headline", "") + " " + right.get("summary", "")),
+    )
+    exact_headline = bool(
+        left_keys["normalized_headline"]
+        and left_keys["normalized_headline"] == right_keys["normalized_headline"]
+    )
+    headline_containment = bool(
+        min(len(left_keys["normalized_headline"]), len(right_keys["normalized_headline"])) >= 12
+        and (
+            left_keys["normalized_headline"] in right_keys["normalized_headline"]
+            or right_keys["normalized_headline"] in left_keys["normalized_headline"]
+        )
+    )
+    document_id_match = bool(
+        set(left_keys["disclosure_document_ids"])
+        & set(right_keys["disclosure_document_ids"])
+    )
+    stable_item_match = bool(
+        set(left_keys["stable_item_keys"]) & set(right_keys["stable_item_keys"])
+    )
+    normalized_url_match = left_keys["normalized_url"] == right_keys["normalized_url"]
+    canonical_page_match = (
+        bool(left_keys["canonical_page_key"])
+        and left_keys["canonical_page_key"] == right_keys["canonical_page_key"]
+    )
+    purpose_match = bool(
+        left_keys["document_purpose_key"]
+        and left_keys["document_purpose_key"] == right_keys["document_purpose_key"]
+    )
+    same_issuer = bool(
+        left_keys["canonical_host"]
+        and left_keys["canonical_host"] == right_keys["canonical_host"]
+    )
+    locator_conflict = bool(
+        same_issuer
+        and left_keys["path_locator"]
+        and right_keys["path_locator"]
+        and left_keys["path_locator"] != right_keys["path_locator"]
+    )
+    identity_signals: list[str] = []
+    if normalized_url_match:
+        identity_signals.append("exact_normalized_url")
+    if document_id_match:
+        identity_signals.append("canonical_disclosure_document_id")
+    if stable_item_match:
+        identity_signals.append("stable_query_item_id")
+    if canonical_page_match:
+        identity_signals.append("canonical_bilingual_or_page_path")
+    if exact_headline:
+        identity_signals.append("exact_normalized_headline")
+    if headline_containment and not exact_headline:
+        identity_signals.append("strong_headline_containment")
+    if purpose_match:
+        identity_signals.append("same_document_purpose")
+    conflicting_signals: list[str] = []
+    if locator_conflict:
+        conflicting_signals.append("different_same_host_path_locator")
+    if left.get("category") != right.get("category"):
+        conflicting_signals.append("category_annotation_differs")
+    if left.get("importance") != right.get("importance"):
+        conflicting_signals.append("importance_annotation_differs")
+    if left.get("earnings_relevance") != right.get("earnings_relevance"):
+        conflicting_signals.append("earnings_relevance_annotation_differs")
+
+    tier = 0
+    confidence = "LOW"
+    auto_merge = False
+    method = "insufficient_identity"
+    score = max(headline_similarity, substance_similarity)
+    if not same_ticker:
+        method = "ticker_mismatch"
+    elif normalized_url_match or document_id_match or stable_item_match or canonical_page_match:
+        tier, confidence, auto_merge, score = 1, "HIGH", True, 1.0
+        method = identity_signals[0]
+    elif same_run:
+        if date_delta <= 1 and exact_headline and substance_similarity >= 0.90:
+            tier, confidence, auto_merge, score = 2, "HIGH", True, 0.95
+            method = "same_run_exact_headline_near_identical_substance"
+        elif date_delta <= 1 and (headline_similarity >= 0.55 or substance_similarity >= 0.60):
+            tier, confidence, method = 3, "MEDIUM", "same_run_semantic_review_only"
+    elif date_delta <= 1 and purpose_match and same_issuer:
+        tier, confidence, auto_merge, score = 2, "HIGH", True, 0.94
+        method = "same_issuer_document_purpose"
+    elif date_delta <= 1 and exact_headline:
+        tier, confidence, auto_merge, score = 2, "HIGH", True, max(0.93, substance_similarity)
+        method = "exact_headline_strong_identity"
+    elif date_delta <= 1 and headline_containment and substance_similarity >= 0.45:
+        tier, confidence, auto_merge, score = 2, "HIGH", True, max(0.90, substance_similarity)
+        method = "headline_containment_and_substance"
+    elif (
+        date_delta <= 1
+        and not locator_conflict
+        and headline_similarity >= 0.86
+        and substance_similarity >= 0.70
+    ):
+        tier, confidence, auto_merge = 2, "HIGH", True
+        method = "near_exact_headline_and_substance"
+    elif (
+        date_delta == 0
+        and not locator_conflict
+        and same_issuer
+        and headline_similarity >= 0.75
+        and substance_similarity >= 0.80
+    ):
+        tier, confidence, auto_merge = 2, "HIGH", True
+        method = "same_issuer_strong_substance"
+    elif date_delta <= 1 and headline_similarity >= 0.45 and substance_similarity >= 0.45:
+        tier, confidence = 3, "MEDIUM"
+        method = "probable_semantic_match_review_only"
+    return {
+        "same_ticker": same_ticker,
+        "same_run": same_run,
+        "tier": tier,
+        "confidence": confidence,
+        "auto_merge": auto_merge,
+        "method": method,
+        "score": score,
+        "date_delta_days": date_delta,
+        "headline_similarity": headline_similarity,
+        "substance_similarity": substance_similarity,
+        "identity_signals": identity_signals,
+        "conflicting_signals": conflicting_signals,
+        "left_canonical_keys": left_keys,
+        "right_canonical_keys": right_keys,
+        "category_equal": left.get("category") == right.get("category"),
+        "importance_equal": left.get("importance") == right.get("importance"),
+        "earnings_relevance_equal": left.get("earnings_relevance") == right.get("earnings_relevance"),
+    }
+
+
 def _load_success_outputs(directory: Path) -> tuple[dict[str, list[dict[str, Any]]], int, int, list[str]]:
     events: dict[str, list[dict[str, Any]]] = defaultdict(list)
     valid = 0
@@ -1461,6 +1690,434 @@ def _reference_repeatability_metrics(
         "matched_events": matched_clusters,
         "reference01_only_events": left_only,
         "reference02_only_events": right_only,
+    }
+
+
+def _observation_id(member: dict[str, Any]) -> str:
+    return f"{member['run_label']}:{member['ticker']}:{int(member['event_index']):04d}"
+
+
+def _strict_dedupe_run_v2(
+    run_name: str, events: dict[str, list[dict[str, Any]]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    label = QUALITY_RUN_LABELS[run_name]
+    members: list[dict[str, Any]] = []
+    for ticker in sorted(events):
+        for event_index, event in enumerate(events[ticker]):
+            member = {
+                "run_name": run_name,
+                "run_label": label,
+                "event_index": event_index,
+                **_event_public_fields(event),
+            }
+            member["observation_id"] = _observation_id(member)
+            member["canonical_keys"] = _canonical_identity_keys(member)
+            members.append(member)
+    parent = list(range(len(members)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    accepted: list[dict[str, Any]] = []
+    review: list[dict[str, Any]] = []
+    for left in range(len(members)):
+        for right in range(left + 1, len(members)):
+            if members[left]["ticker"] != members[right]["ticker"]:
+                continue
+            evidence = _event_identity_evidence_v2(members[left], members[right], same_run=True)
+            pair = {
+                "left_observation_id": members[left]["observation_id"],
+                "right_observation_id": members[right]["observation_id"],
+                **evidence,
+            }
+            if evidence["auto_merge"]:
+                left_root, right_root = find(left), find(right)
+                if left_root != right_root:
+                    parent[right_root] = left_root
+                accepted.append(pair)
+            elif evidence["confidence"] == "MEDIUM":
+                review.append(pair)
+    grouped: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for index, member in enumerate(members):
+        grouped[find(index)].append(member)
+    nodes: list[dict[str, Any]] = []
+    for group_members in grouped.values():
+        group_members.sort(key=lambda item: item["observation_id"])
+        node_hash = hashlib.sha256(
+            "\n".join(item["observation_id"] for item in group_members).encode()
+        ).hexdigest()[:16]
+        nodes.append({
+            "node_id": f"node-{node_hash}",
+            "run_name": run_name,
+            "run_label": label,
+            "ticker": group_members[0]["ticker"],
+            "representative": group_members[0],
+            "members": group_members,
+        })
+    nodes.sort(key=lambda item: item["node_id"])
+    return nodes, accepted, review
+
+
+def _node_identity_evidence_v2(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+    options = [
+        _event_identity_evidence_v2(left_member, right_member)
+        for left_member in left["members"]
+        for right_member in right["members"]
+    ]
+    return max(
+        options,
+        key=lambda value: (
+            value["auto_merge"], -value["tier"] if value["tier"] else -99,
+            value["score"], value["method"],
+        ),
+    )
+
+
+def _matcher_review_record(
+    left: dict[str, Any],
+    right: dict[str, Any],
+    evidence: dict[str, Any],
+    *,
+    reason: str,
+) -> dict[str, Any]:
+    left_event, right_event = left["representative"], right["representative"]
+    confidence = "MEDIUM" if reason == "one_to_one_conflict" else evidence["confidence"]
+    return {
+        "left_run": left["run_label"],
+        "right_run": right["run_label"],
+        "ticker": left_event["ticker"],
+        "date": [left_event["date"], right_event["date"]],
+        "headline_left": left_event["headline"],
+        "headline_right": right_event["headline"],
+        "url_left": left_event["source_url"],
+        "url_right": right_event["source_url"],
+        "canonical_keys": {
+            "left": evidence["left_canonical_keys"],
+            "right": evidence["right_canonical_keys"],
+        },
+        "score": evidence["score"],
+        "identity_signals": evidence["identity_signals"],
+        "conflicting_signals": [*evidence["conflicting_signals"], reason],
+        "confidence": confidence,
+        "suggested_action": "human_gold_review",
+        "matcher_method": evidence["method"],
+    }
+
+
+def _annotation_consistency_v2(clusters: list[dict[str, Any]]) -> dict[str, Any]:
+    totals = {"category": 0, "importance": 0, "earnings_relevance": 0}
+    agreements = {key: 0 for key in totals}
+    for cluster in clusters:
+        representatives: list[dict[str, Any]] = []
+        seen_runs: set[str] = set()
+        for member in cluster["members"]:
+            if member["run_label"] not in seen_runs:
+                seen_runs.add(member["run_label"])
+                representatives.append(member)
+        for left in range(len(representatives)):
+            for right in range(left + 1, len(representatives)):
+                for key in totals:
+                    totals[key] += 1
+                    agreements[key] += int(representatives[left].get(key) == representatives[right].get(key))
+    return {
+        f"{key}_agreement": {
+            "agreement_count": agreements[key],
+            "comparison_count": totals[key],
+            "rate": agreements[key] / totals[key] if totals[key] else 1.0,
+        }
+        for key in totals
+    }
+
+
+def _build_event_union_v2(
+    run_events: dict[str, dict[str, list[dict[str, Any]]]],
+    company_names: dict[str, str],
+) -> dict[str, Any]:
+    nodes: list[dict[str, Any]] = []
+    within_accepted: list[dict[str, Any]] = []
+    within_review: list[dict[str, Any]] = []
+    for run_name in QUALITY_RUN_LABELS:
+        run_nodes, accepted, review = _strict_dedupe_run_v2(
+            run_name, run_events.get(run_name, {})
+        )
+        nodes.extend(run_nodes)
+        within_accepted.extend(accepted)
+        within_review.extend(review)
+    nodes.sort(key=lambda item: item["node_id"])
+    parent = list(range(len(nodes)))
+    cluster_runs = [{node["run_name"]} for node in nodes]
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    edges: list[tuple[int, int, dict[str, Any]]] = []
+    reviews: list[dict[str, Any]] = []
+    for left in range(len(nodes)):
+        for right in range(left + 1, len(nodes)):
+            if nodes[left]["run_name"] == nodes[right]["run_name"]:
+                continue
+            if nodes[left]["ticker"] != nodes[right]["ticker"]:
+                continue
+            evidence = _node_identity_evidence_v2(nodes[left], nodes[right])
+            if evidence["auto_merge"]:
+                edges.append((left, right, evidence))
+            elif evidence["confidence"] == "MEDIUM":
+                reviews.append(_matcher_review_record(
+                    nodes[left], nodes[right], evidence, reason="probable_not_auto_merged"
+                ))
+    edges.sort(key=lambda item: (
+        item[2]["tier"], -item[2]["score"],
+        nodes[item[0]]["node_id"], nodes[item[1]]["node_id"],
+    ))
+    accepted_edges: list[dict[str, Any]] = []
+    for left, right, evidence in edges:
+        left_root, right_root = find(left), find(right)
+        if left_root == right_root:
+            continue
+        if cluster_runs[left_root] & cluster_runs[right_root]:
+            reviews.append(_matcher_review_record(
+                nodes[left], nodes[right], evidence, reason="one_to_one_conflict"
+            ))
+            continue
+        parent[right_root] = left_root
+        cluster_runs[left_root] |= cluster_runs[right_root]
+        accepted_edges.append({
+            "left_node_id": nodes[left]["node_id"],
+            "right_node_id": nodes[right]["node_id"],
+            **evidence,
+        })
+
+    grouped: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for index, node in enumerate(nodes):
+        grouped[find(index)].append(node)
+    clusters: list[dict[str, Any]] = []
+    for cluster_nodes in grouped.values():
+        members = [member for node in cluster_nodes for member in node["members"]]
+        members.sort(key=lambda item: item["observation_id"])
+        representative = members[0]
+        cluster_hash = hashlib.sha256(
+            "\n".join(member["observation_id"] for member in members).encode()
+        ).hexdigest()[:16]
+        cluster_node_ids = {node["node_id"] for node in cluster_nodes}
+        evidence = [
+            edge for edge in accepted_edges
+            if edge["left_node_id"] in cluster_node_ids and edge["right_node_id"] in cluster_node_ids
+        ]
+        found_by = {
+            label: any(member["run_label"] == label for member in members)
+            for label in QUALITY_RUN_LABELS.values()
+        }
+        clusters.append({
+            "match_cluster_id": f"event-v2-{cluster_hash}",
+            "ticker": representative["ticker"],
+            "company": company_names.get(representative["ticker"], ""),
+            "date": representative["date"],
+            "headline": representative["headline"],
+            "category": representative["category"],
+            "source_url": representative["source_url"],
+            "source_domain": representative["source_domain"],
+            "source_type": representative["source_type"],
+            "importance": representative["importance"],
+            "earnings_relevance": representative["earnings_relevance"],
+            "found_by": found_by,
+            "matcher_evidence": evidence,
+            "members": members,
+            "verdict": "UNKNOWN",
+            "automated_false_positive": False,
+        })
+    clusters.sort(key=lambda item: (item["ticker"], item["date"], item["match_cluster_id"]))
+    reviews.sort(key=lambda item: (
+        item["ticker"], item["date"], item["left_run"], item["right_run"],
+        item["headline_left"], item["headline_right"],
+    ))
+    return {
+        "events": clusters,
+        "matcher_merge_candidates": reviews,
+        "accepted_cross_run_edges": accepted_edges,
+        "within_run_dedupe_edges": within_accepted,
+        "within_run_review_candidates": within_review,
+        "annotation_consistency": _annotation_consistency_v2(clusters),
+        "same_run_multi_member_cluster_count": sum(
+            any(
+                sum(member["run_label"] == run for member in cluster["members"]) > 1
+                for run in QUALITY_RUN_LABELS.values()
+            )
+            for cluster in clusters
+        ),
+    }
+
+
+def _pairwise_metrics_v2(
+    left_run: str,
+    right_run: str,
+    left_events: dict[str, list[dict[str, Any]]],
+    right_events: dict[str, list[dict[str, Any]]],
+    tickers: list[str],
+) -> dict[str, Any]:
+    union = _build_event_union_v2(
+        {left_run: left_events, right_run: right_events}, {}
+    )
+    left_label = QUALITY_RUN_LABELS[left_run]
+    right_label = QUALITY_RUN_LABELS[right_run]
+    left_clusters = [cluster for cluster in union["events"] if cluster["found_by"][left_label]]
+    right_clusters = [cluster for cluster in union["events"] if cluster["found_by"][right_label]]
+    matched = [
+        cluster for cluster in union["events"]
+        if cluster["found_by"][left_label] and cluster["found_by"][right_label]
+    ]
+    critical_left = []
+    for cluster in left_clusters:
+        left_member = next(
+            member for member in cluster["members"] if member["run_label"] == left_label
+        )
+        if left_member.get("importance") == "high" or left_member.get("earnings_relevance") == "direct":
+            critical_left.append(cluster)
+    critical_matched = [cluster for cluster in critical_left if cluster["found_by"][right_label]]
+    left_news = {ticker for ticker in tickers if left_events.get(ticker)}
+    right_news = {ticker for ticker in tickers if right_events.get(ticker)}
+    return {
+        "left_run": left_label,
+        "right_run": right_label,
+        "left_event_count": len(left_clusters),
+        "right_event_count": len(right_clusters),
+        "matched_event_count": len(matched),
+        "event_recall": len(matched) / len(left_clusters) if left_clusters else 1.0,
+        "critical_event_count": len(critical_left),
+        "critical_event_recall": len(critical_matched) / len(critical_left) if critical_left else 1.0,
+        "precision_against_left": len(matched) / len(right_clusters) if right_clusters else (1.0 if not left_clusters else 0.0),
+        "jaccard_event_similarity": (
+            len(matched) / (len(left_clusters) + len(right_clusters) - len(matched))
+            if left_clusters or right_clusters else 1.0
+        ),
+        "no_news_false_negative_tickers": sorted(left_news - right_news),
+        "news_presence_agreement_rate": (
+            sum((ticker in left_news) == (ticker in right_news) for ticker in tickers) / len(tickers)
+            if tickers else 1.0
+        ),
+        "ambiguous_match_count": len(union["matcher_merge_candidates"]),
+        "same_run_multi_member_cluster_count": union["same_run_multi_member_cluster_count"],
+        "annotation_consistency": union["annotation_consistency"],
+        "left_only_events": [
+            cluster for cluster in left_clusters if not cluster["found_by"][right_label]
+        ],
+        "right_only_events": [
+            cluster for cluster in right_clusters if not cluster["found_by"][left_label]
+        ],
+    }
+
+
+def _candidate_metrics_from_union_v2(clusters: list[dict[str, Any]], run_label: str) -> dict[str, Any]:
+    reference_clusters = [
+        cluster for cluster in clusters
+        if cluster["found_by"]["reference01"] or cluster["found_by"]["reference02"]
+    ]
+    candidate_clusters = [cluster for cluster in clusters if cluster["found_by"][run_label]]
+    matched = [cluster for cluster in reference_clusters if cluster["found_by"][run_label]]
+    critical = [
+        cluster for cluster in reference_clusters
+        if any(
+            member["run_label"] in {"reference01", "reference02"}
+            and (member.get("importance") == "high" or member.get("earnings_relevance") == "direct")
+            for member in cluster["members"]
+        )
+    ]
+    critical_matched = [cluster for cluster in critical if cluster["found_by"][run_label]]
+    reference_news = {cluster["ticker"] for cluster in reference_clusters}
+    candidate_news = {cluster["ticker"] for cluster in candidate_clusters}
+    return {
+        "quality_status": "PROVISIONAL_REFERENCE_UNION_NOT_GOLD",
+        "reference_union_event_count": len(reference_clusters),
+        "candidate_event_count": len(candidate_clusters),
+        "matched_event_count": len(matched),
+        "event_recall": len(matched) / len(reference_clusters) if reference_clusters else 1.0,
+        "critical_event_count": len(critical),
+        "critical_event_recall": len(critical_matched) / len(critical) if critical else 1.0,
+        "precision_against_reference_union": (
+            len(matched) / len(candidate_clusters)
+            if candidate_clusters else (1.0 if not reference_clusters else 0.0)
+        ),
+        "no_news_false_negative_tickers": sorted(reference_news - candidate_news),
+        "final_quality_requires_gold_v2": True,
+    }
+
+
+def _union_version_comparison(
+    v1_clusters: list[dict[str, Any]], v2_clusters: list[dict[str, Any]]
+) -> dict[str, Any]:
+    v1_by_observation: dict[str, str] = {}
+    v2_by_observation: dict[str, str] = {}
+    for cluster in v1_clusters:
+        for member in cluster["members"]:
+            v1_by_observation[_observation_id(member)] = cluster["match_cluster_id"]
+    for cluster in v2_clusters:
+        for member in cluster["members"]:
+            v2_by_observation[member["observation_id"]] = cluster["match_cluster_id"]
+    v1_to_v2: dict[str, set[str]] = defaultdict(set)
+    v2_to_v1: dict[str, set[str]] = defaultdict(set)
+    for observation_id in sorted(set(v1_by_observation) & set(v2_by_observation)):
+        v1_to_v2[v1_by_observation[observation_id]].add(v2_by_observation[observation_id])
+        v2_to_v1[v2_by_observation[observation_id]].add(v1_by_observation[observation_id])
+    merged_groups = [
+        {"v2_cluster_id": cluster_id, "v1_cluster_ids": sorted(cluster_ids)}
+        for cluster_id, cluster_ids in v2_to_v1.items() if len(cluster_ids) > 1
+    ]
+    split_groups = [
+        {"v1_cluster_id": cluster_id, "v2_cluster_ids": sorted(cluster_ids)}
+        for cluster_id, cluster_ids in v1_to_v2.items() if len(cluster_ids) > 1
+    ]
+    return {
+        "union_v1_cluster_count": len(v1_clusters),
+        "union_v2_cluster_count": len(v2_clusters),
+        "false_split_groups_merged_count": len(merged_groups),
+        "false_splits_merged_count": sum(len(group["v1_cluster_ids"]) - 1 for group in merged_groups),
+        "overmerge_clusters_split_count": len(split_groups),
+        "overmerge_splits_created_count": sum(len(group["v2_cluster_ids"]) - 1 for group in split_groups),
+        "merged_groups": merged_groups,
+        "split_groups": split_groups,
+    }
+
+
+def _overmerge_audit_v2(
+    v1_clusters: list[dict[str, Any]], v2_clusters: list[dict[str, Any]]
+) -> dict[str, Any]:
+    def same_run_members(cluster: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+        by_run: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for member in cluster["members"]:
+            by_run[member["run_label"]].append(member)
+        return {run: values for run, values in by_run.items() if len(values) > 1}
+
+    legacy = []
+    for cluster in v1_clusters:
+        repeated = same_run_members(cluster)
+        if repeated:
+            legacy.append({
+                "match_cluster_id": cluster["match_cluster_id"],
+                "ticker": cluster["ticker"],
+                "same_run_members": repeated,
+            })
+    current = []
+    for cluster in v2_clusters:
+        repeated = same_run_members(cluster)
+        if repeated:
+            current.append({
+                "match_cluster_id": cluster["match_cluster_id"],
+                "ticker": cluster["ticker"],
+                "same_run_members": repeated,
+                "matcher_evidence": cluster["matcher_evidence"],
+            })
+    return {
+        "schema_version": MATCHER_REVIEW_SCHEMA,
+        "legacy_v1_same_run_multi_member_cluster_count": len(legacy),
+        "legacy_v1_same_run_multi_member_clusters": legacy,
+        "v2_same_run_multi_member_cluster_count": len(current),
+        "v2_same_run_multi_member_clusters": current,
+        "bluebon_2208_legacy_overmerge_detected": any(item["ticker"] == "2208" for item in legacy),
     }
 
 
@@ -1837,6 +2494,211 @@ def build_quality_union(
     }
 
 
+def _quality_run_events(
+    root: Path, benchmark_id: str
+) -> tuple[dict[str, Any], dict[str, dict[str, list[dict[str, Any]]]]]:
+    cohort = _load_cohort(root, benchmark_id)
+    reference_tickers = set(cohort["reference_tickers"])
+    run_events: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for run_name in QUALITY_RUN_LABELS:
+        _, events, _ = _completed_run_events(root, benchmark_id, run_name)
+        run_events[run_name] = {
+            ticker: values for ticker, values in events.items() if ticker in reference_tickers
+        }
+    return cohort, run_events
+
+
+def rebuild_quality_union_v2(
+    root: Path, benchmark_id: str, *, now: datetime | None = None
+) -> dict[str, Any]:
+    cohort, run_events = _quality_run_events(root, benchmark_id)
+    company_names = {
+        company["ticker"]: company["company_name"] for company in cohort["companies"]
+    }
+    matcher = _build_event_union_v2(run_events, company_names)
+    v1_path = _quality_v2_dir(root, benchmark_id) / "event_union.json"
+    v1_union = _read_json(v1_path)
+    comparison = _union_version_comparison(v1_union["events"], matcher["events"])
+    persistent = _persistent_false_negative_audit(matcher["events"])
+    tickers = [company["ticker"] for company in cohort["companies"] if company["ticker"] in set(cohort["reference_tickers"])]
+    pairwise = {
+        "batch02_vs_reference01": _pairwise_metrics_v2(
+            "reference", "batch02", run_events["reference"], run_events["batch02"], tickers
+        ),
+        "batch02_vs_reference02": _pairwise_metrics_v2(
+            "reference02", "batch02", run_events["reference02"], run_events["batch02"], tickers
+        ),
+        "batch04_vs_reference01": _pairwise_metrics_v2(
+            "reference", "batch04", run_events["reference"], run_events["batch04"], tickers
+        ),
+        "batch04_vs_reference02": _pairwise_metrics_v2(
+            "reference02", "batch04", run_events["reference02"], run_events["batch04"], tickers
+        ),
+    }
+    telemetry_facts: dict[str, Any] = {}
+    for run_name in QUALITY_RUN_LABELS:
+        audit = _read_json(_run_dir(root, benchmark_id, run_name) / "audit.json")
+        telemetry_facts[QUALITY_RUN_LABELS[run_name]] = {
+            "average_source_count_per_company": audit.get("research", {}).get("average_source_count_per_company"),
+            "company_research_elapsed_seconds": audit.get("runtime", {}).get("company_research_elapsed_seconds"),
+        }
+    core = {
+        "schema_version": EVENT_UNION_V2_SCHEMA,
+        "matcher_schema_version": MATCHER_V2_SCHEMA,
+        "benchmark_id": benchmark_id,
+        "runs": list(QUALITY_RUN_LABELS.values()),
+        "search_from": cohort["search_from"],
+        "search_to": cohort["search_to"],
+        "company_count": len(tickers),
+        "event_cluster_count": len(matcher["events"]),
+        "processing_order": [
+            "strict within-run dedupe", "canonical identity keys", "cross-run candidates",
+            "HIGH-confidence auto match", "deterministic one-to-one assignment",
+            "union clusters", "MEDIUM-confidence review artifact",
+        ],
+        "identity_contract": {
+            "ticker_is_hard_requirement": True,
+            "category_is_identity_gate": False,
+            "importance_is_identity_signal": False,
+            "earnings_relevance_is_identity_signal": False,
+            "same_run_semantic_only_merge_forbidden": True,
+            "only_high_confidence_is_auto_merged": True,
+        },
+        "version_comparison": comparison,
+        "annotation_consistency": matcher["annotation_consistency"],
+        "candidate_matching_metrics": {
+            "pairwise": pairwise,
+            "reference_union": {
+                "batch02": _candidate_metrics_from_union_v2(matcher["events"], "batch02"),
+                "batch04": _candidate_metrics_from_union_v2(matcher["events"], "batch04"),
+            },
+            "final_quality_requires_gold_v2": True,
+        },
+        "immutable_run_telemetry_facts": telemetry_facts,
+        "run_telemetry_mutated": False,
+        "persistent_false_negative_audit": persistent,
+        "candidate_only_events_are_not_false_positives": True,
+        "same_run_multi_member_cluster_count": matcher["same_run_multi_member_cluster_count"],
+        "events": matcher["events"],
+    }
+    deterministic_hash = hashlib.sha256(
+        json.dumps(core, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    union = {
+        **core,
+        "created_at": _iso(now),
+        "deterministic_content_sha256": deterministic_hash,
+    }
+    merge_candidates = {
+        "schema_version": MATCHER_REVIEW_SCHEMA,
+        "matcher_schema_version": MATCHER_V2_SCHEMA,
+        "benchmark_id": benchmark_id,
+        "created_at": _iso(now),
+        "candidate_count": len(matcher["matcher_merge_candidates"]),
+        "only_high_confidence_auto_merged": True,
+        "candidates": matcher["matcher_merge_candidates"],
+    }
+    overmerge = {
+        **_overmerge_audit_v2(v1_union["events"], matcher["events"]),
+        "benchmark_id": benchmark_id,
+        "created_at": _iso(now),
+        "version_comparison": comparison,
+    }
+    matcher_directory = _quality_v2_dir(root, benchmark_id) / "matcher_v2"
+    output_paths = {
+        "event_union_v2": matcher_directory / "event_union_v2.json",
+        "gold_adjudication_v2": matcher_directory / "gold_adjudication_v2.json",
+        "matcher_merge_candidates": matcher_directory / "matcher_merge_candidates.json",
+        "matcher_overmerge_audit": matcher_directory / "matcher_overmerge_audit.json",
+    }
+    if any(path.exists() for path in output_paths.values()):
+        raise BenchmarkError("matcher v2 output already exists; refusing overwrite")
+    atomic_write_json(output_paths["event_union_v2"], union)
+    atomic_write_json(output_paths["matcher_merge_candidates"], merge_candidates)
+    atomic_write_json(output_paths["matcher_overmerge_audit"], overmerge)
+    gold = _gold_template(benchmark_id, union, now=now)
+    gold["matcher_schema_version"] = MATCHER_V2_SCHEMA
+    gold["source_union_path"] = str(output_paths["event_union_v2"].resolve())
+    atomic_write_json(output_paths["gold_adjudication_v2"], gold)
+    return {
+        "schema_version": EVENT_UNION_V2_SCHEMA,
+        "benchmark_id": benchmark_id,
+        "union_v1_cluster_count": comparison["union_v1_cluster_count"],
+        "union_v2_cluster_count": comparison["union_v2_cluster_count"],
+        "false_splits_merged_count": comparison["false_splits_merged_count"],
+        "overmerge_clusters_split_count": comparison["overmerge_clusters_split_count"],
+        "ambiguous_count": len(matcher["matcher_merge_candidates"]),
+        "annotation_consistency": matcher["annotation_consistency"],
+        "candidate_matching_metrics": core["candidate_matching_metrics"],
+        "output_paths": {key: str(path.resolve()) for key, path in output_paths.items()},
+        "existing_v1_artifacts_modified": False,
+        "new_web_research": False,
+        "final_quality_requires_gold_v2": True,
+    }
+
+
+def audit_reference_repeatability_v2(
+    root: Path, benchmark_id: str, *, now: datetime | None = None
+) -> dict[str, Any]:
+    cohort, run_events = _quality_run_events(root, benchmark_id)
+    tickers = [
+        company["ticker"] for company in cohort["companies"]
+        if company["ticker"] in set(cohort["reference_tickers"])
+    ]
+    forward = _pairwise_metrics_v2(
+        "reference", "reference02", run_events["reference"], run_events["reference02"], tickers
+    )
+    reverse = _pairwise_metrics_v2(
+        "reference02", "reference", run_events["reference02"], run_events["reference"], tickers
+    )
+    old_path = _quality_v2_dir(root, benchmark_id) / "reference_repeatability.json"
+    old = _read_json(old_path)
+    stable = (
+        forward["event_recall"] >= 0.90
+        and reverse["event_recall"] >= 0.90
+        and forward["critical_event_recall"] == 1.0
+        and reverse["critical_event_recall"] == 1.0
+    )
+    decision = "PASS" if stable else (
+        "QUALITY_METRIC_NOT_STABLE"
+        if min(forward["event_recall"], reverse["event_recall"]) < 0.90 else "WARN"
+    )
+    result = {
+        "schema_version": REPEATABILITY_V2_SCHEMA,
+        "matcher_schema_version": MATCHER_V2_SCHEMA,
+        "benchmark_id": benchmark_id,
+        "created_at": _iso(now),
+        "decision": decision,
+        "all_event_repeatability_not_material_gold_recall": True,
+        "thresholds": {
+            "overall_event_recall": 0.90,
+            "critical_event_recall": 1.0,
+        },
+        "repeatability_v1": {
+            "reference01_to_reference02": old["reference01_to_reference02"],
+            "reference02_to_reference01": old["reference02_to_reference01"],
+            "jaccard_event_similarity": old["jaccard_event_similarity"],
+            "news_presence_agreement": old["news_presence_agreement"],
+        },
+        "repeatability_v2": {
+            "reference01_to_reference02": forward,
+            "reference02_to_reference01": reverse,
+            "jaccard_event_similarity": forward["jaccard_event_similarity"],
+            "news_presence_agreement_rate": forward["news_presence_agreement_rate"],
+            "same_run_overmerge_count": forward["same_run_multi_member_cluster_count"],
+            "ambiguous_count": forward["ambiguous_match_count"],
+            "annotation_consistency": forward["annotation_consistency"],
+        },
+        "source_count_agreement": old.get("source_count_agreement"),
+        "news_presence_requires_separate_review": True,
+    }
+    output = _quality_v2_dir(root, benchmark_id) / "matcher_v2" / "reference_repeatability_v2.json"
+    if output.exists():
+        raise BenchmarkError("reference repeatability v2 output already exists; refusing overwrite")
+    atomic_write_json(output, result)
+    return result
+
+
 def audit_gold_adjudication(
     root: Path,
     benchmark_id: str,
@@ -1878,6 +2740,51 @@ def audit_gold_adjudication(
         "batch03_remains_on_hold": True,
     }
     atomic_write_json(_quality_v2_dir(root, benchmark_id) / "gold_audit.json", result)
+    return result
+
+
+def audit_gold_adjudication_v2(
+    root: Path,
+    benchmark_id: str,
+    adjudication_path: Path,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    value = validate_gold_adjudication(_read_json(adjudication_path))
+    if value["benchmark_id"] != benchmark_id or value.get("matcher_schema_version") != MATCHER_V2_SCHEMA:
+        raise BenchmarkError("gold adjudication v2 benchmark/matcher identity mismatch")
+    matcher_directory = _quality_v2_dir(root, benchmark_id) / "matcher_v2"
+    union = _read_json(matcher_directory / "event_union_v2.json")
+    expected_hash = hashlib.sha256(
+        json.dumps(union, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    if value.get("source_union_sha256") != expected_hash:
+        raise BenchmarkError("gold adjudication v2 does not match event_union_v2")
+    throughput: dict[str, Any] = {}
+    compression: dict[str, Any] = {}
+    for run_name in ("batch02", "batch04"):
+        audit = _read_json(_run_dir(root, benchmark_id, run_name) / "audit.json")
+        fact = dict(audit.get("throughput", {}))
+        estimated_hours = fact.get("estimated_hours_for_3800")
+        fact["weekly_3800_feasible_with_8_tasks"] = (
+            estimated_hours is not None and float(estimated_hours) <= 168
+        )
+        throughput[run_name] = fact
+        compression[run_name] = audit.get("global_compression", {})
+    result = {
+        "schema_version": GOLD_AUDIT_SCHEMA,
+        "matcher_schema_version": MATCHER_V2_SCHEMA,
+        "benchmark_id": benchmark_id,
+        "captured_at": _iso(now),
+        "adjudication_path": str(adjudication_path.resolve()),
+        **_gold_metrics(value),
+        "reference_is_not_assumed_complete": True,
+        "throughput_facts": throughput,
+        "research_compression_facts": compression,
+        "batch03_remains_on_hold": True,
+    }
+    output = matcher_directory / "gold_audit_v2.json"
+    atomic_write_json(output, result)
     return result
 
 
@@ -2268,7 +3175,7 @@ def recommendation(root: Path, benchmark_id: str) -> dict[str, Any]:
         }
         for batch, audit in sorted(audits.items())
     })
-    gold_path = _quality_v2_dir(root, benchmark_id) / "gold_audit.json"
+    gold_path = _quality_v2_dir(root, benchmark_id) / "matcher_v2" / "gold_audit_v2.json"
     gold_audit = _read_json(gold_path) if gold_path.exists() else {}
     gold_complete = gold_audit.get("available") is True
     gold_decisions: dict[str, str] = {}
@@ -2456,9 +3363,16 @@ def _build_parser() -> argparse.ArgumentParser:
     repeatability.add_argument("--benchmark-id", required=True)
     event_union = commands.add_parser("build-quality-union")
     event_union.add_argument("--benchmark-id", required=True)
+    event_union_v2 = commands.add_parser("rebuild-quality-union-v2")
+    event_union_v2.add_argument("--benchmark-id", required=True)
+    repeatability_v2 = commands.add_parser("audit-reference-repeatability-v2")
+    repeatability_v2.add_argument("--benchmark-id", required=True)
     gold = commands.add_parser("audit-gold")
     gold.add_argument("--benchmark-id", required=True)
     gold.add_argument("--adjudication", type=Path, required=True)
+    gold_v2 = commands.add_parser("audit-gold-v2")
+    gold_v2.add_argument("--benchmark-id", required=True)
+    gold_v2.add_argument("--adjudication", type=Path, required=True)
     integration = commands.add_parser("prepare-integration-fixture")
     integration.add_argument("--batch-size", type=int, required=True)
     integration_audit = commands.add_parser("audit-integration-fixture")
@@ -2507,8 +3421,16 @@ def main(argv: list[str] | None = None) -> int:
             result = audit_reference_repeatability(root, args.benchmark_id)
         elif args.command == "build-quality-union":
             result = build_quality_union(root, args.benchmark_id)
+        elif args.command == "rebuild-quality-union-v2":
+            result = rebuild_quality_union_v2(root, args.benchmark_id)
+        elif args.command == "audit-reference-repeatability-v2":
+            result = audit_reference_repeatability_v2(root, args.benchmark_id)
         elif args.command == "audit-gold":
             result = audit_gold_adjudication(
+                root, args.benchmark_id, args.adjudication.resolve()
+            )
+        elif args.command == "audit-gold-v2":
+            result = audit_gold_adjudication_v2(
                 root, args.benchmark_id, args.adjudication.resolve()
             )
         elif args.command == "prepare-integration-fixture":
