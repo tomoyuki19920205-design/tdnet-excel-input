@@ -749,6 +749,38 @@ news false negatives. `VALID_NON_MATERIAL`, `INVALID_SOURCE`, and `OUT_OF_WINDOW
 participate in the precision denominator; candidate-only events are never classified
 as false positives without adjudication.
 
+### Gold material discovery and miss audit
+
+After Gold v2 reaches `GOLD_COMPLETE`, the existing-artifact-only miss audit builds a
+29-row material-event matrix across reference01, reference02, batch02, and batch04:
+
+```powershell
+python tools/company_news_batch_benchmark.py audit-gold-material-misses-v2 --benchmark-id batchbench-20260901T095759508419
+```
+
+The command validates the fixed 29 material / 7 critical counts and requires its
+discovery totals to equal `gold_audit_v2.json` before writing anything. It uses the
+same duplicate/MATCHER_FALSE_NEGATIVE root grouping as Gold scoring, so a normalized
+Gold event appears exactly once even when multiple matcher clusters represent it.
+For each run it records the actual matched observation provenance and joins existing
+company and task telemetry. Miss classifications and improvement scenarios are
+explicitly artifact-based inferences; the command performs no Web lookup.
+
+Outputs are runtime analysis artifacts under `quality_v2/matcher_v2`:
+
+- `gold_material_discovery_matrix.json` and `.md`
+- `gold_material_miss_analysis.json`
+- `GOLD_MATERIAL_MISS_ANALYSIS.md`
+
+The analysis includes critical/non-critical recall, source/channel/direction groups,
+reference disagreement, batch02/batch04 comparisons, multi-event-company truncation,
+returned-event distributions, found-versus-missed telemetry, batch position, precision
+noise, an official-first theoretical rescue ceiling, targeted second-pass candidates,
+and scenarios with explicit cost/risk caveats. It never rewrites Gold, the event
+union, packets/responses, raw run directories, or benchmark inbox output. For the
+completed benchmark the decision remains `DO_NOT_RUN_BATCH03_YET`: source-strategy
+hardening must be validated before another batch-size run.
+
 Only the final candidate receives the separate integration burst fixture. It contains
 synthetic files under `data/news_benchmark_load`, requires a temporary SQLite copy,
 disables Production Supabase writes, and exposes fields for worker duration/backlog,

@@ -30,7 +30,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from lib.news_monitor import NewsValidationError, normalize_ticker, validate_payload
-from tools.company_news_atomic import atomic_write_json, replace_with_retry
+from tools.company_news_atomic import atomic_write_json, atomic_write_text, replace_with_retry
 
 BENCHMARK_SCHEMA = "company_news_batch_benchmark_v1"
 RUN_SCHEMA = "company_news_batch_benchmark_run_v1"
@@ -53,6 +53,8 @@ GOLD_PACKET_SCHEMA = "company_news_gold_adjudication_packet_v2"
 GOLD_PACKET_MANIFEST_SCHEMA = "company_news_gold_packet_manifest_v2"
 GOLD_PACKET_PROVENANCE_SCHEMA = "company_news_gold_packet_provenance_v2"
 GOLD_RESPONSE_SCHEMA = "company_news_gold_adjudication_response_v2"
+GOLD_MATERIAL_MATRIX_SCHEMA = "company_news_gold_material_discovery_matrix_v1"
+GOLD_MATERIAL_MISS_ANALYSIS_SCHEMA = "company_news_gold_material_miss_analysis_v1"
 
 TASK_COUNT = 8
 COHORT_SIZE = 192
@@ -3237,16 +3239,10 @@ def import_gold_adjudication_v2(
     }
 
 
-def _gold_metrics_v2(value: dict[str, Any]) -> dict[str, Any]:
-    counts = _gold_verdict_counts(value)
-    if counts["UNKNOWN"]:
-        return {
-            "available": False,
-            "decision": "GOLD_INCOMPLETE",
-            "verdict_counts": counts,
-            "unknown_event_count": counts["UNKNOWN"],
-            "runs": {},
-        }
+def _gold_normalized_groups_v2(
+    value: dict[str, Any],
+) -> tuple[dict[str, dict[str, Any]], dict[str, list[dict[str, Any]]]]:
+    """Return Gold events grouped exactly as v2 scoring groups them."""
     by_id = {event["match_cluster_id"]: event for event in value["events"]}
 
     def root_id(event: dict[str, Any]) -> str:
@@ -3266,6 +3262,20 @@ def _gold_metrics_v2(value: dict[str, Any]) -> dict[str, Any]:
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for event in value["events"]:
         groups[root_id(event)].append(event)
+    return by_id, dict(groups)
+
+
+def _gold_metrics_v2(value: dict[str, Any]) -> dict[str, Any]:
+    counts = _gold_verdict_counts(value)
+    if counts["UNKNOWN"]:
+        return {
+            "available": False,
+            "decision": "GOLD_INCOMPLETE",
+            "verdict_counts": counts,
+            "unknown_event_count": counts["UNKNOWN"],
+            "runs": {},
+        }
+    by_id, groups = _gold_normalized_groups_v2(value)
     material_roots = {
         root for root in groups if by_id[root]["verdict"] == "VALID_MATERIAL"
     }
@@ -3398,6 +3408,686 @@ def audit_gold_adjudication_v2(
     output = matcher_directory / "gold_audit_v2.json"
     atomic_write_json(output, result)
     return result
+
+
+def _gold_source_bucket(source_type: str) -> str:
+    mapping = {
+        "company_news": "official_company",
+        "customer_supplier_official": "official_company",
+        "company_ir": "ir_tdnet",
+        "tdnet": "ir_tdnet",
+        "edinet": "ir_tdnet",
+        "government": "government",
+        "industry_association": "industry_research",
+        "reliable_news": "external_news",
+        "secondary": "external_news",
+    }
+    return mapping.get(source_type, "other")
+
+
+def _quartile_summary(values: list[float]) -> dict[str, float | int | None]:
+    return {
+        "count": len(values),
+        "average": statistics.mean(values) if values else None,
+        "median": statistics.median(values) if values else None,
+        "p25": _percentile(values, 0.25),
+        "p75": _percentile(values, 0.75),
+    }
+
+
+def _discovery_aggregate(
+    rows: list[dict[str, Any]],
+    *,
+    labels: tuple[str, ...] = tuple(QUALITY_RUN_LABELS.values()),
+) -> dict[str, Any]:
+    result: dict[str, Any] = {"event_count": len(rows)}
+    for label in labels:
+        found = sum(bool(row[f"{label}_found"]) for row in rows)
+        result[label] = {
+            "found": found,
+            "missed": len(rows) - found,
+            "recall": found / len(rows) if rows else 1.0,
+        }
+    return result
+
+
+def _grouped_discovery_analysis(
+    rows: list[dict[str, Any]], key: str, order: tuple[str, ...] | None = None
+) -> dict[str, Any]:
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        groups[str(row[key])].append(row)
+    keys = list(order or ()) + sorted(set(groups) - set(order or ()))
+    return {value: _discovery_aggregate(groups.get(value, [])) for value in keys}
+
+
+def _task_elapsed_by_run_id(directory: Path) -> dict[str, float]:
+    return {
+        str(record["run_id"]): float(record["task_elapsed_seconds"])
+        for record in _telemetry(directory, "runs.jsonl")
+        if record.get("run_id") and record.get("task_elapsed_seconds") is not None
+    }
+
+
+def _company_telemetry_index(
+    root: Path, benchmark_id: str, run_name: str, records: list[dict[str, Any]]
+) -> dict[str, dict[str, Any]]:
+    task_elapsed = _task_elapsed_by_run_id(_run_dir(root, benchmark_id, run_name))
+    result: dict[str, dict[str, Any]] = {}
+    for record in records:
+        ticker = str(record["ticker"])
+        result[ticker] = {
+            "research_elapsed_seconds": record.get("research_elapsed_seconds"),
+            "source_count": record.get("source_count"),
+            "task_elapsed_seconds": task_elapsed.get(str(record.get("run_id"))),
+            "batch_position": record.get("company_position"),
+            "returned_item_count": record.get("event_count"),
+        }
+    return result
+
+
+def _run_observations(
+    union_by_id: dict[str, dict[str, Any]],
+    group: list[dict[str, Any]],
+    label: str,
+) -> list[dict[str, Any]]:
+    observations: list[dict[str, Any]] = []
+    for gold_member in group:
+        union_event = union_by_id[gold_member["match_cluster_id"]]
+        for member in union_event.get("members", []):
+            if member.get("run_label") != label:
+                continue
+            observations.append({
+                key: member.get(key)
+                for key in (
+                    "observation_id", "headline", "source_url", "source_type",
+                    "category", "importance", "earnings_relevance", "summary",
+                )
+            })
+    return sorted(observations, key=lambda item: str(item.get("observation_id")))
+
+
+def _miss_reason(
+    row: dict[str, Any], label: str, material_count_for_company: int,
+    run_medians: dict[str, dict[str, float | None]],
+) -> dict[str, Any]:
+    detail = row["run_details"][label]
+    telemetry = detail["telemetry"]
+    output_count = int(detail["returned_item_count"] or 0)
+    source_bucket = row["source_bucket"]
+    signals: list[str] = []
+    if output_count == 0:
+        reason, confidence = "NO_EVENT_RETURNED", "HIGH"
+    elif material_count_for_company > 1:
+        reason, confidence = "MULTI_EVENT_COMPANY_TRUNCATION", "MEDIUM"
+    elif source_bucket in {"official_company", "ir_tdnet", "government"}:
+        reason, confidence = "OFFICIAL_SOURCE_MISSED", "HIGH"
+    elif source_bucket == "external_news":
+        reason, confidence = "EXTERNAL_NEWS_MISSED", "MEDIUM"
+    elif source_bucket == "industry_research":
+        reason, confidence = "INDUSTRY_CONTEXT_MISSED", "MEDIUM"
+    else:
+        reason, confidence = "DIFFERENT_EVENT_ONLY", "LOW"
+    research = telemetry.get("research_elapsed_seconds")
+    sources = telemetry.get("source_count")
+    if research is not None and run_medians[label]["research"] is not None:
+        if float(research) < float(run_medians[label]["research"]):
+            signals.append("research_time_below_run_median")
+    if sources is not None and run_medians[label]["sources"] is not None:
+        if float(sources) < float(run_medians[label]["sources"]):
+            signals.append("source_count_below_run_median")
+    if label in {"batch02", "batch04"} and signals:
+        signals.append("possible_batch_compression")
+        if confidence == "LOW":
+            reason, confidence = "POSSIBLE_BATCH_COMPRESSION", "MEDIUM"
+    strategy = {
+        "official_company": "OFFICIAL_SITE_DETERMINISTIC_FETCH",
+        "ir_tdnet": "IR_TDNET_DETERMINISTIC_FEED",
+        "government": "GOVERNMENT_OFFICIAL_SEARCH",
+        "industry_research": "INDUSTRY_KEYWORD_SEARCH",
+        "external_news": "COMPANY_EXPOSURE_AND_NEWS_SEARCH",
+        "other": "GENERAL_WEB_SECOND_PASS",
+    }[source_bucket]
+    return {
+        "reason": reason,
+        "reason_confidence": confidence,
+        "signals": signals,
+        "improvement_candidate": strategy,
+    }
+
+
+def _noise_category(row: dict[str, Any]) -> str:
+    text = " ".join(str(row.get(key, "")) for key in ("headline", "category", "notes")).lower()
+    if re.search(r"campaign|キャンペーン", text):
+        return "campaign"
+    if re.search(r"rating|レーティング|目標株価", text):
+        return "rating"
+    if re.search(r"blog|ブログ|勉強会|csr", text):
+        return "blog"
+    if re.search(r"会社紹介|企業紹介|profile|銘柄カルテ", text):
+        return "profile"
+    if not row.get("company_specific", True) or row.get("earnings_channel") == "industry":
+        return "generic_industry"
+    if row.get("category") in {"product_service", "new_product"}:
+        return "minor_product"
+    return "other"
+
+
+def _markdown_cell(value: Any) -> str:
+    return str(value if value is not None else "").replace("|", "\\|").replace("\n", " ")
+
+
+def _matrix_markdown(matrix: dict[str, Any]) -> str:
+    lines = [
+        "# Gold Material Discovery Matrix", "",
+        f"Benchmark: `{matrix['benchmark_id']}`", "",
+        "The rows use the same duplicate normalization as Gold v2 scoring.", "",
+        "| Ticker | Date | Gold event | Source | Channel | Ref01 | Ref02 | Batch02 | Batch04 |",
+        "|---|---|---|---|---|---:|---:|---:|---:|",
+    ]
+    for row in matrix["rows"]:
+        lines.append("| " + " | ".join(_markdown_cell(value) for value in (
+            row["ticker"], row["date"], row["canonical_headline"],
+            row["primary_source_type"], row["earnings_channel"],
+            "FOUND" if row["reference01_found"] else "MISSED",
+            "FOUND" if row["reference02_found"] else "MISSED",
+            "FOUND" if row["batch02_found"] else "MISSED",
+            "FOUND" if row["batch04_found"] else "MISSED",
+        )) + " |")
+    return "\n".join(lines) + "\n"
+
+
+def _analysis_markdown(analysis: dict[str, Any]) -> str:
+    summary = analysis["summary"]
+    official = analysis["official_source_safety_net"]
+    lines = [
+        "# Gold Material Miss Analysis", "", "## Executive Summary", "",
+        (
+            f"Gold is complete with {summary['material_event_count']} material events and "
+            f"{summary['critical_event_count']} critical events. Reference01/reference02/"
+            f"batch02/batch04 found {summary['run_results']['reference01']['found']}/"
+            f"{summary['run_results']['reference02']['found']}/"
+            f"{summary['run_results']['batch02']['found']}/"
+            f"{summary['run_results']['batch04']['found']} material events respectively."
+        ), "",
+        (
+            f"Batch04 missed {summary['run_results']['batch04']['missed']} events. "
+            f"An official-first pass has a theoretical upper-bound rescue of "
+            f"{official['theoretical_upper_bound_rescue_count']} events; this is not an "
+            "observed recall gain and assumes every deterministic source retrieval succeeds."
+        ), "",
+        f"Recommendation: **{analysis['recommendation']['decision']}**. "
+        f"{analysis['recommendation']['rationale']}", "",
+        "## Four-run summary", "",
+        "| Run | Found | Missed | Material recall | Critical recall | Non-critical recall |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
+    for label, facts in summary["run_results"].items():
+        lines.append(
+            f"| {label} | {facts['found']} | {facts['missed']} | {facts['recall']:.2%} | "
+            f"{summary['critical'][label]['recall']:.2%} | "
+            f"{summary['noncritical'][label]['recall']:.2%} |"
+        )
+    for title, key in (("Critical material events", "critical_analysis"),
+                       ("Non-critical material events", "noncritical_analysis")):
+        lines.extend([
+            "", f"## {title}", "",
+            "| Ticker | Date | Headline | Source | Channel | Direction | Ref01 | Ref02 | Batch02 | Batch04 |",
+            "|---|---|---|---|---|---|---:|---:|---:|---:|",
+        ])
+        for row in analysis[key]["events"]:
+            lines.append("| " + " | ".join(_markdown_cell(value) for value in (
+                row["ticker"], row["date"], row["canonical_headline"],
+                row["primary_source_type"], row["earnings_channel"], row["direction"],
+                "FOUND" if row["reference01_found"] else "MISSED",
+                "FOUND" if row["reference02_found"] else "MISSED",
+                "FOUND" if row["batch02_found"] else "MISSED",
+                "FOUND" if row["batch04_found"] else "MISSED",
+            )) + " |")
+    lines.extend(["", "## Reference disagreement", ""])
+    for key, value in analysis["reference_disagreement"]["counts"].items():
+        lines.append(f"- {key}: {value}")
+    lines.extend([
+        "", "## Source-type recall", "",
+        "| Source bucket | Events | Ref01 | Ref02 | Batch02 | Batch04 |",
+        "|---|---:|---:|---:|---:|---:|",
+    ])
+    for bucket, facts in analysis["source_type_analysis"].items():
+        lines.append(
+            f"| {bucket} | {facts['event_count']} | {facts['reference01']['recall']:.2%} | "
+            f"{facts['reference02']['recall']:.2%} | {facts['batch02']['recall']:.2%} | "
+            f"{facts['batch04']['recall']:.2%} |"
+        )
+    b2 = analysis["batch02_analysis"]
+    b4 = analysis["batch04_analysis"]
+    cross = analysis["batch02_vs_batch04"]["counts"]
+    lines.extend([
+        "", "## Batch compression indicators", "",
+        f"- Both references found but batch02 missed: {len(b2['both_references_found_candidate_missed'])}",
+        f"- Both references found but batch04 missed: {len(b4['both_references_found_candidate_missed'])}",
+        f"- Batch02-only / Batch04-only: {cross['BATCH02_ONLY']} / {cross['BATCH04_ONLY']}",
+        "", "## Multi-event companies", "",
+        f"Multi-material companies: {analysis['multi_event_analysis']['company_count']}; "
+        f"partial company-run observations: {analysis['multi_event_analysis']['partial_truncation_company_run_count']}.",
+        "",
+        "| Ticker | Company | Gold events | Ref01 | Ref02 | Batch02 | Batch04 |",
+        "|---|---|---:|---|---|---|---|",
+    ])
+    for company in analysis["multi_event_analysis"]["companies"]:
+        lines.append("| " + " | ".join(_markdown_cell(value) for value in (
+            company["ticker"], company["company"], company["material_event_count"],
+            company["runs"]["reference01"]["status"], company["runs"]["reference02"]["status"],
+            company["runs"]["batch02"]["status"], company["runs"]["batch04"]["status"],
+        )) + " |")
+    lines.extend([
+        "", "## Found versus missed telemetry", "",
+        "| Run | Found research avg/median | Missed research avg/median | Found sources avg/median | Missed sources avg/median |",
+        "|---|---:|---:|---:|---:|",
+    ])
+    for label, facts in analysis["telemetry_analysis"].items():
+        fr, mr = facts["found_research_seconds"], facts["missed_research_seconds"]
+        fs, ms = facts["found_source_count"], facts["missed_source_count"]
+        lines.append(
+            f"| {label} | {fr['average']:.2f}/{fr['median']:.2f} | "
+            f"{mr['average']:.2f}/{mr['median']:.2f} | {fs['average']:.2f}/{fs['median']:.2f} | "
+            f"{ms['average']:.2f}/{ms['median']:.2f} |"
+        )
+    lines.extend(["", "## Batch position", ""])
+    for label in ("batch02", "batch04"):
+        rendered = ", ".join(
+            f"position {position}: {facts['found']}/{facts['found'] + facts['missed']} ({facts['recall']:.2%})"
+            for position, facts in analysis["batch_position_analysis"][label].items()
+        )
+        lines.append(f"- {label}: {rendered}")
+    remaining = analysis["external_news_second_pass"]
+    lines.extend([
+        "", "## Safety-net estimates", "",
+        f"- Batch04 material misses: {official['batch04_missed_material_count']}",
+        f"- Official-first theoretical rescue ceiling: {official['theoretical_upper_bound_rescue_count']}",
+        f"- Remaining external/industry misses: {remaining['remaining_external_or_industry_miss_count']}",
+        f"- Non-official targeted second-pass candidates: {remaining['targeted_second_pass_candidate_count']}",
+        "", "## Precision noise", "",
+    ])
+    for label, facts in analysis["precision_noise_analysis"].items():
+        categories = ", ".join(f"{key}={value}" for key, value in facts["categories"].items())
+        lines.append(f"- {label}: {facts['total']} non-material discoveries ({categories})")
+    lines.extend(["", "## Improvement scenarios", ""])
+    for scenario in analysis["improvement_scenarios"]:
+        lines.append(
+            f"- **{scenario['scenario']}** — upper-bound recall: "
+            f"{scenario.get('expected_recall_upper_bound')}; cost: {scenario['additional_research_cost']}; "
+            f"throughput: {scenario['throughput_impact_direction']}; risk: {scenario['risk']}"
+        )
+    lines.extend(["", "## Interpretation guardrails", "",
+                  "Miss reasons and rescue counts are artifact-based classifications, not new Web verification. ",
+                  "The audit does not mutate Gold, run outputs, Production data, or scheduled tasks."])
+    return "\n".join(lines) + "\n"
+
+
+def audit_gold_material_misses_v2(
+    root: Path, benchmark_id: str, *, now: datetime | None = None
+) -> dict[str, Any]:
+    """Build a read-only four-run audit of finalized Gold v2 material events."""
+    directory = _matcher_v2_directory(root, benchmark_id)
+    union = _read_json(directory / "event_union_v2.json")
+    gold = _validate_gold_v2_against_union(
+        _read_json(directory / "gold_adjudication_v2.json"), union
+    )
+    gold_audit = _read_json(directory / "gold_audit_v2.json")
+    metrics = _gold_metrics_v2(gold)
+    if metrics.get("decision") != "GOLD_COMPLETE":
+        raise BenchmarkError("Gold v2 must be GOLD_COMPLETE before miss analysis")
+    if metrics.get("gold_material_event_count") != 29 or metrics.get("critical_gold_event_count") != 7:
+        raise BenchmarkError("Gold v2 material/critical integrity mismatch (expected 29/7)")
+    if gold_audit.get("decision") != "GOLD_COMPLETE" or gold_audit.get("verdict_counts", {}).get("UNKNOWN") != 0:
+        raise BenchmarkError("gold_audit_v2.json is not complete")
+
+    by_id, groups = _gold_normalized_groups_v2(gold)
+    union_by_id = {event["match_cluster_id"]: event for event in union["events"]}
+    material_roots = sorted(
+        (root_id for root_id in groups if by_id[root_id]["verdict"] == "VALID_MATERIAL"),
+        key=lambda root_id: (by_id[root_id]["ticker"], by_id[root_id]["date"], root_id),
+    )
+    cohort = _load_cohort(root, benchmark_id)
+    reference_tickers = set(cohort["reference_tickers"])
+    run_events: dict[str, dict[str, list[Any]]] = {}
+    telemetry: dict[str, dict[str, dict[str, Any]]] = {}
+    for run_name, label in QUALITY_RUN_LABELS.items():
+        _, events, company_records = _completed_run_events(root, benchmark_id, run_name)
+        run_events[label] = {ticker: values for ticker, values in events.items() if ticker in reference_tickers}
+        telemetry[label] = _company_telemetry_index(root, benchmark_id, run_name, company_records)
+    run_medians = {
+        label: {
+            "research": statistics.median([
+                float(value["research_elapsed_seconds"]) for value in values.values()
+                if value.get("research_elapsed_seconds") is not None
+            ]),
+            "sources": statistics.median([
+                float(value["source_count"]) for value in values.values()
+                if value.get("source_count") is not None
+            ]),
+        }
+        for label, values in telemetry.items()
+    }
+    material_per_ticker: dict[str, int] = defaultdict(int)
+    for root_id in material_roots:
+        material_per_ticker[str(by_id[root_id]["ticker"])] += 1
+
+    rows: list[dict[str, Any]] = []
+    for root_id in material_roots:
+        gold_event = by_id[root_id]
+        group = groups[root_id]
+        ticker = str(gold_event["ticker"])
+        source_type = str(gold_event.get("primary_source_type") or gold_event.get("source_type") or "none")
+        row: dict[str, Any] = {
+            "gold_event_id": root_id,
+            "cluster_id": root_id,
+            "normalized_cluster_ids": sorted(item["match_cluster_id"] for item in group),
+            "ticker": ticker,
+            "company": gold_event.get("company"),
+            "date": gold_event.get("event_date") or gold_event.get("date"),
+            "canonical_headline": gold_event.get("canonical_headline") or gold_event.get("headline"),
+            "materiality_reason": gold_event.get("materiality_reason") or gold_event.get("rationale"),
+            "earnings_channel": gold_event.get("earnings_channel"),
+            "direction": gold_event.get("direction"),
+            "confidence": gold_event.get("confidence"),
+            "primary_source_url": gold_event.get("primary_source_url") or gold_event.get("official_source_url"),
+            "primary_source_type": source_type,
+            "source_bucket": _gold_source_bucket(source_type),
+            "official_source": _gold_source_bucket(source_type) in {"official_company", "ir_tdnet", "government"},
+            "critical": gold_event.get("importance") == "high" or gold_event.get("earnings_relevance") == "direct",
+            "run_details": {},
+        }
+        found_by: list[str] = []
+        missed_by: list[str] = []
+        for label in QUALITY_RUN_LABELS.values():
+            found = any(bool(member.get("found_by", {}).get(label)) for member in group)
+            observations = _run_observations(union_by_id, group, label)
+            detail = {
+                "found": found,
+                "observations": observations,
+                "returned_item_count": len(run_events[label].get(ticker, [])),
+                "telemetry": telemetry[label].get(ticker, {
+                    "research_elapsed_seconds": None, "source_count": None,
+                    "task_elapsed_seconds": None, "batch_position": None,
+                    "returned_item_count": None,
+                }),
+            }
+            row["run_details"][label] = detail
+            row[f"{label}_found"] = found
+            (found_by if found else missed_by).append(label)
+        row["found_count_4_runs"] = len(found_by)
+        row["found_by"] = found_by
+        row["missed_by"] = missed_by
+        row["miss_analysis"] = {
+            label: _miss_reason(row, label, material_per_ticker[ticker], run_medians)
+            for label in missed_by
+        }
+        rows.append(row)
+
+    run_results = _discovery_aggregate(rows)
+    expected_found = {"reference01": 25, "reference02": 22, "batch02": 19, "batch04": 17}
+    for label, expected in expected_found.items():
+        audit_run = gold_audit.get("runs", {}).get(label, {})
+        actual = run_results[label]["found"]
+        if actual != expected or audit_run.get("found_gold_material_event_count") != actual:
+            raise BenchmarkError(f"{label} discovery flags disagree with Gold audit")
+    critical_rows = [row for row in rows if row["critical"]]
+    noncritical_rows = [row for row in rows if not row["critical"]]
+    critical = _discovery_aggregate(critical_rows)
+    noncritical = _discovery_aggregate(noncritical_rows)
+    if any(critical[label]["found"] != 7 for label in QUALITY_RUN_LABELS.values()):
+        raise BenchmarkError("critical discovery flags disagree with Gold audit")
+
+    ref_categories: dict[str, list[str]] = defaultdict(list)
+    batch_categories: dict[str, list[str]] = defaultdict(list)
+    for row in rows:
+        r1, r2 = row["reference01_found"], row["reference02_found"]
+        ref_key = "BOTH_FOUND" if r1 and r2 else "REF01_ONLY" if r1 else "REF02_ONLY" if r2 else "BOTH_MISSED"
+        ref_categories[ref_key].append(row["gold_event_id"])
+        b2, b4 = row["batch02_found"], row["batch04_found"]
+        batch_key = "BOTH_FOUND" if b2 and b4 else "BATCH02_ONLY" if b2 else "BATCH04_ONLY" if b4 else "BOTH_MISSED"
+        batch_categories[batch_key].append(row["gold_event_id"])
+
+    def comparison(label: str) -> dict[str, Any]:
+        both_refs_missed = [row for row in rows if row["reference01_found"] and row["reference02_found"] and not row[f"{label}_found"]]
+        return {
+            "reference01_found_candidate_missed": [row["gold_event_id"] for row in rows if row["reference01_found"] and not row[f"{label}_found"]],
+            "reference02_found_candidate_missed": [row["gold_event_id"] for row in rows if row["reference02_found"] and not row[f"{label}_found"]],
+            "both_references_found_candidate_missed": [row["gold_event_id"] for row in both_refs_missed],
+            "neither_reference_found_candidate_found": [row["gold_event_id"] for row in rows if not row["reference01_found"] and not row["reference02_found"] and row[f"{label}_found"]],
+            "both_reference_miss_details": [{
+                "gold_event_id": row["gold_event_id"], "ticker": row["ticker"],
+                "headline": row["canonical_headline"], "gold_source": row["primary_source_url"],
+                "source_type": row["primary_source_type"], "channel": row["earnings_channel"],
+                "direction": row["direction"],
+                "reference01_sources": [value.get("source_url") for value in row["run_details"]["reference01"]["observations"]],
+                "reference02_sources": [value.get("source_url") for value in row["run_details"]["reference02"]["observations"]],
+                "candidate_returned_item_count": row["run_details"][label]["returned_item_count"],
+                "candidate_telemetry": row["run_details"][label]["telemetry"],
+            } for row in both_refs_missed],
+        }
+
+    multi_event: list[dict[str, Any]] = []
+    partial_by_run = {label: 0 for label in QUALITY_RUN_LABELS.values()}
+    for ticker in sorted(key for key, count in material_per_ticker.items() if count > 1):
+        company_rows = [row for row in rows if row["ticker"] == ticker]
+        run_status: dict[str, Any] = {}
+        for label in QUALITY_RUN_LABELS.values():
+            found = sum(row[f"{label}_found"] for row in company_rows)
+            state = "ALL_FOUND" if found == len(company_rows) else "ALL_MISSED" if found == 0 else "PARTIAL"
+            partial_by_run[label] += state == "PARTIAL"
+            run_status[label] = {"found": found, "total": len(company_rows), "status": state}
+        multi_event.append({
+            "ticker": ticker, "company": company_rows[0]["company"],
+            "material_event_count": len(company_rows), "runs": run_status,
+        })
+
+    returned_distribution: dict[str, Any] = {}
+    for label in QUALITY_RUN_LABELS.values():
+        counts = {"0": 0, "1": 0, "2": 0, "3+": 0}
+        multi_counts = {"0": 0, "1": 0, "2": 0, "3+": 0}
+        for ticker in sorted(reference_tickers):
+            count = len(run_events[label].get(ticker, []))
+            key = str(count) if count < 3 else "3+"
+            counts[key] += 1
+            if material_per_ticker.get(ticker, 0) > 1:
+                multi_counts[key] += 1
+        returned_distribution[label] = {"all_reference_companies": counts, "multi_material_companies": multi_counts}
+
+    telemetry_analysis: dict[str, Any] = {}
+    position_analysis: dict[str, Any] = {}
+    for label in QUALITY_RUN_LABELS.values():
+        found_research: list[float] = []
+        missed_research: list[float] = []
+        found_sources: list[float] = []
+        missed_sources: list[float] = []
+        found_task_elapsed: list[float] = []
+        missed_task_elapsed: list[float] = []
+        positions: dict[int, list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            facts = row["run_details"][label]["telemetry"]
+            target_research = found_research if row[f"{label}_found"] else missed_research
+            target_sources = found_sources if row[f"{label}_found"] else missed_sources
+            target_task_elapsed = found_task_elapsed if row[f"{label}_found"] else missed_task_elapsed
+            if facts.get("research_elapsed_seconds") is not None:
+                target_research.append(float(facts["research_elapsed_seconds"]))
+            if facts.get("source_count") is not None:
+                target_sources.append(float(facts["source_count"]))
+            if facts.get("task_elapsed_seconds") is not None:
+                target_task_elapsed.append(float(facts["task_elapsed_seconds"]))
+            if facts.get("batch_position") is not None:
+                positions[int(facts["batch_position"])].append(row)
+        telemetry_analysis[label] = {
+            "found_research_seconds": _quartile_summary(found_research),
+            "missed_research_seconds": _quartile_summary(missed_research),
+            "found_source_count": _quartile_summary(found_sources),
+            "missed_source_count": _quartile_summary(missed_sources),
+            "found_task_elapsed_seconds": _quartile_summary(found_task_elapsed),
+            "missed_task_elapsed_seconds": _quartile_summary(missed_task_elapsed),
+        }
+        position_analysis[label] = {
+            str(position): _discovery_aggregate(position_rows, labels=(label,))[label]
+            for position, position_rows in sorted(positions.items())
+        }
+
+    nonmaterial_roots = [root_id for root_id in groups if by_id[root_id]["verdict"] == "VALID_NON_MATERIAL"]
+    precision_noise: dict[str, Any] = {}
+    for label in QUALITY_RUN_LABELS.values():
+        noise: dict[str, int] = defaultdict(int)
+        for root_id in nonmaterial_roots:
+            if any(member.get("found_by", {}).get(label) for member in groups[root_id]):
+                noise[_noise_category(by_id[root_id])] += 1
+        precision_noise[label] = {"total": sum(noise.values()), "categories": dict(sorted(noise.items()))}
+
+    batch04_missed = [row for row in rows if not row["batch04_found"]]
+    official_missed = [row for row in batch04_missed if row["official_source"]]
+    remaining_external_industry = [
+        row for row in batch04_missed
+        if row["source_bucket"] in {"external_news", "industry_research"}
+    ]
+    targeted = [row for row in batch04_missed if not row["official_source"]]
+    current_found = run_results["batch04"]["found"]
+    official_upper = (current_found + len(official_missed)) / len(rows)
+    scenarios = [
+        {
+            "scenario": "A_CURRENT_BATCH04", "expected_recall_upper_bound": run_results["batch04"]["recall"],
+            "additional_research_cost": "none", "throughput_impact_direction": "none",
+            "implementation_complexity": "none", "risk": "material recall remains below target",
+        },
+        {
+            "scenario": "B_BATCH04_OFFICIAL_FIRST", "expected_recall_upper_bound": official_upper,
+            "additional_research_cost": "moderate deterministic source pass", "throughput_impact_direction": "lower",
+            "implementation_complexity": "medium", "risk": "upper bound assumes every official-source miss is rescued",
+        },
+        {
+            "scenario": "C_OFFICIAL_FIRST_TARGETED_SECOND_PASS", "expected_recall_upper_bound": 1.0,
+            "additional_research_cost": "high and source-dependent", "throughput_impact_direction": "lower",
+            "implementation_complexity": "high", "risk": "theoretical ceiling only; Web stochasticity and noise may increase",
+        },
+        {
+            "scenario": "D_SINGLE_COMPANY_FALLBACK_FOR_UNCERTAIN", "expected_recall_upper_bound": None,
+            "additional_research_cost": "high only for selected companies", "throughput_impact_direction": "lower but bounded",
+            "implementation_complexity": "high", "risk": "uncertainty selector must be validated to avoid silent misses",
+        },
+    ]
+    source_analysis = _grouped_discovery_analysis(
+        rows, "source_bucket",
+        ("official_company", "ir_tdnet", "government", "industry_research", "external_news", "other"),
+    )
+    analysis = {
+        "schema_version": GOLD_MATERIAL_MISS_ANALYSIS_SCHEMA,
+        "benchmark_id": benchmark_id,
+        "created_at": _iso(now),
+        "summary": {
+            "gold_status": "GOLD_COMPLETE", "material_event_count": len(rows),
+            "critical_event_count": len(critical_rows), "noncritical_event_count": len(noncritical_rows),
+            "run_results": {label: run_results[label] for label in QUALITY_RUN_LABELS.values()},
+            "critical": {label: critical[label] for label in QUALITY_RUN_LABELS.values()},
+            "noncritical": {label: noncritical[label] for label in QUALITY_RUN_LABELS.values()},
+            "official_source": _discovery_aggregate([row for row in rows if row["official_source"]]),
+            "external_news": source_analysis["external_news"],
+            "industry_research": source_analysis["industry_research"],
+            "multi_event_company": _discovery_aggregate([row for row in rows if material_per_ticker[row["ticker"]] > 1]),
+        },
+        "material_matrix": rows,
+        "critical_analysis": {"summary": critical, "events": critical_rows},
+        "noncritical_analysis": {"summary": noncritical, "events": noncritical_rows},
+        "source_type_analysis": source_analysis,
+        "primary_source_type_detail": _grouped_discovery_analysis(rows, "primary_source_type"),
+        "channel_analysis": _grouped_discovery_analysis(rows, "earnings_channel", GOLD_EARNINGS_CHANNELS),
+        "direction_analysis": _grouped_discovery_analysis(rows, "direction", GOLD_DIRECTIONS),
+        "reference_disagreement": {
+            "counts": {key: len(ref_categories.get(key, [])) for key in ("BOTH_FOUND", "REF01_ONLY", "REF02_ONLY", "BOTH_MISSED")},
+            "event_ids": {key: ref_categories.get(key, []) for key in ("BOTH_FOUND", "REF01_ONLY", "REF02_ONLY", "BOTH_MISSED")},
+        },
+        "batch02_analysis": comparison("batch02"),
+        "batch04_analysis": comparison("batch04"),
+        "batch02_vs_batch04": {
+            "counts": {key: len(batch_categories.get(key, [])) for key in ("BOTH_FOUND", "BATCH02_ONLY", "BATCH04_ONLY", "BOTH_MISSED")},
+            "event_ids": {key: batch_categories.get(key, []) for key in ("BOTH_FOUND", "BATCH02_ONLY", "BATCH04_ONLY", "BOTH_MISSED")},
+        },
+        "multi_event_analysis": {
+            "company_count": len(multi_event), "companies": multi_event,
+            "partial_truncation_count_by_run": partial_by_run,
+            "partial_truncation_company_run_count": sum(partial_by_run.values()),
+            "returned_event_count_distribution": returned_distribution,
+        },
+        "telemetry_analysis": telemetry_analysis,
+        "batch_position_analysis": position_analysis,
+        "miss_reason_counts": {
+            label: dict(sorted({reason: sum(
+                row.get("miss_analysis", {}).get(label, {}).get("reason") == reason for row in rows
+            ) for reason in sorted({
+                row.get("miss_analysis", {}).get(label, {}).get("reason")
+                for row in rows if label in row.get("miss_analysis", {})
+            })}.items()))
+            for label in QUALITY_RUN_LABELS.values()
+        },
+        "official_source_safety_net": {
+            "official_source_event_count": sum(row["official_source"] for row in rows),
+            "batch04_missed_material_count": len(batch04_missed),
+            "theoretical_upper_bound_rescue_count": len(official_missed),
+            "candidate_event_ids": [row["gold_event_id"] for row in official_missed],
+            "theoretical_recall_upper_bound": official_upper,
+        },
+        "external_news_second_pass": {
+            "remaining_external_or_industry_miss_count": len(remaining_external_industry),
+            "event_ids": [row["gold_event_id"] for row in remaining_external_industry],
+            "targeted_second_pass_candidate_count": len(targeted),
+            "targeted_event_ids": [row["gold_event_id"] for row in targeted],
+        },
+        "critical_safety_net": {
+            "all_runs_found_all_critical": True,
+            "source_type_counts": dict(sorted((key, sum(row["primary_source_type"] == key for row in critical_rows)) for key in {row["primary_source_type"] for row in critical_rows})),
+            "channel_counts": dict(sorted((key, sum(row["earnings_channel"] == key for row in critical_rows)) for key in {row["earnings_channel"] for row in critical_rows})),
+            "official_source_count": sum(row["official_source"] for row in critical_rows),
+            "interpretation": "All seven are high-importance or direct-earnings events and were found by every run; the artifact supports salience as an explanation, but does not prove causality.",
+        },
+        "precision_noise_analysis": precision_noise,
+        "improvement_scenarios": scenarios,
+        "recommendation": {
+            "decision": "DO_NOT_RUN_BATCH03_YET",
+            "rationale": "Both batch02 and batch04 miss substantial non-critical material events. An intermediate batch size cannot isolate or repair the observed source-strategy gaps; validate an official-first safety net and targeted second pass before spending another benchmark run.",
+            "batch03_run_performed": False,
+        },
+        "safety": {
+            "web_research_performed": False, "production_writes": 0,
+            "scheduled_task_changes": 0, "gold_mutations": 0,
+            "reference_or_batch_raw_mutations": 0, "batch03_runs": 0,
+        },
+    }
+    matrix = {
+        "schema_version": GOLD_MATERIAL_MATRIX_SCHEMA,
+        "benchmark_id": benchmark_id,
+        "created_at": analysis["created_at"],
+        "gold_status": "GOLD_COMPLETE",
+        "gold_event_count": len(rows),
+        "duplicate_normalization": "same as _gold_metrics_v2",
+        "run_summary": {label: run_results[label] for label in QUALITY_RUN_LABELS.values()},
+        "rows": rows,
+    }
+    matrix_json = directory / "gold_material_discovery_matrix.json"
+    matrix_md = directory / "gold_material_discovery_matrix.md"
+    analysis_json = directory / "gold_material_miss_analysis.json"
+    analysis_md = directory / "GOLD_MATERIAL_MISS_ANALYSIS.md"
+    atomic_write_json(matrix_json, matrix)
+    atomic_write_text(matrix_md, _matrix_markdown(matrix))
+    atomic_write_json(analysis_json, analysis)
+    atomic_write_text(analysis_md, _analysis_markdown(analysis))
+    return {
+        "schema_version": GOLD_MATERIAL_MISS_ANALYSIS_SCHEMA,
+        "benchmark_id": benchmark_id,
+        "gold_status": "GOLD_COMPLETE",
+        "material_event_count": len(rows),
+        "critical_event_count": len(critical_rows),
+        "run_results": {label: run_results[label] for label in QUALITY_RUN_LABELS.values()},
+        "recommendation": analysis["recommendation"]["decision"],
+        "matrix_json": str(matrix_json.resolve()),
+        "matrix_markdown": str(matrix_md.resolve()),
+        "analysis_json": str(analysis_json.resolve()),
+        "analysis_markdown": str(analysis_md.resolve()),
+    }
 
 
 def _task_events(directory: Path) -> list[dict[str, Any]]:
@@ -3992,6 +4682,8 @@ def _build_parser() -> argparse.ArgumentParser:
     packet_import.add_argument("--input", type=Path, required=True)
     gold_status = commands.add_parser("gold-status-v2")
     gold_status.add_argument("--benchmark-id", required=True)
+    miss_audit = commands.add_parser("audit-gold-material-misses-v2")
+    miss_audit.add_argument("--benchmark-id", required=True)
     integration = commands.add_parser("prepare-integration-fixture")
     integration.add_argument("--batch-size", type=int, required=True)
     integration_audit = commands.add_parser("audit-integration-fixture")
@@ -4060,6 +4752,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.command == "gold-status-v2":
             result = gold_status_v2(root, args.benchmark_id)
+        elif args.command == "audit-gold-material-misses-v2":
+            result = audit_gold_material_misses_v2(root, args.benchmark_id)
         elif args.command == "prepare-integration-fixture":
             result = prepare_integration_fixture(root, args.batch_size)
         else:
