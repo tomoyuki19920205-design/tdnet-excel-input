@@ -58,6 +58,8 @@ GOLD_MATERIAL_MISS_ANALYSIS_SCHEMA = "company_news_gold_material_miss_analysis_v
 STRATEGY_V2_VERSION = "company_news_research_strategy_v2"
 STRATEGY_V2_RUN_NAME = "batch04v2"
 STRATEGY_V2_TELEMETRY_SCHEMA = "company_news_benchmark_strategy_telemetry_v2"
+STRATEGY_V3_VERSION = "company_news_research_strategy_v3"
+STRATEGY_V3_RUN_NAME = "batch04v3"
 GOLD_EXTENSION_PACKET_SCHEMA = "company_news_gold_extension_packet_v1"
 
 TASK_COUNT = 8
@@ -194,7 +196,7 @@ def _benchmark_dir(root: Path, benchmark_id: str) -> Path:
 
 def _run_dir(root: Path, benchmark_id: str, run_name: str) -> Path:
     match = re.fullmatch(r"batch(\d{2})", run_name)
-    if run_name not in (*REFERENCE_RUN_NAMES, STRATEGY_V2_RUN_NAME) and (
+    if run_name not in (*REFERENCE_RUN_NAMES, STRATEGY_V2_RUN_NAME, STRATEGY_V3_RUN_NAME) and (
         not match or int(match.group(1)) not in ALLOWED_CANDIDATE_BATCH_SIZES
     ):
         raise BenchmarkError("invalid benchmark run name")
@@ -546,13 +548,22 @@ def _prepare_named_run(
     if reference_replication_of:
         manifest["reference_replication_of"] = reference_replication_of
     if strategy_version:
-        contract = _strategy_v2_contract()
-        prompt_text = _paths(root)["benchmark_prompt"].read_text(encoding="utf-8")
-        firewall = _strategy_v2_firewall_scan(prompt_text, assignments_by_task)
+        if strategy_version == STRATEGY_V3_VERSION:
+            from tools import company_news_strategy_v3 as v3
+            contract = v3.contract()
+            prompt_text = v3.prompt_text(root)
+            firewall = v3.leakage_scan(prompt_text, assignments_by_task, selected)
+            manifest.update({"runtime_prompt_path": str((directory / "RESEARCH_PROMPT.md").resolve()),
+                             "runtime_prompt_sha256": hashlib.sha256(prompt_text.encode()).hexdigest(),
+                             "evaluation_policy": v3.evaluation_policy()})
+        else:
+            contract = _strategy_v2_contract()
+            prompt_text = _paths(root)["benchmark_prompt"].read_text(encoding="utf-8")
+            firewall = _strategy_v2_firewall_scan(prompt_text, assignments_by_task)
         if firewall["status"] != "PASS":
-            raise BenchmarkError(f"strategy v2 runtime Gold firewall failed: {firewall['hits']}")
+            raise BenchmarkError(f"strategy runtime Gold firewall failed: {firewall['hits']}")
         if baseline_company_order_sha256 != company_order_sha256:
-            raise BenchmarkError("strategy v2 company order differs from baseline batch04")
+            raise BenchmarkError("strategy company order differs from baseline batch04")
         manifest.update({
             "strategy_version": strategy_version,
             "strategy_contract": contract,
@@ -565,6 +576,8 @@ def _prepare_named_run(
             "precision_status_after_run": contract["precision_status_after_run"],
             "candidate_only_event_policy": contract["candidate_only_event_policy"],
         })
+    if strategy_version == STRATEGY_V3_VERSION:
+        atomic_write_text(directory / "RESEARCH_PROMPT.md", prompt_text)
     atomic_write_json(directory / "manifest.json", manifest)
     for task_id, assignments in assignments_by_task.items():
         atomic_write_json(directory / "tasks" / task_id / "queue.json", {
@@ -590,12 +603,13 @@ def prepare_run(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     if strategy is not None:
-        if strategy != STRATEGY_V2_VERSION:
+        if strategy not in (STRATEGY_V2_VERSION, STRATEGY_V3_VERSION):
             raise BenchmarkError("unsupported benchmark research strategy")
+        strategy_run_name = STRATEGY_V3_RUN_NAME if strategy == STRATEGY_V3_VERSION else STRATEGY_V2_RUN_NAME
         if reference or batch_size != 4:
-            raise BenchmarkError("research strategy v2 requires non-reference batch size 4")
-        if run_name not in (None, STRATEGY_V2_RUN_NAME):
-            raise BenchmarkError("research strategy v2 run_name must be batch04v2")
+            raise BenchmarkError("research strategy requires non-reference batch size 4")
+        if run_name not in (None, strategy_run_name):
+            raise BenchmarkError(f"research strategy run_name must be {strategy_run_name}")
         cohort = _load_cohort(root, benchmark_id)
         if (
             cohort.get("search_from") != DEFAULT_SEARCH_FROM.isoformat()
@@ -606,6 +620,8 @@ def prepare_run(
         baseline_manifest = _read_json(baseline_directory / "manifest.json")
         baseline_assignments = _ordered_run_assignments(baseline_directory)
         cohort_order = [str(company["ticker"]) for company in cohort["companies"]]
+        if strategy == STRATEGY_V3_VERSION and (len(cohort_order) != COHORT_SIZE or len(set(cohort_order)) != COHORT_SIZE):
+            raise BenchmarkError("research strategy v3 requires the same 192-company cohort")
         baseline_order = [str(assignment["ticker"]) for assignment in baseline_assignments]
         if (
             baseline_manifest.get("batch_size") != 4
@@ -624,8 +640,8 @@ def prepare_run(
             "prior_news_bucket": assignment.get("prior_news_bucket", "unscanned"),
         } for assignment in baseline_assignments]
         return _prepare_named_run(
-            root, benchmark_id, cohort, selected, 4, STRATEGY_V2_RUN_NAME,
-            reference=False, strategy_version=STRATEGY_V2_VERSION,
+            root, benchmark_id, cohort, selected, 4, strategy_run_name,
+            reference=False, strategy_version=strategy,
             baseline_run_name="batch04", baseline_company_order_sha256=baseline_sha,
             now=now,
         )
@@ -730,6 +746,11 @@ def _validate_manifest(root: Path, value: dict[str, Any]) -> tuple[Path, dict[st
         raise BenchmarkError("benchmark output_directory is not isolated; fail closed")
     if Path(manifest["output_directory"]).resolve() != expected_output:
         raise BenchmarkError("benchmark manifest output_directory mismatch; fail closed")
+    if manifest.get("strategy_version") == STRATEGY_V3_VERSION:
+        prompt_path = directory / "RESEARCH_PROMPT.md"
+        if (Path(manifest.get("runtime_prompt_path", "")).resolve() != prompt_path.resolve()
+                or hashlib.sha256(prompt_path.read_bytes()).hexdigest() != manifest.get("runtime_prompt_sha256")):
+            raise BenchmarkError("strategy v3 frozen runtime prompt mismatch")
     return directory, manifest
 
 
@@ -798,6 +819,8 @@ def route_task(root: Path, task_id: str) -> dict[str, Any]:
     }
     if manifest.get("strategy_version"):
         result["strategy_version"] = manifest["strategy_version"]
+        if manifest["strategy_version"] == STRATEGY_V3_VERSION:
+            result["prompt_file"] = manifest["runtime_prompt_path"]
     return result
 
 
@@ -962,7 +985,7 @@ def snapshot_task(
             "output_path": str((output_directory / filename).resolve()),
             "temp_path": str((output_directory / f"{filename}.tmp").resolve()),
         }
-        if manifest.get("strategy_version") == STRATEGY_V2_VERSION:
+        if manifest.get("strategy_version") in (STRATEGY_V2_VERSION, STRATEGY_V3_VERSION):
             strategy_directory = run_directory / "strategy_telemetry" / task_id
             strategy_directory.mkdir(parents=True, exist_ok=True)
             strategy_filename = f"{assignment['assignment_id']}.json"
@@ -985,8 +1008,8 @@ def snapshot_task(
         "assignments": assignments,
         "company_state": {},
     }
-    if manifest.get("strategy_version") == STRATEGY_V2_VERSION:
-        snapshot["strategy_version"] = STRATEGY_V2_VERSION
+    if manifest.get("strategy_version") in (STRATEGY_V2_VERSION, STRATEGY_V3_VERSION):
+        snapshot["strategy_version"] = manifest["strategy_version"]
         snapshot["strategy_contract"] = manifest["strategy_contract"]
     encoded = (json.dumps(snapshot, ensure_ascii=False, indent=2) + "\n").encode()
     descriptor: int | None = None
@@ -1252,16 +1275,20 @@ def finalize_company(
     strategy_telemetry: dict[str, Any] | None = None
     strategy_temp_path: Path | None = None
     strategy_output_path: Path | None = None
-    if manifest.get("strategy_version") == STRATEGY_V2_VERSION and not failure:
+    if manifest.get("strategy_version") in (STRATEGY_V2_VERSION, STRATEGY_V3_VERSION) and not failure:
         strategy_temp_path = Path(assignment["strategy_telemetry_temp_path"])
         strategy_output_path = Path(assignment["strategy_telemetry_path"])
         if not _inside(strategy_temp_path, run_directory) or not _inside(strategy_output_path, run_directory):
             raise BenchmarkError("strategy telemetry path is not benchmark-isolated")
         if strategy_output_path.exists():
             raise BenchmarkError("strategy telemetry already exists; refusing overwrite")
-        strategy_telemetry = validate_strategy_v2_telemetry(
-            _read_json(strategy_temp_path), assignment, event_count, result_type
-        )
+        if manifest["strategy_version"] == STRATEGY_V3_VERSION:
+            from tools.company_news_strategy_v3 import validate as validate_strategy_v3
+            strategy_telemetry = validate_strategy_v3(_read_json(strategy_temp_path), assignment, payload)
+        else:
+            strategy_telemetry = validate_strategy_v2_telemetry(
+                _read_json(strategy_temp_path), assignment, event_count, result_type
+            )
     if strategy_telemetry is not None and strategy_temp_path is not None and strategy_output_path is not None:
         replace_with_retry(strategy_temp_path, strategy_output_path)
         try:
@@ -1317,6 +1344,13 @@ def finalize_company(
                     "total_research_elapsed_seconds", "candidate_provenance",
                 )
             })
+    if manifest.get("strategy_version") == STRATEGY_V3_VERSION:
+        telemetry["strategy_version"] = STRATEGY_V3_VERSION
+        telemetry["strategy_telemetry_path"] = str(strategy_output_path.resolve()) if strategy_output_path else None
+        if strategy_telemetry is not None:
+            # Validated v3 fields are namespaced; cannot overwrite measured times,
+            # ownership, ticker or paths in canonical company telemetry.
+            telemetry["strategy_v3"] = strategy_telemetry
     _append_jsonl(_task_directory(run_directory, task_id) / "companies.jsonl", telemetry)
     state.update({"finalized": True, "result_type": result_type, "output_saved_at": telemetry["output_saved_at"]})
     atomic_write_json(path, snapshot)
