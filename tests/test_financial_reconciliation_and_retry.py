@@ -245,6 +245,34 @@ def test_222a_compact_official_pdf_table_extracts_four_pl_values():
     }
 
 
+def test_us_gaap_dual_currency_table_prefers_parenthesized_jpy_and_allows_no_ordinary_profit():
+    table = [
+        ["", "売上高", None, "営業利益", None, "税引前中間純利益", None,
+         "当社株主に帰属する\n中間純利益", None],
+        ["2026年12月期\n中間期\n2025年12月期\n中間期",
+         "645,423\n(103,732)\n134,599\n(21,632)", "％\n－\n－",
+         "△ 5,376,995\n(△ 864,190)\n△ 6,809,602\n(△ 1,094,439)", "％\n－\n－",
+         "△ 4,900,397\n(△ 787,591)\n△ 6,145,305\n(△ 987,673)", "％\n－\n－",
+         "△ 4,900,397\n(△ 787,591)\n△ 6,145,305\n(△ 987,673)", "％\n－\n－"],
+    ]
+    assert extract_actual_financial_table(
+        [table], prefer_parenthesized_jpy=True,
+    ) == {
+        "sales": 103_732,
+        "operating_profit": -864_190,
+        "profit_before_tax": -787_591,
+        "net_income": -787_591,
+    }
+    assert extract_actual_financial_table(
+        [table], prefer_parenthesized_jpy=True, period_index=1,
+    ) == {
+        "sales": 21_632,
+        "operating_profit": -1_094_439,
+        "profit_before_tax": -987_673,
+        "net_income": -987_673,
+    }
+
+
 def test_recovery_calls_earnings_v2_with_notifications_disabled(tmp_path):
     payload = {
         "disclosure_id": "a" * 64,

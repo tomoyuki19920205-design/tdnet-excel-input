@@ -5,28 +5,48 @@ import re
 
 from .utils import normalize_number
 
-_MONEY_TOKEN_RE = re.compile(r"(?:△|▲|-|－)?[0-9０-９][0-9０-９,，]*")
+_MONEY_TOKEN_RE = re.compile(r"(?:△|▲|-|－)?\s*[0-9０-９][0-9０-９,，]*")
 
 _HEADER_PATTERNS = {
     "sales": re.compile(r"売上高|売上収益|営業収益|経常収益"),
     "operating_profit": re.compile(r"営業利益|営業損失"),
     "ordinary_profit": re.compile(r"経常利益|経常損失"),
+    "profit_before_tax": re.compile(
+        r"税引前(?:当期|四半期|中間)?(?:純)?(?:利益|損失)|"
+        r"税金等調整前(?:当期|四半期|中間)?(?:純)?(?:利益|損失)"
+    ),
     "net_income": re.compile(
-        r"親会社株主.*(?:純利益|利益)|当期純利益|四半期純利益|中間純利益|純利益"
+        r"(?:親会社|当社)株主.*(?:純利益|利益)|当期純利益|四半期純利益|"
+        r"(?<!税引前)中間純利益|(?<!税引前)純利益"
     ),
 }
 
 
-def _money_value(cell) -> int | None:
+def _money_value(
+    cell, *, prefer_parenthesized: bool = False, period_index: int = 0,
+) -> int | None:
     text = str(cell or "").replace("，", ",")
+    if prefer_parenthesized:
+        values = []
+        for line in text.splitlines():
+            match = re.search(r"[（(]\s*([^()（）]+?)\s*[）)]", line)
+            if match:
+                value = normalize_number(match.group(1))
+                if value is not None:
+                    values.append(value)
+        return values[period_index] if period_index < len(values) else None
+    values = []
     for token in _MONEY_TOKEN_RE.findall(text):
         value = normalize_number(token)
         if value is not None:
-            return value
-    return None
+            values.append(value)
+    return values[period_index] if period_index < len(values) else None
 
 
-def extract_actual_financial_table(tables: list) -> dict[str, int]:
+def extract_actual_financial_table(
+    tables: list, *, prefer_parenthesized_jpy: bool = False,
+    period_index: int = 0,
+) -> dict[str, int]:
     """Extract current-period PL values from a compact summary table.
 
     TDnet summary PDFs often merge current/prior values in one cell, e.g.
@@ -41,6 +61,8 @@ def extract_actual_financial_table(tables: list) -> dict[str, int]:
             for column_index, cell in enumerate(header_row or []):
                 header = re.sub(r"\s+", "", str(cell or ""))
                 for metric, pattern in _HEADER_PATTERNS.items():
+                    if metric == "net_income" and _HEADER_PATTERNS["profit_before_tax"].search(header):
+                        continue
                     if metric not in column_for and pattern.search(header):
                         column_for[metric] = column_index
 
@@ -52,7 +74,11 @@ def extract_actual_financial_table(tables: list) -> dict[str, int]:
                 for metric, column_index in column_for.items():
                     if column_index >= len(data_row or []):
                         continue
-                    value = _money_value(data_row[column_index])
+                    value = _money_value(
+                        data_row[column_index],
+                        prefer_parenthesized=prefer_parenthesized_jpy,
+                        period_index=period_index,
+                    )
                     if value is not None:
                         values[metric] = value
                 if "sales" in values and len(values) >= 2:

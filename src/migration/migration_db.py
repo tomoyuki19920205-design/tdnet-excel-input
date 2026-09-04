@@ -108,6 +108,8 @@ _TABLES = [
         gross_margin REAL,
         sga REAL,
         operating_profit REAL,
+        profit_before_tax REAL,
+        net_income REAL,
         unit TEXT DEFAULT '百万円',
         source_doc_id TEXT,
         source_url TEXT,
@@ -267,6 +269,8 @@ class MigrationDB:
             ("zip_hash", "ALTER TABLE quarterly_results ADD COLUMN zip_hash TEXT"),
             ("parser_version", "ALTER TABLE quarterly_results ADD COLUMN parser_version TEXT DEFAULT 'v2'"),
             ("field_sources", "ALTER TABLE quarterly_results ADD COLUMN field_sources TEXT"),
+            ("profit_before_tax", "ALTER TABLE quarterly_results ADD COLUMN profit_before_tax REAL"),
+            ("net_income", "ALTER TABLE quarterly_results ADD COLUMN net_income REAL"),
         ]
         for col_name, sql in migrations:
             if col_name not in existing_cols:
@@ -367,7 +371,10 @@ class MigrationDB:
     # ----------------------------------------------------------
     # quarterly_results — 差分検出upsert
     # ----------------------------------------------------------
-    _QR_NUM_FIELDS = ("sales", "gross_profit", "gross_margin", "sga", "operating_profit")
+    _QR_NUM_FIELDS = (
+        "sales", "gross_profit", "gross_margin", "sga", "operating_profit",
+        "profit_before_tax", "net_income",
+    )
 
     def upsert_quarterly_result(
         self,
@@ -380,6 +387,8 @@ class MigrationDB:
         gross_margin: float | None = None,
         sga: float | None = None,
         operating_profit: float | None = None,
+        profit_before_tax: float | None = None,
+        net_income: float | None = None,
         actor: str = "migration",
         source: str = "migration",
         tdnet_disclosure_id: str | None = None,
@@ -401,6 +410,8 @@ class MigrationDB:
             "gross_margin": gross_margin,
             "sga": sga,
             "operating_profit": operating_profit,
+            "profit_before_tax": profit_before_tax,
+            "net_income": net_income,
         }
         now = _now_jst()
 
@@ -414,12 +425,14 @@ class MigrationDB:
                 INSERT INTO quarterly_results
                     (company_code, fiscal_year_end, quarter,
                      sales, gross_profit, gross_margin, sga, operating_profit,
+                     profit_before_tax, net_income,
                      unit, source_doc_id, source_url, zip_hash, parser_version,
                      field_sources, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, '百万円', ?, ?, ?, 'v2', ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '百万円', ?, ?, ?, 'v2', ?, ?, ?)
                 """,
                 (company_code, fiscal_year_end, quarter,
                  sales, gross_profit, gross_margin, sga, operating_profit,
+                 profit_before_tax, net_income,
                  source_doc_id, source_url, zip_hash,
                  json.dumps(field_sources) if field_sources else None,
                  now, now),

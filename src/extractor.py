@@ -874,6 +874,13 @@ def _extract_from_pdf(pdf_path: str) -> tuple[ExtractedFinancials | None, str]:
 
         # 単位検出
         scale_str = _detect_scale(text)
+        dual_currency_jpy = bool(re.search(
+            r"米ドル\s*[（(]\s*千円\s*[）)]", text
+        ))
+        if dual_currency_jpy:
+            # Foreign issuers may show USD as the primary number and a JPY
+            # translation in parentheses.  Canonical actuals must use JPY.
+            scale_str = "千円"
         scale_multiplier = parse_scale_unit(scale_str)
 
         # 各項目の抽出
@@ -887,13 +894,17 @@ def _extract_from_pdf(pdf_path: str) -> tuple[ExtractedFinancials | None, str]:
         # Structured table cells are more reliable than flattened text for
         # compact TDnet summaries (including 222A's merged current/prior cells).
         from .pdf_financial_table import extract_actual_financial_table
-        table_values = extract_actual_financial_table(tables)
+        table_values = extract_actual_financial_table(
+            tables, prefer_parenthesized_jpy=dual_currency_jpy,
+        )
+        profit_before_tax = None
         if table_values:
             sales = table_values.get("sales", sales)
             operating_profit = table_values.get(
                 "operating_profit", operating_profit
             )
             ordinary_profit = table_values.get("ordinary_profit")
+            profit_before_tax = table_values.get("profit_before_tax")
             net_income = table_values.get("net_income")
             logger.info("[PDF_TABLE] extracted metrics=%s", sorted(table_values))
         # ── ② native数値抽出失敗 → OCRテキストで再抽出 ──
@@ -926,7 +937,8 @@ def _extract_from_pdf(pdf_path: str) -> tuple[ExtractedFinancials | None, str]:
         source_label = "pdf_ocr" if ocr_used else "pdf"
         sources = {}
         values = {"sales": sales, "gross_profit": gross_profit, "operating_profit": operating_profit,
-                  "ordinary_profit": ordinary_profit, "net_income": net_income}
+                  "ordinary_profit": ordinary_profit, "profit_before_tax": profit_before_tax,
+                  "net_income": net_income}
         for field, value in values.items():
             if value is not None:
                 sources[field] = "pdf_table" if field in table_values else source_label
@@ -934,6 +946,7 @@ def _extract_from_pdf(pdf_path: str) -> tuple[ExtractedFinancials | None, str]:
             sales=sales,
             gross_profit=gross_profit,
             ordinary_profit=ordinary_profit,
+            profit_before_tax=profit_before_tax,
             net_income=net_income,
             operating_profit=operating_profit,
             source_unit=scale_str,

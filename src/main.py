@@ -145,6 +145,10 @@ def _process_financial_statement(
         financials.gross_profit = convert_to_excel_unit(financials.gross_profit, source_mult, excel_mult)
     if financials.operating_profit is not None:
         financials.operating_profit = convert_to_excel_unit(financials.operating_profit, source_mult, excel_mult)
+    if financials.profit_before_tax is not None:
+        financials.profit_before_tax = convert_to_excel_unit(financials.profit_before_tax, source_mult, excel_mult)
+    if financials.net_income is not None:
+        financials.net_income = convert_to_excel_unit(financials.net_income, source_mult, excel_mult)
 
     logger.info(
         f"[処理] 抽出結果: 売上={financials.sales}, 粗利={financials.gross_profit}, "
@@ -162,6 +166,8 @@ def _process_financial_statement(
         sales=financials.sales,
         gross_profit=financials.gross_profit,
         operating_profit=financials.operating_profit,
+        profit_before_tax=financials.profit_before_tax,
+        net_income=financials.net_income,
         actor="tdnet", source="tdnet",
         tdnet_disclosure_id=disclosure_id,
         run_id=run_id,
@@ -182,6 +188,8 @@ def _process_financial_statement(
             "sales": financials.sales,
             "gross_profit": financials.gross_profit,
             "operating_profit": financials.operating_profit,
+            "profit_before_tax": financials.profit_before_tax,
+            "net_income": financials.net_income,
         },
     )
 

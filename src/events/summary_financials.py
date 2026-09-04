@@ -890,10 +890,49 @@ def extract_earnings_data(
             from src.extractor import _extract_from_pdf
             pdf_result, _ = _extract_from_pdf(pdf_path)
             if pdf_result and pdf_result.sales is not None:
-                result.sales_current = pdf_result.sales
-                result.op_current = pdf_result.operating_profit
+                from src.utils import parse_scale_unit
+                multiplier = parse_scale_unit(pdf_result.source_unit or "円")
+                result.sales_current = pdf_result.sales * multiplier
+                result.op_current = (
+                    pdf_result.operating_profit * multiplier
+                    if pdf_result.operating_profit is not None else None
+                )
+                result.profit_before_tax_current = (
+                    pdf_result.profit_before_tax * multiplier
+                    if pdf_result.profit_before_tax is not None else None
+                )
+                try:
+                    import pdfplumber
+                    from src.pdf_financial_table import extract_actual_financial_table
+                    tables = []
+                    text = ""
+                    with pdfplumber.open(pdf_path) as pdf:
+                        for page in pdf.pages[:3]:
+                            text += (page.extract_text() or "") + "\n"
+                            tables.extend(page.extract_tables() or [])
+                    dual_currency_jpy = bool(re.search(
+                        r"米ドル\s*[（(]\s*千円\s*[）)]", text
+                    ))
+                    prior = extract_actual_financial_table(
+                        tables,
+                        prefer_parenthesized_jpy=dual_currency_jpy,
+                        period_index=1,
+                    )
+                    result.sales_prior = (
+                        prior["sales"] * multiplier if prior.get("sales") is not None else None
+                    )
+                    result.op_prior = (
+                        prior["operating_profit"] * multiplier
+                        if prior.get("operating_profit") is not None else None
+                    )
+                    result.profit_before_tax_prior = (
+                        prior["profit_before_tax"] * multiplier
+                        if prior.get("profit_before_tax") is not None else None
+                    )
+                except Exception as prior_error:
+                    logger.warning(f"[FINANCIALS] PDF prior-period extraction failed: {prior_error}")
                 result.source = "pdf"
-                result.source_unit = pdf_result.source_unit
+                result.source_unit = "円"
                 logger.info(f"[FINANCIALS] PDF fallback: sales={pdf_result.sales} op={pdf_result.operating_profit}")
                 # PDF からは前期値が取れないことが多い → YOY 計算不可の可能性
         except Exception as e:

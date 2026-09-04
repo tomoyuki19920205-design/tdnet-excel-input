@@ -41,6 +41,7 @@ _FIELD_SOURCE_TO_SOURCE_TYPE = {
     "attachment_xbrl": SourceType.TDNET_ATTACHMENT_XBRL,
     "xbrl": SourceType.TDNET_SUMMARY_XBRL,  # 旧形式
     "pdf": SourceType.PDF_EXTRACTED,
+    "pdf_table": SourceType.PDF_EXTRACTED,
     "pdf_fallback": SourceType.PDF_EXTRACTED,
 }
 
