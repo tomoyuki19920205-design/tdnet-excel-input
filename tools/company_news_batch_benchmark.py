@@ -622,7 +622,8 @@ def prepare_run(
             or cohort.get("search_to") != DEFAULT_SEARCH_TO.isoformat()
         ):
             raise BenchmarkError("research strategy v2 requires the fixed benchmark window")
-        baseline_directory = _run_dir(root, benchmark_id, "batch04")
+        baseline_name = "batch04v2" if strategy == STRATEGY_V4_VERSION else "batch04"
+        baseline_directory = _run_dir(root, benchmark_id, baseline_name)
         baseline_manifest = _read_json(baseline_directory / "manifest.json")
         baseline_assignments = _ordered_run_assignments(baseline_directory)
         cohort_order = [str(company["ticker"]) for company in cohort["companies"]]
@@ -648,7 +649,7 @@ def prepare_run(
         return _prepare_named_run(
             root, benchmark_id, cohort, selected, 4, strategy_run_name,
             reference=False, strategy_version=strategy,
-            baseline_run_name="batch04", baseline_company_order_sha256=baseline_sha,
+            baseline_run_name=baseline_name, baseline_company_order_sha256=baseline_sha,
             now=now,
         )
     if (

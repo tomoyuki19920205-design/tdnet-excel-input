@@ -1,70 +1,72 @@
-# Company News Research Strategy v4 — complementary non-TDNET research
+# Company News Research Strategy v4 — NON_TDNET complement
 
-Benchmark/R&D only. Use only a route with mode=benchmark and strategy_version=company_news_research_strategy_v4. Work in {{REPO}}. Do not change a production prompt or route. This task complements daily TDNET monitoring: find material information that TDNET alone does not provide, not duplicate routine timely disclosures.
+Benchmark only. Root: {{REPO}}. Strategy baseline is company_news_research_strategy_v2: Company Web first, then dynamic business-driver searches. Do not inherit the v3 all-document/index-completeness, strict query-provenance or exact-name query contract. Find earnings-relevant information that daily TDNET monitoring alone does not reveal.
 
-Read {{REPO}}\data\news_work\SCHEDULED_TASK_COMMON_PROMPT.txt for canonical company_news_v1 fields/enums. This v4 document overrides its research scope, coverage and transport rules, NOT its JSON schema. The authoritative sidecar validator is tools/company_news_strategy_v4.py. Scope fields belong only in the benchmark telemetry, never in canonical news items.
+## Ownership, window and isolated delivery
 
-Use `.\.venv\Scripts\python.exe tools/company_news_batch_benchmark.py` for the following benchmark-only commands. Run `snapshot --task-id <route task_id>` once. Busy means exit. Process only its immutable assignments, in order, maximum four companies; never reload a slot to obtain a fifth company. For each company call `research-start --task-id <task_id> --run-token <run_token> --assignment-id <assignment_id>` BEFORE searching. Use only that company's ticker, identity and search window. After research call research-finish with the same arguments.
+Proceed only on an already authorized route with mode=benchmark and strategy_version=company_news_research_strategy_v4. This document does not authorize activation or scheduler changes. Read {{REPO}}/data/news_work/SCHEDULED_TASK_COMMON_PROMPT.txt only for canonical company_news_v1 JSON fields/enums. This document overrides research scope, query/coverage requirements and transport. Scope fields are benchmark sidecar fields, never canonical item fields.
 
-## Evidence-based scope triage
+Use `.\.venv\Scripts\python.exe tools/company_news_batch_benchmark.py`. Call `snapshot --task-id <route task_id>` once, exit on busy/capacity/no-assignment. Follow only that immutable snapshot, in order, at most four companies. Do not reload slots or add a fifth company. For each assignment call `research-start --task-id <task_id> --run-token <run_token> --assignment-id <assignment_id>` BEFORE any search; use the snapshot window. Call research-finish with those same arguments after research. Preserve official identity evidence linking the assigned ticker to the researched company; aliases are acceptable and external searches need not contain its name or ticker.
 
-Assign every discovered document a news_monitor_scope_v1 label with scope_reason. Do not infer scope from URL domain, company/date or topic alone.
+## A. Company Web (normally 1–2 queries)
 
-- IN_SCOPE_COMPANY_WEB: company-site PR, partnership, customer adoption, product/service, orders, supply contracts, pricing, production disruption/resumption, capital investment, capacity, defects/recalls, approvals or other company-specific information with material incremental value beyond TDNET. Check available index/disclosure evidence for same-content TDNET mirrors; when uncertain record AMBIGUOUS, not fabricated exclusivity.
-- IN_SCOPE_EXTERNAL_MEDIA: substantive new reporting by credible general, specialist, industry, local or overseas media. Merely reproducing a TDNET disclosure is not incremental reporting.
-- IN_SCOPE_GOVERNMENT: company-linked or strongly transmitted government, municipality or regulatory announcements, orders, sanctions, approvals, tenders, subsidies or policy changes. Review government and company mirrors at event level.
-- IN_SCOPE_COUNTERPARTY: customer/supplier/partner/subsidiary/competitor/association announcements with an evidenced economic link to the target company. Same industry alone is insufficient.
-- IN_SCOPE_INCREMENTAL_IR: conference, Q&A, transcript or video information NOT already in the TDNET materials. Record the specific incremental_information_evidence and comparison basis. Earnings announcements themselves are not incremental IR. If the difference cannot be established, AMBIGUOUS.
-- OUT_OF_SCOPE_TDNET: confirmed same-content timely disclosure with no incremental information. Includes routine financial statements, guidance/dividend changes, equity issuance, buybacks, splits, TOB, securities/fixed-asset gains and personnel announcements. Record tdnet_same_content_verified=true, tdnet_url, tdnet_identity_evidence (matching document/title/date/content evidence), incremental_information=false. An inaccessible PDF can be skipped when index/document identity establishes this; its body is not mandatory.
-- OUT_OF_SCOPE_TRIVIAL: clearly minor routine notices supported by title/index evidence, including office holiday schedules, routine donations/CSR, ESG website rankings or meeting invitations. Store index_evidence. Do not mechanically apply this to a material subsidy, production shutdown, price change, major partnership, order, investment, customer adoption or administrative action. Those require body follow.
-- AMBIGUOUS: insufficient evidence of scope or TDNET incremental value. Attempt relevant body/comparison follow; unresolved access is PARTIAL, never invent an OUT label to pass.
+Review official news/press/product/service/IR pages for price changes, new products/services, orders, partnerships, customer adoption, shutdowns, capacity, investment, overseas subsidiaries and post-earnings additional commentary. Do not expand search just to enumerate every index page, attachment or timely disclosure. Retain relevant in-window multi-event review after the first finding. Trivial inaccessible pages never block completion.
 
-## Research and coverage
+## B. Dynamic external complement (normally 2–4 queries; highest improvement priority)
 
-Find official news/PR indexes first, enumerate relevant in-window entries and record scanned pagination/window. Triage before PDF follow. All official PDFs are NOT mandatory coverage: follow in-scope and unresolved potentially material candidates only. Follow discovered URLs by navigation/document retrieval, not repeated search. Index reach/snippets are not body verification of a selected event. Record alternate body URLs where needed. Deduplicate EVENTS after reviewing material information; same date or company alone is not duplication. Do not stop after the first item.
+From current company metadata, official profile and business model derive 2–3 economic exposures, each with driver, metadata_evidence and transmission_channel. Examples of generic exposures: input prices, commodity markets, customer production/pricing, equipment investment, demand, freight, property prices, energy/fuel and regulation. These are a taxonomy, never company-specific branches.
 
-Execute official, external-media and focused government search channels for each company. Derive regulatory themes from actual sector/business exposure (at most two); no fixed company/agency hacks. Preserve focused customer/supplier/industry searches when a sourced economic driver warrants them, and prune broad ungrounded sector queries. Store actual query text, executed=true and result_evidence for each, including zero-result searches. Use ticker plus an identifying name; NFKC/case/whitespace variants are allowed. Verified English names, brand names and common aliases require official source evidence linking the alias to the assignment ticker. A wrong company fails closed. Literal Japanese-name or exact regulatory-query-template matching is not required.
+Use query_plan in tools/company_news_strategy_v4.py as a generic plan builder, supplying the actual company name, exposures, up to two relevant regulatory themes, and whether post-earnings commentary warrants a search. Adapt query language and terminology using company metadata. Do not force target-company keywords into customer or industry queries.
 
-Official search target maximum is 3, total target maximum is 6 per company (navigation is not search). Do not expand these merely to chase out-of-scope PDFs or borrow another company's budget. A necessary overrun is recorded by query_budget_exceeded and query_budget_note, NOT automatically a company failure. At the target limit prefer navigation and scope triage; record remaining genuine coverage gaps rather than claiming completion. Preserve the actual number of query actions even if several queries were sent in one tool call.
+Counterparty is an explicit stage: check customers, suppliers, distributors, partners, end markets, domestic/overseas subsidiaries. Record a counterparty channel review even when not applicable, with a reason. Prioritize customer/supplier/partner sources, then industry/trade media, statistics/pricing indicators, relevant government sources, then major general media. Channel families for coverage are counterparty, external_media, government; industry media and general media alone are one family, not two.
 
-COMPLETE requires completed relevant index scans and no unresolved in-scope/ambiguous body gaps, plus all required search channels. If an in-scope potentially material document is inaccessible after reasonable alternate attempts, record body_status=INACCESSIBLE, attempt_evidence and coverage_gaps with retry_required=true. This yields coverage_status=PARTIAL, not failure. Incomplete relevant index enumeration also yields PARTIAL with index_scan gap. An unresolved AMBIGUOUS scope needs an ambiguous_document review gap even if the body was opened. Out-of-scope inaccessible documents do NOT create gaps. Every verified in-scope document needs a candidate selection/rejection decision; do not silently drop it.
+A target-company mention in the article is unnecessary if the transmission is concrete: customer event → customer production/pricing/demand → target order/volume/price/margin → earnings. Same industry alone, generic company profiles and unsupported conjecture are insufficient. Store the evidence-backed chain for every selected event.
 
-On PARTIAL save any verified in-scope events. If none could be verified, items=[] is an incomplete research result, NOT confirmed no-news: no_news_gate_pass=false and the benchmark finalizer records result_type=partial. Do not call it a no-news success in summaries or quality metrics. Retry entries are review-only; do not automatically rerun companies. Failure is reserved for research not being viable (including a mandatory channel never executing), wrong company, ownership/protocol failure or inability to validate/save output.
+## C. Government/regulatory (normally 0–2 queries)
 
-## Sidecar structure and save
+Search only when relevant to an identified exposure. Derive at most two themes, each linked by exposure_index: transport safety, energy rules, approvals, environmental rules, tariffs, subsidies, procurement or similar relevant developments. Do not search all agencies or require government searches when not applicable. There are no fixed agency/domain/company templates.
 
-All booleans/counts/evidence below must reflect actual work. Do not copy example defaults. Every selected event needs substantive verified evidence and economic_transmission. The canonical JSON must pass existing schema validation, use nonempty headline, proper enums and timezone-aware timestamps. No scope/alias fields in company_news_v1.
+## D. Incremental IR (normally 0–1 query)
 
-```json
-{
-  "schema_version": "company_news_benchmark_strategy_telemetry_v4",
-  "strategy_version": "company_news_research_strategy_v4",
-  "assignment_id": "<snapshot assignment_id>",
-  "ticker": "<snapshot ticker>",
-  "company_identity": {"verified_ticker":"<ticker>","source_url":"<verified official source>","evidence":"<identity evidence>","aliases":[]},
-  "queries": [{"channel":"official","query":"<ticker identifying-name actual query>","executed":true,"result_evidence":"<observed results>"}],
-  "query_budget_exceeded": false,
-  "query_budget_note": "",
-  "official_indexes": [{"url":"<index>","window_from":"<search_from>","window_to":"<search_to>","enumeration_complete":true,"scan_evidence":"<window/pagination evidence>"}],
-  "documents": [],
-  "coverage_gaps": [],
-  "coverage_status": "COMPLETE",
-  "source_provenance": [{"url":"<verified URL>","source_type":"<actual type>","content_verified":true,"evidence_excerpt":"<body evidence>","checked_at":"<timezone datetime>"}],
-  "candidate_provenance": [],
-  "candidate_count": 0,
-  "final_event_count": 0,
-  "no_news_gate_pass": true,
-  "stopped_after_first_event": false,
-  "total_research_elapsed_seconds": 0
-}
-```
+Earnings releases and repeated financial numbers are excluded. After earnings, a call/Q&A/presentation transcript, management commentary or supplement can qualify only with specific additional capacity constraints, customer demand, pricing, volumes, orders, margin assumptions, investment or supply constraints absent from the ordinary disclosure. Record incremental_information=true and incremental_information_evidence with the comparison basis. A transcript title alone is insufficient.
 
-The queries array above is structural only: add actual external_media and government queries (counterparty optional). Each verified alias object has name, verified_ticker, source_url and evidence. Identity/alias source URLs must occur in source_provenance, with official identity-link evidence.
+## Scope and candidate decisions
 
-Each documents entry has date, title, url, scope_label, scope_reason, body_status (VERIFIED/SKIPPED/INACCESSIBLE). VERIFIED requires final_url in source_provenance, not an index. TDNET skip requires the four TDNET fields above; trivial skip requires index_evidence. Incremental IR requires incremental_information_evidence. All official entries enumerated in the window and all external material candidates must be recorded; do not omit inconvenient candidates. A zero documents array requires genuinely completed zero-candidate scans. Every coverage_gaps entry has url (an inventoried document/index), kind (in_scope_document/ambiguous_document/index_scan/query_budget), reason, retry_required=true.
+Every reviewed candidate document records date, title, url, scope_label, scope_reason, material (boolean), body_status (VERIFIED/SKIPPED/INACCESSIBLE). Follow selected material sources sufficiently to verify the actual event, date and transmission. No requirement exists to follow every official document.
 
-Each candidate_provenance entry has candidate_index (contiguous from 0), document_url, selected_for_output (boolean), selection_reason; selected entries also require headline, source_url=verified final_url, economic_transmission and a unique event_key. Exactly the selected headline/URL pairs must appear in canonical items. sources_checked_count equals unique verified source_provenance URLs. Unread documents never count as verified sources.
+- IN_SCOPE_COMPANY_WEB / IN_SCOPE_EXTERNAL_MEDIA / IN_SCOPE_COUNTERPARTY / IN_SCOPE_GOVERNMENT: incremental material information from the corresponding channel, within the window, with a concrete earnings transmission.
+- IN_SCOPE_INCREMENTAL_IR: requires the explicit additional information described above.
+- OUT_OF_SCOPE_TDNET: financial results, guidance revisions, issuance/offering, capital policy, fixed-asset gains and simple mirrors of timely disclosures, without additional information. Record tdnet_same_content_verified=true, tdnet_url, tdnet_identity_evidence, incremental_information=false. Sufficient document/index identity evidence allows skipping its body.
+- OUT_OF_SCOPE_TRIVIAL: routine recruitment, event attendance, CSR/donations, holidays, corporate profiles etc. Record index_evidence. A specific material revenue/demand transmission can justify an in-scope exception; evaluate the event, not a keyword alone. Do not label potentially material pricing/orders/production disruption trivial.
+- AMBIGUOUS: scope not established. Keep the uncertainty and decision rationale, do not publish it as verified in-scope information or invent exclusivity.
 
-Write canonical JSON to assignment.temp_path and telemetry to assignment.strategy_telemetry_temp_path ONLY. Use `finalize-company --task-id <task_id> --run-token <run_token> --assignment-id <assignment_id>` to validate and atomically save; do not directly rename final results. For genuine failure use the existing company_news_benchmark_failure_v1 sidecar (task_id, slot_id, assignment_id, ticker, company_name, error_type, error_message, sources_attempted, created_at) and finalize-company --failure. Continue remaining snapshot companies. Finally release-task with task-id and run-token once.
+Deduplicate events, not entire company/date buckets. Every candidate selection/rejection gets a reason. Keep verified selected events even if another material source is inaccessible.
 
-Forbidden: Production inbox/queue/assignment changes, DB/Supabase writes, worker/bridge/ingest/sync, scheduler edits, Gold/extension access or mutation, prior-run results, company-specific benchmark answers, next-company generation, automatic retry/activation. This prompt does not authorize starting a run.
+## Coverage and budgets
+
+Typical total: 3–6 queries/company; extra searches are allowed when useful. Navigation is not a query. Query count alone never causes failure. Record actual queries (channel, query, executed=true), query_budget_exceeded=(total>6) and an optional note; there is no requirement to embed company identity or attach body-level provenance to each query.
+
+Before confirmed no_news require Company Web CHECKED AND at least two CHECKED, exposure-appropriate families from external_media/counterparty/government. Each CHECKED channel has actual search records and a concise channel-level evidence summary. Complement channel reviews link to exposure_index. A zero-result query can count when honestly reviewed. NOT_APPLICABLE and PARTIAL reviews do not count as CHECKED. Continue relevant window review, do not stop at the first item.
+
+Only an inaccessible IN_SCOPE material source after reasonable attempts creates a coverage gap: record attempt_evidence on its document and coverage_gaps with url, reason, retry_required=true. Set coverage_status=PARTIAL and no_news_gate_pass=false; empty items here are PARTIAL, not no-news. Trivial or TDNET pages, incomplete index pagination and budget overruns never create gaps by themselves. Do not use failure to punish document completeness. No automatic retries are authorized. Wrong company/ownership, unusable research or invalid/unwritable output remain genuine failures.
+
+## Sidecar schema
+
+Use schema_version=company_news_benchmark_strategy_telemetry_v4, strategy_version=company_news_research_strategy_v4, assignment_id and ticker exactly from snapshot. Required fields:
+
+- company_identity: verified_ticker, source_url, evidence. URL must be in verified official source_provenance. No exact snapshot spelling requirement for queries.
+- economic_exposures: 2–3 objects, driver, metadata_evidence, transmission_channel.
+- queries: channel (official/external_media/counterparty/government/incremental_ir), query, executed=true.
+- regulatory_themes: zero to two objects, theme, exposure_index.
+- channel_reviews: unique channel, status (CHECKED/NOT_APPLICABLE/PARTIAL), evidence, and exposure_index for checked complement channels. Always include official and counterparty reviews.
+- source_provenance: unique url, source_type, content_verified=true, evidence_excerpt. Count unique verified sources in canonical sources_checked_count. Unread sources are not counted.
+- documents: reviewed candidate documents with the scope fields above. VERIFIED documents have final_url in source_provenance. No exhaustive official index inventory is required.
+- coverage_gaps: material inaccessible-source entries only, as above; [] if none.
+- candidate_provenance: candidate_index contiguous from 0, document_url, selected_for_output, selection_reason. Selected entries additionally have headline, source_url=verified final_url, economic_transmission, unique event_key; the document must be material=true and in scope. Selected headline/URL pairs must exactly match canonical items.
+- coverage_status: COMPLETE or PARTIAL; no_news_gate_pass true only for empty items, no gaps and the Company Web plus two-family gate.
+- query_budget_exceeded: boolean total>6; candidate_count; final_event_count; stopped_after_first_event=false; window_review_complete=true.
+- stage_elapsed_seconds: company_web, external_complement, optionally government and incremental_ir; nonnegative actual elapsed times without double counting. total_research_elapsed_seconds covers their sum. Harness independently records company and task timing, source count, skips and overlap for post-run p50/p95/max and conditional throughput.
+
+Write canonical JSON only to assignment.temp_path and sidecar only to assignment.strategy_telemetry_temp_path. Call `finalize-company --task-id <task_id> --run-token <run_token> --assignment-id <assignment_id>` for validated atomic save. Do not directly rename final outputs. For genuine failure use existing company_news_benchmark_failure_v1 sidecar and finalize-company --failure. Continue remaining snapshot companies. Finally `release-task --task-id <task_id> --run-token <run_token>` once.
+
+Never access evaluation/adjudication artifacts or previous-run findings during research. No company-specific benchmark answers or source URL lists. No Production inbox/queue/DB/Supabase/Viewer writes, worker/bridge/ingest/sync, scheduler edits, activation, or automatic retries. Output stays in the benchmark assignment paths.

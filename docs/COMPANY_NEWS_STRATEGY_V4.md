@@ -1,54 +1,29 @@
-# Company News Monitor Strategy v4 (benchmark/R&D)
+# Strategy v4: v2 baseline specialized for NON_TDNET complement
 
-## Formal purpose
+This implementation uses the v2 Company Web + economic-driver search flow, not v3 document completeness. `contract.baseline_strategy_version` is `company_news_research_strategy_v2`; prepare selects the persisted `batch04v2` assignment order. The v3 module/prompt/run remain frozen. V4 does not call or import the v3 validator.
 
-Company News Monitor complements daily TDNET monitoring with non-TDNET information that can affect company earnings, valuation or risk. Repeating ordinary timely disclosures is not its quality objective. This R&D contract does not switch any production prompt, schedule, worker, schema or Viewer behavior.
+Company Web uses 1–2 searches. From metadata/profile evidence derive 2–3 economic exposures, then explicitly review counterparties and search industry/media/statistics, followed by up to two relevant regulatory themes and optional incremental IR. External queries need not mention the target company. The generic query_plan function builds this plan without company/ticker/source-URL tables. Selected events require in-window verified material scope and a concrete economic transmission; same industry alone is insufficient.
 
-## Independent scope axis
+Exclude routine TDNET results/guidance/issuance/capital policy/fixed-asset gains and simple mirrors. Incremental IR needs a specific additional management/Q&A/transcript insight beyond the ordinary release. Trivial notices are excluded unless concrete material economic relevance justifies inclusion.
 
-`news_monitor_scope_v1` is separate from immutable Gold verdicts. Scope labels are:
+No-news requires Company Web plus two checked exposure-appropriate families among external_media/counterparty/government. Industry and general media are one family. Counterparty review is explicit; NOT_APPLICABLE does not count as checked. Identity remains verified against the assigned ticker, but query strings do not require an exact name/ticker. Channel evidence replaces strict per-query/body provenance.
 
-- IN_SCOPE_COMPANY_WEB: company website-exclusive, economically relevant information.
-- IN_SCOPE_EXTERNAL_MEDIA: material incremental media reporting.
-- IN_SCOPE_GOVERNMENT: government/regulatory information with company linkage or strong transmission.
-- IN_SCOPE_COUNTERPARTY: customer/supplier/partner/subsidiary/competitor/association evidence with a concrete company impact.
-- IN_SCOPE_INCREMENTAL_IR: material conference/Q&A/transcript information absent from the TDNET disclosure.
-- OUT_OF_SCOPE_TDNET: same-content TDNET disclosures without added information (earnings, guidance, dividends, equity actions, TOB, gains on asset sales, personnel and similar disclosures).
-- OUT_OF_SCOPE_TRIVIAL: clearly minor index-supported notices and existing adjudicated nonmaterial information.
-- AMBIGUOUS: unresolved exclusivity, incremental content or scope; review explicitly, never disguise as a negative finding.
+Query targets: Company Web 1–2, external/counterparty 2–4, government 0–2, incremental IR 0–1; typical total 3–6. Overruns are telemetry only. No all-index enumeration or all-PDF reading is required. Only inaccessible in-scope material sources produce PARTIAL. Trivial/index/budget gaps do not. PARTIAL with empty items is not confirmed no-news; the existing isolated finalizer saves result_type=partial. Known material cannot silently disappear without a candidate decision. No automatic retries.
 
-Gold Material and scope are orthogonal. Normalized VALID_MATERIAL roots with confirmed IN_SCOPE form the new recall target. OUT_OF_SCOPE misses are not quality failures. Critical uses frozen Known-Gold labels only, then the independent scope filter; do not invent criticality for Extension. Publish AMBIGUOUS counts and lower/upper denominator bounds. Do not claim a final recall score while the required scope review remains incomplete.
+Primary metric: non_tdnet_material_recall_v1, fixed Common48 denominator 27. Minimum 16/27, preferred 18/27. Minimum scope counts: Company Web 6/7, External Media 4/8, Government 2/4, Counterparty 3/7, Incremental IR 1/1; preferred external 5/8, government 3/4, counterparty 4/7. Old Critical7 is a reference metric only, not a hard gate. Same-cohort success is diagnostic, never Production authorization.
 
-The conservative local scope projection uses persisted adjudication and same-event source evidence only. A company_ir/company_news source label does not establish non-TDNET exclusivity; a transcript title does not establish incremental content. These remain AMBIGUOUS until evidence review. This projection is a review artifact, not a new investment/materiality judgment or an instruction to rerun Web research.
+Measure actual Company Web/external stage times, total company research time, source count, task elapsed p50/p95/max, busy/capacity skips, stale, overlap and conditional throughput. These are future-run measurements: prepare performs no research and cannot establish achieved recall or throughput.
 
-## Runtime states
+Preparation is authorized only for batch04v4, batch size 4, 192 companies, window 2026-08-25–2026-08-31, order SHA 3191f7fd27034417eefd44b2f536699ef700cd3eb6d6b80c7cd014ae817d992e. Output is isolated under data/news_benchmark_inbox. Tasks01–08 remain PAUSED. No activation, no Production worker/queue/DB/Supabase/Viewer operations.
 
-Official-first discovery, focused external media and government searches, event dedupe, source provenance and no-news discipline remain mandatory. Navigation is not a search action. Official3/total6 remain planning targets, not automatic failure thresholds. Explain overruns and unresolved gaps; do not silently truncate or expand the budget without purpose.
+The offline leakage scanner checks runtime code + generic prompt for cohort identity literals, identity branches, all hardcoded source URLs and evaluation artifact references. Legitimate assignment identities are separate inputs. It does not ingest miss lists, event titles or event URLs. Aggregate scope deficits alone informed the flow.
 
-Only in-scope and unresolved potentially material documents require substantive body follow. Confirmed TDNET-only and clearly trivial PDFs may be skipped using index/identity evidence. Potentially material titles cannot use the trivial shortcut. Alias queries require ticker plus normalized identity or official evidence linking the alias to the company; wrong-company research fails closed.
+## Human test command
 
-- COMPLETE: relevant scan/channel work complete; verified selected events have body provenance; no unresolved gaps.
-- PARTIAL: inaccessible in-scope body, unresolved scope or incomplete relevant scan, with explicit review/retry entries. Save verified results. Even an empty items array is `result_type=partial`, never confirmed no-news. No automatic retry is authorized.
-- failure: genuine inability to conduct research, absent mandatory search channel, wrong company, ownership/protocol failure or invalid/unwritable output.
-
-Canonical `company_news_v1` and ingest/sync contracts are unchanged. Sidecar fields and partial state live only in the benchmark harness. Runtime inputs never load Gold, scope review outcomes or prior results.
-
-## Preparation and evaluation gate
-
-The existing harness supports `prepare-run --batch-size 4 --run-name batch04v4 --strategy company_news_research_strategy_v4`, fixed cohort/order/window, frozen run-local prompt, immutable four-company snapshots and benchmark-only atomic save. Preparation is not activation. Neither command is executed as part of this change.
-
-Legacy unfiltered audit refuses v4 before writes. A reviewed scope denominator and partial-aware post-run scoring are required before v4 evaluation; the full new scorer is a subsequent step, not silently substituted with the old Critical7/IR-TDNET targets. No same-cohort outcome authorizes production.
-
-## Verification and handoff
-
-Human command:
+Run from the repository in PowerShell. Use a fresh short basetemp directory to avoid Windows path-length failures:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/test_company_news_strategy_v4.py tests/test_company_news_strategy_v3.py tests/test_company_news_batch_benchmark.py -q
+.\.venv\Scripts\python.exe -B -m pytest tests/test_company_news_strategy_v4.py tests/test_company_news_strategy_v3.py tests/test_company_news_strategy_v2.py tests/test_company_news_scope_adjudication_v1.py tests/test_company_news_batch_benchmark.py -q --tb=short -p no:cacheprovider --basetemp="$env:TEMP/cnv4-human"
 ```
 
-One Codex pytest invocation before final review: 39 passed, 3 errors during existing v3 tmp_path setup (Windows Temp access denied). No retry/workaround. Final review added prepare/scope/legacy-audit regressions and strengthened provenance/coverage checks; these final additions require Human execution. Static parse/diff and read-only audit integrity checks are separate from pytest.
-
-Runtime audit outputs are under the selected benchmark's `quality_v2/matcher_v2/strategy_v4_scope_review/`, not committed. V3, original Gold/Extension and production remain untouched. Scope ambiguity and Human tests must be reviewed before activation.
-
-Prompt structure follows the OpenAI Docs recommendation to make instructions, context and output expectations explicit, while the actual financial-news scope is the user's contract: [Prompt engineering](https://developers.openai.com/api/docs/guides/prompt-engineering).
+Do not use a basetemp containing unrelated files: pytest manages that directory. Synthetic tests cover scope, no-news, advisory budgets, source gaps, query planning, leakage, partial finalization and inert isolated preparation. Preparation is distinct from activation; inspect the actual run manifest and handoff audit before any later explicit activation request.
