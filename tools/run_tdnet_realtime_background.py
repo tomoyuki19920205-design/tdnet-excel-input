@@ -5,13 +5,17 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from lib.runtime_paths import runtime_path
 
 
 def _now() -> str:
@@ -33,23 +37,26 @@ def run_realtime(
     root: Path = ROOT,
     *,
     runner: Callable[..., Any] = subprocess.run,
+    command: list[str] | None = None,
 ) -> int:
     root = root.resolve()
     batch = root / "run_realtime.bat"
-    audit_log = root / "logs" / "realtime_launcher.jsonl"
-    output_log = root / "logs" / f"realtime_console_{datetime.now().astimezone():%Y%m%d}.log"
-    if not batch.is_file():
-        _append_event(audit_log, "launcher_error", pid=os.getpid(), error=f"batch not found: {batch}")
+    audit_log = runtime_path(root / "logs" / "realtime_launcher.jsonl", code_root=root)
+    output_log = runtime_path(root / "logs" / f"realtime_console_{datetime.now().astimezone():%Y%m%d}.log", code_root=root)
+    if command is None and not batch.is_file():
+        _append_event(audit_log, "launcher_error", pid=os.getpid(),
+                      parent_pid=os.getppid(), error=f"batch not found: {batch}")
         return 1
 
     default_comspec = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "cmd.exe"
     comspec = os.environ.get("COMSPEC", str(default_comspec))
-    command = [comspec, "/d", "/c", "call", str(batch)]
+    command = command if command is not None else [comspec, "/d", "/c", "call", str(batch)]
     started = time.monotonic()
     _append_event(
         audit_log,
         "launcher_started",
         pid=os.getpid(),
+        parent_pid=os.getppid(),
         command=command,
         bat_path=str(batch),
         cwd=str(root),
@@ -75,6 +82,7 @@ def run_realtime(
             audit_log,
             "launcher_error",
             pid=os.getpid(),
+            parent_pid=os.getppid(),
             error=str(exc),
             error_type=type(exc).__name__,
             duration_seconds=round(time.monotonic() - started, 3),
@@ -85,6 +93,7 @@ def run_realtime(
         audit_log,
         "launcher_finished",
         pid=os.getpid(),
+        parent_pid=os.getppid(),
         return_code=return_code,
         duration_seconds=round(time.monotonic() - started, 3),
         output_log=str(output_log),

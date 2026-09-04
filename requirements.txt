@@ -8,3 +8,6 @@ lxml>=4.9.0
 pyyaml>=6.0
 supabase>=2.0.0,<3.0.0
 openai>=1.0.0
+tzdata>=2025.3
+python-dateutil>=2.9.0.post0
+psycopg2-binary>=2.9.12
