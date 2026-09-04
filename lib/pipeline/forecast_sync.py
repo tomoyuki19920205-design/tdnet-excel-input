@@ -1,7 +1,6 @@
 """Normalize TDNET/J-Quants forecasts for realtime analysis and J-Quants sync.
 
-Realtime TDNET forecasts are deliberately not written to ``canonical_financials``.
-``expand_forecast_rows`` remains for the J-Quants Nightly canonical path only.
+Forecast revisions and earnings guidance share disclosure-based ordering.
 """
 from __future__ import annotations
 
@@ -29,6 +28,7 @@ _METRIC_MAP = {
     "revised_op": "operating_profit",
     "revised_ordinary": "ordinary_profit",
     "revised_net_income": "net_income",
+    "revised_eps": "eps",
 }
 _SOURCE_TIE = {"tdnet_forecast": 2, "jquants_forecast_fy": 1, "jquants_nxf": 1}
 
@@ -46,6 +46,7 @@ class ForecastDTO:
     forecast_horizon: str
     accounting_standard: str
     document_type: str
+    revision_sequence: int = 0
 
 
 def _as_utc_key(value: str) -> str:
@@ -69,7 +70,9 @@ def make_forecast_recency_key(dto: ForecastDTO, *, updated_at: str) -> str:
     """Newest disclosure wins; correction and source only break exact ties."""
     return (
         f"{_as_utc_key(dto.disclosure_datetime)}_"
+        f"{dto.revision_sequence:08d}_"
         f"{1 if dto.correction_flag else 0}_"
+        f"{1 if dto.document_type == 'forecast_revision' else 0}_"
         f"{_SOURCE_TIE.get(dto.source, 0):02d}_"
         f"{_as_utc_key(updated_at)}"
     )
@@ -241,6 +244,8 @@ def load_revision_forecasts(
     disclosure_ids: Iterable[str] | None = None,
 ) -> tuple[list[ForecastDTO], list[dict]]:
     ids = {str(item) for item in (disclosure_ids or []) if str(item)}
+    if not _table_columns(conn, "events"):
+        return [], []
     sql = "SELECT * FROM events WHERE event_type='forecast_revision'"
     params: list[str] = []
     if ids:
@@ -273,6 +278,8 @@ def load_revision_forecasts(
             continue
         title = str(row.get("title") or "")
         for payload_name, canonical_metric in _METRIC_MAP.items():
+            if canonical_metric == "eps" and not payload.get("eps_validated"):
+                continue
             value = payload.get(payload_name)
             if value is None:
                 continue
@@ -291,6 +298,7 @@ def load_revision_forecasts(
                 forecast_horizon="specified_period",
                 accounting_standard=_accounting_standard(title),
                 document_type="forecast_revision",
+                revision_sequence=int(payload.get("revision_sequence") or 0),
             ))
     return candidates, quarantine
 
@@ -302,7 +310,9 @@ def select_latest_forecasts(candidates: Iterable[ForecastDTO]) -> list[ForecastD
         current = winners.get(key)
         score = (
             _as_utc_key(dto.disclosure_datetime),
+            dto.revision_sequence,
             1 if dto.correction_flag else 0,
+            1 if dto.document_type == "forecast_revision" else 0,
             _SOURCE_TIE.get(dto.source, 0),
             dto.filing_id,
         )
@@ -311,7 +321,9 @@ def select_latest_forecasts(candidates: Iterable[ForecastDTO]) -> list[ForecastD
             continue
         current_score = (
             _as_utc_key(current.disclosure_datetime),
+            current.revision_sequence,
             1 if current.correction_flag else 0,
+            1 if current.document_type == "forecast_revision" else 0,
             _SOURCE_TIE.get(current.source, 0),
             current.filing_id,
         )
@@ -326,12 +338,14 @@ def expand_forecast_rows(candidates: Iterable[ForecastDTO]) -> list[dict]:
     for dto in candidates:
         normalized_disclosure = _as_utc_key(dto.disclosure_datetime)
         rows.append({
+            "revision_sequence": dto.revision_sequence,
+            "document_type": dto.document_type,
             "ticker": dto.ticker,
             "period": dto.forecast_period_end,
             "quarter": "FY",
             "metric": dto.metric,
             "value": dto.value,
-            "unit": "millions_jpy",
+            "unit": "yen_per_share" if dto.metric == "eps" else "millions_jpy",
             "source": dto.source,
             "source_priority": get_priority(dto.source),
             "filing_id": dto.filing_id,
@@ -346,3 +360,35 @@ def expand_forecast_rows(candidates: Iterable[ForecastDTO]) -> list[dict]:
             "updated_at": now_iso,
         })
     return rows
+
+
+def _sync_document_forecasts(conn, disclosure_ids):
+    """Idempotent realtime sync; each document has its own key, so order is immaterial."""
+    from .db import load_env, get_supabase_write_config, supabase_upsert
+    ids = list(disclosure_ids)
+    if not ids:
+        return {"written": 0, "errors": 0}
+    revisions, quarantine = load_revision_forecasts(conn, disclosure_ids=ids)
+    earnings, more = [], []
+    marks = ",".join("?" for _ in ids)
+    if "source_doc_id" in _table_columns(conn, "earnings_summaries") and conn.execute(
+        f"SELECT 1 FROM earnings_summaries WHERE source_doc_id IN ({marks}) LIMIT 1", ids
+    ).fetchone():
+        earnings, more = load_earnings_forecasts(conn, disclosure_ids=ids)
+    rows = expand_forecast_rows(select_latest_forecasts(revisions + earnings))
+    if not rows:
+        return {"written": 0, "errors": 0, "quarantine": quarantine + more}
+    load_env()
+    config = get_supabase_write_config()
+    if not config:
+        return {"written": 0, "errors": 1}
+    return supabase_upsert("canonical_financials", rows, on_conflict="source_row_key", config=config)
+
+
+def sync_document_forecasts(conn, disclosure_ids):
+    previous_factory = conn.row_factory
+    conn.row_factory = sqlite3.Row
+    try:
+        return _sync_document_forecasts(conn, disclosure_ids)
+    finally:
+        conn.row_factory = previous_factory

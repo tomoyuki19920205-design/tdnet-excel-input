@@ -265,112 +265,19 @@ def _process_forecast_revision(
     decision_db: MigrationDB,
     run_id: str,
 ) -> None:
-    """予想修正・差異開示の処理 → DB書き込み"""
-    disclosure_id = item.disclosure_id
-    code = item.ticker
-
-    # ③ 複数ターゲット抽出
-    targets = extract_forecast_targets(pdf_path=doc_path, title=item.title)
-
-    if not targets:
-        logger.error(f"[処理] 予想修正の数値抽出に失敗")
-        state_db.record(
-            disclosure_id=disclosure_id, code=code,
-            year="", quarter="",
-            status=Status.PARSE_FAILED,
-            error_detail="予想修正のターゲットを抽出できませんでした",
-        )
-        return
-
-    logger.info(f"[処理] {len(targets)}件のターゲットを検出")
-
-    success_count = 0
-    error_count = 0
-
-    for i, target in enumerate(targets):
-        logger.info(
-            f"[INFO] forecast_revision "
-            f"FY={target.fiscal_year} Q={target.quarter} "
-            f"sales={target.sales} op_profit={target.operating_profit} "
-            f"source={target.source}"
-        )
-
-        if not target.fiscal_year:
-            logger.error(f"[ERROR] forecast_revision_parse_failed reason=年度不明 (target {i+1})")
-            error_count += 1
-            continue
-
-        if not target.quarter:
-            logger.error(f"[ERROR] forecast_revision_parse_failed reason=Q不明 (target {i+1})")
-            error_count += 1
-            continue
-
-        if target.sales is None and target.operating_profit is None:
-            logger.error(
-                f"[ERROR] forecast_revision_parse_failed "
-                f"reason=売上高・営業利益ともに抽出不可 (target {i+1})"
-            )
-            error_count += 1
-            continue
-
-        # R表記 → YYYY-MM-DD
-        fiscal_year_end = _reiwa_to_fiscal_year_end(target.fiscal_year)
-        if fiscal_year_end is None:
-            logger.error(f"[ERROR] 年度変換失敗: {target.fiscal_year}")
-            error_count += 1
-            continue
-
-        # 単位変換
-        source_mult = parse_scale_unit(target.source_unit) if target.source_unit else 1
-        excel_mult = excel_unit_multiplier(config.excel_unit)
-
-        converted_sales = None
-        if target.sales is not None:
-            converted_sales = convert_to_excel_unit(target.sales, source_mult, excel_mult)
-
-        converted_op = None
-        if target.operating_profit is not None:
-            converted_op = convert_to_excel_unit(target.operating_profit, source_mult, excel_mult)
-
-        converted_gp = None
-        if target.gross_profit is not None:
-            converted_gp = convert_to_excel_unit(target.gross_profit, source_mult, excel_mult)
-
-        logger.info(
-            f"[処理] ターゲット{i+1}: {fiscal_year_end} {target.quarter} "
-            f"売上={converted_sales} 営利={converted_op} "
-            f"(単位変換: {target.source_unit}→{config.excel_unit})"
-        )
-
-        # DB書き込み（数値のみ）
-        result = decision_db.upsert_quarterly_result(
-            company_code=code,
-            fiscal_year_end=fiscal_year_end,
-            quarter=target.quarter,
-            sales=converted_sales,
-            gross_profit=converted_gp,
-            operating_profit=converted_op,
-            actor="tdnet", source="tdnet",
-            tdnet_disclosure_id=disclosure_id,
-            run_id=run_id,
-        )
-        decision_db.commit()
-
-        if result in ("inserted", "updated"):
-            logger.info(f"[処理] ✅ ターゲット{i+1} {result}")
-            success_count += 1
-        else:
-            logger.info(f"[処理] ターゲット{i+1} {result}（変更なし）")
-
-    # StateDB記録
-    final_status = Status.SUCCESS if success_count > 0 else Status.PARSE_FAILED
-    state_db.record(
-        disclosure_id=disclosure_id, code=code,
-        year=targets[0].fiscal_year if targets else "",
-        quarter=",".join(t.quarter for t in targets),
-        status=final_status,
-        error_detail=f"targets={len(targets)}, success={success_count}, error={error_count}",
+    """Store forecast revisions in the event/forecast path, never actual PL."""
+    from src.events.common_models import DocumentMeta
+    from src.events.event_pipeline import process_documents
+    result = process_documents(
+        docs=[DocumentMeta(doc_id=item.disclosure_id, ticker=item.ticker,
+            company_name=item.company_name, title=item.title,
+            disclosure_datetime=item.published_at, doc_url=item.doc_url, pdf_path=doc_path)],
+        db_path=config.decision_db_path, dry_run=False,
+        event_types={"forecast_revision"}, webhook_url="",
     )
+    state_db.record(disclosure_id=item.disclosure_id, code=item.ticker, year="", quarter="",
+        status=Status.SUCCESS if result.errors == 0 and result.supabase_errors == 0 else Status.PARSE_FAILED,
+        error_detail=f"forecast events saved={result.saved}, errors={result.errors + result.supabase_errors}")
 
 
 # ------------------------------------------------------------------

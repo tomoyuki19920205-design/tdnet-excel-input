@@ -2361,6 +2361,15 @@ def _return_with_eps_log(
     text: str = "",
 ) -> ForecastRevisionEvent:
     """EPS を INFO ログに出力し、補助経路による latest_full_year_eps を設定してから event を返す。"""
+    from .forecast_eps_table import forecast_eps_pair
+    pair = forecast_eps_pair(text)
+    if pair is not None and not event.is_difference_disclosure:
+        event.eps_validated = True
+        event.previous_eps, event.revised_eps = pair
+        event.latest_full_year_eps = pair[1]
+        event.delta_eps = _calc_delta(*pair)
+        event.change_eps_pct = _calc_pct(*pair)
+
     event = _sanitize_event_amount_metrics(event)
     if event.previous_eps is not None or event.revised_eps is not None:
         logger.info(

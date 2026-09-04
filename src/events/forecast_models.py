@@ -40,6 +40,7 @@ class ForecastRevisionEvent:
 
     # 専用抽出器が返す「今回の通期EPS予想」（補助フィールド、None は取得不能を意味する）
     latest_full_year_eps: Optional[float] = None
+    eps_validated: bool = False
 
     is_difference_disclosure: bool = False
     extraction_source: str = "fallback"    # pdf_text / html_text / fallback

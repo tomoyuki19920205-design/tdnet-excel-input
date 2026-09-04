@@ -139,7 +139,7 @@ class TestCanonicalSyncUnit:
             CREATE TABLE IF NOT EXISTS quarterly_results (
                 id INTEGER PRIMARY KEY,
                 company_code TEXT,
-                period TEXT,
+                fiscal_year_end TEXT,
                 quarter TEXT,
                 sales REAL,
                 gross_profit REAL,
@@ -154,7 +154,7 @@ class TestCanonicalSyncUnit:
         """)
         conn.execute(
             "INSERT INTO quarterly_results "
-            "(company_code, period, quarter, sales, operating_profit, "
+            "(company_code, fiscal_year_end, quarter, sales, operating_profit, "
             "field_sources, disclosure_id, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             ("6905", "2026-05-31", "3Q", 17346, -899,
@@ -170,29 +170,20 @@ class TestCanonicalSyncUnit:
         conn.commit()
         conn.close()
 
-        captured_units = []
+        captured_rows = []
+        def capture(table, rows, **kwargs):
+            if table == "canonical_financials":
+                captured_rows.extend(rows)
+            return {"ok": True, "count": len(rows), "error": None}
 
-        def _mock_write_fin(**kwargs):
-            captured_units.append(kwargs.get("unit"))
-            return {"written": 1, "skipped": 0, "errors": 0}
-
-        with patch("lib.pipeline.canonical_sync.load_env"):
-            # get_supabase_write_config は canonical_sync 内の
-            # from .db import get_supabase_write_config で解決される
-            with patch("lib.pipeline.db.get_supabase_write_config",
-                       return_value={"url": "x", "key": "y"}):
-                with patch("lib.pipeline.canonical_sync.write_financials_canonical",
-                           side_effect=_mock_write_fin) as mock_fin, \
-                     patch("lib.pipeline.canonical_sync.write_segments_canonical") as mock_seg:
-                    mock_seg.return_value = {"written": 0, "skipped": 0, "errors": 0}
-
-                    from lib.pipeline.canonical_sync import sync_canonical
-                    result = sync_canonical(db_path=db_path, dry_run=False)
-
-        # unit=millions_jpy で呼ばれていること
-        assert len(captured_units) > 0
-        for u in captured_units:
-            assert u == "millions_jpy", f"Expected 'millions_jpy', got '{u}'"
+        with patch("lib.pipeline.canonical_sync.load_env"), \
+             patch("lib.pipeline.canonical_sync.get_supabase_write_config", return_value={"url":"x","key":"y"}), \
+             patch("lib.pipeline.canonical_sync.supabase_upsert", side_effect=capture):
+            from lib.pipeline.canonical_sync import sync_canonical
+            result = sync_canonical(db_path=db_path, dry_run=False, sync_segments=False)
+        assert result["financials"]["written"] > 0
+        assert {r["unit"] for r in captured_rows} == {"millions_jpy"}
+        assert next(r["value"] for r in captured_rows if r["metric"] == "sales") == 17346
 
 
 # ================================================================
@@ -244,8 +235,8 @@ class TestCanonicalWriterUnit:
         rows = mock_upsert.call_args[0][1]
         assert rows[0]["unit"] == "millions_jpy"
 
-    def test_default_unit_is_jpy(self):
-        """デフォルト unit は JPY (後方互換)"""
+    def test_default_unit_is_millions_jpy(self):
+        """The writer default matches normalized caller amounts."""
         from lib.pipeline.canonical_writer import write_financials_canonical
 
         mock_upsert = MagicMock(return_value={"ok": True, "count": 1, "error": None})
@@ -260,4 +251,4 @@ class TestCanonicalWriterUnit:
             )
 
         rows = mock_upsert.call_args[0][1]
-        assert rows[0]["unit"] == "JPY"
+        assert rows[0]["unit"] == "millions_jpy"
