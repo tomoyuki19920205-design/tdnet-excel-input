@@ -214,7 +214,7 @@ def _history_filename(
     run_id: Any,
     run_token: Any,
 ) -> str:
-    if kind not in {"completed", "stale"}:
+    if kind not in {"completed", "stale", "reconciled"}:
         raise BenchmarkError("invalid benchmark task history kind")
     identity = {
         "benchmark_id": benchmark_id,
@@ -1441,6 +1441,338 @@ def release_task(
         "run_status": manifest["status"],
         "completed_at": manifest.get("completed_at"),
         "history_path": str(history_path.resolve()),
+    }
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _reconcile_slot_id(task_id: str, batch_size: int, assignment: dict[str, Any]) -> str:
+    position = assignment.get("task_queue_position")
+    if not isinstance(position, int) or position < 1:
+        raise BenchmarkError("benchmark assignment has invalid task_queue_position")
+    company_position = (position - 1) % batch_size + 1
+    return f"bslot{(int(task_id[-2:]) - 1) * batch_size + company_position:03d}"
+
+
+def _reconcile_output_evidence(
+    root: Path,
+    run_directory: Path,
+    manifest: dict[str, Any],
+    task_id: str,
+    assignment: dict[str, Any],
+    company_records: list[dict[str, Any]],
+    active_assignment: dict[str, Any] | None,
+) -> dict[str, Any]:
+    assignment_id = str(assignment.get("assignment_id", ""))
+    expected_directory = (_paths(root)["outputs"] / manifest["benchmark_id"] / manifest["run_name"]).resolve()
+    output_path = (expected_directory / f"benchmark_{task_id}_{assignment_id}.json").resolve()
+    temp_path = Path(str(output_path) + ".tmp")
+    base = {
+        "assignment_id": assignment_id,
+        "ticker": assignment.get("ticker"),
+        "queue_status_before": assignment.get("status"),
+        "output_path": str(output_path),
+        "output_sha256": None,
+        "strategy_telemetry_path": None,
+        "strategy_telemetry_sha256": None,
+        "temp_artifact_present": temp_path.exists(),
+        "classification": "C_INVALID_OR_INCOMPLETE_OUTPUT",
+        "queue_status_after": assignment.get("status"),
+    }
+    try:
+        if not _inside(output_path, expected_directory):
+            raise BenchmarkError("benchmark reconcile output path is not isolated")
+        duplicates = sorted(
+            str(path.resolve())
+            for path in expected_directory.glob(f"*{assignment_id}*.json")
+            if path.resolve() != output_path
+        )
+        if duplicates:
+            raise BenchmarkError(f"duplicate canonical output candidates: {duplicates}")
+        if not output_path.exists():
+            base["reason"] = "temporary artifact exists without canonical final" if temp_path.exists() else "canonical final is missing"
+            return base
+        payload = _read_json(output_path)
+        prepared = dict(assignment)
+        prepared["slot_id"] = (
+            active_assignment.get("slot_id")
+            if active_assignment is not None
+            else _reconcile_slot_id(task_id, int(manifest["batch_size"]), assignment)
+        )
+        prepared["output_path"] = str(output_path)
+        snapshot_identity = {
+            "benchmark_id": manifest["benchmark_id"],
+            "run_name": manifest["run_name"],
+            "task_id": task_id,
+        }
+        if payload.get("schema_version") == FAILURE_SCHEMA:
+            source_count, event_count, result_type = _validate_failure(payload, prepared, snapshot_identity)
+            classification = "B_VALID_FAILURE_OUTPUT"
+            strategy_path = None
+            strategy_value = None
+        else:
+            source_count, event_count, result_type = _validate_success(payload, prepared)
+            classification = "A_VALID_FINAL_OUTPUT"
+            strategy_path = None
+            strategy_value = None
+            if manifest.get("strategy_version") in (STRATEGY_V2_VERSION, STRATEGY_V3_VERSION, STRATEGY_V4_VERSION):
+                strategy_path = (
+                    run_directory / "strategy_telemetry" / task_id / f"{assignment_id}.json"
+                ).resolve()
+                if not _inside(strategy_path, run_directory) or not strategy_path.exists():
+                    raise BenchmarkError("canonical strategy telemetry is missing or not isolated")
+                strategy_value = _read_json(strategy_path)
+                if manifest["strategy_version"] == STRATEGY_V2_VERSION:
+                    validate_strategy_v2_telemetry(strategy_value, prepared, event_count, result_type)
+                elif manifest["strategy_version"] == STRATEGY_V3_VERSION:
+                    from tools.company_news_strategy_v3 import validate as validate_strategy
+                    strategy_value = validate_strategy(strategy_value, prepared, payload)
+                else:
+                    from tools.company_news_strategy_v4 import validate as validate_strategy
+                    strategy_value = validate_strategy(strategy_value, prepared, payload)
+                    if strategy_value["coverage_status"] == "PARTIAL":
+                        base["reason"] = "strategy v4 coverage is PARTIAL"
+                        base["output_sha256"] = _file_sha256(output_path)
+                        base["strategy_telemetry_path"] = str(strategy_path)
+                        base["strategy_telemetry_sha256"] = _file_sha256(strategy_path)
+                        return base
+
+        assignment_records = [
+            record for record in company_records
+            if record.get("assignment_id") == assignment_id
+        ]
+        expected_marker = {
+            "schema_version": COMPANY_TELEMETRY_SCHEMA,
+            "benchmark_id": manifest["benchmark_id"],
+            "run_name": manifest["run_name"],
+            "task_id": task_id,
+            "slot_id": prepared["slot_id"],
+            "assignment_id": assignment_id,
+            "ticker": assignment["ticker"],
+            "company_name": assignment["company_name"],
+            "result_type": result_type,
+            "output_path": str(output_path),
+            "source_count": source_count,
+            "event_count": event_count,
+        }
+        matching_records = [
+            record for record in assignment_records
+            if all(record.get(key) == value for key, value in expected_marker.items())
+            and isinstance(record.get("run_id"), str)
+            and bool(record["run_id"])
+        ]
+        if len(assignment_records) != 1 or len(matching_records) != 1:
+            raise BenchmarkError("exactly one matching company completion marker is required")
+        marker = matching_records[0]
+        if strategy_path is not None:
+            if Path(str(marker.get("strategy_telemetry_path", ""))).resolve() != strategy_path:
+                raise BenchmarkError("company completion marker strategy path mismatch")
+            strategy_key = "strategy_v4" if manifest["strategy_version"] == STRATEGY_V4_VERSION else "strategy_v3"
+            if manifest["strategy_version"] in (STRATEGY_V3_VERSION, STRATEGY_V4_VERSION) and marker.get(strategy_key) != strategy_value:
+                raise BenchmarkError("company completion marker strategy payload mismatch")
+        queue_status = assignment.get("status")
+        if queue_status not in {"pending", result_type}:
+            raise BenchmarkError("existing queue status contradicts validated result")
+        base.update({
+            "classification": classification,
+            "reason": "canonical output, strategy evidence, and completion marker agree",
+            "queue_status_after": result_type,
+            "output_sha256": _file_sha256(output_path),
+            "completion_marker_run_id": marker["run_id"],
+            "completion_marker_saved_at": marker.get("output_saved_at"),
+        })
+        if strategy_path is not None:
+            base["strategy_telemetry_path"] = str(strategy_path)
+            base["strategy_telemetry_sha256"] = _file_sha256(strategy_path)
+        return base
+    except (BenchmarkError, NewsValidationError, OSError, ValueError, KeyError, TypeError) as exc:
+        base["reason"] = str(exc)
+        return base
+
+
+def reconcile_existing_outputs(
+    root: Path,
+    benchmark_id: str,
+    run_name: str,
+    task_id: str,
+    *,
+    assignment_ids: list[str] | None = None,
+    dry_run: bool = True,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Reconcile already-finalized benchmark artifacts without rerunning research."""
+    root = root.resolve()
+    task_id = _task_id(task_id)
+    run_directory = _run_dir(root, benchmark_id, run_name).resolve()
+    manifest = _read_json(run_directory / "manifest.json")
+    required_manifest = {
+        "schema_version": RUN_SCHEMA,
+        "benchmark_mode": True,
+        "benchmark_id": benchmark_id,
+        "run_name": run_name,
+        "production_write_forbidden": True,
+    }
+    if any(manifest.get(key) != value for key, value in required_manifest.items()):
+        raise BenchmarkError("benchmark reconcile manifest identity or isolation mismatch")
+    expected_output_directory = (_paths(root)["outputs"] / benchmark_id / run_name).resolve()
+    if Path(str(manifest.get("output_directory", ""))).resolve() != expected_output_directory:
+        raise BenchmarkError("benchmark reconcile output directory mismatch")
+
+    task_directory = _task_directory(run_directory, task_id)
+    queue_path = task_directory / "queue.json"
+    queue_before_bytes = queue_path.read_bytes()
+    queue = _read_json(queue_path)
+    required_queue = {
+        "schema_version": RUN_SCHEMA,
+        "benchmark_id": benchmark_id,
+        "run_name": run_name,
+        "task_id": task_id,
+        "batch_size": manifest["batch_size"],
+    }
+    if any(queue.get(key) != value for key, value in required_queue.items()):
+        raise BenchmarkError("benchmark reconcile queue identity mismatch")
+    assignments = queue.get("assignments")
+    if not isinstance(assignments, list):
+        raise BenchmarkError("benchmark reconcile queue assignments are invalid")
+    assignment_by_id = {str(value.get("assignment_id")): value for value in assignments if isinstance(value, dict)}
+    if len(assignment_by_id) != len(assignments):
+        raise BenchmarkError("benchmark reconcile queue has duplicate or invalid assignments")
+
+    guard_path = task_directory / "active.json"
+    guard_before_bytes = guard_path.read_bytes() if guard_path.exists() else None
+    active = _read_json(guard_path) if guard_before_bytes is not None else None
+    active_assignments: dict[str, dict[str, Any]] = {}
+    if active is not None:
+        required_active = {
+            "schema_version": SNAPSHOT_SCHEMA,
+            "benchmark_mode": True,
+            "benchmark_id": benchmark_id,
+            "run_name": run_name,
+            "task_id": task_id,
+        }
+        if any(active.get(key) != value for key, value in required_active.items()):
+            raise BenchmarkError("benchmark reconcile active guard identity mismatch")
+        active_values = active.get("assignments", [])
+        if not isinstance(active_values, list):
+            raise BenchmarkError("benchmark reconcile active guard assignments are invalid")
+        active_assignments = {
+            str(value.get("assignment_id")): value for value in active_values if isinstance(value, dict)
+        }
+        if len(active_assignments) != len(active_values):
+            raise BenchmarkError("benchmark reconcile active guard assignments are invalid")
+        states = active.get("company_state", {})
+        if not isinstance(states, dict):
+            raise BenchmarkError("benchmark reconcile active guard state is invalid")
+        running = [
+            assignment_id for assignment_id, state in states.items()
+            if isinstance(state, dict)
+            and state.get("research_started_at")
+            and not state.get("research_finished_at")
+        ]
+        if running:
+            raise BenchmarkError(f"benchmark reconcile refuses a running assignment: {', '.join(sorted(running))}")
+
+    if assignment_ids is None:
+        if active_assignments:
+            selected_ids = list(active_assignments)
+        else:
+            selected_ids = [
+                assignment_id for assignment_id, assignment in assignment_by_id.items()
+                if assignment.get("status") == "pending"
+                and (
+                    (expected_output_directory / f"benchmark_{task_id}_{assignment_id}.json").exists()
+                    or Path(str(expected_output_directory / f"benchmark_{task_id}_{assignment_id}.json") + ".tmp").exists()
+                )
+            ]
+    else:
+        selected_ids = list(dict.fromkeys(assignment_ids))
+    missing_ids = [assignment_id for assignment_id in selected_ids if assignment_id not in assignment_by_id]
+    if missing_ids:
+        raise BenchmarkError(f"benchmark reconcile assignment identity mismatch: {', '.join(missing_ids)}")
+    company_records = _read_jsonl(task_directory / "companies.jsonl")
+    evidence = [
+        _reconcile_output_evidence(
+            root, run_directory, manifest, task_id, assignment_by_id[assignment_id],
+            company_records, active_assignments.get(assignment_id),
+        )
+        for assignment_id in selected_ids
+    ]
+    valid_classes = {"A_VALID_FINAL_OUTPUT", "B_VALID_FAILURE_OUTPUT"}
+    updates = {
+        item["assignment_id"]: item["queue_status_after"]
+        for item in evidence
+        if item["classification"] in valid_classes
+        and item["queue_status_before"] == "pending"
+    }
+    queue_after = copy.deepcopy(queue)
+    for assignment in queue_after["assignments"]:
+        if assignment["assignment_id"] in updates:
+            assignment["status"] = updates[assignment["assignment_id"]]
+
+    active_ids = set(active_assignments)
+    terminal_statuses = {"news_present", "no_news", "failure", "partial"}
+    status_after = {assignment["assignment_id"]: assignment["status"] for assignment in queue_after["assignments"]}
+    archive_guard = bool(active is not None and active_ids and all(status_after.get(value) in terminal_statuses for value in active_ids))
+    unresolved_active = sorted(value for value in active_ids if status_after.get(value) not in terminal_statuses)
+    history_path: Path | None = None
+    if archive_guard:
+        history_path = task_directory / "history" / _history_filename(
+            "reconciled",
+            benchmark_id=active.get("benchmark_id"),
+            run_name=active.get("run_name"),
+            task_id=active.get("task_id"),
+            run_id=active.get("run_id"),
+            run_token=active.get("run_token"),
+        )
+        if history_path.exists():
+            raise BenchmarkError("reconciled benchmark task history already exists")
+
+    applied = False
+    if not dry_run and (updates or archive_guard):
+        if queue_path.read_bytes() != queue_before_bytes:
+            raise BenchmarkError("benchmark reconcile queue changed during validation")
+        if guard_before_bytes is not None and (not guard_path.exists() or guard_path.read_bytes() != guard_before_bytes):
+            raise BenchmarkError("benchmark reconcile guard changed during validation")
+        if updates:
+            atomic_write_json(queue_path, queue_after)
+        try:
+            if archive_guard and history_path is not None:
+                history_path.parent.mkdir(parents=True, exist_ok=True)
+                replace_with_retry(guard_path, history_path)
+        except OSError:
+            if updates:
+                atomic_write_text(queue_path, queue_before_bytes.decode("utf-8"))
+            raise
+        applied = True
+        manifest = _finalize_run_if_complete(root, run_directory, manifest, completed_at_hint=_now(now))
+
+    counts = defaultdict(int)
+    for assignment in queue_after["assignments"]:
+        counts[str(assignment["status"])] += 1
+    return {
+        "status": "applied" if applied else "dry_run" if dry_run else "no_change",
+        "benchmark_id": benchmark_id,
+        "run_name": run_name,
+        "task_id": task_id,
+        "dry_run": dry_run,
+        "selected_assignment_count": len(selected_ids),
+        "valid_final_count": sum(item["classification"] == "A_VALID_FINAL_OUTPUT" for item in evidence),
+        "valid_failure_count": sum(item["classification"] == "B_VALID_FAILURE_OUTPUT" for item in evidence),
+        "invalid_or_incomplete_count": sum(item["classification"] == "C_INVALID_OR_INCOMPLETE_OUTPUT" for item in evidence),
+        "queue_update_count": len(updates),
+        "guard_archive_planned": archive_guard,
+        "guard_archived": bool(applied and archive_guard),
+        "guard_history_path": str(history_path.resolve()) if history_path is not None else None,
+        "unresolved_active_assignments": unresolved_active,
+        "task_counts_after": dict(counts),
+        "run_status_after": manifest["status"],
+        "evidence": evidence,
     }
 
 
@@ -5155,6 +5487,7 @@ def _build_parser() -> argparse.ArgumentParser:
     finish = commands.add_parser("research-finish")
     finalize = commands.add_parser("finalize-company")
     release = commands.add_parser("release-task")
+    reconcile = commands.add_parser("reconcile-existing-outputs")
     for command in (start, finish, finalize):
         command.add_argument("--task-id", required=True)
         command.add_argument("--run-token", required=True)
@@ -5162,6 +5495,11 @@ def _build_parser() -> argparse.ArgumentParser:
     finalize.add_argument("--failure", action="store_true")
     release.add_argument("--task-id", required=True)
     release.add_argument("--run-token", required=True)
+    reconcile.add_argument("--benchmark-id", required=True)
+    reconcile.add_argument("--run-name", required=True)
+    reconcile.add_argument("--task-id", required=True)
+    reconcile.add_argument("--assignment-id", action="append", dest="assignment_ids")
+    reconcile.add_argument("--apply", action="store_true")
     status = commands.add_parser("status")
     status.add_argument("--benchmark-id", required=True)
     status.add_argument("--run-name", required=True)
@@ -5242,6 +5580,11 @@ def main(argv: list[str] | None = None) -> int:
             result = finalize_company(root, args.task_id, args.run_token, args.assignment_id, failure=args.failure)
         elif args.command == "release-task":
             result = release_task(root, args.task_id, args.run_token)
+        elif args.command == "reconcile-existing-outputs":
+            result = reconcile_existing_outputs(
+                root, args.benchmark_id, args.run_name, args.task_id,
+                assignment_ids=args.assignment_ids, dry_run=not args.apply,
+            )
         elif args.command == "status":
             result = benchmark_status(root, args.benchmark_id, args.run_name)
         elif args.command == "audit":

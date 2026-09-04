@@ -31,6 +31,7 @@ from tools.company_news_batch_benchmark import (
     prepare_reference_replication,
     prepare_run,
     recommendation,
+    reconcile_existing_outputs,
     release_task,
     research_finish,
     research_start,
@@ -178,6 +179,37 @@ def _complete_snapshot(tmp_path: Path, task_id: str, snapshot: dict, started: da
         cursor += timedelta(seconds=1)
     release_task(tmp_path, task_id, snapshot["run_token"], now=cursor)
     return cursor
+
+
+def _reconcile_case(tmp_path: Path, *, failure: bool = False):
+    cohort, _, _ = _prepare(tmp_path, count=8, reference_size=8)
+    run = prepare_run(tmp_path, cohort["benchmark_id"], 1, reference=True, now=NOW)
+    activate_run(tmp_path, cohort["benchmark_id"], run["run_name"], now=NOW)
+    snapshot = snapshot_task(tmp_path, "task01", now=NOW)
+    assignment = snapshot["assignments"][0]
+    research_start(tmp_path, "task01", snapshot["run_token"], assignment["assignment_id"], now=NOW + timedelta(seconds=1))
+    research_finish(tmp_path, "task01", snapshot["run_token"], assignment["assignment_id"], now=NOW + timedelta(seconds=2))
+    if failure:
+        payload = {
+            "schema_version": benchmark_module.FAILURE_SCHEMA,
+            "task_id": "task01",
+            "slot_id": assignment["slot_id"],
+            "assignment_id": assignment["assignment_id"],
+            "ticker": assignment["ticker"],
+            "company_name": assignment["company_name"],
+            "error_type": "fixture_failure",
+            "error_message": "deterministic fixture",
+            "sources_attempted": ["https://example.com/source"],
+            "created_at": (NOW + timedelta(seconds=2)).isoformat(),
+        }
+    else:
+        payload = _payload(assignment)
+    _write_json(Path(assignment["temp_path"]), payload)
+    finalize_company(
+        tmp_path, "task01", snapshot["run_token"], assignment["assignment_id"],
+        failure=failure, now=NOW + timedelta(seconds=3),
+    )
+    return cohort["benchmark_id"], run["run_name"], snapshot, assignment
 
 
 def test_fixed_deterministic_stratified_cohort_and_reference(tmp_path):
@@ -564,6 +596,114 @@ def test_benchmark_harness_cannot_mutate_production_queue_db_or_supabase(tmp_pat
     assert production_queue.read_bytes() == queue_before
     assert production_db.read_bytes() == db_before
     assert not (tmp_path / "data" / "news_inbox").exists()
+
+
+def test_reconcile_existing_valid_output_updates_queue_and_archives_guard(tmp_path):
+    benchmark_id, run_name, _, assignment = _reconcile_case(tmp_path)
+    dry_run = reconcile_existing_outputs(tmp_path, benchmark_id, run_name, "task01")
+    assert dry_run["valid_final_count"] == 1
+    assert dry_run["queue_update_count"] == 1
+    assert dry_run["guard_archive_planned"] is True
+
+    applied = reconcile_existing_outputs(tmp_path, benchmark_id, run_name, "task01", dry_run=False, now=NOW + timedelta(hours=3))
+    assert applied["status"] == "applied"
+    assert applied["guard_archived"] is True
+    assert applied["task_counts_after"]["no_news"] == 1
+    assert not (tmp_path / "data" / "news_work" / "batch_benchmark" / benchmark_id / "runs" / run_name / "tasks" / "task01" / "active.json").exists()
+    assert Path(applied["guard_history_path"]).name.startswith("reconciled-")
+    assert applied["evidence"][0]["assignment_id"] == assignment["assignment_id"]
+
+
+def test_reconcile_existing_failure_output_marks_failure(tmp_path):
+    benchmark_id, run_name, _, assignment = _reconcile_case(tmp_path, failure=True)
+    result = reconcile_existing_outputs(tmp_path, benchmark_id, run_name, "task01", dry_run=False)
+    assert result["valid_failure_count"] == 1
+    assert result["evidence"][0]["classification"] == "B_VALID_FAILURE_OUTPUT"
+    assert result["evidence"][0]["queue_status_after"] == "failure"
+    assert result["task_counts_after"]["failure"] == 1
+
+
+def test_reconcile_incomplete_output_stays_pending(tmp_path):
+    cohort, _, _ = _prepare(tmp_path, count=8, reference_size=8)
+    run = prepare_run(tmp_path, cohort["benchmark_id"], 1, reference=True, now=NOW)
+    activate_run(tmp_path, cohort["benchmark_id"], run["run_name"], now=NOW)
+    snapshot = snapshot_task(tmp_path, "task01", now=NOW)
+    assignment = snapshot["assignments"][0]
+    _write_json(Path(assignment["output_path"]), {"schema_version": "company_news_v1"})
+
+    result = reconcile_existing_outputs(tmp_path, cohort["benchmark_id"], run["run_name"], "task01", dry_run=False)
+    assert result["invalid_or_incomplete_count"] == 1
+    assert result["queue_update_count"] == 0
+    assert result["guard_archived"] is False
+    assert result["task_counts_after"]["pending"] == 1
+
+
+@pytest.mark.parametrize(
+    ("field", "wrong_value"),
+    (("benchmark_id", "batchbench-wrong"), ("run_name", "batch04"), ("task_id", "task08")),
+)
+def test_reconcile_wrong_completion_identity_fails_closed(tmp_path, field, wrong_value):
+    benchmark_id, run_name, _, _ = _reconcile_case(tmp_path)
+    companies = tmp_path / "data" / "news_work" / "batch_benchmark" / benchmark_id / "runs" / run_name / "tasks" / "task01" / "companies.jsonl"
+    marker = json.loads(companies.read_text(encoding="utf-8"))
+    marker[field] = wrong_value
+    companies.write_text(json.dumps(marker) + "\n", encoding="utf-8")
+
+    result = reconcile_existing_outputs(tmp_path, benchmark_id, run_name, "task01", dry_run=False)
+    assert result["invalid_or_incomplete_count"] == 1
+    assert "completion marker" in result["evidence"][0]["reason"]
+    assert result["queue_update_count"] == 0
+    assert result["guard_archived"] is False
+
+
+def test_reconcile_is_idempotent_when_repeated(tmp_path):
+    benchmark_id, run_name, _, assignment = _reconcile_case(tmp_path)
+    first = reconcile_existing_outputs(tmp_path, benchmark_id, run_name, "task01", dry_run=False)
+    second = reconcile_existing_outputs(
+        tmp_path, benchmark_id, run_name, "task01",
+        assignment_ids=[assignment["assignment_id"]], dry_run=False,
+    )
+    assert first["queue_update_count"] == 1
+    assert second["status"] == "no_change"
+    assert second["queue_update_count"] == 0
+    assert second["valid_final_count"] == 1
+
+
+def test_reconcile_rolls_back_queue_when_guard_archive_fails(tmp_path, monkeypatch):
+    benchmark_id, run_name, _, _ = _reconcile_case(tmp_path)
+    task_directory = tmp_path / "data" / "news_work" / "batch_benchmark" / benchmark_id / "runs" / run_name / "tasks" / "task01"
+    queue_path = task_directory / "queue.json"
+    guard_path = task_directory / "active.json"
+    queue_before = queue_path.read_bytes()
+    guard_before = guard_path.read_bytes()
+
+    def fail_archive(source, destination):
+        raise OSError("injected archive failure")
+
+    monkeypatch.setattr(benchmark_module, "replace_with_retry", fail_archive)
+    with pytest.raises(OSError, match="injected archive failure"):
+        reconcile_existing_outputs(tmp_path, benchmark_id, run_name, "task01", dry_run=False)
+    assert queue_path.read_bytes() == queue_before
+    assert guard_path.read_bytes() == guard_before
+
+
+def test_reconcile_recovers_expired_guard_without_touching_production_or_gold(tmp_path):
+    production_queue = tmp_path / "data" / "news_work" / "queue" / "queue_state.json"
+    production_db = tmp_path / "decision_db.db"
+    gold = tmp_path / "data" / "news_work" / "batch_benchmark" / "gold-sentinel.json"
+    _write_json(production_queue, {"queue_id": "production", "status": "sentinel"})
+    sqlite3.connect(production_db).execute("CREATE TABLE sentinel(value TEXT)").connection.close()
+    _write_json(gold, {"gold": "unchanged"})
+    protected_before = (production_queue.read_bytes(), production_db.read_bytes(), gold.read_bytes())
+    benchmark_id, run_name, snapshot, _ = _reconcile_case(tmp_path)
+
+    result = reconcile_existing_outputs(
+        tmp_path, benchmark_id, run_name, "task01",
+        dry_run=False, now=datetime.fromisoformat(snapshot["expires_at"]) + timedelta(seconds=1),
+    )
+    assert result["guard_archived"] is True
+    assert Path(result["guard_history_path"]).exists()
+    assert (production_queue.read_bytes(), production_db.read_bytes(), gold.read_bytes()) == protected_before
 
 
 def test_default_worker_ignores_benchmark_inbox(tmp_path):
