@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from lib.runtime_paths import runtime_path
 from lib.news_monitor import NewsValidationError, normalize_ticker
 from tools.company_news_atomic import atomic_write_json, atomic_write_jsonl, atomic_write_text
 from tools.company_news_work_bridge import (
@@ -70,7 +71,7 @@ class QueuePaths:
     @classmethod
     def from_values(cls, root: Path = ROOT, work_dir: Path | None = None) -> "QueuePaths":
         root = root.resolve()
-        work_dir = (work_dir or root / "data" / "news_work").resolve()
+        work_dir = (work_dir or runtime_path(root / "data" / "news_work", code_root=root)).resolve()
         queue_dir = work_dir / "queue"
         return cls(
             root=root,
@@ -1374,10 +1375,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     root = args.root.resolve()
-    work_dir = (args.work_dir or root / "data" / "news_work").resolve()
-    inbox = (args.inbox or root / "data" / "news_inbox").resolve()
-    db_path = (args.db or root / "decision_db.db").resolve()
-    master_db = (args.master_db or root / "data" / "jquants.db").resolve()
+    work_dir = (args.work_dir or runtime_path(root / "data" / "news_work", code_root=root)).resolve()
+    inbox = (args.inbox or runtime_path(root / "data" / "news_inbox", code_root=root)).resolve()
+    db_path = (args.db or runtime_path(root / "decision_db.db", code_root=root)).resolve()
+    master_db = (args.master_db or runtime_path(root / "data" / "jquants.db", code_root=root)).resolve()
     paths = QueuePaths.from_values(root, work_dir)
     bridge = BridgePaths.from_root(root, work_dir, inbox)
     try:

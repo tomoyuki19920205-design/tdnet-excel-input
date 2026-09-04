@@ -39,6 +39,7 @@ import sys
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from lib.runtime_paths import runtime_path
 from typing import Any
 
 logger = logging.getLogger("pipeline.lock")
@@ -143,10 +144,11 @@ class FileLock:
         self,
         name: str,
         max_age_minutes: int = 15,
-        state_dir: str = _DEFAULT_STATE_DIR,
+        state_dir: str | None = None,
     ) -> None:
         self.name = name
         self.max_age_minutes = max_age_minutes
+        state_dir = state_dir if state_dir is not None else str(runtime_path(_DEFAULT_STATE_DIR))
         self.state_dir = state_dir
         self.lock_path = os.path.join(state_dir, f"{name}.lock")
         self.acquired = False
@@ -390,7 +392,7 @@ def acquire_dual_lock(
     *,
     global_max_age: int = 60,
     job_max_age: int = 15,
-    state_dir: str = _DEFAULT_STATE_DIR,
+    state_dir: str | None = None,
 ) -> tuple[FileLock, FileLock] | None:
     """グローバルロック + ジョブロックの二段取得。
 

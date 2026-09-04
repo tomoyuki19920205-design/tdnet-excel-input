@@ -25,6 +25,7 @@ from pathlib import Path
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 sys.path.insert(0, _PROJECT_ROOT)
 
+from lib.runtime_paths import runtime_path
 from src.common_ticker import normalize_ticker
 
 logger = logging.getLogger("extract_per_share")
@@ -814,17 +815,18 @@ def main():
     parser = argparse.ArgumentParser(
         description="raw_json → per_share_data バックフィル"
     )
-    parser.add_argument("--db", default=_DEFAULT_DB, help="SQLite DB パス")
+    parser.add_argument("--db", default=str(runtime_path(_DEFAULT_DB)), help="SQLite DB パス")
     parser.add_argument("--apply", action="store_true", help="本番反映")
     parser.add_argument("--dry-run", action="store_true", help="ドライラン (デフォルト)")
     parser.add_argument("--limit", type=int, default=0, help="処理行数上限")
     parser.add_argument("--ticker", help="対象銘柄だけを再構築（例: 7480）")
     args = parser.parse_args()
+    args.db = str(runtime_path(args.db))
 
-    os.makedirs(_LOG_DIR, exist_ok=True)
+    os.makedirs(str(runtime_path(_LOG_DIR)), exist_ok=True)
     ts = datetime.now(JST).strftime("%Y%m%d_%H%M%S")
     mode = "apply" if args.apply else "dryrun"
-    log_file = os.path.join(_LOG_DIR, f"extract_per_share_{mode}_{ts}.log")
+    log_file = os.path.join(str(runtime_path(_LOG_DIR)), f"extract_per_share_{mode}_{ts}.log")
 
     logging.basicConfig(
         level=logging.INFO,

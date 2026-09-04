@@ -25,6 +25,7 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+from lib.runtime_paths import runtime_path
 from lib.pipeline.db import load_env
 from src.events.common_models import EventRecord
 from src.events.tdnet_event_store import save_event_to_supabase
@@ -135,7 +136,7 @@ def run(
         {"total": int, "inserted": int, "dedup_skipped": int, "errors": int}
     """
     if not db_path:
-        db_path = str(Path(_PROJECT_ROOT) / "decision_db.db")
+        db_path = str(runtime_path(Path(_PROJECT_ROOT) / "decision_db.db", code_root=Path(_PROJECT_ROOT)))
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row

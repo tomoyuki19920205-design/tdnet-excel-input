@@ -23,6 +23,7 @@ import requests
 
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 sys.path.insert(0, _PROJECT_ROOT)
+from lib.runtime_paths import runtime_path
 from tools.file_lock import FileLock, read_lock_metadata
 
 _DEFAULT_DB = os.path.join(_PROJECT_ROOT, "data", "jquants.db")
@@ -279,6 +280,7 @@ def _lock_is_active(name: str, state_dir: str, max_age_minutes: int) -> bool:
 
 
 def _realtime_lock_active(state_dir: str = _LOCK_DIR) -> bool:
+    state_dir = str(runtime_path(state_dir))
     return _lock_is_active("realtime", state_dir, _REALTIME_LOCK_MAX_AGE_MINUTES)
 
 
@@ -385,6 +387,7 @@ def sync(db_path, supabase_url, supabase_key, dry_run=True,
          recent_days=_DEFAULT_RECENT_DAYS, limit=0, *,
          state_dir=_LOCK_DIR, reference_time=None, sleep_fn=time.sleep):
     """Synchronize market data with an apply-only, process-wide safety guard."""
+    state_dir = str(runtime_path(state_dir))
     is_full = recent_days == 0
 
     if dry_run:
@@ -431,20 +434,21 @@ def sync(db_path, supabase_url, supabase_key, dry_run=True,
 
 def main():
     parser = argparse.ArgumentParser(description="SQLite market_data → Supabase 同期")
-    parser.add_argument("--sqlite", default=_DEFAULT_DB)
+    parser.add_argument("--sqlite", default=str(runtime_path(_DEFAULT_DB)))
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--full", action="store_true")
     parser.add_argument("--recent", type=int, default=_DEFAULT_RECENT_DAYS)
     parser.add_argument("--limit", type=int, default=0)
     args = parser.parse_args()
+    args.sqlite = str(runtime_path(args.sqlite))
 
     is_dry_run = not args.apply
     recent_days = 0 if args.full else args.recent
 
-    os.makedirs(_LOG_DIR, exist_ok=True)
+    os.makedirs(str(runtime_path(_LOG_DIR)), exist_ok=True)
     ts = datetime.now(JST).strftime("%Y%m%d_%H%M%S")
     mode = "dryrun" if is_dry_run else "apply"
-    log_file = os.path.join(_LOG_DIR, f"sync_market_data_{mode}_{ts}.log")
+    log_file = os.path.join(str(runtime_path(_LOG_DIR)), f"sync_market_data_{mode}_{ts}.log")
 
     logging.basicConfig(
         level=logging.INFO,

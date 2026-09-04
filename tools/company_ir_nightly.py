@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from lib.runtime_paths import runtime_path
 from src.company_ir_monitor import import_sources_csv, init_db, notifications_enabled, run_monitor
 from src.events.env_loader import load_project_env
 from src.material_url_retry import connect_retry_db
@@ -59,10 +60,10 @@ def main() -> int:
     )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s")
-    db_path = ROOT / args.db
+    db_path = runtime_path(ROOT / args.db, code_root=ROOT)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
-    retry_conn = connect_retry_db(ROOT / "data/material_url_retry.db")
+    retry_conn = connect_retry_db(runtime_path(ROOT / "data/material_url_retry.db", code_root=ROOT))
     try:
         init_db(conn)
         imported = import_sources_csv(conn, ROOT / args.sources)

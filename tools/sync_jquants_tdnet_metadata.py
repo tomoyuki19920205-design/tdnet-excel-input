@@ -15,6 +15,7 @@ from typing import Any, Iterable
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+from lib.runtime_paths import runtime_path
 
 from src.jquants.adapter import fetch_tdnet_list_raw
 
@@ -240,7 +241,7 @@ def _unmatched_economic_date(disclosure_id: str, reported_date: str) -> tuple[st
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db", default=str(ROOT / "data" / "jquants.db"))
+    parser.add_argument("--db", default=str(runtime_path(ROOT / "data" / "jquants.db")))
     parser.add_argument("--from-date")
     parser.add_argument("--to-date")
     parser.add_argument("--apply", action="store_true")

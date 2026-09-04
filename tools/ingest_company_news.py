@@ -10,6 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from lib.runtime_paths import runtime_path
 from lib.news_monitor import NewsValidationError, connect_news_db, record_failed_run, upsert_run, validate_payload
 
 
@@ -38,8 +39,8 @@ def ingest_file(path: Path, db_path: Path, processed: Path, quarantine: Path) ->
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("paths", nargs="*", type=Path)
-    parser.add_argument("--db", type=Path, default=ROOT / "decision_db.db")
-    parser.add_argument("--inbox", type=Path, default=ROOT / "data" / "news_inbox")
+    parser.add_argument("--db", type=Path, default=runtime_path(ROOT / "decision_db.db"))
+    parser.add_argument("--inbox", type=Path, default=runtime_path(ROOT / "data" / "news_inbox"))
     args = parser.parse_args()
     paths = args.paths or sorted(args.inbox.glob("*.json"))
     processed, quarantine = args.inbox / "processed", args.inbox / "quarantine"

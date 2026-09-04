@@ -40,6 +40,7 @@ JST = timezone(timedelta(hours=9))
 
 
 # ticker 正規化は共通モジュールを使用
+from lib.runtime_paths import runtime_path
 from src.common_ticker import normalize_ticker as _normalize_ticker, ticker_to_sec_code as _ticker_to_sec_code
 
 # 決算スコア
@@ -76,10 +77,10 @@ def _get_enabled_categories() -> set[str]:
 # Sent log (dedup)
 # ============================================================
 def _load_sent_log() -> set[tuple]:
-    if not os.path.exists(_SENT_LOG_FILE):
+    if not os.path.exists(str(runtime_path(_SENT_LOG_FILE))):
         return set()
     try:
-        with open(_SENT_LOG_FILE, "r", encoding="utf-8-sig") as f:
+        with open(str(runtime_path(_SENT_LOG_FILE)), "r", encoding="utf-8-sig") as f:
             entries = json.load(f)
         return {tuple(e) for e in entries}
     except Exception:
@@ -87,9 +88,9 @@ def _load_sent_log() -> set[tuple]:
 
 
 def _save_sent_log(log: set[tuple]):
-    os.makedirs(os.path.dirname(_SENT_LOG_FILE), exist_ok=True)
+    os.makedirs(os.path.dirname(str(runtime_path(_SENT_LOG_FILE))), exist_ok=True)
     entries = sorted(log)
-    with open(_SENT_LOG_FILE, "w", encoding="utf-8") as f:
+    with open(str(runtime_path(_SENT_LOG_FILE)), "w", encoding="utf-8") as f:
         json.dump(entries, f, ensure_ascii=False, indent=2)
 
 
@@ -536,7 +537,7 @@ def run_alerts(
     sent_log = _load_sent_log()
 
     # SQLite 接続（AI差分要約取得用）
-    _db = db_path or _DEFAULT_DB_PATH
+    _db = db_path or str(runtime_path(_DEFAULT_DB_PATH))
     diff_conn: sqlite3.Connection | None = None
     if os.path.exists(_db):
         try:
@@ -661,9 +662,9 @@ def main():
 
     # Clear log
     if args.clear_log:
-        if os.path.exists(_SENT_LOG_FILE):
-            os.remove(_SENT_LOG_FILE)
-            _safe_print(f"[OK] Sent log cleared: {_SENT_LOG_FILE}")
+        if os.path.exists(str(runtime_path(_SENT_LOG_FILE))):
+            os.remove(str(runtime_path(_SENT_LOG_FILE)))
+            _safe_print(f"[OK] Sent log cleared: {str(runtime_path(_SENT_LOG_FILE))}")
         else:
             _safe_print("[OK] No sent log to clear")
         sys.exit(0)
@@ -684,10 +685,10 @@ def main():
         # items.json 優先、なければ tickers.json
         input_file = args.tickers_file
         if input_file is None:
-            if os.path.exists(_DEFAULT_ITEMS_FILE):
-                input_file = _DEFAULT_ITEMS_FILE
-            elif os.path.exists(_DEFAULT_TICKERS_FILE):
-                input_file = _DEFAULT_TICKERS_FILE
+            if os.path.exists(str(runtime_path(_DEFAULT_ITEMS_FILE))):
+                input_file = str(runtime_path(_DEFAULT_ITEMS_FILE))
+            elif os.path.exists(str(runtime_path(_DEFAULT_TICKERS_FILE))):
+                input_file = str(runtime_path(_DEFAULT_TICKERS_FILE))
             else:
                 _safe_print("[INFO] No items/tickers file found")
                 _safe_print("ALERT_DONE sent=0 checked=0 skipped=0 deduped=0")
@@ -719,7 +720,7 @@ def main():
         supabase_key=supabase_key,
         yoy_th=yoy_th,
         qoq_th=qoq_th,
-        db_path=os.path.join(_PROJECT_ROOT, "decision_db.db"),
+        db_path=str(runtime_path(os.path.join(_PROJECT_ROOT, "decision_db.db"))),
     )
     sys.exit(0)
 

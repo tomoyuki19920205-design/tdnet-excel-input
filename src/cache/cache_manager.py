@@ -6,6 +6,7 @@ from pathlib import Path
 from logging import getLogger
 from typing import Optional, Any
 import sqlite3
+from lib.runtime_paths import runtime_path
 
 logger = getLogger(__name__)
 
@@ -15,18 +16,15 @@ XBRL_DIR = CACHE_ROOT / "xbrl"
 HTML_DIR = CACHE_ROOT / "html"
 PARSED_DIR = CACHE_ROOT / "parsed"
 
-for d in [PDF_DIR, XBRL_DIR, HTML_DIR, PARSED_DIR]:
-    d.mkdir(parents=True, exist_ok=True)
-
 def _get_dir_by_type(cache_type: str) -> Path:
     if cache_type == "pdf":
-        return PDF_DIR
+        return runtime_path(PDF_DIR)
     if cache_type == "xbrl":
-        return XBRL_DIR
+        return runtime_path(XBRL_DIR)
     if cache_type == "html":
-        return HTML_DIR
+        return runtime_path(HTML_DIR)
     if cache_type == "parsed":
-        return PARSED_DIR
+        return runtime_path(PARSED_DIR)
     raise ValueError(f"invalid cache type: {cache_type}")
 
 def _extract_tdnet_id_from_url(url: str) -> str:
@@ -67,6 +65,7 @@ def exists(cache_type: str, key: str) -> bool:
     return get_path(cache_type, key).exists()
 
 def atomic_write(path: Path, content: bytes):
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     try:
         with open(tmp_path, "wb") as f:
@@ -106,7 +105,9 @@ def save_binary(cache_type: str, key: str, content: bytes, conn: Optional[sqlite
 
 def load_binary(cache_type: str, key: str, conn: Optional[sqlite3.Connection] = None) -> Optional[bytes]:
     path = get_path(cache_type, key)
-    db_conn = _get_conn(conn)
+    # Reading cache must not implicitly open SQLite (including WAL/SHM).
+    # A caller may explicitly supply its existing connection for statistics.
+    db_conn = conn
     
     if not path.exists():
         logger.debug(f"[CACHE_MISS] cache_type={cache_type} key={key}")
@@ -147,7 +148,7 @@ def save_json(key: str, data: Any, conn: Optional[sqlite3.Connection] = None):
 
 def load_json(key: str, conn: Optional[sqlite3.Connection] = None) -> Optional[Any]:
     path = get_path("parsed", key)
-    db_conn = _get_conn(conn)
+    db_conn = conn
     if not path.exists():
         logger.debug(f"[CACHE_MISS] cache_type=parsed key={key}")
         if db_conn:

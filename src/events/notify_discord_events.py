@@ -20,6 +20,7 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+from lib.runtime_paths import runtime_path
 from src.events.common_storage import ensure_events_table, get_unnotified_events, mark_notified, mark_filtered
 from src.events.common_notify import send_event_discord, SendResult
 from src.events.notify_rules import filter_and_sort_events
@@ -58,7 +59,7 @@ def main():
 
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
 
-    db_path = os.path.join(_PROJECT_ROOT, "decision_db.db")
+    db_path = str(runtime_path(os.path.join(_PROJECT_ROOT, "decision_db.db")))
     webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "")
 
     if not webhook_url and not args.dry_run:

@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from lib.runtime_paths import runtime_path
 from src.company_ir_source_discovery import (
     DiscoveryResult, apply_discovery_result, cached_tdnet_pdf, discover_ir_pages,
     discovery_report, extract_official_url_from_tdnet_pdf, latest_tdnet_documents,
@@ -41,10 +42,10 @@ def main() -> int:
     if args.request_interval < 0:
         parser.error("request interval must be non-negative")
 
-    db_path = ROOT / args.db
+    db_path = runtime_path(ROOT / args.db, code_root=ROOT)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
-    universe = load_tse_universe(ROOT / args.jquants_db)
+    universe = load_tse_universe(runtime_path(ROOT / args.jquants_db, code_root=ROOT))
     if args.ticker:
         universe = [row for row in universe if row.ticker == args.ticker]
     if args.limit:
@@ -67,7 +68,7 @@ def main() -> int:
                 ORDER BY COALESCE(c.last_validated_at,''),c.ticker LIMIT ?
             """, (repair_limit,))
         }
-    documents = latest_tdnet_documents(ROOT / args.jquants_db)
+    documents = latest_tdnet_documents(runtime_path(ROOT / args.jquants_db, code_root=ROOT))
     work: list[tuple[str, str]] = []
     missing_pdf_work: list[tuple[str, str]] = []
     baseline_source_ids: list[int] = []
@@ -106,7 +107,7 @@ def main() -> int:
                 official_url = f"{parts.scheme}://{parts.netloc}/"
             else:
                 document_id = documents.get(company.ticker)
-                data = cached_tdnet_pdf(ROOT / args.cache_root, document_id) if document_id else None
+                data = cached_tdnet_pdf(runtime_path(ROOT / args.cache_root, code_root=ROOT), document_id) if document_id else None
                 if data is None and document_id and not args.local_only:
                     missing_pdf_work.append((company.ticker, document_id))
                     continue

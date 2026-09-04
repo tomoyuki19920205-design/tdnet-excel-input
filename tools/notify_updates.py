@@ -7,6 +7,7 @@ discord_alerts.run_alerts() をラップ。
 失敗は warning 扱いで pipeline 全体を失敗にしない。
 """
 from __future__ import annotations
+from lib.runtime_paths import runtime_path
 
 import json
 import logging
@@ -41,10 +42,10 @@ def _load_env_value(key: str) -> str:
 
 def _load_ticker_items() -> list[dict]:
     """last_ingested_tickers.json からアラート対象を読み込む"""
-    if not os.path.exists(_TICKERS_FILE):
+    if not os.path.exists(str(runtime_path(_TICKERS_FILE))):
         return []
     try:
-        with open(_TICKERS_FILE, encoding="utf-8") as f:
+        with open(str(runtime_path(_TICKERS_FILE)), encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, list):
             return data

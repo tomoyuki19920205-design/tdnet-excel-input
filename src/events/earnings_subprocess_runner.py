@@ -89,6 +89,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from lib.runtime_paths import runtime_path
 from typing import Any
 
 # ── 環境設定 ────────────────────────────────────────────────────────────────
@@ -294,7 +295,7 @@ def find_zip_for_doc(
     if not ticker or ticker == "None":
         raise ValueError("invalid_required_field: ticker is missing")
     
-    d = Path(archive_root) if archive_root is not None else _PROJECT_ROOT / "data" / "xbrl_archive"
+    d = Path(archive_root) if archive_root is not None else runtime_path(_PROJECT_ROOT / "data" / "xbrl_archive", code_root=_PROJECT_ROOT)
     if not d.is_dir():
         raise ValueError(f"file_not_found: XBRL_ARCHIVE_DIR missing {d}")
         

@@ -22,6 +22,7 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+from lib.runtime_paths import runtime_path
 from tools.sqlite_to_supabase import push_sqlite_to_supabase
 
 logger = logging.getLogger("pipeline.process")
@@ -96,7 +97,7 @@ def _setup_batch_log_handler() -> logging.FileHandler | None:
     既に同一パスの handler がある場合は追加しない。
     """
     now = datetime.now(JST)
-    log_dir = os.path.join(_PROJECT_ROOT, "logs")
+    log_dir = str(runtime_path(os.path.join(_PROJECT_ROOT, "logs"), code_root=_PROJECT_ROOT))
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(
         log_dir, f"process_batch_{now.strftime('%Y%m%d')}.log"
@@ -258,7 +259,7 @@ def _run_batch_inner(
 ) -> dict:
     """run_batch の内部実装。"""
     _is_realtime = mode == "realtime"
-    _db = db_path or os.path.join(_PROJECT_ROOT, "decision_db.db")
+    _db = db_path or str(runtime_path(os.path.join(_PROJECT_ROOT, "decision_db.db"), code_root=_PROJECT_ROOT))
 
     # realtime モードの自動調整
     if _is_realtime:
@@ -348,7 +349,7 @@ def _run_batch_inner(
 
                 supabase_url = _load_env_value("SUPABASE_URL")
                 supabase_key = _load_env_value("SUPABASE_ANON_KEY")
-                jquants_db = os.path.join(_PROJECT_ROOT, "data", "jquants.db")
+                jquants_db = str(runtime_path(os.path.join(_PROJECT_ROOT, "data", "jquants.db"), code_root=_PROJECT_ROOT))
 
                 if not os.path.exists(jquants_db):
                     logger.warning(
@@ -527,7 +528,7 @@ def run_realtime(
     """
     import time
     t0 = time.monotonic()
-    _db = db_path or os.path.join(_PROJECT_ROOT, "decision_db.db")
+    _db = db_path or str(runtime_path(os.path.join(_PROJECT_ROOT, "decision_db.db"), code_root=_PROJECT_ROOT))
 
     result: dict = {
         "mode": "realtime",

@@ -21,6 +21,7 @@ import logging
 import re
 import sqlite3
 import time
+from lib.runtime_paths import runtime_path
 from src.cache.cache_manager import make_cache_key, load_json, save_json
 from src.review_completion import (
     should_suppress_after_financial_comparison,
@@ -75,7 +76,7 @@ def _run_canonical_gateway_dryrun(ticker: str, period: str | None, quarter: str,
     if not guidance:
         guidance_absent_reason = "existing_worker_skips_guidance_for_non_fy_quarters"
 
-    report_file = "scratch/phase4d_normalized_write_plan.json"
+    report_file = str(runtime_path("scratch/phase4d_normalized_write_plan.json"))
     existing_report = []
     if os.path.exists(report_file):
         try:
@@ -875,7 +876,7 @@ def _retry_incomplete_canonical_for_duplicate(
 
         from src.events.env_loader import get_project_root
         import os
-        xbrl_dir = str(get_project_root() / "data" / "xbrl_archive")
+        xbrl_dir = str(runtime_path(get_project_root() / "data" / "xbrl_archive"))
 
         if not disclosure_no or len(disclosure_no) != 14 or not disclosure_no.isdigit():
             logger.info(
@@ -1594,8 +1595,8 @@ def run_earnings_production(
 
     ensure_earnings_summary_table(conn)
 
-    xbrl_dir = str(get_project_root() / "data" / "xbrl_archive")
-    docs_dir = str(get_project_root() / "data" / "docs")
+    xbrl_dir = str(runtime_path(get_project_root() / "data" / "xbrl_archive"))
+    docs_dir = str(runtime_path(get_project_root() / "data" / "docs"))
 
     # ---- Phase 0: security eligibility (before document classification) ----
     # Direct/backfill callers may bypass fetch_new_disclosures.  Drop ETF/ETN

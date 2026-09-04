@@ -11,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from lib.runtime_paths import runtime_path
 
 from lib.ny_market import validate_payload
 from lib.ny_market_research import verify_market_data_packet_projection
@@ -52,7 +53,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("input", type=Path)
     parser.add_argument("--market-data-packet", required=True, type=Path)
-    parser.add_argument("--inbox", type=Path, default=ROOT / "data" / "news_inbox")
+    parser.add_argument("--inbox", type=Path, default=runtime_path(ROOT / "data" / "news_inbox"))
     parser.add_argument("--validate-only", action="store_true", help="validate only; perform no writes")
     parser.add_argument("--emit-report", action="store_true", help="emit the exact canonical report_markdown")
     args = parser.parse_args()

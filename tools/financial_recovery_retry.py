@@ -14,6 +14,7 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+from lib.runtime_paths import runtime_path
 from lib.pipeline.canonical_writer import write_financials_canonical
 from lib.pipeline.db import (
     get_supabase_write_config,
@@ -146,7 +147,7 @@ def recover_one(payload: dict, *, decision_db_path: str | None = None) -> dict:
     if not config:
         return {"resolved": False, "route": "no_write_config"}
 
-    docs_dir = str(Path(_PROJECT_ROOT) / "data" / "docs")
+    docs_dir = str(runtime_path(Path(_PROJECT_ROOT) / "data" / "docs"))
     pdf_path = download_document(item.doc_url, docs_dir)
     xbrl_path = None
     if item.xbrl_url and _official_url(str(item.xbrl_url), ".zip"):
@@ -163,8 +164,9 @@ def recover_one(payload: dict, *, decision_db_path: str | None = None) -> dict:
 
     # 2. EARNINGS_V2 may resolve/cache the official ZIP through its resolver.
     db_path = decision_db_path or os.getenv(
-        "DECISION_DB_PATH", str(Path(_PROJECT_ROOT) / "decision_db.db")
+        "DECISION_DB_PATH", str(runtime_path(Path(_PROJECT_ROOT) / "decision_db.db"))
     )
+    db_path = str(runtime_path(db_path))
     conn = None
     try:
         conn = sqlite3.connect(db_path)

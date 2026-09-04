@@ -13,6 +13,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from lib.runtime_paths import runtime_path
 from lib.sector_weekly import (
     JST, WeeklyWindow,
     connect_sector_db,
@@ -108,6 +109,7 @@ def claim_one(
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
     window: WeeklyWindow | None = None,
 ) -> dict[str, Any]:
+    work_root = runtime_path(work_root)
     timestamp = at or now_jst()
     if not in_worker_window(timestamp):
         return {"status": "no_work", "claim_owner": owner, "reason": "outside_worker_window"}
@@ -160,6 +162,7 @@ def abandon_one(
     reason: str = "worker hard time budget reached",
     work_root: Path = DEFAULT_WORK_ROOT,
 ) -> dict[str, Any]:
+    work_root = runtime_path(work_root)
     conn = connect_sector_db(db_path)
     try:
         row = abandon_assignment(conn, assignment_id, owner, now=at, reason=reason)
@@ -303,6 +306,7 @@ def reopen_quality_one(
     supabase_reader: Any = _read_supabase_reports,
 ) -> dict[str, Any]:
     """Archive and reopen one verified success; canonical rows remain untouched."""
+    work_root = runtime_path(work_root)
     if confirmation != QUALITY_REOPEN_CONFIRMATION:
         raise SectorBridgeError("exact quality-reopen confirmation text is required")
     processed = work_root / "processed" / f"{assignment_id}.json"
@@ -400,6 +404,7 @@ def stage_one(
     work_root: Path = DEFAULT_WORK_ROOT,
     at: datetime | None = None,
 ) -> dict[str, Any]:
+    work_root = runtime_path(work_root)
     timestamp = at or now_jst()
     conn = connect_sector_db(db_path)
     try:
@@ -488,8 +493,8 @@ def _status_table(result: dict[str, Any]) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--db", type=Path, default=ROOT / "decision_db.db")
-    parser.add_argument("--work-root", type=Path, default=DEFAULT_WORK_ROOT)
+    parser.add_argument("--db", type=Path, default=runtime_path(ROOT / "decision_db.db", code_root=ROOT))
+    parser.add_argument("--work-root", type=Path, default=runtime_path(DEFAULT_WORK_ROOT))
     parser.add_argument("--at", help="timezone-aware ISO-8601 clock override for isolated tests and audits")
     subparsers = parser.add_subparsers(dest="command", required=True)
     claim_parser = subparsers.add_parser("claim")

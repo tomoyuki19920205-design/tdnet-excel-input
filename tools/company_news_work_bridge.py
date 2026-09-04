@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from lib.runtime_paths import runtime_path
 from lib.news_monitor import NewsValidationError, normalize_ticker, validate_payload
 from tools.company_news_atomic import atomic_write_json
 from tools.ingest_company_news import ingest_file
@@ -72,8 +73,8 @@ class BridgePaths:
         slot_id: str = DEFAULT_SLOT_ID,
     ) -> "BridgePaths":
         root = root.resolve()
-        work_dir = (work_dir or root / "data" / "news_work").resolve()
-        inbox = (inbox or root / "data" / "news_inbox").resolve()
+        work_dir = (work_dir or runtime_path(root / "data" / "news_work", code_root=root)).resolve()
+        inbox = (inbox or runtime_path(root / "data" / "news_inbox", code_root=root)).resolve()
         if not _SLOT_ID_RE.fullmatch(slot_id):
             raise BridgeError(f"invalid slot_id: {slot_id}")
         return cls(
@@ -233,7 +234,7 @@ def validate_assignment(value: dict[str, Any], paths: BridgePaths) -> dict[str, 
         raise BridgeError("created_at must include a timezone")
     if value["status"] not in ASSIGNMENT_STATUSES:
         raise BridgeError(f"unsupported assignment status: {value['status']}")
-    output = (paths.root / value["output_directory"]).resolve()
+    output = runtime_path(paths.root / value["output_directory"], code_root=paths.root).resolve()
     if output != paths.inbox:
         raise BridgeError(f"output_directory must resolve to {paths.inbox}")
     return value
@@ -581,10 +582,10 @@ def main() -> int:
     parser.add_argument("--work-dir", type=Path)
     parser.add_argument("--inbox", type=Path)
     parser.add_argument("--slot-id", default=DEFAULT_SLOT_ID)
-    parser.add_argument("--db", type=Path, default=ROOT / "decision_db.db")
+    parser.add_argument("--db", type=Path, default=runtime_path(ROOT / "decision_db.db", code_root=ROOT))
     subparsers = parser.add_subparsers(dest="command", required=True)
     create = subparsers.add_parser("create")
-    create.add_argument("--master-db", type=Path, default=ROOT / "data" / "jquants.db")
+    create.add_argument("--master-db", type=Path, default=runtime_path(ROOT / "data" / "jquants.db", code_root=ROOT))
     create.add_argument("--assignment-id", required=True)
     create.add_argument("--ticker")
     create.add_argument("--search-from", type=date.fromisoformat, required=True)

@@ -7,6 +7,7 @@
 3. 取得できなければ None を返す（処理継続）
 """
 from __future__ import annotations
+from lib.runtime_paths import runtime_path
 
 import logging
 import os
@@ -52,7 +53,7 @@ def get_last_close(
             os.path.join(os.path.dirname(__file__), "..", "..", "data", "decision_db.db"),
         ]
         for c in candidates:
-            p = os.path.normpath(c)
+            p = str(runtime_path(os.path.normpath(c)))
             if os.path.isfile(p):
                 db_path = p
                 break

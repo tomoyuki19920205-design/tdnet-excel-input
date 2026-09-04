@@ -33,6 +33,7 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+from lib.runtime_paths import runtime_path
 from lib.pipeline.db import load_env
 from lib.pipeline.logging_utils import PipelineRun, check_concurrent_run
 
@@ -280,7 +281,7 @@ def _run_event_notify(dry_run: bool) -> StepResult:
         from src.events.notify_rules import should_notify_event  # [C] 出口ガード
         import sqlite3
 
-        db_path = os.path.join(_PROJECT_ROOT, "decision_db.db")
+        db_path = str(runtime_path(os.path.join(_PROJECT_ROOT, "decision_db.db"), code_root=_PROJECT_ROOT))
         webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "")
 
         conn = sqlite3.connect(db_path)
@@ -523,7 +524,7 @@ def main():
     _env_path = os.path.join(_PROJECT_ROOT, ".env")
     _db_path = os.environ.get(
         "DECISION_DB_PATH",
-        os.path.join(_PROJECT_ROOT, "decision_db.db"),
+        str(runtime_path(os.path.join(_PROJECT_ROOT, "decision_db.db"), code_root=_PROJECT_ROOT)),
     )
 
     def _tag(path: str) -> str:

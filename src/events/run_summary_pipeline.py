@@ -32,6 +32,7 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+from lib.runtime_paths import runtime_path
 from src.events.env_loader import load_project_env, require_env, get_project_root
 from src.events.common_models import DocumentMeta
 from src.events.summary_pipeline import run_summary_pipeline
@@ -42,7 +43,7 @@ logger = logging.getLogger("summary_pipeline")
 
 
 def _get_db_path() -> str:
-    return str(get_project_root() / "decision_db.db")
+    return str(runtime_path(get_project_root() / "decision_db.db"))
 
 
 def _get_webhook_url() -> str:

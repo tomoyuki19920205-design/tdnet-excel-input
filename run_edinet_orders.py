@@ -43,6 +43,7 @@ import os
 import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from lib.runtime_paths import runtime_path
 
 # .env 読み込み
 try:
@@ -207,7 +208,7 @@ def _run_dynamic_mode(args: argparse.Namespace) -> None:
     # キャッシュディレクトリ
     cache_dir = os.environ.get(
         "EDINET_CACHE_DIR",
-        str(Path(__file__).parent / "data" / "edinet_cache")
+        str(runtime_path(Path(__file__).parent / "data" / "edinet_cache"))
     )
 
     # 5. XBRL取得 → 抽出 → 変換
@@ -324,7 +325,7 @@ def _write_dryrun_report(
     skip_reasons: list[dict],
 ) -> None:
     """dry-run/apply の結果レポートを scratch に書き出す。"""
-    SCRATCH_DIR.mkdir(exist_ok=True)
+    runtime_path(SCRATCH_DIR).mkdir(parents=True, exist_ok=True)
     ts = datetime.now(JST).strftime("%Y%m%d_%H%M%S")
     run_id = ts
     base = f"edinet_order_pipeline_dryrun_{target_date.replace('-', '')}_{run_id}"
@@ -337,12 +338,12 @@ def _write_dryrun_report(
     md_path = getattr(args, "output_md", None)
 
     if json_path is None:
-        json_path = SCRATCH_DIR / f"{base}.json"
+        json_path = runtime_path(SCRATCH_DIR) / f"{base}.json"
     else:
         json_path = Path(json_path)
 
     if md_path is None:
-        md_path = SCRATCH_DIR / f"{base}.md"
+        md_path = runtime_path(SCRATCH_DIR) / f"{base}.md"
     else:
         md_path = Path(md_path)
 
@@ -506,8 +507,8 @@ def main() -> None:
 
     # ── 2. JSON 保存 ──
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    json_path = args.save_json or (SCRATCH_DIR / f"edinet_orders_{ts}.json")
-    SCRATCH_DIR.mkdir(exist_ok=True)
+    json_path = args.save_json or (runtime_path(SCRATCH_DIR) / f"edinet_orders_{ts}.json")
+    runtime_path(SCRATCH_DIR).mkdir(parents=True, exist_ok=True)
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(extracted_list, f, ensure_ascii=False, indent=2)
     print(f"\n[JSON] Saved {len(extracted_list)} records → {json_path}")

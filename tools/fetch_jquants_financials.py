@@ -61,6 +61,7 @@ if _PROJECT_ROOT not in sys.path:
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from lib.runtime_paths import runtime_path
 from src.jquants.financial_details import (
     has_plausible_actual_period_metadata,
     normalize_actual_consolidated_pbt,
@@ -857,6 +858,7 @@ def _supplement_gross_profit_from_details(
     absent from that response are recorded as terminal ``no_detail`` and are not
     retried forever. Transient request failures remain pending for the next run.
     """
+    state_path = str(runtime_path(state_path))
     stats = {
         "checked": 0,
         "documents_total": 0,
@@ -1086,6 +1088,8 @@ def fetch_and_save(
         dry_run:   True の場合は DB 書き込みをスキップ
         db_path:   保存先 SQLite パス
     """
+    db_path = str(runtime_path(db_path))
+    details_state_path = str(runtime_path(details_state_path))
     stats = {
         "from_date": from_date,
         "to_date": to_date,
@@ -1284,9 +1288,9 @@ def fetch_and_save(
 # CLI
 # ============================================================
 def main() -> None:
-    os.makedirs(_LOG_DIR, exist_ok=True)
+    os.makedirs(str(runtime_path(_LOG_DIR)), exist_ok=True)
     ts = datetime.now(JST).strftime("%Y%m%d_%H%M%S")
-    log_file = os.path.join(_LOG_DIR, f"fetch_jquants_fin_{ts}.log")
+    log_file = os.path.join(str(runtime_path(_LOG_DIR)), f"fetch_jquants_fin_{ts}.log")
 
     logging.basicConfig(
         level=logging.INFO,
@@ -1337,8 +1341,8 @@ def main() -> None:
     parser.add_argument("--recent-days", type=int, default=None,
                         help=f"直近N日（default: {_DEFAULT_RECENT_DAYS}）")
     parser.add_argument("--ticker", type=str, default=None, help="対象銘柄コード 4桁（例: 1930）")
-    parser.add_argument("--db", type=str, default=_DEFAULT_DB,
-                        help=f"保存先 SQLite パス（default: {_DEFAULT_DB}）")
+    parser.add_argument("--db", type=str, default=str(runtime_path(_DEFAULT_DB)),
+                        help=f"保存先 SQLite パス（default: {str(runtime_path(_DEFAULT_DB))}）")
     parser.add_argument(
         "--repair-gross-profit-from-raw-json", action="store_true",
         help="raw_json['_gross_profit'] が存在するが gross_profit IS NULL の行を修復する",
@@ -1352,7 +1356,7 @@ def main() -> None:
         help="--enable-details-gp 時に既存 gross_profit も上書きする",
     )
     parser.add_argument(
-        "--details-state", type=str, default=_DEFAULT_DETAILS_STATE,
+        "--details-state", type=str, default=str(runtime_path(_DEFAULT_DETAILS_STATE)),
         help="details完了documentのcheckpoint JSON path",
     )
     parser.add_argument(
@@ -1364,6 +1368,7 @@ def main() -> None:
         help="summaryに無い訂正開示をdetailsの正確なDEI periodから取り込む",
     )
     args = parser.parse_args()
+    args.db = str(runtime_path(args.db))
 
     if args.details_only:
         if not args.ticker or not args.from_date or not args.to_date:
@@ -1489,6 +1494,7 @@ def _repair_gross_profit(*, db_path: str = _DEFAULT_DB, apply: bool = False) -> 
     - --apply あり で実際に UPDATE する
     - 単位: raw_json['_gross_profit'] は円単位。DB も円単位保存なのでそのまま使う。
     """
+    db_path = str(runtime_path(db_path))
     if not os.path.exists(db_path):
         print(f"[REPAIR] DB が見つかりません: {db_path}")
         sys.exit(1)

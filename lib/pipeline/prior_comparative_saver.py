@@ -13,6 +13,7 @@ import traceback
 from src.segment.xbrl_segment_extractor import extract_segments_from_xbrl_zip
 from src.segment.prior_comparative_generator import generate_prior_comparative_payload
 from lib.pipeline.db import supabase_select
+from lib.runtime_paths import runtime_path
 
 logger = logging.getLogger("pipeline.prior_comparative")
 
@@ -48,7 +49,7 @@ def get_xbrl_zip_path_for_doc_id(doc_id: str, project_root: str) -> str | None:
     tdnet_ingest.pyは 'data/xbrl_archive/{code}_{date}_{basename}' に保存する。
     """
     import glob
-    archive_dir = os.path.join(project_root, "data", "xbrl_archive")
+    archive_dir = str(runtime_path(os.path.join(project_root, "data", "xbrl_archive"), code_root=project_root))
     zips = glob.glob(os.path.join(archive_dir, f"*{doc_id[4:]}*.zip"))
     if zips:
         return zips[0]

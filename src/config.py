@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
+from lib.runtime_paths import runtime_path
 
 
 @dataclass
@@ -32,9 +33,9 @@ class Config:
     q_search_up: int = 20
     q_search_down: int = 40
     excel_unit: str = "million_yen"
-    log_path: str = "data/app.log"
-    state_db_path: str = "data/state.db"
-    decision_db_path: str = "decision_db.db"
+    log_path: str = field(default_factory=lambda: str(runtime_path("data/app.log")))
+    state_db_path: str = field(default_factory=lambda: str(runtime_path("data/state.db")))
+    decision_db_path: str = field(default_factory=lambda: str(runtime_path("decision_db.db")))
     retry_count: int = 5
     columns: ColumnMapping = field(default_factory=ColumnMapping)
     watch_tickers: list[str] = field(default_factory=list)
@@ -70,13 +71,13 @@ def load_config(config_path: str | None = None) -> Config:
 
     # パスの解決（configファイルからの相対パスをプロジェクトルートからの相対パスに）
     project_root = Path(config_path).resolve().parent
-    cfg.log_path = str(project_root / raw.get("log_path", cfg.log_path))
-    cfg.state_db_path = str(project_root / raw.get("state_db_path", cfg.state_db_path))
+    cfg.log_path = str(runtime_path(project_root / raw.get("log_path", cfg.log_path), code_root=project_root))
+    cfg.state_db_path = str(runtime_path(project_root / raw.get("state_db_path", cfg.state_db_path), code_root=project_root))
 
     # decision_db_path
     ddb = raw.get("decision_db_path", cfg.decision_db_path)
     if ddb and not os.path.isabs(ddb):
-        cfg.decision_db_path = str(project_root / ddb)
+        cfg.decision_db_path = str(runtime_path(project_root / ddb, code_root=project_root))
     else:
         cfg.decision_db_path = ddb
 

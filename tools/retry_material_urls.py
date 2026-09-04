@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from lib.runtime_paths import runtime_path
 from src.events.common_models import DocumentMeta
 from src.events.env_loader import load_project_env
 from src.events.event_pipeline import process_documents
@@ -108,7 +109,7 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s")
-    conn = connect_retry_db(ROOT / args.db)
+    conn = connect_retry_db(runtime_path(ROOT / args.db, code_root=ROOT))
     try:
         if args.dry_run:
             counts = list_status_counts(conn)
@@ -123,12 +124,12 @@ def main() -> int:
         result = run_due_retries(
             conn,
             publish=_publisher(
-                str(ROOT / args.event_db), str(ROOT / args.company_ir_db), args.dry_run,
+                str(runtime_path(ROOT / args.event_db, code_root=ROOT)), str(runtime_path(ROOT / args.company_ir_db, code_root=ROOT)), args.dry_run,
             ),
             runner=args.runner,
             limit=args.limit,
         )
-        _sync_company_ir_terminal_states(conn, str(ROOT / args.company_ir_db))
+        _sync_company_ir_terminal_states(conn, str(runtime_path(ROOT / args.company_ir_db, code_root=ROOT)))
         print("MATERIAL_URL_RETRY " + json.dumps(result, ensure_ascii=False, sort_keys=True))
         return 1 if result["publish_failed"] else 0
     finally:

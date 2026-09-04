@@ -40,6 +40,7 @@ from .buyback_extractor import extract_buyback_event
 from .forecast_extractor import extract_forecast_revision
 from .dividend_extractor import extract_dividend_revision
 from .price_service import get_last_close
+from lib.runtime_paths import runtime_path
 from src.pdf_only_materials import classify_pdf_only_material, is_after_pdf_only_material_activation
 
 logger = logging.getLogger("event_pipeline")
@@ -145,6 +146,7 @@ def _download_and_save_pdf(url: str, save_dir: str = "") -> tuple[str, str]:
                     os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
                     "data", "docs"
                 )
+            save_dir = str(runtime_path(save_dir))
             os.makedirs(save_dir, exist_ok=True)
             # URL末尾のファイル名 or doc_id を使う
             fname = url.rstrip("/").split("/")[-1]
@@ -940,7 +942,7 @@ def process_documents(
                 logger.info(f"[EVENT_NOTIFY] unnotified_events={len(unnotified)}")
                 
                 # --- GLOBAL OUTBOX BLOCKER GUARD ---
-                outbox_db_path = os.getenv("OUTBOX_DB_PATH", "data/state.db")
+                outbox_db_path = str(runtime_path(os.getenv("OUTBOX_DB_PATH", "data/state.db")))
                 try:
                     from .discord_outbox import verify_outbox_schema, scan_outbox_blockers
                     if verify_outbox_schema(outbox_db_path):

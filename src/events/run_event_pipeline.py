@@ -24,6 +24,7 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+from lib.runtime_paths import runtime_path
 from src.events.common_models import DocumentMeta, EventType
 from src.events.common_storage import ensure_events_table, list_events
 from src.events.event_pipeline import process_documents
@@ -48,7 +49,7 @@ def _load_env():
 
 
 def _get_db_path() -> str:
-    return os.path.join(_PROJECT_ROOT, "decision_db.db")
+    return str(runtime_path(os.path.join(_PROJECT_ROOT, "decision_db.db")))
 
 
 def _get_webhook_url() -> str:

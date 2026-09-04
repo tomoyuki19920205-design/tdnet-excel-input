@@ -1,3 +1,4 @@
+from lib.runtime_paths import runtime_path
 import os
 import json
 import logging
@@ -114,7 +115,7 @@ def run_shadow_write_plan(
             append_diff_plan("operating_profit", shadow_guidance.op_forecast, guidance.op_forecast if guidance else None, "FY", "jquants_forecast_fy", shadow_guidance.evidences)
                     
         # Append to a global report file for verification
-        report_file = "scratch/phase4a_shadow_write_plan.json"
+        report_file = str(runtime_path("scratch/phase4a_shadow_write_plan.json"))
         existing = []
         if os.path.exists(report_file):
             try:

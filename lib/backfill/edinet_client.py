@@ -5,6 +5,7 @@ API key 未設定時は安全に skip し、mock/cache ベースで動作可能�
 .env ファイルからも自動的に読み込む。
 """
 from __future__ import annotations
+from lib.runtime_paths import runtime_path
 
 import logging
 import os
@@ -107,6 +108,7 @@ class EdinetClient:
         self._cache_dir = cache_dir or os.path.join(
             os.environ.get("EDINET_CACHE_DIR", "data/edinet_cache")
         )
+        self._cache_dir = str(runtime_path(self._cache_dir))
         self._rate_limit = rate_limit
         self._last_request_time: float = 0.0
 

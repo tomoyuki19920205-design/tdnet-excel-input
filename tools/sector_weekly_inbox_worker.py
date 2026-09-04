@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from lib.runtime_paths import runtime_path
 from lib.sector_weekly import connect_sector_db, now_jst, upsert_report, validate_report
 from lib.sector_weekly_work import (
     complete_staged_assignment,
@@ -70,10 +71,10 @@ class WorkerPaths:
         work_root: Path | None = None,
     ) -> "WorkerPaths":
         root = root.resolve()
-        work = (work_root or DEFAULT_WORK_ROOT).resolve()
+        work = (work_root or runtime_path(DEFAULT_WORK_ROOT)).resolve()
         return cls(
             root=root,
-            db=(db or root / "decision_db.db").resolve(),
+            db=(db or runtime_path(root / "decision_db.db", code_root=root)).resolve(),
             work_root=work,
             inbox=work / "inbox",
             processed=work / "processed",

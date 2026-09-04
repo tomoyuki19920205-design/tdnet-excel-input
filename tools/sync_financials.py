@@ -60,6 +60,7 @@ JST = timezone(timedelta(hours=9))
 # ============================================================
 # J-Quants API は円単位で数値を返す。
 # Viewer / canonical の基準単位は百万円なので、push 前に変換する。
+from lib.runtime_paths import runtime_path
 from lib.pipeline.unit_convert import to_millions as _to_millions  # noqa: E402
 
 # 百万円単位としては異常に大きい閾値 (= 元が円単位のまま混入した可能性)
@@ -706,7 +707,7 @@ def _upsert_company_names(
     )
     if not os.path.exists(decision_db_path):
         # フォールバック: プロジェクトルート直下
-        decision_db_path = os.path.join(_PROJECT_ROOT, "decision_db.db")
+        decision_db_path = str(runtime_path(os.path.join(_PROJECT_ROOT, "decision_db.db")))
 
     if os.path.exists(decision_db_path):
         try:
@@ -1154,7 +1155,7 @@ def main():
     )
     parser.add_argument(
         "--sqlite",
-        default=_DEFAULT_DB,
+        default=str(runtime_path(_DEFAULT_DB)),
         help=f"SQLite DB パス (default: data/jquants.db)",
     )
     parser.add_argument(
@@ -1203,6 +1204,7 @@ def main():
         help="同期対象の銘柄コード (例: 2353)",
     )
     args = parser.parse_args()
+    args.sqlite = str(runtime_path(args.sqlite))
 
     # apply が指定されなければ常に dry-run
     is_dry_run = not args.apply
@@ -1210,12 +1212,12 @@ def main():
     recent_days = 0 if args.full else args.recent
 
     # ---- ログ設定 ----
-    os.makedirs(_LOG_DIR, exist_ok=True)
+    os.makedirs(str(runtime_path(_LOG_DIR)), exist_ok=True)
     ts = datetime.now(JST).strftime("%Y%m%d_%H%M%S")
     mode_label = "dryrun" if is_dry_run else "apply"
     scope_label = "full" if args.full else f"recent{args.recent}d"
     log_file = os.path.join(
-        _LOG_DIR, f"sync_financials_{mode_label}_{scope_label}_{ts}.log"
+        str(runtime_path(_LOG_DIR)), f"sync_financials_{mode_label}_{scope_label}_{ts}.log"
     )
 
     logging.basicConfig(

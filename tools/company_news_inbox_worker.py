@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from lib.runtime_paths import runtime_path
 from lib.news_monitor import NewsValidationError, validate_payload
 from lib.ny_market import (
     NYMarketValidationError,
@@ -90,13 +91,13 @@ class WorkerPaths:
         db: Path | None = None,
     ) -> "WorkerPaths":
         root = root.resolve()
-        work_dir = (work_dir or root / "data" / "news_work").resolve()
-        inbox = (inbox or root / "data" / "news_inbox").resolve()
+        work_dir = (work_dir or runtime_path(root / "data" / "news_work", code_root=root)).resolve()
+        inbox = (inbox or runtime_path(root / "data" / "news_inbox", code_root=root)).resolve()
         return cls(
             root=root,
             work_dir=work_dir,
             inbox=inbox,
-            db=(db or root / "decision_db.db").resolve(),
+            db=(db or runtime_path(root / "decision_db.db", code_root=root)).resolve(),
             state=work_dir / "state" / "inbox_worker.json",
             log=work_dir / "logs" / "inbox_worker.jsonl",
             lock=work_dir / "state" / "inbox_worker.lock",

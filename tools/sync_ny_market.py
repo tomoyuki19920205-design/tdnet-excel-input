@@ -9,6 +9,7 @@ from typing import Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from lib.runtime_paths import runtime_path
 
 from lib.ny_market import connect_db, rows_for_sync
 from lib.pipeline.db import (
@@ -147,7 +148,7 @@ def sync(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--db", type=Path, default=ROOT / "decision_db.db")
+    parser.add_argument("--db", type=Path, default=runtime_path(ROOT / "decision_db.db"))
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--stable-key", action="append")
     parser.add_argument("--production-root", type=Path)

@@ -7,6 +7,7 @@ API key 未設定時でも cache hit は使えるため、
 手動配置や別経路で入ったファイルも活用可能。
 """
 from __future__ import annotations
+from lib.runtime_paths import runtime_path
 
 import json
 import logging
@@ -24,7 +25,7 @@ class EdinetXbrlCache:
     """EDINET XBRL ZIP のファイルキャッシュ。"""
 
     def __init__(self, cache_root: str | None = None) -> None:
-        self._root = Path(cache_root or os.environ.get(
+        self._root = runtime_path(cache_root or os.environ.get(
             "EDINET_CACHE_DIR", "data/edinet_cache"
         ))
 

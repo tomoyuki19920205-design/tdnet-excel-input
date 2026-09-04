@@ -35,6 +35,7 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+from lib.runtime_paths import runtime_path
 from tools.file_lock import acquire_dual_lock, release_dual_lock
 
 logger = logging.getLogger("scheduler.nightly")
@@ -178,7 +179,7 @@ def main() -> int:
 
     # ── ログ設定 ──
     now = datetime.now(JST)
-    log_dir = os.path.join(_PROJECT_ROOT, "logs")
+    log_dir = str(runtime_path(os.path.join(_PROJECT_ROOT, "logs"), code_root=_PROJECT_ROOT))
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, f"nightly_{now.strftime('%Y%m%d')}.log")
 

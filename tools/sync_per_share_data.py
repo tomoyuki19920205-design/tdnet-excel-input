@@ -20,6 +20,7 @@ import requests
 
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 sys.path.insert(0, _PROJECT_ROOT)
+from lib.runtime_paths import runtime_path
 _DEFAULT_DB = os.path.join(_PROJECT_ROOT, "data", "jquants.db")
 _LOG_DIR = os.path.join(_PROJECT_ROOT, "logs")
 
@@ -185,7 +186,7 @@ def sync(
 
 def main():
     parser = argparse.ArgumentParser(description="SQLite per_share_data → Supabase 同期")
-    parser.add_argument("--sqlite", default=_DEFAULT_DB)
+    parser.add_argument("--sqlite", default=str(runtime_path(_DEFAULT_DB)))
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--ticker", help="対象銘柄だけを同期（例: 7480）")
@@ -195,13 +196,14 @@ def main():
         help="forecast EPS basis factorが非1の行だけを同期",
     )
     args = parser.parse_args()
+    args.sqlite = str(runtime_path(args.sqlite))
 
     is_dry_run = not args.apply
 
-    os.makedirs(_LOG_DIR, exist_ok=True)
+    os.makedirs(str(runtime_path(_LOG_DIR)), exist_ok=True)
     ts = datetime.now(JST).strftime("%Y%m%d_%H%M%S")
     mode = "dryrun" if is_dry_run else "apply"
-    log_file = os.path.join(_LOG_DIR, f"sync_per_share_{mode}_{ts}.log")
+    log_file = os.path.join(str(runtime_path(_LOG_DIR)), f"sync_per_share_{mode}_{ts}.log")
 
     logging.basicConfig(
         level=logging.INFO,

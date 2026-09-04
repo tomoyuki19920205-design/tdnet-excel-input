@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Optional
 from pathlib import Path
 from datetime import datetime, timezone
+from lib.runtime_paths import runtime_path
 from src.jquants.adapter import get_file_url
 from src.segment.zip_identity_verifier import (
     TrustedProvenance,
@@ -193,6 +194,8 @@ def resolve_xbrl_zip(
     3. Fetches from J-Quants API if allow_jquants_fetch is True
     """
     # 探索対象候補パスのリスト作成
+    local_archive_dir = str(runtime_path(local_archive_dir))
+    cache_dir = str(runtime_path(cache_dir))
     candidate_paths = []
     
     # 1. local_archive 内のパターン

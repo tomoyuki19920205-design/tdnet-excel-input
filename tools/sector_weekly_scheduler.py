@@ -15,6 +15,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from lib.runtime_paths import runtime_path
 from lib.sector_weekly import (
     JST, SCHEMA_VERSION, REPORT_TYPE, SectorValidationError, WeeklyWindow, connect_sector_db,
     dedupe_key, iso_seconds, now_jst, sector_name,
@@ -238,6 +239,8 @@ def run_scheduled(
     not_before: datetime | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    log_path = runtime_path(log_path)
+    lock_path = runtime_path(lock_path)
     if dry_run:
         window = weekly_window(at)
         if not_before is not None and at.astimezone(JST) < not_before.astimezone(JST):
@@ -284,6 +287,7 @@ def run_scheduled(
 
 
 def enqueue_manual(code: int, at: datetime, *, db_path: Path, log_path: Path = DEFAULT_LOG) -> dict[str, Any]:
+    log_path = runtime_path(log_path)
     window = weekly_window(at)
     conn = connect_sector_db(db_path)
     try:
@@ -297,9 +301,9 @@ def enqueue_manual(code: int, at: datetime, *, db_path: Path, log_path: Path = D
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--db", type=Path, default=ROOT / "decision_db.db")
-    parser.add_argument("--log", type=Path, default=DEFAULT_LOG)
-    parser.add_argument("--lock", type=Path, default=DEFAULT_LOCK)
+    parser.add_argument("--db", type=Path, default=runtime_path(ROOT / "decision_db.db", code_root=ROOT))
+    parser.add_argument("--log", type=Path, default=runtime_path(DEFAULT_LOG))
+    parser.add_argument("--lock", type=Path, default=runtime_path(DEFAULT_LOCK))
     parser.add_argument("--at", help="timezone-aware ISO-8601 test time")
     parser.add_argument("--sector", type=int, help="manual assignment override")
     parser.add_argument("--not-before", help="do not schedule automatic sectors before this timezone-aware timestamp")

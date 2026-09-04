@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from lib.runtime_paths import runtime_path
 from tools.company_news_atomic import atomic_write_json, replace_with_retry
 from tools.company_news_queue import QueueError, QueuePaths, _read_state
 from tools.company_news_work_bridge import BridgePaths, BridgeError, validate_assignment
@@ -51,7 +52,7 @@ def _read_json(path: Path) -> dict[str, Any]:
 def _task_paths(root: Path, task_id: str) -> tuple[Path, Path, Path]:
     if not _TASK_ID_PATTERN.fullmatch(task_id):
         raise TaskBatchError("task_id must be taskNN")
-    directory = root / "data" / "news_work" / "task_runs" / task_id
+    directory = runtime_path(root / "data" / "news_work" / "task_runs" / task_id, code_root=root)
     return directory, directory / "active.json", directory / "runs.jsonl"
 
 

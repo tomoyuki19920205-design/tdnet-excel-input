@@ -1,3 +1,4 @@
+from lib.runtime_paths import runtime_path
 import logging
 import os
 import time
@@ -99,7 +100,7 @@ def run_prior_comparative_realtime_hook(target_items: List[Any], max_docs: int) 
         
         try:
             # ensure scratch/prior_comparative_rollback exists
-            rollback_dir = "scratch/prior_comparative_rollback"
+            rollback_dir = str(runtime_path("scratch/prior_comparative_rollback"))
             os.makedirs(rollback_dir, exist_ok=True)
             
             # save_prior_comparative_from_event に1件だけ渡して詳細な統計を取る

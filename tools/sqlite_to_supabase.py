@@ -31,6 +31,7 @@ import requests
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _PROJECT_ROOT)
 
+from lib.runtime_paths import runtime_path
 from src.common_ticker import normalize_ticker
 
 logger = logging.getLogger("sqlite2supa")
@@ -1130,11 +1131,11 @@ def push_sqlite_to_supabase(
     )
 
     if not checkpoint_path:
-        checkpoint_path = os.path.join(
+        checkpoint_path = str(runtime_path(os.path.join(
             _PROJECT_ROOT, _CHECKPOINT_FILE
-        )
+        )))
 
-    quarantine_path = os.path.join(_PROJECT_ROOT, _QUARANTINE_DB)
+    quarantine_path = str(runtime_path(os.path.join(_PROJECT_ROOT, _QUARANTINE_DB)))
     api = _SupabaseAPI(supabase_url, supabase_key)
     logger.info("[push] requests.Session enabled (connection reuse)")
 
@@ -2285,13 +2286,13 @@ def main():
         datefmt="%H:%M:%S",
     )
 
-    db_path = args.db
+    db_path = str(runtime_path(args.db))
     if not os.path.isabs(db_path):
         db_path = os.path.join(_PROJECT_ROOT, db_path)
 
-    checkpoint_path = os.path.join(
+    checkpoint_path = str(runtime_path(os.path.join(
         _PROJECT_ROOT, _CHECKPOINT_FILE
-    )
+    )))
 
     if args.reset_checkpoint:
         _clear_checkpoint(checkpoint_path)
@@ -2366,7 +2367,7 @@ def main():
         print(f"  エラー             : {stats['errors']}")
         print(
             f"  quarantine DB      : "
-            f"{os.path.join(_PROJECT_ROOT, _QUARANTINE_DB)}"
+            f"{str(runtime_path(os.path.join(_PROJECT_ROOT, _QUARANTINE_DB)))}"
         )
         print("=" * 55)
         print()

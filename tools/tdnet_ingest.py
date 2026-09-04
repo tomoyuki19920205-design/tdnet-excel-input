@@ -28,6 +28,7 @@ from pathlib import Path
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _PROJECT_ROOT)
 
+from lib.runtime_paths import runtime_path
 from src.config import load_config, Config
 from src.db import StateDB
 from src.downloader import download_document
@@ -813,9 +814,9 @@ def run_ingest(
             target_date=getattr(config, "start_date", None),
             session=session,
             yanoshin_timeout_sec=yanoshin_timeout_sec,
-            material_retry_db_path=os.path.join(
+            material_retry_db_path=str(runtime_path(os.path.join(
                 _PROJECT_ROOT, "data", "material_url_retry.db"
-            ) if not dry_run else None,
+            ), code_root=_PROJECT_ROOT)) if not dry_run else None,
         )
 
         # [JQUANTS_SHADOW] Phase 2: Shadow Run — JQUANTS_SHADOW_ENABLED=1 の場合のみ実行
@@ -1371,12 +1372,12 @@ def main():
             "doc_category": "tanshin",
             "status": r["status"],
         })
-    items_file = os.path.join(_PROJECT_ROOT, "logs", "last_ingested_items.json")
+    items_file = str(runtime_path(os.path.join(_PROJECT_ROOT, "logs", "last_ingested_items.json"), code_root=_PROJECT_ROOT))
     os.makedirs(os.path.dirname(items_file), exist_ok=True)
     with open(items_file, "w", encoding="utf-8") as f:
         json.dump(ingested, f, ensure_ascii=False, indent=2)
     # 後方互換: 旧ファイル名にも書き出す
-    tickers_file = os.path.join(_PROJECT_ROOT, "logs", "last_ingested_tickers.json")
+    tickers_file = str(runtime_path(os.path.join(_PROJECT_ROOT, "logs", "last_ingested_tickers.json"), code_root=_PROJECT_ROOT))
     with open(tickers_file, "w", encoding="utf-8") as f:
         json.dump(ingested, f, ensure_ascii=False, indent=2)
     print(f"[TICKERS] {len(ingested)} items -> {items_file}")

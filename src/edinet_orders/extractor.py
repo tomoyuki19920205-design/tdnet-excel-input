@@ -11,6 +11,7 @@ import zipfile
 from typing import Any
 
 from bs4 import BeautifulSoup
+from lib.runtime_paths import runtime_path, runtime_default
 
 from .semantic_table import (
     BEGIN_CARRYOVER_KEYWORDS,
@@ -268,7 +269,7 @@ def _latest_period_label(all_labels: list[str]) -> str:
 
 def extract_from_company(
     target: dict[str, Any],
-    cache_dir: str = _DEFAULT_CACHE_DIR,
+    cache_dir: str | None = None,
 ) -> dict[str, Any]:
     """
     1社分のEDINET有価証券報告書から受注データを抽出する。
@@ -287,6 +288,10 @@ def extract_from_company(
         order_backlog / construction_carryover / rpo / source_type /
         source_tag / snippet / confidence / notes）
     """
+    cache_dir = str(runtime_path(cache_dir)) if cache_dir is not None else str(
+        runtime_path(os.environ["EDINET_CACHE_DIR"]) if "EDINET_CACHE_DIR" in os.environ
+        else runtime_default("data/edinet_cache", _DEFAULT_CACHE_DIR)
+    )
     ticker = target["ticker"]
     company = target["company"]
     doc_id = target["doc_id"]
@@ -801,7 +806,7 @@ def extract_from_company(
 
 def extract(
     survey_data: list[dict[str, Any]],
-    cache_dir: str = _DEFAULT_CACHE_DIR,
+    cache_dir: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     survey_data (survey_detail.json の内容) から全社抽出する。
@@ -817,6 +822,10 @@ def extract(
     list of dict
         extract_from_company() の結果リスト。
     """
+    cache_dir = str(runtime_path(cache_dir)) if cache_dir is not None else str(
+        runtime_path(os.environ["EDINET_CACHE_DIR"]) if "EDINET_CACHE_DIR" in os.environ
+        else runtime_default("data/edinet_cache", _DEFAULT_CACHE_DIR)
+    )
     targets = [
         {"ticker": d["ticker"], "company": d["company"], "doc_id": d["doc_id"]}
         for d in survey_data

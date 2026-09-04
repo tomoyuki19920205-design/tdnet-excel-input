@@ -27,6 +27,7 @@ sys.path.insert(0, _PROJECT_ROOT)
 sys.path.insert(0, str(Path(__file__).parent))
 
 from jquants_auth import get_auth_headers
+from lib.runtime_paths import runtime_path
 from src.common_ticker import strip_tdnet_trailing_zero
 
 logger = logging.getLogger("jquants_prices")
@@ -437,6 +438,7 @@ def upsert_quotes(conn: sqlite3.Connection, items: list[dict]) -> int:
 # 進捗管理
 # ============================================================
 def load_progress(progress_file: Path = _PROGRESS_FILE) -> dict:
+    progress_file = runtime_path(progress_file)
     if progress_file.exists():
         try:
             return json.loads(progress_file.read_text(encoding="utf-8"))
@@ -446,6 +448,7 @@ def load_progress(progress_file: Path = _PROGRESS_FILE) -> dict:
 
 
 def save_progress(data: dict, progress_file: Path = _PROGRESS_FILE):
+    progress_file = runtime_path(progress_file)
     progress_file.parent.mkdir(parents=True, exist_ok=True)
     temporary = progress_file.with_suffix(progress_file.suffix + ".tmp")
     temporary.write_text(
@@ -615,7 +618,7 @@ def update_market_caps(conn: sqlite3.Connection) -> int:
 # ============================================================
 def main():
     parser = argparse.ArgumentParser(description="J-Quants 株価一括取得")
-    parser.add_argument("--db", default=_DEFAULT_DB)
+    parser.add_argument("--db", default=str(runtime_path(_DEFAULT_DB)))
     parser.add_argument("--since", default=None, help="取得開始日 (YYYY-MM-DD)")
     parser.add_argument("--until", default=None, help="取得終了日 (YYYY-MM-DD、指定時は当日を含む)")
     parser.add_argument("--recent", action="store_true", help="直近7日のみ")
@@ -630,10 +633,11 @@ def main():
     parser.add_argument("--sync-supabase", action="store_true",
                         help="successful fetch completion後に対象普通株をSupabaseへ全量upsert")
     args = parser.parse_args()
+    args.db = str(runtime_path(args.db))
 
     progress_file = Path(args.progress_file) if args.progress_file else (
-        Path(_PROJECT_ROOT) / "data" / "jquants_prices_backfill_progress.json"
-        if args.backfill else _PROGRESS_FILE
+        runtime_path(Path(_PROJECT_ROOT) / "data" / "jquants_prices_backfill_progress.json")
+        if args.backfill else runtime_path(_PROGRESS_FILE)
     )
 
     # 日付範囲
@@ -652,9 +656,9 @@ def main():
         return
 
     # ログ
-    Path(_LOG_DIR).mkdir(parents=True, exist_ok=True)
+    Path(str(runtime_path(_LOG_DIR))).mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = Path(_LOG_DIR) / f"jquants_prices_{ts}.log"
+    log_file = Path(str(runtime_path(_LOG_DIR))) / f"jquants_prices_{ts}.log"
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",

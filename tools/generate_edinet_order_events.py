@@ -29,6 +29,7 @@ except ImportError:
     pass
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+from lib.runtime_paths import runtime_path
 from src.edinet_orders.saver import _get_client
 
 
@@ -313,7 +314,7 @@ def generate_events(targets: list[dict], target_date_str: str, dry_run: bool = T
                     # dry-run mode で extractor を呼び出す
                     from src.edinet_orders.extractor import extract_from_company
                     from src.edinet_orders.transformer import transform_to_db_row
-                    cache_dir = os.path.join(os.getcwd(), 'data', 'edinet_cache')
+                    cache_dir = str(runtime_path(os.path.join(os.getcwd(), 'data', 'edinet_cache'), code_root=os.getcwd()))
                     target_spec = {"ticker": t, "company": c_name, "doc_id": fallback_doc_id, "docs": []}
                     extracted = extract_from_company(target_spec, cache_dir=cache_dir)
                     if extracted:
@@ -459,7 +460,7 @@ def generate_events(targets: list[dict], target_date_str: str, dry_run: bool = T
         })
 
     # ドライランのレポート出力
-    scratch_dir = Path(__file__).parent.parent / "scratch"
+    scratch_dir = runtime_path(Path(__file__).parent.parent / "scratch")
     scratch_dir.mkdir(exist_ok=True)
     
     base_name = f"edinet_order_event_dryrun_{target_date_str.replace('-', '')}"

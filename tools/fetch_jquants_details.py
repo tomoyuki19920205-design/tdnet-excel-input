@@ -39,6 +39,7 @@ import requests
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
+from lib.runtime_paths import runtime_path
 
 # Windows cp932 対策
 for _s in (sys.stdout, sys.stderr):
@@ -477,9 +478,9 @@ def run(opts) -> None:
 
 
 def main() -> None:
-    os.makedirs(_LOG_DIR, exist_ok=True)
+    os.makedirs(str(runtime_path(_LOG_DIR)), exist_ok=True)
     ts = datetime.now(JST).strftime("%Y%m%d_%H%M%S")
-    log_file = os.path.join(_LOG_DIR, f"fetch_jquants_details_{ts}.log")
+    log_file = os.path.join(str(runtime_path(_LOG_DIR)), f"fetch_jquants_details_{ts}.log")
 
     logging.basicConfig(
         level=logging.INFO,
@@ -498,7 +499,7 @@ def main() -> None:
                         help="対象銘柄コード (4桁, default: 6861)")
     parser.add_argument("--recent-days", type=int, default=None,
                         help="日付範囲取得: 直近N日 (ticker未指定時に使用)")
-    parser.add_argument("--db", type=str, default=_DEFAULT_DB,
+    parser.add_argument("--db", type=str, default=str(runtime_path(_DEFAULT_DB)),
                         help=f"保存先 SQLite (default: data/jquants.db)")
     parser.add_argument("--dry-run", action="store_true", default=True,
                         help="DB・Supabase に書き込まない (default)")
