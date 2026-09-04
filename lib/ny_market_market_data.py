@@ -684,6 +684,23 @@ def resolve_discrepancy(
         ):
             reason = "stale_daily_bar"
 
+    # Some sub-dollar Yahoo daily bars are rounded to cents even though the
+    # official Nasdaq close and screener retain four decimal places.  Resolve
+    # that generic precision loss only when the target close agrees exactly,
+    # the official screener arithmetic is already supported, and a genuinely
+    # independent source supports the official previous close.
+    target_tolerance = max(0.0001, official_target * 0.002)
+    previous_tolerance = max(0.0001, official_previous * 0.002)
+    previous_delta = abs(historical_previous_close - official_previous)
+    if (
+        reason is None
+        and official_target < 1.0
+        and abs(historical_target_close - official_target) <= target_tolerance
+        and previous_delta > previous_tolerance
+        and previous_delta <= 0.005
+    ):
+        reason = "daily_bar_precision_rounding"
+
     if not official_supports or not action_checked or not independent_support or reason is None:
         problems = []
         if not official_supports:

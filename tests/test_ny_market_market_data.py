@@ -312,6 +312,40 @@ def test_unresolved_discrepancy_still_fails_closed():
         )
 
 
+def test_sub_dollar_daily_bar_precision_rounding_is_resolved_generically():
+    candidate = {
+        **row("PENNY", 26.453, close=0.1501, volume=863_667_458),
+        "_change_pct": 26.453,
+        "_close": 0.1501,
+    }
+    resolved = resolve_discrepancy(
+        candidate=candidate,
+        historical_provider="yahoo_chart_query1",
+        historical_previous_close=0.12,
+        historical_target_close=0.1501,
+        historical_change_pct=25.083333,
+        official={
+            "provider": "nasdaq_official_fixture", "provider_family": "nasdaq",
+            "previous_close": 0.1187, "target_close": 0.1501,
+        },
+        corporate_action={
+            "provider": "action_fixture", "provider_family": "yahoo", "status": "checked_none",
+        },
+        minute_close={
+            "provider": "minute_fixture", "provider_family": "yahoo",
+            "previous_close": 0.1187, "target_close": 0.1688,
+        },
+        independent_sources=[{
+            "provider": "independent_fixture", "provider_family": "independent_fixture",
+            "previous_close": 0.12, "target_close": None,
+        }],
+        tolerance_pct=0.20,
+        resolved_at="2026-09-03T00:00:00+00:00",
+    )
+    assert resolved["discrepancy_status"] == "resolved"
+    assert resolved["discrepancy_reason"] == "daily_bar_precision_rounding"
+
+
 def test_corporate_action_must_be_resolved_before_arbitration_passes():
     candidate = {**row("GENR", 17.219, close=17.70), "_change_pct": 17.219, "_close": 17.70}
     with pytest.raises(MarketDataError, match="corporate action is not resolved"):
