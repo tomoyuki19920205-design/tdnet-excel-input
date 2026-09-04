@@ -476,7 +476,7 @@ SQLite sector_weekly_work_assignments (ready)
 claim one current-week item → start → 10-minute heartbeat → Web research → local validation/stage or atomic abandon
         ↓ Sector Weekly dedicated bridge
 owner/lease/sector/period/schema validation → atomic local inbox handoff (`sync_pending`)
-        ↓ Windows Task Scheduler: SectorWeeklyInboxWorker (PT5M, hidden VBS, IgnoreNew)
+        ↓ Windows Task Scheduler: SectorWeeklyInboxWorker (PT5M, hidden, IgnoreNew)
 hash/schema/assignment validation → idempotent canonical upsert → Supabase sync → assignment success
         ↓
 SQLite canonical_sector_reports + canonical_sector_report_runs
@@ -490,10 +490,7 @@ or an API key. The ChatGPT task performs research within the user's ChatGPT plan
 and uses only local `tools/sector_weekly_work_bridge.py`
 claim/start/heartbeat/abandon/stage/fail/status operations. The bridge never performs
 external sync. `SectorWeeklyInboxWorker` is the only Sector Weekly transport worker;
-it polls the dedicated inbox every five minutes outside the ChatGPT sandbox. This
-separation is required because Scheduled Task sandbox processes receive unusable
-`HTTP_PROXY`, `HTTPS_PROXY`, and `ALL_PROXY` values pointing to `127.0.0.1:9`;
-prompt-level instructions cannot make that sandbox perform the Supabase transport.
+it polls the dedicated inbox every five minutes outside the ChatGPT sandbox.
 The Sector Weekly queue, payload namespace, schema, lease, and canonical tables are
 separate from Company News Task01-08.
 
@@ -531,3 +528,325 @@ conflicting payloads fail closed. `sync_pending` and `sync_error` remain
 Transport polling never increments `attempt_count`; only invalid research payloads
 return to the research retry lane. The Windows worker alone confirms `success` after
 the external sync succeeds.
+
+## Optimal batch-size benchmark (isolated, post-8x4 baseline)
+
+The completed `pilot200-20260831T145019404335` soak establishes the operational
+performance baseline at eight tasks, batch size four, and 32 logical slots: 200/200
+completed, zero failed/retry/stale/validation/sync/research failures, 50 productive
+runs, average/p50/p95/max task duration 214.7/213/280/311 seconds, and measured
+throughput 31.7558 companies/hour. The subsequent fixed-cohort `batch04` comparison
+is formally RUNTIME PASS, RELIABILITY PASS, and QUALITY FAIL: material-event recall
+is 53.45%, critical-event recall is 75%, and 7 of 30 reference news-present companies
+are false no-news results. Therefore `PRODUCTION_BATCH_4_QUALITY_VALIDATED=false`.
+The existing Scheduled Tasks are not changed by the refinement preparation, but a
+full Production queue must not start on the assumption that batch four is validated.
+
+The historical `run_duration_seconds` is not a worker or scheduler-polling metric.
+`tools/company_news_task_batch.py snapshot` writes `started_at` immediately before
+the immutable assignment snapshot is returned to ChatGPT Work. After Work completes
+Web research, constructs and validates each payload, and atomically saves every
+success/failure file, its final `release` call writes `completed_at`. The reported
+duration is the difference between those timestamps. It therefore covers Work-side
+research, payload construction, validation/save, and command overhead after snapshot;
+it does not cover the later `CompanyNewsInboxWorker` run, PT5M polling delay, local
+ingest, SQLite write, or Supabase sync.
+
+`tools/company_news_batch_benchmark.py` adds a completely separate state and output
+plane:
+
+```text
+data/news_work/batch_benchmark/<benchmark_id>/
+  cohort.json
+  runs/reference|batchNN/
+    manifest.json
+    tasks/task01..task08/{queue,active,companies,runs,events}.*
+
+data/news_benchmark_inbox/<benchmark_id>/<run_name>/
+  benchmark_taskNN_<assignment_id>.json
+```
+
+No benchmark file is written to `data/news_inbox`. The default worker scans only the
+top level of `data/news_inbox`, so it cannot discover benchmark results. The harness
+imports the canonical validator but never opens a write connection to
+`decision_db.db`, never invokes ingest/sync, and has no Supabase write path. The
+company_news_v1 payload remains unchanged; timing is recorded only in
+`company_news_benchmark_telemetry_v1` sidecars. Each company record contains the
+external `research_started_at`, `research_finished_at`, validation completion,
+atomic-save completion, elapsed values, position, source/event counts, and result
+type. Each task record contains start/first-company/last-company/finish timestamps,
+elapsed and summed research/save time, snapshot size, and success/failure counts.
+Hidden reasoning or token-thinking time is neither requested nor inferred.
+
+The eight setup files call the read-only `route` command. With no active benchmark
+control they return the existing Production task prompt. Benchmark routing requires
+all of `benchmark_mode=true`, a valid benchmark/run ID, and an output directory that
+exactly resolves under `data/news_benchmark_inbox`. A malformed or partially present
+control fails closed instead of falling back to Production. An active benchmark task
+snapshots at most its candidate batch size once; later task-queue changes cannot add
+an N+1 company to that run.
+
+The fixed cohort is 192 companies, deterministically stratified across TSE 33 sector,
+latest available market-cap tercile (large/mid/small), and prior news-present/no-news/
+unscanned history. A deterministic 48-company subset is used for single-company
+reference research. Every run uses the immutable 2026-08-25 through 2026-08-31 search
+window. After the batch-four quality failure, the active candidate order is strictly
+reference(1), 2, 3, then 4. Batch sizes 8, 12, 16, 20, and 24 are suspended and the
+harness refuses to prepare them during this refinement. The existing cohort and
+single-company reference are reused; neither is regenerated.
+
+Reference/candidate event matching first uses normalized source URL, then a
+reviewable ticker/date/category plus headline/substance token similarity rule;
+ambiguous matches are listed separately. Audits report event recall, high/direct
+critical-event recall, precision, no-news false negatives, URL and schema validity,
+source/event density, research failures, position-quartile degradation, task
+average/p50/p95/max, busy skips, overlap, measured throughput, 3,800-company duration,
+weekly buffer, and local output bytes. Global-compression metrics separately report
+candidate/reference source-count ratio, research-time ratio, and event recall so a
+batch-wide loss is visible even when late positions do not degrade. A PASS requires
+100% schema validity, zero research failure, at least 99% valid URLs, 100% critical
+recall, at least 95% material
+event recall, zero major no-news false negatives, p95 below 45 minutes, max below 55
+minutes, and zero busy skip/overlap or late-position degradation.
+
+For quality benchmark v2, reuse `batchbench-20260901T095759508419`; do not run
+`prepare`, regenerate its completed reference, or prepare/activate batch03. The
+single-company reference is not assumed to be ground truth. Instead, an independent
+`reference02` is prepared from the persisted reference queue, preserving the exact
+48-company order and 2026-08-25 through 2026-08-31 search window without overwriting
+`reference`:
+
+```powershell
+python tools/company_news_batch_benchmark.py prepare-reference-replication --benchmark-id batchbench-20260901T095759508419
+python tools/company_news_batch_benchmark.py activate-run --benchmark-id batchbench-20260901T095759508419 --run-name reference02
+python tools/company_news_batch_benchmark.py status --benchmark-id batchbench-20260901T095759508419 --run-name reference02
+python tools/company_news_batch_benchmark.py deactivate-run
+```
+
+After reference02 reaches 48/48 with zero failures, a human runs the symmetric
+repeatability audit and builds the four-run event union:
+
+```powershell
+python tools/company_news_batch_benchmark.py audit --benchmark-id batchbench-20260901T095759508419 --run-name reference02
+python tools/company_news_batch_benchmark.py audit-reference-repeatability --benchmark-id batchbench-20260901T095759508419
+python tools/company_news_batch_benchmark.py build-quality-union --benchmark-id batchbench-20260901T095759508419
+```
+
+The repeatability artifact reports reference01->reference02 and
+reference02->reference01 recall, critical recall, news/no-news agreement, source and
+event-count agreement, Jaccard similarity, ambiguous matches, and events found by only
+one run. It returns `QUALITY_METRIC_NOT_STABLE` if either directional event recall is
+below 90%; 95% remains the stronger target, and critical recall targets 100%.
+
+`quality_v2/event_union.json` clusters the reference01, reference02, batch02, and
+batch04 48-company results using ticker plus normalized URL or ticker/date/category
+plus headline/substance similarity. Every cluster retains pairwise URL, date-distance,
+category, headline, and substance evidence. `found_by` has all four runs. Candidate-
+only events remain `UNKNOWN` and are never automatically labelled false positives.
+The same artifact carries an event-level persistent false-negative audit with the
+reference event, source type/category/importance, each candidate result, and the best
+available matcher-based reason; it separates shared batch02/batch04 misses from
+candidate-specific misses. The generated `quality_v2/gold_adjudication.json` is an
+isolated human-work artifact
+with verdicts `VALID_MATERIAL`, `VALID_NON_MATERIAL`, `DUPLICATE`,
+`MATCHER_FALSE_NEGATIVE`, `INVALID_SOURCE`, `OUT_OF_WINDOW`, and `UNKNOWN`.
+
+The v1 union has 88 clusters and is retained unchanged as comparison evidence. Its
+Gold template must not be adjudicated because review found both false splits and a
+same-run many-to-one overmerge.
+
+Matcher v2 applies this fixed pipeline: strict within-run identity dedupe, canonical
+identity-key generation, cross-run candidates, HIGH-confidence matches only,
+deterministic one-to-one assignment, union construction, then MEDIUM-confidence review
+output. Ticker is always a hard requirement. Category, importance, and earnings
+relevance never decide identity; their agreement is reported separately. Canonical
+keys normalize Unicode/trademark/punctuation, bilingual language subdomains and path
+tokens, 14-digit disclosure IDs embedded in mirror URLs, and allowlisted stable query
+IDs such as `itemid`. Other query values remain in the page key so two articles on the
+same path are not merged. Semantic similarity alone never merges two events from the
+same run.
+
+The v2 commands read only the completed reference/reference02/batch02/batch04 raw
+artifacts and write new outputs under `quality_v2/matcher_v2`; they do not overwrite
+the v1 union or Gold template:
+
+```powershell
+python tools/company_news_batch_benchmark.py rebuild-quality-union-v2 --benchmark-id batchbench-20260901T095759508419
+python tools/company_news_batch_benchmark.py audit-reference-repeatability-v2 --benchmark-id batchbench-20260901T095759508419
+```
+
+`event_union_v2.json` and `gold_adjudication_v2.json` are the new review inputs.
+`matcher_merge_candidates.json` holds probable or one-to-one-conflicting pairs without
+auto-merging them. `matcher_overmerge_audit.json` compares v1 and v2 same-run members,
+including the Bluebon two-product case. Human Gold v2 adjudication still prioritizes
+company IR/press releases, TDNET, EDINET/SEC, government, exchange, and other official
+sources. Until every v2 `UNKNOWN` is adjudicated, all reference and candidate quality
+scores remain provisional and `ready_for_production_change` remains false.
+
+The existing-artifact v2 rebuild produced 82 clusters from the v1 total of 88. It
+joined seven verified false-split groups, split the one Bluebon same-run overmerge,
+left zero same-run multi-member clusters, and emitted zero ambiguous candidates.
+Reference01-to-reference02 all-event recall improved from 46.55% to 60.34%, the
+reverse direction from 50.94% to 66.04%, and event Jaccard from 32.53% to 46.05%.
+Critical recall improved from 62.5%/70.0% to 75.0%/90.0%. News-presence agreement
+remained 77.08%, so the formal repeatability decision is still
+`QUALITY_METRIC_NOT_STABLE`; these improvements validate matcher behavior, not the
+research quality of any batch size. All 82 Gold v2 rows remain `UNKNOWN` pending human
+adjudication.
+
+After human adjudication is complete:
+
+```powershell
+python tools/company_news_batch_benchmark.py audit-gold-v2 --benchmark-id batchbench-20260901T095759508419 --adjudication data/news_work/batch_benchmark/batchbench-20260901T095759508419/quality_v2/matcher_v2/gold_adjudication_v2.json
+```
+
+Only then is batch03 reconsidered. Existing compression facts remain attached to the
+run audits. Batch02's measured 15.9273 companies/hour implies 9.941 days for 3,800 and
+cannot meet a weekly 3,800-company cycle in the current eight-task arrangement, even
+if its later Gold quality passes. If both batch02 and batch04 fail Gold quality, the
+next step is research-architecture redesign rather than larger batches.
+
+### Blind Gold v2 adjudication packets
+
+Gold v2 Web adjudication is performed outside the benchmark harness. The harness only
+builds deterministic blind packets, validates complete packet responses, and imports
+validated results. Packet generation orders all 82 clusters by ticker, event date, and
+cluster ID, keeps every company's events together, and partitions them into 8-10 event
+packets. Each packet SHA-256 covers canonical sorted-key JSON excluding only the
+`packet_sha256` field; no timestamps are included, so identical unions produce
+identical packet bytes and hashes.
+
+For `batchbench-20260901T095759508419`, this produces nine packets with event
+counts `8, 8, 9, 10, 10, 10, 10, 8, 9` (82 total).
+
+Packets contain cluster/company identity, date, canonical headline, summary,
+`why_it_matters`, and de-duplicated source URLs. They never contain `found_by`, run
+labels, candidate presence, matcher evidence, or members. The separate provenance
+manifest stays outside `gold_packets` and is joined only after Gold completion.
+
+```powershell
+python tools/company_news_batch_benchmark.py build-gold-packets-v2 --benchmark-id batchbench-20260901T095759508419
+python tools/company_news_batch_benchmark.py gold-status-v2 --benchmark-id batchbench-20260901T095759508419
+python tools/company_news_batch_benchmark.py import-gold-adjudication-v2 --benchmark-id batchbench-20260901T095759508419 --input <response.json>
+```
+
+The response contract is `company_news_gold_adjudication_response_v2`. Import rejects
+schema, benchmark, packet ID, packet SHA, cluster coverage, duplicate cluster, enum,
+URL, datetime, evidence, and duplicate-target violations before any Gold write. A
+successful import content-addresses and atomically preserves the previous Gold file in
+`backups/g-<16hex>.json`, then atomically replaces `gold_adjudication_v2.json`. The
+full content SHA-256 remains in import provenance and is checked before reusing a
+short-name backup; a prefix collision fails closed. Re-importing an
+identical response is a no-op. Status remains `GOLD_INCOMPLETE` while any event is
+`UNKNOWN`; `GOLD_COMPLETE` only means every event is adjudicated and still requires
+Gold metric review before batch03 can run.
+
+Gold scoring collapses `DUPLICATE` and `MATCHER_FALSE_NEGATIVE` relationships to one
+event, treats candidate-only `VALID_MATERIAL` events as valid discoveries, and scores
+reference01, reference02, batch02, and batch04 symmetrically. It reports material
+recall, critical-material recall, material precision, and company-level material/no-
+news false negatives. `VALID_NON_MATERIAL`, `INVALID_SOURCE`, and `OUT_OF_WINDOW`
+participate in the precision denominator; candidate-only events are never classified
+as false positives without adjudication.
+
+### Gold material discovery and miss audit
+
+After Gold v2 reaches `GOLD_COMPLETE`, the existing-artifact-only miss audit builds a
+29-row material-event matrix across reference01, reference02, batch02, and batch04:
+
+```powershell
+python tools/company_news_batch_benchmark.py audit-gold-material-misses-v2 --benchmark-id batchbench-20260901T095759508419
+```
+
+The command validates the fixed 29 material / 7 critical counts and requires its
+discovery totals to equal `gold_audit_v2.json` before writing anything. It uses the
+same duplicate/MATCHER_FALSE_NEGATIVE root grouping as Gold scoring, so a normalized
+Gold event appears exactly once even when multiple matcher clusters represent it.
+For each run it records the actual matched observation provenance and joins existing
+company and task telemetry. Miss classifications and improvement scenarios are
+explicitly artifact-based inferences; the command performs no Web lookup.
+
+Outputs are runtime analysis artifacts under `quality_v2/matcher_v2`:
+
+- `gold_material_discovery_matrix.json` and `.md`
+- `gold_material_miss_analysis.json`
+- `GOLD_MATERIAL_MISS_ANALYSIS.md`
+
+The analysis includes critical/non-critical recall, source/channel/direction groups,
+reference disagreement, batch02/batch04 comparisons, multi-event-company truncation,
+returned-event distributions, found-versus-missed telemetry, batch position, precision
+noise, an official-first theoretical rescue ceiling, targeted second-pass candidates,
+and scenarios with explicit cost/risk caveats. It never rewrites Gold, the event
+union, packets/responses, raw run directories, or benchmark inbox output. For the
+completed benchmark the decision remains `DO_NOT_RUN_BATCH03_YET`: source-strategy
+hardening must be validated before another batch-size run.
+
+### Benchmark research strategy v2
+
+`company_news_research_strategy_v2` is an isolated batch-four research candidate. It
+reconstructs `batch04v2` from the persisted 192-company `batch04` assignment order,
+requires the same order SHA-256 and fixed 2026-08-25 through 2026-08-31 window, and
+refuses preparation if the baseline or cohort differs. Preparation is inert:
+
+```powershell
+python tools/company_news_batch_benchmark.py prepare-run `
+  --benchmark-id batchbench-20260901T095759508419 `
+  --run-name batch04v2 `
+  --batch-size 4 `
+  --strategy company_news_research_strategy_v2
+```
+
+Activation remains a separate human-approved command. The existing Task01-Task08
+setup files and schedules are unchanged; their generic router returns the existing
+benchmark prompt and includes the strategy version when this run is later active.
+
+Each company receives a reserved two-to-three-query official pass and a one-to-three-
+query targeted economic-driver pass, capped at six search actions total. The official
+pass includes company IR/news, disclosure sources, and a generic company-name plus
+`site:go.jp` search. The targeted pass derives at most three demand/order,
+pricing/cost/supply, or industry/regulation drivers from public company information;
+it contains no ticker-specific branch. Both stages and the full fixed window must be
+complete before finalization, including an empty result. Finding one event does not
+end the company review. `company_news_v1` itself has no event-count hard cap.
+
+Strategy evidence remains outside the production-compatible payload. Every snapshot
+assignment receives a benchmark-run-local telemetry temp/final path. Finalization
+validates the query budgets, generic government search, coverage booleans, full-window
+attestation, driver groups, stage timings, source diversity, candidate/final counts,
+and exactly-once candidate provenance before atomically accepting the result. These
+fields are then copied into benchmark company telemetry; no production schema changes.
+
+Preparation scans the runtime prompt and assignments for adjudication/provenance
+leakage and company-specific conditional branches. Post-run scoring may use finalized
+Gold, but runtime research inputs may not. Known-Gold scoring reports recall with
+precision explicitly `PROVISIONAL_PENDING_GOLD_EXTENSION`. Candidate-only events are
+not false positives: `build_gold_extension_packet_v2` creates a deterministic blind
+packet containing only novel candidates, strips run/provenance/matcher fields, and
+does not re-adjudicate the existing 82 events. Rescue attribution is recorded as
+official-first, targeted-second-pass, or existing/general; regression of any of the
+17 baseline material events, seven critical events, or 12 IR/TDNET events remains a
+hard failure. Throughput keeps the existing p95/max, busy-skip, overlap, and weekly
+feasibility gates.
+
+Only the final candidate receives the separate integration burst fixture. It contains
+synthetic files under `data/news_benchmark_load`, requires a temporary SQLite copy,
+disables Production Supabase writes, and exposes fields for worker duration/backlog,
+SQLite waits and WinError 5/32, sync retries, IgnoreNew skips, TDNET fixture durations,
+duplicates/console visibility, and test-endpoint sync duration. Batch size changes do
+not change annual news volume; the benchmark itself has zero Supabase capacity delta
+and records only local isolated output size. The human fills the generated result
+template and audits it with:
+
+```powershell
+python tools/company_news_batch_benchmark.py audit-integration-fixture --manifest <fixture>/manifest.json --result <fixture>/human_result.json
+python tools/company_news_batch_benchmark.py recommend --benchmark-id <id>
+```
+
+Recommendation walks 2, 3, and 4 in order and selects the largest contiguous candidate
+whose complete audit is PASS. A quality failure cannot be offset by throughput. If two
+fails, the recommendation is the single-company reference and research-architecture
+redesign is required; if three fails after two passes, two is recommended; if two and
+three pass while four fails, three is recommended. A batch-four failure blocks all
+upward candidates. Ratios use the single-company reference rather than batch four as
+their baseline. `ready_for_production_change` remains false until the matching final
+candidate integration audit passes, and human review remains mandatory.
