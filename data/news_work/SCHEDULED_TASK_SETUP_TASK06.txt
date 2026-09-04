@@ -1,3 +1,5 @@
-次の内容で繰り返しScheduled Taskを作成してください。Task名は「Company News Monitor Task06」、Local ProjectはC:\Users\takuy\OneDrive\tdnet-excel-input、実行時刻は毎時38分です。
+Company News Monitor Task06のProduction setupです。scheduleは毎時38分を維持します。
 
-毎回の実行開始時に最初にC:\Users\takuy\OneDrive\tdnet-excel-input\data\news_work\SCHEDULED_TASK_TASK06_PROMPT.txtを読み、その内容を完全に守ってください。Task本文へticker、会社名、assignment IDを固定しないでください。1 runはrun開始時snapshotの最大3社だけです。Task作成後は手動実行せず、queueもactivateしないでください。
+Local Projectのrootを作業ディレクトリとして、data/news_work/SCHEDULED_TASK_TASK06_PROMPT.txtを読み、そのcontractを守ってください。1 runは開始時snapshotの最大4社です。途中補充された5社目を処理しません。
+
+実験用data/news_work/batch_benchmark/active.jsonが存在する場合は調査・保存せず停止してください。benchmarkの起動・移植・設定変更は行いません。
