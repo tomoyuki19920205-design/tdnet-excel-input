@@ -5142,6 +5142,14 @@ def _build_parser() -> argparse.ArgumentParser:
     gold_status.add_argument("--benchmark-id", required=True)
     miss_audit = commands.add_parser("audit-gold-material-misses-v2")
     miss_audit.add_argument("--benchmark-id", required=True)
+    for command in ("audit-strategy-v2-run", "build-gold-extension-v2", "import-gold-extension-v2"):
+        post = commands.add_parser(command)
+        post.add_argument("--benchmark-id", required=True)
+        post.add_argument("--run-name", required=True)
+        if command == "import-gold-extension-v2":
+            post.add_argument("--input", type=Path, required=True)
+        else:
+            post.add_argument("--adjudication", type=Path)
     integration = commands.add_parser("prepare-integration-fixture")
     integration.add_argument("--batch-size", type=int, required=True)
     integration_audit = commands.add_parser("audit-integration-fixture")
@@ -5215,6 +5223,15 @@ def main(argv: list[str] | None = None) -> int:
             result = gold_status_v2(root, args.benchmark_id)
         elif args.command == "audit-gold-material-misses-v2":
             result = audit_gold_material_misses_v2(root, args.benchmark_id)
+        elif args.command in {"audit-strategy-v2-run", "build-gold-extension-v2", "import-gold-extension-v2"}:
+            from tools.company_news_post_run_v2 import audit_strategy_v2_run, import_extension
+            if args.command == "import-gold-extension-v2":
+                result = import_extension(root, args.benchmark_id, args.run_name, args.input)
+            else:
+                result = audit_strategy_v2_run(
+                    root, args.benchmark_id, args.run_name, args.adjudication,
+                    build_extension=args.command == "build-gold-extension-v2",
+                )
         elif args.command == "prepare-integration-fixture":
             result = prepare_integration_fixture(root, args.batch_size)
         else:
