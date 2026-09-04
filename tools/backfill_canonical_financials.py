@@ -92,12 +92,12 @@ def load_sqlite_financials(db_path: str) -> list[dict]:
         logger.error(f"DB not found: {db_path}")
         return []
 
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         "SELECT company_code, fiscal_year_end, quarter, "
         "sales, gross_profit, sga, operating_profit, "
-        "unit, source_doc_id, source_url, field_sources "
+        "unit, source_doc_id, source_url, field_sources, created_at "
         "FROM quarterly_results"
     ).fetchall()
     conn.close()
@@ -136,6 +136,10 @@ def load_sqlite_financials(db_path: str) -> list[dict]:
             skip_counts["all_null"] = skip_counts.get("all_null", 0) + 1
             continue
 
+        from lib.pipeline.financial_integrity import actual_period_is_valid
+        if not actual_period_is_valid(period, quarter, rdict.get("created_at")):
+            skip_counts["invalid_actual_duration"] = skip_counts.get("invalid_actual_duration", 0) + 1
+            continue
         source = _detect_source(rdict)
 
         valid.append({

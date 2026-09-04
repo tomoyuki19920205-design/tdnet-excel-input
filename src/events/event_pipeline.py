@@ -1233,6 +1233,15 @@ def process_documents(
             except Exception as _sb_e:
                 logger.warning(f"[EVENT_SUPABASE] sync block failed (non-fatal): {_sb_e}")
 
+        if not dry_run:
+            try:
+                from lib.pipeline.forecast_sync import sync_document_forecasts
+                forecast_sync = sync_document_forecasts(conn, [doc.doc_id for doc in docs])
+                result.supabase_errors += forecast_sync.get("errors", 0)
+            except Exception as exc:
+                logger.error("[FORECAST_CANONICAL] sync failed: %s", exc)
+                result.supabase_errors += 1
+
     finally:
         if conn:
             conn.close()

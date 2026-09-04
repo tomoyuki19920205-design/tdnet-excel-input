@@ -171,7 +171,7 @@ def expand_financials_rows(
     filing_id: str | None = None,
     disclosure_datetime: str | None = None,
     correction_flag: bool = False,
-    unit: str = "JPY",
+    unit: str = "millions_jpy",
 ) -> tuple[list[dict], int]:
     """wide dict → canonical_financials long rows に展開。HTTP 呼び出しなし。
 
@@ -196,6 +196,13 @@ def expand_financials_rows(
             f"period={period} quarter={quarter} — skipping"
         )
         return [], len(metrics_dict)
+
+    from .financial_integrity import FORECAST_SOURCES, actual_period_is_valid, normalize_amount
+    if source not in FORECAST_SOURCES and not actual_period_is_valid(period, quarter, disclosure_datetime):
+        logger.warning("[canonical] invalid actual period: %s %s %s", ticker, period, quarter)
+        return [], len(metrics_dict)
+    metrics_dict = {metric: normalize_amount(value, unit, metric) for metric, value in metrics_dict.items()}
+    unit = "millions_jpy"
 
     now_iso = datetime.now(JST).isoformat()
     priority = get_priority(source)
@@ -382,7 +389,7 @@ def write_financials_canonical(
     filing_id: str | None = None,
     disclosure_datetime: str | None = None,
     correction_flag: bool = False,
-    unit: str = "JPY",
+    unit: str = "millions_jpy",
     config: dict,
 ) -> dict:
     """financials wide dict → canonical_financials (long) に upsert。

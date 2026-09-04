@@ -121,6 +121,18 @@ _INSERT_COLS = [
 ]
 
 
+def _sync_guidance_if_present(conn, data):
+    if not data.get("source_doc_id") or not any(data.get(k) is not None for k in ("guidance_sales", "guidance_op")):
+        return
+    try:
+        from lib.pipeline.forecast_sync import sync_document_forecasts
+        result = sync_document_forecasts(conn, [data["source_doc_id"]])
+        if result.get("errors"):
+            logger.error("[FORECAST_CANONICAL] guidance synchronization needs retry: %s", data["source_doc_id"])
+    except Exception as exc:
+        logger.error("[FORECAST_CANONICAL] guidance synchronization failed: %s", exc)
+
+
 def save_earnings_summary(
     conn: sqlite3.Connection,
     data: dict,
@@ -145,6 +157,7 @@ def save_earnings_summary(
     ).fetchone()
     if row is not None:
         logger.debug(f"earnings_summary already exists: fp={fp[:12]}")
+        _sync_guidance_if_present(conn, data)
         return "already_exists"
 
     now = _now_jst()
@@ -163,6 +176,7 @@ def save_earnings_summary(
     logger.info(
         f"INSERT earnings_summary fp={fp[:12]} ticker={data.get('ticker')}"
     )
+    _sync_guidance_if_present(conn, data)
     return "inserted"
 
 
