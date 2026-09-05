@@ -1,6 +1,10 @@
 import copy
+import hashlib
 import json
+import os
 import sqlite3
+import subprocess
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -21,9 +25,12 @@ from tools.sector_weekly_work_bridge import (
     _normalized_report_row,
     abandon_one,
     claim_one,
+    fail_one,
     heartbeat_one,
     stage_one,
     start_one,
+    verify_claim_one,
+    verify_payload_one,
 )
 from tools.apply_sector_weekly_work_sqlite_migration import apply_sqlite_migration
 
@@ -87,6 +94,8 @@ def _envelope(assignment: dict, report: dict | None = None) -> dict:
         "sector_name": assignment["sector_name"],
         "period_start": assignment["period_start"],
         "period_end": assignment["period_end"],
+        "attempt_count": assignment["attempt_count"],
+        "contract_hash": assignment["contract_hash"],
         "report": report or _report(),
     }
 
@@ -232,6 +241,106 @@ def test_bridge_claim_contract_contains_prompt_but_no_api_controls(tmp_path: Pat
     assert assignment["result_schema_version"] == RESULT_SCHEMA
     assert "max_tool_calls" not in assignment["research_prompt"]
     assert "OPENAI_API_KEY" not in assignment["research_prompt"]
+    assert assignment["contract_hash"]
+    assert f".attempt-{assignment['attempt_count']}." in assignment["submit_path"]
+
+
+def test_code_5_claim_is_textiles_and_contract_verifies_before_research(tmp_path: Path):
+    db = tmp_path / "db.sqlite"
+    work = tmp_path / "work"
+    _enqueue(db, 5)
+    claimed = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
+    assert (claimed["sector_code"], claimed["sector_name"]) == (5, "繊維製品")
+    active_path = Path(claimed["active_contract_path"])
+    db_hash = hashlib.sha256(db.read_bytes()).hexdigest()
+    active_hash = hashlib.sha256(active_path.read_bytes()).hexdigest()
+    active_mtime = active_path.stat().st_mtime_ns
+    verified = verify_claim_one(
+        db, claimed["assignment_id"], OWNER, claimed["contract_hash"], work_root=work, at=AT,
+    )
+    assert verified["verified"] is True
+    assert (verified["sector_code"], verified["sector_name"], verified["attempt_count"]) == (5, "繊維製品", 1)
+    assert hashlib.sha256(db.read_bytes()).hexdigest() == db_hash
+    assert hashlib.sha256(active_path.read_bytes()).hexdigest() == active_hash
+    assert active_path.stat().st_mtime_ns == active_mtime
+
+
+def test_claim_cli_json_is_ascii_safe_under_cp932_console(tmp_path: Path):
+    db = tmp_path / "db.sqlite"
+    work = tmp_path / "work"
+    _enqueue(db, 5)
+    command = [
+        sys.executable, str(Path(__file__).parents[1] / "tools" / "sector_weekly_work_bridge.py"),
+        "--db", str(db), "--work-root", str(work), "--at", AT.isoformat(), "claim", "--owner", OWNER,
+    ]
+    environment = dict(os.environ)
+    environment["PYTHONIOENCODING"] = "cp932"
+    result = subprocess.run(command, capture_output=True, check=True, env=environment)
+    assert all(byte < 128 for byte in result.stdout)
+    decoded = json.loads(result.stdout.decode("cp932"))
+    assert decoded["assignment"]["sector_name"] == "繊維製品"
+    assert result.stderr == b""
+
+
+def test_verify_claim_fails_closed_for_mojibake_or_hash_mismatch(tmp_path: Path):
+    db = tmp_path / "db.sqlite"
+    work = tmp_path / "work"
+    _enqueue(db, 5)
+    claimed = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
+    with pytest.raises(SectorBridgeError, match="hash"):
+        verify_claim_one(db, claimed["assignment_id"], OWNER, "0" * 64, work_root=work, at=AT)
+    active_path = Path(claimed["active_contract_path"])
+    active = json.loads(active_path.read_text(encoding="utf-8"))
+    active["sector_name"] = "邵ｺ邵ｺ製品"
+    active_path.write_text(json.dumps(active, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(SectorBridgeError, match="canonical mapping"):
+        verify_claim_one(
+            db, claimed["assignment_id"], OWNER, claimed["contract_hash"], work_root=work, at=AT,
+        )
+
+
+def test_attempt_two_uses_new_draft_and_rejects_attempt_one_payload(tmp_path: Path):
+    db = tmp_path / "db.sqlite"
+    work = tmp_path / "work"
+    _enqueue(db, 2)
+    first = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
+    old_draft = Path(first["submit_path"])
+    old_draft.parent.mkdir(parents=True, exist_ok=True)
+    old_draft.write_text(json.dumps(_envelope(first), ensure_ascii=False), encoding="utf-8")
+    fail_one(db, first["assignment_id"], OWNER, "isolated retry", at=AT)
+    second_at = AT + timedelta(hours=1)
+    second = claim_one(db, OWNER, work_root=work, at=second_at)["assignment"]
+    assert second["attempt_count"] == 2
+    assert second["submit_path"] != first["submit_path"]
+    assert old_draft.exists() and not Path(second["submit_path"]).exists()
+    assert Path(first["active_contract_path"]).exists()
+    assert Path(second["active_contract_path"]).exists()
+    with pytest.raises(SectorBridgeError, match="attempt_count"):
+        verify_payload_one(
+            db, second["assignment_id"], OWNER, second["contract_hash"], old_draft,
+            work_root=work, at=second_at,
+        )
+
+
+def test_textile_payload_passes_pre_stage_contract_and_stages_once(tmp_path: Path):
+    db = tmp_path / "db.sqlite"
+    work = tmp_path / "work"
+    _enqueue(db, 5)
+    claimed = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
+    start_one(db, claimed["assignment_id"], OWNER, at=AT)
+    report = _report()
+    report["full_report_md"] = report["full_report_md"].replace("鉱業", "繊維製品", 1)
+    draft = Path(claimed["submit_path"])
+    draft.parent.mkdir(parents=True, exist_ok=True)
+    draft.write_text(json.dumps(_envelope(claimed, report), ensure_ascii=False), encoding="utf-8")
+    checked = verify_payload_one(
+        db, claimed["assignment_id"], OWNER, claimed["contract_hash"], draft,
+        work_root=work, at=AT,
+    )
+    assert checked["status"] == "payload_verified"
+    staged = stage_one(db, claimed["assignment_id"], OWNER, draft, work_root=work, at=AT)
+    assert staged["status"] == "handoff_pending"
+    assert len(list((work / "inbox").glob("*.json"))) == 1
 
 
 def test_lease_expiry_recovers_assignment_for_retry(tmp_path: Path):
@@ -406,7 +515,8 @@ def test_malformed_payload_is_quarantined_and_retried(tmp_path: Path):
         assert conn.execute("SELECT count(*) FROM canonical_sector_reports").fetchone()[0] == 0
     finally:
         conn.close()
-    assert (work / "quarantine" / f"{claimed['assignment_id']}.json").exists()
+    quarantined = list((work / "quarantine").glob(f"{claimed['assignment_id']}.attempt-1*.json"))
+    assert len(quarantined) == 1
 
 
 def test_failed_sector_does_not_block_a_fresh_sector(tmp_path: Path):

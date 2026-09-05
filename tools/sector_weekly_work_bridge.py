@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
+import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,10 +41,12 @@ from lib.sector_weekly_work import (
     stage_assignment,
 )
 from lib.pipeline.db import get_supabase_read_config, load_env, supabase_select
-from tools.company_news_atomic import atomic_write_json, replace_with_retry
+from lib.sector_weekly_sqlite import MigrationRequiredError, validate_work_schema
+from tools.company_news_atomic import atomic_write_json, atomic_write_text, replace_with_retry
 from tools.sector_weekly_scheduler import assemble_payload, build_prompt, in_worker_window
 
-RESULT_SCHEMA = "sector_weekly_work_result_v1"
+LEGACY_RESULT_SCHEMA = "sector_weekly_work_result_v1"
+RESULT_SCHEMA = "sector_weekly_work_result_v2"
 DEFAULT_OWNER = "sector-weekly-worker"
 DEFAULT_WORK_ROOT = ROOT / "data" / "sector_weekly_work"
 QUALITY_REOPEN_CONFIRMATION = "REOPEN_SECTOR_WEEKLY_QUALITY"
@@ -78,23 +82,67 @@ def _window(row: dict[str, Any]) -> WeeklyWindow:
     )
 
 
+def _contract_identity(value: dict[str, Any]) -> dict[str, Any]:
+    try:
+        identity = {
+            "assignment_id": str(value["assignment_id"]),
+            "sector_code": int(value["sector_code"]),
+            "sector_name": value["sector_name"],
+            "period_start": value["period_start"],
+            "period_end": value["period_end"],
+            "attempt_count": int(value["attempt_count"]),
+        }
+    except (KeyError, TypeError, ValueError) as exc:
+        raise SectorBridgeError("claim contract identity is incomplete or invalid") from exc
+    if not isinstance(identity["sector_name"], str) or not identity["sector_name"].strip():
+        raise SectorBridgeError("claim contract sector_name is empty or invalid")
+    expected_name = sector_name(identity["sector_code"])
+    if identity["sector_name"] != expected_name:
+        raise SectorBridgeError("claim contract sector_code and sector_name do not match the canonical mapping")
+    for field in ("period_start", "period_end"):
+        _parse_datetime(identity[field], field)
+    return identity
+
+
+def _contract_hash(value: dict[str, Any]) -> str:
+    body = json.dumps(
+        _contract_identity(value), ensure_ascii=True, sort_keys=True, separators=(",", ":"),
+    ).encode("ascii")
+    return hashlib.sha256(body).hexdigest()
+
+
+def _active_contract_path(work_root: Path, value: dict[str, Any]) -> Path:
+    identity = _contract_identity(value)
+    return work_root / "active" / (
+        f"{identity['assignment_id']}.attempt-{identity['attempt_count']}.{_contract_hash(identity)[:16]}.json"
+    )
+
+
 def _assignment_contract(row: dict[str, Any], work_root: Path) -> dict[str, Any]:
     assignment_id = str(row["assignment_id"])
+    identity = _contract_identity(row)
+    contract_hash = _contract_hash(identity)
+    attempt_count = identity["attempt_count"]
+    active_contract_path = _active_contract_path(work_root, identity)
     return {
         "schema_version": row["schema_version"],
         "assignment_id": assignment_id,
         "stable_key": row["stable_key"],
-        "sector_code": int(row["sector_code"]),
-        "sector_name": row["sector_name"],
-        "period_start": row["period_start"],
-        "period_end": row["period_end"],
+        "sector_code": identity["sector_code"],
+        "sector_name": identity["sector_name"],
+        "period_start": identity["period_start"],
+        "period_end": identity["period_end"],
         "status": row["status"],
-        "attempt_count": int(row["attempt_count"]),
+        "attempt_count": attempt_count,
+        "contract_hash": contract_hash,
         "claim_owner": row["claim_owner"],
         "claimed_at": row["claimed_at"],
         "lease_expires_at": row["lease_expires_at"],
         "research_prompt": build_prompt(int(row["sector_code"]), _window(row)),
-        "submit_path": str((work_root / "drafts" / f"{assignment_id}.json").resolve()),
+        "active_contract_path": str(active_contract_path.resolve()),
+        "submit_path": str((
+            work_root / "drafts" / f"{assignment_id}.attempt-{attempt_count}.{contract_hash[:16]}.json"
+        ).resolve()),
         "result_schema_version": RESULT_SCHEMA,
     }
 
@@ -120,7 +168,10 @@ def claim_one(
     if row is None:
         return {"status": "no_work", "claim_owner": owner}
     contract = _assignment_contract(row, work_root)
-    atomic_write_json(work_root / "active" / f"{row['assignment_id']}.json", contract)
+    active_path = Path(contract["active_contract_path"])
+    if active_path.exists():
+        raise SectorBridgeError("attempt-specific active claim contract already exists")
+    atomic_write_json(active_path, contract)
     return {"status": "claimed", "assignment": contract}
 
 
@@ -165,29 +216,32 @@ def abandon_one(
         row = abandon_assignment(conn, assignment_id, owner, now=at, reason=reason)
     finally:
         conn.close()
-    (work_root / "active" / f"{assignment_id}.json").unlink(missing_ok=True)
+    _active_contract_path(work_root, row).unlink(missing_ok=True)
     return {
         "status": row["status"], "assignment_id": assignment_id,
         "attempt_count": int(row["attempt_count"]), "released": True,
     }
 
 
-def _read_envelope(path: Path) -> dict[str, Any]:
+def _read_envelope(path: Path, *, require_contract: bool = True) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise SectorBridgeError("submitted payload is not valid UTF-8 JSON") from exc
     if not isinstance(value, dict):
         raise SectorBridgeError("submitted payload must be a JSON object")
-    required = {
+    legacy_required = {
         "schema_version", "assignment_id", "claim_owner", "sector_code", "sector_name",
         "period_start", "period_end", "report",
     }
-    if set(value) != required:
+    required = legacy_required | ({"attempt_count", "contract_hash"} if require_contract else set())
+    permitted = legacy_required | {"attempt_count", "contract_hash"}
+    if not required.issubset(value) or not set(value).issubset(permitted):
         missing = sorted(required - set(value))
-        extra = sorted(set(value) - required)
+        extra = sorted(set(value) - permitted)
         raise SectorBridgeError(f"submitted envelope keys mismatch: missing={missing}, extra={extra}")
-    if value["schema_version"] != RESULT_SCHEMA:
+    allowed_schemas = {RESULT_SCHEMA} if require_contract else {LEGACY_RESULT_SCHEMA, RESULT_SCHEMA}
+    if value["schema_version"] not in allowed_schemas:
         raise SectorBridgeError("submitted result schema_version is not supported")
     if not isinstance(value["report"], dict):
         raise SectorBridgeError("report must be a JSON object")
@@ -195,6 +249,7 @@ def _read_envelope(path: Path) -> dict[str, Any]:
 
 
 def _validate_ownership(envelope: dict[str, Any], row: dict[str, Any], assignment_id: str, owner: str) -> None:
+    transport_waiting = row["status"] == "retry_pending" and bool(row["submitted_payload_hash"])
     expected = {
         "assignment_id": assignment_id,
         "claim_owner": owner,
@@ -203,26 +258,145 @@ def _validate_ownership(envelope: dict[str, Any], row: dict[str, Any], assignmen
         "period_start": row["period_start"],
         "period_end": row["period_end"],
     }
+    if not transport_waiting:
+        expected.update({
+            "attempt_count": int(row["attempt_count"]),
+            "contract_hash": _contract_hash(row),
+        })
     for field, expected_value in expected.items():
         if envelope.get(field) != expected_value:
             raise SectorBridgeError(f"submitted {field} does not match the claimed assignment")
-    transport_waiting = row["status"] == "retry_pending" and bool(row["submitted_payload_hash"])
     if row["claim_owner"] != owner and row["status"] != "success" and not transport_waiting:
         raise SectorBridgeError("claim owner does not own this assignment")
     if row["status"] not in {"claimed", "running", "success"} and not transport_waiting:
         raise SectorBridgeError("assignment is not active, staged, or completed")
 
 
-def _quarantine(work_root: Path, assignment_id: str, source: Path) -> None:
-    target = work_root / "quarantine" / f"{assignment_id}.json"
+def _quarantine(
+    work_root: Path,
+    assignment_id: str,
+    source: Path,
+    *,
+    attempt_count: int | None = None,
+    contract_hash: str | None = None,
+) -> None:
+    suffix = f".attempt-{attempt_count}" if attempt_count is not None else ".attempt-unknown"
+    if contract_hash:
+        suffix += f".{contract_hash[:16]}"
+    target = work_root / "quarantine" / f"{assignment_id}{suffix}.json"
     try:
         body = source.read_text(encoding="utf-8", errors="replace")
     except OSError:
         body = ""
     target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_suffix(".json.tmp")
-    temporary.write_text(body, encoding="utf-8")
-    replace_with_retry(temporary, target)
+    sequence = 1
+    while target.exists():
+        target = target.with_name(f"{target.stem}.{sequence}.json")
+        sequence += 1
+    atomic_write_text(target, body)
+
+
+def _read_active_contract(work_root: Path, row: dict[str, Any]) -> dict[str, Any]:
+    path = _active_contract_path(work_root, row)
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise SectorBridgeError("active claim contract is not valid UTF-8 JSON") from exc
+    if not isinstance(value, dict):
+        raise SectorBridgeError("active claim contract must be a JSON object")
+    return value
+
+
+def _connect_readonly(db_path: Path) -> sqlite3.Connection:
+    path = Path(db_path).expanduser().resolve()
+    if not path.is_file():
+        raise MigrationRequiredError(f"Sector Weekly SQLite DB does not exist or is not migrated: {path}")
+    conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        validate_work_schema(conn)
+    except Exception:
+        conn.close()
+        raise
+    return conn
+
+
+def verify_claim_one(
+    db_path: Path,
+    assignment_id: str,
+    owner: str,
+    contract_hash: str,
+    *,
+    work_root: Path = DEFAULT_WORK_ROOT,
+    at: datetime | None = None,
+) -> dict[str, Any]:
+    """Read-only verification of the immutable DB and active-file claim contract."""
+    conn = _connect_readonly(db_path)
+    try:
+        row = get_assignment(conn, assignment_id)
+    finally:
+        conn.close()
+    if row is None:
+        raise SectorBridgeError("assignment not found")
+    if row["status"] not in {"claimed", "running"} or row["claim_owner"] != owner:
+        raise SectorBridgeError("assignment is not actively owned by this worker")
+    timestamp = at or now_jst()
+    if _parse_datetime(row["lease_expires_at"], "lease_expires_at") <= timestamp:
+        raise SectorBridgeError("claim lease has expired")
+    active = _read_active_contract(work_root, row)
+    expected = _contract_identity(row)
+    actual = _contract_identity(active)
+    if actual != expected:
+        raise SectorBridgeError("active claim contract does not match the assignment database")
+    expected_hash = _contract_hash(expected)
+    if active.get("contract_hash") != expected_hash or contract_hash != expected_hash:
+        raise SectorBridgeError("claim contract hash does not match")
+    if active.get("claim_owner") != owner:
+        raise SectorBridgeError("active claim contract owner does not match")
+    regenerated = _assignment_contract(row, work_root)
+    for field in (
+        "schema_version", "stable_key", "research_prompt", "submit_path",
+        "active_contract_path", "result_schema_version",
+    ):
+        if active.get(field) != regenerated[field]:
+            raise SectorBridgeError(f"active claim contract {field} does not match")
+    return {
+        "status": "verified", "verified": True, "contract_hash": expected_hash,
+        "research_prompt": regenerated["research_prompt"],
+        "submit_path": regenerated["submit_path"],
+        "active_contract_path": regenerated["active_contract_path"],
+        **expected,
+    }
+
+
+def verify_payload_one(
+    db_path: Path,
+    assignment_id: str,
+    owner: str,
+    contract_hash: str,
+    payload_path: Path,
+    *,
+    work_root: Path = DEFAULT_WORK_ROOT,
+    at: datetime | None = None,
+) -> dict[str, Any]:
+    """Read-only pre-stage verification; it never creates inbox or canonical rows."""
+    verified = verify_claim_one(
+        db_path, assignment_id, owner, contract_hash, work_root=work_root, at=at,
+    )
+    conn = _connect_readonly(db_path)
+    try:
+        row = get_assignment(conn, assignment_id)
+    finally:
+        conn.close()
+    if row is None:
+        raise SectorBridgeError("assignment not found")
+    envelope = _read_envelope(payload_path)
+    _validate_ownership(envelope, row, assignment_id, owner)
+    return {
+        "status": "payload_verified", "verified": True,
+        "assignment_id": assignment_id, "attempt_count": int(row["attempt_count"]),
+        "contract_hash": contract_hash, "payload_hash": payload_hash(envelope),
+    }
 
 
 def _comparison_datetime(value: Any, field: str, *, allow_date_only: bool = False) -> Any:
@@ -306,7 +480,7 @@ def reopen_quality_one(
     if confirmation != QUALITY_REOPEN_CONFIRMATION:
         raise SectorBridgeError("exact quality-reopen confirmation text is required")
     processed = work_root / "processed" / f"{assignment_id}.json"
-    envelope = _read_envelope(processed)
+    envelope = _read_envelope(processed, require_contract=False)
     digest = payload_hash(envelope)
     if digest != expected_hash:
         raise SectorBridgeError("processed payload hash does not match expected hash")
@@ -326,8 +500,8 @@ def reopen_quality_one(
             raise SectorBridgeError("quality revision attempt limit has been reached")
         if row["last_error_type"] or row["last_error_message"]:
             raise SectorBridgeError("quality revision requires no pending transport or error state")
-        if (work_root / "inbox" / f"{assignment_id}.json").exists() or (
-            work_root / "active" / f"{assignment_id}.json"
+        if (work_root / "inbox" / f"{assignment_id}.json").exists() or _active_contract_path(
+            work_root, row,
         ).exists():
             raise SectorBridgeError("quality revision requires no active transport files")
         if row["submitted_payload_hash"] != expected_hash:
@@ -409,6 +583,11 @@ def stage_one(
         try:
             envelope = _read_envelope(payload_path)
             _validate_ownership(envelope, row, assignment_id, owner)
+            if row["status"] in {"claimed", "running"}:
+                verify_claim_one(
+                    db_path, assignment_id, owner, str(envelope["contract_hash"]),
+                    work_root=work_root, at=timestamp,
+                )
             digest = payload_hash(envelope)
             if row["status"] == "success":
                 if row["submitted_payload_hash"] != digest:
@@ -428,7 +607,7 @@ def stage_one(
             inbox_path = work_root / "inbox" / f"{assignment_id}.json"
             atomic_write_json(inbox_path, envelope)
             staged, changed = stage_assignment(conn, assignment_id, owner, digest, now=timestamp)
-            (work_root / "active" / f"{assignment_id}.json").unlink(missing_ok=True)
+            _active_contract_path(work_root, row).unlink(missing_ok=True)
             return {
                 "status": "handoff_pending" if changed else "already_staged",
                 "assignment_status": staged["status"], "assignment_id": assignment_id,
@@ -436,7 +615,11 @@ def stage_one(
             }
         except Exception as exc:
             if isinstance(exc, SectorBridgeError) or row["status"] != "success":
-                _quarantine(work_root, assignment_id, payload_path)
+                _quarantine(
+                    work_root, assignment_id, payload_path,
+                    attempt_count=int(row["attempt_count"]),
+                    contract_hash=str(envelope.get("contract_hash", "")) if "envelope" in locals() else None,
+                )
             current = get_assignment(conn, assignment_id)
             if current and current["status"] in {"claimed", "running"} and current["claim_owner"] == owner:
                 fail_assignment(conn, assignment_id, owner, exc, now=timestamp)
@@ -495,6 +678,10 @@ def main() -> int:
     claim_parser = subparsers.add_parser("claim")
     claim_parser.add_argument("--owner", default=DEFAULT_OWNER)
     claim_parser.add_argument("--lease-seconds", type=int, default=DEFAULT_LEASE_SECONDS)
+    verify_claim_parser = subparsers.add_parser("verify-claim")
+    verify_claim_parser.add_argument("--assignment-id", required=True)
+    verify_claim_parser.add_argument("--owner", default=DEFAULT_OWNER)
+    verify_claim_parser.add_argument("--contract-hash", required=True)
     start_parser = subparsers.add_parser("start")
     start_parser.add_argument("--assignment-id", required=True)
     start_parser.add_argument("--owner", default=DEFAULT_OWNER)
@@ -509,6 +696,11 @@ def main() -> int:
     stage_parser.add_argument("--assignment-id", required=True)
     stage_parser.add_argument("--owner", default=DEFAULT_OWNER)
     stage_parser.add_argument("--payload", type=Path, required=True)
+    verify_payload_parser = subparsers.add_parser("verify-payload")
+    verify_payload_parser.add_argument("--assignment-id", required=True)
+    verify_payload_parser.add_argument("--owner", default=DEFAULT_OWNER)
+    verify_payload_parser.add_argument("--contract-hash", required=True)
+    verify_payload_parser.add_argument("--payload", type=Path, required=True)
     fail_parser = subparsers.add_parser("fail")
     fail_parser.add_argument("--assignment-id", required=True)
     fail_parser.add_argument("--owner", default=DEFAULT_OWNER)
@@ -527,6 +719,11 @@ def main() -> int:
         at = _parse_datetime(args.at, "--at") if args.at else None
         if args.command == "claim":
             result = claim_one(args.db, args.owner, work_root=args.work_root, lease_seconds=args.lease_seconds, at=at)
+        elif args.command == "verify-claim":
+            result = verify_claim_one(
+                args.db, args.assignment_id, args.owner, args.contract_hash,
+                work_root=args.work_root, at=at,
+            )
         elif args.command == "start":
             result = start_one(args.db, args.assignment_id, args.owner, at=at)
         elif args.command == "heartbeat":
@@ -541,6 +738,11 @@ def main() -> int:
                 args.db, args.assignment_id, args.owner, args.payload,
                 work_root=args.work_root, at=at,
             )
+        elif args.command == "verify-payload":
+            result = verify_payload_one(
+                args.db, args.assignment_id, args.owner, args.contract_hash, args.payload,
+                work_root=args.work_root, at=at,
+            )
         elif args.command == "fail":
             result = fail_one(args.db, args.assignment_id, args.owner, args.message, at=at)
         elif args.command == "reopen-quality":
@@ -553,12 +755,11 @@ def main() -> int:
         else:
             result = status_one(args.db, at=at)
             if not args.json:
-                print(_status_table(result))
-                return int(result["exit_code"])
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+                print(_status_table(result), file=sys.stderr)
+        print(json.dumps(result, ensure_ascii=True, indent=2))
         return int(result.get("exit_code", 0))
     except (RuntimeError, ValueError, OSError) as exc:
-        print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+        print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=True))
         return 2
 
 
