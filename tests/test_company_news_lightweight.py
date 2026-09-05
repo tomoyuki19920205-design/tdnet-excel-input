@@ -224,7 +224,7 @@ def test_runner_persists_raw_usage_and_tool_events_before_validation(tmp_path, m
         prompts.append((spec.worker_id if spec else "final", prompt, web_enabled))
         if spec and spec.kind == "company_web":
             return {"worker_id": spec.worker_id, "kind": spec.kind,
-                    "company_identity": {"verified_ticker": "7760", "source_url": "https://imv.test", "evidence": "official"},
+                    "company_identity": {"verified_ticker": "7760", "source_url": "https://example.test/a", "evidence": "official"},
                     "economic_exposures": [exposure, {**exposure, "canonical_driver_phrase": "electronics capex"}],
                     "exposure_id": None, "queries": [], "evidence_cards": [card],
                     "zero_result_signatures": [], "incremental_ir_applicable": False}, telemetry(spec)
@@ -238,7 +238,10 @@ def test_runner_persists_raw_usage_and_tool_events_before_validation(tmp_path, m
                     "economic_exposures": [], "exposure_id": spec.exposure_id, "queries": [query],
                     "evidence_cards": [], "zero_result_signatures": [],
                     "incremental_ir_applicable": False}, telemetry(spec)
-        return {"research_result": {}, "strategy_telemetry": {}}, telemetry(None)
+        return {"research_result": {"sources_checked_count": 1, "items": []},
+                "strategy_telemetry": {"source_provenance": [{
+                    "url": "https://example.test/a", "source_type": "company",
+                    "content_verified": True, "evidence_excerpt": "official identity"}]}}, telemetry(None)
     monkeypatch.setattr(light, "_run_isolated_stage", fake_stage)
     assignment = {"assignment_id": "a", "ticker": "7760", "company_name": "IMV", "position": 1,
                   "search_from": "2026-08-25", "search_to": "2026-08-31"}
@@ -367,6 +370,68 @@ def test_runtime_checked_at_injection_never_runs_llm_repair(monkeypatch):
     injected = light.inject_runtime_metadata(response, completed_at="2026-09-05T14:41:36Z")
     assert injected["research_result"]["checked_at"] == "2026-09-05T14:41:36+00:00"
     assert calls == 0
+
+
+def _metadata_repair_fixture(published_at="2026-08-31T09:30:00+09:00"):
+    response = {
+        "research_result": {"sources_checked_count": 1, "items": [{
+            "headline": "Price notice", "source_url": "https://example.test/news", "published_at": "2026-08-31",
+            "summary": "Material pricing change", "why_it_matters": "Margin transmission"}]},
+        "strategy_telemetry": {"company_identity": {}, "source_provenance": [{
+            "url": "https://example.test/ir.pdf", "source_type": "official_report",
+            "content_verified": True, "evidence_excerpt": "old mapping"}]}}
+    discovery = {"company_identity": {"verified_ticker": "7760", "source_url": "https://example.test/ir.pdf",
+                                       "evidence": "Official report identifies code 7760."}}
+    cards = [
+        {"source_id": "identity", "query_id": "company-web-q1", "exposure_id": None,
+         "url": "https://example.test/ir.pdf", "source_type": "official_report", "title": "Official report",
+         "published_at": "2026-05-13", "excerpt": "Company code 7760", "supports": "identity",
+         "verification_status": "VERIFIED"},
+        {"source_id": "event", "query_id": "company-web-q1", "exposure_id": None,
+         "url": "https://example.test/news/", "source_type": "official_news", "title": "Price notice",
+         "published_at": published_at, "excerpt": "Prices changed", "supports": "event",
+         "verification_status": "VERIFIED"},
+    ]
+    return response, discovery, cards
+
+
+@pytest.mark.parametrize("link_present", [True, False])
+def test_official_identity_evidence_is_bound_by_python_aggregator(link_present):
+    response, discovery, cards = _metadata_repair_fixture()
+    if not link_present:
+        response["strategy_telemetry"]["source_provenance"] = []
+        response["research_result"]["sources_checked_count"] = 0
+    repaired = light.inject_identity_provenance(response, discovery, cards)
+    identity = repaired["strategy_telemetry"]["company_identity"]
+    source = repaired["strategy_telemetry"]["source_provenance"][0]
+    assert identity == {"verified_ticker": "7760", "source_url": "https://example.test/ir.pdf",
+                        "evidence": "Official report identifies code 7760."}
+    assert source["source_type"] == "company_official" and source["content_verified"] is True
+    assert repaired["research_result"]["sources_checked_count"] == 1
+
+
+def test_missing_official_identity_evidence_fails_closed():
+    response, discovery, cards = _metadata_repair_fixture()
+    cards[0]["verification_status"] = "UNVERIFIED"
+    with pytest.raises(light.LightweightError, match="official Company Web identity evidence is missing"):
+        light.inject_identity_provenance(response, discovery, cards)
+
+
+def test_timezone_aware_published_at_is_restored_exactly_from_evidence():
+    response, _, cards = _metadata_repair_fixture()
+    repaired = light.restore_published_at_from_evidence(response, cards)
+    assert repaired["research_result"]["items"][0]["published_at"] == "2026-08-31T09:30:00+09:00"
+    assert repaired["research_result"]["items"][0]["source_url"] == "https://example.test/news"
+    assert repaired["research_result"]["items"][0]["summary"] == "Material pricing change"
+    assert response["research_result"]["items"][0]["published_at"] == "2026-08-31"
+
+
+def test_date_only_published_at_never_invents_time_or_timezone():
+    response, _, cards = _metadata_repair_fixture("2026-08-31")
+    original = copy.deepcopy(response)
+    with pytest.raises(light.LightweightError, match="date-only; time and timezone unavailable"):
+        light.restore_published_at_from_evidence(response, cards)
+    assert response == original
 
 
 def test_offline_cost_gate_for_two_through_five_workers():

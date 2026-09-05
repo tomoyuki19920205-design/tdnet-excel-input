@@ -45,6 +45,10 @@ MAX_EVIDENCE_SUPPORTS = 400
 MAX_WEB_WORKERS = 5
 MAX_QUERIES_PER_WORKER = 2
 WORKER_TELEMETRY_SCHEMA = "company_news_exposure_worker_telemetry_v1"
+OFFICIAL_EVIDENCE_SOURCE_TYPES = frozenset({
+    "official", "official_index", "official_report", "official_news",
+    "company", "company_news", "company_ir", "ir", "company_official",
+})
 CONTROL_TOTAL_TOKENS = 8_584_237
 CONTROL_INPUT_TOKENS = 8_545_419
 CONTROL_CACHED_INPUT_TOKENS = 8_227_072
@@ -669,6 +673,90 @@ def inject_runtime_metadata(response: dict[str, Any], *, completed_at: Any) -> d
     return injected
 
 
+def inject_identity_provenance(response: dict[str, Any], discovery: dict[str, Any],
+                               evidence_cards: list[dict[str, Any]]) -> dict[str, Any]:
+    """Bind verified Company Web identity evidence to canonical provenance."""
+    identity = discovery.get("company_identity") if isinstance(discovery, dict) else None
+    if not isinstance(identity, dict):
+        raise LightweightError("verified Company Web identity is missing")
+    identity_url = canonicalize_url(identity.get("source_url"))
+    cards = [card for card in evidence_cards if isinstance(card, dict)
+             and card.get("verification_status") == "VERIFIED"
+             and str(card.get("query_id", "")).startswith("company-web-")
+             and card.get("source_type") in OFFICIAL_EVIDENCE_SOURCE_TYPES
+             and canonicalize_url(card.get("url")) == identity_url]
+    if not cards:
+        raise LightweightError("official Company Web identity evidence is missing")
+    card = cards[0]
+    repaired = copy.deepcopy(response)
+    payload = repaired.get("research_result")
+    strategy = repaired.get("strategy_telemetry")
+    if not isinstance(payload, dict) or not isinstance(strategy, dict):
+        raise LightweightError("canonical response is incomplete")
+    provenance = strategy.get("source_provenance")
+    if not isinstance(provenance, list):
+        raise LightweightError("canonical source provenance is missing")
+    matches = [row for row in provenance if isinstance(row, dict)
+               and canonicalize_url(row.get("url")) == identity_url]
+    if len(matches) > 1:
+        raise LightweightError("duplicate canonical identity provenance")
+    authoritative_source = {
+        "url": identity_url,
+        "source_type": "company_official",
+        "content_verified": True,
+        "evidence_excerpt": card["excerpt"],
+    }
+    if matches:
+        provenance[provenance.index(matches[0])] = authoritative_source
+    else:
+        provenance.append(authoritative_source)
+    strategy["company_identity"] = {
+        "verified_ticker": identity.get("verified_ticker"),
+        "source_url": identity_url,
+        "evidence": identity.get("evidence"),
+    }
+    payload["sources_checked_count"] = len(provenance)
+    return repaired
+
+
+def restore_published_at_from_evidence(response: dict[str, Any],
+                                       evidence_cards: list[dict[str, Any]]) -> dict[str, Any]:
+    """Restore exact publication instants only; never invent time or timezone."""
+    repaired = copy.deepcopy(response)
+    payload = repaired.get("research_result")
+    if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+        raise LightweightError("canonical research items are missing")
+    for index, item in enumerate(payload["items"]):
+        matching = [card for card in evidence_cards if isinstance(card, dict)
+                    and card.get("verification_status") == "VERIFIED"
+                    and canonicalize_url(card.get("url")) == canonicalize_url(item.get("source_url"))
+                    and card.get("title") == item.get("headline")]
+        if not matching:
+            raise LightweightError(f"items[{index}] has no authoritative evidence card")
+        raw_values = {card.get("published_at") for card in matching}
+        if None in raw_values:
+            raw_values.remove(None)
+        if not raw_values:
+            raise LightweightError(f"items[{index}] authoritative published_at is unknown")
+        instants: set[str] = set()
+        date_only: set[str] = set()
+        for value in raw_values:
+            if isinstance(value, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+                date_only.add(value)
+                continue
+            instants.add(parse_datetime(value, f"items[{index}] evidence published_at"))
+        if not instants:
+            raise LightweightError(
+                f"items[{index}] authoritative published_at is date-only; time and timezone unavailable")
+        if len(instants) != 1:
+            raise LightweightError(f"items[{index}] has conflicting authoritative publication instants")
+        authoritative = next(iter(instants))
+        if date_only and {value[:10] for value in instants} != date_only:
+            raise LightweightError(f"items[{index}] publication date conflicts with authoritative instant")
+        item["published_at"] = authoritative
+    return repaired
+
+
 def _validate_worker_response_contract(response: dict[str, Any], spec: WorkerSpec) -> None:
     """Reject added/rephrased queries and cross-slice fields without an LLM repair."""
     if response.get("worker_id") != spec.worker_id or response.get("kind") != spec.kind:
@@ -800,6 +888,8 @@ def codex_runner(root: Path, experiment: Path, assignment: dict[str, Any]) -> tu
     response, synthesis_telemetry = _run_isolated_stage(
         root, company_dir, None, synthesis_prompt, synthesis_output_schema(), web_enabled=False)
     response = inject_runtime_metadata(response, completed_at=synthesis_telemetry.get("completed_at"))
+    response = inject_identity_provenance(response, discovery, store.cards())
+    response = restore_published_at_from_evidence(response, store.cards())
     telemetry_rows.append(synthesis_telemetry)
     measured = aggregate_worker_telemetry(telemetry_rows)
     _atomic_json(company_dir / "measured-token-telemetry.json", measured)
