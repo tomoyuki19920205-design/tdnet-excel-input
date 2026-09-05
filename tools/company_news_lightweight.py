@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from lib.news_monitor import canonicalize_url, validate_payload
+from lib.news_monitor import canonicalize_url, parse_datetime, validate_payload
 from tools import company_news_strategy_v5 as strategy_v5
 from tools.company_news_canonical_schema import validate_instance
 
@@ -375,6 +375,10 @@ def lint_api_schema(schema: dict[str, Any]) -> list[str]:
 def synthesis_output_schema() -> dict[str, Any]:
     """API transport form; Python still validates the unchanged canonical schema."""
     schema = api_compatible_schema(output_schema())
+    # checked_at is operational scan metadata.  The synthesis transport may emit
+    # an empty string or null, but the runner replaces it with its authoritative
+    # completion timestamp before canonical validation.
+    schema["properties"]["research_result"]["properties"]["checked_at"]["type"] = ["string", "null"]
     errors = lint_api_schema(schema)
     if errors:
         raise LightweightError("invalid synthesis API schema: " + "; ".join(errors))
@@ -611,10 +615,12 @@ def _run_isolated_stage(root: Path, company_dir: Path, spec: WorkerSpec | None,
     schema_path, result_path = stage_dir / "output-schema.json", stage_dir / "last-message.json"
     _atomic_json(schema_path, schema)
     command = codex_command(root, schema_path, result_path, prompt, web_enabled=web_enabled)
+    started_at = datetime.now(timezone.utc).isoformat()
     started = time.monotonic()
     completed = subprocess.run(command, text=True, encoding="utf-8", errors="replace",
                                capture_output=True, check=False)
     elapsed = time.monotonic() - started
+    completed_at = datetime.now(timezone.utc).isoformat()
     events = _parse_events(completed.stdout)
     _atomic_jsonl(stage_dir / "raw-events.sanitized.jsonl", events)
     telemetry = token_telemetry(events, elapsed)
@@ -624,6 +630,8 @@ def _run_isolated_stage(root: Path, company_dir: Path, spec: WorkerSpec | None,
         "exposure_id": spec.exposure_id if spec else None,
         "kind": spec.kind if spec else "final_synthesis",
         "model_visible_chars": sum(item["model_visible_chars"] for item in telemetry["tool_events"]),
+        "started_at": started_at,
+        "completed_at": completed_at,
         "validation_status": "PENDING" if completed.returncode == 0 and result_path.exists() else "PROCESS_FAILED",
     })
     _atomic_json(stage_dir / "telemetry.json", telemetry)
@@ -647,6 +655,18 @@ def _run_isolated_stage(root: Path, company_dir: Path, spec: WorkerSpec | None,
     telemetry["evidence_cards_returned"] = len(response.get("evidence_cards", []))
     _atomic_json(stage_dir / "telemetry.json", telemetry)
     return response, telemetry
+
+
+def inject_runtime_metadata(response: dict[str, Any], *, completed_at: Any) -> dict[str, Any]:
+    """Set operational metadata from the runner before canonical validation."""
+    if not isinstance(response, dict) or not isinstance(response.get("research_result"), dict):
+        raise LightweightError("RESEARCH_RESULT object is incomplete")
+    if completed_at is None:
+        raise LightweightError("authoritative execution completed_at is missing")
+    authoritative = parse_datetime(completed_at, "execution completed_at")
+    injected = copy.deepcopy(response)
+    injected["research_result"]["checked_at"] = authoritative
+    return injected
 
 
 def _validate_worker_response_contract(response: dict[str, Any], spec: WorkerSpec) -> None:
@@ -779,6 +799,7 @@ def codex_runner(root: Path, experiment: Path, assignment: dict[str, Any]) -> tu
     synthesis_prompt = synthesis_contract(assignment, discovery, queries, store, elapsed)
     response, synthesis_telemetry = _run_isolated_stage(
         root, company_dir, None, synthesis_prompt, synthesis_output_schema(), web_enabled=False)
+    response = inject_runtime_metadata(response, completed_at=synthesis_telemetry.get("completed_at"))
     telemetry_rows.append(synthesis_telemetry)
     measured = aggregate_worker_telemetry(telemetry_rows)
     _atomic_json(company_dir / "measured-token-telemetry.json", measured)

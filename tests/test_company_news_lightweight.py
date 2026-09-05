@@ -217,7 +217,9 @@ def test_runner_persists_raw_usage_and_tool_events_before_validation(tmp_path, m
                 "output_tokens": 20, "reasoning_tokens": 3, "total_tokens": 120,
                 "model_call_count": 1, "tool_call_count": 1 if spec else 0,
                 "web_call_count": 1 if spec else 0, "research_elapsed_seconds": 1.0,
-                "model_visible_chars": 50 if spec else 0, "thread_ids": [f"thread-{len(prompts)}"]}
+                "model_visible_chars": 50 if spec else 0, "thread_ids": [f"thread-{len(prompts)}"],
+                "started_at": "2026-09-05T14:40:00+00:00",
+                "completed_at": "2026-09-05T14:41:36.202594+00:00"}
     def fake_stage(root, company_dir, spec, prompt, schema, *, web_enabled):
         prompts.append((spec.worker_id if spec else "final", prompt, web_enabled))
         if spec and spec.kind == "company_web":
@@ -310,6 +312,61 @@ def test_worker_telemetry_is_saved_before_schema_failure(tmp_path, monkeypatch):
                                   light.worker_output_schema(spec), web_enabled=True)
     saved = light._read_json(tmp_path / "company" / "workers" / "company-web" / "telemetry.json")
     assert saved["total_tokens"] == 110 and saved["validation_status"] == "FAIL"
+    assert saved["started_at"] and saved["completed_at"]
+
+
+@pytest.mark.parametrize("generated", ["", None])
+def test_runtime_checked_at_injection_accepts_empty_or_null(generated):
+    response = {"research_result": {
+        "schema_version": "company_news_v1", "run_id": "r", "task_id": "r", "ticker": "7760",
+        "checked_at": generated, "collector_type": "test", "sources_checked_count": 0, "items": []},
+        "strategy_telemetry": {}}
+    injected = light.inject_runtime_metadata(
+        response, completed_at="2026-09-05T14:41:36.2025945Z")
+    assert injected["research_result"]["checked_at"] == "2026-09-05T14:41:36.202594+00:00"
+    assert response["research_result"]["checked_at"] is generated
+    assert light.validate_payload(injected["research_result"]).scan["checked_at"] == \
+        "2026-09-05T14:41:36.202594+00:00"
+
+
+def test_synthesis_transport_allows_null_checked_at_before_runtime_injection():
+    schema = light.synthesis_output_schema()
+    assert schema["properties"]["research_result"]["properties"]["checked_at"]["type"] == ["string", "null"]
+    assert light.output_schema()["properties"]["research_result"]["properties"]["checked_at"]["type"] == "string"
+
+
+def test_runtime_checked_at_injection_fails_closed_without_execution_timestamp():
+    response = {"research_result": {"checked_at": ""}, "strategy_telemetry": {}}
+    with pytest.raises(light.LightweightError, match="completed_at is missing"):
+        light.inject_runtime_metadata(response, completed_at=None)
+
+
+def test_runtime_checked_at_injection_fails_closed_for_invalid_timestamp():
+    response = {"research_result": {"checked_at": ""}, "strategy_telemetry": {}}
+    with pytest.raises(Exception, match="ISO-8601"):
+        light.inject_runtime_metadata(response, completed_at="not-a-timestamp")
+
+
+def test_runtime_checked_at_does_not_hide_other_semantic_failure():
+    response = {"research_result": {"schema_version": "company_news_v1", "run_id": "r", "task_id": "r",
+                                      "ticker": "INVALID", "checked_at": "", "collector_type": "test", "items": []},
+                "strategy_telemetry": {}}
+    injected = light.inject_runtime_metadata(response, completed_at="2026-09-05T14:41:36Z")
+    with pytest.raises(Exception, match="ticker"):
+        light.validate_payload(injected["research_result"])
+
+
+def test_runtime_checked_at_injection_never_runs_llm_repair(monkeypatch):
+    calls = 0
+    def forbidden(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("LLM retry is forbidden")
+    monkeypatch.setattr(light.subprocess, "run", forbidden)
+    response = {"research_result": {"checked_at": "model-value"}, "strategy_telemetry": {}}
+    injected = light.inject_runtime_metadata(response, completed_at="2026-09-05T14:41:36Z")
+    assert injected["research_result"]["checked_at"] == "2026-09-05T14:41:36+00:00"
+    assert calls == 0
 
 
 def test_offline_cost_gate_for_two_through_five_workers():
