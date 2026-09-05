@@ -1,3 +1,4 @@
+import copy
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -64,6 +65,83 @@ def test_canonical_schema_is_wired_to_actual_command(tmp_path):
     assert light.strategy_v5.schema_sha256(light.output_schema()) == light.strategy_v5.canonical_schema_sha256()
 
 
+def _worker_fixture(spec):
+    queries = []
+    for row in spec.queries:
+        queries.append({"channel": row["channel"], "query": row["query"], "executed": True,
+                        "result_count": 1, "reached_sources": ["https://example.test/item"],
+                        "window_relevance_checked": True, "exposure_index": row.get("exposure_index"),
+                        "canonical_driver_phrase": row.get("canonical_driver_phrase"),
+                        "driver_phrase_preserved": True if row.get("canonical_driver_phrase") else None,
+                        "driver_phrase_preservation_reason": None})
+    exposure = {"canonical_driver_phrase": "vehicle test demand", "metadata_evidence": "business metadata",
+                "transmission_channel": "orders", "government_applicable": False,
+                "government_applicability_reason": "no policy linkage", "product_context": None,
+                "channel": "external_media"}
+    return {"worker_id": spec.worker_id, "kind": spec.kind,
+            "company_identity": ({"verified_ticker": "7760", "source_url": "https://example.test",
+                                  "evidence": "official identity"} if spec.kind == "company_web" else None),
+            "economic_exposures": ([exposure, {**exposure, "canonical_driver_phrase": "electronics capex"}]
+                                   if spec.kind == "company_web" else []),
+            "exposure_id": spec.exposure_id, "queries": queries,
+            "evidence_cards": [{"source_id": "s1", "query_id": spec.queries[0]["query_id"],
+                                "exposure_id": spec.exposure_id, "url": "https://example.test/item",
+                                "source_type": "company", "title": "Item", "published_at": "2026-08-31",
+                                "excerpt": "Evidence", "supports": "Material fact",
+                                "verification_status": "VERIFIED"}],
+            "zero_result_signatures": [], "incremental_ir_applicable": False}
+
+
+@pytest.mark.parametrize("spec", [
+    light.WorkerSpec("company-web", "company_web", None, None, ({"query_id": "q1", "channel": "official",
+        "query": "IMV news", "exposure_index": None, "canonical_driver_phrase": None},)),
+    light.WorkerSpec("exposure-1", "exposure", 0, {}, ({"query_id": "q1", "channel": "external_media",
+        "query": "vehicle test demand", "exposure_index": 0, "canonical_driver_phrase": "vehicle test demand"},)),
+    light.WorkerSpec("government-1", "government", 0, {}, ({"query_id": "q1", "channel": "government",
+        "query": "vehicle test regulation", "exposure_index": 0, "canonical_driver_phrase": "vehicle test"},)),
+    light.WorkerSpec("incremental-ir", "incremental_ir", None, None, ({"query_id": "q1", "channel": "incremental_ir",
+        "query": "IMV IR", "exposure_index": None, "canonical_driver_phrase": None},)),
+])
+def test_every_worker_schema_lints_and_validates_fixture(spec):
+    schema = light.worker_output_schema(spec)
+    assert light.lint_api_schema(schema) == []
+    fixture = _worker_fixture(spec)
+    light.validate_instance(fixture, schema)
+    light._validate_worker_response_contract(fixture, spec)
+
+
+def test_worker_semantic_identity_and_structural_failures_are_rejected():
+    spec = light.WorkerSpec("exposure-1", "exposure", 0, {}, ({"query_id": "q1", "channel": "external_media",
+        "query": "vehicle test demand", "exposure_index": 0, "canonical_driver_phrase": "vehicle test demand"},))
+    schema = light.worker_output_schema(spec)
+    valid = _worker_fixture(spec)
+    wrong = copy.deepcopy(valid); wrong["worker_id"] = "exposure-2"
+    with pytest.raises(light.LightweightError, match="identity mismatch"):
+        light._validate_worker_response_contract(wrong, spec)
+    wrong = copy.deepcopy(valid); wrong["exposure_id"] = 1
+    with pytest.raises(light.LightweightError, match="exposure identity"):
+        light._validate_worker_response_contract(wrong, spec)
+    for mutation in (
+        lambda row: row.pop("worker_id"),
+        lambda row: row.update(kind="invalid"),
+        lambda row: row.update(extra=True),
+    ):
+        wrong = copy.deepcopy(valid); mutation(wrong)
+        with pytest.raises(Exception):
+            light.validate_instance(wrong, schema)
+
+
+def test_output_schema_file_is_utf8_json_and_command_uses_it(tmp_path):
+    spec = light.WorkerSpec("company-web", "company_web", None, None, ({"query_id": "q1",
+        "channel": "official", "query": "IMV news", "exposure_index": None,
+        "canonical_driver_phrase": None},))
+    schema_path, result_path = tmp_path / "worker-schema.json", tmp_path / "result.json"
+    light._atomic_json(schema_path, light.worker_output_schema(spec))
+    assert json.loads(schema_path.read_text(encoding="utf-8"))["type"] == "object"
+    command = light.codex_command(tmp_path, schema_path, result_path, "prompt")
+    assert Path(command[command.index("--output-schema") + 1]).exists()
+
+
 def test_bounded_tool_output_and_no_broad_repo_search():
     bounded = light.bounded_text("x" * 20_000, max_chars=100, max_lines=2)
     assert len(bounded) < 180 and "TRUNCATED" in bounded
@@ -80,6 +158,13 @@ def test_token_telemetry_complete():
     assert value["uncached_input_tokens"] == 60 and value["total_tokens"] == 120
     assert value["post_research_model_calls"] == value["post_research_tokens"] == 0
     assert value["model_call_count"] == 1
+
+
+def test_missing_usage_is_unknown_not_zero():
+    value = light.token_telemetry([{"type": "turn.started"}], 0.1)
+    for key in ("input_tokens", "cached_input_tokens", "uncached_input_tokens", "output_tokens",
+                "reasoning_tokens", "total_tokens", "model_call_count"):
+        assert value[key] is None
 
 
 def test_token_telemetry_preserves_each_terminal_usage_and_tool_size():

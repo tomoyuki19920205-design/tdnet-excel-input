@@ -98,6 +98,14 @@ def test_canonical_generation_schema_accepts_full_valid_sample():
     assert len(v.canonical_schema_sha256()) == 64
 
 
+def test_final_synthesis_api_schema_lints_and_accepts_valid_sample():
+    from tools import company_news_lightweight as light
+    schema = light.synthesis_output_schema()
+    assert light.lint_api_schema(schema) == []
+    light.validate_instance(canonical_response(), schema)
+    assert v.canonical_schema_sha256() == "28dde3510e724231d43ed865c85accc96c2970f00fa8409ae155df31823c73c3"
+
+
 @pytest.mark.parametrize("mutation,pattern", [
     (lambda r: r["strategy_telemetry"]["queries"][0].update(channel="company_web"), "channel"),
     (lambda r: r["strategy_telemetry"]["queries"][0].pop("executed"), "executed"),

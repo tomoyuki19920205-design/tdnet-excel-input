@@ -291,6 +291,96 @@ def _strict_object(properties: dict[str, Any]) -> dict[str, Any]:
             "additionalProperties": False}
 
 
+def _json_type(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    raise LightweightError(f"unsupported JSON value type: {type(value).__name__}")
+
+
+def api_compatible_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Add API-required explicit types to a semantic-equivalent schema copy."""
+    value = copy.deepcopy(schema)
+
+    def visit(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        if "type" not in node and not any(key in node for key in ("anyOf", "oneOf", "allOf", "$ref")):
+            if "const" in node:
+                node["type"] = _json_type(node["const"])
+            elif "enum" in node and node["enum"]:
+                types = sorted({_json_type(item) for item in node["enum"]})
+                node["type"] = types[0] if len(types) == 1 else types
+        for child in node.get("properties", {}).values():
+            visit(child)
+        if isinstance(node.get("items"), dict):
+            visit(node["items"])
+        for keyword in ("anyOf", "oneOf", "allOf"):
+            for child in node.get(keyword, []):
+                visit(child)
+
+    visit(value)
+    return value
+
+
+def lint_api_schema(schema: dict[str, Any]) -> list[str]:
+    """Return structural errors that would make strict output-schema unsafe."""
+    errors: list[str] = []
+
+    def visit(node: Any, path: str, *, is_property: bool = False) -> None:
+        if not isinstance(node, dict):
+            errors.append(f"{path}: schema node must be object")
+            return
+        alternatives = any(key in node for key in ("anyOf", "oneOf", "allOf", "$ref"))
+        if is_property and "type" not in node and not alternatives:
+            errors.append(f"{path}: property schema needs explicit type")
+        if ("const" in node or "enum" in node) and "type" not in node and not alternatives:
+            errors.append(f"{path}: const/enum schema needs explicit type")
+        types = node.get("type", [])
+        types = [types] if isinstance(types, str) else types
+        if "object" in types:
+            if not isinstance(node.get("properties"), dict):
+                errors.append(f"{path}: object needs properties")
+            else:
+                missing = set(node.get("required", [])) - set(node["properties"])
+                if missing:
+                    errors.append(f"{path}: required missing from properties: {sorted(missing)}")
+                if node.get("additionalProperties") is not False:
+                    errors.append(f"{path}: object must set additionalProperties=false")
+        if "array" in types and not isinstance(node.get("items"), dict):
+            errors.append(f"{path}: array needs items schema")
+        for name, child in node.get("properties", {}).items():
+            visit(child, f"{path}.properties.{name}", is_property=True)
+        if isinstance(node.get("items"), dict):
+            visit(node["items"], f"{path}.items")
+        for keyword in ("anyOf", "oneOf", "allOf"):
+            for index, child in enumerate(node.get(keyword, [])):
+                visit(child, f"{path}.{keyword}[{index}]")
+
+    visit(schema, "$")
+    return errors
+
+
+def synthesis_output_schema() -> dict[str, Any]:
+    """API transport form; Python still validates the unchanged canonical schema."""
+    schema = api_compatible_schema(output_schema())
+    errors = lint_api_schema(schema)
+    if errors:
+        raise LightweightError("invalid synthesis API schema: " + "; ".join(errors))
+    return schema
+
+
 def evidence_card_schema() -> dict[str, Any]:
     return _strict_object({
         "source_id": {"type": "string", "maxLength": 80},
@@ -312,8 +402,8 @@ def worker_output_schema(spec: WorkerSpec) -> dict[str, Any]:
     company_identity = copy.deepcopy(telemetry["company_identity"])
     company_identity["type"] = ["object", "null"]
     properties = {
-        "worker_id": {"const": spec.worker_id},
-        "kind": {"const": spec.kind},
+        "worker_id": {"type": "string", "maxLength": 80},
+        "kind": {"type": "string", "enum": ["company_web", "exposure", "government", "incremental_ir"]},
         "company_identity": company_identity,
         "economic_exposures": copy.deepcopy(telemetry["economic_exposures"]),
         "exposure_id": {"type": ["integer", "null"], "minimum": 0},
@@ -330,6 +420,10 @@ def worker_output_schema(spec: WorkerSpec) -> dict[str, Any]:
     if spec.kind != "company_web":
         schema["properties"]["economic_exposures"]["minItems"] = 0
         schema["properties"]["economic_exposures"]["maxItems"] = 0
+    schema = api_compatible_schema(schema)
+    errors = lint_api_schema(schema)
+    if errors:
+        raise LightweightError("invalid worker API schema: " + "; ".join(errors))
     return schema
 
 
@@ -413,18 +507,18 @@ def _numbers(node: Any, names: set[str]) -> int:
 def token_telemetry(events: list[dict[str, Any]], elapsed: float) -> dict[str, Any]:
     """Normalize Codex JSONL usage without feeding event history back to the model."""
     terminal = [event for event in events if event.get("type") in {"turn.completed", "task.completed"}]
-    usage_node: Any = terminal if terminal else events
-    input_tokens = _numbers(usage_node, {"input_tokens"})
-    cached = _numbers(usage_node, {"cached_input_tokens", "cached_tokens"})
-    output = _numbers(usage_node, {"output_tokens"})
-    reasoning = _numbers(usage_node, {"reasoning_tokens", "reasoning_output_tokens"})
+    usage_node: Any = terminal
+    input_tokens = _numbers(usage_node, {"input_tokens"}) if terminal else None
+    cached = _numbers(usage_node, {"cached_input_tokens", "cached_tokens"}) if terminal else None
+    output = _numbers(usage_node, {"output_tokens"}) if terminal else None
+    reasoning = _numbers(usage_node, {"reasoning_tokens", "reasoning_output_tokens"}) if terminal else None
     completed_items = [event.get("item", {}) for event in events if event.get("type") == "item.completed"]
     tool_types = {"command_execution", "mcp_tool_call", "dynamic_tool_call", "tool_call", "web_search", "web_fetch"}
     tool_calls = sum(str(item.get("type", "")) in tool_types for item in completed_items)
     web_calls = sum("web" in str(item.get("type", "")).lower()
                     or re.search(r"\b(search_query|open)\b", json.dumps(item, ensure_ascii=False), re.I) is not None
                     for item in completed_items)
-    model_calls = len(terminal) or sum(1 for event in events if event.get("type") in {"turn.started", "response.started"}) or 1
+    model_calls = len(terminal) if terminal else None
     tool_events = []
     for event in events:
         if event.get("type") != "item.completed" or not isinstance(event.get("item"), dict):
@@ -443,11 +537,11 @@ def token_telemetry(events: list[dict[str, Any]], elapsed: float) -> dict[str, A
     return {
         "schema_version": TELEMETRY_SCHEMA,
         "input_tokens": input_tokens,
-        "cached_input_tokens": min(cached, input_tokens),
-        "uncached_input_tokens": max(0, input_tokens - cached),
+        "cached_input_tokens": min(cached, input_tokens) if terminal else None,
+        "uncached_input_tokens": max(0, input_tokens - cached) if terminal else None,
         "output_tokens": output,
         "reasoning_tokens": reasoning,
-        "total_tokens": input_tokens + output,
+        "total_tokens": input_tokens + output if terminal else None,
         "model_call_count": model_calls,
         "tool_call_count": tool_calls,
         "web_call_count": web_calls,
@@ -557,6 +651,10 @@ def _run_isolated_stage(root: Path, company_dir: Path, spec: WorkerSpec | None,
 
 def _validate_worker_response_contract(response: dict[str, Any], spec: WorkerSpec) -> None:
     """Reject added/rephrased queries and cross-slice fields without an LLM repair."""
+    if response.get("worker_id") != spec.worker_id or response.get("kind") != spec.kind:
+        raise LightweightError(f"worker identity mismatch: {spec.worker_id}")
+    if response.get("exposure_id") != spec.exposure_id:
+        raise LightweightError(f"worker exposure identity mismatch: {spec.worker_id}")
     expected = [(row["query_id"], row["channel"], row["query"], row.get("exposure_index"))
                 for row in spec.queries]
     actual = [(row.get("query_id"), row.get("channel"), row.get("query"), row.get("exposure_index"))
@@ -633,7 +731,10 @@ def aggregate_worker_telemetry(rows: list[dict[str, Any]]) -> dict[str, Any]:
     additive = ("input_tokens", "cached_input_tokens", "uncached_input_tokens", "output_tokens",
                 "reasoning_tokens", "total_tokens", "model_call_count", "tool_call_count",
                 "web_call_count", "research_elapsed_seconds", "model_visible_chars")
-    value = {key: sum(row.get(key, 0) for row in rows) for key in additive}
+    def sum_known(key: str) -> int | float | None:
+        values = [row.get(key) for row in rows]
+        return None if any(value is None for value in values) else sum(values)
+    value = {key: sum_known(key) for key in additive}
     value.update({"schema_version": TELEMETRY_SCHEMA, "workers": rows,
                   "worker_count": sum(row.get("kind") != "final_synthesis" for row in rows),
                   "synthesis_model_call_count": sum(row.get("model_call_count", 0) for row in rows
@@ -677,7 +778,7 @@ def codex_runner(root: Path, experiment: Path, assignment: dict[str, Any]) -> tu
     }
     synthesis_prompt = synthesis_contract(assignment, discovery, queries, store, elapsed)
     response, synthesis_telemetry = _run_isolated_stage(
-        root, company_dir, None, synthesis_prompt, output_schema(), web_enabled=False)
+        root, company_dir, None, synthesis_prompt, synthesis_output_schema(), web_enabled=False)
     telemetry_rows.append(synthesis_telemetry)
     measured = aggregate_worker_telemetry(telemetry_rows)
     _atomic_json(company_dir / "measured-token-telemetry.json", measured)
