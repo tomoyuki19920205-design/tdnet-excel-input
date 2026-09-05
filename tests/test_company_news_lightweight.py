@@ -238,12 +238,14 @@ def test_runner_persists_raw_usage_and_tool_events_before_validation(tmp_path, m
                     "economic_exposures": [], "exposure_id": spec.exposure_id, "queries": [query],
                     "evidence_cards": [], "zero_result_signatures": [],
                     "incremental_ir_applicable": False}, telemetry(spec)
-        return {"research_result": {"sources_checked_count": 1, "items": []},
-                    "strategy_telemetry": {"source_provenance": [{
-                        "url": "https://example.test/a", "source_type": "company",
-                        "content_verified": True, "evidence_excerpt": "official identity"}],
-                        "queries": [], "channel_reviews": [], "documents": [],
-                        "candidate_provenance": []}}, telemetry(None)
+        return {"research_result": {"run_id": "", "task_id": "", "ticker": "7760",
+                                      "sources_checked_count": 1, "items": []},
+                "strategy_telemetry": {"assignment_id": "a", "ticker": "7760",
+                    "source_provenance": [{
+                    "url": "https://example.test/a", "source_type": "company",
+                    "content_verified": True, "evidence_excerpt": "official identity"}],
+                    "queries": [], "channel_reviews": [], "documents": [],
+                    "candidate_provenance": []}}, telemetry(None)
     monkeypatch.setattr(light, "_run_isolated_stage", fake_stage)
     assignment = {"assignment_id": "a", "ticker": "7760", "company_name": "IMV", "position": 1,
                   "search_from": "2026-08-25", "search_to": "2026-08-31"}
@@ -374,6 +376,42 @@ def test_runtime_checked_at_injection_never_runs_llm_repair(monkeypatch):
     assert calls == 0
 
 
+def test_runtime_execution_identity_comes_from_acquired_assignment():
+    response = {
+        "research_result": {"run_id": "", "task_id": "model", "ticker": "6444"},
+        "strategy_telemetry": {"assignment_id": "phase-6444", "ticker": "6444"},
+    }
+    repaired = light.inject_runtime_identity(
+        response, {"assignment_id": "phase-6444", "ticker": "6444"})
+    assert repaired["research_result"]["run_id"] == "phase-6444"
+    assert repaired["research_result"]["task_id"] == "phase-6444"
+    assert response["research_result"]["run_id"] == ""
+
+
+def test_runtime_execution_identity_rejects_conflicting_ticker():
+    response = {
+        "research_result": {"ticker": "7760"},
+        "strategy_telemetry": {"assignment_id": "phase-6444", "ticker": "7760"},
+    }
+    with pytest.raises(light.LightweightError, match="ticker conflicts"):
+        light.inject_runtime_identity(
+            response, {"assignment_id": "phase-6444", "ticker": "6444"})
+
+
+def test_source_count_is_derived_after_canonical_deduplication():
+    source = {"url": "https://example.test/news/", "source_type": "company_news",
+              "content_verified": True, "evidence_excerpt": "verified"}
+    duplicate = dict(source)
+    duplicate["url"] = "https://example.test/news"
+    response = {
+        "research_result": {"sources_checked_count": 99},
+        "strategy_telemetry": {"source_provenance": [source, duplicate]},
+    }
+    repaired = light.apply_source_count_authority(response)
+    assert repaired["research_result"]["sources_checked_count"] == 1
+    assert len(repaired["strategy_telemetry"]["source_provenance"]) == 1
+
+
 def _metadata_repair_fixture(published_at="2026-08-31T09:30:00+09:00"):
     response = {
         "research_result": {"sources_checked_count": 1, "items": [{
@@ -415,6 +453,13 @@ def test_official_identity_evidence_is_bound_by_python_aggregator(link_present):
 def test_missing_official_identity_evidence_fails_closed():
     response, discovery, cards = _metadata_repair_fixture()
     cards[0]["verification_status"] = "UNVERIFIED"
+    with pytest.raises(light.LightweightError, match="official Company Web identity evidence is missing"):
+        light.inject_identity_provenance(response, discovery, cards)
+
+
+def test_search_excerpt_alone_is_not_official_identity_evidence():
+    response, discovery, cards = _metadata_repair_fixture()
+    cards[0]["source_type"] = "official_ir_index_search_excerpt"
     with pytest.raises(light.LightweightError, match="official Company Web identity evidence is missing"):
         light.inject_identity_provenance(response, discovery, cards)
 
@@ -462,6 +507,71 @@ def test_document_dates_are_normalized_without_counting_unknown_or_background():
         ("Index", None, "https://example.test/index"),
         ("Event", "2026-08-31", "https://example.test/event"),
     ]
+
+
+def test_unverified_inaccessible_document_keeps_null_date_and_background_candidate_is_removed():
+    response = {"strategy_telemetry": {
+        "documents": [
+            {"date": None, "url": "https://example.test/inaccessible", "body_status": "INACCESSIBLE"},
+            {"date": "2026-06-25", "url": "https://example.test/background", "body_status": "VERIFIED"},
+        ],
+        "candidate_provenance": [
+            {"candidate_index": 0, "document_url": "https://example.test/inaccessible", "selected_for_output": False},
+            {"candidate_index": 1, "document_url": "https://example.test/background", "selected_for_output": False},
+        ],
+        "candidate_count": 2,
+    }}
+    cards = [
+        {"url": "https://example.test/inaccessible", "published_at": None,
+         "verification_status": "UNVERIFIED"},
+        {"url": "https://example.test/background", "published_at": "2026-06-25",
+         "verification_status": "VERIFIED"},
+    ]
+    repaired = light.normalize_documents_from_evidence(
+        response, cards, {"search_from": "2026-08-25", "search_to": "2026-08-31"})
+    assert repaired["strategy_telemetry"]["documents"] == [
+        {"date": None, "url": "https://example.test/inaccessible", "body_status": "INACCESSIBLE"}]
+    assert repaired["strategy_telemetry"]["candidate_count"] == 1
+    assert repaired["strategy_telemetry"]["candidate_provenance"][0]["candidate_index"] == 0
+
+
+def _policy_materiality_fixture(*, direct=False):
+    why = ("Synthetic Works was selected as a subsidy recipient and will expand capacity."
+           if direct else "The effect on Synthetic Works revenue is not established.")
+    importance = "medium" if direct else "low"
+    relevance = "direct" if direct else "context"
+    return ({
+        "research_result": {"items": [{"headline": "Policy notice", "source_url": "https://policy.test/n",
+                                          "summary": "Program notice", "why_it_matters": why,
+                                          "evidence_excerpt": None, "importance": importance,
+                                          "earnings_relevance": relevance}]},
+        "strategy_telemetry": {
+            "documents": [{"url": "https://policy.test/n", "scope_label": "IN_SCOPE_GOVERNMENT",
+                           "material": True, "body_status": "VERIFIED"}],
+            "candidate_provenance": [{"candidate_index": 0, "document_url": "https://policy.test/n",
+                                      "source_url": "https://policy.test/n", "headline": "Policy notice",
+                                      "selected_for_output": True, "event_key": "e1",
+                                      "selection_reason": "candidate", "economic_transmission": why}],
+            "final_event_count": 1,
+        },
+    }, [{"url": "https://policy.test/n", "supports": why}])
+
+
+def test_general_policy_context_without_direct_company_linkage_is_rejected():
+    response, cards = _policy_materiality_fixture()
+    repaired, decisions = light.apply_materiality_authority(
+        response, cards, company_name="Synthetic Works")
+    assert repaired["research_result"]["items"] == []
+    assert repaired["strategy_telemetry"]["final_event_count"] == 0
+    assert decisions[0]["decision"] == "REJECT_GENERAL_CONTEXT"
+
+
+def test_direct_company_policy_impact_is_retained():
+    response, cards = _policy_materiality_fixture(direct=True)
+    repaired, decisions = light.apply_materiality_authority(
+        response, cards, company_name="Synthetic Works")
+    assert len(repaired["research_result"]["items"]) == 1
+    assert decisions[0]["decision"] == "KEEP"
 
 
 def test_invalid_evidence_published_at_fails_closed():
@@ -572,6 +682,20 @@ def test_coverage_authority_derives_complete_and_accepts_zero_results_as_checked
     assert state["fake_gap_count"] == 0
 
 
+def test_incremental_ir_applicable_coverage_uses_executed_registry_record():
+    response, registry, discovery = _coverage_authority_fixture()
+    discovery["incremental_ir_applicable"] = True
+    registry.append({"query_id": "incremental-ir-q1", "worker_id": "incremental-ir",
+                     "exposure_id": None, "canonical_channel": "incremental_ir",
+                     "executed": True, "result_count": 0, "evidence_ids": [],
+                     "window_relevance_checked": True})
+    repaired, state = light.apply_coverage_authority(response, registry, discovery)
+    reviews = {row["channel"]: row for row in state["channel_reviews"]}
+    assert reviews["incremental_ir"]["status"] == "CHECKED"
+    assert reviews["incremental_ir"]["exposure_index"] is None
+    assert repaired["strategy_telemetry"]["coverage_status"] == "COMPLETE"
+
+
 def test_missing_required_query_derives_partial_with_explicit_real_gap():
     response, registry, discovery = _coverage_authority_fixture()
     registry = [row for row in registry if row["canonical_channel"] != "government"]
@@ -634,6 +758,17 @@ def test_incremental_ir_true_with_delta_evidence_passes():
     repaired = light.apply_incremental_ir_authority(
         response, cards, {"incremental_ir_applicable": True})
     assert repaired["strategy_telemetry"]["documents"][0]["scope_label"] == "IN_SCOPE_INCREMENTAL_IR"
+
+
+def test_exhaustive_audit_incremental_ir_handles_both_applicability_paths():
+    from tools.company_news_phase18j_offline_replay import incremental_ir_contract
+    query = {"canonical_channel": "incremental_ir", "executed": True}
+    assert incremental_ir_contract(
+        {"incremental_ir_applicable": True}, [query], [])[0] is True
+    assert incremental_ir_contract(
+        {"incremental_ir_applicable": False}, [], [])[0] is True
+    assert incremental_ir_contract(
+        {"incremental_ir_applicable": False}, [query], [])[0] is False
 
 
 def test_saved_effective_dates_upgrade_without_fake_time_or_checked_at():

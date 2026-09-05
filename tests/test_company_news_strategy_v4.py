@@ -55,6 +55,14 @@ def test_v2_baseline_without_v3_completeness():
     assert v.evaluation_policy()['common48_denominator']==27
 
 
+def test_checked_incremental_ir_review_has_no_exposure_link():
+    a,t,p=fixture()
+    t['queries'].append({'channel':'incremental_ir','query':'Example Works briefing delta','executed':True})
+    t['channel_reviews'].append({'channel':'incremental_ir','status':'CHECKED',
+                                 'evidence':'Executed incremental IR review','exposure_index':None})
+    assert v.validate(t,a,p)
+
+
 def test_unknown_document_date_does_not_crash_or_count_as_window_evidence():
     a,t,p=fixture(); d=document('Undated index','IN_SCOPE_COMPANY_WEB')
     d.update(date=None, material=False, body_status='VERIFIED', final_url=d['url'])

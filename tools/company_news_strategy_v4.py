@@ -166,8 +166,10 @@ def validate(value, assignment, payload):
         seen.add(c['channel'])
         if c['status'] == 'CHECKED':
             require(c['channel'] in channels, 'checked channel has no search record')
-            if c['channel'] != 'official':
+            if c['channel'] not in {'official', 'incremental_ir'}:
                 require(type(c.get('exposure_index')) is int and 0 <= c['exposure_index'] < len(v['economic_exposures']), 'complement channel needs business exposure')
+            if c['channel'] == 'incremental_ir':
+                require(c.get('exposure_index') is None, 'incremental IR review cannot link a business exposure')
             reviewed.add(c['channel'])
     require({'official', 'counterparty'} <= seen, 'Company Web and explicit counterparty review required')
     documents = v.get('documents'); gaps = v.get('coverage_gaps')

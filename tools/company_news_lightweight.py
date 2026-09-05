@@ -675,6 +675,60 @@ def inject_runtime_metadata(response: dict[str, Any], *, completed_at: Any) -> d
     return injected
 
 
+def inject_runtime_identity(response: dict[str, Any], assignment: dict[str, Any]) -> dict[str, Any]:
+    """Bind payload execution identity to the acquired private assignment."""
+    assignment_id = assignment.get("assignment_id")
+    ticker = assignment.get("ticker")
+    if not isinstance(assignment_id, str) or not assignment_id.strip():
+        raise LightweightError("assignment runtime identity is missing")
+    if not isinstance(ticker, str) or not ticker.strip():
+        raise LightweightError("assignment ticker identity is missing")
+    repaired = copy.deepcopy(response)
+    payload = repaired.get("research_result")
+    strategy = repaired.get("strategy_telemetry")
+    if not isinstance(payload, dict) or not isinstance(strategy, dict):
+        raise LightweightError("canonical response is incomplete")
+    if payload.get("ticker") != ticker or strategy.get("ticker") != ticker:
+        raise LightweightError("model ticker conflicts with acquired assignment")
+    if strategy.get("assignment_id") != assignment_id:
+        raise LightweightError("model assignment identity conflicts with acquired assignment")
+    payload["run_id"] = assignment_id
+    payload["task_id"] = assignment_id
+    return repaired
+
+
+def apply_source_count_authority(response: dict[str, Any]) -> dict[str, Any]:
+    """Canonicalize and deduplicate verified provenance before deriving its count."""
+    repaired = copy.deepcopy(response)
+    payload = repaired.get("research_result")
+    strategy = repaired.get("strategy_telemetry")
+    if not isinstance(payload, dict) or not isinstance(strategy, dict):
+        raise LightweightError("canonical response is incomplete")
+    sources = strategy.get("source_provenance")
+    if not isinstance(sources, list):
+        raise LightweightError("canonical source provenance is missing")
+    deduped: list[dict[str, Any]] = []
+    by_url: dict[str, dict[str, Any]] = {}
+    for index, source in enumerate(sources):
+        if not isinstance(source, dict):
+            raise LightweightError(f"source_provenance[{index}] is invalid")
+        canonical_url = canonicalize_url(source.get("url"))
+        if not canonical_url or source.get("content_verified") is not True:
+            raise LightweightError(f"source_provenance[{index}] is not verified")
+        normalized = {**source, "url": canonical_url}
+        previous = by_url.get(canonical_url)
+        if previous is not None:
+            comparable = ("source_type", "content_verified", "evidence_excerpt")
+            if any(previous.get(key) != normalized.get(key) for key in comparable):
+                raise LightweightError(f"conflicting duplicate source provenance: {canonical_url}")
+            continue
+        by_url[canonical_url] = normalized
+        deduped.append(normalized)
+    strategy["source_provenance"] = deduped
+    payload["sources_checked_count"] = len(deduped)
+    return repaired
+
+
 def inject_identity_provenance(response: dict[str, Any], discovery: dict[str, Any],
                                evidence_cards: list[dict[str, Any]]) -> dict[str, Any]:
     """Bind verified Company Web identity evidence to canonical provenance."""
@@ -730,17 +784,20 @@ def normalize_documents_from_evidence(response: dict[str, Any], evidence_cards: 
         raise LightweightError("canonical documents are missing")
     start = date.fromisoformat(assignment["search_from"])
     end = date.fromisoformat(assignment["search_to"])
-    candidate_urls = {canonicalize_url(row.get("document_url")) for row in strategy.get("candidate_provenance", [])
-                      if isinstance(row, dict) and row.get("document_url")}
+    candidates = strategy.get("candidate_provenance", [])
+    selected_urls = {canonicalize_url(row.get("document_url")) for row in candidates
+                     if isinstance(row, dict) and row.get("selected_for_output") is True}
     normalized = []
     for index, document in enumerate(strategy["documents"]):
         if not isinstance(document, dict):
             raise LightweightError(f"documents[{index}] is invalid")
         document_url = canonicalize_url(document.get("url"))
-        matching = [card for card in evidence_cards if isinstance(card, dict)
-                    and card.get("verification_status") == "VERIFIED"
-                    and canonicalize_url(card.get("url")) == document_url]
-        if not matching:
+        all_matching = [card for card in evidence_cards if isinstance(card, dict)
+                        and canonicalize_url(card.get("url")) == document_url]
+        matching = [card for card in all_matching if card.get("verification_status") == "VERIFIED"]
+        if not all_matching:
+            raise LightweightError(f"documents[{index}] has no evidence card")
+        if not matching and document.get("body_status") != "INACCESSIBLE":
             raise LightweightError(f"documents[{index}] has no verified evidence card")
         source_dates: set[str] = set()
         for card in matching:
@@ -756,7 +813,7 @@ def normalize_documents_from_evidence(response: dict[str, Any], evidence_cards: 
                 exact = parse_datetime(value, f"documents[{index}] evidence published_at")
                 assert exact is not None
                 source_dates.add(str(value).strip()[:10])
-        existing = document.get("date")
+        existing = document.get("date") if matching else None
         if existing in (None, ""):
             document_date = next(iter(source_dates)) if len(source_dates) == 1 else None
         else:
@@ -769,7 +826,7 @@ def normalize_documents_from_evidence(response: dict[str, Any], evidence_cards: 
         if len(source_dates) > 1:
             raise LightweightError(f"documents[{index}] has conflicting verified dates")
         if document_date is not None and not (start <= date.fromisoformat(document_date) <= end):
-            if document_url in candidate_urls:
+            if document_url in selected_urls:
                 raise LightweightError(f"documents[{index}] candidate is outside the assigned window")
             continue
         document["date"] = document_date
@@ -778,7 +835,74 @@ def normalize_documents_from_evidence(response: dict[str, Any], evidence_cards: 
             document["final_url"] = document_url
         normalized.append(document)
     strategy["documents"] = normalized
+    retained_urls = {row["url"] for row in normalized}
+    retained_candidates = [row for row in candidates
+                           if canonicalize_url(row.get("document_url")) in retained_urls]
+    for index, candidate in enumerate(retained_candidates):
+        candidate["candidate_index"] = index
+        candidate["document_url"] = canonicalize_url(candidate.get("document_url"))
+        if candidate.get("source_url"):
+            candidate["source_url"] = canonicalize_url(candidate.get("source_url"))
+    strategy["candidate_provenance"] = retained_candidates
+    strategy["candidate_count"] = len(retained_candidates)
     return repaired
+
+
+_POLICY_UNCERTAINTY = re.compile(
+    r"(?:direct (?:company )?(?:impact|linkage)|effect on .{0,40}|orders?|revenue|earnings|"
+    r"(?:受注|売上|業績|直接(?:的)?影響).{0,30})(?:not (?:established|verified|confirmed)|"
+    r"unverified|未確認|確認されていない|確認できない)", re.I)
+_POLICY_DIRECT = re.compile(
+    r"(?:was selected|was awarded|contracted|customer adopted|supply agreement|subsidy recipient|"
+    r"採択(?:された|を受け)|受注(?:した|を獲得)|供給契約|顧客採用|補助対象事業者)", re.I)
+
+
+def apply_materiality_authority(response: dict[str, Any], evidence_cards: list[dict[str, Any]],
+                                *, company_name: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Reject selected general-policy context lacking affirmative company linkage."""
+    repaired = copy.deepcopy(response)
+    payload = repaired.get("research_result")
+    strategy = repaired.get("strategy_telemetry")
+    if not isinstance(payload, dict) or not isinstance(payload.get("items"), list) or not isinstance(strategy, dict):
+        raise LightweightError("canonical materiality state is incomplete")
+    documents = {canonicalize_url(row.get("url")): row for row in strategy.get("documents", [])}
+    retained_items = []
+    decisions: list[dict[str, Any]] = []
+    selected_candidates = [row for row in strategy.get("candidate_provenance", [])
+                           if row.get("selected_for_output") is True]
+    for item in payload["items"]:
+        item_url = canonicalize_url(item.get("source_url"))
+        candidate = next((row for row in selected_candidates
+                          if canonicalize_url(row.get("source_url")) == item_url
+                          and row.get("headline") == item.get("headline")), None)
+        document = documents.get(canonicalize_url(candidate.get("document_url"))) if candidate else None
+        cards = [row for row in evidence_cards if canonicalize_url(row.get("url")) == item_url]
+        evidence_text = " ".join(str(value or "") for value in (
+            item.get("summary"), item.get("why_it_matters"), item.get("evidence_excerpt"),
+            candidate.get("economic_transmission") if candidate else None,
+            *[card.get("supports") for card in cards],
+        ))
+        policy_context = bool(document and document.get("scope_label") == "IN_SCOPE_GOVERNMENT")
+        explicit_low_context = item.get("importance") == "low" and item.get("earnings_relevance") == "context"
+        direct_linkage = (company_name.casefold() in evidence_text.casefold()
+                          and bool(_POLICY_DIRECT.search(evidence_text))
+                          and not bool(_POLICY_UNCERTAINTY.search(evidence_text)))
+        reject = bool(policy_context and explicit_low_context and not direct_linkage)
+        decisions.append({"headline": item.get("headline"), "source_url": item_url,
+                          "policy_context": policy_context, "direct_company_linkage": direct_linkage,
+                          "decision": "REJECT_GENERAL_CONTEXT" if reject else "KEEP"})
+        if not reject:
+            retained_items.append(item)
+            continue
+        if candidate is None or document is None:
+            raise LightweightError("selected policy event lacks candidate/document provenance")
+        candidate.update(selected_for_output=False, event_key=None,
+                         selection_reason="Python materiality authority: general policy context lacks affirmative direct company linkage.")
+        document["material"] = False
+    payload["items"] = retained_items
+    strategy["final_event_count"] = sum(row.get("selected_for_output") is True
+                                        for row in strategy.get("candidate_provenance", []))
+    return repaired, decisions
 
 
 def restore_publication_from_evidence(response: dict[str, Any],
@@ -1265,11 +1389,15 @@ def codex_runner(root: Path, experiment: Path, assignment: dict[str, Any]) -> tu
     search_registry = build_search_record_registry(list(zip(outputs, telemetry_rows)))
     response, synthesis_telemetry = _run_isolated_stage(
         root, company_dir, None, synthesis_prompt, synthesis_output_schema(), web_enabled=False)
+    response = inject_runtime_identity(response, assignment)
     response = inject_runtime_metadata(response, completed_at=synthesis_telemetry.get("completed_at"))
     response = inject_identity_provenance(response, discovery, store.cards())
+    response = apply_source_count_authority(response)
     response = apply_search_record_registry(response, search_registry, discovery)
     response = normalize_documents_from_evidence(response, store.cards(), assignment)
     response = apply_incremental_ir_authority(response, store.cards(), discovery)
+    response, _ = apply_materiality_authority(
+        response, store.cards(), company_name=assignment["company_name"])
     response, _ = apply_coverage_authority(response, search_registry, discovery)
     response = restore_publication_from_evidence(response, store.cards())
     response = restore_effective_precision(response)

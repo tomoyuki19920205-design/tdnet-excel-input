@@ -51,6 +51,28 @@ def _provenance_ok(response: dict[str, Any], registry: list[dict[str, Any]]) -> 
     )
 
 
+def incremental_ir_contract(discovery: dict[str, Any], registry: list[dict[str, Any]],
+                            documents: list[dict[str, Any]]) -> tuple[bool, str]:
+    """Validate either branch of the incremental-IR applicability contract."""
+    applicable = discovery.get("incremental_ir_applicable")
+    queries = [row for row in registry
+               if row.get("canonical_channel") == "incremental_ir"
+               and row.get("executed") is True]
+    scoped = [row for row in documents if row.get("scope_label") == "IN_SCOPE_INCREMENTAL_IR"]
+    if applicable is True:
+        valid = bool(queries) and all(
+            row.get("incremental_information") is True
+            and isinstance(row.get("incremental_information_evidence"), str)
+            and bool(row["incremental_information_evidence"].strip())
+            for row in scoped)
+        return valid, ("applicable incremental IR requires an executed query and delta evidence "
+                       "for every in-scope document")
+    if applicable is False:
+        return (not queries and not scoped,
+                "non-applicable incremental IR must have no executed query or incremental document")
+    return False, "incremental IR applicability must be boolean"
+
+
 def exhaustive_audit(response: dict[str, Any], registry: list[dict[str, Any]],
                      discovery: dict[str, Any]) -> dict[str, Any]:
     """Evaluate independent rules without changing or short-circuiting state."""
@@ -76,6 +98,12 @@ def exhaustive_audit(response: dict[str, Any], registry: list[dict[str, Any]],
     catches("payload_semantics", lambda: news_monitor.validate_payload(payload), "C")
     check("search_provenance", _provenance_ok(response, registry), "B",
           "SearchRecordRegistry must exactly project to canonical query telemetry")
+    check("run_identity", payload.get("run_id") == telemetry.get("assignment_id")
+          and payload.get("task_id") == telemetry.get("assignment_id"), "A",
+          "payload execution identity must come from the acquired assignment")
+    sources = telemetry.get("source_provenance", [])
+    check("source_count", payload.get("sources_checked_count") == len(sources), "A",
+          "sources_checked_count must equal canonical verified provenance")
     check("query_budget", telemetry.get("query_budget_exceeded") == derived["query_budget_exceeded"], "A",
           "query budget is derived from actual registry count")
     check("coverage_status", telemetry.get("coverage_status") == derived["coverage_status"], "A",
@@ -95,15 +123,16 @@ def exhaustive_audit(response: dict[str, Any], registry: list[dict[str, Any]],
           f"saved={saved_exposures} derived={derived_exposures}")
     check("no_news_gate", telemetry.get("no_news_gate_pass") == derived["no_news_gate_pass"], "A",
           "gate is derived from completed required channels, gaps, and output presence")
-    check("incremental_ir", discovery.get("incremental_ir_applicable") is False and all(
-        row.get("scope_label") != "IN_SCOPE_INCREMENTAL_IR" for row in telemetry.get("documents", [])), "A",
-        "non-applicable incremental IR must not create a gap or incremental document")
+    incremental_ok, incremental_detail = incremental_ir_contract(
+        discovery, registry, telemetry.get("documents", []))
+    check("incremental_ir", incremental_ok, "C", incremental_detail)
     identity = telemetry.get("company_identity", {})
     sources = {lightweight.canonicalize_url(row["url"]): row
                for row in telemetry.get("source_provenance", [])}
     identity_source = sources.get(lightweight.canonicalize_url(identity.get("source_url")))
-    check("identity_evidence", bool(identity_source and identity_source.get("content_verified") is True), "B",
-          "identity source must be verified provenance")
+    check("identity_evidence", bool(identity_source and identity_source.get("content_verified") is True
+          and identity_source.get("source_type") in lightweight.OFFICIAL_EVIDENCE_SOURCE_TYPES), "B",
+          "identity source must be verified official provenance, not a search excerpt")
     catches("publication_precision", lambda: [news_monitor.normalize_publication_fields(
         item, allow_legacy=False) for item in payload.get("items", [])], "C")
     catches("effective_date_precision", lambda: [news_monitor.normalize_effective_fields(
