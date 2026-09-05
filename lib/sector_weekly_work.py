@@ -8,7 +8,7 @@ import sqlite3
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 from lib.sector_weekly import (
     JST,
@@ -235,22 +235,11 @@ def claim_next(
     if window is not None:
         period_filter = " AND period_start=? AND period_end=?"
         period_values = (_utc_text(window.period_start), _utc_text(window.period_end))
-    actionable = conn.execute(
-        "SELECT 1 FROM sector_weekly_work_assignments WHERE "
-        "((status='ready' AND attempt_count<? AND available_at<=?) OR "
-        "(status IN ('pending','retry_pending') AND available_at<=? "
-        "AND submitted_payload_hash IS NULL "
-        "AND (last_error_type IS NULL OR last_error_type NOT IN "
-        "('sync_pending','sync_error','quality_revision_sync_pending','quality_revision_sync_error'))) OR "
-        "(status IN ('claimed','running') AND lease_expires_at IS NOT NULL AND lease_expires_at<=?))"
-        f"{period_filter} LIMIT 1",
-        (MAX_ATTEMPTS, _utc_text(timestamp), _utc_text(timestamp), _utc_text(timestamp), *period_values),
-    ).fetchone()
     active = conn.execute(
         "SELECT 1 FROM sector_weekly_work_assignments WHERE status IN ('claimed','running') "
         f"AND lease_expires_at>?{period_filter} LIMIT 1", (_utc_text(timestamp), *period_values),
     ).fetchone()
-    if active is not None or actionable is None:
+    if active is not None:
         return None
     with _immediate(conn):
         _recover_expired_in_transaction(conn, timestamp)
@@ -261,20 +250,14 @@ def claim_next(
         ).fetchone()
         if active is not None:
             return None
-        conn.execute(
-            "UPDATE sector_weekly_work_assignments SET status='ready',updated_at=? "
-            "WHERE status IN ('pending','retry_pending') AND available_at<=? "
-            "AND submitted_payload_hash IS NULL "
-            "AND (last_error_type IS NULL OR last_error_type NOT IN "
-            "('sync_pending','sync_error','quality_revision_sync_pending','quality_revision_sync_error'))"
-            f"{period_filter}",
-            (_utc_text(timestamp), _utc_text(timestamp), *period_values),
-        )
         selected = conn.execute(
-            "SELECT * FROM sector_weekly_work_assignments WHERE status='ready' AND attempt_count<? AND available_at<=? "
+            "SELECT * FROM sector_weekly_work_assignments WHERE status IN ('ready','pending','retry_pending') "
+            "AND attempt_count<? AND available_at<=? AND submitted_payload_hash IS NULL "
+            "AND (last_error_type IS NULL OR last_error_type NOT IN "
+            "('sync_pending','sync_error','quality_revision_sync_pending','quality_revision_sync_error')) "
             f"{period_filter} ORDER BY CASE "
             "WHEN attempt_count>0 AND last_error_type='SectorBridgeError' THEN 0 "
-            "WHEN attempt_count=0 THEN 1 ELSE 2 END,available_at,sector_code LIMIT 1",
+            "WHEN attempt_count>0 THEN 1 ELSE 2 END,available_at,sector_code LIMIT 1",
             (MAX_ATTEMPTS, _utc_text(timestamp), *period_values),
         ).fetchone()
         if selected is None:
@@ -283,13 +266,12 @@ def claim_next(
         revision = is_quality_revision(selected)
         cursor = conn.execute(
             "UPDATE sector_weekly_work_assignments SET status='claimed',attempt_count=?,claim_owner=?,claimed_at=?,"
-            "lease_expires_at=?,started_at=NULL,last_error_type=?,last_error_message=NULL,"
-            "submitted_payload_hash=NULL,updated_at=? "
-            "WHERE assignment_id=? AND status='ready'",
+            "lease_expires_at=?,started_at=NULL,submitted_payload_hash=NULL,updated_at=? "
+            "WHERE assignment_id=? AND status=? AND attempt_count=? AND available_at<=? "
+            "AND submitted_payload_hash IS NULL",
             (
-                attempts, owner, _utc_text(timestamp), _utc_text(lease_expires),
-                QUALITY_REVISION_PREFIX if revision else None,
-                _utc_text(timestamp), selected["assignment_id"],
+                attempts, owner, _utc_text(timestamp), _utc_text(lease_expires), _utc_text(timestamp),
+                selected["assignment_id"], selected["status"], int(selected["attempt_count"]), _utc_text(timestamp),
             ),
         )
         if cursor.rowcount != 1:
@@ -372,6 +354,8 @@ def fail_assignment(
     *,
     now: datetime | None = None,
     retry_delay_seconds: int = 0,
+    error_type: str | None = None,
+    retryable: bool = True,
 ) -> dict[str, Any]:
     owner = _validate_owner(owner)
     timestamp = _now(now)
@@ -384,20 +368,25 @@ def fail_assignment(
             return row
         if row["claim_owner"] != owner or row["status"] not in ACTIVE_STATUSES:
             raise SectorWorkError("assignment failure owner does not match active claim")
-        terminal = int(row["attempt_count"]) >= MAX_ATTEMPTS
+        terminal = not retryable or int(row["attempt_count"]) >= MAX_ATTEMPTS
         status = "failed" if terminal else "retry_pending"
         revision = is_quality_revision(row)
-        error_type = f"{QUALITY_REVISION_PREFIX}_{type(error).__name__}" if revision else type(error).__name__
+        failure_type = error_type or type(error).__name__
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,127}", failure_type):
+            raise SectorWorkError("failure type must use a safe identifier")
+        if not retryable:
+            failure_type = f"needs_review_{failure_type}"
+        stored_error_type = f"{QUALITY_REVISION_PREFIX}_{failure_type}" if revision else failure_type
         message = str(error)[:2000]
         conn.execute(
             "UPDATE sector_weekly_work_assignments SET status=?,available_at=?,claim_owner=NULL,claimed_at=NULL,"
             "lease_expires_at=NULL,last_error_type=?,last_error_message=?,updated_at=? WHERE assignment_id=?",
-            (status, _utc_text(available), error_type, message, _utc_text(timestamp), assignment_id),
+            (status, _utc_text(available), stored_error_type, message, _utc_text(timestamp), assignment_id),
         )
         if not revision:
             _set_run_state(
                 conn, row["stable_key"], status if status == "failed" else "retry_pending", timestamp,
-                attempt_count=int(row["attempt_count"]), error_type=error_type, error_message=message,
+                attempt_count=int(row["attempt_count"]), error_type=stored_error_type, error_message=message,
             )
         return get_assignment(conn, assignment_id) or row
 
@@ -487,6 +476,7 @@ def stage_assignment(
     submitted_hash: str,
     *,
     now: datetime | None = None,
+    publish: Callable[[], None] | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """Atomically hand a validated research payload to the local transport worker.
 
@@ -531,6 +521,8 @@ def stage_assignment(
                 attempt_count=int(row["attempt_count"]), error_type="sync_pending",
                 error_message="validated payload staged for local sync",
             )
+        if publish is not None:
+            publish()
         return get_assignment(conn, assignment_id) or row, True
 
 

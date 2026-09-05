@@ -378,17 +378,19 @@ def test_chatgpt_worker_prompt_has_transport_research_and_schema_contracts():
         "Sector Weekly Worker", "1回の実行でready assignmentを最大1件", "claim --owner sector-weekly-worker",
         "ChatGPTプラン内", "outside-in", "確認できた事実", "日本企業への波及", "反対材料・注意点",
         "海外企業", "日本語読み", "空行を3行以上", "数字は1段落1論点",
-        "重要材料は", "3〜5件", "3,000〜4,500文字", "missed_candidates",
+        "重要材料は", "3〜5件", "4,200〜4,800文字", "missed_candidates",
         "sector_weekly_work_result_v2", "company_ir | government | regulator",
         "heartbeat --assignment-id", "10分ごと", "hard time budgetは50分", "45分時点",
         "abandon --assignment-id", "atomicにretry_pending", "調査品質を落として無理にstage",
-        "stage --assignment-id", "handoff_pending", "sync_pending", "SectorWeeklyInboxWorker",
+        "validate-and-stage --assignment-id", "handoff_pending", "sync_pending", "SectorWeeklyInboxWorker",
         "built-in Web Search", "Responses API", "OPENAI_API_KEY",
         "1実行で複数sectorを処理してはいけません", "月曜08:05 JST",
-        "不変contract", "verify-claim", "verify-payload", "contract hash", "attempt固有",
+        "不変contract", "verify-claim", "validate-and-stage", "contract hash", "attempt固有",
         "codeからnameを推測", "memoryは調査入力に使わない", "隔離SQLite DB",
     ):
         assert term in prompt
+    assert prompt.count("sector_weekly_work_bridge.py verify-claim") == 1
+    assert "verify-payload" not in prompt
     for forbidden in (
         "API料金", "max_tool_calls", "API timeout", "token料金",
         '"sector_code": 5', '"sector_name": "鉱業"',

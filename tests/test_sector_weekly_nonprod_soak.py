@@ -23,7 +23,7 @@ from tools.sector_weekly_work_bridge import (
     claim_one,
     heartbeat_one,
     start_one,
-    stage_one,
+    validate_and_stage_one,
 )
 
 SAT = datetime.fromisoformat("2026-09-05T06:00:00+09:00")
@@ -126,7 +126,7 @@ def test_accelerated_51_slot_33_sector_nonproduction_soak(tmp_path: Path):
         return {"canonical_sector_reports": 1, "canonical_sector_report_runs": 1}
 
     completed_codes: set[int] = set()
-    failed_attempts = 0
+    failed_codes: set[int] = set()
     last_completed_at: datetime | None = None
     last_processed: Path | None = None
     last_claimed: dict | None = None
@@ -140,20 +140,20 @@ def test_accelerated_51_slot_33_sector_nonproduction_soak(tmp_path: Path):
         code = int(claimed["sector_code"])
         start_one(db, claimed["assignment_id"], OWNER, at=worker_at)
         _heartbeat_to_minute_40(db, claimed["assignment_id"], worker_at)
-        if failed_attempts < TEMPORARY_FAILURES:
+        if len(failed_codes) < TEMPORARY_FAILURES and code not in failed_codes:
             released = abandon_one(
                 db, claimed["assignment_id"], OWNER,
                 at=worker_at + timedelta(minutes=49), reason="fixture temporary timeout",
                 work_root=work,
             )
             assert released["status"] == "retry_pending"
-            failed_attempts += 1
+            failed_codes.add(code)
             continue
         payload = tmp_path / f"result-{code:02d}.json"
         payload.write_text(json.dumps(_envelope(claimed), ensure_ascii=False), encoding="utf-8")
         submit_at = worker_at + timedelta(minutes=45)
-        staged = stage_one(
-            db, claimed["assignment_id"], OWNER, payload, work_root=work,
+        staged = validate_and_stage_one(
+            db, claimed["assignment_id"], OWNER, claimed["contract_hash"], payload, work_root=work,
             at=submit_at,
         )
         assert staged["status"] == "handoff_pending"
@@ -191,7 +191,7 @@ def test_accelerated_51_slot_33_sector_nonproduction_soak(tmp_path: Path):
     assert status["success"] == 33 and status["failed"] == 0
     assert status["missing_count"] == status["duplicate_count"] == 0
     assert status["stale_count"] == 1
-    assert failed_attempts == TEMPORARY_FAILURES
+    assert len(failed_codes) == TEMPORARY_FAILURES
     assert status["attempts"] == 33 + TEMPORARY_FAILURES
     assert last_completed_at is not None
     assert last_completed_at <= datetime.fromisoformat("2026-09-07T08:55:00+09:00")
@@ -220,7 +220,7 @@ def test_every_12_hour_outage_position_retains_capacity_for_six_retries(tmp_path
         conn.close()
     slots = _available_slots(outage_start)
     assert len(slots) == 39
-    failures = 0
+    failed_codes: set[int] = set()
     completion_keys: set[str] = set()
     last_finished_at: datetime | None = None
     for slot in slots:
@@ -232,13 +232,14 @@ def test_every_12_hour_outage_position_retains_capacity_for_six_retries(tmp_path
         claimed = claim_one(db, OWNER, work_root=work, at=worker_at)["assignment"]
         start_one(db, claimed["assignment_id"], OWNER, at=worker_at)
         _heartbeat_to_minute_40(db, claimed["assignment_id"], worker_at)
-        if failures < TEMPORARY_FAILURES:
+        code = int(claimed["sector_code"])
+        if len(failed_codes) < TEMPORARY_FAILURES and code not in failed_codes:
             abandon_one(
                 db, claimed["assignment_id"], OWNER,
                 at=worker_at + timedelta(minutes=49), reason="capacity fixture retry",
                 work_root=work,
             )
-            failures += 1
+            failed_codes.add(code)
             last_finished_at = worker_at + timedelta(minutes=49)
             continue
         conn = connect_sector_db(db)
@@ -261,7 +262,7 @@ def test_every_12_hour_outage_position_retains_capacity_for_six_retries(tmp_path
         conn.close()
     completion_keys.add(status["completion_event"]["event_key"])
     completion_keys.add(repeated["completion_event"]["event_key"])
-    assert failures == 6 and status["attempts"] == 39
+    assert len(failed_codes) == 6 and status["attempts"] == 39
     assert status["success"] == 33 and status["failed"] == 0
     assert status["missing_count"] == status["duplicate_count"] == 0
     assert status["stale_count"] == 1 and len(completion_keys) == 1

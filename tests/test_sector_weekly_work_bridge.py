@@ -29,6 +29,7 @@ from tools.sector_weekly_work_bridge import (
     heartbeat_one,
     stage_one,
     start_one,
+    validate_and_stage_one,
     verify_claim_one,
     verify_payload_one,
 )
@@ -73,6 +74,15 @@ def _report() -> dict:
             "source_name": "Exchange", "source_type": "market_data", "published_at": "2026-09-04",
         }],
     }
+
+
+def _report_with_length(minimum: int = 4_200, maximum: int = 4_800) -> dict:
+    report = _report()
+    markdown = report["full_report_md"]
+    padding = "\n\n" + "追" * max(0, minimum - len(markdown) - 2)
+    report["full_report_md"] = markdown + padding
+    assert minimum <= len(report["full_report_md"]) <= maximum
+    return report
 
 
 def _enqueue(db: Path, code: int = 2) -> dict:
@@ -245,6 +255,15 @@ def test_bridge_claim_contract_contains_prompt_but_no_api_controls(tmp_path: Pat
     assert f".attempt-{assignment['attempt_count']}." in assignment["submit_path"]
 
 
+def test_worker_prompt_has_one_presearch_verify_and_one_final_bridge_command():
+    prompt = (Path(__file__).parents[1] / "config" / "sector_weekly_worker_prompt.txt").read_text(encoding="utf-8")
+    assert prompt.count("sector_weekly_work_bridge.py verify-claim") == 1
+    assert prompt.count("sector_weekly_work_bridge.py validate-and-stage") == 1
+    assert "verify-payload" not in prompt
+    assert "4,200〜4,800文字" in prompt
+    assert "最終合否は必ず`validate-and-stage`へ委ねる" in prompt
+
+
 def test_code_5_claim_is_textiles_and_contract_verifies_before_research(tmp_path: Path):
     db = tmp_path / "db.sqlite"
     work = tmp_path / "work"
@@ -341,6 +360,168 @@ def test_textile_payload_passes_pre_stage_contract_and_stages_once(tmp_path: Pat
     staged = stage_one(db, claimed["assignment_id"], OWNER, draft, work_root=work, at=AT)
     assert staged["status"] == "handoff_pending"
     assert len(list((work / "inbox").glob("*.json"))) == 1
+
+
+def test_validate_and_stage_is_the_only_post_draft_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import tools.sector_weekly_work_bridge as bridge
+
+    db = tmp_path / "db.sqlite"
+    work = tmp_path / "work"
+    _enqueue(db)
+    claimed = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
+    start_one(db, claimed["assignment_id"], OWNER, at=AT)
+    draft = Path(claimed["submit_path"])
+    draft.parent.mkdir(parents=True, exist_ok=True)
+    draft.write_text(json.dumps(_envelope(claimed, _report_with_length()), ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(
+        bridge, "verify_payload_one",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("separate payload verification called")),
+    )
+
+    result = validate_and_stage_one(
+        db, claimed["assignment_id"], OWNER, claimed["contract_hash"], draft,
+        work_root=work, at=AT,
+    )
+
+    assert result["status"] == "handoff_pending"
+    assert (work / "inbox" / f"{claimed['assignment_id']}.json").exists()
+
+
+@pytest.mark.parametrize("field,value", [
+    ("sector_code", 4),
+    ("sector_name", "水産・農林業"),
+    ("period_end", "2026-09-06T05:59:59+09:00"),
+    ("attempt_count", 99),
+    ("contract_hash", "0" * 64),
+])
+def test_validate_and_stage_rejects_contract_identity_mismatch(
+    tmp_path: Path, field: str, value: object,
+):
+    db = tmp_path / "db.sqlite"
+    work = tmp_path / "work"
+    _enqueue(db)
+    claimed = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
+    envelope = _envelope(claimed)
+    envelope[field] = value
+    draft = tmp_path / "wrong.json"
+    draft.write_text(json.dumps(envelope, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(SectorBridgeError):
+        validate_and_stage_one(
+            db, claimed["assignment_id"], OWNER, claimed["contract_hash"], draft,
+            work_root=work, at=AT,
+        )
+
+    conn = connect_sector_db(db)
+    try:
+        row = get_assignment(conn, claimed["assignment_id"])
+        assert row["status"] == "failed"
+        assert row["last_error_type"].startswith("needs_review_")
+    finally:
+        conn.close()
+    assert not (work / "inbox" / f"{claimed['assignment_id']}.json").exists()
+
+
+def test_validate_and_stage_rejects_wrong_owner_and_expired_lease(tmp_path: Path):
+    owner_db = tmp_path / "owner.sqlite"
+    owner_work = tmp_path / "owner-work"
+    _enqueue(owner_db)
+    owner_claim = claim_one(owner_db, OWNER, work_root=owner_work, at=AT)["assignment"]
+    owner_draft = tmp_path / "owner.json"
+    owner_draft.write_text(json.dumps(_envelope(owner_claim), ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(SectorBridgeError):
+        validate_and_stage_one(
+            owner_db, owner_claim["assignment_id"], "another-worker", owner_claim["contract_hash"],
+            owner_draft, work_root=owner_work, at=AT,
+        )
+
+    lease_db = tmp_path / "lease.sqlite"
+    lease_work = tmp_path / "lease-work"
+    _enqueue(lease_db)
+    lease_claim = claim_one(lease_db, OWNER, work_root=lease_work, at=AT, lease_seconds=60)["assignment"]
+    lease_draft = tmp_path / "lease.json"
+    lease_draft.write_text(json.dumps(_envelope(lease_claim), ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(SectorBridgeError, match="lease"):
+        validate_and_stage_one(
+            lease_db, lease_claim["assignment_id"], OWNER, lease_claim["contract_hash"],
+            lease_draft, work_root=lease_work, at=AT + timedelta(seconds=61),
+        )
+    assert not list((lease_work / "inbox").glob("*.json"))
+
+
+def test_overlength_failure_is_returned_by_next_claim(tmp_path: Path):
+    db = tmp_path / "db.sqlite"
+    work = tmp_path / "work"
+    _enqueue(db, 8)
+    claimed = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
+    report = _report()
+    report["full_report_md"] = report["full_report_md"].replace("鉱業", "医薬品", 1) + "長文" * 3_000
+    draft = Path(claimed["submit_path"])
+    draft.parent.mkdir(parents=True, exist_ok=True)
+    draft.write_text(json.dumps(_envelope(claimed, report), ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(SectorValidationError, match="5,500-character"):
+        validate_and_stage_one(
+            db, claimed["assignment_id"], OWNER, claimed["contract_hash"], draft,
+            work_root=work, at=AT,
+        )
+    assert not list((work / "inbox").glob("*.json"))
+
+    retry = claim_one(db, OWNER, work_root=work, at=AT + timedelta(hours=1))["assignment"]
+    assert retry["attempt_count"] == 2
+    assert retry["previous_failure"] == {
+        "attempt_count": 1,
+        "error_type": "SectorValidationError",
+        "message": "full_report_md exceeds the 5,500-character normal limit",
+    }
+
+
+def test_valid_target_length_stages(tmp_path: Path):
+    db = tmp_path / "db.sqlite"
+    work = tmp_path / "work"
+    _enqueue(db)
+    claimed = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
+    report = _report_with_length()
+    assert 4_200 <= len(report["full_report_md"]) <= 4_800
+    draft = Path(claimed["submit_path"])
+    draft.parent.mkdir(parents=True, exist_ok=True)
+    draft.write_text(json.dumps(_envelope(claimed, report), ensure_ascii=False), encoding="utf-8")
+    result = validate_and_stage_one(
+        db, claimed["assignment_id"], OWNER, claimed["contract_hash"], draft,
+        work_root=work, at=AT,
+    )
+    assert result["status"] == "handoff_pending"
+
+
+def test_publish_failure_rolls_back_stage_and_leaves_no_inbox(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    import tools.sector_weekly_work_bridge as bridge
+
+    db = tmp_path / "db.sqlite"
+    work = tmp_path / "work"
+    _enqueue(db)
+    claimed = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
+    draft = Path(claimed["submit_path"])
+    draft.parent.mkdir(parents=True, exist_ok=True)
+    draft.write_text(json.dumps(_envelope(claimed), ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(bridge, "replace_with_retry", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("publish failed")))
+
+    with pytest.raises(OSError, match="publish failed"):
+        validate_and_stage_one(
+            db, claimed["assignment_id"], OWNER, claimed["contract_hash"], draft,
+            work_root=work, at=AT,
+        )
+
+    conn = connect_sector_db(db)
+    try:
+        row = get_assignment(conn, claimed["assignment_id"])
+        assert row["status"] == "retry_pending"
+        assert row["submitted_payload_hash"] is None
+        assert row["last_error_type"] == "OSError"
+    finally:
+        conn.close()
+    assert not list((work / "inbox").glob("*.json"))
 
 
 def test_lease_expiry_recovers_assignment_for_retry(tmp_path: Path):
@@ -533,6 +714,71 @@ def test_retry_is_claimed_before_a_fresh_sector(tmp_path: Path):
     assert second["sector_code"] == 2
     assert second["assignment_id"] == first["assignment_id"]
     assert second["attempt_count"] == 2
+
+
+def test_claim_changes_only_selected_retry_and_prioritizes_all_retries(tmp_path: Path):
+    db = tmp_path / "db.sqlite"
+    work = tmp_path / "work"
+    rows = {code: _enqueue(db, code) for code in (8, 9, 10)}
+    conn = connect_sector_db(db)
+    try:
+        conn.execute(
+            "UPDATE sector_weekly_work_assignments SET status='retry_pending',attempt_count=1,"
+            "last_error_type='SectorValidationError',last_error_message='too long' WHERE sector_code=8"
+        )
+        conn.execute(
+            "UPDATE sector_weekly_work_assignments SET status='retry_pending',attempt_count=1,"
+            "last_error_type='SectorBridgeError',last_error_message='protocol error' WHERE sector_code=9"
+        )
+        conn.commit()
+
+        first = claim_next(conn, OWNER, now=AT)
+        assert first["sector_code"] == 9
+        untouched = {
+            code: get_assignment(conn, rows[code]["assignment_id"])["status"] for code in (8, 10)
+        }
+        assert untouched == {8: "retry_pending", 10: "ready"}
+
+        conn.execute(
+            "UPDATE sector_weekly_work_assignments SET status='success',claim_owner=NULL,claimed_at=NULL,"
+            "lease_expires_at=NULL WHERE assignment_id=?", (first["assignment_id"],),
+        )
+        conn.commit()
+        second = claim_next(conn, OWNER, now=AT + timedelta(minutes=1))
+        assert second["sector_code"] == 8
+        assert get_assignment(conn, rows[10]["assignment_id"])["status"] == "ready"
+    finally:
+        conn.close()
+
+
+def test_explicit_fail_preserves_type_and_needs_review_is_not_reclaimed(tmp_path: Path):
+    retry_db = tmp_path / "retry.sqlite"
+    retry_work = tmp_path / "retry-work"
+    _enqueue(retry_db)
+    retry_claim = claim_one(retry_db, OWNER, work_root=retry_work, at=AT)["assignment"]
+    fail_one(
+        retry_db, retry_claim["assignment_id"], OWNER, "source unavailable",
+        error_type="ResearchSourceError", at=AT,
+    )
+    retry = claim_one(retry_db, OWNER, work_root=retry_work, at=AT + timedelta(hours=1))["assignment"]
+    assert retry["previous_failure"]["error_type"] == "ResearchSourceError"
+
+    review_db = tmp_path / "review.sqlite"
+    review_work = tmp_path / "review-work"
+    _enqueue(review_db)
+    review_claim = claim_one(review_db, OWNER, work_root=review_work, at=AT)["assignment"]
+    fail_one(
+        review_db, review_claim["assignment_id"], OWNER, "contract store corrupt",
+        error_type="SystemInvariantError", needs_review=True, at=AT,
+    )
+    conn = connect_sector_db(review_db)
+    try:
+        row = get_assignment(conn, review_claim["assignment_id"])
+        assert row["status"] == "failed"
+        assert row["last_error_type"] == "needs_review_SystemInvariantError"
+        assert claim_next(conn, OWNER, now=AT + timedelta(hours=1)) is None
+    finally:
+        conn.close()
 
 
 @pytest.mark.parametrize("field,value", [
