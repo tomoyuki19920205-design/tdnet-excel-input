@@ -241,7 +241,8 @@ def test_runner_persists_raw_usage_and_tool_events_before_validation(tmp_path, m
         return {"research_result": {"sources_checked_count": 1, "items": []},
                 "strategy_telemetry": {"source_provenance": [{
                     "url": "https://example.test/a", "source_type": "company",
-                    "content_verified": True, "evidence_excerpt": "official identity"}]}}, telemetry(None)
+                    "content_verified": True, "evidence_excerpt": "official identity"}],
+                    "queries": [], "channel_reviews": []}}, telemetry(None)
     monkeypatch.setattr(light, "_run_isolated_stage", fake_stage)
     assignment = {"assignment_id": "a", "ticker": "7760", "company_name": "IMV", "position": 1,
                   "search_from": "2026-08-25", "search_to": "2026-08-31"}
@@ -432,6 +433,77 @@ def test_date_only_published_at_never_invents_time_or_timezone():
     with pytest.raises(light.LightweightError, match="date-only; time and timezone unavailable"):
         light.restore_published_at_from_evidence(response, cards)
     assert response == original
+
+
+def test_invalid_evidence_published_at_fails_closed():
+    response, _, cards = _metadata_repair_fixture("not-a-publication-date")
+    with pytest.raises(Exception, match="ISO-8601"):
+        light.restore_published_at_from_evidence(response, cards)
+
+
+def _search_worker(worker_id, channel, *, result_count, executed=True, web_calls=1, evidence=False,
+                   exposure_id=0):
+    query_id = f"{worker_id}-q1"
+    output = {"queries": [{"channel": channel, "query": f"{channel} query", "executed": executed,
+                            "result_count": result_count, "reached_sources": [],
+                            "window_relevance_checked": True, "exposure_index": exposure_id,
+                            "canonical_driver_phrase": "driver", "driver_phrase_preserved": True,
+                            "driver_phrase_preservation_reason": None}],
+              "evidence_cards": ([{"source_id": "e1", "query_id": query_id}] if evidence else [])}
+    telemetry = {"worker_id": worker_id, "exposure_id": exposure_id, "web_call_count": web_calls}
+    return output, telemetry
+
+
+def test_actual_queries_and_evidence_are_registered_and_linked():
+    run = _search_worker("exposure-1", "external_media", result_count=2, evidence=True)
+    registry = light.build_search_record_registry([run])
+    assert {key: registry[0][key] for key in ("query_id", "worker_id", "exposure_id", "canonical_channel",
+                                               "query_text", "executed", "result_count", "evidence_ids")} == {
+        "query_id": "exposure-1-q1", "worker_id": "exposure-1", "exposure_id": 0,
+        "canonical_channel": "external_media", "query_text": "external_media query",
+        "executed": True, "result_count": 2, "evidence_ids": ["e1"]}
+
+
+def test_actual_zero_result_query_remains_in_search_registry():
+    registry = light.build_search_record_registry([
+        _search_worker("exposure-1", "external_media", result_count=0)])
+    assert len(registry) == 1 and registry[0]["result_count"] == 0 and registry[0]["executed"] is True
+
+
+def test_unexecuted_query_is_never_added_to_search_registry():
+    registry = light.build_search_record_registry([
+        _search_worker("exposure-1", "external_media", result_count=0, executed=False, web_calls=0)])
+    assert registry == []
+
+
+def test_claimed_execution_without_observed_web_call_fails_closed():
+    with pytest.raises(light.LightweightError, match="no observed Web call"):
+        light.build_search_record_registry([
+            _search_worker("exposure-1", "external_media", result_count=0, web_calls=0)])
+
+
+def test_checked_channel_without_actual_record_is_corrected_from_worker_state():
+    response = {"strategy_telemetry": {"queries": [], "channel_reviews": [
+        {"channel": "incremental_ir", "status": "CHECKED", "evidence": "No in-window item", "exposure_index": None},
+        {"channel": "counterparty", "status": "CHECKED", "evidence": "Claimed review", "exposure_index": None},
+    ]}}
+    repaired = light.apply_search_record_registry(response, [], {"incremental_ir_applicable": False})
+    reviews = {row["channel"]: row for row in repaired["strategy_telemetry"]["channel_reviews"]}
+    assert reviews["incremental_ir"]["status"] == "NOT_APPLICABLE"
+    assert reviews["counterparty"]["status"] == "PARTIAL"
+
+
+def test_duplicate_per_exposure_reviews_collapse_to_canonical_channel_record():
+    run = _search_worker("exposure-1", "external_media", result_count=1, exposure_id=1)
+    registry = light.build_search_record_registry([run])
+    response = {"strategy_telemetry": {"queries": run[0]["queries"], "channel_reviews": [
+        {"channel": "external_media", "status": "PARTIAL", "evidence": "exposure zero", "exposure_index": 0},
+        {"channel": "external_media", "status": "CHECKED", "evidence": "exposure one", "exposure_index": 1},
+    ]}}
+    repaired = light.apply_search_record_registry(response, registry, {"incremental_ir_applicable": False})
+    reviews = repaired["strategy_telemetry"]["channel_reviews"]
+    assert len(reviews) == 1 and reviews[0]["status"] == "CHECKED" and reviews[0]["exposure_index"] == 1
+    assert "exposure zero" in reviews[0]["evidence"] and "exposure one" in reviews[0]["evidence"]
 
 
 def test_offline_cost_gate_for_two_through_five_workers():

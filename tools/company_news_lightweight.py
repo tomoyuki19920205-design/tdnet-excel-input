@@ -757,6 +757,100 @@ def restore_published_at_from_evidence(response: dict[str, Any],
     return repaired
 
 
+def build_search_record_registry(
+        worker_runs: list[tuple[dict[str, Any], dict[str, Any]]]) -> list[dict[str, Any]]:
+    """Build query provenance only from validated worker output with observed Web calls."""
+    registry: list[dict[str, Any]] = []
+    for output, telemetry in worker_runs:
+        worker_id = telemetry.get("worker_id")
+        if not isinstance(worker_id, str) or not worker_id or worker_id == "final-synthesis":
+            raise LightweightError("search worker identity is missing")
+        queries = output.get("queries")
+        cards = output.get("evidence_cards")
+        if not isinstance(queries, list) or not isinstance(cards, list):
+            raise LightweightError(f"search worker output is incomplete: {worker_id}")
+        executed = [query for query in queries if isinstance(query, dict) and query.get("executed") is True]
+        web_calls = telemetry.get("web_call_count")
+        if executed and (not isinstance(web_calls, int) or web_calls <= 0):
+            raise LightweightError(f"executed query has no observed Web call: {worker_id}")
+        for position, query in enumerate(queries, 1):
+            if not isinstance(query, dict) or query.get("executed") is not True:
+                continue
+            if query.get("exposure_index") != telemetry.get("exposure_id"):
+                raise LightweightError(f"query exposure does not match worker telemetry: {worker_id}")
+            query_id = f"{worker_id}-q{position}"
+            evidence_ids = [card["source_id"] for card in cards if isinstance(card, dict)
+                            and card.get("query_id") == query_id and isinstance(card.get("source_id"), str)]
+            registry.append({
+                "query_id": query_id,
+                "worker_id": worker_id,
+                "exposure_id": telemetry.get("exposure_id"),
+                "canonical_channel": query.get("channel"),
+                "query_text": query.get("query"),
+                "executed": True,
+                "result_count": query.get("result_count"),
+                "evidence_ids": evidence_ids,
+                "reached_sources": copy.deepcopy(query.get("reached_sources")),
+                "window_relevance_checked": query.get("window_relevance_checked"),
+                "canonical_driver_phrase": query.get("canonical_driver_phrase"),
+                "driver_phrase_preserved": query.get("driver_phrase_preserved"),
+                "driver_phrase_preservation_reason": query.get("driver_phrase_preservation_reason"),
+            })
+    if len({row["query_id"] for row in registry}) != len(registry):
+        raise LightweightError("duplicate search registry query_id")
+    return registry
+
+
+def apply_search_record_registry(response: dict[str, Any], registry: list[dict[str, Any]],
+                                 discovery: dict[str, Any]) -> dict[str, Any]:
+    """Project actual searches and channel coverage into the strict canonical contract."""
+    repaired = copy.deepcopy(response)
+    strategy = repaired.get("strategy_telemetry")
+    if not isinstance(strategy, dict) or not isinstance(strategy.get("channel_reviews"), list):
+        raise LightweightError("canonical search telemetry is incomplete")
+    if any(row.get("executed") is not True for row in registry):
+        raise LightweightError("search registry contains an unexecuted query")
+    actual_channels = {row.get("canonical_channel") for row in registry}
+    actual_links = {(row.get("canonical_channel"), row.get("exposure_id")) for row in registry}
+    strategy["queries"] = [{
+        "channel": row["canonical_channel"],
+        "query": row["query_text"],
+        "executed": True,
+        "result_count": row["result_count"],
+        "reached_sources": row["reached_sources"],
+        "window_relevance_checked": row["window_relevance_checked"],
+        "exposure_index": row["exposure_id"],
+        "canonical_driver_phrase": row["canonical_driver_phrase"],
+        "driver_phrase_preserved": row["driver_phrase_preserved"],
+        "driver_phrase_preservation_reason": row["driver_phrase_preservation_reason"],
+    } for row in registry]
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for review in strategy["channel_reviews"]:
+        if not isinstance(review, dict) or not isinstance(review.get("channel"), str):
+            raise LightweightError("invalid channel review")
+        grouped.setdefault(review["channel"], []).append(review)
+    normalized = []
+    for channel, reviews in grouped.items():
+        statuses = [review.get("status") for review in reviews]
+        supported_checked = [review for review in reviews if review.get("status") == "CHECKED"
+                             and ((channel == "official" and channel in actual_channels)
+                                  or (channel, review.get("exposure_index")) in actual_links)]
+        if channel not in actual_channels:
+            status = ("NOT_APPLICABLE" if channel == "incremental_ir"
+                      and discovery.get("incremental_ir_applicable") is False else "PARTIAL")
+        else:
+            status = "CHECKED" if supported_checked else ("PARTIAL" if "PARTIAL" in statuses or "CHECKED" in statuses
+                                                           else "NOT_APPLICABLE")
+        selected = supported_checked[0] if status == "CHECKED" else next(
+            (review for review in reviews if review.get("status") == status), reviews[0])
+        evidence = " | ".join(dict.fromkeys(str(review.get("evidence", "")).strip()
+                                              for review in reviews if str(review.get("evidence", "")).strip()))
+        normalized.append({"channel": channel, "status": status, "evidence": evidence,
+                           "exposure_index": selected.get("exposure_index")})
+    strategy["channel_reviews"] = normalized
+    return repaired
+
+
 def _validate_worker_response_contract(response: dict[str, Any], spec: WorkerSpec) -> None:
     """Reject added/rephrased queries and cross-slice fields without an LLM repair."""
     if response.get("worker_id") != spec.worker_id or response.get("kind") != spec.kind:
@@ -885,10 +979,12 @@ def codex_runner(root: Path, experiment: Path, assignment: dict[str, Any]) -> tu
         "provenance": 0.0,
     }
     synthesis_prompt = synthesis_contract(assignment, discovery, queries, store, elapsed)
+    search_registry = build_search_record_registry(list(zip(outputs, telemetry_rows)))
     response, synthesis_telemetry = _run_isolated_stage(
         root, company_dir, None, synthesis_prompt, synthesis_output_schema(), web_enabled=False)
     response = inject_runtime_metadata(response, completed_at=synthesis_telemetry.get("completed_at"))
     response = inject_identity_provenance(response, discovery, store.cards())
+    response = apply_search_record_registry(response, search_registry, discovery)
     response = restore_published_at_from_evidence(response, store.cards())
     telemetry_rows.append(synthesis_telemetry)
     measured = aggregate_worker_telemetry(telemetry_rows)
@@ -896,6 +992,7 @@ def codex_runner(root: Path, experiment: Path, assignment: dict[str, Any]) -> tu
     _atomic_json(company_dir / "evidence-state.json", {
         "cards": store.cards(), "raw_body_retained": False,
         "cross_worker_payload": "bounded_evidence_cards_only",
+        "search_record_registry": search_registry,
     })
     return response, measured
 
