@@ -76,12 +76,11 @@ def _report() -> dict:
     }
 
 
-def _report_with_length(minimum: int = 4_200, maximum: int = 4_800) -> dict:
+def _report_at_length(target: int) -> dict:
     report = _report()
     markdown = report["full_report_md"]
-    padding = "\n\n" + "追" * max(0, minimum - len(markdown) - 2)
-    report["full_report_md"] = markdown + padding
-    assert minimum <= len(report["full_report_md"]) <= maximum
+    report["full_report_md"] = markdown + "追" * max(0, target - len(markdown))
+    assert len(report["full_report_md"]) == target
     return report
 
 
@@ -260,7 +259,9 @@ def test_worker_prompt_has_one_presearch_verify_and_one_final_bridge_command():
     assert prompt.count("sector_weekly_work_bridge.py verify-claim") == 1
     assert prompt.count("sector_weekly_work_bridge.py validate-and-stage") == 1
     assert "verify-payload" not in prompt
-    assert "4,200〜4,800文字" in prompt
+    assert "hard上限10,000文字" in prompt
+    assert "5,500文字超だけを理由に必要な情報を削らず" in prompt
+    assert "Markdownを機械的に途中切断せず" in prompt
     assert "最終合否は必ず`validate-and-stage`へ委ねる" in prompt
 
 
@@ -372,7 +373,7 @@ def test_validate_and_stage_is_the_only_post_draft_check(tmp_path: Path, monkeyp
     start_one(db, claimed["assignment_id"], OWNER, at=AT)
     draft = Path(claimed["submit_path"])
     draft.parent.mkdir(parents=True, exist_ok=True)
-    draft.write_text(json.dumps(_envelope(claimed, _report_with_length()), ensure_ascii=False), encoding="utf-8")
+    draft.write_text(json.dumps(_envelope(claimed, _report_at_length(6_864)), ensure_ascii=False), encoding="utf-8")
     monkeypatch.setattr(
         bridge, "verify_payload_one",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("separate payload verification called")),
@@ -449,18 +450,19 @@ def test_validate_and_stage_rejects_wrong_owner_and_expired_lease(tmp_path: Path
     assert not list((lease_work / "inbox").glob("*.json"))
 
 
-def test_overlength_failure_is_returned_by_next_claim(tmp_path: Path):
+def test_over_10000_failure_is_returned_by_next_claim(tmp_path: Path):
     db = tmp_path / "db.sqlite"
     work = tmp_path / "work"
     _enqueue(db, 8)
     claimed = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
     report = _report()
-    report["full_report_md"] = report["full_report_md"].replace("鉱業", "医薬品", 1) + "長文" * 3_000
+    report["full_report_md"] = report["full_report_md"].replace("鉱業", "医薬品", 1)
+    report["full_report_md"] += "長" * (10_001 - len(report["full_report_md"]))
     draft = Path(claimed["submit_path"])
     draft.parent.mkdir(parents=True, exist_ok=True)
     draft.write_text(json.dumps(_envelope(claimed, report), ensure_ascii=False), encoding="utf-8")
 
-    with pytest.raises(SectorValidationError, match="5,500-character"):
+    with pytest.raises(SectorValidationError, match="10,000-character hard limit"):
         validate_and_stage_one(
             db, claimed["assignment_id"], OWNER, claimed["contract_hash"], draft,
             work_root=work, at=AT,
@@ -472,17 +474,16 @@ def test_overlength_failure_is_returned_by_next_claim(tmp_path: Path):
     assert retry["previous_failure"] == {
         "attempt_count": 1,
         "error_type": "SectorValidationError",
-        "message": "full_report_md exceeds the 5,500-character normal limit",
+        "message": "full_report_md exceeds the 10,000-character hard limit",
     }
 
 
-def test_valid_target_length_stages(tmp_path: Path):
+def test_6864_character_report_stages(tmp_path: Path):
     db = tmp_path / "db.sqlite"
     work = tmp_path / "work"
     _enqueue(db)
     claimed = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
-    report = _report_with_length()
-    assert 4_200 <= len(report["full_report_md"]) <= 4_800
+    report = _report_at_length(6_864)
     draft = Path(claimed["submit_path"])
     draft.parent.mkdir(parents=True, exist_ok=True)
     draft.write_text(json.dumps(_envelope(claimed, report), ensure_ascii=False), encoding="utf-8")
