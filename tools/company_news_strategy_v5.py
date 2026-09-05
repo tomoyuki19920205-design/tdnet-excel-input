@@ -51,6 +51,8 @@ def validate_generated_response(value):
     validate_instance(value, canonical_output_schema())
     for index, item in enumerate(value["research_result"]["items"]):
         news_monitor.normalize_publication_fields(item, f"items[{index}]", allow_legacy=False)
+        news_monitor.normalize_effective_fields(item, "valid_from", allow_legacy=False)
+        news_monitor.normalize_effective_fields(item, "valid_until", allow_legacy=False)
     return value
 
 

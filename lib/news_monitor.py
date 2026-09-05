@@ -25,6 +25,7 @@ TEMPORAL_SCOPE = frozenset("current quarter fiscal_year multi_year ongoing histo
 TEMPORAL_STATUS = frozenset("current ongoing historical expired unknown".split())
 SOURCE_TYPES = frozenset("news ir company government exchange research other".split())
 PUBLICATION_PRECISIONS = frozenset({"datetime", "date", "unknown"})
+EFFECTIVE_DATE_PRECISIONS = frozenset({"datetime", "date", "unknown"})
 _TICKER_RE = re.compile(r"^(?:\d{4}|\d{3}[A-Z])$")
 
 
@@ -145,6 +146,67 @@ def publication_display_value(item: Any, *, unknown: str | None = None) -> str |
     return unknown
 
 
+def normalize_effective_fields(item: Any, boundary: str, *, allow_legacy: bool = True) -> dict[str, str | None]:
+    """Validate one effective-date boundary without fabricating an instant.
+
+    ``boundary`` is ``valid_from`` or ``valid_until``. The existing boundary
+    column remains the exact-instant field for reader compatibility; its
+    companion ``*_date`` and ``*_precision`` fields carry calendar dates and
+    explicit absence. Legacy exact/null payloads remain readable.
+    """
+    if boundary not in {"valid_from", "valid_until"}:
+        raise ValueError("unsupported effective-date boundary")
+    if not isinstance(item, dict):
+        raise NewsValidationError("item must be an object")
+    date_key = f"{boundary}_date"
+    precision_key = f"{boundary}_precision"
+    explicit = date_key in item or precision_key in item
+    if not explicit:
+        if not allow_legacy:
+            raise NewsValidationError(f"item missing {boundary} precision fields")
+        raw = item.get(boundary)
+        if raw is None:
+            return {boundary: None, date_key: None, precision_key: "unknown"}
+        return {boundary: parse_datetime(raw, boundary), date_key: None,
+                precision_key: "datetime"}
+    if boundary not in item or date_key not in item or precision_key not in item:
+        raise NewsValidationError(
+            f"item must include {boundary}, {date_key}, and {precision_key}")
+    precision = _enum(item.get(precision_key), precision_key, EFFECTIVE_DATE_PRECISIONS)
+    effective_date = parse_date(item.get(date_key), date_key, required=False)
+    raw_at = item.get(boundary)
+    if precision == "datetime":
+        effective_at = parse_datetime(raw_at, boundary)
+    elif precision == "date":
+        if raw_at is not None or effective_date is None:
+            raise NewsValidationError(
+                f"{boundary} date precision requires null {boundary} and a {date_key}")
+        effective_at = None
+    else:
+        if raw_at is not None or effective_date is not None:
+            raise NewsValidationError(
+                f"{boundary} unknown precision requires null effective-date values")
+        effective_at = None
+    return {boundary: effective_at, date_key: effective_date, precision_key: precision}
+
+
+def effective_calendar_date(item: Any, boundary: str) -> str | None:
+    """Return a comparison date while preserving the boundary's precision."""
+    effective = normalize_effective_fields(item, boundary)
+    return effective[f"{boundary}_date"] or (
+        effective[boundary][:10] if effective[boundary] is not None else None)
+
+
+def effective_display_value(item: Any, boundary: str, *, unknown: str | None = None) -> str | None:
+    """Reader-first adapter for exact, date-only, and unknown effective dates."""
+    effective = normalize_effective_fields(item, boundary)
+    if effective[f"{boundary}_precision"] == "datetime":
+        return effective[boundary]
+    if effective[f"{boundary}_precision"] == "date":
+        return effective[f"{boundary}_date"]
+    return unknown
+
+
 def canonicalize_url(value: Any) -> str:
     text = _required_text(value, "source_url", 2048)
     parts = urlsplit(text)
@@ -195,8 +257,12 @@ def _temporal_status(item: dict[str, Any], checked_at: str) -> str:
     if supplied is not None:
         return _enum(supplied, "temporal_status", TEMPORAL_STATUS)
     scope = item.get("temporal_scope", "unknown")
-    valid_until = parse_datetime(item.get("valid_until"), "valid_until", required=False)
+    effective = normalize_effective_fields(item, "valid_until")
+    valid_until = effective["valid_until"]
+    valid_until_date = effective["valid_until_date"]
     if valid_until and datetime.fromisoformat(valid_until) < datetime.fromisoformat(checked_at):
+        return "expired"
+    if valid_until_date and date.fromisoformat(valid_until_date) < datetime.fromisoformat(checked_at).date():
         return "expired"
     if scope == "historical":
         return "historical"
@@ -240,8 +306,14 @@ def validate_payload(payload: Any) -> ValidatedRun:
         source_url = canonicalize_url(raw.get("source_url"))
         publication = normalize_publication_fields(raw, f"items[{index}]")
         published_at = publication["published_at"]
-        valid_from = parse_datetime(raw.get("valid_from"), f"items[{index}].valid_from", required=False)
-        valid_until = parse_datetime(raw.get("valid_until"), f"items[{index}].valid_until", required=False)
+        valid_from_fields = normalize_effective_fields(raw, "valid_from")
+        valid_until_fields = normalize_effective_fields(raw, "valid_until")
+        valid_from = valid_from_fields["valid_from"]
+        valid_until = valid_until_fields["valid_until"]
+        from_date = valid_from_fields["valid_from_date"] or (valid_from[:10] if valid_from else None)
+        until_date = valid_until_fields["valid_until_date"] or (valid_until[:10] if valid_until else None)
+        if from_date and until_date and until_date < from_date:
+            raise NewsValidationError(f"items[{index}].valid_until precedes valid_from")
         if valid_from and valid_until and valid_until < valid_from:
             raise NewsValidationError(f"items[{index}].valid_until precedes valid_from")
         tags = raw.get("tags", [])
@@ -269,7 +341,7 @@ def validate_payload(payload: Any) -> ValidatedRun:
             "earnings_relevance": _enum(raw.get("earnings_relevance"), "earnings_relevance", EARNINGS_RELEVANCE),
             "summary": _required_text(raw.get("summary"), "summary", 4000), "why_it_matters": _required_text(raw.get("why_it_matters"), "why_it_matters", 4000),
             "evidence_excerpt": _optional_text(raw.get("evidence_excerpt"), "evidence_excerpt", 1000), "temporal_scope": temporal_scope,
-            "valid_from": valid_from, "valid_until": valid_until, "temporal_status": _temporal_status(raw, checked_at),
+            **valid_from_fields, **valid_until_fields, "temporal_status": _temporal_status(raw, checked_at),
             "tags": json.dumps(tags, ensure_ascii=False), "task_run_id": run_id, "collector_type": collector_type,
             "collector_version": _optional_text(payload.get("collector_version"), "collector_version", 100),
             "analysis_version": _optional_text(payload.get("analysis_version"), "analysis_version", 100),
@@ -292,12 +364,22 @@ CREATE TABLE IF NOT EXISTS canonical_news_events (
  first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, checked_at TEXT NOT NULL, category TEXT NOT NULL,
  subcategory TEXT, direction TEXT NOT NULL, importance TEXT NOT NULL, earnings_relevance TEXT NOT NULL,
  summary TEXT NOT NULL, why_it_matters TEXT NOT NULL, evidence_excerpt TEXT, temporal_scope TEXT NOT NULL,
- valid_from TEXT, valid_until TEXT, temporal_status TEXT NOT NULL, tags TEXT NOT NULL DEFAULT '[]', task_run_id TEXT NOT NULL,
+ valid_from TEXT, valid_from_date TEXT, valid_from_precision TEXT NOT NULL DEFAULT 'unknown'
+ CHECK (valid_from_precision IN ('datetime','date','unknown')),
+ valid_until TEXT, valid_until_date TEXT, valid_until_precision TEXT NOT NULL DEFAULT 'unknown'
+ CHECK (valid_until_precision IN ('datetime','date','unknown')),
+ temporal_status TEXT NOT NULL, tags TEXT NOT NULL DEFAULT '[]', task_run_id TEXT NOT NULL,
  collector_type TEXT NOT NULL, collector_version TEXT, analysis_version TEXT, dedupe_key TEXT NOT NULL UNIQUE,
  source_hash TEXT NOT NULL, raw_payload TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
  CHECK ((published_precision='datetime' AND published_at IS NOT NULL)
      OR (published_precision='date' AND published_at IS NULL AND published_date IS NOT NULL)
-     OR (published_precision='unknown' AND published_at IS NULL AND published_date IS NULL))
+     OR (published_precision='unknown' AND published_at IS NULL AND published_date IS NULL)),
+ CHECK ((valid_from_precision='datetime' AND valid_from IS NOT NULL)
+     OR (valid_from_precision='date' AND valid_from IS NULL AND valid_from_date IS NOT NULL)
+     OR (valid_from_precision='unknown' AND valid_from IS NULL AND valid_from_date IS NULL)),
+ CHECK ((valid_until_precision='datetime' AND valid_until IS NOT NULL)
+     OR (valid_until_precision='date' AND valid_until IS NULL AND valid_until_date IS NOT NULL)
+     OR (valid_until_precision='unknown' AND valid_until IS NULL AND valid_until_date IS NULL))
 );
 CREATE TABLE IF NOT EXISTS canonical_news_scan_runs (
  scan_run_id TEXT PRIMARY KEY, ticker TEXT NOT NULL, checked_at TEXT NOT NULL, collector_type TEXT NOT NULL,
@@ -305,6 +387,8 @@ CREATE TABLE IF NOT EXISTS canonical_news_scan_runs (
  error_code TEXT, error_message TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_news_events_ticker_published ON canonical_news_events(ticker, published_date DESC, published_at DESC);
+CREATE INDEX IF NOT EXISTS ix_news_events_valid_from ON canonical_news_events(valid_from_date DESC, valid_from DESC);
+CREATE INDEX IF NOT EXISTS ix_news_events_valid_until ON canonical_news_events(valid_until_date DESC, valid_until DESC);
 CREATE INDEX IF NOT EXISTS ix_news_events_created ON canonical_news_events(created_at DESC);
 CREATE INDEX IF NOT EXISTS ix_news_events_importance ON canonical_news_events(importance);
 CREATE INDEX IF NOT EXISTS ix_news_events_direction ON canonical_news_events(direction);

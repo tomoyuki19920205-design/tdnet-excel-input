@@ -86,8 +86,15 @@ def test_material_inclusion(label):
     assert v.validate(t,a,p)
 
 
-def test_incremental_ir_requires_actual_delta():
+def test_incremental_ir_false_flag_is_rejected():
     a,t,p=fixture();select_pr(t,p);t['documents'][0]['scope_label']='IN_SCOPE_INCREMENTAL_IR'
+    with pytest.raises(b.BenchmarkError,match='flag'):v.validate(t,a,p)
+
+
+def test_incremental_ir_true_flag_still_requires_delta_evidence():
+    a,t,p=fixture();select_pr(t,p);d=t['documents'][0]
+    d.update(scope_label='IN_SCOPE_INCREMENTAL_IR',incremental_information=True,
+             incremental_information_evidence=None)
     with pytest.raises(b.BenchmarkError,match='delta'):v.validate(t,a,p)
 
 

@@ -103,7 +103,7 @@ def test_final_synthesis_api_schema_lints_and_accepts_valid_sample():
     schema = light.synthesis_output_schema()
     assert light.lint_api_schema(schema) == []
     light.validate_instance(canonical_response(), schema)
-    assert v.canonical_schema_sha256() == "38900fd0dbcd52fd7ed878bb2521b79a9d9088345f282082f97dcdf42e91827e"
+    assert v.canonical_schema_sha256() == "828269133af3cfb91d6c863579124e346a7191130204610dc00716ffd66c1205"
 
 
 @pytest.mark.parametrize("mutation,pattern", [
@@ -123,7 +123,9 @@ def test_canonical_schema_rejects_long_earnings_relevance():
     response["research_result"]["items"] = [{
         "headline": "Price revision", "source_url": "https://example.test/news", "published_at": "2026-08-31T00:00:00+09:00",
         "published_date": "2026-08-31", "published_precision": "datetime",
-        "valid_from": None, "valid_until": None, "source_type": "company", "source_name": "Example Works",
+        "valid_from": None, "valid_from_date": None, "valid_from_precision": "unknown",
+        "valid_until": None, "valid_until_date": None, "valid_until_precision": "unknown",
+        "source_type": "company", "source_name": "Example Works",
         "category": "pricing", "subcategory": None, "direction": "mixed", "importance": "medium",
         "earnings_relevance": "a detailed explanation that is deliberately longer than the canonical enum field permits",
         "summary": "Price revised", "why_it_matters": "Margin transmission", "evidence_excerpt": "New prices apply",

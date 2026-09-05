@@ -53,6 +53,11 @@ def contract():
             'exact_company_name_in_query_required': False, 'strict_query_provenance_required': False,
             'no_news_minimum_complement_channels': 2, 'partial_is_no_news': False,
             'partial_retry': 'REVIEW_ONLY_NO_AUTOMATIC_RERUN',
+            'incremental_ir_authority': {
+                'incremental_information': True,
+                'delta_evidence_required': True,
+                'source_channel_alone_is_sufficient': False,
+            },
             'candidate_only_event_policy': 'NOT_A_FALSE_POSITIVE_PENDING_BLIND_ADJUDICATION',
             'precision_status_after_run': 'PROVISIONAL_PENDING_SCOPE_AND_BLIND_ADJUDICATION'}
 
@@ -109,7 +114,8 @@ def scope_decision(item):
         require(text(item.get('index_evidence')), 'trivial index evidence missing')
         require(not MATERIAL_TITLE.search(item.get('title', '')), 'potentially material title cannot be skipped as trivial')
     if label == 'IN_SCOPE_INCREMENTAL_IR':
-        require(text(item.get('incremental_information_evidence')) and item.get('incremental_information') is True, 'incremental IR delta missing')
+        require(item.get('incremental_information') is True, 'incremental IR flag is not true')
+        require(text(item.get('incremental_information_evidence')), 'incremental IR delta missing')
     if label in IN_SCOPE:
         require(item.get('tdnet_same_content_verified') is not True or item.get('incremental_information') is True, 'in-scope event repeats TDNET without increment')
     return label

@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 
 from lib.news_monitor import (NewsValidationError, connect_news_db, make_dedupe_key,
-                              publication_display_value, upsert_run, validate_payload)
+                              effective_display_value, publication_display_value,
+                              upsert_run, validate_payload)
 from tools.ingest_company_news import ingest_file
 
 FIXTURE = Path(__file__).parent / "fixtures" / "company_news_v1.json"
@@ -110,3 +111,49 @@ def test_publication_cross_field_contradictions_fail_closed(fields):
     data = payload(); data["items"][0].update(fields)
     with pytest.raises(NewsValidationError):
         validate_payload(data)
+
+
+def test_exact_effective_datetime_keeps_legacy_behavior():
+    data = payload()
+    data["items"][0]["valid_from"] = "2026-10-01T09:30:00+09:00"
+    event = validate_payload(data).events[0]
+    assert event["valid_from"] == "2026-10-01T09:30:00+09:00"
+    assert event["valid_from_date"] is None
+    assert event["valid_from_precision"] == "datetime"
+    assert effective_display_value(event, "valid_from") == event["valid_from"]
+
+
+def test_date_only_and_unknown_effective_dates_create_no_midnight(tmp_path):
+    data = payload()
+    data["items"][0].update(
+        valid_from=None, valid_from_date="2026-10-01", valid_from_precision="date",
+        valid_until=None, valid_until_date=None, valid_until_precision="unknown")
+    run = validate_payload(data)
+    event = run.events[0]
+    assert event["valid_from"] is None
+    assert event["valid_from_date"] == "2026-10-01"
+    assert effective_display_value(event, "valid_from") == "2026-10-01"
+    assert effective_display_value(event, "valid_until", unknown="日付不明") == "日付不明"
+    assert "T00:00:00" not in json.dumps(event)
+    conn = connect_news_db(tmp_path / "effective.db")
+    upsert_run(conn, run)
+    row = conn.execute("SELECT valid_from,valid_from_date,valid_from_precision FROM canonical_news_events").fetchone()
+    assert tuple(row) == (None, "2026-10-01", "date")
+
+
+@pytest.mark.parametrize("fields", [
+    {"valid_from": "2026-10-01T00:00:00+09:00", "valid_from_date": "2026-10-01", "valid_from_precision": "date"},
+    {"valid_from": None, "valid_from_date": None, "valid_from_precision": "datetime"},
+    {"valid_until": None, "valid_until_date": "2026-12-01", "valid_until_precision": "unknown"},
+])
+def test_effective_date_cross_field_contradictions_fail_closed(fields):
+    data = payload()
+    data["items"][0].update(fields)
+    with pytest.raises(NewsValidationError):
+        validate_payload(data)
+
+
+def test_checked_at_is_not_reused_as_effective_date():
+    event = validate_payload(payload()).events[0]
+    assert event["valid_from"] is None and event["valid_from_date"] is None
+    assert event["valid_until"] is None and event["valid_until_date"] is None

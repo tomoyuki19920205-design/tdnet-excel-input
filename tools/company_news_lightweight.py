@@ -24,7 +24,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from lib import news_monitor
 from lib.news_monitor import canonicalize_url, parse_datetime, validate_payload
+from tools import company_news_strategy_v4 as strategy_v4
 from tools import company_news_strategy_v5 as strategy_v5
 from tools.company_news_canonical_schema import validate_instance
 
@@ -822,6 +824,79 @@ def restore_publication_from_evidence(response: dict[str, Any],
     return repaired
 
 
+def apply_incremental_ir_authority(response: dict[str, Any],
+                                   evidence_cards: list[dict[str, Any]],
+                                   discovery: dict[str, Any]) -> dict[str, Any]:
+    """Make EvidenceStore provenance authoritative for incremental-IR scope.
+
+    A verified company index used only for coverage is Company Web provenance,
+    not an incremental disclosure.  The aggregator may correct that metadata
+    classification when discovery explicitly says incremental IR is not
+    applicable.  It never converts a material document or invents delta text.
+    """
+    applicable = discovery.get("incremental_ir_applicable")
+    if type(applicable) is not bool:
+        raise LightweightError("incremental IR applicability authority is missing")
+    repaired = copy.deepcopy(response)
+    documents = repaired.get("strategy_telemetry", {}).get("documents")
+    if not isinstance(documents, list):
+        raise LightweightError("canonical documents are missing")
+    for index, document in enumerate(documents):
+        if document.get("scope_label") != "IN_SCOPE_INCREMENTAL_IR":
+            continue
+        if applicable:
+            strategy_v4.scope_decision(document)
+            continue
+        if document.get("incremental_information") is not False:
+            raise LightweightError(
+                f"documents[{index}] conflicts with no-increment EvidenceStore authority")
+        if document.get("material") is not False:
+            raise LightweightError(
+                f"documents[{index}] material scope cannot be reclassified without delta evidence")
+        document_url = canonicalize_url(document.get("url"))
+        matching = [card for card in evidence_cards if isinstance(card, dict)
+                    and card.get("verification_status") == "VERIFIED"
+                    and canonicalize_url(card.get("url")) == document_url]
+        if not matching or any(card.get("source_type") not in {
+                "official_index", "official_news", "official_report"} for card in matching):
+            raise LightweightError(
+                f"documents[{index}] lacks verified Company Web provenance")
+        document["scope_label"] = "IN_SCOPE_COMPANY_WEB"
+        document["scope_reason"] = (
+            "Verified official Company Web source retained for coverage; "
+            "EvidenceStore records no incremental IR delta.")
+    return repaired
+
+
+def restore_effective_precision(response: dict[str, Any]) -> dict[str, Any]:
+    """Upgrade saved exact/date/null effective values without making a time."""
+    repaired = copy.deepcopy(response)
+    payload = repaired.get("research_result")
+    if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+        raise LightweightError("canonical research items are missing")
+    for index, item in enumerate(payload["items"]):
+        for boundary in ("valid_from", "valid_until"):
+            date_key = f"{boundary}_date"
+            precision_key = f"{boundary}_precision"
+            if date_key in item or precision_key in item:
+                news_monitor.normalize_effective_fields(item, boundary, allow_legacy=False)
+                continue
+            raw = item.get(boundary)
+            if raw is None:
+                item.update({boundary: None, date_key: None, precision_key: "unknown"})
+            elif isinstance(raw, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
+                try:
+                    effective_date = date.fromisoformat(raw).isoformat()
+                except ValueError as exc:
+                    raise LightweightError(
+                        f"items[{index}] {boundary} is not a valid calendar date") from exc
+                item.update({boundary: None, date_key: effective_date, precision_key: "date"})
+            else:
+                effective_at = parse_datetime(raw, f"items[{index}] {boundary}")
+                item.update({boundary: effective_at, date_key: None, precision_key: "datetime"})
+    return repaired
+
+
 def restore_published_at_from_evidence(response: dict[str, Any],
                                        evidence_cards: list[dict[str, Any]]) -> dict[str, Any]:
     """Backward-compatible name for precision-aware evidence restoration."""
@@ -1057,7 +1132,9 @@ def codex_runner(root: Path, experiment: Path, assignment: dict[str, Any]) -> tu
     response = inject_identity_provenance(response, discovery, store.cards())
     response = apply_search_record_registry(response, search_registry, discovery)
     response = normalize_documents_from_evidence(response, store.cards(), assignment)
+    response = apply_incremental_ir_authority(response, store.cards(), discovery)
     response = restore_publication_from_evidence(response, store.cards())
+    response = restore_effective_precision(response)
     telemetry_rows.append(synthesis_telemetry)
     measured = aggregate_worker_telemetry(telemetry_rows)
     _atomic_json(company_dir / "measured-token-telemetry.json", measured)

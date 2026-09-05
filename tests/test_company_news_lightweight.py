@@ -271,7 +271,7 @@ def test_worker_limits_schema_sharing_and_context_boundaries():
     specs = light.plan_exposure_workers(assignment, discovery, light.EvidenceStore())
     assert len(specs) == 3 and all(len(spec.queries) <= 2 for spec in specs)
     assert specs[0].queries[0]["canonical_driver_phrase"] in specs[0].queries[0]["query"]
-    assert light.strategy_v5.canonical_schema_sha256() == "38900fd0dbcd52fd7ed878bb2521b79a9d9088345f282082f97dcdf42e91827e"
+    assert light.strategy_v5.canonical_schema_sha256() == "828269133af3cfb91d6c863579124e346a7191130204610dc00716ffd66c1205"
     prompt = light.worker_contract(specs[1], assignment)
     assert "prior worker history" in prompt and "electronics capex" in prompt
     assert "vibration testing demand" not in prompt
@@ -533,6 +533,67 @@ def test_duplicate_per_exposure_reviews_collapse_to_canonical_channel_record():
     reviews = repaired["strategy_telemetry"]["channel_reviews"]
     assert len(reviews) == 1 and reviews[0]["status"] == "CHECKED" and reviews[0]["exposure_index"] == 1
     assert "exposure zero" in reviews[0]["evidence"] and "exposure one" in reviews[0]["evidence"]
+
+
+def _incremental_authority_fixture(*, material=False, incremental=False, evidence="No delta"):
+    response = {"strategy_telemetry": {"documents": [{
+        "date": None, "title": "IR index", "url": "https://example.test/ir",
+        "scope_label": "IN_SCOPE_INCREMENTAL_IR", "scope_reason": "IR channel",
+        "material": material, "incremental_information": incremental,
+        "incremental_information_evidence": evidence,
+    }]}}
+    cards = [{"url": "https://example.test/ir", "source_type": "official_index",
+              "verification_status": "VERIFIED"}]
+    return response, cards
+
+
+def test_nonincremental_company_index_is_not_misclassified_as_incremental_ir():
+    response, cards = _incremental_authority_fixture()
+    repaired = light.apply_incremental_ir_authority(
+        response, cards, {"incremental_ir_applicable": False})
+    doc = repaired["strategy_telemetry"]["documents"][0]
+    assert doc["scope_label"] == "IN_SCOPE_COMPANY_WEB"
+    assert doc["incremental_information"] is False
+    assert response["strategy_telemetry"]["documents"][0]["scope_label"] == "IN_SCOPE_INCREMENTAL_IR"
+
+
+def test_incremental_ir_fails_closed_without_true_flag_or_delta():
+    response, cards = _incremental_authority_fixture(material=True)
+    with pytest.raises(light.LightweightError, match="material scope"):
+        light.apply_incremental_ir_authority(
+            response, cards, {"incremental_ir_applicable": False})
+    response, cards = _incremental_authority_fixture(
+        material=True, incremental=True, evidence=None)
+    with pytest.raises(Exception, match="delta"):
+        light.apply_incremental_ir_authority(
+            response, cards, {"incremental_ir_applicable": True})
+
+
+def test_incremental_ir_true_with_delta_evidence_passes():
+    response, cards = _incremental_authority_fixture(
+        material=True, incremental=True,
+        evidence="Q&A adds capacity constraint absent from the release")
+    repaired = light.apply_incremental_ir_authority(
+        response, cards, {"incremental_ir_applicable": True})
+    assert repaired["strategy_telemetry"]["documents"][0]["scope_label"] == "IN_SCOPE_INCREMENTAL_IR"
+
+
+def test_saved_effective_dates_upgrade_without_fake_time_or_checked_at():
+    response = {"research_result": {"checked_at": "2026-09-05T10:00:00+00:00", "items": [
+        {"valid_from": "2026-10-01", "valid_until": None},
+        {"valid_from": "2026-10-01T09:30:00+09:00", "valid_until": "2026-12-01"},
+    ]}}
+    repaired = light.restore_effective_precision(response)
+    first, second = repaired["research_result"]["items"]
+    assert first == {"valid_from": None, "valid_until": None,
+                     "valid_from_date": "2026-10-01", "valid_from_precision": "date",
+                     "valid_until_date": None, "valid_until_precision": "unknown"}
+    assert second["valid_from"] == "2026-10-01T09:30:00+09:00"
+    assert second["valid_from_date"] is None and second["valid_from_precision"] == "datetime"
+    assert second["valid_until"] is None and second["valid_until_date"] == "2026-12-01"
+    assert second["valid_until_precision"] == "date"
+    assert "T00:00:00" not in json.dumps(repaired)
+    assert all(item.get("valid_from") != response["research_result"]["checked_at"] for item in (first, second))
 
 
 def test_offline_cost_gate_for_two_through_five_workers():

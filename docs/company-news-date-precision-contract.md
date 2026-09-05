@@ -81,8 +81,10 @@ not compatible with the meaning of `published_at`.
 
 ## Phase1.8h offline result
 
-The implemented canonical schema SHA-256 is
-`38900fd0dbcd52fd7ed878bb2521b79a9d9088345f282082f97dcdf42e91827e`.
+The Phase1.8i effective-date extension changes the canonical schema SHA-256 to
+`828269133af3cfb91d6c863579124e346a7191130204610dc00716ffd66c1205`.
+Effective dates keep a separate semantic role and contract; see
+`docs/company-news-effective-date-contract.md`.
 The in-memory migration rehearsal passes legacy exact-instant preservation,
 date-only and unknown inserts, old/new reader shapes, and rejection of all
 three contradictory field combinations.
