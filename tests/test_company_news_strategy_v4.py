@@ -116,6 +116,17 @@ def test_inaccessible_material_partial_and_not_no_news():
     with pytest.raises(b.BenchmarkError,match='no-news'):v.validate(t,a,p)
 
 
+def test_partial_without_gap_and_complete_with_real_gap_fail_closed():
+    a,t,p=fixture();t.update(coverage_status='PARTIAL',no_news_gate_pass=False)
+    with pytest.raises(b.BenchmarkError,match='coverage status'):v.validate(t,a,p)
+    a,t,p=fixture();d=document('Material supply agreement','IN_SCOPE_COUNTERPARTY')
+    d.update(body_status='INACCESSIBLE',attempt_evidence='Primary source access failed')
+    t.update(documents=[d],coverage_status='COMPLETE',no_news_gate_pass=False,coverage_gaps=[{
+        'gap_type':'document_access','url':d['url'],'channel':None,'exposure_index':None,
+        'reason':'Primary source access failed','retry_required':True}])
+    with pytest.raises(b.BenchmarkError,match='coverage status'):v.validate(t,a,p)
+
+
 def test_trivial_cannot_force_partial():
     a,t,p=fixture();d=document('Holiday notice','OUT_OF_SCOPE_TRIVIAL');t['documents']=[d]
     t['coverage_gaps']=[{'url':d['url'],'reason':'Unread','retry_required':True}]

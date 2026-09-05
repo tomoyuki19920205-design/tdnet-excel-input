@@ -81,8 +81,10 @@ not compatible with the meaning of `published_at`.
 
 ## Phase1.8h offline result
 
-The Phase1.8i effective-date extension changes the canonical schema SHA-256 to
-`828269133af3cfb91d6c863579124e346a7191130204610dc00716ffd66c1205`.
+The Phase1.8i effective-date extension changed the canonical schema SHA-256 to
+`828269133af3cfb91d6c863579124e346a7191130204610dc00716ffd66c1205`;
+the Phase1.8j typed coverage-gap contract changes it to
+`d1f28aa1e09eb2ed32cdde3810a7d5bda7d6ec0d7fd2831895a4b28aba5fe34c`.
 Effective dates keep a separate semantic role and contract; see
 `docs/company-news-effective-date-contract.md`.
 The in-memory migration rehearsal passes legacy exact-instant preservation,

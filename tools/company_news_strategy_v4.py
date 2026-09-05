@@ -188,12 +188,28 @@ def validate(value, assignment, payload):
 
     gap_urls = set()
     for gap in gaps:
-        require(isinstance(gap, dict) and gap.get('url') in docs and gap['url'] not in gap_urls
-                and text(gap.get('reason')) and gap.get('retry_required') is True, 'gap needs document and review reason')
-        d = docs[gap['url']]
-        require(d['scope_label'] in IN_SCOPE and d.get('material') is True
-                and d['body_status'] == 'INACCESSIBLE' and text(d.get('attempt_evidence')), 'only inaccessible in-scope material is a partial gap')
-        gap_urls.add(gap['url'])
+        require(isinstance(gap, dict) and text(gap.get('reason'))
+                and gap.get('retry_required') is True, 'gap needs evidence and retry reason')
+        gap_type = gap.get('gap_type', 'document_access')
+        require(gap_type in {'document_access', 'query_execution'}, 'invalid coverage gap type')
+        if gap_type == 'document_access':
+            require(gap.get('url') in docs and gap['url'] not in gap_urls,
+                    'gap needs document and review reason')
+            d = docs[gap['url']]
+            require(d['scope_label'] in IN_SCOPE and d.get('material') is True
+                    and d['body_status'] == 'INACCESSIBLE' and text(d.get('attempt_evidence')),
+                    'only inaccessible in-scope material is a document gap')
+            gap_urls.add(gap['url'])
+        else:
+            channel = gap.get('channel'); exposure_index = gap.get('exposure_index')
+            require(channel in CHANNELS and gap.get('url') is None,
+                    'query gap needs channel and null document URL')
+            require(exposure_index is None or type(exposure_index) is int
+                    and 0 <= exposure_index < len(v['economic_exposures']),
+                    'query gap exposure link invalid')
+            require(not any(q.get('channel') == channel and q.get('executed') is True
+                            and q.get('exposure_index') == exposure_index for q in queries),
+                    'query gap conflicts with executed search')
     for d in documents:
         if d['scope_label'] in IN_SCOPE and d.get('material') is True:
             require(d['body_status'] != 'SKIPPED', 'known material cannot be silently skipped')

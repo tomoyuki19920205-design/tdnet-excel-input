@@ -997,6 +997,143 @@ def apply_search_record_registry(response: dict[str, Any], registry: list[dict[s
     return repaired
 
 
+def derive_coverage_state(response: dict[str, Any], registry: list[dict[str, Any]],
+                          discovery: dict[str, Any]) -> dict[str, Any]:
+    """Derive search and document coverage from recorded execution state."""
+    strategy = response.get("strategy_telemetry")
+    payload = response.get("research_result")
+    if not isinstance(strategy, dict) or not isinstance(payload, dict):
+        raise LightweightError("canonical response is incomplete")
+    exposures = discovery.get("economic_exposures")
+    if not isinstance(exposures, list) or not 2 <= len(exposures) <= 3:
+        raise LightweightError("coverage applicability map is missing")
+    if any(not isinstance(row, dict) or row.get("executed") is not True for row in registry):
+        raise LightweightError("coverage authority requires executed SearchRecordRegistry rows")
+
+    requirements: list[dict[str, Any]] = []
+
+    def add_requirement(exposure_id: int | None, channel: str,
+                        applicable: bool, required: bool) -> None:
+        matches = [row for row in registry
+                   if row.get("canonical_channel") == channel
+                   and row.get("exposure_id") == exposure_id]
+        planned = 1 if required else 0
+        executed = len(matches)
+        checked = bool(matches) and all(row.get("window_relevance_checked") is True for row in matches)
+        satisfied = not required or (executed >= planned and checked)
+        reason = None
+        if not satisfied:
+            reason = (f"Required {channel} query for exposure {exposure_id} has no executed "
+                      "SearchRecordRegistry record." if not matches else
+                      f"Required {channel} query for exposure {exposure_id} lacks window review.")
+        requirements.append({
+            "exposure_id": exposure_id, "channel": channel,
+            "applicable": applicable, "required": required,
+            "planned_query_count": planned, "executed_query_count": executed,
+            "result_count": sum(row.get("result_count", 0) for row in matches),
+            "evidence_card_count": len({evidence_id for row in matches
+                                        for evidence_id in row.get("evidence_ids", [])}),
+            "checked": checked, "gap": not satisfied, "gap_reason": reason,
+        })
+
+    add_requirement(None, "official", True, True)
+    for index, exposure in enumerate(exposures):
+        primary = exposure.get("channel") or "external_media"
+        if primary not in {"external_media", "counterparty"}:
+            raise LightweightError(f"exposure {index} has invalid complement applicability")
+        for channel in ("external_media", "counterparty"):
+            applicable = channel == primary
+            add_requirement(index, channel, applicable, applicable)
+        government = exposure.get("government_applicable")
+        if type(government) is not bool:
+            raise LightweightError(f"exposure {index} government applicability is missing")
+        add_requirement(index, "government", government, government)
+    incremental = discovery.get("incremental_ir_applicable")
+    if type(incremental) is not bool:
+        raise LightweightError("incremental IR applicability is missing")
+    add_requirement(None, "incremental_ir", incremental, incremental)
+
+    gaps = [{
+        "gap_type": "query_execution", "url": None,
+        "channel": row["channel"], "exposure_index": row["exposure_id"],
+        "reason": row["gap_reason"], "retry_required": True,
+    } for row in requirements if row["gap"]]
+    for index, document in enumerate(strategy.get("documents", [])):
+        if (document.get("scope_label") in strategy_v4.IN_SCOPE
+                and document.get("material") is True
+                and document.get("body_status") == "INACCESSIBLE"):
+            reason = document.get("attempt_evidence")
+            if not isinstance(reason, str) or not reason.strip():
+                raise LightweightError(
+                    f"documents[{index}] inaccessible material lacks attempt evidence")
+            gaps.append({
+                "gap_type": "document_access", "url": document.get("url"),
+                "channel": None, "exposure_index": None,
+                "reason": reason.strip(), "retry_required": True,
+            })
+
+    channels = {row["channel"] for row in requirements}
+    reviews = []
+    for channel in sorted(channels):
+        rows = [row for row in requirements if row["channel"] == channel]
+        applicable_rows = [row for row in rows if row["applicable"]]
+        if not applicable_rows:
+            status = "NOT_APPLICABLE"
+        elif all(row["checked"] for row in applicable_rows):
+            status = "CHECKED"
+        else:
+            status = "PARTIAL"
+        exposure_ids = [row["exposure_id"] for row in applicable_rows
+                        if row["exposure_id"] is not None]
+        reviews.append({
+            "channel": channel, "status": status,
+            "evidence": (f"Python coverage authority: {sum(row['executed_query_count'] for row in rows)} "
+                         f"executed SearchRecordRegistry record(s); "
+                         f"{sum(row['evidence_card_count'] for row in rows)} linked evidence card(s)."),
+            "exposure_index": exposure_ids[0] if exposure_ids else None,
+        })
+
+    exposure_coverage = []
+    for index in range(len(exposures)):
+        rows = [row for row in requirements if row["exposure_id"] == index and row["required"]]
+        complete = rows and all(row["checked"] for row in rows)
+        found = any(row["evidence_card_count"] for row in rows)
+        status = "SEARCHED_FOUND" if complete and found else (
+            "SEARCHED_NO_RESULT" if complete else "NOT_APPLICABLE")
+        exposure_coverage.append({
+            "exposure_index": index, "status": status,
+            "evidence": (f"Python coverage authority: {sum(row['executed_query_count'] for row in rows)} "
+                         f"of {sum(row['planned_query_count'] for row in rows)} required query record(s); "
+                         f"{sum(row['evidence_card_count'] for row in rows)} linked evidence card(s)."),
+        })
+
+    checked_channels = {review["channel"] for review in reviews if review["status"] == "CHECKED"}
+    no_news_gate = (not gaps and "official" in checked_channels
+                    and len(checked_channels & {"external_media", "counterparty", "government"}) >= 2
+                    and not payload.get("items"))
+    return {
+        "coverage_status": "PARTIAL" if gaps else "COMPLETE",
+        "coverage_gaps": gaps, "coverage_matrix": requirements,
+        "channel_reviews": reviews, "no_news_exposure_coverage": exposure_coverage,
+        "no_news_gate_pass": no_news_gate,
+        "query_budget_exceeded": len(registry) > 6,
+        "search_provenance_status": "PASS",
+        "executed_query_count": len(registry), "fake_gap_count": 0,
+    }
+
+
+def apply_coverage_authority(response: dict[str, Any], registry: list[dict[str, Any]],
+                             discovery: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Replace synthesis-derived coverage fields with Python-derived state."""
+    repaired = copy.deepcopy(response)
+    state = derive_coverage_state(repaired, registry, discovery)
+    strategy = repaired["strategy_telemetry"]
+    for key in ("coverage_status", "coverage_gaps", "channel_reviews",
+                "no_news_exposure_coverage", "no_news_gate_pass", "query_budget_exceeded"):
+        strategy[key] = copy.deepcopy(state[key])
+    return repaired, state
+
+
 def _validate_worker_response_contract(response: dict[str, Any], spec: WorkerSpec) -> None:
     """Reject added/rephrased queries and cross-slice fields without an LLM repair."""
     if response.get("worker_id") != spec.worker_id or response.get("kind") != spec.kind:
@@ -1133,6 +1270,7 @@ def codex_runner(root: Path, experiment: Path, assignment: dict[str, Any]) -> tu
     response = apply_search_record_registry(response, search_registry, discovery)
     response = normalize_documents_from_evidence(response, store.cards(), assignment)
     response = apply_incremental_ir_authority(response, store.cards(), discovery)
+    response, _ = apply_coverage_authority(response, search_registry, discovery)
     response = restore_publication_from_evidence(response, store.cards())
     response = restore_effective_precision(response)
     telemetry_rows.append(synthesis_telemetry)

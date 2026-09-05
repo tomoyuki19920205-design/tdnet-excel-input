@@ -271,7 +271,7 @@ def test_worker_limits_schema_sharing_and_context_boundaries():
     specs = light.plan_exposure_workers(assignment, discovery, light.EvidenceStore())
     assert len(specs) == 3 and all(len(spec.queries) <= 2 for spec in specs)
     assert specs[0].queries[0]["canonical_driver_phrase"] in specs[0].queries[0]["query"]
-    assert light.strategy_v5.canonical_schema_sha256() == "828269133af3cfb91d6c863579124e346a7191130204610dc00716ffd66c1205"
+    assert light.strategy_v5.canonical_schema_sha256() == "d1f28aa1e09eb2ed32cdde3810a7d5bda7d6ec0d7fd2831895a4b28aba5fe34c"
     prompt = light.worker_contract(specs[1], assignment)
     assert "prior worker history" in prompt and "electronics capex" in prompt
     assert "vibration testing demand" not in prompt
@@ -533,6 +533,64 @@ def test_duplicate_per_exposure_reviews_collapse_to_canonical_channel_record():
     reviews = repaired["strategy_telemetry"]["channel_reviews"]
     assert len(reviews) == 1 and reviews[0]["status"] == "CHECKED" and reviews[0]["exposure_index"] == 1
     assert "exposure zero" in reviews[0]["evidence"] and "exposure one" in reviews[0]["evidence"]
+
+
+def _coverage_authority_fixture():
+    exposures = [{"channel": "external_media", "government_applicable": True},
+                 {"channel": "counterparty", "government_applicable": False}]
+    discovery = {"economic_exposures": exposures, "incremental_ir_applicable": False}
+    registry = []
+    for worker, channel, exposure, count in [
+        ("company-web", "official", None, 0),
+        ("exposure-1", "external_media", 0, 0),
+        ("government-1", "government", 0, 0),
+        ("exposure-2", "counterparty", 1, 2),
+    ]:
+        registry.append({"query_id": worker+"-q1", "worker_id": worker,
+                         "exposure_id": exposure, "canonical_channel": channel,
+                         "executed": True, "result_count": count,
+                         "evidence_ids": ([worker+"-s1"] if count else []),
+                         "window_relevance_checked": True})
+    response = {"research_result": {"items": [{"headline": "event"}]},
+                "strategy_telemetry": {"documents": [], "coverage_status": "PARTIAL",
+                    "coverage_gaps": [], "channel_reviews": [],
+                    "no_news_exposure_coverage": [], "no_news_gate_pass": False,
+                    "query_budget_exceeded": False}}
+    return response, registry, discovery
+
+
+def test_coverage_authority_derives_complete_and_accepts_zero_results_as_checked():
+    response, registry, discovery = _coverage_authority_fixture()
+    repaired, state = light.apply_coverage_authority(response, registry, discovery)
+    assert state["coverage_status"] == "COMPLETE" and state["coverage_gaps"] == []
+    zero = [row for row in state["coverage_matrix"]
+            if row["required"] and row["result_count"] == 0]
+    assert zero and all(row["checked"] and not row["gap"] for row in zero)
+    assert repaired["strategy_telemetry"]["coverage_status"] == "COMPLETE"
+    reviews = {row["channel"]: row["status"] for row in state["channel_reviews"]}
+    assert reviews["incremental_ir"] == "NOT_APPLICABLE"
+    assert state["fake_gap_count"] == 0
+
+
+def test_missing_required_query_derives_partial_with_explicit_real_gap():
+    response, registry, discovery = _coverage_authority_fixture()
+    registry = [row for row in registry if row["canonical_channel"] != "government"]
+    _, state = light.apply_coverage_authority(response, registry, discovery)
+    assert state["coverage_status"] == "PARTIAL"
+    assert state["coverage_gaps"] == [{
+        "gap_type": "query_execution", "url": None, "channel": "government",
+        "exposure_index": 0,
+        "reason": "Required government query for exposure 0 has no executed SearchRecordRegistry record.",
+        "retry_required": True,
+    }]
+    assert state["fake_gap_count"] == 0
+
+
+def test_search_registry_and_derived_coverage_counts_are_consistent():
+    response, registry, discovery = _coverage_authority_fixture()
+    _, state = light.apply_coverage_authority(response, registry, discovery)
+    assert state["executed_query_count"] == len(registry)
+    assert sum(row["executed_query_count"] for row in state["coverage_matrix"]) == len(registry)
 
 
 def _incremental_authority_fixture(*, material=False, incremental=False, evidence="No delta"):

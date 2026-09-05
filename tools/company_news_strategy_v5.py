@@ -140,6 +140,25 @@ def query_plan(company_name, exposures, *, search_from, search_to):
     return plan
 
 
+def project_v4_validation(value, assignment):
+    """Build the validation-only v4 view without mutating canonical telemetry."""
+    exposures = value.get("economic_exposures", [])
+    times = value.get("stage_elapsed_seconds", {})
+    common = dict(value)
+    common.update(schema_version=v4.SCHEMA, strategy_version=v4.VERSION)
+    common_assignment = dict(assignment, strategy_version=v4.VERSION)
+    common["economic_exposures"] = [{
+        "driver": x["canonical_driver_phrase"],
+        "metadata_evidence": x["metadata_evidence"],
+        "transmission_channel": x["transmission_channel"],
+    } for x in exposures]
+    common["stage_elapsed_seconds"] = {
+        "company_web": times.get("company_web"),
+        "external_complement": times.get("external", 0) + times.get("provenance", 0),
+    }
+    return common, common_assignment
+
+
 def validate(value, assignment, payload):
     require(isinstance(value, dict), "telemetry must be object")
     require(value.get("schema_version") == SCHEMA and value.get("strategy_version") == VERSION
@@ -196,13 +215,30 @@ def validate(value, assignment, payload):
     require(value.get("candidate_count") == len(value.get("candidate_provenance", []))
             and value.get("final_event_count") == len(payload.get("items", [])), "candidate/final counts mismatch")
 
+    reviews = {row.get("channel"): row.get("status") for row in value.get("channel_reviews", [])}
+    for gap in value.get("coverage_gaps", []):
+        if gap.get("gap_type") != "query_execution":
+            continue
+        channel = gap.get("channel"); index = gap.get("exposure_index")
+        if channel == "official":
+            require(index is None, "official query gap cannot link an exposure")
+        elif channel in {"external_media", "counterparty"}:
+            require(type(index) is int and 0 <= index < len(exposures)
+                    and (exposures[index].get("channel") or "external_media") == channel,
+                    "query gap conflicts with exposure applicability")
+        elif channel == "government":
+            require(type(index) is int and 0 <= index < len(exposures)
+                    and exposures[index].get("government_applicable") is True,
+                    "government query gap is not applicable")
+        elif channel == "incremental_ir":
+            require(index is None and reviews.get("incremental_ir") != "NOT_APPLICABLE",
+                    "incremental IR query gap is not applicable")
+        else:
+            require(False, "query gap channel invalid")
+
     # Reuse the frozen v4 scope/candidate safety checks without inheriting its
     # query planning.  The copied object is validation-only and never persisted.
-    common = dict(value)
-    common.update(schema_version=v4.SCHEMA, strategy_version=v4.VERSION)
-    common_assignment = dict(assignment, strategy_version=v4.VERSION)
-    common["economic_exposures"] = [{"driver": x["canonical_driver_phrase"], "metadata_evidence": x["metadata_evidence"], "transmission_channel": x["transmission_channel"]} for x in exposures]
-    common["stage_elapsed_seconds"] = {"company_web": times["company_web"], "external_complement": times["external"] + times["provenance"]}
+    common, common_assignment = project_v4_validation(value, assignment)
     v4.validate(common, common_assignment, payload)
     validate_instance(value, canonical_output_schema()["properties"]["strategy_telemetry"], "$.strategy_telemetry")
     return value

@@ -93,8 +93,10 @@ exact and null legacy fixtures. It contains no evidence that any midnight
 value is truly exact or was promoted from a date, so migration does not
 reclassify such values.
 
-The canonical schema SHA after Phase1.8i is
+The Phase1.8i canonical schema SHA was
 `828269133af3cfb91d6c863579124e346a7191130204610dc00716ffd66c1205`.
+Phase1.8j adds typed query/document coverage gaps and changes the SHA to
+`d1f28aa1e09eb2ed32cdde3810a7d5bda7d6ec0d7fd2831895a4b28aba5fe34c`.
 
 ## 7760 offline replay
 
@@ -104,3 +106,8 @@ validation pass. Strategy validation then exposes a separate saved-state
 inconsistency: `coverage_status` is `PARTIAL` while `coverage_gaps` is empty.
 The validator correctly reports `coverage status mismatch`. Phase1.8i stops at
 that new failure and does not repair it.
+
+Phase1.8j audits that derived state from SearchRecordRegistry and saved
+applicability. It establishes complete coverage, replaces the stale status and
+channel reviews, and passes every offline validator. See
+`docs/company-news-coverage-contract.md`.

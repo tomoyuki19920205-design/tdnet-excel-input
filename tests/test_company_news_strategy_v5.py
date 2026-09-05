@@ -103,7 +103,7 @@ def test_final_synthesis_api_schema_lints_and_accepts_valid_sample():
     schema = light.synthesis_output_schema()
     assert light.lint_api_schema(schema) == []
     light.validate_instance(canonical_response(), schema)
-    assert v.canonical_schema_sha256() == "828269133af3cfb91d6c863579124e346a7191130204610dc00716ffd66c1205"
+    assert v.canonical_schema_sha256() == "d1f28aa1e09eb2ed32cdde3810a7d5bda7d6ec0d7fd2831895a4b28aba5fe34c"
 
 
 @pytest.mark.parametrize("mutation,pattern", [
@@ -162,6 +162,16 @@ def test_government_applicability_is_consistent():
                                  "driver_phrase_preservation_reason": None})
     telemetry["regulatory_themes"] = [{"theme": "freight subsidy", "exposure_index": 0}]
     assert v.validate(telemetry, a, payload)
+
+
+def test_query_gap_must_match_saved_exposure_applicability():
+    assignment, telemetry, payload = fixture()
+    telemetry.update(coverage_status="PARTIAL", no_news_gate_pass=False, coverage_gaps=[{
+        "gap_type": "query_execution", "url": None, "channel": "counterparty",
+        "exposure_index": 0, "reason": "claimed missing query", "retry_required": True,
+    }])
+    with pytest.raises(b.BenchmarkError, match="gap conflicts with exposure applicability"):
+        v.validate(telemetry, assignment, payload)
 
 
 def test_duplicate_query_is_rejected_before_research_state_is_accepted():
