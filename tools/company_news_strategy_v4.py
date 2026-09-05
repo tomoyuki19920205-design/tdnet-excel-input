@@ -169,7 +169,13 @@ def validate(value, assignment, payload):
     docs = {}
     for doc in documents:
         require(isinstance(doc, dict) and url(doc.get('url')) and text(doc.get('title')) and doc['url'] not in docs, 'document identity missing/duplicate')
-        require(date.fromisoformat(assignment['search_from']) <= date.fromisoformat(doc['date']) <= date.fromisoformat(assignment['search_to']), 'document outside window')
+        document_date = doc.get('date')
+        if document_date is not None:
+            try:
+                parsed_document_date = date.fromisoformat(document_date)
+            except (TypeError, ValueError):
+                require(False, 'document date must be YYYY-MM-DD or null')
+            require(date.fromisoformat(assignment['search_from']) <= parsed_document_date <= date.fromisoformat(assignment['search_to']), 'document outside window')
         scope_decision(doc)
         require(doc.get('body_status') in {'VERIFIED', 'SKIPPED', 'INACCESSIBLE'}, 'invalid body status')
         docs[doc['url']] = doc

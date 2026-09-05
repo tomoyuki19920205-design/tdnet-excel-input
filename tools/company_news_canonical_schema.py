@@ -47,7 +47,10 @@ def canonical_output_schema(*, telemetry_schema: str, strategy_version: str,
     nullable_string = _string(nullable=True)
     item_properties = {
         "headline": _string(max_length=500), "source_url": _string(max_length=2048),
-        "published_at": _string(max_length=64), "valid_from": nullable_string,
+        "published_at": _string(max_length=64, nullable=True),
+        "published_date": _string(max_length=10, nullable=True),
+        "published_precision": _string(enum=news_monitor.PUBLICATION_PRECISIONS),
+        "valid_from": nullable_string,
         "valid_until": nullable_string, "source_type": _string(enum=news_monitor.SOURCE_TYPES),
         "source_name": _string(max_length=200), "category": _string(enum=news_monitor.CATEGORIES),
         "subcategory": nullable_string, "direction": _string(enum=news_monitor.DIRECTIONS),
@@ -94,7 +97,7 @@ def canonical_output_schema(*, telemetry_schema: str, strategy_version: str,
                       "content_verified": {"const": True}, "evidence_excerpt": _string(max_length=1000)},
                      ("url", "source_type", "content_verified", "evidence_excerpt"), additional=False)
     document_properties = {
-        "date": _string(max_length=10), "title": _string(max_length=500), "url": _string(max_length=2048),
+        "date": _string(max_length=10, nullable=True), "title": _string(max_length=500), "url": _string(max_length=2048),
         "final_url": nullable_string, "scope_label": _string(enum=scope_labels), "scope_reason": _string(),
         "material": {"type": "boolean"}, "body_status": _string(enum={"VERIFIED", "SKIPPED", "INACCESSIBLE"}),
         "attempt_evidence": nullable_string, "tdnet_same_content_verified": {"type": ["boolean", "null"]},

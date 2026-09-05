@@ -37,7 +37,7 @@ Use an explicit three-state representation:
 
 | Precision | `published_at` | `published_date` | Meaning |
 | --- | --- | --- | --- |
-| `datetime` | timezone-aware datetime | matching calendar date | Exact instant is known |
+| `datetime` | timezone-aware datetime | source date when retained, otherwise null | Exact instant is known |
 | `date` | null | date | Calendar date only is known |
 | `unknown` | null | null | Neither date nor time is known |
 
@@ -59,20 +59,38 @@ canonical URL, and normalized headline.
 
 ## Migration plan
 
-1. Add nullable `published_date DATE` and a constrained
-   `published_precision` enum/text column. Make `published_at` nullable and add
-   checks enforcing the three valid combinations.
-2. Backfill all existing non-null `published_at` rows as `datetime`, deriving
-   `published_date` from the stored instant without changing the instant.
-3. Version the payload validator and API view to return all three fields. Keep
+1. Deploy readers that accept legacy exact-datetime rows and all three new
+   precision states while writers still emit the legacy shape.
+2. Apply the additive migration in `020_company_news_date_precision.sql`.
+   Backfill existing non-null `published_at` rows as `datetime` without deriving
+   `published_date`: PostgreSQL does not retain the original input offset needed
+   to reconstruct the source calendar date safely.
+3. Update the API view to return all three fields. Keep
    exact-datetime inputs and outputs byte-for-byte compatible where current
    normalization already permits it.
-4. Update ordering and dedupe together, then update the viewer to show a date
+4. Switch writers to the explicit three-field contract. Update ordering and
+   dedupe together, then update the viewer to show a date
    for `date`, a timestamp for `datetime`, and an explicit unknown state.
-5. Deploy readers that accept both versions before writers emit date-only or
-   unknown events. Run a dry migration and rollback rehearsal before any live
-   schema or data change.
+5. Strengthen and validate the cross-field constraint after all writers are
+   confirmed compatible. Run a dry migration and rollback rehearsal before any
+   live schema or data change.
 
 Until that migration is approved, date-only evidence must fail closed before
 production publication. Converting `2026-08-31` to midnight in any timezone is
 not compatible with the meaning of `published_at`.
+
+## Phase1.8h offline result
+
+The implemented canonical schema SHA-256 is
+`38900fd0dbcd52fd7ed878bb2521b79a9d9088345f282082f97dcdf42e91827e`.
+The in-memory migration rehearsal passes legacy exact-instant preservation,
+date-only and unknown inserts, old/new reader shapes, and rejection of all
+three contradictory field combinations.
+
+The saved 7760 replay passes the new canonical publication and document-date
+contracts. Full final validation remains blocked by two independent saved
+payload defects: an undated IR index is labelled `IN_SCOPE_INCREMENTAL_IR`
+while its evidence says no incremental entry exists, and `valid_from` is a
+date-only value while the existing temporal validator requires a timezone-aware
+datetime. Phase1.8h records these failures without changing their meaning or
+fabricating a temporal value. The PostgreSQL migration remains unapplied.

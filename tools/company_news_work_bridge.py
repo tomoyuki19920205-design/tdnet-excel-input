@@ -26,7 +26,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from lib.news_monitor import NewsValidationError, normalize_ticker, validate_payload
+from lib.news_monitor import (NewsValidationError, normalize_ticker,
+                              publication_calendar_date, validate_payload)
 from tools.company_news_atomic import atomic_write_json
 from tools.ingest_company_news import ingest_file
 from tools.sync_company_news import sync as sync_company_news
@@ -308,7 +309,10 @@ def _validate_result(path: Path, assignment: dict[str, Any]) -> int:
     search_from = date.fromisoformat(assignment["search_from"])
     search_to = date.fromisoformat(assignment["search_to"])
     for index, event in enumerate(run.events):
-        published = datetime.fromisoformat(event["published_at"]).date()
+        calendar_date = publication_calendar_date(event, f"items[{index}]")
+        if calendar_date is None:
+            raise WorkPayloadValidationError(f"items[{index}].publication date is unknown")
+        published = date.fromisoformat(calendar_date)
         if published < search_from or published > search_to:
             raise WorkPayloadValidationError(f"items[{index}].published_at is outside assignment search range")
     return len(run.events)

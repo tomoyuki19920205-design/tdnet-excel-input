@@ -239,10 +239,11 @@ def test_runner_persists_raw_usage_and_tool_events_before_validation(tmp_path, m
                     "evidence_cards": [], "zero_result_signatures": [],
                     "incremental_ir_applicable": False}, telemetry(spec)
         return {"research_result": {"sources_checked_count": 1, "items": []},
-                "strategy_telemetry": {"source_provenance": [{
-                    "url": "https://example.test/a", "source_type": "company",
-                    "content_verified": True, "evidence_excerpt": "official identity"}],
-                    "queries": [], "channel_reviews": []}}, telemetry(None)
+                    "strategy_telemetry": {"source_provenance": [{
+                        "url": "https://example.test/a", "source_type": "company",
+                        "content_verified": True, "evidence_excerpt": "official identity"}],
+                        "queries": [], "channel_reviews": [], "documents": [],
+                        "candidate_provenance": []}}, telemetry(None)
     monkeypatch.setattr(light, "_run_isolated_stage", fake_stage)
     assignment = {"assignment_id": "a", "ticker": "7760", "company_name": "IMV", "position": 1,
                   "search_from": "2026-08-25", "search_to": "2026-08-31"}
@@ -270,7 +271,7 @@ def test_worker_limits_schema_sharing_and_context_boundaries():
     specs = light.plan_exposure_workers(assignment, discovery, light.EvidenceStore())
     assert len(specs) == 3 and all(len(spec.queries) <= 2 for spec in specs)
     assert specs[0].queries[0]["canonical_driver_phrase"] in specs[0].queries[0]["query"]
-    assert light.strategy_v5.canonical_schema_sha256() == "28dde3510e724231d43ed865c85accc96c2970f00fa8409ae155df31823c73c3"
+    assert light.strategy_v5.canonical_schema_sha256() == "38900fd0dbcd52fd7ed878bb2521b79a9d9088345f282082f97dcdf42e91827e"
     prompt = light.worker_contract(specs[1], assignment)
     assert "prior worker history" in prompt and "electronics capex" in prompt
     assert "vibration testing demand" not in prompt
@@ -422,6 +423,8 @@ def test_timezone_aware_published_at_is_restored_exactly_from_evidence():
     response, _, cards = _metadata_repair_fixture()
     repaired = light.restore_published_at_from_evidence(response, cards)
     assert repaired["research_result"]["items"][0]["published_at"] == "2026-08-31T09:30:00+09:00"
+    assert repaired["research_result"]["items"][0]["published_date"] == "2026-08-31"
+    assert repaired["research_result"]["items"][0]["published_precision"] == "datetime"
     assert repaired["research_result"]["items"][0]["source_url"] == "https://example.test/news"
     assert repaired["research_result"]["items"][0]["summary"] == "Material pricing change"
     assert response["research_result"]["items"][0]["published_at"] == "2026-08-31"
@@ -429,10 +432,36 @@ def test_timezone_aware_published_at_is_restored_exactly_from_evidence():
 
 def test_date_only_published_at_never_invents_time_or_timezone():
     response, _, cards = _metadata_repair_fixture("2026-08-31")
-    original = copy.deepcopy(response)
-    with pytest.raises(light.LightweightError, match="date-only; time and timezone unavailable"):
-        light.restore_published_at_from_evidence(response, cards)
-    assert response == original
+    repaired = light.restore_publication_from_evidence(response, cards)
+    assert repaired["research_result"]["items"][0]["published_at"] is None
+    assert repaired["research_result"]["items"][0]["published_date"] == "2026-08-31"
+    assert repaired["research_result"]["items"][0]["published_precision"] == "date"
+    assert response["research_result"]["items"][0]["published_at"] == "2026-08-31"
+
+
+def test_document_dates_are_normalized_without_counting_unknown_or_background():
+    response = {"strategy_telemetry": {
+        "documents": [
+            {"date": "", "title": "Index", "url": "https://example.test/index",
+             "final_url": None, "body_status": "VERIFIED"},
+            {"date": "2026-05-13", "title": "Background", "url": "https://example.test/background",
+             "final_url": None, "body_status": "VERIFIED"},
+            {"date": "2026-08-31", "title": "Event", "url": "https://example.test/event",
+             "final_url": None, "body_status": "VERIFIED"},
+        ],
+        "candidate_provenance": [{"document_url": "https://example.test/event"}],
+    }}
+    cards = [
+        {"url": "https://example.test/index", "published_at": None, "verification_status": "VERIFIED"},
+        {"url": "https://example.test/background", "published_at": "2026-05-13", "verification_status": "VERIFIED"},
+        {"url": "https://example.test/event", "published_at": "2026-08-31", "verification_status": "VERIFIED"},
+    ]
+    assignment = {"search_from": "2026-08-25", "search_to": "2026-08-31"}
+    repaired = light.normalize_documents_from_evidence(response, cards, assignment)
+    assert [(row["title"], row["date"], row["final_url"]) for row in repaired["strategy_telemetry"]["documents"]] == [
+        ("Index", None, "https://example.test/index"),
+        ("Event", "2026-08-31", "https://example.test/event"),
+    ]
 
 
 def test_invalid_evidence_published_at_fails_closed():

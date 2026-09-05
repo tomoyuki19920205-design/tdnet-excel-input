@@ -10,6 +10,7 @@ import math
 import re
 from pathlib import Path
 
+from lib import news_monitor
 from tools import company_news_batch_benchmark as b
 from tools import company_news_strategy_v4 as v4
 from tools.company_news_canonical_schema import (
@@ -48,6 +49,8 @@ def canonical_schema_sha256():
 
 def validate_generated_response(value):
     validate_instance(value, canonical_output_schema())
+    for index, item in enumerate(value["research_result"]["items"]):
+        news_monitor.normalize_publication_fields(item, f"items[{index}]", allow_legacy=False)
     return value
 
 

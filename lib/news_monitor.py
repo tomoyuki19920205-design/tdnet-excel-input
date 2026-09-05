@@ -11,7 +11,7 @@ import re
 import sqlite3
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -24,6 +24,7 @@ EARNINGS_RELEVANCE = frozenset("direct likely general context unknown".split())
 TEMPORAL_SCOPE = frozenset("current quarter fiscal_year multi_year ongoing historical unknown".split())
 TEMPORAL_STATUS = frozenset("current ongoing historical expired unknown".split())
 SOURCE_TYPES = frozenset("news ir company government exchange research other".split())
+PUBLICATION_PRECISIONS = frozenset({"datetime", "date", "unknown"})
 _TICKER_RE = re.compile(r"^(?:\d{4}|\d{3}[A-Z])$")
 
 
@@ -75,6 +76,75 @@ def parse_datetime(value: Any, field: str, *, required: bool = True) -> str | No
     return parsed.isoformat()
 
 
+def parse_date(value: Any, field: str, *, required: bool = True) -> str | None:
+    if value is None and not required:
+        return None
+    text = _required_text(value, field, 10)
+    try:
+        parsed = date.fromisoformat(text)
+    except ValueError as exc:
+        raise NewsValidationError(f"{field} must be YYYY-MM-DD") from exc
+    if parsed.isoformat() != text:
+        raise NewsValidationError(f"{field} must be canonical YYYY-MM-DD")
+    return text
+
+
+def normalize_publication_fields(item: Any, field: str = "item", *, allow_legacy: bool = True) -> dict[str, str | None]:
+    """Validate publication precision without inventing a time or timezone.
+
+    Legacy payloads containing only an exact ``published_at`` remain readable.
+    New payloads must provide both nullable value fields and an explicit
+    ``published_precision``.
+    """
+    if not isinstance(item, dict):
+        raise NewsValidationError(f"{field} must be an object")
+    explicit = any(key in item for key in ("published_date", "published_precision"))
+    if not explicit:
+        if not allow_legacy:
+            raise NewsValidationError(f"{field} missing publication precision fields")
+        published_at = parse_datetime(item.get("published_at"), f"{field}.published_at")
+        return {"published_at": published_at, "published_date": None,
+                "published_precision": "datetime"}
+
+    if "published_date" not in item or "published_precision" not in item or "published_at" not in item:
+        raise NewsValidationError(f"{field} must include published_at, published_date, and published_precision")
+    precision = _enum(item.get("published_precision"), f"{field}.published_precision", PUBLICATION_PRECISIONS)
+    raw_at = item.get("published_at")
+    published_date = parse_date(item.get("published_date"), f"{field}.published_date", required=False)
+    if precision == "datetime":
+        published_at = parse_datetime(raw_at, f"{field}.published_at")
+    elif precision == "date":
+        if raw_at is not None or published_date is None:
+            raise NewsValidationError(f"{field} date precision requires null published_at and a published_date")
+        published_at = None
+    else:
+        if raw_at is not None or published_date is not None:
+            raise NewsValidationError(f"{field} unknown precision requires null publication values")
+        published_at = None
+    return {"published_at": published_at, "published_date": published_date,
+            "published_precision": precision}
+
+
+def publication_calendar_date(item: Any, field: str = "item") -> str | None:
+    """Return a comparison date without persisting a fabricated value."""
+    publication = normalize_publication_fields(item, field)
+    if publication["published_date"] is not None:
+        return publication["published_date"]
+    if publication["published_at"] is not None:
+        return publication["published_at"][:10]
+    return None
+
+
+def publication_display_value(item: Any, *, unknown: str | None = None) -> str | None:
+    """Reader-first display adapter for legacy and precision-aware rows."""
+    publication = normalize_publication_fields(item, "event")
+    if publication["published_precision"] == "datetime":
+        return publication["published_at"]
+    if publication["published_precision"] == "date":
+        return publication["published_date"]
+    return unknown
+
+
 def canonicalize_url(value: Any) -> str:
     text = _required_text(value, "source_url", 2048)
     parts = urlsplit(text)
@@ -94,8 +164,20 @@ def normalize_headline(value: Any) -> str:
     return " ".join(_required_text(value, "headline", 500).casefold().split())
 
 
-def make_dedupe_key(ticker: str, source_url: str, published_at: str, headline: str) -> str:
-    material = "\n".join((ticker, canonicalize_url(source_url), published_at, normalize_headline(headline)))
+def make_dedupe_key(ticker: str, source_url: str, published_at: str | None, headline: str,
+                    *, published_date: str | None = None,
+                    published_precision: str | None = None) -> str:
+    # Preserve existing exact-datetime keys byte-for-byte.  Date-only and
+    # unknown records use tagged values so null never causes duplicate churn.
+    if published_precision in (None, "datetime") and published_at is not None:
+        publication = published_at
+    elif published_precision == "date" and published_date is not None:
+        publication = f"date:{published_date}"
+    elif published_precision == "unknown" and published_at is None and published_date is None:
+        publication = "unknown"
+    else:
+        raise NewsValidationError("invalid publication fields for dedupe")
+    material = "\n".join((ticker, canonicalize_url(source_url), publication, normalize_headline(headline)))
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
@@ -156,7 +238,8 @@ def validate_payload(payload: Any) -> ValidatedRun:
             raise NewsValidationError(f"items[{index}] exceeds the structured payload size limit")
         headline = _required_text(raw.get("headline"), f"items[{index}].headline", 500)
         source_url = canonicalize_url(raw.get("source_url"))
-        published_at = parse_datetime(raw.get("published_at"), f"items[{index}].published_at")
+        publication = normalize_publication_fields(raw, f"items[{index}]")
+        published_at = publication["published_at"]
         valid_from = parse_datetime(raw.get("valid_from"), f"items[{index}].valid_from", required=False)
         valid_until = parse_datetime(raw.get("valid_until"), f"items[{index}].valid_until", required=False)
         if valid_from and valid_until and valid_until < valid_from:
@@ -165,7 +248,9 @@ def validate_payload(payload: Any) -> ValidatedRun:
         if not isinstance(tags, list) or any(not isinstance(tag, str) or not tag.strip() for tag in tags):
             raise NewsValidationError(f"items[{index}].tags must be an array of non-empty strings")
         tags = list(dict.fromkeys(tag.strip()[:100] for tag in tags))[:50]
-        dedupe_key = make_dedupe_key(ticker, source_url, published_at, headline)
+        dedupe_key = make_dedupe_key(ticker, source_url, published_at, headline,
+                                     published_date=publication["published_date"],
+                                     published_precision=publication["published_precision"])
         if dedupe_key in seen:
             continue
         seen.add(dedupe_key)
@@ -176,7 +261,9 @@ def validate_payload(payload: Any) -> ValidatedRun:
             "event_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"company-news:{dedupe_key}")), "schema_version": SCHEMA_VERSION,
             "ticker": ticker, "headline": headline, "source_type": source_type,
             "source_name": _required_text(raw.get("source_name"), "source_name", 200), "source_url": source_url,
-            "published_at": published_at, "first_seen_at": checked_at, "last_seen_at": checked_at, "checked_at": checked_at,
+            "published_at": published_at, "published_date": publication["published_date"],
+            "published_precision": publication["published_precision"],
+            "first_seen_at": checked_at, "last_seen_at": checked_at, "checked_at": checked_at,
             "category": _enum(raw.get("category"), "category", CATEGORIES), "subcategory": _optional_text(raw.get("subcategory"), "subcategory", 200),
             "direction": _enum(raw.get("direction"), "direction", DIRECTIONS), "importance": _enum(raw.get("importance"), "importance", IMPORTANCE),
             "earnings_relevance": _enum(raw.get("earnings_relevance"), "earnings_relevance", EARNINGS_RELEVANCE),
@@ -199,20 +286,25 @@ def validate_payload(payload: Any) -> ValidatedRun:
 SQLITE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS canonical_news_events (
  event_id TEXT PRIMARY KEY, schema_version TEXT NOT NULL, ticker TEXT NOT NULL, headline TEXT NOT NULL,
- source_type TEXT NOT NULL, source_name TEXT NOT NULL, source_url TEXT NOT NULL, published_at TEXT NOT NULL,
+ source_type TEXT NOT NULL, source_name TEXT NOT NULL, source_url TEXT NOT NULL, published_at TEXT,
+ published_date TEXT, published_precision TEXT NOT NULL DEFAULT 'datetime'
+ CHECK (published_precision IN ('datetime','date','unknown')),
  first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, checked_at TEXT NOT NULL, category TEXT NOT NULL,
  subcategory TEXT, direction TEXT NOT NULL, importance TEXT NOT NULL, earnings_relevance TEXT NOT NULL,
  summary TEXT NOT NULL, why_it_matters TEXT NOT NULL, evidence_excerpt TEXT, temporal_scope TEXT NOT NULL,
  valid_from TEXT, valid_until TEXT, temporal_status TEXT NOT NULL, tags TEXT NOT NULL DEFAULT '[]', task_run_id TEXT NOT NULL,
  collector_type TEXT NOT NULL, collector_version TEXT, analysis_version TEXT, dedupe_key TEXT NOT NULL UNIQUE,
- source_hash TEXT NOT NULL, raw_payload TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+ source_hash TEXT NOT NULL, raw_payload TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+ CHECK ((published_precision='datetime' AND published_at IS NOT NULL)
+     OR (published_precision='date' AND published_at IS NULL AND published_date IS NOT NULL)
+     OR (published_precision='unknown' AND published_at IS NULL AND published_date IS NULL))
 );
 CREATE TABLE IF NOT EXISTS canonical_news_scan_runs (
  scan_run_id TEXT PRIMARY KEY, ticker TEXT NOT NULL, checked_at TEXT NOT NULL, collector_type TEXT NOT NULL,
  task_id TEXT, status TEXT NOT NULL, items_found INTEGER NOT NULL DEFAULT 0, sources_checked_count INTEGER,
  error_code TEXT, error_message TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS ix_news_events_ticker_published ON canonical_news_events(ticker, published_at DESC);
+CREATE INDEX IF NOT EXISTS ix_news_events_ticker_published ON canonical_news_events(ticker, published_date DESC, published_at DESC);
 CREATE INDEX IF NOT EXISTS ix_news_events_created ON canonical_news_events(created_at DESC);
 CREATE INDEX IF NOT EXISTS ix_news_events_importance ON canonical_news_events(importance);
 CREATE INDEX IF NOT EXISTS ix_news_events_direction ON canonical_news_events(direction);

@@ -7,10 +7,10 @@ time or timezone.
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
-from lib.news_monitor import NewsValidationError, parse_datetime
+from lib.news_monitor import NewsValidationError, normalize_publication_fields, parse_datetime
 
 
 PRECISIONS = frozenset({"datetime", "date", "unknown"})
@@ -60,33 +60,18 @@ def classify_publication(value: Any) -> dict[str, str | None]:
     except NewsValidationError as exc:
         raise DatePrecisionError(str(exc)) from exc
     assert exact is not None
+    source_date = str(value).strip()[:10]
     return {"published_at": exact,
-            "published_date": datetime.fromisoformat(exact).date().isoformat(),
+            "published_date": source_date if len(source_date) == 10 else None,
             "published_precision": "datetime"}
 
 
 def validate_publication_record(record: dict[str, Any]) -> dict[str, str | None]:
     """Validate the proposed representation without supplying missing facts."""
-    if not isinstance(record, dict) or record.get("published_precision") not in PRECISIONS:
-        raise DatePrecisionError("published_precision must be datetime, date, or unknown")
-    precision = record["published_precision"]
-    published_at = record.get("published_at")
-    published_date = normalize_document_date(record.get("published_date"))
-    if precision == "unknown":
-        if published_at is not None or published_date is not None:
-            raise DatePrecisionError("unknown precision cannot carry a publication value")
-    elif precision == "date":
-        if published_at is not None or published_date is None:
-            raise DatePrecisionError("date precision requires only published_date")
-    else:
-        if published_at is None or published_date is None:
-            raise DatePrecisionError("datetime precision requires published_at and published_date")
-        exact = classify_publication(published_at)
-        if exact["published_precision"] != "datetime" or exact["published_date"] != published_date:
-            raise DatePrecisionError("published_at and published_date disagree")
-        published_at = exact["published_at"]
-    return {"published_at": published_at, "published_date": published_date,
-            "published_precision": precision}
+    try:
+        return normalize_publication_fields(record, "publication", allow_legacy=False)
+    except NewsValidationError as exc:
+        raise DatePrecisionError(str(exc)) from exc
 
 
 def publication_sort_key(record: dict[str, Any], stable_id: str) -> tuple[str, int, str, str]:
@@ -97,7 +82,10 @@ def publication_sort_key(record: dict[str, Any], stable_id: str) -> tuple[str, i
     without implying an intraday order.
     """
     value = validate_publication_record(record)
-    anchor = value["published_date"] or "0001-01-01"
+    # Exact legacy rows may not have a safely backfilled published_date.  Their
+    # stored instant still supplies a transient ordering anchor without writing
+    # a calendar date back to the row.
+    anchor = value["published_date"] or (value["published_at"][:10] if value["published_at"] else "0001-01-01")
     rank = {"unknown": 0, "date": 1, "datetime": 2}[value["published_precision"]]
     return anchor, rank, value["published_at"] or "", stable_id
 

@@ -55,6 +55,25 @@ def test_v2_baseline_without_v3_completeness():
     assert v.evaluation_policy()['common48_denominator']==27
 
 
+def test_unknown_document_date_does_not_crash_or_count_as_window_evidence():
+    a,t,p=fixture(); d=document('Undated index','IN_SCOPE_COMPANY_WEB')
+    d.update(date=None, material=False, body_status='VERIFIED', final_url=d['url'])
+    t['documents']=[d]
+    t['source_provenance'].append({**t['source_provenance'][0], 'url':d['url']})
+    p['sources_checked_count']=2
+    assert v.validate(t,a,p)['documents'][0]['date'] is None
+
+
+def test_empty_document_date_is_rejected_without_parser_leak():
+    a,t,p=fixture(); d=document('Undated index','IN_SCOPE_COMPANY_WEB')
+    d.update(date='', material=False, body_status='VERIFIED', final_url=d['url'])
+    t['documents']=[d]
+    t['source_provenance'].append({**t['source_provenance'][0], 'url':d['url']})
+    p['sources_checked_count']=2
+    with pytest.raises(b.BenchmarkError, match='YYYY-MM-DD or null'):
+        v.validate(t,a,p)
+
+
 @pytest.mark.parametrize('title,label', [('決算短信','OUT_OF_SCOPE_TDNET'),('業績修正','OUT_OF_SCOPE_TDNET'),('増資・売出し','OUT_OF_SCOPE_TDNET'),('固定資産売却益','OUT_OF_SCOPE_TDNET'),('夏季休業日程','OUT_OF_SCOPE_TRIVIAL'),('児童図書の寄付','OUT_OF_SCOPE_TRIVIAL')])
 def test_inaccessible_out_of_scope_nonfailure(title,label):
     a,t,p=fixture();t['documents']=[document(title,label)];assert v.validate(t,a,p)['coverage_status']=='COMPLETE'

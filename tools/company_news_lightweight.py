@@ -16,7 +16,7 @@ import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -719,9 +719,69 @@ def inject_identity_provenance(response: dict[str, Any], discovery: dict[str, An
     return repaired
 
 
-def restore_published_at_from_evidence(response: dict[str, Any],
-                                       evidence_cards: list[dict[str, Any]]) -> dict[str, Any]:
-    """Restore exact publication instants only; never invent time or timezone."""
+def normalize_documents_from_evidence(response: dict[str, Any], evidence_cards: list[dict[str, Any]],
+                                      assignment: dict[str, Any]) -> dict[str, Any]:
+    """Bind document dates/URLs to evidence and exclude out-of-window background."""
+    repaired = copy.deepcopy(response)
+    strategy = repaired.get("strategy_telemetry")
+    if not isinstance(strategy, dict) or not isinstance(strategy.get("documents"), list):
+        raise LightweightError("canonical documents are missing")
+    start = date.fromisoformat(assignment["search_from"])
+    end = date.fromisoformat(assignment["search_to"])
+    candidate_urls = {canonicalize_url(row.get("document_url")) for row in strategy.get("candidate_provenance", [])
+                      if isinstance(row, dict) and row.get("document_url")}
+    normalized = []
+    for index, document in enumerate(strategy["documents"]):
+        if not isinstance(document, dict):
+            raise LightweightError(f"documents[{index}] is invalid")
+        document_url = canonicalize_url(document.get("url"))
+        matching = [card for card in evidence_cards if isinstance(card, dict)
+                    and card.get("verification_status") == "VERIFIED"
+                    and canonicalize_url(card.get("url")) == document_url]
+        if not matching:
+            raise LightweightError(f"documents[{index}] has no verified evidence card")
+        source_dates: set[str] = set()
+        for card in matching:
+            value = card.get("published_at")
+            if value is None:
+                continue
+            if isinstance(value, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+                try:
+                    source_dates.add(date.fromisoformat(value).isoformat())
+                except ValueError as exc:
+                    raise LightweightError(f"documents[{index}] evidence date is invalid") from exc
+            else:
+                exact = parse_datetime(value, f"documents[{index}] evidence published_at")
+                assert exact is not None
+                source_dates.add(str(value).strip()[:10])
+        existing = document.get("date")
+        if existing in (None, ""):
+            document_date = next(iter(source_dates)) if len(source_dates) == 1 else None
+        else:
+            try:
+                document_date = date.fromisoformat(existing).isoformat()
+            except (TypeError, ValueError) as exc:
+                raise LightweightError(f"documents[{index}] date is invalid") from exc
+            if source_dates and source_dates != {document_date}:
+                raise LightweightError(f"documents[{index}] date conflicts with verified evidence")
+        if len(source_dates) > 1:
+            raise LightweightError(f"documents[{index}] has conflicting verified dates")
+        if document_date is not None and not (start <= date.fromisoformat(document_date) <= end):
+            if document_url in candidate_urls:
+                raise LightweightError(f"documents[{index}] candidate is outside the assigned window")
+            continue
+        document["date"] = document_date
+        document["url"] = document_url
+        if document.get("body_status") == "VERIFIED":
+            document["final_url"] = document_url
+        normalized.append(document)
+    strategy["documents"] = normalized
+    return repaired
+
+
+def restore_publication_from_evidence(response: dict[str, Any],
+                                      evidence_cards: list[dict[str, Any]]) -> dict[str, Any]:
+    """Restore publication precision from evidence without inventing an instant."""
     repaired = copy.deepcopy(response)
     payload = repaired.get("research_result")
     if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
@@ -737,7 +797,8 @@ def restore_published_at_from_evidence(response: dict[str, Any],
         if None in raw_values:
             raw_values.remove(None)
         if not raw_values:
-            raise LightweightError(f"items[{index}] authoritative published_at is unknown")
+            item.update(published_at=None, published_date=None, published_precision="unknown")
+            continue
         instants: set[str] = set()
         date_only: set[str] = set()
         for value in raw_values:
@@ -746,15 +807,25 @@ def restore_published_at_from_evidence(response: dict[str, Any],
                 continue
             instants.add(parse_datetime(value, f"items[{index}] evidence published_at"))
         if not instants:
-            raise LightweightError(
-                f"items[{index}] authoritative published_at is date-only; time and timezone unavailable")
+            if len(date_only) != 1:
+                raise LightweightError(f"items[{index}] has conflicting authoritative publication dates")
+            item.update(published_at=None, published_date=next(iter(date_only)), published_precision="date")
+            continue
         if len(instants) != 1:
             raise LightweightError(f"items[{index}] has conflicting authoritative publication instants")
         authoritative = next(iter(instants))
         if date_only and {value[:10] for value in instants} != date_only:
             raise LightweightError(f"items[{index}] publication date conflicts with authoritative instant")
-        item["published_at"] = authoritative
+        item.update(published_at=authoritative,
+                    published_date=(next(iter(date_only)) if date_only else str(next(iter(raw_values))).strip()[:10]),
+                    published_precision="datetime")
     return repaired
+
+
+def restore_published_at_from_evidence(response: dict[str, Any],
+                                       evidence_cards: list[dict[str, Any]]) -> dict[str, Any]:
+    """Backward-compatible name for precision-aware evidence restoration."""
+    return restore_publication_from_evidence(response, evidence_cards)
 
 
 def build_search_record_registry(
@@ -985,7 +1056,8 @@ def codex_runner(root: Path, experiment: Path, assignment: dict[str, Any]) -> tu
     response = inject_runtime_metadata(response, completed_at=synthesis_telemetry.get("completed_at"))
     response = inject_identity_provenance(response, discovery, store.cards())
     response = apply_search_record_registry(response, search_registry, discovery)
-    response = restore_published_at_from_evidence(response, store.cards())
+    response = normalize_documents_from_evidence(response, store.cards(), assignment)
+    response = restore_publication_from_evidence(response, store.cards())
     telemetry_rows.append(synthesis_telemetry)
     measured = aggregate_worker_telemetry(telemetry_rows)
     _atomic_json(company_dir / "measured-token-telemetry.json", measured)

@@ -64,6 +64,15 @@ def test_existing_exact_datetime_behavior_is_unchanged():
     assert value["published_at"] == raw
 
 
+def test_exact_datetime_may_omit_calendar_date_without_conversion():
+    value = precision.validate_publication_record({
+        "published_at": "2026-08-31T23:30:00-04:00", "published_date": None,
+        "published_precision": "datetime"})
+    assert value["published_at"] == "2026-08-31T23:30:00-04:00"
+    assert value["published_date"] is None
+    assert precision.publication_sort_key(value, "legacy")[0] == "2026-08-31"
+
+
 def test_invalid_or_naive_publication_values_fail_closed():
     with pytest.raises(precision.DatePrecisionError):
         precision.classify_publication("2026-08-31T09:30:00")
