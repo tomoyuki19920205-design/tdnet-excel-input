@@ -519,7 +519,7 @@ def test_malformed_payload_is_quarantined_and_retried(tmp_path: Path):
     assert len(quarantined) == 1
 
 
-def test_failed_sector_does_not_block_a_fresh_sector(tmp_path: Path):
+def test_retry_is_claimed_before_a_fresh_sector(tmp_path: Path):
     db = tmp_path / "db.sqlite"
     work = tmp_path / "work"
     _enqueue(db, 2)
@@ -530,8 +530,9 @@ def test_failed_sector_does_not_block_a_fresh_sector(tmp_path: Path):
         stage_one(db, first["assignment_id"], OWNER, bad, work_root=work, at=AT)
     _enqueue(db, 3)
     second = claim_one(db, OWNER, work_root=work, at=AT + timedelta(hours=1))["assignment"]
-    assert second["sector_code"] == 3
-    assert second["assignment_id"] != first["assignment_id"]
+    assert second["sector_code"] == 2
+    assert second["assignment_id"] == first["assignment_id"]
+    assert second["attempt_count"] == 2
 
 
 @pytest.mark.parametrize("field,value", [

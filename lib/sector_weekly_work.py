@@ -272,7 +272,9 @@ def claim_next(
         )
         selected = conn.execute(
             "SELECT * FROM sector_weekly_work_assignments WHERE status='ready' AND attempt_count<? AND available_at<=? "
-            f"{period_filter} ORDER BY CASE WHEN attempt_count=0 THEN 0 ELSE 1 END,sector_code LIMIT 1",
+            f"{period_filter} ORDER BY CASE "
+            "WHEN attempt_count>0 AND last_error_type='SectorBridgeError' THEN 0 "
+            "WHEN attempt_count=0 THEN 1 ELSE 2 END,available_at,sector_code LIMIT 1",
             (MAX_ATTEMPTS, _utc_text(timestamp), *period_values),
         ).fetchone()
         if selected is None:
