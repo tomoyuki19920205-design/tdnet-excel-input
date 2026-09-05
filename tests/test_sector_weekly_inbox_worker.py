@@ -68,6 +68,8 @@ def _run_main(
 
 def _fixture(
     tmp_path: Path, code: int = 4, *, published_at: str = "2026-09-04",
+    full_report_length: int | None = None,
+    watchlist_companies: list[dict] | None = None,
 ) -> tuple[Path, Path, dict, Path]:
     db = tmp_path / "db.sqlite"
     conn = sqlite3.connect(db)
@@ -94,7 +96,7 @@ def _fixture(
         "report": {
             "importance": "A", "direction": "mixed",
             "summary_bullets": ["海外需給", "国内波及", "反証条件"],
-            "watchlist_companies": [], "next_week_watchpoints": ["価格"],
+            "watchlist_companies": watchlist_companies or [], "next_week_watchpoints": ["価格"],
             "missed_candidates": ["重要変動なしも確認"],
             "full_report_md": (
                 f"# 【東証33業種週次】{claimed['sector_name']}\n\n## 今週の要旨\n要旨。\n\n" +
@@ -116,6 +118,12 @@ def _fixture(
             }],
         },
     }
+    if full_report_length is not None:
+        markdown = envelope["report"]["full_report_md"]
+        envelope["report"]["full_report_md"] = (
+            markdown + "長" * (full_report_length - len(markdown))
+        )
+        assert len(envelope["report"]["full_report_md"]) == full_report_length
     draft = tmp_path / "draft.json"
     draft.write_text(json.dumps(envelope, ensure_ascii=False), encoding="utf-8")
     stage_one(db, claimed["assignment_id"], OWNER, draft, work_root=work, at=AT)
@@ -188,6 +196,47 @@ def test_worker_happy_path_upserts_syncs_completes_and_processes(tmp_path: Path)
         row = get_assignment(conn, claimed["assignment_id"])
         assert row["status"] == "success" and row["attempt_count"] == 1
         assert conn.execute("SELECT count(*) FROM canonical_sector_reports").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_10000_character_report_preserves_structures_and_syncs_one_row(tmp_path: Path):
+    watchlist = [{"code": "4502", "name": "武田薬品工業", "direction": "mixed"}]
+    db, work, claimed, inbox = _fixture(
+        tmp_path, code=8, full_report_length=10_000, watchlist_companies=watchlist,
+    )
+    staged = json.loads(inbox.read_text(encoding="utf-8"))
+    staged_markdown = staged["report"]["full_report_md"]
+    assert len(staged_markdown) == 10_000
+    assert staged_markdown.startswith("# 【東証33業種週次】医薬品")
+    assert staged["report"]["watchlist_companies"] == watchlist
+    assert staged["report"]["sources"][0]["source_type"] == "government"
+    calls = []
+
+    def sync(path: Path, dedupe_key: str, run_id: str, dry: bool):
+        calls.append((path, dedupe_key, run_id, dry))
+        return {"canonical_sector_reports": 1, "canonical_sector_report_runs": 1}
+
+    result = process_one(WorkerPaths.from_values(tmp_path, db, work), inbox, sync_func=sync)
+
+    assert result["status"] == "success"
+    assert calls == [(db, claimed["stable_key"], claimed["stable_key"], False)]
+    assert not inbox.exists()
+    conn = connect_sector_db(db)
+    try:
+        report = dict(conn.execute(
+            "SELECT * FROM canonical_sector_reports WHERE dedupe_key=?", (claimed["stable_key"],),
+        ).fetchone())
+        assert report["full_report_md"] == staged_markdown
+        assert json.loads(report["summary_bullets"]) == ["海外需給", "国内波及", "反証条件"]
+        assert json.loads(report["watchlist_companies"]) == watchlist
+        assert json.loads(report["sources"])[0]["source_name"] == "Authority"
+        assert conn.execute(
+            "SELECT count(*) FROM canonical_sector_reports WHERE dedupe_key=?", (claimed["stable_key"],),
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT count(*) FROM canonical_sector_report_runs WHERE run_id=?", (claimed["stable_key"],),
+        ).fetchone()[0] == 1
     finally:
         conn.close()
 

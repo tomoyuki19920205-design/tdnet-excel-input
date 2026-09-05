@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT))
 from lib.sector_weekly import (
     JST, SCHEMA_VERSION, REPORT_TYPE, SectorValidationError, WeeklyWindow, connect_sector_db,
     dedupe_key, iso_seconds, now_jst, sector_name,
-    sector_research_context, weekly_window,
+    sector_research_context, validate_full_report_length, weekly_window,
 )
 from lib.sector_weekly_work import enqueue_assignment, enqueue_retry_candidate, get_assignment_by_key
 
@@ -150,8 +150,7 @@ def assemble_payload(content: dict[str, Any], code: int, window: WeeklyWindow, g
     content = dict(content)
     content["summary_bullets"] = clean_summary_bullets(content.get("summary_bullets"))
     content["full_report_md"] = clean_full_report_md(content.get("full_report_md"), code)
-    if content.get("importance") != "A+" and isinstance(content["full_report_md"], str) and len(content["full_report_md"]) > 5500:
-        raise SectorValidationError("full_report_md exceeds the 5,500-character normal limit")
+    validate_full_report_length(content["full_report_md"])
     return {
         "schema_version": SCHEMA_VERSION, "report_type": REPORT_TYPE, "sector_code": code,
         "sector_name": sector_name(code), "period_start": iso_seconds(window.period_start), "period_end": iso_seconds(window.period_end),

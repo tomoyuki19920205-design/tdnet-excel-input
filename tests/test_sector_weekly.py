@@ -8,7 +8,8 @@ import pytest
 
 import tools.sector_weekly_scheduler as scheduler
 from lib.sector_weekly import (
-    CANONICAL_SQLITE_SCHEMA, JST, OUTSIDE_IN_SECTORS, SECTORS, SectorValidationError, connect_sector_db, dedupe_key,
+    CANONICAL_SQLITE_SCHEMA, FULL_REPORT_MAX_CHARS, JST, OUTSIDE_IN_SECTORS, SECTORS,
+    SectorValidationError, connect_sector_db, dedupe_key,
     scheduled_sector, sector_name, validate_report, weekly_window,
 )
 from tools.sector_weekly_scheduler import (
@@ -136,7 +137,7 @@ def test_shipping_prompt_separates_freight_markets():
 
 def test_final_prompt_requires_concise_report_and_bullets():
     prompt = scheduler.build_prompt(16, weekly_window(datetime.fromisoformat("2026-09-05T06:00:00+09:00")))
-    for term in ("重要材料は原則3〜5件", "目安3,000〜4,500文字", "5,500文字以下へ編集", "summary_bulletsは左カード用に3〜5件", "同じ数値・因果関係", "URLとMarkdown citationはfull_report_mdへ入れず"):
+    for term in ("重要材料は原則3〜5件", "hard上限は10,000文字", "5,500文字を超えたことだけでは失敗とせず", "機械的な途中切断", "summary_bulletsは左カード用に3〜5件", "同じ数値・因果関係", "URLとMarkdown citationはfull_report_mdへ入れず"):
         assert term in prompt
 
 
@@ -317,7 +318,7 @@ def test_card_bullets_remove_web_citations_and_are_bounded():
         validate_report(payload, expected_code=20, expected_window=window)
 
 
-def test_full_report_normalizes_title_citations_and_normal_length():
+def test_full_report_normalizes_title_and_citations():
     window = weekly_window(datetime.fromisoformat("2026-09-05T06:00:00+09:00"))
     content = _content()
     content["importance"] = "A"
@@ -325,9 +326,35 @@ def test_full_report_normalizes_title_citations_and_normal_length():
     payload = assemble_payload(content, 20, window)
     assert payload["full_report_md"].startswith("# 【東証33業種週次】電気・ガス業")
     assert "https://" not in payload["full_report_md"]
-    content["full_report_md"] = "# 電気・ガス業\n" + "長" * 5501
-    with pytest.raises(SectorValidationError, match="5,500-character"):
+
+
+@pytest.mark.parametrize("length", [5_500, 5_501, 6_864, 9_999, 10_000])
+def test_full_report_hard_limit_accepts_every_required_boundary(length: int):
+    window = weekly_window(datetime.fromisoformat("2026-09-05T06:00:00+09:00"))
+    content = _content()
+    content["importance"] = "A"
+    body = content["full_report_md"]
+    content["full_report_md"] = body + "長" * (length - len(body))
+
+    payload = assemble_payload(content, 20, window)
+    validated = validate_report(
+        payload, expected_code=20, expected_window=window, require_new_markdown_style=True,
+    )
+
+    assert FULL_REPORT_MAX_CHARS == 10_000
+    assert len(payload["full_report_md"]) == length
+    assert len(validated.report["full_report_md"]) == length
+
+
+def test_full_report_hard_limit_rejects_10001_without_truncating():
+    window = weekly_window(datetime.fromisoformat("2026-09-05T06:00:00+09:00"))
+    content = _content()
+    body = content["full_report_md"]
+    content["full_report_md"] = body + "長" * (10_001 - len(body))
+
+    with pytest.raises(SectorValidationError, match="10,000-character hard limit"):
         assemble_payload(content, 20, window)
+    assert len(content["full_report_md"]) == 10_001
 
 
 def test_full_report_restores_concatenated_markdown_headings():
@@ -378,7 +405,7 @@ def test_chatgpt_worker_prompt_has_transport_research_and_schema_contracts():
         "Sector Weekly Worker", "1回の実行でready assignmentを最大1件", "claim --owner sector-weekly-worker",
         "ChatGPTプラン内", "outside-in", "確認できた事実", "日本企業への波及", "反対材料・注意点",
         "海外企業", "日本語読み", "空行を3行以上", "数字は1段落1論点",
-        "重要材料は", "3〜5件", "4,200〜4,800文字", "missed_candidates",
+        "重要材料は", "3〜5件", "hard上限は10,000文字", "missed_candidates",
         "sector_weekly_work_result_v2", "company_ir | government | regulator",
         "heartbeat --assignment-id", "10分ごと", "hard time budgetは50分", "45分時点",
         "abandon --assignment-id", "atomicにretry_pending", "調査品質を落として無理にstage",

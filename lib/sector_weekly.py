@@ -21,6 +21,7 @@ DIRECTIONS = frozenset({"positive", "negative", "mixed", "neutral"})
 SOURCE_TYPES = frozenset({
     "company_ir", "government", "regulator", "industry_association", "news", "market_data", "other"
 })
+FULL_REPORT_MAX_CHARS = 10_000
 
 SECTORS: tuple[str, ...] = (
     "水産・農林業", "鉱業", "建設業", "食料品", "繊維製品", "パルプ・紙", "化学", "医薬品",
@@ -181,6 +182,14 @@ def _text(value: Any, field: str, maximum: int, minimum: int = 1) -> str:
     return result
 
 
+def validate_full_report_length(value: Any) -> None:
+    """Enforce the one hard length limit without truncating report Markdown."""
+    if isinstance(value, str) and len(value) > FULL_REPORT_MAX_CHARS:
+        raise SectorValidationError(
+            f"full_report_md exceeds the {FULL_REPORT_MAX_CHARS:,}-character hard limit"
+        )
+
+
 def _string_list(value: Any, field: str, minimum: int, maximum: int, item_max: int = 1000) -> list[str]:
     if not isinstance(value, list) or not minimum <= len(value) <= maximum:
         raise SectorValidationError(f"{field} must be an array with {minimum}..{maximum} items")
@@ -318,7 +327,10 @@ def validate_report(
     if direction not in DIRECTIONS:
         raise SectorValidationError("direction must be positive, negative, mixed, or neutral")
     bullets = _string_list(payload.get("summary_bullets"), "summary_bullets", 3, 5, 240)
-    full_report = _text(payload.get("full_report_md"), "full_report_md", 100_000, 200)
+    validate_full_report_length(payload.get("full_report_md"))
+    full_report = _text(
+        payload.get("full_report_md"), "full_report_md", FULL_REPORT_MAX_CHARS, 200,
+    )
     if require_new_markdown_style:
         validate_new_report_markdown(full_report)
     else:
