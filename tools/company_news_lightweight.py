@@ -7,6 +7,7 @@ context per assignment, and performs validation/finalization in Python.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -25,6 +26,7 @@ if str(ROOT) not in sys.path:
 
 from lib.news_monitor import canonicalize_url, validate_payload
 from tools import company_news_strategy_v5 as strategy_v5
+from tools.company_news_canonical_schema import validate_instance
 
 
 SCHEMA = "company_news_lightweight_phase1_v1"
@@ -40,6 +42,9 @@ MAX_EVIDENCE_SOURCES = 24
 MAX_QUERY_RESULTS = 5
 MAX_EVIDENCE_EXCERPT = 800
 MAX_EVIDENCE_SUPPORTS = 400
+MAX_WEB_WORKERS = 5
+MAX_QUERIES_PER_WORKER = 2
+WORKER_TELEMETRY_SCHEMA = "company_news_exposure_worker_telemetry_v1"
 CONTROL_TOTAL_TOKENS = 8_584_237
 CONTROL_INPUT_TOKENS = 8_545_419
 CONTROL_CACHED_INPUT_TOKENS = 8_227_072
@@ -73,17 +78,31 @@ class EvidenceStore:
         self.result_limit = result_limit
         self._cards: dict[str, EvidenceCard] = {}
         self._queries: dict[str, str] = {}
+        self._zero_result_signatures: set[str] = set()
 
     @staticmethod
     def _query_key(query: str) -> str:
         return " ".join(query.casefold().split())
 
+    @staticmethod
+    def _query_signature(query: str) -> str:
+        aliases = {"prices": "price", "pricing": "price", "demands": "demand",
+                   "regulatory": "regulation", "government": "regulation"}
+        tokens = re.findall(r"[\w一-龯ぁ-んァ-ン]+", query.casefold())
+        ignored = {"search", "latest", "news", "press", "the", "a", "an"}
+        normalized = {aliases.get(token, token) for token in tokens
+                      if token not in ignored and not re.fullmatch(r"20\d{2}(?:\d{2}){0,2}", token)}
+        return " ".join(sorted(normalized))
+
     def register_query(self, query_id: str, query: str) -> bool:
         key = self._query_key(query)
-        if key in self._queries:
+        if key in self._queries or self._query_signature(query) in self._zero_result_signatures:
             return False
         self._queries[key] = query_id
         return True
+
+    def register_zero_result(self, query: str) -> None:
+        self._zero_result_signatures.add(self._query_signature(query))
 
     def bounded_results(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Expose only the configured number of already-ranked result records."""
@@ -254,37 +273,122 @@ def preflight(experiment: Path) -> dict[str, Any]:
                 "prior_news_bucket", "search_from", "search_to", "strategy_version", "position")}}
 
 
-def compact_contract(assignment: dict[str, Any]) -> str:
-    """Runtime-only contract. It contains no control result or evaluation data."""
-    assignment_json = json.dumps(assignment, ensure_ascii=False, separators=(",", ":"))
-    return f"""You are researching exactly one Japanese listed company for a read-only benchmark.
-Return only the JSON object required by the canonical output schema. Use web search/open tools; do not use shell, repo search, prior company context, Gold, or saved benchmark results. The schema, including enum spelling and required nested keys, is enforced by --output-schema.
-
-ASSIGNMENT={assignment_json}
-
-Apply Company News Strategy v5 without weakening research semantics:
-- Fixed window {assignment['search_from']} through {assignment['search_to']}; NON_TDNET only.
-- Verify ticker identity from an official company source. Review the bounded official news/press/IR index and all relevant in-window material candidates.
-- Derive 2 or 3 economic exposures. Preserve every canonical_driver_phrase literally in at least one executed exposure query. External/counterparty queries need not contain the company name.
-- Review concrete customer, supplier, product demand, pricing/cost, capacity/order and industry transmission. For regulation, financing, rate, tariff, subsidy, safety or procurement exposure, run exactly one focused government query.
-- Incremental IR is eligible only for added pricing, volume, order, capacity, customer, margin, supply or capex information. Exclude TDNET-equivalent and trivial items. Continue the window after finding an event.
-- no_news requires official coverage plus at least two exposure-appropriate complement channels and semantic coverage for every exposure.
-- Every claimed source must be opened and content_verified. Keep snippets concise. Do not fabricate future facts; report research failure if the fixed future window cannot be verified.
-
-Use checked_at with a timezone. earnings_relevance is only direct, likely, general, context, or unknown; explanations belong in why_it_matters. Query channels are only official, external_media, government, counterparty, or incremental_ir. Link every exposure query and regulatory theme to its exposure_index. Candidate entries must map selected payload headline/source URL. Documents must be in the fixed window; index-only no-news evidence may use the window end date. Python performs all validation; do not attempt a second-pass repair.
-"""
-
-
 def output_schema() -> dict[str, Any]:
     return strategy_v5.canonical_output_schema()
 
 
-def codex_command(root: Path, schema_path: Path, result_path: Path, prompt: str) -> list[str]:
-    """Expose native Web search while removing unrelated research tools."""
+@dataclass(frozen=True)
+class WorkerSpec:
+    worker_id: str
+    kind: str
+    exposure_id: int | None
+    exposure: dict[str, Any] | None
+    queries: tuple[dict[str, Any], ...]
+
+
+def _strict_object(properties: dict[str, Any]) -> dict[str, Any]:
+    return {"type": "object", "properties": properties, "required": list(properties),
+            "additionalProperties": False}
+
+
+def evidence_card_schema() -> dict[str, Any]:
+    return _strict_object({
+        "source_id": {"type": "string", "maxLength": 80},
+        "query_id": {"type": "string", "maxLength": 80},
+        "exposure_id": {"type": ["integer", "null"], "minimum": 0},
+        "url": {"type": "string", "maxLength": 2048},
+        "source_type": {"type": "string", "maxLength": 80},
+        "title": {"type": "string", "maxLength": 300},
+        "published_at": {"type": ["string", "null"], "maxLength": 64},
+        "excerpt": {"type": "string", "maxLength": MAX_EVIDENCE_EXCERPT},
+        "supports": {"type": "string", "maxLength": MAX_EVIDENCE_SUPPORTS},
+        "verification_status": {"type": "string", "enum": ["VERIFIED", "UNVERIFIED"]},
+    })
+
+
+def worker_output_schema(spec: WorkerSpec) -> dict[str, Any]:
+    """Use canonical exposure/query definitions while keeping worker output bounded."""
+    telemetry = output_schema()["properties"]["strategy_telemetry"]["properties"]
+    company_identity = copy.deepcopy(telemetry["company_identity"])
+    company_identity["type"] = ["object", "null"]
+    properties = {
+        "worker_id": {"const": spec.worker_id},
+        "kind": {"const": spec.kind},
+        "company_identity": company_identity,
+        "economic_exposures": copy.deepcopy(telemetry["economic_exposures"]),
+        "exposure_id": {"type": ["integer", "null"], "minimum": 0},
+        "queries": {"type": "array", "items": copy.deepcopy(telemetry["queries"]["items"]),
+                    "minItems": 1, "maxItems": MAX_QUERIES_PER_WORKER},
+        "evidence_cards": {"type": "array", "items": evidence_card_schema(),
+                           "maxItems": MAX_QUERY_RESULTS * MAX_QUERIES_PER_WORKER},
+        "zero_result_signatures": {"type": "array", "items": {"type": "string", "maxLength": 500},
+                                   "maxItems": MAX_QUERIES_PER_WORKER},
+        "incremental_ir_applicable": {"type": "boolean"},
+    }
+    schema = {"$schema": "http://json-schema.org/draft-07/schema#", **_strict_object(properties)}
+    # Discovery alone derives the canonical 2..3 exposures. Other workers carry none.
+    if spec.kind != "company_web":
+        schema["properties"]["economic_exposures"]["minItems"] = 0
+        schema["properties"]["economic_exposures"]["maxItems"] = 0
+    return schema
+
+
+def compact_contract(assignment: dict[str, Any]) -> str:
+    """Compatibility alias for the company-Web worker's minimal contract."""
+    return worker_contract(WorkerSpec("company-web", "company_web", None, None, ({
+        "query_id": "company-web-q1", "channel": "official",
+        "query": f"{assignment['company_name']} news press IR {assignment['search_from']} {assignment['search_to']}",
+        "exposure_index": None, "canonical_driver_phrase": None,
+    },)), assignment)
+
+
+def worker_contract(spec: WorkerSpec, assignment: dict[str, Any]) -> str:
+    minimal = {key: assignment.get(key) for key in
+               ("assignment_id", "ticker", "company_name", "search_from", "search_to")}
+    payload = {"assignment": minimal, "worker_id": spec.worker_id, "kind": spec.kind,
+               "exposure_id": spec.exposure_id, "exposure": spec.exposure,
+               "queries": list(spec.queries)}
+    return "\n".join((
+        "Research one bounded NON_TDNET slice. Return only the worker JSON schema object.",
+        "Use native Web only; do not use shell, repo search, Gold, benchmark output, prior company context, or prior worker history.",
+        "Execute only the supplied 1 or 2 queries; never retry, paraphrase, broaden, or add a query.",
+        "Open only results needed to verify evidence. Return bounded evidence cards; omit raw page bodies.",
+        "For company_web, verify ticker identity, review the official index/window, and derive 2 or 3 major economic exposures.",
+        "Each exposure channel must be external_media or counterparty; government is a second query on that exposure.",
+        "For an exposure worker, research only its supplied exposure. Do not discuss or infer other exposures.",
+        "Each executed query record must use its supplied query/channel/linkage verbatim and report actual result metadata.",
+        "No repair/reconcile pass is allowed. Python validates and stops on any failure.",
+        "INPUT=" + json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+    ))
+
+
+def synthesis_contract(assignment: dict[str, Any], discovery: dict[str, Any],
+                       queries: list[dict[str, Any]], store: EvidenceStore,
+                       elapsed_by_kind: dict[str, float]) -> str:
+    minimal = {key: assignment.get(key) for key in
+               ("assignment_id", "ticker", "company_name", "search_from", "search_to")}
+    payload = {"assignment": minimal, "company_identity": discovery["company_identity"],
+               "economic_exposures": discovery["economic_exposures"], "queries": queries,
+               "evidence_cards": store.cards(), "stage_elapsed_seconds": elapsed_by_kind}
+    return "\n".join((
+        "Synthesize the canonical Company News Strategy v5 JSON object from the bounded input only.",
+        "No Web or tools are available. Do not invent facts, URLs, queries, evidence, or elapsed times.",
+        "Map verified cards to source_provenance/documents/candidates and final events; no_news requires complete evidence.",
+        "Use the exact canonical schema. Python performs validation/finalization and no LLM retry is allowed.",
+        "BOUNDED_INPUT=" + json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+    ))
+
+
+def codex_command(root: Path, schema_path: Path, result_path: Path, prompt: str,
+                  *, web_enabled: bool = True) -> list[str]:
+    """Create one ephemeral context; only Web workers receive native Web."""
     disabled = ("shell_tool", "unified_exec", "apps", "plugins", "computer_use",
                 "browser_use", "browser_use_external", "browser_use_full_cdp_access",
                 "image_generation", "multi_agent")
-    command = ["codex", "--search", "exec", "--ephemeral", "--ignore-user-config"]
+    command = ["codex"]
+    if web_enabled:
+        command.append("--search")
+    command.extend(("exec", "--ephemeral", "--ignore-user-config"))
     for feature in disabled:
         command.extend(("--disable", feature))
     command.extend(("--json", "--color", "never", "--sandbox", "read-only",
@@ -370,64 +474,242 @@ def _redact_event(value: Any) -> Any:
     return value
 
 
+def _sanitize_event(value: dict[str, Any]) -> dict[str, Any]:
+    """Keep usage/call telemetry but discard native tool bodies from persisted JSONL."""
+    cleaned = _redact_event(value)
+    if cleaned.get("type") == "item.completed" and isinstance(cleaned.get("item"), dict):
+        item = dict(cleaned["item"])
+        tool_types = {"command_execution", "mcp_tool_call", "dynamic_tool_call", "tool_call",
+                      "web_search", "web_fetch"}
+        if str(item.get("type", "")) in tool_types:
+            for key in ("content", "output", "result", "body", "text"):
+                if key in item:
+                    item[key] = "[OMITTED_RAW_TOOL_CONTENT]"
+        cleaned = {**cleaned, "item": item}
+    return cleaned
+
+
 def _atomic_jsonl(path: Path, events: list[dict[str, Any]]) -> None:
-    text = "".join(json.dumps(_redact_event(event), ensure_ascii=False, separators=(",", ":")) + "\n"
+    text = "".join(json.dumps(_sanitize_event(event), ensure_ascii=False, separators=(",", ":")) + "\n"
                    for event in events)
     temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
     temporary.write_text(text, encoding="utf-8")
     os.replace(temporary, path)
 
 
-def codex_runner(root: Path, experiment: Path, assignment: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
-    company_dir = experiment / "companies" / f"{assignment['position']:02d}-{assignment['ticker']}"
-    company_dir.mkdir(parents=True, exist_ok=True)
-    schema_path, result_path = company_dir / "output-schema.json", company_dir / "last-message.json"
-    _atomic_json(schema_path, output_schema())
-    command = codex_command(root, schema_path, result_path, compact_contract(assignment))
-    started = time.monotonic()
-    completed = subprocess.run(command, text=True, encoding="utf-8", errors="replace", capture_output=True, check=False)
-    elapsed = time.monotonic() - started
-    event_lines = completed.stdout.splitlines()
-    events: list[dict[str, Any]] = []
-    for line in event_lines:
+def _parse_events(stdout: str) -> list[dict[str, Any]]:
+    events = []
+    for line in stdout.splitlines():
         try:
             value = json.loads(line)
         except json.JSONDecodeError:
             continue
         if isinstance(value, dict):
             events.append(value)
-    _atomic_jsonl(company_dir / "raw-events.jsonl", events)
-    _atomic_json(company_dir / "execution-summary.json", {
+    return events
+
+
+def _run_isolated_stage(root: Path, company_dir: Path, spec: WorkerSpec | None,
+                        prompt: str, schema: dict[str, Any], *, web_enabled: bool) -> tuple[dict[str, Any], dict[str, Any]]:
+    stage_id = spec.worker_id if spec else "final-synthesis"
+    stage_dir = company_dir / "workers" / stage_id
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    schema_path, result_path = stage_dir / "output-schema.json", stage_dir / "last-message.json"
+    _atomic_json(schema_path, schema)
+    command = codex_command(root, schema_path, result_path, prompt, web_enabled=web_enabled)
+    started = time.monotonic()
+    completed = subprocess.run(command, text=True, encoding="utf-8", errors="replace",
+                               capture_output=True, check=False)
+    elapsed = time.monotonic() - started
+    events = _parse_events(completed.stdout)
+    _atomic_jsonl(stage_dir / "raw-events.sanitized.jsonl", events)
+    telemetry = token_telemetry(events, elapsed)
+    telemetry.update({
+        "schema_version": WORKER_TELEMETRY_SCHEMA,
+        "worker_id": stage_id,
+        "exposure_id": spec.exposure_id if spec else None,
+        "kind": spec.kind if spec else "final_synthesis",
+        "model_visible_chars": sum(item["model_visible_chars"] for item in telemetry["tool_events"]),
+        "validation_status": "PENDING" if completed.returncode == 0 and result_path.exists() else "PROCESS_FAILED",
+    })
+    _atomic_json(stage_dir / "telemetry.json", telemetry)
+    _atomic_json(stage_dir / "execution-summary.json", {
         "exit_code": completed.returncode,
         "stderr": bounded_text(completed.stderr, max_chars=8_000, max_lines=80),
         "event_types": [event.get("type") for event in events],
-        "errors": [event for event in events if event.get("type") in {"error", "turn.failed"}],
     })
-    measured = token_telemetry(events, elapsed)
-    measured["canonical_schema_sha256"] = strategy_v5.canonical_schema_sha256()
-    measured["validation_status"] = "PENDING" if completed.returncode == 0 and result_path.exists() else "RESEARCH_PROCESS_FAILED"
-    _atomic_json(company_dir / "measured-token-telemetry.json", measured)
     if completed.returncode != 0 or not result_path.exists():
-        raise LightweightError(f"Codex research failed for {assignment['ticker']}: exit={completed.returncode}")
+        raise LightweightError(f"isolated stage failed: {stage_id} exit={completed.returncode}")
     response = _read_json(result_path)
+    try:
+        validate_instance(response, schema)
+        if spec is not None:
+            _validate_worker_response_contract(response, spec)
+    except Exception:
+        telemetry["validation_status"] = "FAIL"
+        _atomic_json(stage_dir / "telemetry.json", telemetry)
+        raise
+    telemetry["validation_status"] = "PASS"
+    telemetry["evidence_cards_returned"] = len(response.get("evidence_cards", []))
+    _atomic_json(stage_dir / "telemetry.json", telemetry)
+    return response, telemetry
+
+
+def _validate_worker_response_contract(response: dict[str, Any], spec: WorkerSpec) -> None:
+    """Reject added/rephrased queries and cross-slice fields without an LLM repair."""
+    expected = [(row["query_id"], row["channel"], row["query"], row.get("exposure_index"))
+                for row in spec.queries]
+    actual = [(row.get("query_id"), row.get("channel"), row.get("query"), row.get("exposure_index"))
+              for row in response["queries"]]
+    # query_id is a worker-card linkage field, not part of the canonical query object.
+    if len(actual) != len(expected):
+        raise LightweightError(f"worker changed fixed query count: {spec.worker_id}")
+    if any(row[0] is None for row in actual):
+        actual = [(expected[index][0], *row[1:]) for index, row in enumerate(actual)]
+    if actual != expected:
+        raise LightweightError(f"worker changed fixed query plan: {spec.worker_id}")
+    if spec.kind == "company_web":
+        if response["company_identity"] is None or not 2 <= len(response["economic_exposures"]) <= 3:
+            raise LightweightError("company Web discovery contract incomplete")
+        invalid_channels = {row.get("channel") for row in response["economic_exposures"]} - {
+            "external_media", "counterparty", None}
+        if invalid_channels:
+            raise LightweightError(f"invalid exposure channels: {sorted(invalid_channels)}")
+    elif response["company_identity"] is not None or response["economic_exposures"]:
+        raise LightweightError(f"cross-exposure context returned: {spec.worker_id}")
+    allowed_query_ids = {row["query_id"] for row in spec.queries}
+    if any(card["query_id"] not in allowed_query_ids for card in response["evidence_cards"]):
+        raise LightweightError(f"unplanned evidence-card query link: {spec.worker_id}")
+
+
+def _query_record(query_id: str, row: dict[str, Any]) -> dict[str, Any]:
+    return {"query_id": query_id, "channel": row["channel"], "query": row["query"],
+            "exposure_index": row.get("exposure_index"),
+            "canonical_driver_phrase": row.get("canonical_driver_phrase")}
+
+
+def plan_exposure_workers(assignment: dict[str, Any], discovery: dict[str, Any],
+                          store: EvidenceStore) -> list[WorkerSpec]:
+    exposures = discovery["economic_exposures"]
+    plan = strategy_v5.query_plan(assignment["company_name"], exposures,
+                                  search_from=assignment["search_from"], search_to=assignment["search_to"])
+    specs: list[WorkerSpec] = []
+    for index, exposure in enumerate(exposures):
+        rows = [row for row in plan if row.get("exposure_index") == index]
+        queries = []
+        for number, row in enumerate(rows[:MAX_QUERIES_PER_WORKER], start=1):
+            query_id = f"exposure-{index + 1}-q{number}"
+            if store.register_query(query_id, row["query"]):
+                queries.append(_query_record(query_id, row))
+        if not queries:
+            raise LightweightError(f"no unique query for exposure {index}")
+        specs.append(WorkerSpec(f"exposure-{index + 1}", "exposure", index,
+                                copy.deepcopy(exposure), tuple(queries)))
+    if discovery["incremental_ir_applicable"]:
+        query = f"{assignment['company_name']} IR {assignment['search_from']} {assignment['search_to']} pricing volume order capacity customer margin supply capex"
+        if store.register_query("incremental-ir-q1", query):
+            specs.append(WorkerSpec("incremental-ir", "incremental_ir", None, None, ({
+                "query_id": "incremental-ir-q1", "channel": "incremental_ir", "query": query,
+                "exposure_index": None, "canonical_driver_phrase": None,
+            },)))
+    if 1 + len(specs) > MAX_WEB_WORKERS:
+        raise LightweightError(f"Web worker limit exceeded: {1 + len(specs)} > {MAX_WEB_WORKERS}")
+    if any(len(spec.queries) > MAX_QUERIES_PER_WORKER for spec in specs):
+        raise LightweightError("query limit exceeded")
+    return specs
+
+
+def _add_cards(store: EvidenceStore, response: dict[str, Any]) -> None:
+    for card in response.get("evidence_cards", []):
+        store.add(url=card["url"], source_type=card["source_type"], title=card["title"],
+                  published_at=card["published_at"], body=card["excerpt"], supports=card["supports"],
+                  exposure_id=card["exposure_id"], query_id=card["query_id"],
+                  verification_status=card["verification_status"], relevant_terms=[])
+    for query in response.get("zero_result_signatures", []):
+        store.register_zero_result(query)
+
+
+def aggregate_worker_telemetry(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    additive = ("input_tokens", "cached_input_tokens", "uncached_input_tokens", "output_tokens",
+                "reasoning_tokens", "total_tokens", "model_call_count", "tool_call_count",
+                "web_call_count", "research_elapsed_seconds", "model_visible_chars")
+    value = {key: sum(row.get(key, 0) for row in rows) for key in additive}
+    value.update({"schema_version": TELEMETRY_SCHEMA, "workers": rows,
+                  "worker_count": sum(row.get("kind") != "final_synthesis" for row in rows),
+                  "synthesis_model_call_count": sum(row.get("model_call_count", 0) for row in rows
+                                                    if row.get("kind") == "final_synthesis"),
+                  "post_research_model_calls": 0, "post_research_tokens": 0,
+                  "thread_ids": [thread for row in rows for thread in row.get("thread_ids", [])],
+                  "canonical_schema_sha256": strategy_v5.canonical_schema_sha256(),
+                  "validation_status": "PENDING"})
+    return value
+
+
+def codex_runner(root: Path, experiment: Path, assignment: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Run Web slices in independent processes and synthesize from cards only."""
+    company_dir = experiment / "companies" / f"{assignment['position']:02d}-{assignment['ticker']}"
+    company_dir.mkdir(parents=True, exist_ok=True)
     store = EvidenceStore()
-    strategy = response.get("strategy_telemetry", {})
-    if isinstance(strategy, dict):
-        for index, query in enumerate(strategy.get("queries", [])):
-            if isinstance(query, dict) and isinstance(query.get("query"), str):
-                store.register_query(f"q{index + 1}", query["query"])
-        for source in strategy.get("source_provenance", []):
-            if not isinstance(source, dict) or not isinstance(source.get("url"), str):
-                continue
-            excerpt = source.get("evidence_excerpt", "")
-            store.add(url=source["url"], source_type=str(source.get("source_type", "other")),
-                      title=str(source.get("title", source["url"])), published_at=source.get("published_at"),
-                      body=excerpt, supports=excerpt, exposure_id=source.get("exposure_index"),
-                      query_id=str(source.get("query_id", "unlinked")),
-                      verification_status="VERIFIED" if source.get("content_verified") is True else "UNVERIFIED",
-                      relevant_terms=[])
-    _atomic_json(company_dir / "evidence-state.json", {"cards": store.cards(), "raw_body_retained": False})
+    official_query = f"{assignment['company_name']} news press IR {assignment['search_from']} {assignment['search_to']}"
+    store.register_query("company-web-q1", official_query)
+    discovery_spec = WorkerSpec("company-web", "company_web", None, None, ({
+        "query_id": "company-web-q1", "channel": "official", "query": official_query,
+        "exposure_index": None, "canonical_driver_phrase": None,
+    },))
+    discovery, discovery_telemetry = _run_isolated_stage(
+        root, company_dir, discovery_spec, worker_contract(discovery_spec, assignment),
+        worker_output_schema(discovery_spec), web_enabled=True)
+    _add_cards(store, discovery)
+    outputs = [discovery]
+    telemetry_rows = [discovery_telemetry]
+    for spec in plan_exposure_workers(assignment, discovery, store):
+        response, telemetry = _run_isolated_stage(
+            root, company_dir, spec, worker_contract(spec, assignment),
+            worker_output_schema(spec), web_enabled=True)
+        _add_cards(store, response)
+        outputs.append(response)
+        telemetry_rows.append(telemetry)
+    queries = [query for output in outputs for query in output["queries"]]
+    elapsed = {
+        "company_web": discovery_telemetry["research_elapsed_seconds"],
+        "external": sum(row["research_elapsed_seconds"] for row in telemetry_rows[1:]),
+        "provenance": 0.0,
+    }
+    synthesis_prompt = synthesis_contract(assignment, discovery, queries, store, elapsed)
+    response, synthesis_telemetry = _run_isolated_stage(
+        root, company_dir, None, synthesis_prompt, output_schema(), web_enabled=False)
+    telemetry_rows.append(synthesis_telemetry)
+    measured = aggregate_worker_telemetry(telemetry_rows)
+    _atomic_json(company_dir / "measured-token-telemetry.json", measured)
+    _atomic_json(company_dir / "evidence-state.json", {
+        "cards": store.cards(), "raw_body_retained": False,
+        "cross_worker_payload": "bounded_evidence_cards_only",
+    })
     return response, measured
+
+
+def offline_cost_model(worker_counts: tuple[int, ...] = (2, 3, 4, 5)) -> list[dict[str, Any]]:
+    """Conservative pre-run budget based on Phase1.5 telemetry and hard worker caps."""
+    observed_startup_floor = 24_600
+    startup = 30_000
+    worker_prompt = 8_000
+    web_interaction = 25_000
+    card_output = 6_000
+    synthesis = 115_000
+    rows = []
+    for count in worker_counts:
+        total = count * (startup + worker_prompt + web_interaction + card_output) + synthesis
+        rows.append({"worker_count": count,
+                     "observed_startup_floor_reference": count * observed_startup_floor,
+                     "startup_fixed": count * startup,
+                     "worker_prompt_input": count * worker_prompt,
+                     "web_interaction": count * web_interaction,
+                     "evidence_card_output": count * card_output,
+                     "final_synthesis": synthesis, "python_processing": 0,
+                     "conservative_upper_total": total,
+                     "hard_500k": "GO" if total <= 500_000 else "NO_GO",
+                     "preferred_400k": "GO" if total <= 400_000 else "NO_GO"})
+    return rows
 
 
 def _owned(experiment: Path, run_token: str) -> tuple[Path, dict[str, Any], dict[str, Any]]:
