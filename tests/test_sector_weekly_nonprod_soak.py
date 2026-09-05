@@ -119,9 +119,9 @@ def test_accelerated_51_slot_33_sector_nonproduction_soak(tmp_path: Path):
 
     sync_calls: list[int] = []
 
-    def fake_sync(_db: Path, _dry_run: bool) -> dict[str, int]:
+    def fake_sync(_db: Path, _dedupe_key: str, _run_id: str, _dry_run: bool) -> dict[str, int]:
         sync_calls.append(1)
-        return {"canonical_sector_reports": len(sync_calls)}
+        return {"canonical_sector_reports": 1, "canonical_sector_report_runs": 1}
 
     completed_codes: set[int] = set()
     failed_attempts = 0

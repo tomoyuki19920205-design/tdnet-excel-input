@@ -40,7 +40,7 @@ from tools.sector_weekly_work_bridge import (
     _validate_ownership,
     _window,
 )
-from tools.sync_sector_weekly import sync as sync_sector_weekly
+from tools.sync_sector_weekly import sync_one as sync_sector_weekly
 
 ASSIGNMENT_FILE_RE = re.compile(
     r"^(?P<assignment>[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.json$"
@@ -187,7 +187,7 @@ def process_one(
     paths: WorkerPaths,
     path: Path,
     *,
-    sync_func: Callable[[Path, bool], dict[str, int]] = sync_sector_weekly,
+    sync_func: Callable[[Path, str, str, bool], dict[str, int]] = sync_sector_weekly,
     dry_run_sync: bool = False,
 ) -> dict[str, Any]:
     match = ASSIGNMENT_FILE_RE.fullmatch(path.name)
@@ -237,6 +237,13 @@ def process_one(
             }
 
         revision = is_quality_revision(row)
+        report = validated.report
+        dedupe_key = report.get("dedupe_key")
+        run_id = report.get("run_id")
+        if not isinstance(dedupe_key, str) or not dedupe_key.strip():
+            raise SectorInboxWorkerError("validated report is missing dedupe_key")
+        if not isinstance(run_id, str) or not run_id.strip():
+            raise SectorInboxWorkerError("validated report is missing run_id")
         sync_db = paths.db
         revision_db: Path | None = None
         if revision:
@@ -246,7 +253,7 @@ def process_one(
             upsert_report(conn, validated)
             prepare_staged_sync(conn, assignment_id, digest)
         try:
-            sync_result = sync_func(sync_db, dry_run_sync)
+            sync_result = sync_func(sync_db, dedupe_key, run_id, dry_run_sync)
         except Exception as exc:
             summary = _safe_error(exc, transport=True)
             mark_staged_sync_error(conn, assignment_id, digest, RuntimeError(summary))
@@ -268,6 +275,9 @@ def process_one(
             "attempt_count": int(completed["attempt_count"]), "payload_hash": digest,
             "sync_result": sync_result, "processed_path": str(processed),
             "identical_quarantine_removed": duplicate_removed,
+            "sector_name": report["sector_name"],
+            "period_start": report["period_start"], "period_end": report["period_end"],
+            "dedupe_key": dedupe_key, "run_id": run_id,
         }
     finally:
         conn.close()
@@ -276,7 +286,7 @@ def process_one(
 def run_once(
     paths: WorkerPaths,
     *,
-    sync_func: Callable[[Path, bool], dict[str, int]] = sync_sector_weekly,
+    sync_func: Callable[[Path, str, str, bool], dict[str, int]] = sync_sector_weekly,
     dry_run_sync: bool = False,
     trigger: str = "manual",
 ) -> dict[str, Any]:
