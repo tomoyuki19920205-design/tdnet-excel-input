@@ -14,6 +14,7 @@ import re
 import subprocess
 import sys
 import time
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -22,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from lib.news_monitor import validate_payload
+from lib.news_monitor import canonicalize_url, validate_payload
 from tools import company_news_strategy_v5 as strategy_v5
 
 
@@ -35,6 +36,10 @@ SOURCE_TASK = "task03"
 STRATEGY = strategy_v5.VERSION
 MAX_TOOL_CHARS = 12_000
 MAX_TOOL_LINES = 160
+MAX_EVIDENCE_SOURCES = 24
+MAX_QUERY_RESULTS = 5
+MAX_EVIDENCE_EXCERPT = 800
+MAX_EVIDENCE_SUPPORTS = 400
 CONTROL_TOTAL_TOKENS = 8_584_237
 CONTROL_INPUT_TOKENS = 8_545_419
 CONTROL_CACHED_INPUT_TOKENS = 8_227_072
@@ -43,6 +48,87 @@ CONTROL_OUTPUT_TOKENS = 38_818
 
 class LightweightError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class EvidenceCard:
+    source_id: str
+    url: str
+    source_type: str
+    title: str
+    published_at: str | None
+    excerpt: str
+    supports: str
+    exposure_id: int | None
+    query_id: str
+    verification_status: str
+
+
+class EvidenceStore:
+    """Company-local state that never retains a raw Web body."""
+
+    def __init__(self, *, source_limit: int = MAX_EVIDENCE_SOURCES,
+                 result_limit: int = MAX_QUERY_RESULTS):
+        self.source_limit = source_limit
+        self.result_limit = result_limit
+        self._cards: dict[str, EvidenceCard] = {}
+        self._queries: dict[str, str] = {}
+
+    @staticmethod
+    def _query_key(query: str) -> str:
+        return " ".join(query.casefold().split())
+
+    def register_query(self, query_id: str, query: str) -> bool:
+        key = self._query_key(query)
+        if key in self._queries:
+            return False
+        self._queries[key] = query_id
+        return True
+
+    def bounded_results(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Expose only the configured number of already-ranked result records."""
+        return [dict(item) for item in results[:self.result_limit]]
+
+    @staticmethod
+    def relevant_excerpt(body: str, terms: list[str], *, limit: int = MAX_EVIDENCE_EXCERPT) -> str:
+        """Select relevant sentences first; bound only after evidence selection."""
+        normalized_terms = [term.casefold() for term in terms if term.strip()]
+        parts = [part.strip() for part in re.split(r"(?<=[。！？.!?])\s*|[\r\n]+", body) if part.strip()]
+        ranked = sorted(enumerate(parts), key=lambda row: (
+            -sum(term in row[1].casefold() for term in normalized_terms), row[0]))
+        selected = [text for _, text in ranked if any(term in text.casefold() for term in normalized_terms)]
+        if not selected:
+            selected = parts[:1]
+        excerpt = " ".join(selected)
+        return bounded_text(excerpt, max_chars=limit, max_lines=20)
+
+    def add(self, *, url: str, source_type: str, title: str, published_at: str | None,
+            body: str, supports: str, exposure_id: int | None, query_id: str,
+            verification_status: str, relevant_terms: list[str]) -> bool:
+        normalized_url = canonicalize_url(url)
+        if normalized_url in self._cards or len(self._cards) >= self.source_limit:
+            return False
+        excerpt = self.relevant_excerpt(body, relevant_terms)
+        card = EvidenceCard(
+            source_id=hashlib.sha256(normalized_url.encode()).hexdigest()[:16],
+            url=normalized_url,
+            source_type=bounded_text(source_type, max_chars=80, max_lines=1),
+            title=bounded_text(title, max_chars=300, max_lines=2),
+            published_at=published_at,
+            excerpt=excerpt,
+            supports=bounded_text(supports, max_chars=MAX_EVIDENCE_SUPPORTS, max_lines=6),
+            exposure_id=exposure_id,
+            query_id=query_id,
+            verification_status=verification_status,
+        )
+        self._cards[normalized_url] = card
+        return True
+
+    def cards(self) -> list[dict[str, Any]]:
+        return [asdict(card) for card in list(self._cards.values())[:self.source_limit]]
+
+    def model_context(self) -> str:
+        return json.dumps({"evidence_cards": self.cards()}, ensure_ascii=False, separators=(",", ":"))
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -172,7 +258,7 @@ def compact_contract(assignment: dict[str, Any]) -> str:
     """Runtime-only contract. It contains no control result or evaluation data."""
     assignment_json = json.dumps(assignment, ensure_ascii=False, separators=(",", ":"))
     return f"""You are researching exactly one Japanese listed company for a read-only benchmark.
-Return only the JSON object required by the output schema. Use web search/open tools; do not use shell, repo search, prior company context, Gold, or saved benchmark results.
+Return only the JSON object required by the canonical output schema. Use web search/open tools; do not use shell, repo search, prior company context, Gold, or saved benchmark results. The schema, including enum spelling and required nested keys, is enforced by --output-schema.
 
 ASSIGNMENT={assignment_json}
 
@@ -185,33 +271,26 @@ Apply Company News Strategy v5 without weakening research semantics:
 - no_news requires official coverage plus at least two exposure-appropriate complement channels and semantic coverage for every exposure.
 - Every claimed source must be opened and content_verified. Keep snippets concise. Do not fabricate future facts; report research failure if the fixed future window cannot be verified.
 
-The top-level object has research_result and strategy_telemetry. research_result is company_news_v1 with run_id=task_id=assignment_id, collector_type=codex_web_research, collector_version=company_news_lightweight_v1, analysis_version=company_news_v1, sources_checked_count equal to unique source_provenance URLs, and items.
-Each item requires headline, source_url, published_at with timezone, source_type, source_name, category, direction, importance, earnings_relevance, summary, why_it_matters, evidence_excerpt, temporal_scope, temporal_status, tags.
-strategy_telemetry uses schema_version=company_news_benchmark_strategy_telemetry_v5 and strategy_version=company_news_research_strategy_v5. Include assignment_id, ticker, company_identity, economic_exposures, queries, channel_reviews, company_web_review, documents, coverage_gaps, coverage_status, source_provenance, candidate_provenance, candidate_count, final_event_count, no_news_exposure_coverage, no_news_gate_pass, regulatory_themes, query_budget_exceeded, stopped_after_first_event=false, window_review_complete, stage_elapsed_seconds(company_web/external/provenance), total_research_elapsed_seconds.
-Use the exact field semantics enforced by Strategy v5. Candidate entries must map selected payload headline/source URL. Documents must be in the fixed window; index-only no-news evidence may use the window end date.
-
-Exact enum/key constraints:
-- research_result.checked_at is required ISO-8601 with timezone. item.source_type is one of news/ir/company/government/exchange/research/other; temporal_scope is current/fiscal_year/multi_year/ongoing/historical/unknown; temporal_status is current/ongoing/historical/expired/unknown.
-- Every economic_exposures entry requires canonical_driver_phrase, metadata_evidence, transmission_channel, government_applicable(boolean), government_applicability_reason, with optional product_context and channel.
-- Every query requires channel, query, executed=true, result_count(integer), reached_sources(array), window_relevance_checked=true. Exposure queries also require exposure_index, canonical_driver_phrase, driver_phrase_preserved(boolean), and a reason when false.
-- company_identity requires verified_ticker, source_url, evidence. source_provenance requires unique url, source_type, content_verified=true, evidence_excerpt.
-- company_web_review requires index_checked=true, window_items_checked=true, material_candidates_checked=true and integer counts for background_pages_opened, redundant_pages_opened, old_business_pages_opened, provenance_only_pages_opened.
-- stage_elapsed_seconds has numeric company_web, external, provenance and total_research_elapsed_seconds is at least their sum.
+Use checked_at with a timezone. earnings_relevance is only direct, likely, general, context, or unknown; explanations belong in why_it_matters. Query channels are only official, external_media, government, counterparty, or incremental_ir. Link every exposure query and regulatory theme to its exposure_index. Candidate entries must map selected payload headline/source URL. Documents must be in the fixed window; index-only no-news evidence may use the window end date. Python performs all validation; do not attempt a second-pass repair.
 """
 
 
 def output_schema() -> dict[str, Any]:
-    """Keep generation structurally constrained; Python applies the full validators."""
-    return {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "required": ["research_result", "strategy_telemetry"],
-        "additionalProperties": False,
-        "properties": {
-            "research_result": {"type": "object"},
-            "strategy_telemetry": {"type": "object"},
-        },
-    }
+    return strategy_v5.canonical_output_schema()
+
+
+def codex_command(root: Path, schema_path: Path, result_path: Path, prompt: str) -> list[str]:
+    """Expose native Web search while removing unrelated research tools."""
+    disabled = ("shell_tool", "unified_exec", "apps", "plugins", "computer_use",
+                "browser_use", "browser_use_external", "browser_use_full_cdp_access",
+                "image_generation", "multi_agent")
+    command = ["codex", "--search", "exec", "--ephemeral", "--ignore-user-config"]
+    for feature in disabled:
+        command.extend(("--disable", feature))
+    command.extend(("--json", "--color", "never", "--sandbox", "read-only",
+                    "--output-schema", str(schema_path), "--output-last-message", str(result_path),
+                    "-C", str(root.resolve()), prompt))
+    return command
 
 
 def _numbers(node: Any, names: set[str]) -> int:
@@ -230,7 +309,7 @@ def _numbers(node: Any, names: set[str]) -> int:
 def token_telemetry(events: list[dict[str, Any]], elapsed: float) -> dict[str, Any]:
     """Normalize Codex JSONL usage without feeding event history back to the model."""
     terminal = [event for event in events if event.get("type") in {"turn.completed", "task.completed"}]
-    usage_node: Any = terminal[-1] if terminal else events
+    usage_node: Any = terminal if terminal else events
     input_tokens = _numbers(usage_node, {"input_tokens"})
     cached = _numbers(usage_node, {"cached_input_tokens", "cached_tokens"})
     output = _numbers(usage_node, {"output_tokens"})
@@ -241,7 +320,22 @@ def token_telemetry(events: list[dict[str, Any]], elapsed: float) -> dict[str, A
     web_calls = sum("web" in str(item.get("type", "")).lower()
                     or re.search(r"\b(search_query|open)\b", json.dumps(item, ensure_ascii=False), re.I) is not None
                     for item in completed_items)
-    model_calls = sum(1 for event in events if event.get("type") in {"turn.started", "response.started"}) or 1
+    model_calls = len(terminal) or sum(1 for event in events if event.get("type") in {"turn.started", "response.started"}) or 1
+    tool_events = []
+    for event in events:
+        if event.get("type") != "item.completed" or not isinstance(event.get("item"), dict):
+            continue
+        item = event["item"]
+        if str(item.get("type", "")) not in tool_types:
+            continue
+        serialized = json.dumps(item, ensure_ascii=False)
+        query = item.get("query") or item.get("arguments", {}).get("query") if isinstance(item.get("arguments"), dict) else item.get("query")
+        tool_events.append({
+            "tool_type": str(item.get("type", "unknown")),
+            "query": query if isinstance(query, str) else None,
+            "result_count": item.get("result_count") if isinstance(item.get("result_count"), int) else None,
+            "model_visible_chars": len(serialized),
+        })
     return {
         "schema_version": TELEMETRY_SCHEMA,
         "input_tokens": input_tokens,
@@ -256,7 +350,32 @@ def token_telemetry(events: list[dict[str, Any]], elapsed: float) -> dict[str, A
         "research_elapsed_seconds": elapsed,
         "post_research_model_calls": 0,
         "post_research_tokens": 0,
+        "turn_started_count": sum(event.get("type") == "turn.started" for event in events),
+        "turn_completed_count": len(terminal),
+        "turn_completed_usage_raw": [event.get("usage") for event in terminal],
+        "thread_ids": [event.get("thread_id") for event in events if event.get("type") == "thread.started" and event.get("thread_id")],
+        "tool_events": tool_events,
     }
+
+
+_SECRET_KEYS = {"authorization", "api_key", "apikey", "access_token", "refresh_token", "cookie", "set-cookie", "run_token"}
+
+
+def _redact_event(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: "[REDACTED]" if key.casefold() in _SECRET_KEYS else _redact_event(item)
+                for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_event(item) for item in value]
+    return value
+
+
+def _atomic_jsonl(path: Path, events: list[dict[str, Any]]) -> None:
+    text = "".join(json.dumps(_redact_event(event), ensure_ascii=False, separators=(",", ":")) + "\n"
+                   for event in events)
+    temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
+    temporary.write_text(text, encoding="utf-8")
+    os.replace(temporary, path)
 
 
 def codex_runner(root: Path, experiment: Path, assignment: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -264,13 +383,11 @@ def codex_runner(root: Path, experiment: Path, assignment: dict[str, Any]) -> tu
     company_dir.mkdir(parents=True, exist_ok=True)
     schema_path, result_path = company_dir / "output-schema.json", company_dir / "last-message.json"
     _atomic_json(schema_path, output_schema())
-    command = ["codex", "exec", "--ephemeral", "--ignore-user-config", "--json", "--color", "never",
-               "--sandbox", "read-only", "--output-last-message", str(result_path),
-               "-C", str(root.resolve()), compact_contract(assignment)]
+    command = codex_command(root, schema_path, result_path, compact_contract(assignment))
     started = time.monotonic()
     completed = subprocess.run(command, text=True, encoding="utf-8", errors="replace", capture_output=True, check=False)
     elapsed = time.monotonic() - started
-    event_lines = bounded_text(completed.stdout, max_chars=2_000_000, max_lines=20_000).splitlines()
+    event_lines = completed.stdout.splitlines()
     events: list[dict[str, Any]] = []
     for line in event_lines:
         try:
@@ -279,17 +396,38 @@ def codex_runner(root: Path, experiment: Path, assignment: dict[str, Any]) -> tu
             continue
         if isinstance(value, dict):
             events.append(value)
+    _atomic_jsonl(company_dir / "raw-events.jsonl", events)
     _atomic_json(company_dir / "execution-summary.json", {
         "exit_code": completed.returncode,
         "stderr": bounded_text(completed.stderr, max_chars=8_000, max_lines=80),
         "event_types": [event.get("type") for event in events],
         "errors": [event for event in events if event.get("type") in {"error", "turn.failed"}],
     })
+    measured = token_telemetry(events, elapsed)
+    measured["canonical_schema_sha256"] = strategy_v5.canonical_schema_sha256()
+    measured["validation_status"] = "PENDING" if completed.returncode == 0 and result_path.exists() else "RESEARCH_PROCESS_FAILED"
+    _atomic_json(company_dir / "measured-token-telemetry.json", measured)
     if completed.returncode != 0 or not result_path.exists():
         raise LightweightError(f"Codex research failed for {assignment['ticker']}: exit={completed.returncode}")
-    measured = token_telemetry(events, elapsed)
-    _atomic_json(company_dir / "measured-token-telemetry.json", measured)
-    return _read_json(result_path), measured
+    response = _read_json(result_path)
+    store = EvidenceStore()
+    strategy = response.get("strategy_telemetry", {})
+    if isinstance(strategy, dict):
+        for index, query in enumerate(strategy.get("queries", [])):
+            if isinstance(query, dict) and isinstance(query.get("query"), str):
+                store.register_query(f"q{index + 1}", query["query"])
+        for source in strategy.get("source_provenance", []):
+            if not isinstance(source, dict) or not isinstance(source.get("url"), str):
+                continue
+            excerpt = source.get("evidence_excerpt", "")
+            store.add(url=source["url"], source_type=str(source.get("source_type", "other")),
+                      title=str(source.get("title", source["url"])), published_at=source.get("published_at"),
+                      body=excerpt, supports=excerpt, exposure_id=source.get("exposure_index"),
+                      query_id=str(source.get("query_id", "unlinked")),
+                      verification_status="VERIFIED" if source.get("content_verified") is True else "UNVERIFIED",
+                      relevant_terms=[])
+    _atomic_json(company_dir / "evidence-state.json", {"cards": store.cards(), "raw_body_retained": False})
+    return response, measured
 
 
 def _owned(experiment: Path, run_token: str) -> tuple[Path, dict[str, Any], dict[str, Any]]:
@@ -313,6 +451,7 @@ def finalize(experiment: Path, run_token: str, response: dict[str, Any], telemet
         strategy = response.get("strategy_telemetry")
         if not isinstance(payload, dict) or not isinstance(strategy, dict):
             raise LightweightError("RESEARCH_RESULT object is incomplete")
+        strategy_v5.validate_generated_response(response)
         validate_payload(payload)
         if payload.get("run_id") != assignment["assignment_id"] or payload.get("task_id") != assignment["assignment_id"]:
             raise LightweightError("payload assignment mismatch")
@@ -329,12 +468,26 @@ def finalize(experiment: Path, run_token: str, response: dict[str, Any], telemet
         result_path, strategy_path, telemetry_path = company_dir / "research-result.json", company_dir / "strategy-telemetry.json", company_dir / "token-telemetry.json"
         if any(path.exists() for path in (result_path, strategy_path, telemetry_path)):
             raise LightweightError("artifact collision")
+        telemetry = {**telemetry, "validation_status": "PASS",
+                     "canonical_schema_sha256": strategy_v5.canonical_schema_sha256()}
         _atomic_json(result_path, payload)
         _atomic_json(strategy_path, strategy)
         _atomic_json(telemetry_path, {**telemetry, "assignment_id": assignment["assignment_id"], "ticker": assignment["ticker"]})
+        _atomic_json(company_dir / "validation-result.json", {"status": "PASS", "schema_sha256": strategy_v5.canonical_schema_sha256()})
         assignment.update(status="completed", result_type="news_present" if payload.get("items") else "no_news",
                           event_count=len(payload.get("items", [])), result_path=str(result_path), telemetry_path=str(telemetry_path))
     except Exception as exc:
+        company_dir = experiment / "companies" / f"{assignment['position']:02d}-{assignment['ticker']}"
+        _atomic_json(company_dir / "validation-result.json", {
+            "status": "FAIL", "error_type": type(exc).__name__, "error_message": str(exc),
+            "schema_sha256": strategy_v5.canonical_schema_sha256(),
+        })
+        measured_path = company_dir / "measured-token-telemetry.json"
+        if measured_path.exists():
+            measured = _read_json(measured_path)
+            measured.update(validation_status="FAIL", validation_error_type=type(exc).__name__,
+                            validation_error_message=str(exc))
+            _atomic_json(measured_path, measured)
         assignment.update(status="failed", error_type=type(exc).__name__, error_message=str(exc))
         _atomic_json(experiment / "queue.json", queue)
         guard_path.unlink(missing_ok=True)

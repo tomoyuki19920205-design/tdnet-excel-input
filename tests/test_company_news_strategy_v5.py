@@ -8,6 +8,7 @@ import pytest
 
 from tools import company_news_batch_benchmark as b
 from tools import company_news_strategy_v5 as v
+from tools.company_news_canonical_schema import SchemaContractError
 
 
 def fixture():
@@ -18,25 +19,28 @@ def fixture():
     exposures = [
         {"canonical_driver_phrase": "Baltic Dry Index", "metadata_evidence": "Freight affects delivered costs",
          "transmission_channel": "freight benchmark changes margin", "government_applicable": False,
-         "government_applicability_reason": "No policy exposure", "channel": "external_media"},
+         "government_applicability_reason": "No policy exposure", "product_context": None, "channel": "external_media"},
         {"canonical_driver_phrase": "customer vehicle production", "metadata_evidence": "Components sell to vehicle plants",
          "transmission_channel": "customer production changes order volume", "government_applicable": False,
-         "government_applicability_reason": "No policy exposure", "channel": "counterparty"},
+         "government_applicability_reason": "No policy exposure", "product_context": None, "channel": "counterparty"},
     ]
     queries = []
     for index, exposure in enumerate(exposures):
         queries.append({"channel": exposure["channel"], "query": exposure["canonical_driver_phrase"] + " 2026-08-25 2026-08-31",
                         "exposure_index": index, "canonical_driver_phrase": exposure["canonical_driver_phrase"],
                         "driver_phrase_preserved": True, "executed": True, "result_count": 0,
-                        "reached_sources": [], "window_relevance_checked": True})
+                        "reached_sources": [], "window_relevance_checked": True,
+                        "driver_phrase_preservation_reason": None})
     queries.insert(0, {"channel": "official", "query": "Example Works news press IR", "executed": True,
-                       "result_count": 1, "reached_sources": [source["url"]], "window_relevance_checked": True})
+                       "result_count": 1, "reached_sources": [source["url"]], "window_relevance_checked": True,
+                       "exposure_index": None, "canonical_driver_phrase": None,
+                       "driver_phrase_preserved": None, "driver_phrase_preservation_reason": None})
     telemetry = {
         "schema_version": v.SCHEMA, "strategy_version": v.VERSION,
         "assignment_id": assignment["assignment_id"], "ticker": assignment["ticker"],
         "company_identity": {"verified_ticker": assignment["ticker"], "source_url": source["url"], "evidence": "metadata identity"},
         "economic_exposures": exposures, "queries": queries, "regulatory_themes": [], "query_budget_exceeded": False,
-        "channel_reviews": [{"channel": "official", "status": "CHECKED", "evidence": "bounded window review"},
+        "channel_reviews": [{"channel": "official", "status": "CHECKED", "evidence": "bounded window review", "exposure_index": None},
                             {"channel": "external_media", "status": "CHECKED", "evidence": "specific indicator searched", "exposure_index": 0},
                             {"channel": "counterparty", "status": "CHECKED", "evidence": "customer production searched", "exposure_index": 1}],
         "no_news_exposure_coverage": [{"exposure_index": 0, "status": "SEARCHED_NO_RESULT", "evidence": "zero window result"},
@@ -51,6 +55,18 @@ def fixture():
         "total_research_elapsed_seconds": 8,
     }
     return assignment, telemetry, {"sources_checked_count": 1, "items": []}
+
+
+def canonical_response():
+    assignment, telemetry, _ = fixture()
+    research = {
+        "schema_version": "company_news_v1", "run_id": assignment["assignment_id"],
+        "task_id": assignment["assignment_id"], "ticker": assignment["ticker"],
+        "collector_type": "codex_web_research", "collector_version": "company_news_lightweight_v1",
+        "analysis_version": "company_news_v1", "checked_at": "2026-08-31T12:00:00+09:00",
+        "sources_checked_count": 1, "items": [],
+    }
+    return {"research_result": research, "strategy_telemetry": telemetry}
 
 
 def test_v2_baseline_and_v4_inheritance_are_explicit():
@@ -76,6 +92,38 @@ def test_complete_semantic_no_news_telemetry_and_bounded_web():
     assert telemetry["company_web_review"]["redundant_pages_opened"] == 0
 
 
+def test_canonical_generation_schema_accepts_full_valid_sample():
+    response = canonical_response()
+    assert v.validate_generated_response(response) is response
+    assert len(v.canonical_schema_sha256()) == 64
+
+
+@pytest.mark.parametrize("mutation,pattern", [
+    (lambda r: r["strategy_telemetry"]["queries"][0].update(channel="company_web"), "channel"),
+    (lambda r: r["strategy_telemetry"]["queries"][0].pop("executed"), "executed"),
+    (lambda r: r["strategy_telemetry"].update(regulatory_themes=[{"theme": str(i), "exposure_index": 0} for i in range(3)]), "item count"),
+    (lambda r: r["strategy_telemetry"].pop("no_news_exposure_coverage"), "no_news_exposure_coverage"),
+])
+def test_canonical_schema_rejects_aliases_and_missing_contract(mutation, pattern):
+    response = canonical_response(); mutation(response)
+    with pytest.raises(SchemaContractError, match=pattern):
+        v.validate_generated_response(response)
+
+
+def test_canonical_schema_rejects_long_earnings_relevance():
+    response = canonical_response()
+    response["research_result"]["items"] = [{
+        "headline": "Price revision", "source_url": "https://example.test/news", "published_at": "2026-08-31T00:00:00+09:00",
+        "valid_from": None, "valid_until": None, "source_type": "company", "source_name": "Example Works",
+        "category": "pricing", "subcategory": None, "direction": "mixed", "importance": "medium",
+        "earnings_relevance": "a detailed explanation that is deliberately longer than the canonical enum field permits",
+        "summary": "Price revised", "why_it_matters": "Margin transmission", "evidence_excerpt": "New prices apply",
+        "temporal_scope": "ongoing", "temporal_status": "ongoing", "tags": ["NON_TDNET"],
+    }]
+    with pytest.raises(SchemaContractError, match="earnings_relevance"):
+        v.validate_generated_response(response)
+
+
 @pytest.mark.parametrize("mutation,message", [
     (lambda t: t["queries"].pop(1), "specific query"),
     (lambda t: t["queries"][1].update(driver_phrase_preserved=False, driver_phrase_preservation_reason="translated"), "not preserved"),
@@ -99,20 +147,32 @@ def test_government_applicability_is_consistent():
     telemetry["queries"].append({"channel": "government", "query": "Baltic Dry Index subsidy 2026-08-25",
                                  "exposure_index": 0, "canonical_driver_phrase": "Baltic Dry Index",
                                  "driver_phrase_preserved": True, "executed": True, "result_count": 0,
-                                 "reached_sources": [], "window_relevance_checked": True})
+                                 "reached_sources": [], "window_relevance_checked": True,
+                                 "driver_phrase_preservation_reason": None})
     telemetry["regulatory_themes"] = [{"theme": "freight subsidy", "exposure_index": 0}]
     assert v.validate(telemetry, a, payload)
+
+
+def test_duplicate_query_is_rejected_before_research_state_is_accepted():
+    a, telemetry, payload = fixture()
+    telemetry["queries"].append(copy.deepcopy(telemetry["queries"][1]))
+    telemetry["query_budget_exceeded"] = False
+    with pytest.raises(b.BenchmarkError, match="duplicate query"):
+        v.validate(telemetry, a, payload)
 
 
 def test_group_source_incremental_ir_tdnet_and_trivial_rules():
     a, telemetry, payload = fixture()
     doc = {"date": "2026-08-26", "title": "Group customer capacity agreement", "url": "https://example.test/group",
            "final_url": "https://example.test/group", "scope_label": "IN_SCOPE_COUNTERPARTY", "scope_reason": "group source",
-           "material": True, "body_status": "VERIFIED"}
+           "material": True, "body_status": "VERIFIED", "attempt_evidence": None,
+           "tdnet_same_content_verified": None, "tdnet_url": None, "tdnet_identity_evidence": None,
+           "incremental_information": None, "incremental_information_evidence": None, "index_evidence": None}
     telemetry["documents"] = [doc]
     telemetry["source_provenance"].append({**telemetry["source_provenance"][0], "url": doc["url"]})
     telemetry["candidate_provenance"] = [{"candidate_index": 0, "document_url": doc["url"], "selected_for_output": False,
-                                           "selection_reason": "group source supported but below material threshold"}]
+                                           "selection_reason": "group source supported but below material threshold",
+                                           "source_url": None, "headline": None, "economic_transmission": None, "event_key": None}]
     telemetry["candidate_count"] = 1
     payload["sources_checked_count"] = 2
     assert v.validate(telemetry, a, payload)

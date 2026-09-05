@@ -12,6 +12,11 @@ from pathlib import Path
 
 from tools import company_news_batch_benchmark as b
 from tools import company_news_strategy_v4 as v4
+from tools.company_news_canonical_schema import (
+    canonical_output_schema as build_canonical_output_schema,
+    schema_sha256,
+    validate_instance,
+)
 
 VERSION = "company_news_research_strategy_v5"
 RUN_NAME = "batch04v5"
@@ -24,6 +29,26 @@ SCOPE_LABELS = v4.SCOPE_LABELS
 CHANNELS = v4.CHANNELS
 EXPOSURE_STATUSES = {"SEARCHED_FOUND", "SEARCHED_NO_RESULT", "NOT_APPLICABLE"}
 GOVERNMENT_SIGNALS = {"regulation", "financing", "rate", "tariff", "subsidy", "safety", "procurement"}
+
+
+def canonical_output_schema():
+    """Return the generator and validator's shared nested output contract."""
+    return build_canonical_output_schema(
+        telemetry_schema=SCHEMA,
+        strategy_version=VERSION,
+        channels=CHANNELS,
+        scope_labels=SCOPE_LABELS,
+        exposure_statuses=EXPOSURE_STATUSES,
+    )
+
+
+def canonical_schema_sha256():
+    return schema_sha256(canonical_output_schema())
+
+
+def validate_generated_response(value):
+    validate_instance(value, canonical_output_schema())
+    return value
 
 
 def require(ok, message):
@@ -122,12 +147,16 @@ def validate(value, assignment, payload):
     queries = value.get("queries")
     require(isinstance(queries, list) and queries, "queries missing")
     by_exposure = {i: [] for i in range(len(exposures))}
+    seen_queries = set()
     for query in queries:
         require(query.get("channel") in CHANNELS and text(query.get("query")) and query.get("executed") is True, "query execution record missing")
+        query_key = _normalized(query["query"])
+        require(query_key not in seen_queries, "duplicate query execution")
+        seen_queries.add(query_key)
         require(type(query.get("result_count")) is int and query["result_count"] >= 0
                 and isinstance(query.get("reached_sources"), list), "query result telemetry missing")
         require(query.get("window_relevance_checked") is True, "window relevance not checked")
-        if "exposure_index" in query:
+        if query.get("exposure_index") is not None:
             index = query["exposure_index"]
             require(type(index) is int and index in by_exposure, "query exposure link invalid")
             require(text(query.get("canonical_driver_phrase")) and type(query.get("driver_phrase_preserved")) is bool, "driver preservation telemetry missing")
@@ -169,7 +198,9 @@ def validate(value, assignment, payload):
     common_assignment = dict(assignment, strategy_version=v4.VERSION)
     common["economic_exposures"] = [{"driver": x["canonical_driver_phrase"], "metadata_evidence": x["metadata_evidence"], "transmission_channel": x["transmission_channel"]} for x in exposures]
     common["stage_elapsed_seconds"] = {"company_web": times["company_web"], "external_complement": times["external"] + times["provenance"]}
-    return value if v4.validate(common, common_assignment, payload) else value
+    v4.validate(common, common_assignment, payload)
+    validate_instance(value, canonical_output_schema()["properties"]["strategy_telemetry"], "$.strategy_telemetry")
+    return value
 
 
 def leakage_scan(prompt, assignments, companies, *, root=None, benchmark_id=None):
