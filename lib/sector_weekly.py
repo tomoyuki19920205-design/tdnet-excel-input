@@ -445,12 +445,37 @@ def upsert_report(conn: sqlite3.Connection, validated: ValidatedSectorReport) ->
         )
 
 
-def rows_for_sync(conn: sqlite3.Connection, table: str) -> list[dict[str, Any]]:
-    if table not in {"canonical_sector_reports", "canonical_sector_report_runs"}:
-        raise ValueError("unsupported sector table")
-    rows = [dict(row) for row in conn.execute(f"SELECT * FROM {table}")]
+def _decode_sync_rows(table: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if table == "canonical_sector_reports":
         for row in rows:
             for field in ("summary_bullets", "watchlist_companies", "next_week_watchpoints", "missed_candidates", "sources"):
                 row[field] = json.loads(row[field])
     return rows
+
+
+def rows_for_sync(
+    conn: sqlite3.Connection,
+    table: str,
+    *,
+    key: str,
+) -> list[dict[str, Any]]:
+    if table not in {"canonical_sector_reports", "canonical_sector_report_runs"}:
+        raise ValueError("unsupported sector table")
+    if not isinstance(key, str) or not key.strip():
+        raise ValueError("sector sync key is required")
+    key_column = "dedupe_key" if table == "canonical_sector_reports" else "run_id"
+    rows = [
+        dict(row)
+        for row in conn.execute(
+            f"SELECT * FROM {table} WHERE {key_column}=?",
+            (key,),
+        )
+    ]
+    return _decode_sync_rows(table, rows)
+
+
+def rows_for_sync_all(conn: sqlite3.Connection, table: str) -> list[dict[str, Any]]:
+    """Return the full table only for explicitly requested maintenance syncs."""
+    if table not in {"canonical_sector_reports", "canonical_sector_report_runs"}:
+        raise ValueError("unsupported sector table")
+    return _decode_sync_rows(table, [dict(row) for row in conn.execute(f"SELECT * FROM {table}")])

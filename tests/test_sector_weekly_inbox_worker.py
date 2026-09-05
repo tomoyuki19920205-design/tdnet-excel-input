@@ -160,13 +160,14 @@ def test_worker_happy_path_upserts_syncs_completes_and_processes(tmp_path: Path)
     db, work, claimed, inbox = _fixture(tmp_path)
     calls = []
 
-    def sync(path: Path, dry: bool):
-        calls.append((path, dry))
-        return {"canonical_sector_reports": 1, "canonical_sector_report_runs": 33}
+    def sync(path: Path, dedupe_key: str, run_id: str, dry: bool):
+        calls.append((path, dedupe_key, run_id, dry))
+        return {"canonical_sector_reports": 1, "canonical_sector_report_runs": 1}
 
     result = process_one(WorkerPaths.from_values(tmp_path, db, work), inbox, sync_func=sync)
     assert result["status"] == "success" and result["attempt_count"] == 1
-    assert len(calls) == 1 and not inbox.exists()
+    assert calls == [(db, claimed["stable_key"], claimed["stable_key"], False)]
+    assert not inbox.exists()
     assert Path(result["processed_path"]).exists()
     conn = connect_sector_db(db)
     try:
@@ -192,6 +193,33 @@ def test_sync_failure_preserves_payload_attempt_and_resumes_next_poll(tmp_path: 
         conn.close()
     resumed = process_one(paths, inbox, sync_func=lambda *_: {"canonical_sector_reports": 1})
     assert resumed["status"] == "success" and resumed["attempt_count"] == 1
+
+
+def test_malformed_payload_research_retry_syncs_only_current_keys(tmp_path: Path, monkeypatch):
+    db, work, claimed, inbox = _fixture(tmp_path)
+    paths = WorkerPaths.from_values(tmp_path, db, work)
+    valid_payload = inbox.read_text(encoding="utf-8")
+    inbox.write_text("{", encoding="utf-8")
+    original_reject = inbox_worker.reject_staged_payload
+    monkeypatch.setattr(
+        inbox_worker, "reject_staged_payload",
+        lambda conn, assignment_id, error: original_reject(conn, assignment_id, error, now=AT),
+    )
+    assert process_one(paths, inbox, sync_func=lambda *_: pytest.fail("transport called"))["status"] == "quarantined"
+
+    retried = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
+    draft = tmp_path / "retry.json"
+    draft.write_text(valid_payload, encoding="utf-8")
+    stage_one(db, retried["assignment_id"], OWNER, draft, work_root=work, at=AT)
+    calls = []
+
+    def sync(path: Path, dedupe_key: str, run_id: str, dry: bool):
+        calls.append((path, dedupe_key, run_id, dry))
+        return {"canonical_sector_reports": 1, "canonical_sector_report_runs": 1}
+
+    result = process_one(paths, work / "inbox" / inbox.name, sync_func=sync)
+    assert result["status"] == "success"
+    assert calls == [(db, claimed["stable_key"], claimed["stable_key"], False)]
 
 
 def test_quality_revision_archives_old_payload_and_preserves_canonical_until_sync_success(tmp_path: Path):
@@ -254,8 +282,16 @@ def test_quality_revision_archives_old_payload_and_preserves_canonical_until_syn
         assert get_assignment(conn, claimed["assignment_id"])["last_error_type"] == "quality_revision_sync_error"
     finally:
         conn.close()
-    completed = process_one(paths, revision_inbox, sync_func=lambda *_: {"canonical_sector_reports": 1})
+    revision_sync_calls = []
+
+    def revision_sync(path: Path, dedupe_key: str, run_id: str, dry: bool):
+        revision_sync_calls.append((path, dedupe_key, run_id, dry))
+        return {"canonical_sector_reports": 1, "canonical_sector_report_runs": 1}
+
+    completed = process_one(paths, revision_inbox, sync_func=revision_sync)
     assert completed["status"] == "success" and completed["attempt_count"] == 2
+    assert len(revision_sync_calls) == 1
+    assert revision_sync_calls[0][1:] == (claimed["stable_key"], claimed["stable_key"], False)
     conn = connect_sector_db(db)
     try:
         revised = conn.execute(
@@ -439,7 +475,7 @@ def test_revision_crash_after_remote_sync_before_local_replace_converges_idempot
             raise RuntimeError("crash after remote sync")
         return original_upsert(conn, validated)
 
-    def idempotent_sync(_db: Path, _dry: bool):
+    def idempotent_sync(_db: Path, _dedupe_key: str, _run_id: str, _dry: bool):
         calls["sync"] += 1
         if calls["remote_hash"] is None:
             calls["remote_hash"] = new_hash
@@ -670,9 +706,9 @@ def test_main_processed_finishes_after_successful_sync(tmp_path: Path, monkeypat
     paths = WorkerPaths.from_values(tmp_path, db, work)
     calls = []
 
-    def sync(path: Path, dry: bool):
-        calls.append((path, dry))
-        return {"canonical_sector_reports": 1, "canonical_sector_report_runs": 33}
+    def sync(path: Path, dedupe_key: str, run_id: str, dry: bool):
+        calls.append((path, dedupe_key, run_id, dry))
+        return {"canonical_sector_reports": 1, "canonical_sector_report_runs": 1}
 
     exit_code = _run_main(
         monkeypatch,
@@ -682,7 +718,8 @@ def test_main_processed_finishes_after_successful_sync(tmp_path: Path, monkeypat
     )
 
     assert exit_code == 0
-    assert len(calls) == 1 and not inbox.exists()
+    assert calls == [(db, claimed["stable_key"], claimed["stable_key"], False)]
+    assert not inbox.exists()
     conn = connect_sector_db(db)
     try:
         row = get_assignment(conn, claimed["assignment_id"])
@@ -700,6 +737,14 @@ def test_main_processed_finishes_after_successful_sync(tmp_path: Path, monkeypat
     assert finished["trigger"] == "task_scheduler"
     assert finished["duration_seconds"] >= 0
     assert all(line.count('"trigger"') == 1 for line in paths.log.read_text(encoding="utf-8").splitlines())
+    payload_finished = next(item for item in records if item["event"] == "payload_finished")
+    assert payload_finished["sync_result"] == {
+        "canonical_sector_reports": 1, "canonical_sector_report_runs": 1,
+    }
+    assert payload_finished["sector_name"] == claimed["sector_name"]
+    assert payload_finished["dedupe_key"] == claimed["stable_key"]
+    assert payload_finished["run_id"] == claimed["stable_key"]
+    assert payload_finished["period_start"] and payload_finished["period_end"]
 
 
 def test_main_sync_failure_is_nonzero_and_preserves_payload(tmp_path: Path, monkeypatch):
