@@ -65,6 +65,19 @@ def test_fixed_sector_mapping_boundaries():
     assert sector_name(33) == "サービス業"
 
 
+def test_all_33_sector_code_name_pairs_are_canonical():
+    expected = (
+        "水産・農林業", "鉱業", "建設業", "食料品", "繊維製品", "パルプ・紙",
+        "化学", "医薬品", "石油・石炭製品", "ゴム製品", "ガラス・土石製品", "鉄鋼",
+        "非鉄金属", "金属製品", "機械", "電気機器", "輸送用機器", "精密機器",
+        "その他製品", "電気・ガス業", "陸運業", "海運業", "空運業", "倉庫・運輸関連業",
+        "情報・通信業", "卸売業", "小売業", "銀行業", "証券・商品先物取引業", "保険業",
+        "その他金融業", "不動産業", "サービス業",
+    )
+    assert SECTORS == expected
+    assert tuple(sector_name(code) for code in range(1, 34)) == expected
+
+
 @pytest.mark.parametrize(("at", "expected"), [
     ("2026-09-05T06:00:00+09:00", 1),
     ("2026-09-05T23:00:00+09:00", 18),
@@ -363,20 +376,23 @@ def test_chatgpt_worker_prompt_has_transport_research_and_schema_contracts():
     prompt = (Path(__file__).parents[1] / "config" / "sector_weekly_worker_prompt.txt").read_text(encoding="utf-8")
     for term in (
         "Sector Weekly Worker", "1回の実行でready assignmentを最大1件", "claim --owner sector-weekly-worker",
-        "ChatGPTプラン内", "outside-in", "アンチモン", "Samsung Electronics", "SK hynix", "Micron",
-        "foundry", "VLCC", "確認できた事実", "日本企業への波及", "反対材料・注意点",
+        "ChatGPTプラン内", "outside-in", "確認できた事実", "日本企業への波及", "反対材料・注意点",
         "海外企業", "日本語読み", "空行を3行以上", "数字は1段落1論点",
         "重要材料は", "3〜5件", "3,000〜4,500文字", "missed_candidates",
-        "sector_weekly_work_result_v1", "company_ir | government | regulator",
+        "sector_weekly_work_result_v2", "company_ir | government | regulator",
         "heartbeat --assignment-id", "10分ごと", "hard time budgetは50分", "45分時点",
         "abandon --assignment-id", "atomicにretry_pending", "調査品質を落として無理にstage",
         "stage --assignment-id", "handoff_pending", "sync_pending", "SectorWeeklyInboxWorker",
         "built-in Web Search", "Responses API", "OPENAI_API_KEY",
         "1実行で複数sectorを処理してはいけません", "月曜08:05 JST",
-        "owner、sector、period", "隔離SQLite DB",
+        "不変contract", "verify-claim", "verify-payload", "contract hash", "attempt固有",
+        "codeからnameを推測", "memoryは調査入力に使わない", "隔離SQLite DB",
     ):
         assert term in prompt
-    for forbidden in ("API料金", "max_tool_calls", "API timeout", "token料金"):
+    for forbidden in (
+        "API料金", "max_tool_calls", "API timeout", "token料金",
+        '"sector_code": 5', '"sector_name": "鉱業"',
+    ):
         assert forbidden not in prompt
 
 

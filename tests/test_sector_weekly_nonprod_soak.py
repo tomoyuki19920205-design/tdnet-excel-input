@@ -85,6 +85,8 @@ def _envelope(claimed: dict) -> dict:
         "sector_name": claimed["sector_name"],
         "period_start": claimed["period_start"],
         "period_end": claimed["period_end"],
+        "attempt_count": claimed["attempt_count"],
+        "contract_hash": claimed["contract_hash"],
         "report": _report(int(claimed["sector_code"])),
     }
 

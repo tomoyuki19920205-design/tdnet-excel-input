@@ -89,6 +89,8 @@ def _fixture(
         "sector_name": claimed["sector_name"],
         "period_start": claimed["period_start"],
         "period_end": claimed["period_end"],
+        "attempt_count": claimed["attempt_count"],
+        "contract_hash": claimed["contract_hash"],
         "report": {
             "importance": "A", "direction": "mixed",
             "summary_bullets": ["海外需給", "国内波及", "反証条件"],
@@ -135,6 +137,17 @@ def _completed_fixture(tmp_path: Path) -> tuple[Path, Path, dict, WorkerPaths, d
     return db, work, claimed, paths, old_report, completed["payload_hash"]
 
 
+def _bind_current_contract(envelope: dict, claimed: dict) -> dict:
+    result = dict(envelope)
+    for field in (
+        "assignment_id", "sector_code", "sector_name", "period_start", "period_end",
+        "attempt_count", "contract_hash",
+    ):
+        result[field] = claimed[field]
+    result["claim_owner"] = OWNER
+    return result
+
+
 def _staged_revision_fixture(tmp_path: Path) -> tuple[Path, Path, dict, WorkerPaths, Path, dict, str, str]:
     db, work, claimed, paths, old_report, old_hash = _completed_fixture(tmp_path)
     reopen_quality_one(
@@ -146,6 +159,7 @@ def _staged_revision_fixture(tmp_path: Path) -> tuple[Path, Path, dict, WorkerPa
     envelope = json.loads(
         (work / "processed" / f"{claimed['assignment_id']}.json").read_text(encoding="utf-8")
     )
+    envelope = _bind_current_contract(envelope, revised_claim)
     envelope["report"]["full_report_md"] = envelope["report"]["full_report_md"].replace(
         "**確認できた事実**\n\n需給変化。", "**確認できた事実**\n\ncrash recovery後の需給変化。", 1,
     )
@@ -198,7 +212,7 @@ def test_sync_failure_preserves_payload_attempt_and_resumes_next_poll(tmp_path: 
 def test_malformed_payload_research_retry_syncs_only_current_keys(tmp_path: Path, monkeypatch):
     db, work, claimed, inbox = _fixture(tmp_path)
     paths = WorkerPaths.from_values(tmp_path, db, work)
-    valid_payload = inbox.read_text(encoding="utf-8")
+    valid_payload = json.loads(inbox.read_text(encoding="utf-8"))
     inbox.write_text("{", encoding="utf-8")
     original_reject = inbox_worker.reject_staged_payload
     monkeypatch.setattr(
@@ -209,7 +223,9 @@ def test_malformed_payload_research_retry_syncs_only_current_keys(tmp_path: Path
 
     retried = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
     draft = tmp_path / "retry.json"
-    draft.write_text(valid_payload, encoding="utf-8")
+    draft.write_text(
+        json.dumps(_bind_current_contract(valid_payload, retried), ensure_ascii=False), encoding="utf-8",
+    )
     stage_one(db, retried["assignment_id"], OWNER, draft, work_root=work, at=AT)
     calls = []
 
@@ -265,6 +281,7 @@ def test_quality_revision_archives_old_payload_and_preserves_canonical_until_syn
     revised_claim = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
     assert revised_claim["attempt_count"] == 2
     old_envelope = json.loads((work / "processed" / f"{claimed['assignment_id']}.json").read_text(encoding="utf-8"))
+    old_envelope = _bind_current_contract(old_envelope, revised_claim)
     old_envelope["report"]["full_report_md"] = old_envelope["report"]["full_report_md"].replace(
         "**確認できた事実**\n\n需給変化。", "**確認できた事実**\n\n改訂後の需給変化。", 1,
     )
@@ -566,6 +583,7 @@ def test_revision_permanent_validation_failure_preserves_old_canonical(tmp_path:
     )
     revised = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
     envelope = json.loads((work / "processed" / f"{claimed['assignment_id']}.json").read_text(encoding="utf-8"))
+    envelope = _bind_current_contract(envelope, revised)
     envelope["report"]["full_report_md"] = envelope["report"]["full_report_md"].replace(
         "**確認できた事実**", "確認できた事実", 1,
     )
