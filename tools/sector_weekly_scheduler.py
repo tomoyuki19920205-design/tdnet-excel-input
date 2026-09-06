@@ -20,16 +20,22 @@ from lib.sector_weekly import (
     dedupe_key, iso_seconds, now_jst, sector_name,
     sector_research_context, validate_full_report_length, weekly_window,
 )
-from lib.sector_weekly_work import enqueue_assignment, enqueue_retry_candidate, get_assignment_by_key
+from lib.sector_weekly_work import (
+    completion_status,
+    completion_target_window,
+    enqueue_assignment,
+    enqueue_retry_candidate,
+    get_assignment_by_key,
+)
 
 PROMPT_PATH = ROOT / "config" / "sector_weekly_prompt.txt"
 DEFAULT_LOG = ROOT / "data" / "sector_weekly" / "scheduler.jsonl"
 DEFAULT_LOCK = ROOT / "data" / "sector_weekly" / "scheduler.lock"
 SCHEDULER_CADENCE_MINUTES = 60
 SCHEDULER_SLOT_COUNT = 51
-SCHEDULER_FINAL_DAY = 0
-SCHEDULER_FINAL_HOUR = 8
-SCHEDULER_FINAL_MINUTE = 0
+COMPLETION_TARGET_DAY = 0
+COMPLETION_TARGET_HOUR = 8
+COMPLETION_TARGET_MINUTE = 55
 
 
 class SchedulerError(RuntimeError):
@@ -174,29 +180,23 @@ def _public_assignment(row: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def in_catchup_window(value: datetime) -> bool:
-    local = value.astimezone(JST)
-    if local.weekday() == 5:
-        return local.hour >= 6
-    if local.weekday() == 6:
-        return True
-    return local.weekday() == SCHEDULER_FINAL_DAY and (
-        local.hour, local.minute, local.second, local.microsecond
-    ) <= (SCHEDULER_FINAL_HOUR, SCHEDULER_FINAL_MINUTE, 0, 0)
+    """Compatibility predicate: completion mode has no Monday hard cutoff."""
+    value.astimezone(JST)
+    return True
 
 
 def in_worker_window(value: datetime) -> bool:
-    local = value.astimezone(JST)
-    if local.weekday() == 5:
-        return (local.hour, local.minute, local.second, local.microsecond) >= (6, 5, 0, 0)
-    if local.weekday() == 6:
-        return True
-    return local.weekday() == SCHEDULER_FINAL_DAY and (
-        local.hour, local.minute, local.second, local.microsecond
-    ) <= (8, 5, 0, 0)
+    """Compatibility predicate: workers may finish a fixed period after Monday."""
+    value.astimezone(JST)
+    return True
 
 
 def scheduler_slots(saturday_start: datetime) -> tuple[datetime, ...]:
-    """Return the 51 eligible hourly invocations for one recovery window."""
+    """Return the 51 hourly target slots through Monday 08:00.
+
+    These slots express the Monday 08:55 completion target. They are capacity
+    planning data, not a hard stop; completion mode continues hourly afterward.
+    """
     local = saturday_start.astimezone(JST)
     if (local.weekday(), local.hour, local.minute, local.second, local.microsecond) != (5, 6, 0, 0, 0):
         raise SchedulerError("scheduler slot window must start Saturday 06:00:00 JST")
@@ -209,8 +209,6 @@ def _utc_text(value: datetime) -> str:
 
 def plan_scheduled(conn: Any, at: datetime, window: WeeklyWindow) -> dict[str, Any]:
     """Return the next action without mutating the queue."""
-    if not in_catchup_window(at):
-        return {"action": "none", "event": "not_scheduled"}
     local = at.astimezone(JST)
     same_slot = conn.execute(
         "SELECT * FROM sector_weekly_work_assignments WHERE period_start=? AND period_end=? "
@@ -225,6 +223,11 @@ def plan_scheduled(conn: Any, at: datetime, window: WeeklyWindow) -> dict[str, A
     for code in range(1, 34):
         if get_assignment_by_key(conn, dedupe_key(window, code)) is None:
             return {"action": "enqueue", "event": "assignment_queued", "sector_code": code}
+    status = completion_status(conn, window)
+    if status["complete"]:
+        return {"action": "none", "event": "completion_reached"}
+    if status["failed"]:
+        return {"action": "none", "event": "needs_review_required"}
     return {"action": "retry", "event": "retry_queued"}
 
 
@@ -238,11 +241,11 @@ def run_scheduled(
     dry_run: bool = False,
 ) -> dict[str, Any]:
     if dry_run:
-        window = weekly_window(at)
         if not_before is not None and at.astimezone(JST) < not_before.astimezone(JST):
             return {"status": "not_started", "at": iso_seconds(at), "not_before": iso_seconds(not_before)}
         conn = connect_sector_db(db_path)
         try:
+            window = completion_target_window(conn, at)
             plan = plan_scheduled(conn, at, window)
         finally:
             conn.close()
@@ -252,11 +255,11 @@ def run_scheduled(
             **plan,
         }
     with scheduler_lock(lock_path):
-        window = weekly_window(at)
         if not_before is not None and at.astimezone(JST) < not_before.astimezone(JST):
             return {"status": "not_started", "at": iso_seconds(at), "not_before": iso_seconds(not_before)}
         conn = connect_sector_db(db_path)
         try:
+            window = completion_target_window(conn, at)
             plan = plan_scheduled(conn, at, window)
             if plan["action"] == "enqueue":
                 assignment, created = enqueue_assignment(conn, int(plan["sector_code"]), window, now=at)

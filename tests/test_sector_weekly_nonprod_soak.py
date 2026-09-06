@@ -110,6 +110,17 @@ def test_accelerated_51_slot_33_sector_nonproduction_soak(tmp_path: Path):
     try:
         old_window = weekly_window(SAT - timedelta(days=7))
         old, _ = enqueue_assignment(conn, 1, old_window, now=SAT - timedelta(days=7))
+        conn.execute(
+            "UPDATE canonical_sector_report_runs SET status='success' "
+            "WHERE datetime(period_start)=datetime(?) AND datetime(period_end)=datetime(?)",
+            (old["period_start"], old["period_end"]),
+        )
+        conn.execute(
+            "UPDATE sector_weekly_work_assignments SET status='retry_pending',"
+            "last_error_type='quality_revision' WHERE assignment_id=?",
+            (old["assignment_id"],),
+        )
+        conn.commit()
     finally:
         conn.close()
 
@@ -178,7 +189,7 @@ def test_accelerated_51_slot_33_sector_nonproduction_soak(tmp_path: Path):
     try:
         status = completion_status(conn, weekly_window(SAT))
         status_again = completion_status(conn, weekly_window(SAT))
-        assert get_assignment(conn, old["assignment_id"])["status"] == "ready"
+        assert get_assignment(conn, old["assignment_id"])["status"] == "retry_pending"
         sentinel = conn.execute("SELECT value FROM company_news_soak_sentinel").fetchone()[0]
         report_count = conn.execute("SELECT count(*) FROM canonical_sector_reports").fetchone()[0]
         queue_count = conn.execute(
@@ -206,6 +217,54 @@ def test_accelerated_51_slot_33_sector_nonproduction_soak(tmp_path: Path):
     assert rerun["created"] is False
 
 
+def test_33_sector_completion_continues_after_monday_target_without_week_mixing(tmp_path: Path):
+    db = tmp_path / "after-target-soak.db"
+    work = tmp_path / "after-target-work"
+    _migrate(db, tmp_path / "after-target-migration")
+    for index in range(33):
+        scheduled = run_scheduled(
+            SAT + index * CADENCE,
+            db_path=db,
+            log_path=tmp_path / "after-target-scheduler.jsonl",
+            lock_path=tmp_path / "after-target-scheduler.lock",
+        )
+        assert scheduled["created"] is True
+
+    first_late_worker = datetime.fromisoformat("2026-09-07T09:05:00+09:00")
+    for index in range(33):
+        worker_at = first_late_worker + index * CADENCE
+        claimed = claim_one(db, OWNER, work_root=work, at=worker_at)["assignment"]
+        assert claimed["period_end"] == "2026-09-04T20:59:59Z"
+        conn = connect_sector_db(db)
+        try:
+            complete_assignment(
+                conn, claimed["assignment_id"], OWNER,
+                f"{int(claimed['sector_code']):064x}", now=worker_at,
+            )
+        finally:
+            conn.close()
+
+    conn = connect_sector_db(db)
+    try:
+        status = completion_status(conn, weekly_window(SAT))
+        periods = conn.execute(
+            "SELECT DISTINCT period_start,period_end FROM sector_weekly_work_assignments"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert status["state"] == "COMPLETE_33_OF_33"
+    assert status["success"] == 33 and status["duplicate_count"] == 0
+    assert len(periods) == 1
+    assert first_late_worker + 32 * CADENCE > datetime.fromisoformat("2026-09-07T08:55:00+09:00")
+    stopped = run_scheduled(
+        datetime.fromisoformat("2026-09-09T18:00:00+09:00"),
+        db_path=db,
+        log_path=tmp_path / "after-target-scheduler.jsonl",
+        lock_path=tmp_path / "after-target-scheduler.lock",
+    )
+    assert stopped["status"] == "completion_reached" and stopped["created"] is False
+
+
 @pytest.mark.parametrize("outage_start", range(40))
 def test_every_12_hour_outage_position_retains_capacity_for_six_retries(tmp_path: Path, outage_start: int):
     db = tmp_path / f"capacity-{outage_start:02d}.db"
@@ -216,6 +275,17 @@ def test_every_12_hour_outage_position_retains_capacity_for_six_retries(tmp_path
         old, _ = enqueue_assignment(
             conn, 1, weekly_window(SAT - timedelta(days=7)), now=SAT - timedelta(days=7),
         )
+        conn.execute(
+            "UPDATE canonical_sector_report_runs SET status='success' "
+            "WHERE datetime(period_start)=datetime(?) AND datetime(period_end)=datetime(?)",
+            (old["period_start"], old["period_end"]),
+        )
+        conn.execute(
+            "UPDATE sector_weekly_work_assignments SET status='retry_pending',"
+            "last_error_type='quality_revision' WHERE assignment_id=?",
+            (old["assignment_id"],),
+        )
+        conn.commit()
     finally:
         conn.close()
     slots = _available_slots(outage_start)
@@ -256,7 +326,7 @@ def test_every_12_hour_outage_position_retains_capacity_for_six_retries(tmp_path
     try:
         status = completion_status(conn, weekly_window(SAT))
         repeated = completion_status(conn, weekly_window(SAT))
-        assert get_assignment(conn, old["assignment_id"])["status"] == "ready"
+        assert get_assignment(conn, old["assignment_id"])["status"] == "retry_pending"
         sentinel = conn.execute("SELECT value FROM company_news_soak_sentinel").fetchone()[0]
     finally:
         conn.close()

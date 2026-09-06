@@ -717,7 +717,7 @@ def test_retry_is_claimed_before_a_fresh_sector(tmp_path: Path):
     assert second["attempt_count"] == 2
 
 
-def test_claim_changes_only_selected_retry_and_prioritizes_all_retries(tmp_path: Path):
+def test_claim_changes_only_selected_retry_without_special_case_priority(tmp_path: Path):
     db = tmp_path / "db.sqlite"
     work = tmp_path / "work"
     rows = {code: _enqueue(db, code) for code in (8, 9, 10)}
@@ -734,11 +734,11 @@ def test_claim_changes_only_selected_retry_and_prioritizes_all_retries(tmp_path:
         conn.commit()
 
         first = claim_next(conn, OWNER, now=AT)
-        assert first["sector_code"] == 9
+        assert first["sector_code"] == 8
         untouched = {
-            code: get_assignment(conn, rows[code]["assignment_id"])["status"] for code in (8, 10)
+            code: get_assignment(conn, rows[code]["assignment_id"])["status"] for code in (9, 10)
         }
-        assert untouched == {8: "retry_pending", 10: "ready"}
+        assert untouched == {9: "retry_pending", 10: "ready"}
 
         conn.execute(
             "UPDATE sector_weekly_work_assignments SET status='success',claim_owner=NULL,claimed_at=NULL,"
@@ -746,7 +746,7 @@ def test_claim_changes_only_selected_retry_and_prioritizes_all_retries(tmp_path:
         )
         conn.commit()
         second = claim_next(conn, OWNER, now=AT + timedelta(minutes=1))
-        assert second["sector_code"] == 8
+        assert second["sector_code"] == 9
         assert get_assignment(conn, rows[10]["assignment_id"])["status"] == "ready"
     finally:
         conn.close()
@@ -777,6 +777,28 @@ def test_explicit_fail_preserves_type_and_needs_review_is_not_reclaimed(tmp_path
         row = get_assignment(conn, review_claim["assignment_id"])
         assert row["status"] == "failed"
         assert row["last_error_type"] == "needs_review_SystemInvariantError"
+        assert claim_next(conn, OWNER, now=AT + timedelta(hours=1)) is None
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("error_type", [
+    "SectorBridgeError", "SectorContractError", "SystemInvariantError", "ActiveContractError",
+])
+def test_system_or_contract_failure_automatically_requires_review(tmp_path: Path, error_type: str):
+    db = tmp_path / f"{error_type}.sqlite"
+    work = tmp_path / f"{error_type}-work"
+    _enqueue(db)
+    claimed = claim_one(db, OWNER, work_root=work, at=AT)["assignment"]
+    failed = fail_one(
+        db, claimed["assignment_id"], OWNER, "unchanged system condition",
+        error_type=error_type, at=AT,
+    )
+    assert failed["status"] == "failed"
+    conn = connect_sector_db(db)
+    try:
+        row = get_assignment(conn, claimed["assignment_id"])
+        assert row["last_error_type"] == f"needs_review_{error_type}"
         assert claim_next(conn, OWNER, now=AT + timedelta(hours=1)) is None
     finally:
         conn.close()

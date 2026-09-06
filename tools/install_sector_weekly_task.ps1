@@ -42,7 +42,7 @@ $action = New-ScheduledTaskAction -Execute $PythonPath -Argument $argumentString
 $trigger = New-ScheduledTaskTrigger -Once -At $firstSaturday -RepetitionInterval (New-TimeSpan -Hours 1)
 $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 59)
 $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
-$task = New-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description "Queue at most one Sector Weekly assignment per eligible hourly JST slot through Monday 08:00; never runs LLM or Web Search."
+$task = New-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description "Queue at most one Sector Weekly assignment per hourly JST slot until the fixed reporting period reaches 33/33; never runs LLM or Web Search."
 
 if ($PSCmdlet.ShouldProcess($TaskName, "Register scheduled task")) {
     Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
@@ -58,8 +58,9 @@ if ($PSCmdlet.ShouldProcess($TaskName, "Register scheduled task")) {
     NextStart = $firstSaturday
     Repetition = "PT1H"
     RepetitionDuration = "Indefinite"
-    EligibleSlots = 51
-    EligibleWindowEnd = $firstSaturday.AddHours(50)
+    CompletionTarget = $firstSaturday.AddDays(2).AddHours(2).AddMinutes(55)
+    HardStop = $false
+    StopCondition = "COMPLETE_33_OF_33"
     Execute = $PythonPath
     Arguments = $argumentString
     MultipleInstances = "IgnoreNew"

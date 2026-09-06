@@ -14,6 +14,7 @@ from lib.sector_weekly_work import (
     SectorWorkError,
     abandon_assignment,
     claim_next,
+    completion_target_window,
     complete_assignment,
     completion_status,
     enqueue_assignment,
@@ -54,7 +55,7 @@ def _schedule(db: Path, tmp_path: Path, at: datetime) -> dict:
     )
 
 
-def test_scheduler_has_51_hourly_slots_and_stops_after_monday_0800(tmp_path: Path):
+def test_scheduler_has_51_target_slots_and_continues_after_monday_0800(tmp_path: Path):
     db = _db(tmp_path)
     assert CADENCE == timedelta(hours=1)
     assert len(SLOTS) == 51
@@ -64,7 +65,7 @@ def test_scheduler_has_51_hourly_slots_and_stops_after_monday_0800(tmp_path: Pat
     assert sum(slot.weekday() == 6 for slot in SLOTS) == 24
     assert sum(slot.weekday() == 0 for slot in SLOTS) == 9
     assert in_catchup_window(SLOTS[-1]) is True
-    assert in_catchup_window(SLOTS[-1] + CADENCE) is False
+    assert in_catchup_window(SLOTS[-1] + CADENCE) is True
     for index, slot in enumerate(SLOTS):
         result = _schedule(db, tmp_path, slot)
         if index < 33:
@@ -75,6 +76,9 @@ def test_scheduler_has_51_hourly_slots_and_stops_after_monday_0800(tmp_path: Pat
     conn = sqlite3.connect(db)
     assert conn.execute("SELECT count(*) FROM sector_weekly_work_assignments").fetchone()[0] == 33
     assert conn.execute("SELECT count(DISTINCT stable_key) FROM sector_weekly_work_assignments").fetchone()[0] == 33
+    continued = _schedule(db, tmp_path, SLOTS[-1] + CADENCE)
+    assert continued["period_end"] == "2026-09-05T05:59:59+09:00"
+    assert continued["created"] is False
 
 
 def test_scheduler_duplicate_same_instant_and_dry_run_are_read_only(tmp_path: Path):
@@ -104,27 +108,71 @@ def test_scheduler_catches_up_oldest_missing_after_gap(tmp_path: Path, gap: int)
     assert after_gap["created"] is True
 
 
-def test_scheduler_outside_window_week_rollover_and_stale_do_not_collide(tmp_path: Path):
+def test_incomplete_period_stays_fixed_across_week_rollover(tmp_path: Path):
     db = _db(tmp_path)
-    outside = _schedule(db, tmp_path, datetime.fromisoformat("2026-09-04T20:00:00+09:00"))
-    assert outside["status"] == "not_scheduled"
     first = _schedule(db, tmp_path, SAT)
     next_week = _schedule(db, tmp_path, SAT + timedelta(days=7))
-    assert first["sector_code"] == next_week["sector_code"] == 1
-    assert first["stable_key"] != next_week["stable_key"]
+    assert first["sector_code"] == 1 and next_week["sector_code"] == 2
+    assert first["period_end"] == next_week["period_end"]
 
 
-def test_monday_recovery_boundaries_and_worker_noop_outside_window(tmp_path: Path):
+def test_completed_period_allows_next_week_without_mixing(tmp_path: Path):
     db = _db(tmp_path)
-    monday_scheduler = datetime.fromisoformat("2026-09-07T08:00:00+09:00")
-    monday_worker = datetime.fromisoformat("2026-09-07T08:05:00+09:00")
+    current = weekly_window(SAT)
+    conn = connect_sector_db(db)
+    try:
+        for code in range(1, 34):
+            enqueue_assignment(conn, code, current, now=SAT)
+        conn.execute(
+            "UPDATE sector_weekly_work_assignments SET status='success' WHERE period_end=?",
+            ("2026-09-04T20:59:59Z",),
+        )
+        conn.execute(
+            "UPDATE canonical_sector_report_runs SET status='success' WHERE period_end=?",
+            ("2026-09-05T05:59:59+09:00",),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    next_week = _schedule(db, tmp_path, SAT + timedelta(days=7))
+    assert next_week["created"] is True and next_week["sector_code"] == 1
+    assert next_week["period_end"] == "2026-09-11T20:59:59Z"
+
+
+def test_monday_0855_is_a_target_and_worker_continues_afterward(tmp_path: Path):
+    db = _db(tmp_path)
+    monday_scheduler = datetime.fromisoformat("2026-09-07T09:00:00+09:00")
+    monday_worker = datetime.fromisoformat("2026-09-07T09:05:00+09:00")
     assert _schedule(db, tmp_path, monday_scheduler)["sector_code"] == 1
     assert in_worker_window(monday_worker) is True
     claimed = claim_one(db, OWNER, at=monday_worker, work_root=tmp_path / "work")
     assert claimed["status"] == "claimed"
-    assert _schedule(db, tmp_path, monday_scheduler + timedelta(hours=1))["status"] == "not_scheduled"
-    outside = claim_one(db, OWNER, at=monday_worker + timedelta(hours=1), work_root=tmp_path / "work")
-    assert outside == {"status": "no_work", "claim_owner": OWNER, "reason": "outside_worker_window"}
+    assert claimed["assignment"]["period_end"] == "2026-09-04T20:59:59Z"
+
+
+def test_quality_only_retry_does_not_pull_generation_to_completed_old_period(tmp_path: Path):
+    db = _db(tmp_path)
+    old_at = SAT - timedelta(days=7)
+    old_window = weekly_window(old_at)
+    current_window = weekly_window(SAT)
+    conn = connect_sector_db(db)
+    try:
+        old, _ = enqueue_assignment(conn, 9, old_window, now=old_at)
+        conn.execute(
+            "UPDATE canonical_sector_report_runs SET status='success' WHERE period_end=?",
+            ("2026-08-29T05:59:59+09:00",),
+        )
+        conn.execute(
+            "UPDATE sector_weekly_work_assignments SET status='retry_pending',"
+            "last_error_type='quality_revision' WHERE assignment_id=?",
+            (old["assignment_id"],),
+        )
+        conn.commit()
+        enqueue_assignment(conn, 1, current_window, now=SAT)
+        target = completion_target_window(conn, SAT + timedelta(days=7))
+    finally:
+        conn.close()
+    assert target.week_key == "2026-09-05"
 
 
 def test_scheduler_uses_jst_not_host_dst(tmp_path: Path):

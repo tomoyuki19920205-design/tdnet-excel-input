@@ -411,7 +411,8 @@ def test_chatgpt_worker_prompt_has_transport_research_and_schema_contracts():
         "abandon --assignment-id", "atomicにretry_pending", "調査品質を落として無理にstage",
         "validate-and-stage --assignment-id", "handoff_pending", "sync_pending", "SectorWeeklyInboxWorker",
         "built-in Web Search", "Responses API", "OPENAI_API_KEY",
-        "1実行で複数sectorを処理してはいけません", "月曜08:05 JST",
+        "1実行で複数sectorを処理してはいけません", "月曜08:55 JST", "hard停止条件ではありません",
+        "33/33完成まで固定", "新しい週を混ぜません", "完成済み業種を再処理せず",
         "不変contract", "verify-claim", "validate-and-stage", "contract hash", "attempt固有",
         "codeからnameを推測", "memoryは調査入力に使わない", "隔離SQLite DB",
     ):
@@ -439,8 +440,9 @@ def test_sector_weekly_task_installer_uses_hourly_disabled_safe_schedule():
     assert "-At $firstSaturday -RepetitionInterval (New-TimeSpan -Hours 1)" in script
     assert 'Repetition = "PT1H"' in script
     assert 'RepetitionDuration = "Indefinite"' in script
-    assert "EligibleSlots = 51" in script
-    assert "EligibleWindowEnd = $firstSaturday.AddHours(50)" in script
+    assert 'StopCondition = "COMPLETE_33_OF_33"' in script
+    assert "CompletionTarget = $firstSaturday.AddDays(2).AddHours(2).AddMinutes(55)" in script
+    assert "HardStop = $false" in script
     assert "-MultipleInstances IgnoreNew" in script
     assert "if (-not $Enable) { Disable-ScheduledTask" in script
     assert "New-TimeSpan -Minutes 45" not in script
