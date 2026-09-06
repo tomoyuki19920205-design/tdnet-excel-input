@@ -33,6 +33,7 @@ IN_SCOPE = {'IN_SCOPE_COMPANY_WEB', 'IN_SCOPE_EXTERNAL_MEDIA', 'IN_SCOPE_GOVERNM
             'IN_SCOPE_COUNTERPARTY', 'IN_SCOPE_INCREMENTAL_IR'}
 OUT_SCOPE = {'OUT_OF_SCOPE_TDNET', 'OUT_OF_SCOPE_IR_NIGHTLY', 'OUT_OF_SCOPE_TRIVIAL'}
 SCOPE_LABELS = IN_SCOPE | OUT_SCOPE | {'AMBIGUOUS'}
+REQUIRED_BODY_SCOPE = IN_SCOPE | {'AMBIGUOUS'}
 CHANNELS = {'official', 'external_media', 'government', 'counterparty', 'incremental_ir'}
 MATERIAL_TITLE = re.compile(r'価格改定|値上げ|値下げ|提携|受注|生産停止|工場停止|操業|設備投資|顧客採用|行政処分|回収|不具合|承認|供給契約|capacity|price|partnership|recall|order', re.I)
 
@@ -221,7 +222,7 @@ def validate(value, assignment, payload, *, identity_registry: CompanyIdentityRe
             require(gap.get('url') in docs and gap['url'] not in gap_urls,
                     'gap needs document and review reason')
             d = docs[gap['url']]
-            require(d['scope_label'] in IN_SCOPE and d.get('material') is True
+            require(d['scope_label'] in REQUIRED_BODY_SCOPE and d.get('material') is True
                     and d['body_status'] == 'INACCESSIBLE' and text(d.get('attempt_evidence')),
                     'only inaccessible in-scope material is a document gap')
             gap_urls.add(gap['url'])
@@ -236,9 +237,9 @@ def validate(value, assignment, payload, *, identity_registry: CompanyIdentityRe
                             and q.get('exposure_index') == exposure_index for q in queries),
                     'query gap conflicts with executed search')
     for d in documents:
-        if d['scope_label'] in IN_SCOPE and d.get('material') is True:
+        if d['scope_label'] in REQUIRED_BODY_SCOPE and d.get('material') is True:
             require(d['body_status'] != 'SKIPPED', 'known material cannot be silently skipped')
-        if d['body_status'] == 'INACCESSIBLE' and d['scope_label'] in IN_SCOPE and d.get('material') is True:
+        if d['body_status'] == 'INACCESSIBLE' and d['scope_label'] in REQUIRED_BODY_SCOPE and d.get('material') is True:
             require(d['url'] in gap_urls, 'inaccessible material needs PARTIAL')
         if d['body_status'] == 'VERIFIED':
             require(d.get('final_url') in source_map, 'verified document source missing')

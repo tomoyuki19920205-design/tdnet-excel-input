@@ -56,6 +56,11 @@ OFFICIAL_EVIDENCE_SOURCE_TYPES = frozenset({
     "official", "official_index", "official_report", "official_news",
     "company", "company_news", "company_ir", "ir", "company_official",
 })
+INDEX_ONLY_SOURCE_TYPES = frozenset({"official_index", "listing", "index"})
+DOCUMENT_PROVENANCE_STATES = frozenset({
+    "DISCOVERED_IN_INDEX", "URL_DISCOVERED", "BODY_FETCH_ATTEMPTED",
+    "BODY_VERIFIED", "ACCESS_FAILED",
+})
 CONTROL_TOTAL_TOKENS = 8_584_237
 CONTROL_INPUT_TOKENS = 8_545_419
 CONTROL_CACHED_INPUT_TOKENS = 8_227_072
@@ -780,6 +785,80 @@ def inject_identity_provenance(response: dict[str, Any], discovery: dict[str, An
     return repaired
 
 
+def derive_document_provenance_state(document: dict[str, Any],
+                                     evidence_cards: list[dict[str, Any]]) -> str:
+    """Derive body provenance from bounded evidence without trusting synthesis labels."""
+    document_url = canonicalize_url(document.get("url"))
+    matching = [card for card in evidence_cards if isinstance(card, dict)
+                and canonicalize_url(card.get("url")) == document_url]
+    explicit = {card.get("document_provenance_state") for card in matching
+                if card.get("document_provenance_state") in DOCUMENT_PROVENANCE_STATES}
+    if len(explicit) > 1:
+        raise LightweightError("conflicting explicit document provenance states")
+    if explicit:
+        return next(iter(explicit))
+    body_cards = [card for card in matching if card.get("verification_status") == "VERIFIED"
+                  and card.get("source_type") not in INDEX_ONLY_SOURCE_TYPES
+                  and isinstance(card.get("excerpt"), str) and card.get("excerpt").strip()]
+    if body_cards:
+        return "BODY_VERIFIED"
+    if document.get("body_status") == "INACCESSIBLE":
+        return "ACCESS_FAILED"
+    index_cards = [card for card in matching if card.get("source_type") in INDEX_ONLY_SOURCE_TYPES]
+    if index_cards:
+        title = re.sub(r"\s+", " ", str(document.get("title") or "")).strip().casefold()
+        if title and any(
+                re.sub(r"\s+", " ", str(card.get("title") or "")).strip().casefold() == title
+                and card.get("exact_url_from_saved_evidence") is True for card in index_cards):
+            return "URL_DISCOVERED"
+        return "DISCOVERED_IN_INDEX"
+    if document.get("body_status") == "VERIFIED":
+        raise LightweightError("body VERIFIED lacks actual-content evidence")
+    return "URL_DISCOVERED"
+
+
+def classify_recall_materiality(facts: dict[str, Any]) -> str:
+    """Classify a verified recall from structured facts, never from its title alone."""
+    if facts.get("body_verified") is not True:
+        return "UNKNOWN"
+    required = (
+        "direct_company_linkage", "actual_product_recall", "affected_product",
+        "commercial_or_operational_impact", "meaningful_earnings_pathway",
+    )
+    return "PASS" if all(facts.get(key) for key in required) else "FAIL"
+
+
+def apply_document_provenance_authority(
+        response: dict[str, Any], evidence_cards: list[dict[str, Any]],
+        ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Downgrade index-only documents and emit a separate provenance ledger."""
+    repaired = copy.deepcopy(response)
+    payload = repaired.get("research_result")
+    strategy = repaired.get("strategy_telemetry")
+    if not isinstance(payload, dict) or not isinstance(strategy, dict):
+        raise LightweightError("canonical response is incomplete")
+    ledger = []
+    non_body_urls = set()
+    for index, document in enumerate(strategy.get("documents", [])):
+        state = derive_document_provenance_state(document, evidence_cards)
+        document_url = canonicalize_url(document.get("url"))
+        ledger.append({"document_index": index, "url": document_url, "state": state})
+        if state != "BODY_VERIFIED":
+            non_body_urls.add(document_url)
+            document["body_status"] = "INACCESSIBLE"
+            document["final_url"] = None
+            document["attempt_evidence"] = (
+                f"Python provenance authority: {state}; actual document body is not verified.")
+    provenance = strategy.get("source_provenance")
+    if not isinstance(provenance, list):
+        raise LightweightError("canonical source provenance is missing")
+    strategy["source_provenance"] = [row for row in provenance
+        if not (canonicalize_url(row.get("url")) in non_body_urls
+                and row.get("source_type") in INDEX_ONLY_SOURCE_TYPES)]
+    payload["sources_checked_count"] = len(strategy["source_provenance"])
+    return repaired, ledger
+
+
 def normalize_documents_from_evidence(response: dict[str, Any], evidence_cards: list[dict[str, Any]],
                                       assignment: dict[str, Any]) -> dict[str, Any]:
     """Bind document dates/URLs to evidence and exclude out-of-window background."""
@@ -1131,7 +1210,8 @@ def apply_search_record_registry(response: dict[str, Any], registry: list[dict[s
 
 
 def derive_coverage_state(response: dict[str, Any], registry: list[dict[str, Any]],
-                          discovery: dict[str, Any]) -> dict[str, Any]:
+                          discovery: dict[str, Any],
+                          evidence_cards: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Derive search and document coverage from recorded execution state."""
     strategy = response.get("strategy_telemetry")
     payload = response.get("research_result")
@@ -1191,14 +1271,16 @@ def derive_coverage_state(response: dict[str, Any], registry: list[dict[str, Any
         "channel": row["channel"], "exposure_index": row["exposure_id"],
         "reason": row["gap_reason"], "retry_required": True,
     } for row in requirements if row["gap"]]
+    cards = evidence_cards or []
     for index, document in enumerate(strategy.get("documents", [])):
-        if (document.get("scope_label") in strategy_v4.IN_SCOPE
-                and document.get("material") is True
-                and document.get("body_status") == "INACCESSIBLE"):
+        state = derive_document_provenance_state(document, cards) if cards else (
+            "BODY_VERIFIED" if document.get("body_status") == "VERIFIED" else "ACCESS_FAILED")
+        if (document.get("scope_label") in strategy_v4.REQUIRED_BODY_SCOPE
+                and document.get("material") is True and state != "BODY_VERIFIED"):
             reason = document.get("attempt_evidence")
             if not isinstance(reason, str) or not reason.strip():
                 raise LightweightError(
-                    f"documents[{index}] inaccessible material lacks attempt evidence")
+                    f"documents[{index}] unresolved material lacks attempt evidence")
             gaps.append({
                 "gap_type": "document_access", "url": document.get("url"),
                 "channel": None, "exposure_index": None,
@@ -1256,10 +1338,12 @@ def derive_coverage_state(response: dict[str, Any], registry: list[dict[str, Any
 
 
 def apply_coverage_authority(response: dict[str, Any], registry: list[dict[str, Any]],
-                             discovery: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+                             discovery: dict[str, Any],
+                             evidence_cards: list[dict[str, Any]] | None = None,
+                             ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Replace synthesis-derived coverage fields with Python-derived state."""
     repaired = copy.deepcopy(response)
-    state = derive_coverage_state(repaired, registry, discovery)
+    state = derive_coverage_state(repaired, registry, discovery, evidence_cards)
     strategy = repaired["strategy_telemetry"]
     for key in ("coverage_status", "coverage_gaps", "channel_reviews",
                 "no_news_exposure_coverage", "no_news_gate_pass", "query_budget_exceeded"):
@@ -1404,11 +1488,12 @@ def codex_runner(root: Path, experiment: Path, assignment: dict[str, Any]) -> tu
     response = apply_source_count_authority(response)
     response = apply_search_record_registry(response, search_registry, discovery)
     response = normalize_documents_from_evidence(response, store.cards(), assignment)
+    response, document_provenance = apply_document_provenance_authority(response, store.cards())
     response = apply_ir_nightly_overlap(response)
     response = apply_incremental_ir_authority(response, store.cards(), discovery)
     response, _ = apply_materiality_authority(
         response, store.cards(), company_name=assignment["company_name"])
-    response, _ = apply_coverage_authority(response, search_registry, discovery)
+    response, _ = apply_coverage_authority(response, search_registry, discovery, store.cards())
     response = restore_publication_from_evidence(response, store.cards())
     response = restore_effective_precision(response)
     telemetry_rows.append(synthesis_telemetry)
@@ -1417,6 +1502,7 @@ def codex_runner(root: Path, experiment: Path, assignment: dict[str, Any]) -> tu
     _atomic_json(company_dir / "evidence-state.json", {
         "cards": store.cards(), "raw_body_retained": False,
         "cross_worker_payload": "bounded_evidence_cards_only",
+        "document_provenance": document_provenance,
         "search_record_registry": search_registry,
     })
     return response, measured

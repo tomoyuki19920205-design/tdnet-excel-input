@@ -198,7 +198,7 @@ try {
     $started.Stop()
     Write-Result @{
         schema_version = 'company_news_schannel_helper_v1'; result = 'RESPONSE'; transport_id = 'windows-schannel-v1'
-        implementation_fingerprint = 'dotnet10-sslstream-schannel-cryptoapi-v3'; requested_url = $uri.AbsoluteUri
+        implementation_fingerprint = 'dotnet10-sslstream-schannel-cryptoapi-v4'; requested_url = $uri.AbsoluteUri
         final_url = $uri.AbsoluteUri; status_code = $statusCode; mime_type = $mime
         response_bytes = $responseBytes; body_sha256 = $bodySha256; body_base64 = $bodyBase64
         safe_headers = $safeHeaders; certificate_summary = $certificateSummary; elapsed_seconds = $started.Elapsed.TotalSeconds
@@ -207,14 +207,22 @@ try {
 } catch {
     $started.Stop()
     $message = $_.Exception.Message
-    $failure = if ($message -match '^SIZE_LIMIT') { 'SIZE_LIMIT' } elseif ($message -match '^ACCESS_DENIED') { 'ACCESS_DENIED' } elseif ($message -match '^HTTP_PROTOCOL') { 'HTTP' } elseif ($message -match 'timed out|canceled') { 'TIMEOUT' } elseif ($certificateSummary.hostname_validation -eq 'FAIL') { 'TLS_HOSTNAME' } elseif ($certificateSummary.chain_status.Count -gt 0) { 'TLS_CA_CHAIN' } elseif ($message -match 'authentication|certificate|SSL|TLS') { 'TLS_UNKNOWN' } elseif ($stage -eq 'BODY_READ') { 'BODY_READ' } elseif ($stage -eq 'BODY_ENCODING') { 'BODY_ENCODING' } elseif ($stage -eq 'HTTP') { 'HTTP' } else { 'DNS' }
+    $exceptionType = $_.Exception.GetType().FullName
+    $exceptionChain = @()
+    $cursor = $_.Exception
+    while ($null -ne $cursor -and $exceptionChain.Count -lt 8) {
+        $exceptionChain += ('{0}: {1}' -f $cursor.GetType().FullName, $cursor.Message)
+        $cursor = $cursor.InnerException
+    }
+    $failure = if ($message -match '^SIZE_LIMIT') { 'SIZE_LIMIT' } elseif ($message -match '^ACCESS_DENIED') { 'ACCESS_DENIED' } elseif ($message -match '^HTTP_PROTOCOL') { 'HTTP' } elseif ($message -match 'timed out|canceled') { 'TIMEOUT' } elseif ($certificateSummary.hostname_validation -eq 'FAIL') { 'TLS_HOSTNAME' } elseif ($certificateSummary.chain_status.Count -gt 0) { 'TLS_CA_CHAIN' } elseif ($stage -eq 'TLS' -and $message -match 'authentication|AuthenticateAsClient|handshake') { 'TLS_HANDSHAKE' } elseif ($message -match 'certificate|SSL|TLS') { 'TLS_UNKNOWN' } elseif ($stage -eq 'BODY_READ') { 'BODY_READ' } elseif ($stage -eq 'BODY_ENCODING') { 'BODY_ENCODING' } elseif ($stage -eq 'HTTP') { 'HTTP' } else { 'DNS' }
     Write-Result @{
         schema_version = 'company_news_schannel_helper_v1'; result = 'FAILURE'; transport_id = 'windows-schannel-v1'
-        implementation_fingerprint = 'dotnet10-sslstream-schannel-cryptoapi-v3'
+        implementation_fingerprint = 'dotnet10-sslstream-schannel-cryptoapi-v4'
         requested_url = if ($null -ne $request) { [string]$request.url } else { $null }; final_url = if ($statusCode -gt 0) { $uri.AbsoluteUri } else { $null }
         status_code = $statusCode; mime_type = $mime; response_bytes = $responseBytes; body_sha256 = $bodySha256; body_base64 = $null; safe_headers = $safeHeaders
         certificate_summary = $certificateSummary; elapsed_seconds = $started.Elapsed.TotalSeconds
         request_header_profile = $requestHeaderProfile
+        failure_stage = $stage; exception_type = $exceptionType; exception_chain = $exceptionChain
         failure_class = $failure; error_detail = $message.Substring(0, [Math]::Min(2000, $message.Length))
     }
 } finally {

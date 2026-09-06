@@ -1308,3 +1308,40 @@ def test_delegated_rejection_parser_and_policy_do_not_invoke_model_or_store_raw_
     source = official_source.Path(official_source.__file__).read_text(encoding="utf-8")
     assert "parse_http_rejection_artifact" in source
     assert "model_context_from_resolution(parse_http_rejection_artifact" not in source
+
+
+def test_schannel_unknown_retains_stage_and_becomes_handshake():
+    response = {"failure_class": "TLS_UNKNOWN", "failure_stage": "TLS",
+                "error_detail": "Exception calling AuthenticateAsClient: Authentication failed",
+                "exception_chain": ["AuthenticationException: handshake failed"],
+                "certificate_summary": {"hostname_validation": "UNKNOWN", "chain_status": []}}
+    assert official_source.classify_schannel_failure(response) == "TLS_HANDSHAKE"
+
+
+def test_schannel_chain_and_hostname_take_priority():
+    base = {"failure_class": "TLS_UNKNOWN", "failure_stage": "TLS",
+            "error_detail": "authentication failed"}
+    assert official_source.classify_schannel_failure({
+        **base, "certificate_summary": {"hostname_validation": "FAIL", "chain_status": []}
+    }) == "TLS_HOSTNAME"
+    assert official_source.classify_schannel_failure({
+        **base, "certificate_summary": {"hostname_validation": "PASS",
+                                         "chain_status": [{"status": "UntrustedRoot"}]}
+    }) == "TLS_CA_CHAIN"
+
+
+def test_exact_document_url_requires_literal_saved_official_href():
+    body = b'<ul><li><a href="/en/news/42">Recall statement</a></li></ul>'
+    assert official_source.derive_exact_document_url(
+        body, "https://official.example/en/news", "Recall statement", "official.example"
+    ) == "https://official.example/en/news/42"
+
+
+def test_exact_document_url_rejects_guessed_or_external_url():
+    body = b'<p>Recall statement</p><a href="https://evil.example/news/42">other</a>'
+    assert official_source.derive_exact_document_url(
+        body, "https://official.example/en/news", "Recall statement",
+        "official.example") is None
+    assert official_source.derive_exact_document_url(
+        b"<p>Recall statement</p>", "https://official.example/en/news",
+        "Recall statement", "official.example") is None

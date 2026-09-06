@@ -850,3 +850,106 @@ def test_benchmark_and_production_isolation(tmp_path):
     exp = experiment(tmp_path)
     snap = light.preflight(exp)
     assert Path(snap["assignment"]["assignment_id"]).is_absolute() is False
+
+
+def _index_only_recall_fixture():
+    url = "https://official.example/en/news"
+    response, registry, discovery = _coverage_authority_fixture()
+    response["research_result"]["items"] = []
+    response["research_result"]["sources_checked_count"] = 2
+    response["strategy_telemetry"].update({
+        "documents": [{
+            "date": "2026-08-31", "title": "News", "url": url, "final_url": url,
+            "scope_label": "IN_SCOPE_COMPANY_WEB", "scope_reason": "official candidate",
+            "material": True, "body_status": "VERIFIED", "attempt_evidence": "index only",
+        }],
+        "source_provenance": [
+            {"url": "https://official.example/", "source_type": "company_official",
+             "content_verified": True, "evidence_excerpt": "official body"},
+            {"url": url, "source_type": "official_index", "content_verified": True,
+             "evidence_excerpt": "2026-08-31 recall"},
+        ],
+    })
+    cards = [{"url": url, "source_type": "official_index", "title": "News",
+              "excerpt": "2026-08-31 recall", "verification_status": "VERIFIED"}]
+    return response, registry, discovery, cards
+
+
+def test_index_only_is_not_content_verified_and_forces_partial_no_news_false():
+    response, registry, discovery, cards = _index_only_recall_fixture()
+    repaired, ledger = light.apply_document_provenance_authority(response, cards)
+    assert ledger[0]["state"] == "DISCOVERED_IN_INDEX"
+    document = repaired["strategy_telemetry"]["documents"][0]
+    assert document["body_status"] == "INACCESSIBLE" and document["final_url"] is None
+    assert all(row["url"] != document["url"]
+               for row in repaired["strategy_telemetry"]["source_provenance"])
+    repaired, state = light.apply_coverage_authority(repaired, registry, discovery, cards)
+    assert state["coverage_status"] == "PARTIAL"
+    assert state["no_news_gate_pass"] is False
+    assert state["coverage_gaps"][0]["gap_type"] == "document_access"
+
+
+def test_url_discovered_is_separate_from_body_verified():
+    document = {"url": "https://official.example/news/42", "title": "Recall",
+                "body_status": "SKIPPED"}
+    card = {"url": document["url"], "title": "Recall", "source_type": "official_index",
+            "verification_status": "VERIFIED", "excerpt": "index row",
+            "exact_url_from_saved_evidence": True}
+    assert light.derive_document_provenance_state(document, [card]) == "URL_DISCOVERED"
+    body = {**card, "source_type": "official_news", "excerpt": "actual statement body"}
+    assert light.derive_document_provenance_state(document, [body]) == "BODY_VERIFIED"
+
+
+def test_access_failed_is_separate_from_discovery():
+    document = {"url": "https://official.example/news/42", "title": "Recall",
+                "body_status": "INACCESSIBLE", "attempt_evidence": "TLS failed"}
+    assert light.derive_document_provenance_state(document, []) == "ACCESS_FAILED"
+
+
+def test_recall_materiality_fixtures_are_not_inferred_from_title():
+    nonmaterial = {"material": False, "economic_transmission": None}
+    material = {"material": True,
+                "economic_transmission": "Recall costs and lost sales affect earnings."}
+    assert nonmaterial["material"] is False and nonmaterial["economic_transmission"] is None
+    assert material["material"] is True and material["economic_transmission"]
+
+
+def test_phase21_5122_index_only_offline_replay():
+    response, registry, discovery, cards = _index_only_recall_fixture()
+    repaired, ledger = light.apply_document_provenance_authority(response, cards)
+    repaired, state = light.apply_coverage_authority(repaired, registry, discovery, cards)
+    assert ledger == [{"document_index": 0, "url": "https://official.example/en/news",
+                       "state": "DISCOVERED_IN_INDEX"}]
+    assert state["coverage_status"] == "PARTIAL" and len(state["coverage_gaps"]) == 1
+    assert repaired["strategy_telemetry"]["no_news_gate_pass"] is False
+
+
+def test_body_fetch_attempted_state_is_preserved_before_verification():
+    document = {"url": "https://official.example/news/42", "title": "Recall",
+                "body_status": "SKIPPED"}
+    card = {"url": document["url"], "source_type": "official_index", "title": "Recall",
+            "verification_status": "VERIFIED", "excerpt": "index row",
+            "document_provenance_state": "BODY_FETCH_ATTEMPTED"}
+    assert light.derive_document_provenance_state(document, [card]) == "BODY_FETCH_ATTEMPTED"
+
+
+def test_recall_materiality_requires_verified_body_and_earnings_pathway():
+    facts = {"body_verified": True, "direct_company_linkage": True,
+             "actual_product_recall": True, "affected_product": "product",
+             "commercial_or_operational_impact": "recall operations",
+             "meaningful_earnings_pathway": None}
+    assert light.classify_recall_materiality(facts) == "FAIL"
+    facts["meaningful_earnings_pathway"] = "lost sales and recall cost"
+    assert light.classify_recall_materiality(facts) == "PASS"
+    facts["body_verified"] = False
+    assert light.classify_recall_materiality(facts) == "UNKNOWN"
+
+
+def test_ambiguous_material_index_document_fails_closed_as_access_gap():
+    response, registry, discovery, cards = _index_only_recall_fixture()
+    response["strategy_telemetry"]["documents"][0]["scope_label"] = "AMBIGUOUS"
+    repaired, _ = light.apply_document_provenance_authority(response, cards)
+    repaired, state = light.apply_coverage_authority(repaired, registry, discovery, cards)
+    assert state["coverage_status"] == "PARTIAL"
+    assert state["coverage_gaps"][0]["url"] == "https://official.example/en/news"
+    assert repaired["strategy_telemetry"]["no_news_gate_pass"] is False

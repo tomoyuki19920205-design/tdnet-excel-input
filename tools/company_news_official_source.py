@@ -44,7 +44,7 @@ TLS_BACKEND_CURRENT_CA = "current-ca-v1"
 TLS_BACKEND_WINDOWS_SYSTEM_TRUST = "windows-system-trust-v1"
 TLS_BACKEND_WINDOWS_ROOT_BUNDLE_SEMANTIC = "windows-root-bundle-v1"
 SCHANNEL_TRANSPORT_ID = "windows-schannel-v1"
-SCHANNEL_IMPLEMENTATION_FINGERPRINT = "dotnet10-sslstream-schannel-cryptoapi-v3"
+SCHANNEL_IMPLEMENTATION_FINGERPRINT = "dotnet10-sslstream-schannel-cryptoapi-v4"
 HTTP_JOURNAL_PHASES = {
     "PLANNED", "REQUEST_STARTED", "RESPONSE_RECEIVED", "NORMALIZED", "FAILED", "OUTCOME_LOST",
 }
@@ -460,6 +460,55 @@ def classify_tls_failure(exc: BaseException) -> str:
     return "TLS_UNKNOWN"
 
 
+def classify_schannel_failure(response: Mapping[str, Any]) -> str:
+    """Classify a structured Schannel failure without discarding its TLS stage."""
+    reported = str(response.get("failure_class") or "UNKNOWN")
+    certificate = response.get("certificate_summary") or {}
+    if certificate.get("hostname_validation") == "FAIL":
+        return "TLS_HOSTNAME"
+    if certificate.get("chain_status"):
+        return "TLS_CA_CHAIN"
+    if reported != "TLS_UNKNOWN":
+        return reported
+    stage = str(response.get("failure_stage") or "").upper()
+    messages = " ".join(str(value or "") for value in (
+        response.get("error_detail"), *(response.get("exception_chain") or [])))
+    classified = classify_tls_failure(RuntimeError(messages))
+    if classified != "TLS_UNKNOWN":
+        return classified
+    if stage == "TLS" and any(token in messages.casefold() for token in (
+            "authenticateasclient", "authentication failed", "handshake")):
+        return "TLS_HANDSHAKE"
+    return reported
+
+
+def derive_exact_document_url(saved_body: bytes, listing_url: str, title: str,
+                              official_domain: str) -> str | None:
+    """Return one literal document URL from saved official HTML; never guess a route."""
+    soup = BeautifulSoup(saved_body, "html.parser")
+    wanted = re.sub(r"\s+", " ", title).strip().casefold()
+    found: set[str] = set()
+    candidates = list(soup.find_all("a")) + list(soup.find_all(attrs={"data-url": True}))
+    for candidate in candidates:
+        candidate_text = re.sub(r"\s+", " ", candidate.get_text(" ", strip=True)).casefold()
+        container_text = re.sub(
+            r"\s+", " ", candidate.parent.get_text(" ", strip=True)).casefold()
+        if wanted not in candidate_text and wanted not in container_text:
+            continue
+        raw = candidate.get("href") or candidate.get("data-url")
+        if not raw:
+            continue
+        absolute = _canonical_url(urljoin(listing_url, str(raw)))
+        parsed = urlsplit(absolute)
+        if parsed.scheme.lower() == "https" and _is_official_host(
+                parsed.hostname or "", official_domain):
+            found.add(absolute)
+    if len(found) > 1:
+        raise OfficialSourceError(
+            "AMBIGUOUS_DOCUMENT_URL: saved evidence has multiple exact links")
+    return next(iter(found), None)
+
+
 class VerifiedSslContextAdapter(HTTPAdapter):
     """Requests adapter whose pool uses a prevalidated SSLContext."""
 
@@ -774,9 +823,12 @@ class WindowsSchannelTransport:
                 "response_bytes": response.get("response_bytes"),
                 "body_sha256": response.get("body_sha256"),
                 "request_header_profile": response.get("request_header_profile"),
+                "failure_stage": response.get("failure_stage"),
+                "exception_type": response.get("exception_type"),
+                "exception_chain": response.get("exception_chain") or [],
             }
             if response.get("result") != "RESPONSE":
-                failure = str(response.get("failure_class") or "UNKNOWN")
+                failure = classify_schannel_failure(response)
                 payload = TransportPayload(
                     requested_url, current, int(response.get("status_code") or 0),
                     response.get("mime_type"), None, self.name, failure,
