@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -54,6 +55,32 @@ def verified_registry(ticker="1001", name="Company 1"):
         "https://example.test/", "fixture", "REPOSITORY_VERIFIED_ARTIFACT",
         "2026-09-06T00:00:00+00:00", "b" * 64, "VERIFIED", f"{name} official")
     return CompanyIdentityRegistry([record])
+
+
+def company_master(path: Path, rows):
+    connection = sqlite3.connect(path)
+    connection.execute("""CREATE TABLE company_ir_companies (
+        ticker TEXT PRIMARY KEY, official_url TEXT, official_domain TEXT,
+        discovery_status TEXT, source_origin TEXT, last_validated_at TEXT,
+        last_http_status INTEGER)""")
+    connection.executemany(
+        "INSERT INTO company_ir_companies VALUES (?,?,?,?,?,?,?)", rows)
+    connection.commit()
+    connection.close()
+
+
+def complete_inputs(tmp_path: Path, cohort):
+    records = []
+    for company in cohort.companies:
+        records.extend(verified_registry(company.security_code, company.company_name).to_dict()["records"])
+    registry = CompanyIdentityRegistry([CompanyIdentityRecord(**row) for row in records])
+    registry_path = tmp_path / "identity-registry.json"
+    registry.save(registry_path)
+    plan_path = tmp_path / "official-plan.json"
+    plan_path.write_text(json.dumps(multi._official_plan(
+        cohort, {row.security_code: row for row in (
+            CompanyIdentityRecord(**value) for value in records)})), encoding="utf-8")
+    return registry_path, plan_path
 
 
 def resolution(url, *, status="VERIFIED", method="repository_existing"):
@@ -168,21 +195,87 @@ def test_cohort_mutation_after_prepare_stops_before_execution(tmp_path):
 def test_official_registry_and_plan_are_frozen_together(tmp_path):
     path = cohort_file(tmp_path, 1)
     cohort = load(path, 1, 1)
-    registry = tmp_path / "identity-registry.json"
-    registry.write_text(json.dumps({
-        "schema_version": "company_identity_registry_v1", "records": []}), encoding="utf-8")
-    plan = tmp_path / "official-plan.json"
-    plan.write_text(json.dumps({
-        "family_urls": {}, "repository_artifacts": {}}), encoding="utf-8")
+    registry, plan = complete_inputs(tmp_path, cohort)
     run = tmp_path / "run"
     manifest = multi.prepare_run(
         cohort, run, search_from="2026-08-25", search_to="2026-08-31",
         approved_company_count=1, identity_registry_path=registry,
         official_plan_path=plan)
+    assert len(manifest["identity_registry_logical_sha256"]) == 64
+    assert len(manifest["official_plan_logical_sha256"]) == 64
     assert multi.load_frozen_official_config(manifest) == (registry.resolve(), plan.resolve())
-    plan.write_text(json.dumps({"family_urls": {"1001": {}}}), encoding="utf-8")
+    document = json.loads(plan.read_text())
+    document["companies"][0]["official_domain"] = "changed.example"
+    plan.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(multi.CohortIntegrityError, match="metadata changed"):
         multi.load_frozen_official_config(manifest)
+
+
+def test_offline_bootstrap_fails_closed_without_verified_identity(tmp_path):
+    cohort = load(cohort_file(tmp_path), 12, 12)
+    master = tmp_path / "company-master.db"
+    company_master(master, [(row.security_code, f"https://{row.security_code}.example/",
+                             f"{row.security_code}.example", "discovered", "company master",
+                             "2026-08-20T00:00:00+00:00", 200)
+                            for row in cohort.companies])
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    output = tmp_path / "bootstrap"
+    report = multi.bootstrap_inputs(
+        cohort, company_master_db=master, repository_artifacts_root=artifacts,
+        output_dir=output, offline_only=True)
+    assert report["status"] == "INCOMPLETE_OFFLINE_EVIDENCE"
+    assert report["verified_count"] == 0 and report["unverified_count"] == 12
+    assert all(not row["offline_bootstrap_complete"] for row in report["matrix"])
+    assert not (output / "phase22-company-identity-registry.json").exists()
+    assert not (output / "phase22-official-source-plan.json").exists()
+    rendered = json.dumps(report).lower()
+    assert not any(key in rendered for key in (
+        "historical_result", "old_event", "gold_url", "selection_reason"))
+
+
+def test_offline_bootstrap_reuses_verified_repository_identity_and_freezes(tmp_path):
+    cohort = load(cohort_file(tmp_path, 1), 1, 1)
+    master = tmp_path / "company-master.db"
+    company_master(master, [("1001", "https://example.test/", "example.test",
+                             "discovered", "company master",
+                             "2026-08-20T00:00:00+00:00", 200)])
+    artifacts = tmp_path / "artifacts" / "identity-preflight"
+    artifacts.mkdir(parents=True)
+    verified_registry().save(artifacts / "company-identity-registry.json")
+    output = tmp_path / "bootstrap"
+    report = multi.bootstrap_inputs(
+        cohort, company_master_db=master,
+        repository_artifacts_root=tmp_path / "artifacts",
+        output_dir=output, offline_only=True)
+    assert report["status"] == "READY" and report["verified_count"] == 1
+    registry = output / "phase22-company-identity-registry.json"
+    plan = output / "phase22-official-source-plan.json"
+    multi.validate_frozen_inputs(cohort, registry, plan)
+    frozen_plan = json.loads(plan.read_text())
+    assert frozen_plan["resolver_policy"]["manual_url_input"] is False
+    assert frozen_plan["resolver_policy"]["historical_result_input"] is False
+    assert frozen_plan["family_urls"] == {} and frozen_plan["repository_artifacts"] == {}
+    prepared = tmp_path / "prepared"
+    multi.prepare_run(cohort, prepared, search_from="2026-08-25", search_to="2026-08-31",
+                      approved_company_count=1, identity_registry_path=registry,
+                      official_plan_path=plan)
+    assert not (prepared / "companies").exists()
+
+
+def test_prepare_rejects_incomplete_frozen_inputs(tmp_path):
+    cohort = load(cohort_file(tmp_path, 1), 1, 1)
+    registry = tmp_path / "empty-registry.json"
+    registry.write_text(json.dumps({
+        "schema_version": "company_identity_registry_v1", "records": []}), encoding="utf-8")
+    plan = tmp_path / "empty-plan.json"
+    plan.write_text(json.dumps({"schema_version": multi.OFFICIAL_PLAN_SCHEMA,
+        "cohort_sha256": cohort.cohort_sha256, "company_count": 1,
+        "ordered_tickers": ["1001"], "companies": []}), encoding="utf-8")
+    with pytest.raises(multi.CohortIntegrityError, match="registry cohort/count mismatch"):
+        multi.prepare_run(cohort, tmp_path / "run", search_from="2026-08-25",
+                          search_to="2026-08-31", approved_company_count=1,
+                          identity_registry_path=registry, official_plan_path=plan)
 
 
 def test_mock_12_company_simulation_is_ordered_isolated_and_atomic(tmp_path):

@@ -15,6 +15,7 @@ import json
 import os
 import re
 import secrets
+import sqlite3
 import statistics
 import sys
 from dataclasses import asdict, dataclass
@@ -29,6 +30,7 @@ if str(ROOT) not in sys.path:
 from tools import company_news_lightweight as lightweight
 from tools.company_news_official_source import (
     CompanyIdentityRegistry,
+    CompanyIdentityRecord,
     DurableArtifactStore,
     FetchPolicy,
     HttpFetchJournal,
@@ -44,6 +46,8 @@ from tools.company_news_overlap_scope import classify_news_monitor_scope
 
 
 SCHEMA = "company_news_frozen_cohort_run_v1"
+BOOTSTRAP_SCHEMA = "company_news_frozen_input_bootstrap_v1"
+OFFICIAL_PLAN_SCHEMA = "company_news_official_source_plan_v1"
 RUN_STATES = {"PREPARED", "RUNNING", "STOPPED", "COMPLETED", "FAILED"}
 COMPANY_STATES = {"PENDING", "RUNNING", "COMPLETED", "FAILED", "SAFE_UNKNOWN"}
 DOCUMENT_PROVENANCE_STATES = (
@@ -55,6 +59,10 @@ DEFAULT_HARD_TOKEN_GATE = 500_000
 DEFAULT_PREFERRED_TOKEN_GATE = 400_000
 RUNTIME_FIELDS = ("assignment_id", "ticker", "company_name", "search_from", "search_to",
                   "strategy_version", "position")
+FORBIDDEN_BOOTSTRAP_KEYS = {
+    "bucket", "historical_result", "historical_result_label", "old_event",
+    "material_answer", "gold_url", "selection_reason",
+}
 
 
 class MultiRunnerError(RuntimeError):
@@ -115,6 +123,23 @@ def _canonical_sha(value: Any) -> str:
     raw = json.dumps(value, ensure_ascii=False, sort_keys=True,
                      separators=(",", ":")).encode("utf-8")
     return _sha_bytes(raw)
+
+
+def _normalized_company_name(value: str) -> str:
+    normalized = re.sub(r"[\s\u3000]", "", value or "")
+    for designator in ("株式会社", "㈱", "(株)", "（株）"):
+        normalized = normalized.replace(designator, "")
+    return normalized.casefold()
+
+
+def _contains_forbidden_bootstrap_key(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        return any(str(key).casefold() in FORBIDDEN_BOOTSTRAP_KEYS
+                   or _contains_forbidden_bootstrap_key(child)
+                   for key, child in value.items())
+    if isinstance(value, list):
+        return any(_contains_forbidden_bootstrap_key(child) for child in value)
+    return False
 
 
 @dataclass(frozen=True)
@@ -196,6 +221,212 @@ class FrozenCohort:
             max_companies=len(self.companies), expected_cohort_sha256=self.cohort_sha256)
         if current.file_sha256 != self.file_sha256 or current.companies != self.companies:
             raise CohortIntegrityError("frozen cohort file changed after prepare")
+
+
+def _load_repository_identity_records(
+        repository_artifacts_root: Path) -> tuple[dict[str, CompanyIdentityRecord], dict[str, str]]:
+    """Load only canonical identity-registry artifacts, never benchmark answers."""
+    records: dict[str, CompanyIdentityRecord] = {}
+    conflicts: set[str] = set()
+    observed: dict[str, set[str]] = {}
+    if not repository_artifacts_root.is_dir():
+        return records, {}
+    patterns = ("**/*company-identity-registry*.json",)
+    for path in sorted({path for pattern in patterns
+                        for path in repository_artifacts_root.glob(pattern)}):
+        try:
+            registry = CompanyIdentityRegistry.load(path)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+        for record in registry.to_dict()["records"]:
+            parsed = CompanyIdentityRecord(**record)
+            observed.setdefault(parsed.security_code, set()).add(parsed.status)
+            if parsed.status != "VERIFIED":
+                continue
+            prior = records.get(parsed.security_code)
+            if prior and (prior.official_domain != parsed.official_domain
+                          or prior.verified_official_url != parsed.verified_official_url):
+                conflicts.add(parsed.security_code)
+                records.pop(parsed.security_code, None)
+            elif parsed.security_code not in conflicts:
+                records[parsed.security_code] = parsed
+    for security_code, statuses in observed.items():
+        if "STALE" in statuses:
+            conflicts.add(security_code)
+            records.pop(security_code, None)
+    states = {security_code: ("STALE" if security_code in conflicts else (
+        "VERIFIED" if security_code in records else "UNVERIFIED"))
+        for security_code in observed}
+    return records, states
+
+
+def _load_company_master(company_master_db: Path,
+                         tickers: Sequence[str]) -> dict[str, dict[str, Any]]:
+    if not company_master_db.is_file():
+        return {}
+    uri = company_master_db.resolve().as_uri() + "?mode=ro"
+    connection = sqlite3.connect(uri, uri=True)
+    connection.row_factory = sqlite3.Row
+    try:
+        table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='company_ir_companies'"
+        ).fetchone()
+        if table is None:
+            raise MultiRunnerError("company master has no company_ir_companies table")
+        placeholders = ",".join("?" for _ in tickers)
+        rows = connection.execute(
+            "SELECT ticker,official_url,official_domain,discovery_status,source_origin,"
+            "last_validated_at,last_http_status FROM company_ir_companies "
+            f"WHERE ticker IN ({placeholders})", tuple(tickers)).fetchall()
+        return {str(row["ticker"]): dict(row) for row in rows}
+    finally:
+        connection.close()
+
+
+def _official_plan(cohort: FrozenCohort,
+                   verified: Mapping[str, CompanyIdentityRecord]) -> dict[str, Any]:
+    companies = []
+    for company in cohort.companies:
+        record = verified[company.security_code]
+        companies.append({
+            "position": company.position,
+            "ticker": company.security_code,
+            "company_name": company.company_name,
+            "identity_status": "VERIFIED",
+            "official_domain": record.official_domain,
+            "verified_root_url": record.verified_official_url,
+            "allowed_hosts": [record.official_domain],
+            "transport_preference": ["repository_existing", "windows-schannel-v1"],
+        })
+    return {
+        "schema_version": OFFICIAL_PLAN_SCHEMA,
+        "cohort_sha256": cohort.cohort_sha256,
+        "company_count": len(companies),
+        "ordered_tickers": [row.security_code for row in cohort.companies],
+        "companies": companies,
+        "resolver_policy": {
+            "manual_url_input": False,
+            "historical_result_input": False,
+            "search_engine_discovery": False,
+            "root_authority": "frozen_verified_identity_registry",
+            "target_discovery": "deterministic_links_from_verified_official_parent",
+            "delegated_resource_authority": "exact_embedded_url_only",
+            "https_only": True,
+        },
+        # Compatibility containers are intentionally empty at bootstrap.
+        "family_urls": {},
+        "repository_artifacts": {},
+    }
+
+
+def validate_frozen_inputs(cohort: FrozenCohort, registry_path: Path,
+                           plan_path: Path) -> tuple[CompanyIdentityRegistry, dict[str, Any]]:
+    registry = CompanyIdentityRegistry.load(registry_path)
+    registry_records = registry.to_dict()["records"]
+    plan = _read(plan_path)
+    if plan.get("schema_version") != OFFICIAL_PLAN_SCHEMA:
+        raise CohortIntegrityError("official plan schema mismatch")
+    tickers = [row.security_code for row in cohort.companies]
+    registry_tickers = [str(row["security_code"]) for row in registry_records]
+    if len(registry_tickers) != len(tickers) or set(registry_tickers) != set(tickers):
+        raise CohortIntegrityError("identity registry cohort/count mismatch")
+    if (plan.get("cohort_sha256") != cohort.cohort_sha256
+            or plan.get("company_count") != len(tickers)
+            or plan.get("ordered_tickers") != tickers):
+        raise CohortIntegrityError("official plan cohort/order mismatch")
+    rows = plan.get("companies")
+    if not isinstance(rows, list) or len(rows) != len(tickers):
+        raise CohortIntegrityError("official plan company matrix incomplete")
+    if _contains_forbidden_bootstrap_key(plan):
+        raise CohortIntegrityError("official plan contains result leakage")
+    for company, row in zip(cohort.companies, rows, strict=True):
+        record = registry.usable(company.security_code, company.company_name)
+        if record is None:
+            raise CohortIntegrityError(f"identity registry incomplete: {company.security_code}")
+        if (row.get("position") != company.position
+                or row.get("ticker") != company.security_code
+                or row.get("company_name") != company.company_name
+                or row.get("identity_status") != "VERIFIED"
+                or row.get("official_domain") != record.official_domain
+                or row.get("verified_root_url") != record.verified_official_url):
+            raise CohortIntegrityError(f"official plan identity mismatch: {company.security_code}")
+    if _contains_forbidden_bootstrap_key({"records": registry_records}):
+        raise CohortIntegrityError("identity registry contains result leakage")
+    return registry, plan
+
+
+def bootstrap_inputs(cohort: FrozenCohort, *, company_master_db: Path,
+                     repository_artifacts_root: Path, output_dir: Path,
+                     offline_only: bool) -> dict[str, Any]:
+    """Build a result-neutral bootstrap matrix and freeze only complete inputs."""
+    if not offline_only:
+        raise MultiRunnerError("bootstrap-inputs requires --offline-only")
+    verified, observed_states = _load_repository_identity_records(repository_artifacts_root)
+    tickers = [row.security_code for row in cohort.companies]
+    master = _load_company_master(company_master_db, tickers)
+    matrix = []
+    for company in cohort.companies:
+        record = verified.get(company.security_code)
+        authority = master.get(company.security_code)
+        if record is not None and record.normalized_name != _normalized_company_name(company.company_name):
+            record = None
+        status = "VERIFIED" if record else observed_states.get(company.security_code, "UNVERIFIED")
+        domain = record.official_domain if record else (authority or {}).get("official_domain")
+        root_url = record.verified_official_url if record else (authority or {}).get("official_url")
+        missing = []
+        if record is None:
+            missing.append("verified official body/repository identity artifact")
+        if not domain:
+            missing.append("official domain authority")
+        if not root_url or not str(root_url).startswith("https://"):
+            missing.append("verified HTTPS root URL")
+        matrix.append({
+            "position": company.position, "ticker": company.security_code,
+            "company": company.company_name, "identity_status": status,
+            "identity_source": record.verification_source if record else (
+                "company_ir_monitor.db:company_ir_companies" if authority else None),
+            "official_domain": domain, "verified_root_url": record.verified_official_url if record else None,
+            "known_root_url": root_url, "repository_evidence_available": record is not None,
+            "offline_bootstrap_complete": not missing, "missing_requirement": missing,
+        })
+    ready = all(row["offline_bootstrap_complete"] for row in matrix)
+    output_dir = output_dir.resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    registry_path = output_dir / "phase22-company-identity-registry.json"
+    plan_path = output_dir / "phase22-official-source-plan.json"
+    report = {
+        "schema_version": BOOTSTRAP_SCHEMA, "created_at": _now(),
+        "status": "READY" if ready else "INCOMPLETE_OFFLINE_EVIDENCE",
+        "offline_only": True, "research_companies": 0, "http_calls": 0,
+        "web_calls": 0, "model_calls": 0,
+        "cohort_path": str(cohort.path), "cohort_sha256": cohort.cohort_sha256,
+        "cohort_file_sha256": cohort.file_sha256,
+        "universe_order_sha256": cohort.universe_order_sha256,
+        "company_count": len(matrix), "ordered_tickers": tickers,
+        "matrix": matrix,
+        "verified_count": sum(row["identity_status"] == "VERIFIED" for row in matrix),
+        "unverified_count": sum(row["identity_status"] == "UNVERIFIED" for row in matrix),
+        "stale_count": sum(row["identity_status"] == "STALE" for row in matrix),
+        "registry_path": str(registry_path) if ready else None,
+        "plan_path": str(plan_path) if ready else None,
+    }
+    if ready:
+        selected = [verified[ticker] for ticker in tickers]
+        registry = CompanyIdentityRegistry(selected)
+        plan = _official_plan(cohort, verified)
+        if _contains_forbidden_bootstrap_key(registry.to_dict()) or _contains_forbidden_bootstrap_key(plan):
+            raise CohortIntegrityError("bootstrap result leakage detected")
+        registry.save(registry_path)
+        _atomic(plan_path, plan)
+        validate_frozen_inputs(cohort, registry_path, plan_path)
+        report.update(
+            registry_logical_sha256=_canonical_sha(registry.to_dict()),
+            registry_file_sha256=_sha_bytes(registry_path.read_bytes()),
+            plan_logical_sha256=_canonical_sha(plan),
+            plan_file_sha256=_sha_bytes(plan_path.read_bytes()),
+        )
+    _atomic(output_dir / "phase22-bootstrap-report.json", report)
+    return report
 
 
 @dataclass(frozen=True)
@@ -453,12 +684,14 @@ def prepare_run(cohort: FrozenCohort, run_dir: Path, *, search_from: str,
             raise MultiRunnerError("identity registry and official plan must be frozen together")
         identity_registry_path, official_plan_path = (
             identity_registry_path.resolve(), official_plan_path.resolve())
-        CompanyIdentityRegistry.load(identity_registry_path)
-        _read(official_plan_path)
+        identity_registry, official_plan = validate_frozen_inputs(
+            cohort, identity_registry_path, official_plan_path)
         manifest.update(
             identity_registry_path=str(identity_registry_path),
+            identity_registry_logical_sha256=_canonical_sha(identity_registry.to_dict()),
             identity_registry_sha256=_sha_bytes(identity_registry_path.read_bytes()),
             official_plan_path=str(official_plan_path),
+            official_plan_logical_sha256=_canonical_sha(official_plan),
             official_plan_sha256=_sha_bytes(official_plan_path.read_bytes()),
         )
     _atomic(run_dir / "manifest.json", manifest)
@@ -469,16 +702,21 @@ def prepare_run(cohort: FrozenCohort, run_dir: Path, *, search_from: str,
 def load_frozen_official_config(manifest: Mapping[str, Any]) -> tuple[Path, Path]:
     """Reopen the exact offline official inputs frozen when the run was prepared."""
     required = (
-        "identity_registry_path", "identity_registry_sha256",
-        "official_plan_path", "official_plan_sha256",
+        "identity_registry_path", "identity_registry_logical_sha256", "identity_registry_sha256",
+        "official_plan_path", "official_plan_logical_sha256", "official_plan_sha256",
     )
     if any(not manifest.get(key) for key in required):
         raise CohortIntegrityError("frozen official preflight metadata is missing")
     registry_path = Path(str(manifest["identity_registry_path"]))
     plan_path = Path(str(manifest["official_plan_path"]))
-    if (not registry_path.is_file() or not plan_path.is_file()
-            or _sha_bytes(registry_path.read_bytes()) != manifest["identity_registry_sha256"]
-            or _sha_bytes(plan_path.read_bytes()) != manifest["official_plan_sha256"]):
+    if not registry_path.is_file() or not plan_path.is_file():
+        raise CohortIntegrityError("frozen official preflight metadata changed")
+    registry = CompanyIdentityRegistry.load(registry_path)
+    plan = _read(plan_path)
+    if (_sha_bytes(registry_path.read_bytes()) != manifest["identity_registry_sha256"]
+            or _canonical_sha(registry.to_dict()) != manifest["identity_registry_logical_sha256"]
+            or _sha_bytes(plan_path.read_bytes()) != manifest["official_plan_sha256"]
+            or _canonical_sha(plan) != manifest["official_plan_logical_sha256"]):
         raise CohortIntegrityError("frozen official preflight metadata changed")
     return registry_path, plan_path
 
@@ -658,6 +896,15 @@ def _parser() -> argparse.ArgumentParser:
     prepare.add_argument("--search-to", required=True)
     prepare.add_argument("--identity-registry", type=Path, required=True)
     prepare.add_argument("--official-plan", type=Path, required=True)
+    bootstrap = sub.add_parser("bootstrap-inputs")
+    bootstrap.add_argument("--cohort-file", type=Path, required=True)
+    bootstrap.add_argument("--cohort-sha256", required=True)
+    bootstrap.add_argument("--approved-company-count", type=int, required=True)
+    bootstrap.add_argument("--max-companies", type=int, required=True)
+    bootstrap.add_argument("--company-master-db", type=Path, required=True)
+    bootstrap.add_argument("--repository-artifacts-root", type=Path, required=True)
+    bootstrap.add_argument("--output-dir", type=Path, required=True)
+    bootstrap.add_argument("--offline-only", action="store_true", required=True)
     report = sub.add_parser("aggregate"); report.add_argument("--run-dir", type=Path, required=True)
     run_next = sub.add_parser("run-next")
     run_next.add_argument("--root", type=Path, default=Path.cwd())
@@ -670,7 +917,16 @@ def _parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _parser().parse_args()
-    if args.command == "prepare":
+    if args.command == "bootstrap-inputs":
+        cohort = FrozenCohort.load(args.cohort_file,
+            approved_company_count=args.approved_company_count,
+            max_companies=args.max_companies,
+            expected_cohort_sha256=args.cohort_sha256)
+        value = bootstrap_inputs(
+            cohort, company_master_db=args.company_master_db,
+            repository_artifacts_root=args.repository_artifacts_root,
+            output_dir=args.output_dir, offline_only=args.offline_only)
+    elif args.command == "prepare":
         cohort = FrozenCohort.load(args.cohort_file,
             approved_company_count=args.approved_company_count,
             max_companies=args.max_companies,
@@ -695,6 +951,8 @@ def main() -> int:
             executor=execute_lightweight_company, auditor=exhaustive_auditor,
         ).run_next()
     print(json.dumps(value, ensure_ascii=False, indent=2))
+    if args.command == "bootstrap-inputs" and value.get("status") != "READY":
+        return 2
     return 0
 
 

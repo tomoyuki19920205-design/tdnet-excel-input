@@ -82,6 +82,36 @@ continue.
 The runner writes only beneath its supplied run directory.  It contains no
 Production inbox, database, Supabase, Viewer, scheduler, or routing path.
 
+## Offline input bootstrap
+
+`bootstrap-inputs --offline-only` builds the pre-run identity matrix without
+HTTP, Web, search, or model calls.  Its authorities are limited to canonical
+`CompanyIdentityRegistry` artifacts and the read-only
+`company_ir_companies` security/company master.  Master URLs can identify a
+known root and domain, but cannot promote an identity to `VERIFIED`; promotion
+still requires a saved verified identity artifact backed by an actual official
+body.  The command has no manual URL argument and never reads benchmark
+answers, Gold data, cohort buckets, historical results, or old event URLs.
+
+```powershell
+..\.venv\Scripts\python.exe tools\company_news_multi_runner.py bootstrap-inputs `
+  --cohort-file artifacts\token_efficiency_phase22\phase22-fixed-cohort.json `
+  --cohort-sha256 fc38bd476c68a0e47d75c59d664eb4fc2387c5a5c2580beece5668f395ff909e `
+  --approved-company-count 12 --max-companies 12 `
+  --company-master-db data\company_ir_monitor.db `
+  --repository-artifacts-root artifacts `
+  --output-dir artifacts\token_efficiency_phase22\phase22-input-bootstrap `
+  --offline-only
+```
+
+The bootstrap report is always written.  Frozen registry and plan files are
+written only when all cohort identities are already verified offline.  An
+incomplete matrix exits with status 2 and lists each missing requirement.
+The result-neutral plan freezes ticker order, verified roots, allowed hosts,
+transport order, and deterministic discovery/delegation policy.  It contains
+no future document URLs or result-dependent endpoints.  `prepare` validates
+the complete registry/plan pair before creating a manifest or queue.
+
 ## Commands
 
 Prepare the approved twelve-company run without research:
