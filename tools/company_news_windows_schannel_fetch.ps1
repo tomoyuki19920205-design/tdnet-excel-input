@@ -65,6 +65,7 @@ $statusCode = 0
 $mime = $null
 $safeHeaders = @{}
 $responseBytes = $null
+$bodySha256 = $null
 $certificateSummary = [ordered]@{ ssl_policy_errors = @(); hostname_validation = 'UNKNOWN'; leaf = $null; chain_elements = @(); chain_status = @() }
 try {
     $request = ([Console]::In.ReadToEnd() | ConvertFrom-Json)
@@ -165,6 +166,7 @@ try {
     if ($null -eq $body) { $body = [byte[]]::new(0) }
     if ($body.Length -gt $maxBytes) { throw 'SIZE_LIMIT' }
     $responseBytes = $body.Length
+    $bodySha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($body)).ToLowerInvariant()
     $stage = 'BODY_ENCODING'
     $bodyBase64 = [Convert]::ToBase64String($body)
     $started.Stop()
@@ -172,7 +174,7 @@ try {
         schema_version = 'company_news_schannel_helper_v1'; result = 'RESPONSE'; transport_id = 'windows-schannel-v1'
         implementation_fingerprint = 'dotnet10-sslstream-schannel-cryptoapi-v2'; requested_url = $uri.AbsoluteUri
         final_url = $uri.AbsoluteUri; status_code = $statusCode; mime_type = $mime
-        response_bytes = $responseBytes; body_base64 = $bodyBase64
+        response_bytes = $responseBytes; body_sha256 = $bodySha256; body_base64 = $bodyBase64
         safe_headers = $safeHeaders; certificate_summary = $certificateSummary; elapsed_seconds = $started.Elapsed.TotalSeconds
     }
 } catch {
@@ -183,7 +185,7 @@ try {
         schema_version = 'company_news_schannel_helper_v1'; result = 'FAILURE'; transport_id = 'windows-schannel-v1'
         implementation_fingerprint = 'dotnet10-sslstream-schannel-cryptoapi-v2'
         requested_url = if ($null -ne $request) { [string]$request.url } else { $null }; final_url = if ($statusCode -gt 0) { $uri.AbsoluteUri } else { $null }
-        status_code = $statusCode; mime_type = $mime; response_bytes = $responseBytes; body_base64 = $null; safe_headers = $safeHeaders
+        status_code = $statusCode; mime_type = $mime; response_bytes = $responseBytes; body_sha256 = $bodySha256; body_base64 = $null; safe_headers = $safeHeaders
         certificate_summary = $certificateSummary; elapsed_seconds = $started.Elapsed.TotalSeconds
         failure_class = $failure; error_detail = $message.Substring(0, [Math]::Min(2000, $message.Length))
     }

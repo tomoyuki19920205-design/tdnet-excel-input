@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import ssl
 import base64
+import hashlib
 import subprocess
 from datetime import datetime, timedelta, timezone
 
@@ -744,6 +745,7 @@ def schannel_response(*, body=b"<html><body>Example Works official profile</body
         "status_code": status,
         "mime_type": mime,
         "response_bytes": len(body),
+        "body_sha256": hashlib.sha256(body).hexdigest(),
         "body_base64": base64.b64encode(body).decode(),
         "safe_headers": safe_headers or {},
         "certificate_summary": {
@@ -916,6 +918,23 @@ def test_schannel_cross_domain_redirect_is_blocked_without_second_request():
         helper_runner=lambda request: calls.append(request) or response).fetch(
             "https://official.example/", "official.example", FetchPolicy(max_redirects=2))
     assert payload.failure_reason == "REDIRECT_BLOCKED" and len(calls) == 1
+    assert payload.body is None
+
+
+def test_schannel_redirect_journal_keeps_zero_body_and_hash(tmp_path):
+    journal = journal_for(tmp_path)
+    response = schannel_response(status=301, body=b"", mime="text/html",
+                                 safe_headers={"content-length": "0", "location": "/next"})
+    payload = WindowsSchannelTransport(
+        journal=journal, dns_resolver=PUBLIC_DNS,
+        helper_runner=lambda request: response).fetch(
+            "https://official.example/", "official.example", FetchPolicy(max_redirects=0))
+    assert payload.failure_reason == "REDIRECT_BLOCKED"
+    received = next(row for row in journal._disk_records()[0][0]["history"]
+                    if row["phase"] == "RESPONSE_RECEIVED")
+    assert received["status_code"] == 301
+    assert received["response_bytes"] == 0
+    assert received["body_sha256"] == hashlib.sha256(b"").hexdigest()
 
 
 @pytest.mark.parametrize("response,expected", [

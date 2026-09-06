@@ -654,6 +654,8 @@ class WindowsSchannelTransport:
                 "certificate_summary": response.get("certificate_summary"),
                 "elapsed_seconds": response.get("elapsed_seconds"),
                 "error_detail": str(response.get("error_detail") or "")[:2000] or None,
+                "response_bytes": response.get("response_bytes"),
+                "body_sha256": response.get("body_sha256"),
             }
             if response.get("result") != "RESPONSE":
                 failure = str(response.get("failure_class") or "UNKNOWN")
@@ -1032,16 +1034,20 @@ class HttpFetchJournal:
 
     def response_received(self, request_id: str, payload: TransportPayload, *, elapsed: float,
                           access_status: str | None = None) -> None:
+        metadata = dict(payload.transport_metadata or {})
+        response_bytes = (len(payload.body) if payload.body is not None
+                          else metadata.get("response_bytes"))
+        body_sha256 = (hashlib.sha256(payload.body).hexdigest() if payload.body is not None
+                       else metadata.get("body_sha256"))
         self.transition(
             request_id, "RESPONSE_RECEIVED", completed_at=self.clock(),
             final_url=payload.final_url, status_code=payload.status_code,
             safe_headers=dict(payload.safe_headers or {}), mime_type=payload.mime_type,
-            response_bytes=len(payload.body) if payload.body is not None else None,
-            body_sha256=hashlib.sha256(payload.body).hexdigest() if payload.body is not None else None,
+            response_bytes=response_bytes, body_sha256=body_sha256,
             access_status=access_status or (
                 "BLOCKED" if payload.failure_reason or payload.body is None else "RECEIVED"),
             exception_category=payload.failure_reason, elapsed_seconds=elapsed,
-            transport_metadata=dict(payload.transport_metadata or {}),
+            transport_metadata=metadata,
         )
 
     def normalized(self, request_id: str, *, normalized_chars: int, body_hash: str) -> None:
