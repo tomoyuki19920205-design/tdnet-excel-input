@@ -227,12 +227,14 @@ class FakeExecutor:
     def __init__(self, tokens=100, marker=None):
         self.tokens, self.marker, self.calls = tokens, marker, []
 
-    def __call__(self, root, company_dir, assignment, official):
+    def __call__(self, root, company_dir, assignment, official, *, usage_checkpoint=None):
         self.calls.append(dict(assignment))
         total = self.tokens(assignment) if callable(self.tokens) else self.tokens
-        return ({"research_result": {"items": []}, "strategy_telemetry": {}},
-                {"total_tokens": total, "worker_count": 3, "web_call_count": 2,
-                 "cached_input_tokens": 40, "workers": [{"input_tokens": 50}]})
+        telemetry = {"total_tokens": total, "worker_count": 3, "web_call_count": 2,
+                     "cached_input_tokens": 40, "workers": [{"input_tokens": 50}]}
+        if usage_checkpoint:
+            usage_checkpoint(telemetry)
+        return ({"research_result": {"items": []}, "strategy_telemetry": {}}, telemetry)
 
 
 def prepare(tmp_path, count=12):
@@ -786,6 +788,74 @@ def test_token_and_semantic_gates_stop_before_next_company(tmp_path):
     run2, ctl2 = controller(other, auditor=lambda *_: {"status": "FAIL"})
     assert ctl2.run_next()["status"] == "FAILED"
     assert json.loads((run2 / "manifest.json").read_text())["state"] == "FAILED"
+    failed = json.loads((run2 / "queue.json").read_text())["assignments"][0]
+    assert failed["token_state"] == "MEASURED" and failed["total_tokens"] == 100
+    report = multi.aggregate(run2)
+    assert report["total_tokens"] == 100 and report["quality_pass_samples"] == 0
+
+
+def test_publication_contract_failure_is_infra_stop_with_tokens_and_guard_release(tmp_path):
+    class PublicationFailure(FakeExecutor):
+        def __call__(self, root, company_dir, assignment, official, *, usage_checkpoint=None):
+            telemetry = {"total_tokens": 268060, "worker_count": 4,
+                         "web_call_count": 9, "cached_input_tokens": 136704,
+                         "workers": [{"input_tokens": 102406}]}
+            usage_checkpoint(telemetry)
+            raise multi.lightweight.PublicationAuthorityError("unknown evidence_id")
+    run, ctl = controller(tmp_path, executor=PublicationFailure(), count=2)
+    assert ctl.run_next()["status"] == "INFRA_STOP"
+    rows = json.loads((run / "queue.json").read_text())["assignments"]
+    assert rows[0]["token_state"] == "MEASURED" and rows[0]["total_tokens"] == 268060
+    assert rows[1]["status"] == "PENDING"
+    assert not (run / "guard.json").exists()
+
+
+def test_partial_and_unknown_failure_usage_are_never_coerced_to_zero(tmp_path):
+    class PartialFailure:
+        def __call__(self, root, company_dir, assignment, official, *, usage_checkpoint=None):
+            worker = company_dir / "workers" / "company-web"
+            worker.mkdir(parents=True)
+            (worker / "telemetry.json").write_text(json.dumps({
+                "kind": "company_web", "total_tokens": 10, "input_tokens": 8,
+                "cached_input_tokens": 0, "uncached_input_tokens": 8,
+                "output_tokens": 2, "reasoning_tokens": 0, "model_call_count": 1,
+                "tool_call_count": 1, "web_call_count": 1,
+                "research_elapsed_seconds": 1, "model_visible_chars": 1}), encoding="utf-8")
+            incomplete = company_dir / "workers" / "exposure-1"
+            incomplete.mkdir(parents=True)
+            (incomplete / "telemetry.json").write_text(json.dumps({
+                "kind": "exposure", "total_tokens": None}), encoding="utf-8")
+            raise RuntimeError("provenance failure")
+    run, ctl = controller(tmp_path, executor=PartialFailure(), count=1)
+    assert ctl.run_next()["status"] == "FAILED"
+    row = json.loads((run / "queue.json").read_text())["assignments"][0]
+    assert row["token_state"] == "PARTIAL_USAGE"
+    assert row["total_tokens"] is None and row["observed_total_tokens"] == 10
+    assert multi.aggregate(run)["partial_usage"] == 1
+
+
+def test_failed_run_consumption_audit_is_external_and_includes_exact_usage(tmp_path):
+    _, run = prepare(tmp_path, count=2)
+    queue_path, manifest_path = run / "queue.json", run / "manifest.json"
+    queue = json.loads(queue_path.read_text())
+    queue["assignments"][0].update(status="FAILED", research_started=True)
+    queue_path.write_text(json.dumps(queue), encoding="utf-8")
+    manifest = json.loads(manifest_path.read_text()); manifest["state"] = "FAILED"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    worker = run / "companies" / "01-1001" / "workers" / "company-web"
+    worker.mkdir(parents=True)
+    (worker / "telemetry.json").write_text(json.dumps({
+        "kind": "company_web", "total_tokens": 123, "input_tokens": 100,
+        "cached_input_tokens": 40, "uncached_input_tokens": 60, "output_tokens": 23,
+        "reasoning_tokens": 3, "model_call_count": 1, "tool_call_count": 1,
+        "web_call_count": 1, "research_elapsed_seconds": 1, "model_visible_chars": 1}),
+        encoding="utf-8")
+    before = manifest_path.read_bytes(), queue_path.read_bytes()
+    report = multi.audit_consumed_usage(run, tmp_path / "audit.json")
+    assert report["total_consumed_tokens"] == 123
+    assert report["companies"][0]["token_state"] == "MEASURED"
+    assert report["quality_classification"] == "INVALID_FOR_PHASE22_QUALITY_EVALUATION"
+    assert before == (manifest_path.read_bytes(), queue_path.read_bytes())
 
 
 def test_resume_disabled_by_default_and_requires_explicit_command(tmp_path):

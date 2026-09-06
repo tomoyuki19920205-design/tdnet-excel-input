@@ -484,6 +484,56 @@ def test_date_only_published_at_never_invents_time_or_timezone():
     assert response["research_result"]["items"][0]["published_at"] == "2026-08-31"
 
 
+def test_evidence_id_is_primary_and_headline_may_differ_from_source_title():
+    response, _, cards = _metadata_repair_fixture("2026-08-31")
+    cards[1]["evidence_id"] = "evidence-event"
+    response["strategy_telemetry"].update(
+        source_provenance=[{"url": "https://example.test/news", "source_type": "model",
+                            "content_verified": True, "evidence_excerpt": "model"}],
+        candidate_provenance=[{"source_url": "https://example.test/news",
+                               "selected_for_output": True}])
+    response["research_result"]["items"][0].update(
+        headline="Presentation headline rewritten by synthesis",
+        supporting_evidence_ids=["evidence-event"])
+    repaired = light.restore_publication_from_evidence(response, cards)
+    item = repaired["research_result"]["items"][0]
+    assert item["headline"] == "Presentation headline rewritten by synthesis"
+    assert item["published_date"] == "2026-08-31"
+    assert item["source_url"] == "https://example.test/news"
+    assert item["evidence_excerpt"] == "Prices changed"
+    assert "supporting_evidence_ids" not in item
+    source = repaired["strategy_telemetry"]["source_provenance"][0]
+    assert source["source_type"] == "official_news" and source["evidence_excerpt"] == "Prices changed"
+
+
+def test_nonexistent_or_fabricated_evidence_id_fails_closed():
+    response, _, cards = _metadata_repair_fixture()
+    cards[1]["evidence_id"] = "evidence-event"
+    response["research_result"]["items"][0]["supporting_evidence_ids"] = ["evidence-invented"]
+    with pytest.raises(light.PublicationAuthorityError, match="unknown evidence_id"):
+        light.restore_publication_from_evidence(response, cards)
+
+
+def test_legacy_url_fallback_fails_when_ambiguous():
+    response, _, cards = _metadata_repair_fixture()
+    cards.append({**cards[1], "source_id": "event-duplicate"})
+    with pytest.raises(light.PublicationAuthorityError, match="not unique"):
+        light.restore_publication_from_evidence(response, cards)
+
+
+def test_legacy_unique_canonical_url_fallback_ignores_title_difference():
+    response, _, cards = _metadata_repair_fixture("2026-08-31")
+    response["research_result"]["items"][0]["headline"] = "Different presentation headline"
+    repaired = light.restore_publication_from_evidence(response, cards)
+    assert repaired["research_result"]["items"][0]["published_date"] == "2026-08-31"
+
+
+def test_synthesis_schema_requires_nonempty_supporting_evidence_ids_for_events():
+    item = light.synthesis_output_schema()["properties"]["research_result"]["properties"]["items"]["items"]
+    assert "supporting_evidence_ids" in item["required"]
+    assert item["properties"]["supporting_evidence_ids"]["minItems"] == 1
+
+
 def test_document_dates_are_normalized_without_counting_unknown_or_background():
     response = {"strategy_telemetry": {
         "documents": [
@@ -572,6 +622,15 @@ def test_direct_company_policy_impact_is_retained():
         response, cards, company_name="Synthetic Works")
     assert len(repaired["research_result"]["items"]) == 1
     assert decisions[0]["decision"] == "KEEP"
+
+
+def test_general_industry_context_without_company_linkage_is_rejected():
+    response, cards = _policy_materiality_fixture()
+    response["strategy_telemetry"]["documents"][0]["scope_label"] = "IN_SCOPE_EXTERNAL_MEDIA"
+    repaired, decisions = light.apply_materiality_authority(
+        response, cards, company_name="Synthetic Works")
+    assert repaired["research_result"]["items"] == []
+    assert decisions[0]["decision"] == "REJECT_GENERAL_CONTEXT"
 
 
 def test_invalid_evidence_published_at_fails_closed():

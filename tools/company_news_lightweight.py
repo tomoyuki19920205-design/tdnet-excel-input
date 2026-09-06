@@ -71,8 +71,13 @@ class LightweightError(RuntimeError):
     pass
 
 
+class PublicationAuthorityError(LightweightError):
+    """The generated event cannot be bound to saved authoritative evidence."""
+
+
 @dataclass(frozen=True)
 class EvidenceCard:
+    evidence_id: str
     source_id: str
     url: str
     source_type: str
@@ -110,6 +115,11 @@ class EvidenceStore:
                       if token not in ignored and not re.fullmatch(r"20\d{2}(?:\d{2}){0,2}", token)}
         return " ".join(sorted(normalized))
 
+    @staticmethod
+    def evidence_id(url: str) -> str:
+        normalized_url = canonicalize_url(url)
+        return "evidence-" + hashlib.sha256(normalized_url.encode()).hexdigest()[:24]
+
     def register_query(self, query_id: str, query: str) -> bool:
         key = self._query_key(query)
         if key in self._queries or self._query_signature(query) in self._zero_result_signatures:
@@ -144,8 +154,10 @@ class EvidenceStore:
         if normalized_url in self._cards or len(self._cards) >= self.source_limit:
             return False
         excerpt = self.relevant_excerpt(body, relevant_terms)
+        digest = hashlib.sha256(normalized_url.encode()).hexdigest()
         card = EvidenceCard(
-            source_id=hashlib.sha256(normalized_url.encode()).hexdigest()[:16],
+            evidence_id="evidence-" + digest[:24],
+            source_id=digest[:16],
             url=normalized_url,
             source_type=bounded_text(source_type, max_chars=80, max_lines=1),
             title=bounded_text(title, max_chars=300, max_lines=2),
@@ -158,6 +170,10 @@ class EvidenceStore:
         )
         self._cards[normalized_url] = card
         return True
+
+    def evidence_id_for_url(self, url: str) -> str | None:
+        card = self._cards.get(canonicalize_url(url))
+        return card.evidence_id if card is not None else None
 
     def cards(self) -> list[dict[str, Any]]:
         return [asdict(card) for card in list(self._cards.values())[:self.source_limit]]
@@ -395,6 +411,12 @@ def synthesis_output_schema() -> dict[str, Any]:
     # an empty string or null, but the runner replaces it with its authoritative
     # completion timestamp before canonical validation.
     schema["properties"]["research_result"]["properties"]["checked_at"]["type"] = ["string", "null"]
+    item = schema["properties"]["research_result"]["properties"]["items"]["items"]
+    item["properties"]["supporting_evidence_ids"] = {
+        "type": "array", "items": {"type": "string", "maxLength": 80},
+        "minItems": 1, "maxItems": MAX_EVIDENCE_SOURCES,
+    }
+    item["required"].append("supporting_evidence_ids")
     errors = lint_api_schema(schema)
     if errors:
         raise LightweightError("invalid synthesis API schema: " + "; ".join(errors))
@@ -488,6 +510,7 @@ def synthesis_contract(assignment: dict[str, Any], discovery: dict[str, Any],
         "Synthesize the canonical Company News Strategy v5 JSON object from the bounded input only.",
         "No Web or tools are available. Do not invent facts, URLs, queries, evidence, or elapsed times.",
         "Map verified cards to source_provenance/documents/candidates and final events; no_news requires complete evidence.",
+        "Every final event must list exact supporting_evidence_ids from BOUNDED_INPUT. Never invent or alter an evidence ID.",
         "Use the exact canonical schema. Python performs validation/finalization and no LLM retry is allowed.",
         "BOUNDED_INPUT=" + json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
     ))
@@ -842,6 +865,14 @@ def apply_document_provenance_authority(
     for index, document in enumerate(strategy.get("documents", [])):
         state = derive_document_provenance_state(document, evidence_cards)
         document_url = canonicalize_url(document.get("url"))
+        matching_cards = [card for card in evidence_cards if isinstance(card, dict)
+                          and canonicalize_url(card.get("url")) == document_url]
+        if (document.get("scope_label") == "OUT_OF_SCOPE_TRIVIAL"
+                and not str(document.get("index_evidence") or "").strip()):
+            authoritative = next((card for card in matching_cards
+                                  if _card_has_authoritative_content(card)), None)
+            if authoritative is not None:
+                document["index_evidence"] = authoritative["excerpt"]
         ledger.append({"document_index": index, "url": document_url, "state": state})
         if state != "BODY_VERIFIED":
             non_body_urls.add(document_url)
@@ -943,7 +974,7 @@ _POLICY_DIRECT = re.compile(
 
 def apply_materiality_authority(response: dict[str, Any], evidence_cards: list[dict[str, Any]],
                                 *, company_name: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Reject selected general-policy context lacking affirmative company linkage."""
+    """Reject selected general context lacking affirmative company linkage."""
     repaired = copy.deepcopy(response)
     payload = repaired.get("research_result")
     strategy = repaired.get("strategy_telemetry")
@@ -960,20 +991,26 @@ def apply_materiality_authority(response: dict[str, Any], evidence_cards: list[d
                           if canonicalize_url(row.get("source_url")) == item_url
                           and row.get("headline") == item.get("headline")), None)
         document = documents.get(canonicalize_url(candidate.get("document_url"))) if candidate else None
-        cards = [row for row in evidence_cards if canonicalize_url(row.get("url")) == item_url]
+        cards = _supporting_cards_for_item(item, evidence_cards, index=len(decisions),
+                                           require_body=False)
         evidence_text = " ".join(str(value or "") for value in (
             item.get("summary"), item.get("why_it_matters"), item.get("evidence_excerpt"),
             candidate.get("economic_transmission") if candidate else None,
             *[card.get("supports") for card in cards],
         ))
-        policy_context = bool(document and document.get("scope_label") == "IN_SCOPE_GOVERNMENT")
+        context_scope = bool(document and document.get("scope_label") in {
+            "IN_SCOPE_GOVERNMENT", "IN_SCOPE_EXTERNAL_MEDIA", "IN_SCOPE_COUNTERPARTY"})
         explicit_low_context = item.get("importance") == "low" and item.get("earnings_relevance") == "context"
+        uncertainty = bool(re.search(
+            r"(?:unverified|not (?:verified|established|confirmed)|inferred|未確認|確認できない)",
+            evidence_text, re.I))
         direct_linkage = (company_name.casefold() in evidence_text.casefold()
                           and bool(_POLICY_DIRECT.search(evidence_text))
+                          and not uncertainty
                           and not bool(_POLICY_UNCERTAINTY.search(evidence_text)))
-        reject = bool(policy_context and explicit_low_context and not direct_linkage)
+        reject = bool(context_scope and (explicit_low_context or uncertainty) and not direct_linkage)
         decisions.append({"headline": item.get("headline"), "source_url": item_url,
-                          "policy_context": policy_context, "direct_company_linkage": direct_linkage,
+                          "context_scope": context_scope, "direct_company_linkage": direct_linkage,
                           "decision": "REJECT_GENERAL_CONTEXT" if reject else "KEEP"})
         if not reject:
             retained_items.append(item)
@@ -981,7 +1018,7 @@ def apply_materiality_authority(response: dict[str, Any], evidence_cards: list[d
         if candidate is None or document is None:
             raise LightweightError("selected policy event lacks candidate/document provenance")
         candidate.update(selected_for_output=False, event_key=None,
-                         selection_reason="Python materiality authority: general policy context lacks affirmative direct company linkage.")
+                         selection_reason="Python materiality authority: general context lacks affirmative direct company linkage.")
         document["material"] = False
     payload["items"] = retained_items
     strategy["final_event_count"] = sum(row.get("selected_for_output") is True
@@ -989,21 +1026,101 @@ def apply_materiality_authority(response: dict[str, Any], evidence_cards: list[d
     return repaired, decisions
 
 
+def _card_has_authoritative_content(card: dict[str, Any]) -> bool:
+    return (card.get("verification_status") == "VERIFIED"
+            and card.get("source_type") not in INDEX_ONLY_SOURCE_TYPES
+            and isinstance(card.get("excerpt"), str) and bool(card["excerpt"].strip()))
+
+
+def _supporting_cards_for_item(item: dict[str, Any], evidence_cards: list[dict[str, Any]], *,
+                               index: int, require_body: bool = True) -> list[dict[str, Any]]:
+    """Resolve exact evidence IDs, with a strict unique-URL legacy fallback."""
+    requested = item.get("supporting_evidence_ids")
+    if requested is not None:
+        if (not isinstance(requested, list) or not requested
+                or any(not isinstance(value, str) or not value for value in requested)
+                or len(set(requested)) != len(requested)):
+            raise PublicationAuthorityError(
+                f"items[{index}] supporting_evidence_ids must be a non-empty unique list")
+        by_id: dict[str, dict[str, Any]] = {}
+        for card in evidence_cards:
+            if not isinstance(card, dict) or not isinstance(card.get("evidence_id"), str):
+                continue
+            evidence_id = card["evidence_id"]
+            if evidence_id in by_id:
+                raise PublicationAuthorityError(f"ambiguous evidence_id: {evidence_id}")
+            by_id[evidence_id] = card
+        unknown = [value for value in requested if value not in by_id]
+        if unknown:
+            raise PublicationAuthorityError(
+                f"items[{index}] references unknown evidence_id: {unknown[0]}")
+        selected = [by_id[value] for value in requested]
+    else:
+        item_url = canonicalize_url(item.get("source_url"))
+        selected = [card for card in evidence_cards if isinstance(card, dict)
+                    and canonicalize_url(card.get("url")) == item_url]
+        if len(selected) != 1:
+            raise PublicationAuthorityError(
+                f"items[{index}] canonical URL fallback is not unique")
+    if require_body and any(not _card_has_authoritative_content(card) for card in selected):
+        raise PublicationAuthorityError(
+            f"items[{index}] evidence does not satisfy authoritative content verification")
+    item_url = canonicalize_url(item.get("source_url"))
+    source_cards = [card for card in selected
+                    if canonicalize_url(card.get("url")) == item_url]
+    if len(source_cards) != 1:
+        raise PublicationAuthorityError(
+            f"items[{index}] has no unique source evidence for canonical URL")
+    return selected
+
+
+def _canonical_event_source_type(source_type: Any) -> str:
+    value = str(source_type or "").casefold()
+    if value in {"government"}:
+        return "government"
+    if value in {"research", "exchange"}:
+        return value
+    if value in OFFICIAL_EVIDENCE_SOURCE_TYPES:
+        return "ir" if "ir" in value or "report" in value else "company"
+    if value in {"external_media", "news", "media", "counterparty"}:
+        return "news"
+    return "other"
+
+
 def restore_publication_from_evidence(response: dict[str, Any],
                                       evidence_cards: list[dict[str, Any]]) -> dict[str, Any]:
-    """Restore publication precision from evidence without inventing an instant."""
+    """Restore source/publication authority by evidence ID, never presentation title."""
     repaired = copy.deepcopy(response)
     payload = repaired.get("research_result")
     if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
         raise LightweightError("canonical research items are missing")
     for index, item in enumerate(payload["items"]):
-        matching = [card for card in evidence_cards if isinstance(card, dict)
-                    and card.get("verification_status") == "VERIFIED"
-                    and canonicalize_url(card.get("url")) == canonicalize_url(item.get("source_url"))
-                    and card.get("title") == item.get("headline")]
-        if not matching:
-            raise LightweightError(f"items[{index}] has no authoritative evidence card")
-        raw_values = {card.get("published_at") for card in matching}
+        matching = _supporting_cards_for_item(item, evidence_cards, index=index)
+        source = next(card for card in matching
+                      if canonicalize_url(card.get("url")) == canonicalize_url(item.get("source_url")))
+        item["source_url"] = canonicalize_url(source["url"])
+        item["source_type"] = _canonical_event_source_type(source.get("source_type"))
+        item["evidence_excerpt"] = source["excerpt"]
+        item.pop("supporting_evidence_ids", None)
+        strategy = repaired.get("strategy_telemetry")
+        if isinstance(strategy, dict) and "candidate_provenance" in strategy:
+            provenance = [row for row in strategy.get("source_provenance", [])
+                          if isinstance(row, dict)
+                          and canonicalize_url(row.get("url")) == item["source_url"]]
+            if len(provenance) != 1:
+                raise PublicationAuthorityError(
+                    f"items[{index}] has no unique canonical source provenance")
+            provenance[0].update(
+                url=item["source_url"], source_type=source.get("source_type"),
+                content_verified=True, evidence_excerpt=source["excerpt"])
+            candidates = [row for row in strategy.get("candidate_provenance", [])
+                          if isinstance(row, dict) and row.get("selected_for_output") is True
+                          and canonicalize_url(row.get("source_url")) == item["source_url"]]
+            if len(candidates) != 1:
+                raise PublicationAuthorityError(
+                    f"items[{index}] has no unique selected candidate provenance")
+            candidates[0]["source_url"] = item["source_url"]
+        raw_values = {source.get("published_at")}
         if None in raw_values:
             raw_values.remove(None)
         if not raw_values:
@@ -1137,8 +1254,9 @@ def build_search_record_registry(
             if query.get("exposure_index") != telemetry.get("exposure_id"):
                 raise LightweightError(f"query exposure does not match worker telemetry: {worker_id}")
             query_id = f"{worker_id}-q{position}"
-            evidence_ids = [card["source_id"] for card in cards if isinstance(card, dict)
-                            and card.get("query_id") == query_id and isinstance(card.get("source_id"), str)]
+            evidence_ids = [card.get("evidence_id") or card.get("source_id") for card in cards
+                            if isinstance(card, dict) and card.get("query_id") == query_id
+                            and isinstance(card.get("evidence_id") or card.get("source_id"), str)]
             registry.append({
                 "query_id": query_id,
                 "worker_id": worker_id,
@@ -1425,6 +1543,7 @@ def _add_cards(store: EvidenceStore, response: dict[str, Any]) -> None:
                   published_at=card["published_at"], body=card["excerpt"], supports=card["supports"],
                   exposure_id=card["exposure_id"], query_id=card["query_id"],
                   verification_status=card["verification_status"], relevant_terms=[])
+        card["evidence_id"] = store.evidence_id_for_url(card["url"])
     for query in response.get("zero_result_signatures", []):
         store.register_zero_result(query)
 
@@ -1449,7 +1568,9 @@ def aggregate_worker_telemetry(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def run_company(root: Path, experiment: Path, assignment: dict[str, Any], *,
-                official_context: dict[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
+                official_context: dict[str, Any] | None = None,
+                usage_checkpoint: Callable[[dict[str, Any]], None] | None = None,
+                ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Canonical isolated company execution path used by single and multi runners.
 
     ``official_context`` contains only deterministic, bounded output from the
@@ -1487,6 +1608,19 @@ def run_company(root: Path, experiment: Path, assignment: dict[str, Any], *,
     search_registry = build_search_record_registry(list(zip(outputs, telemetry_rows)))
     response, synthesis_telemetry = _run_isolated_stage(
         root, company_dir, None, synthesis_prompt, synthesis_output_schema(), web_enabled=False)
+    telemetry_rows.append(synthesis_telemetry)
+    measured = aggregate_worker_telemetry(telemetry_rows)
+    if official_context:
+        measured["non_llm"] = copy.deepcopy(official_context.get("telemetry", {}))
+        measured["position"] = assignment.get("position")
+    _atomic_json(company_dir / "measured-token-telemetry.json", measured)
+    _atomic_json(company_dir / "evidence-state.json", {
+        "cards": store.cards(), "raw_body_retained": False,
+        "cross_worker_payload": "bounded_evidence_cards_only",
+        "document_provenance": [], "search_record_registry": search_registry,
+    })
+    if usage_checkpoint is not None:
+        usage_checkpoint(copy.deepcopy(measured))
     response = inject_runtime_identity(response, assignment)
     response = inject_runtime_metadata(response, completed_at=synthesis_telemetry.get("completed_at"))
     response = inject_identity_provenance(response, discovery, store.cards())
@@ -1501,12 +1635,6 @@ def run_company(root: Path, experiment: Path, assignment: dict[str, Any], *,
     response, _ = apply_coverage_authority(response, search_registry, discovery, store.cards())
     response = restore_publication_from_evidence(response, store.cards())
     response = restore_effective_precision(response)
-    telemetry_rows.append(synthesis_telemetry)
-    measured = aggregate_worker_telemetry(telemetry_rows)
-    if official_context:
-        measured["non_llm"] = copy.deepcopy(official_context.get("telemetry", {}))
-        measured["position"] = assignment.get("position")
-    _atomic_json(company_dir / "measured-token-telemetry.json", measured)
     _atomic_json(company_dir / "evidence-state.json", {
         "cards": store.cards(), "raw_body_retained": False,
         "cross_worker_payload": "bounded_evidence_cards_only",

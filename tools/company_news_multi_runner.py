@@ -1337,7 +1337,9 @@ class OfficialPreflightProvider(Protocol):
 
 class CompanyExecutor(Protocol):
     def __call__(self, root: Path, company_dir: Path, assignment: dict[str, Any],
-                 official: OfficialPreflight) -> tuple[dict[str, Any], dict[str, Any]]: ...
+                 official: OfficialPreflight, *,
+                 usage_checkpoint: Callable[[dict[str, Any]], None] | None = None,
+                 ) -> tuple[dict[str, Any], dict[str, Any]]: ...
 
 
 _FAMILY_PATH_MARKERS = {
@@ -1605,11 +1607,14 @@ class ConfiguredOfficialProvider:
 
 def execute_lightweight_company(root: Path, company_dir: Path,
                                 assignment: dict[str, Any],
-                                official: OfficialPreflight) -> tuple[dict[str, Any], dict[str, Any]]:
+                                official: OfficialPreflight, *,
+                                usage_checkpoint: Callable[[dict[str, Any]], None] | None = None,
+                                ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Use the same canonical execution path as the historical Phase1 harness."""
     experiment = company_dir.parents[1]
     response, telemetry = lightweight.run_company(
-        root, experiment, assignment, official_context=official.model_context)
+        root, experiment, assignment, official_context=official.model_context,
+        usage_checkpoint=usage_checkpoint)
     response = apply_registry_identity(response, official.registry, assignment)
     document_states = []
     additional_http = 0
@@ -1701,7 +1706,8 @@ def prepare_run(cohort: FrozenCohort, run_dir: Path, *, search_from: str,
         assignments.append({
             **assignment, "status": "PENDING", "research_started": False,
             "model_started": False, "official_discovery_started": False,
-            "quality_sample": False, "token_gate": "NOT_MEASURED",
+            "quality_sample": False, "token_state": "NOT_MEASURED",
+            "token_gate": "NOT_MEASURED",
         })
     manifest = {
         "schema_version": SCHEMA, "state": "PREPARED", "created_at": _now(),
@@ -1754,6 +1760,62 @@ def load_frozen_official_config(manifest: Mapping[str, Any]) -> tuple[Path, Path
             or _canonical_sha(plan) != manifest["official_plan_logical_sha256"]):
         raise CohortIntegrityError("frozen official preflight metadata changed")
     return registry_path, plan_path
+
+
+_USAGE_FIELDS = (
+    "input_tokens", "cached_input_tokens", "uncached_input_tokens", "output_tokens",
+    "reasoning_tokens", "total_tokens", "model_call_count", "tool_call_count",
+    "web_call_count", "research_elapsed_seconds", "model_visible_chars",
+)
+
+
+def project_consumed_usage(company_dir: Path) -> dict[str, Any]:
+    """Recover exact or partial consumed usage from durable per-worker telemetry."""
+    measured_path = company_dir / "measured-token-telemetry.json"
+    if measured_path.is_file():
+        measured = _read(measured_path)
+        exact = type(measured.get("total_tokens")) is int
+        return {**measured, "token_state": "MEASURED" if exact else "PARTIAL_USAGE"}
+    paths = sorted((company_dir / "workers").glob("*/telemetry.json"))
+    rows = [_read(path) for path in paths]
+    if not rows:
+        return {"token_state": "UNKNOWN", "total_tokens": None,
+                "observed_total_tokens": None, "workers": []}
+    exact = all(type(row.get("total_tokens")) is int for row in rows)
+    values: dict[str, Any] = {}
+    for key in _USAGE_FIELDS:
+        known = [row.get(key) for row in rows
+                 if isinstance(row.get(key), (int, float)) and not isinstance(row.get(key), bool)]
+        values[key] = sum(known) if exact and len(known) == len(rows) else None
+    observed = sum(row["total_tokens"] for row in rows
+                   if type(row.get("total_tokens")) is int)
+    values.update(
+        token_state="MEASURED" if exact else "PARTIAL_USAGE",
+        observed_total_tokens=observed, workers=rows,
+        worker_count=sum(row.get("kind") != "final_synthesis" for row in rows),
+        web_call_count=sum(row.get("web_call_count", 0) or 0 for row in rows),
+    )
+    return values
+
+
+def _assignment_usage_fields(telemetry: Mapping[str, Any], manifest: Mapping[str, Any]) -> dict[str, Any]:
+    token_state = str(telemetry.get("token_state") or (
+        "MEASURED" if type(telemetry.get("total_tokens")) is int else "PARTIAL_USAGE"))
+    total = telemetry.get("total_tokens") if type(telemetry.get("total_tokens")) is int else None
+    token_gate = ("NOT_MEASURED" if token_state == "NOT_MEASURED" else
+                  "UNKNOWN" if token_state == "UNKNOWN" else
+                  "PARTIAL_USAGE" if token_state == "PARTIAL_USAGE" else
+                  "HARD_FAIL" if total > manifest["hard_token_gate"] else
+                  "PREFERRED_WARNING" if total > manifest["preferred_token_gate"] else "PASS")
+    return {
+        "token_state": token_state, "total_tokens": total,
+        "observed_total_tokens": telemetry.get("observed_total_tokens", total),
+        "worker_count": telemetry.get("worker_count"),
+        "web_calls": telemetry.get("web_call_count"),
+        "first_model_input_tokens": (telemetry.get("workers") or [{}])[0].get("input_tokens"),
+        "cached_input_tokens": telemetry.get("cached_input_tokens"),
+        "token_gate": token_gate,
+    }
 
 
 class FrozenCohortController:
@@ -1853,7 +1915,7 @@ class FrozenCohortController:
                     status="INFRA_STOP", completed_at=_now(), error_type="CONTROL_CONTRACT_FAILURE",
                     error_message=reason, research_started=False, model_started=False,
                     official_discovery_started=False, quality_sample=False,
-                    token_gate="NOT_MEASURED")
+                    token_state="NOT_MEASURED", token_gate="NOT_MEASURED")
                 _atomic(self.run_dir / "queue.json", queue)
                 guard.unlink(missing_ok=True)
                 self._stop(manifest, f"CONTROL_CONTRACT_FAILURE: {reason}")
@@ -1873,7 +1935,7 @@ class FrozenCohortController:
                                   total_tokens=None, worker_count=0, web_calls=0,
                                   research_started=False, model_started=False,
                                   official_discovery_started=True, quality_sample=False,
-                                  token_gate="NOT_MEASURED")
+                                  token_state="NOT_MEASURED", token_gate="NOT_MEASURED")
                 _atomic(self.run_dir / "queue.json", queue)
                 guard.unlink(missing_ok=True)
                 self._advance_manifest(manifest, queue)
@@ -1883,14 +1945,21 @@ class FrozenCohortController:
             assignment.update(research_started=True, model_started=True,
                               official_discovery_started=bool(
                                   official.telemetry.get("official_discovery_started")),
-                              quality_sample=True)
+                              quality_sample=True, token_state="UNKNOWN", token_gate="UNKNOWN")
             _atomic(self.run_dir / "queue.json", queue)
-            response, telemetry = self.executor(self.root, company_dir, runtime, official)
+            def usage_checkpoint(value: dict[str, Any]) -> None:
+                assignment.update(**_assignment_usage_fields(value, manifest))
+                _atomic(self.run_dir / "queue.json", queue)
+
+            response, telemetry = self.executor(
+                self.root, company_dir, runtime, official,
+                usage_checkpoint=usage_checkpoint)
+            usage_checkpoint(telemetry)
             audit = self.auditor(response, company_dir)
             _atomic(company_dir / "exhaustive-semantic-audit.json", audit)
             if audit.get("status") != "PASS":
                 raise MultiRunnerError("semantic architecture gate failed")
-            total = telemetry.get("total_tokens")
+            total = assignment.get("total_tokens")
             if type(total) is not int:
                 raise MultiRunnerError("exact total token telemetry missing")
             if leakage:
@@ -1900,13 +1969,7 @@ class FrozenCohortController:
             _atomic(company_dir / "token-telemetry.json", telemetry)
             assignment.update(status="COMPLETED", completed_at=_now(),
                               result_type="news_present" if response["research_result"]["items"] else "no_news",
-                              total_tokens=total, worker_count=telemetry.get("worker_count"),
-                              web_calls=telemetry.get("web_call_count"),
-                               first_model_input_tokens=(telemetry.get("workers") or [{}])[0].get("input_tokens"),
-                               cached_input_tokens=telemetry.get("cached_input_tokens"),
-                               token_gate=("HARD_FAIL" if total > manifest["hard_token_gate"] else
-                                           "PREFERRED_WARNING" if total > manifest["preferred_token_gate"]
-                                           else "PASS"))
+                              token_state="MEASURED")
             _atomic(self.run_dir / "queue.json", queue)
             guard.unlink(missing_ok=True)
             if total > manifest["hard_token_gate"]:
@@ -1916,7 +1979,12 @@ class FrozenCohortController:
                 self._advance_manifest(manifest, queue)
             return {"status": assignment["status"], "assignment": assignment}
         except Exception as exc:
-            control_failure = isinstance(exc, ControlContractError)
+            usage = project_consumed_usage(company_dir)
+            if (assignment.get("research_started") is True
+                    and assignment.get("token_state") != "MEASURED"):
+                assignment.update(**_assignment_usage_fields(usage, manifest))
+            control_failure = isinstance(
+                exc, (ControlContractError, lightweight.PublicationAuthorityError))
             assignment.update(status="INFRA_STOP" if control_failure else "FAILED", completed_at=_now(), error_type=type(exc).__name__,
                               error_message=str(exc))
             _atomic(self.run_dir / "queue.json", queue)
@@ -1960,7 +2028,13 @@ def aggregate(run_dir: Path) -> dict[str, Any]:
         "failed": sum(row["status"] == "FAILED" for row in rows),
         "pending": sum(row["status"] == "PENDING" for row in rows),
         "research_samples": len(measured),
-        "not_measured": sum(row.get("research_started") is not True for row in rows),
+        "quality_pass_samples": len(completed),
+        "not_measured": sum((row.get("token_state") or (
+            "NOT_MEASURED" if row.get("research_started") is not True else "UNKNOWN"))
+            == "NOT_MEASURED" for row in rows),
+        "partial_usage": sum(row.get("token_state") == "PARTIAL_USAGE" for row in rows),
+        "unknown_usage": sum(row.get("research_started") is True
+                             and row.get("token_state", "UNKNOWN") == "UNKNOWN" for row in rows),
         "total_tokens": sum(tokens), "mean_tokens": statistics.mean(tokens) if tokens else None,
         "median_tokens": statistics.median(tokens) if tokens else None,
         "min_tokens": min(tokens) if tokens else None, "p90_tokens": p90,
@@ -1969,8 +2043,130 @@ def aggregate(run_dir: Path) -> dict[str, Any]:
         "within_preferred_gate": sum(value <= manifest["preferred_token_gate"] for value in tokens),
         "ordered_results": [{key: row.get(key) for key in (
             "position", "ticker", "status", "result_type", "research_started", "model_started",
-            "total_tokens", "token_gate")} for row in rows],
+            "total_tokens", "observed_total_tokens", "token_state", "token_gate")} for row in rows],
     }
+
+
+def audit_consumed_usage(run_dir: Path, output_path: Path) -> dict[str, Any]:
+    """Project immutable failed-run worker usage without modifying the source run."""
+    manifest_path, queue_path = run_dir / "manifest.json", run_dir / "queue.json"
+    before = manifest_path.read_bytes(), queue_path.read_bytes()
+    manifest, queue = json.loads(before[0]), json.loads(before[1])
+    projected = []
+    for row in queue["assignments"]:
+        company_dir = run_dir / "companies" / f"{row['position']:02d}-{row['ticker']}"
+        if row.get("research_started") is not True:
+            usage = {"token_state": "NOT_MEASURED", "total_tokens": None,
+                     "observed_total_tokens": None, "worker_count": 0,
+                     "web_call_count": 0}
+        else:
+            usage = project_consumed_usage(company_dir)
+        projected.append({
+            "position": row["position"], "ticker": row["ticker"],
+            "status": row["status"], "research_started": row.get("research_started") is True,
+            "token_state": usage["token_state"],
+            "total_tokens": usage.get("total_tokens"),
+            "observed_total_tokens": usage.get("observed_total_tokens"),
+            "worker_count": usage.get("worker_count"),
+            "web_call_count": usage.get("web_call_count"),
+        })
+    exact = [row["total_tokens"] for row in projected
+             if row["token_state"] == "MEASURED" and type(row["total_tokens"]) is int]
+    report = {
+        "schema_version": "company_news_failed_run_usage_audit_v1",
+        "created_at": _now(), "source_run": str(run_dir.resolve()),
+        "source_manifest_sha256": _sha_bytes(before[0]),
+        "source_queue_sha256": _sha_bytes(before[1]),
+        "source_artifacts_mutated": False,
+        "quality_classification": "INVALID_FOR_PHASE22_QUALITY_EVALUATION",
+        "total_consumed_tokens": sum(exact),
+        "measured_companies": len(exact),
+        "partial_usage_companies": sum(row["token_state"] == "PARTIAL_USAGE" for row in projected),
+        "unknown_usage_companies": sum(row["token_state"] == "UNKNOWN" for row in projected),
+        "companies": projected,
+    }
+    _atomic(output_path, report)
+    if before != (manifest_path.read_bytes(), queue_path.read_bytes()):
+        raise MultiRunnerError("consumption audit mutated source run")
+    return report
+
+
+def offline_replay_saved_company(run_dir: Path, ticker: str, output_path: Path) -> dict[str, Any]:
+    """Replay saved bounded worker/final artifacts with zero HTTP, Web, or model work."""
+    manifest, queue = _read(run_dir / "manifest.json"), _read(run_dir / "queue.json")
+    assignment = next((row for row in queue["assignments"] if str(row["ticker"]) == ticker), None)
+    if assignment is None:
+        raise MultiRunnerError(f"ticker not present in run: {ticker}")
+    company_dir = run_dir / "companies" / f"{assignment['position']:02d}-{ticker}"
+    worker_root = company_dir / "workers"
+    ordering = lambda path: (0 if path.parent.name == "company-web" else
+                             2 if path.parent.name == "final-synthesis" else 1,
+                             path.parent.name)
+    message_paths = sorted(worker_root.glob("*/last-message.json"), key=ordering)
+    search_paths = [path for path in message_paths if path.parent.name != "final-synthesis"]
+    final_path = worker_root / "final-synthesis" / "last-message.json"
+    if not search_paths or not final_path.is_file():
+        raise MultiRunnerError("saved worker/final artifacts are incomplete")
+    outputs = [_read(path) for path in search_paths]
+    telemetry_rows = [_read(path.parent / "telemetry.json") for path in search_paths]
+    discovery = next((row for row in outputs if row.get("kind") == "company_web"), None)
+    if discovery is None:
+        raise MultiRunnerError("saved company-web discovery is missing")
+    store = lightweight.EvidenceStore()
+    for output in outputs:
+        lightweight._add_cards(store, output)
+    registry = lightweight.build_search_record_registry(list(zip(outputs, telemetry_rows)))
+    synthesis_telemetry = _read(final_path.parent / "telemetry.json")
+    response = _read(final_path)
+    runtime = {key: assignment[key] for key in RUNTIME_FIELDS}
+    response = lightweight.inject_runtime_identity(response, runtime)
+    response = lightweight.inject_runtime_metadata(
+        response, completed_at=synthesis_telemetry.get("completed_at"))
+    response = lightweight.inject_identity_provenance(response, discovery, store.cards())
+    response = lightweight.apply_source_count_authority(response)
+    response = lightweight.apply_search_record_registry(response, registry, discovery)
+    response = lightweight.normalize_documents_from_evidence(response, store.cards(), runtime)
+    response, provenance = lightweight.apply_document_provenance_authority(
+        response, store.cards())
+    response = lightweight.apply_ir_nightly_overlap(response)
+    response = lightweight.apply_incremental_ir_authority(response, store.cards(), discovery)
+    publication_probe = lightweight.restore_publication_from_evidence(
+        copy.deepcopy(response), store.cards())
+    response, materiality = lightweight.apply_materiality_authority(
+        response, store.cards(), company_name=runtime["company_name"])
+    response, coverage = lightweight.apply_coverage_authority(
+        response, registry, discovery, store.cards())
+    response = lightweight.restore_publication_from_evidence(response, store.cards())
+    response = lightweight.restore_effective_precision(response)
+    registry_path, _ = load_frozen_official_config(manifest)
+    identity_registry = CompanyIdentityRegistry.load(registry_path)
+    response = apply_registry_identity(response, identity_registry, runtime)
+    lightweight.strategy_v5.validate_generated_response(response)
+    lightweight.validate_payload(response["research_result"])
+    official_raw = _read(company_dir / "official-preflight.json")["official_window"]
+    official_window = validate_window_coverage(OfficialWindowCoverage(**official_raw))
+    lightweight.strategy_v5.validate(
+        response["strategy_telemetry"], runtime, response["research_result"],
+        identity_registry=identity_registry, official_window_coverage=official_window)
+    state = ("news_present" if response["research_result"]["items"] else
+             "SAFE_UNKNOWN" if response["strategy_telemetry"]["coverage_status"] == "PARTIAL"
+             else "no_news")
+    report = {
+        "schema_version": "company_news_phase22_offline_replay_v1",
+        "created_at": _now(), "source_run": str(run_dir.resolve()), "ticker": ticker,
+        "research_companies": 0, "http_calls": 0, "web_calls": 0, "model_calls": 0,
+        "publication_authority": {
+            "status": "PASS", "headline_title_equality_required": False,
+            "item_count_before_materiality": len(publication_probe["research_result"]["items"]),
+        },
+        "materiality_decisions": materiality,
+        "final_state": state, "coverage_status": coverage["coverage_status"],
+        "remaining_gaps": response["strategy_telemetry"]["coverage_gaps"],
+        "document_provenance": provenance,
+        "validation_status": "PASS", "response": response,
+    }
+    _atomic(output_path, report)
+    return report
 
 
 def audit_unstarted_run(run_dir: Path, output_path: Path) -> dict[str, Any]:
@@ -2084,6 +2280,13 @@ def _parser() -> argparse.ArgumentParser:
     finalize_identity.add_argument("--search-from", default="2026-08-25")
     finalize_identity.add_argument("--search-to", default="2026-08-31")
     report = sub.add_parser("aggregate"); report.add_argument("--run-dir", type=Path, required=True)
+    consumption = sub.add_parser("audit-consumption")
+    consumption.add_argument("--run-dir", type=Path, required=True)
+    consumption.add_argument("--output", type=Path, required=True)
+    replay = sub.add_parser("offline-replay")
+    replay.add_argument("--run-dir", type=Path, required=True)
+    replay.add_argument("--ticker", required=True)
+    replay.add_argument("--output", type=Path, required=True)
     audit_run = sub.add_parser("audit-run")
     audit_run.add_argument("--run-dir", type=Path, required=True)
     audit_run.add_argument("--output", type=Path, required=True)
@@ -2152,6 +2355,10 @@ def main() -> int:
                             official_plan_path=args.official_plan)
     elif args.command == "aggregate":
         value = aggregate(args.run_dir)
+    elif args.command == "audit-consumption":
+        value = audit_consumed_usage(args.run_dir, args.output)
+    elif args.command == "offline-replay":
+        value = offline_replay_saved_company(args.run_dir, args.ticker, args.output)
     elif args.command == "audit-run":
         value = audit_unstarted_run(args.run_dir, args.output)
     elif args.command == "dry-preflight":
