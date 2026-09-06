@@ -112,6 +112,33 @@ transport order, and deterministic discovery/delegation policy.  It contains
 no future document URLs or result-dependent endpoints.  `prepare` validates
 the complete registry/plan pair before creating a manifest or queue.
 
+With separate network authorization, the same operation accepts
+`--windows-schannel`.  It deterministically constructs only
+`https://<company-master-domain>/`, permits one same-domain HTTPS redirect,
+and promotes identity only when the normalized official body directly names
+the assigned company.  If the root lacks that support, one additional URL may
+be fetched only when its literal same-domain href contains a generic company,
+corporate, about, or profile path marker.  The per-company request cap is two
+actual journaled requests and the command hard-limits the cohort total to 24.
+There is no retry, HTTP downgrade, guessed path, search, Web worker, or model
+fallback.  Every request uses the company-local durable Schannel journal.
+
+```powershell
+..\.venv\Scripts\python.exe tools\company_news_multi_runner.py bootstrap-inputs `
+  --cohort-file artifacts\token_efficiency_phase22\phase22-fixed-cohort.json `
+  --cohort-sha256 fc38bd476c68a0e47d75c59d664eb4fc2387c5a5c2580beece5668f395ff909e `
+  --approved-company-count 12 --max-companies 12 `
+  --company-master-db data\company_ir_monitor.db `
+  --repository-artifacts-root artifacts `
+  --output-dir artifacts\token_efficiency_phase22\phase22-identity-bootstrap `
+  --max-http-requests 24 --windows-schannel `
+  --prepare-run-dir artifacts\token_efficiency_phase22\phase22-run-001
+```
+
+Formal registry/plan files and the `PREPARED` run are emitted only after all
+cohort identities pass.  Any `UNVERIFIED` or `BLOCKED` company leaves the
+research run unprepared and records the exact gap in the bootstrap report.
+
 ## Commands
 
 Prepare the approved twelve-company run without research:

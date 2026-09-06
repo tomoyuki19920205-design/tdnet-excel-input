@@ -22,6 +22,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -36,10 +37,12 @@ from tools.company_news_official_source import (
     HttpFetchJournal,
     OfficialSourceResolution,
     OfficialSourceResolver,
+    OfficialSourceError,
     OfficialWindowCoverage,
     RepositoryExistingTransport,
     WindowsSchannelTransport,
     apply_registry_identity,
+    promote_verified_identity,
     validate_window_coverage,
 )
 from tools.company_news_overlap_scope import classify_news_monitor_scope
@@ -296,6 +299,7 @@ def _official_plan(cohort: FrozenCohort,
             "official_domain": record.official_domain,
             "verified_root_url": record.verified_official_url,
             "allowed_hosts": [record.official_domain],
+            "identity_registry_reference": "phase22-company-identity-registry.json",
             "transport_preference": ["repository_existing", "windows-schannel-v1"],
         })
     return {
@@ -303,6 +307,7 @@ def _official_plan(cohort: FrozenCohort,
         "cohort_sha256": cohort.cohort_sha256,
         "company_count": len(companies),
         "ordered_tickers": [row.security_code for row in cohort.companies],
+        "identity_registry_reference": "phase22-company-identity-registry.json",
         "companies": companies,
         "resolver_policy": {
             "manual_url_input": False,
@@ -426,6 +431,185 @@ def bootstrap_inputs(cohort: FrozenCohort, *, company_master_db: Path,
             plan_file_sha256=_sha_bytes(plan_path.read_bytes()),
         )
     _atomic(output_dir / "phase22-bootstrap-report.json", report)
+    return report
+
+
+def deterministic_https_root(official_domain: str) -> str:
+    domain = str(official_domain or "").strip().lower().rstrip(".")
+    if (not domain or "/" in domain or ":" in domain or "@" in domain
+            or not re.fullmatch(r"[a-z0-9.-]+", domain)
+            or any(not label or label.startswith("-") or label.endswith("-")
+                   for label in domain.split("."))):
+        raise MultiRunnerError("invalid company-master official domain")
+    return f"https://{domain}/"
+
+
+def literal_identity_page_candidate(resolution: OfficialSourceResolution,
+                                    official_domain: str) -> str | None:
+    """Choose one literal same-domain corporate link; never construct a path."""
+    if resolution.access_status != "VERIFIED" or resolution.normalized_content is None:
+        return None
+    markers = re.compile(r"(?:^|[-_/])(company|corporate|about|profile)(?:[-_/\.?#]|$)", re.I)
+    candidates = []
+    for value in resolution.normalized_content.relevant_links:
+        parsed = urlsplit(value)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        domain = official_domain.lower().rstrip(".")
+        if (parsed.scheme.lower() == "https" and (host == domain or host.endswith("." + domain))
+                and markers.search(parsed.path + ("?" + parsed.query if parsed.query else ""))):
+            candidates.append(value)
+    return sorted(set(candidates))[0] if candidates else None
+
+
+def _default_live_resolver(company_dir: Path, company: FrozenCompany) -> tuple[OfficialSourceResolver, HttpFetchJournal]:
+    store = DurableArtifactStore.prepare(company_dir / "identity-http")
+    journal = HttpFetchJournal(
+        store, run_id=f"phase22-identity-{company.position:02d}-{company.security_code}",
+        company=company.security_code)
+    return OfficialSourceResolver(WindowsSchannelTransport(
+        journal=journal, retain_raw_html=True)), journal
+
+
+def bootstrap_identities_schannel(
+        cohort: FrozenCohort, *, company_master_db: Path,
+        repository_artifacts_root: Path, output_dir: Path,
+        max_http_requests: int = 24,
+        resolver_factory: Callable[[Path, FrozenCompany], tuple[OfficialSourceResolver, Any]] | None = None,
+        prepare_run_dir: Path | None = None, search_from: str = "2026-08-25",
+        search_to: str = "2026-08-31") -> dict[str, Any]:
+    """Verify cohort identities with repository evidence, then bounded Schannel GETs."""
+    if max_http_requests < 1 or max_http_requests > 24:
+        raise MultiRunnerError("identity bootstrap HTTP budget must be 1..24")
+    verified, observed_states = _load_repository_identity_records(repository_artifacts_root)
+    master = _load_company_master(company_master_db, [row.security_code for row in cohort.companies])
+    output_dir = output_dir.resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    registry_path = output_dir / "phase22-company-identity-registry.json"
+    plan_path = output_dir / "phase22-official-source-plan.json"
+    if registry_path.exists() or plan_path.exists():
+        raise MultiRunnerError("identity bootstrap formal artifact collision")
+    factory = resolver_factory or _default_live_resolver
+    total_requests = 0
+    repository_hits = 0
+    matrix = []
+    for company in cohort.companies:
+        record = verified.get(company.security_code)
+        authority = master.get(company.security_code)
+        state = observed_states.get(company.security_code, "UNVERIFIED")
+        failure = None
+        transport = None
+        request_count = 0
+        verified_url = record.verified_official_url if record else None
+        if record is not None and record.normalized_name == _normalized_company_name(company.company_name):
+            state, transport = "VERIFIED", "repository_existing"
+            repository_hits += 1
+        elif authority is None or not authority.get("official_domain"):
+            state, failure = "UNVERIFIED", "company-master official domain unavailable"
+        elif total_requests >= max_http_requests:
+            state, failure = "BLOCKED", "global HTTP budget exhausted"
+        else:
+            domain = str(authority["official_domain"])
+            root_url = deterministic_https_root(domain)
+            provisional = CompanyIdentityRecord(
+                security_code=company.security_code, company_name=company.company_name,
+                normalized_name=_normalized_company_name(company.company_name),
+                official_domain=domain, verified_official_url=root_url,
+                verification_source="company_ir_monitor.db:company_ir_companies",
+                verification_method=None, verified_at=None, evidence_hash=None,
+                status="UNVERIFIED", evidence_excerpt=None)
+            company_dir = output_dir / "companies" / f"{company.position:02d}-{company.security_code}"
+            resolver, journal = factory(company_dir, company)
+            remaining_before_root = max_http_requests - total_requests
+            root_result = resolver.resolve(
+                provisional, root_url,
+                FetchPolicy(max_redirects=1 if remaining_before_root >= 2 else 0))
+            request_count = int(journal.request_count())
+            total_requests += request_count
+            transport = root_result.fetch_method
+            result = root_result
+            try:
+                record = promote_verified_identity(
+                    provisional, result,
+                    verification_source="Phase2.2e company-master root + Schannel verified body")
+            except OfficialSourceError as exc:
+                identity_url = literal_identity_page_candidate(result, domain)
+                remaining_company_budget = 2 - request_count
+                remaining_global_budget = max_http_requests - total_requests
+                if identity_url and remaining_company_budget > 0 and remaining_global_budget > 0:
+                    result = resolver.resolve(provisional, identity_url, FetchPolicy(max_redirects=0))
+                    new_count = int(journal.request_count())
+                    total_requests += new_count - request_count
+                    request_count = new_count
+                    try:
+                        record = promote_verified_identity(
+                            provisional, result,
+                            verification_source=(
+                                "Phase2.2e literal official identity page + Schannel verified body"))
+                    except OfficialSourceError as identity_exc:
+                        record, failure = None, str(identity_exc)
+                else:
+                    record, failure = None, str(exc)
+            if record is not None:
+                verified[company.security_code] = record
+                state, verified_url, failure = "VERIFIED", record.verified_official_url, None
+            else:
+                state = "BLOCKED" if result.access_status == "BLOCKED" else "UNVERIFIED"
+                failure = result.failure_reason or failure or "official body lacks direct company identity"
+        matrix.append({
+            "position": company.position, "ticker": company.security_code,
+            "company": company.company_name, "identity_state": state,
+            "official_domain": (authority or {}).get("official_domain") if authority else (
+                record.official_domain if record else None),
+            "deterministic_root_url": (
+                deterministic_https_root(authority["official_domain"])
+                if authority and authority.get("official_domain") else None),
+            "verified_url": verified_url, "transport": transport,
+            "http_requests": request_count, "failure": failure,
+        })
+    ready = all(row["identity_state"] == "VERIFIED" for row in matrix)
+    report = {
+        "schema_version": BOOTSTRAP_SCHEMA, "created_at": _now(),
+        "status": "READY" if ready else "INCOMPLETE_IDENTITY_VERIFICATION",
+        "mode": "windows-schannel-v1", "research_companies": 0,
+        "web_calls": 0, "model_calls": 0, "http_requests": total_requests,
+        "http_request_limit": max_http_requests, "repository_existing_hits": repository_hits,
+        "cohort_path": str(cohort.path), "cohort_sha256": cohort.cohort_sha256,
+        "cohort_file_sha256": cohort.file_sha256,
+        "universe_order_sha256": cohort.universe_order_sha256,
+        "company_count": len(matrix),
+        "ordered_tickers": [row.security_code for row in cohort.companies],
+        "matrix": matrix,
+        "verified_count": sum(row["identity_state"] == "VERIFIED" for row in matrix),
+        "unverified_count": sum(row["identity_state"] == "UNVERIFIED" for row in matrix),
+        "blocked_count": sum(row["identity_state"] == "BLOCKED" for row in matrix),
+        "registry_path": str(registry_path) if ready else None,
+        "plan_path": str(plan_path) if ready else None,
+        "prepare_result": None,
+    }
+    if ready:
+        registry = CompanyIdentityRegistry([verified[row.security_code] for row in cohort.companies])
+        plan = _official_plan(cohort, verified)
+        if _contains_forbidden_bootstrap_key(registry.to_dict()) or _contains_forbidden_bootstrap_key(plan):
+            raise CohortIntegrityError("bootstrap result leakage detected")
+        registry.save(registry_path)
+        _atomic(plan_path, plan)
+        validate_frozen_inputs(cohort, registry_path, plan_path)
+        report.update(
+            registry_logical_sha256=_canonical_sha(registry.to_dict()),
+            registry_file_sha256=_sha_bytes(registry_path.read_bytes()),
+            plan_logical_sha256=_canonical_sha(plan),
+            plan_file_sha256=_sha_bytes(plan_path.read_bytes()),
+        )
+        if prepare_run_dir is not None:
+            manifest = prepare_run(
+                cohort, prepare_run_dir, search_from=search_from, search_to=search_to,
+                approved_company_count=len(cohort.companies),
+                identity_registry_path=registry_path, official_plan_path=plan_path)
+            report["prepare_result"] = {
+                "state": manifest["state"], "run_dir": str(prepare_run_dir.resolve()),
+                "company_directories": 0,
+            }
+    _atomic(output_dir / "phase22-schannel-bootstrap-report.json", report)
     return report
 
 
@@ -904,7 +1088,13 @@ def _parser() -> argparse.ArgumentParser:
     bootstrap.add_argument("--company-master-db", type=Path, required=True)
     bootstrap.add_argument("--repository-artifacts-root", type=Path, required=True)
     bootstrap.add_argument("--output-dir", type=Path, required=True)
-    bootstrap.add_argument("--offline-only", action="store_true", required=True)
+    bootstrap_mode = bootstrap.add_mutually_exclusive_group(required=True)
+    bootstrap_mode.add_argument("--offline-only", action="store_true")
+    bootstrap_mode.add_argument("--windows-schannel", action="store_true")
+    bootstrap.add_argument("--max-http-requests", type=int, default=24)
+    bootstrap.add_argument("--prepare-run-dir", type=Path)
+    bootstrap.add_argument("--search-from", default="2026-08-25")
+    bootstrap.add_argument("--search-to", default="2026-08-31")
     report = sub.add_parser("aggregate"); report.add_argument("--run-dir", type=Path, required=True)
     run_next = sub.add_parser("run-next")
     run_next.add_argument("--root", type=Path, default=Path.cwd())
@@ -922,10 +1112,20 @@ def main() -> int:
             approved_company_count=args.approved_company_count,
             max_companies=args.max_companies,
             expected_cohort_sha256=args.cohort_sha256)
-        value = bootstrap_inputs(
-            cohort, company_master_db=args.company_master_db,
-            repository_artifacts_root=args.repository_artifacts_root,
-            output_dir=args.output_dir, offline_only=args.offline_only)
+        if args.offline_only:
+            if args.prepare_run_dir is not None:
+                raise MultiRunnerError("offline-only incomplete bootstrap cannot prepare a run")
+            value = bootstrap_inputs(
+                cohort, company_master_db=args.company_master_db,
+                repository_artifacts_root=args.repository_artifacts_root,
+                output_dir=args.output_dir, offline_only=True)
+        else:
+            value = bootstrap_identities_schannel(
+                cohort, company_master_db=args.company_master_db,
+                repository_artifacts_root=args.repository_artifacts_root,
+                output_dir=args.output_dir, max_http_requests=args.max_http_requests,
+                prepare_run_dir=args.prepare_run_dir,
+                search_from=args.search_from, search_to=args.search_to)
     elif args.command == "prepare":
         cohort = FrozenCohort.load(args.cohort_file,
             approved_company_count=args.approved_company_count,

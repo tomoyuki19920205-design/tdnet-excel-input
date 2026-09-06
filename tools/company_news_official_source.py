@@ -19,6 +19,7 @@ import ssl
 import subprocess
 import tempfile
 import time
+import unicodedata
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -65,7 +66,8 @@ def _now() -> str:
 
 
 def _normalized_name(value: str) -> str:
-    normalized = re.sub(r"[\s\u3000]", "", value or "")
+    normalized = unicodedata.normalize("NFKC", value or "")
+    normalized = re.sub(r"[\s\u3000]", "", normalized)
     for designator in ("株式会社", "㈱", "(株)", "（株）"):
         normalized = normalized.replace(designator, "")
     return normalized.casefold()

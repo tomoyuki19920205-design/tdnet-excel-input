@@ -102,6 +102,37 @@ class FakeResolver:
         return self.outcome or resolution(url)
 
 
+class IdentityResolver:
+    def __init__(self, *, root_has_identity=True, blocked=False, identity_link=None):
+        self.root_has_identity = root_has_identity
+        self.blocked = blocked
+        self.identity_link = identity_link
+        self.calls = []
+
+    def resolve(self, identity, url, policy=None):
+        self.calls.append((identity, url, policy))
+        if self.blocked:
+            return OfficialSourceResolution(
+                url, url, 0, "BLOCKED", None, None, None,
+                "2026-09-06T00:00:00+00:00", "windows-schannel-v1", "TLS")
+        is_root = len(self.calls) == 1
+        text = identity.company_name if self.root_has_identity or not is_root else "generic landing page"
+        links = (self.identity_link,) if is_root and self.identity_link else ()
+        body = NormalizedOfficialBody(
+            "Official corporate site", url, text, (), links, text)
+        return OfficialSourceResolution(
+            url, url, 200, "VERIFIED", "text/html", body, "d" * 64,
+            "2026-09-06T00:00:00+00:00", "windows-schannel-v1", None)
+
+
+class ResolverJournal:
+    def __init__(self, resolver):
+        self.resolver = resolver
+
+    def request_count(self):
+        return len(self.resolver.calls)
+
+
 class ReadyOfficial:
     def __init__(self, safe_at=None):
         self.safe_at = safe_at
@@ -261,6 +292,82 @@ def test_offline_bootstrap_reuses_verified_repository_identity_and_freezes(tmp_p
                       approved_company_count=1, identity_registry_path=registry,
                       official_plan_path=plan)
     assert not (prepared / "companies").exists()
+
+
+def test_schannel_bootstrap_verifies_12_freezes_and_prepares_without_research(tmp_path):
+    cohort = load(cohort_file(tmp_path), 12, 12)
+    master = tmp_path / "company-master.db"
+    company_master(master, [(row.security_code, f"https://{row.security_code}.example/",
+                             f"{row.security_code}.example", "discovered", "company master",
+                             "2026-08-20T00:00:00+00:00", 200)
+                            for row in cohort.companies])
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    resolvers = []
+    def factory(company_dir, company):
+        resolver = IdentityResolver()
+        resolvers.append(resolver)
+        return resolver, ResolverJournal(resolver)
+    output, prepared = tmp_path / "bootstrap", tmp_path / "prepared"
+    report = multi.bootstrap_identities_schannel(
+        cohort, company_master_db=master, repository_artifacts_root=artifacts,
+        output_dir=output, resolver_factory=factory, prepare_run_dir=prepared)
+    assert report["status"] == "READY" and report["verified_count"] == 12
+    assert report["http_requests"] == 12 and sum(len(row.calls) for row in resolvers) == 12
+    assert len(report["registry_logical_sha256"]) == len(report["plan_file_sha256"]) == 64
+    assert report["prepare_result"]["state"] == "PREPARED"
+    assert not (prepared / "companies").exists()
+    assert report["research_companies"] == report["web_calls"] == report["model_calls"] == 0
+
+
+def test_schannel_bootstrap_follows_only_literal_identity_link_once(tmp_path):
+    cohort = load(cohort_file(tmp_path, 1), 1, 1)
+    master = tmp_path / "company-master.db"
+    company_master(master, [("1001", "https://example.test/", "example.test",
+                             "discovered", "company master",
+                             "2026-08-20T00:00:00+00:00", 200)])
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    resolver = IdentityResolver(
+        root_has_identity=False, identity_link="https://example.test/company/profile/")
+    report = multi.bootstrap_identities_schannel(
+        cohort, company_master_db=master, repository_artifacts_root=artifacts,
+        output_dir=tmp_path / "bootstrap", resolver_factory=lambda *_: (
+            resolver, ResolverJournal(resolver)))
+    assert report["status"] == "READY" and report["http_requests"] == 2
+    assert resolver.calls[1][1] == "https://example.test/company/profile/"
+    assert resolver.calls[1][2].max_redirects == 0
+
+
+def test_identity_bootstrap_rejects_guessed_path_and_preserves_failure_state(tmp_path):
+    blocked = OfficialSourceResolution(
+        "https://example.test/", "https://example.test/", 0, "BLOCKED", None,
+        None, None, "2026-09-06T00:00:00+00:00", "windows-schannel-v1", "TLS")
+    assert multi.literal_identity_page_candidate(blocked, "example.test") is None
+    assert multi.deterministic_https_root("example.test") == "https://example.test/"
+    with pytest.raises(multi.MultiRunnerError):
+        multi.deterministic_https_root("https://example.test/about")
+    cohort = load(cohort_file(tmp_path, 1), 1, 1)
+    master = tmp_path / "company-master.db"
+    company_master(master, [("1001", "https://example.test/", "example.test",
+                             "discovered", "company master",
+                             "2026-08-20T00:00:00+00:00", 200)])
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    unverified = IdentityResolver(root_has_identity=False)
+    report = multi.bootstrap_identities_schannel(
+        cohort, company_master_db=master, repository_artifacts_root=artifacts,
+        output_dir=tmp_path / "unverified", resolver_factory=lambda *_: (
+            unverified, ResolverJournal(unverified)))
+    assert report["matrix"][0]["identity_state"] == "UNVERIFIED"
+    assert report["registry_path"] is None
+    tls_blocked = IdentityResolver(blocked=True)
+    report = multi.bootstrap_identities_schannel(
+        cohort, company_master_db=master, repository_artifacts_root=artifacts,
+        output_dir=tmp_path / "blocked", resolver_factory=lambda *_: (
+            tls_blocked, ResolverJournal(tls_blocked)))
+    assert report["matrix"][0]["identity_state"] == "BLOCKED"
+    assert report["matrix"][0]["failure"] == "TLS"
 
 
 def test_prepare_rejects_incomplete_frozen_inputs(tmp_path):
