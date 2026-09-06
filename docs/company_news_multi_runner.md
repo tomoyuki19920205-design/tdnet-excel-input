@@ -171,6 +171,33 @@ alone never becomes `VERIFIED`.
   --output artifacts\token_efficiency_phase22\phase22-identity-resolution-plan.json
 ```
 
+`bootstrap-known-successful` consumes that plan by exact byte SHA and performs
+one logical identity fetch per frozen company through
+`ir-nightly-known-successful-v1`. The transport uses the IR Nightly user agent
+and `requests.Session` with certificate verification enabled, no environment
+credentials, cookies, authentication, retry, or automatic redirect handling.
+Every allowed same-company redirect hop is validated and journaled separately;
+external, private, localhost, and link-local destinations fail closed. Final
+bodies are size/MIME bounded and saved beside their durable request journals.
+
+An HTTP exact URL may be used only when it was frozen from Nightly evidence. It
+can produce a verified identity only by an observed same-domain redirect to an
+HTTPS final URL. An HTTP 200 final body remains `UNVERIFIED_HTTP_ONLY`.
+Formal registry/plan artifacts and a `PREPARED` runner are created only when the
+whole frozen cohort is verified. The command never starts company research.
+
+```powershell
+..\.venv\Scripts\python.exe tools\company_news_multi_runner.py bootstrap-known-successful `
+  --cohort-file artifacts\token_efficiency_phase22\phase22-fixed-cohort.json `
+  --cohort-sha256 fc38bd476c68a0e47d75c59d664eb4fc2387c5a5c2580beece5668f395ff909e `
+  --approved-company-count 12 --max-companies 12 `
+  --resolution-plan artifacts\token_efficiency_phase22\phase22-identity-resolution-plan.json `
+  --resolution-plan-sha256 9ac3097e207c811bbf947901bf3ba77c6eb2cfe78f8765bad5057ca42c438b08 `
+  --output-dir artifacts\token_efficiency_phase22\phase22g-identity-bootstrap `
+  --prepare-run-dir artifacts\token_efficiency_phase22\phase22-run-001 `
+  --max-logical-fetches 12
+```
+
 ## Commands
 
 Prepare the approved twelve-company run without research:

@@ -45,6 +45,7 @@ TLS_BACKEND_CURRENT_CA = "current-ca-v1"
 TLS_BACKEND_WINDOWS_SYSTEM_TRUST = "windows-system-trust-v1"
 TLS_BACKEND_WINDOWS_ROOT_BUNDLE_SEMANTIC = "windows-root-bundle-v1"
 SCHANNEL_TRANSPORT_ID = "windows-schannel-v1"
+IR_NIGHTLY_KNOWN_SUCCESSFUL_TRANSPORT_ID = "ir-nightly-known-successful-v1"
 SCHANNEL_IMPLEMENTATION_FINGERPRINT = "dotnet10-sslstream-schannel-cryptoapi-v4"
 HTTP_JOURNAL_PHASES = {
     "PLANNED", "REQUEST_STARTED", "RESPONSE_RECEIVED", "NORMALIZED", "FAILED", "OUTCOME_LOST",
@@ -364,7 +365,9 @@ def validate_fetch_url(url: str, official_domain: str,
     if not _is_official_host(parsed.hostname, official_domain):
         raise OfficialSourceError("ACCESS_DENIED: host is outside official domain")
     try:
-        addresses = {row[4][0] for row in dns_resolver(parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM)}
+        default_port = 443 if parsed.scheme.lower() == "https" else 80
+        addresses = {row[4][0] for row in dns_resolver(
+            parsed.hostname, parsed.port or default_port, type=socket.SOCK_STREAM)}
     except OSError as exc:
         raise OfficialSourceError("DNS: official host resolution failed") from exc
     if not addresses:
@@ -535,12 +538,18 @@ class DirectHttpTransport:
                  dns_resolver: Callable[..., Any] = socket.getaddrinfo,
                  journal: "HttpFetchJournal | None" = None,
                  tls_backend: str = TLS_BACKEND_CURRENT_CA,
-                 system_context_factory: Callable[[], ssl.SSLContext] = windows_system_trust_context) -> None:
+                 system_context_factory: Callable[[], ssl.SSLContext] = windows_system_trust_context,
+                 transport_name: str | None = None,
+                 retain_raw_html: bool = False,
+                 user_agent: str = "CompanyNewsOfficialResolver/1.0") -> None:
         if tls_backend not in {TLS_BACKEND_CURRENT_CA, TLS_BACKEND_WINDOWS_SYSTEM_TRUST}:
             raise TlsTrustInitializationError("TLS_TRUST_INIT: unsupported TLS backend")
         self.session_factory, self.dns_resolver = session_factory, dns_resolver
         self.journal = journal
         self.tls_backend = tls_backend
+        self.transport_name = transport_name
+        self.retain_raw_html = retain_raw_html
+        self.user_agent = user_agent
         self._system_context = None
         if tls_backend == TLS_BACKEND_WINDOWS_SYSTEM_TRUST:
             self._system_context = validate_verified_tls_context(system_context_factory())
@@ -549,6 +558,8 @@ class DirectHttpTransport:
 
     @property
     def name(self) -> str:
+        if self.transport_name:
+            return self.transport_name
         if self.tls_backend == TLS_BACKEND_CURRENT_CA:
             return "direct_http"
         return "direct_http/windows-system-trust-v1"
@@ -567,20 +578,43 @@ class DirectHttpTransport:
             session.mount("https://", VerifiedSslContextAdapter(self._system_context))
         return session
 
-    def _start_request(self, target_url: str, wire_url: str) -> tuple[str | None, float]:
+    def _start_request(self, target_url: str, wire_url: str, *,
+                       parent_request_id: str | None = None, redirect_hop: int = 0,
+                       redirect_source_url: str | None = None,
+                       redirect_location: str | None = None) -> tuple[str | None, float]:
         started = time.monotonic()
         if self.journal is None:
             return None, started
         self._attempts += 1
         request_id = f"request-{self._attempts:04d}-{uuid.uuid4().hex[:12]}"
-        self.journal.start(request_id=request_id, transport=self.name,
-                           requested_url=wire_url, attempt_number=self._attempts)
+        self.journal.start(
+            request_id=request_id, transport=self.name, requested_url=wire_url,
+            attempt_number=self._attempts, parent_request_id=parent_request_id,
+            redirect_hop=redirect_hop, redirect_source_url=redirect_source_url,
+            redirect_location=redirect_location,
+            redirect_target_url=wire_url if parent_request_id else None)
         self._request_for_target[_canonical_url(target_url)] = request_id
         return request_id, started
 
     def _finish_request(self, request_id: str | None, payload: TransportPayload,
-                        started: float, *, access_status: str | None = None) -> TransportPayload:
+                        started: float, *, access_status: str | None = None,
+                        raw_body: bytes | None = None) -> TransportPayload:
         if self.journal is not None and request_id is not None:
+            retained = payload.body if raw_body is None else raw_body
+            if (self.retain_raw_html and retained is not None
+                    and payload.mime_type in {"text/html", "application/xhtml+xml", "text/plain"}):
+                relative = Path("raw-http") / f"{request_id}.body"
+                self.journal.store.write_bytes(relative, retained)
+                metadata = dict(payload.transport_metadata or {})
+                metadata.update({
+                    "raw_body_artifact": relative.as_posix(),
+                    "raw_body_sha256": hashlib.sha256(retained).hexdigest(),
+                    "raw_body_bytes": len(retained),
+                })
+                payload = TransportPayload(
+                    payload.requested_url, payload.final_url, payload.status_code,
+                    payload.mime_type, payload.body, payload.fetch_method,
+                    payload.failure_reason, payload.safe_headers, metadata)
             self.journal.response_received(request_id, payload,
                                            elapsed=time.monotonic() - started,
                                            access_status=access_status)
@@ -609,11 +643,20 @@ class DirectHttpTransport:
             session.trust_env = False
         if hasattr(session, "cookies"):
             session.cookies.clear()
+        if hasattr(session, "headers"):
+            session.headers.pop("Authorization", None)
+            session.headers.pop("Cookie", None)
         try:
+            parent_request_id = None
+            redirect_source_url = None
+            redirect_location = None
             for redirects in range(policy.max_redirects + 1):
-                request_id, request_started = self._start_request(requested_url, current)
+                request_id, request_started = self._start_request(
+                    requested_url, current, parent_request_id=parent_request_id,
+                    redirect_hop=redirects, redirect_source_url=redirect_source_url,
+                    redirect_location=redirect_location)
                 try:
-                    response = session.get(current, headers={"User-Agent": "CompanyNewsOfficialResolver/1.0",
+                    response = session.get(current, headers={"User-Agent": self.user_agent,
                                                              "Accept": "text/html,application/xhtml+xml,application/pdf,text/plain"},
                                            timeout=policy.timeout_seconds, stream=True, allow_redirects=False)
                 except requests.Timeout as exc:
@@ -647,6 +690,9 @@ class DirectHttpTransport:
                                                         self.name, safe_headers=safe_headers)
                     self._finish_request(request_id, redirect_payload, request_started,
                                          access_status="REDIRECT")
+                    parent_request_id = request_id
+                    redirect_source_url = current
+                    redirect_location = location
                     current = validate_fetch_url(destination, official_domain, self.dns_resolver)
                     continue
                 mime = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() or None
@@ -679,6 +725,20 @@ class DirectHttpTransport:
             if hasattr(session, "close"):
                 session.close()
         return TransportPayload(requested_url, current, 0, None, None, self.name, "UNKNOWN")
+
+
+class IrNightlyKnownSuccessfulTransport(DirectHttpTransport):
+    """Requests transport restricted by callers to persisted IR Nightly exact URLs."""
+
+    def __init__(self, *, session_factory: Callable[[], Any] = requests.Session,
+                 dns_resolver: Callable[..., Any] = socket.getaddrinfo,
+                 journal: "HttpFetchJournal | None" = None) -> None:
+        super().__init__(
+            session_factory=session_factory, dns_resolver=dns_resolver, journal=journal,
+            tls_backend=TLS_BACKEND_CURRENT_CA,
+            transport_name=IR_NIGHTLY_KNOWN_SUCCESSFUL_TRANSPORT_ID,
+            retain_raw_html=True,
+            user_agent="tdnet-company-ir-monitor/1.0 (+nightly; metadata-only)")
 
 
 class WindowsSchannelTransport:

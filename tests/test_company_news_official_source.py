@@ -23,6 +23,7 @@ from tools.company_news_official_source import (
     FetchPolicy,
     HttpFetchJournal,
     IdentityFailureCache,
+    IrNightlyKnownSuccessfulTransport,
     JournaledTransport,
     OfficialSourceError,
     OfficialSourceResolver,
@@ -241,6 +242,82 @@ def test_cross_domain_redirect_is_blocked():
     payload = DirectHttpTransport(session_factory=lambda: session, dns_resolver=PUBLIC_DNS).fetch(
         "https://official.example/company", "official.example", FetchPolicy())
     assert payload.failure_reason == "REDIRECT_BLOCKED"
+
+
+def test_ir_nightly_transport_uses_verified_requests_exact_url_and_no_retry():
+    session = FakeSession([FakeResponse(
+        200, headers={"Content-Type": "text/html"}, chunks=[b"Example Works official"])])
+    transport = IrNightlyKnownSuccessfulTransport(
+        session_factory=lambda: session, dns_resolver=PUBLIC_DNS)
+    result = OfficialSourceResolver(transport).resolve(
+        verified_record(status="UNVERIFIED", verification_method=None,
+                        verified_at=None, evidence_hash=None),
+        "https://official.example/company", FetchPolicy(max_redirects=0))
+    assert result.access_status == "VERIFIED"
+    assert transport.name == "ir-nightly-known-successful-v1"
+    assert len(session.calls) == 1 and session.trust_env is False and session.verify is True
+    assert session.calls[0][1]["allow_redirects"] is False
+    assert session.calls[0][1]["headers"]["User-Agent"].startswith("tdnet-company-ir-monitor/")
+
+
+def test_ir_nightly_transport_redirect_chain_is_durable_and_external_is_rejected(tmp_path):
+    store = DurableArtifactStore.prepare(tmp_path / "same")
+    journal = HttpFetchJournal(store, run_id="r", company="X001")
+    session = FakeSession([
+        FakeResponse(301, headers={"Location": "/company", "Content-Type": "text/html"}),
+        FakeResponse(200, headers={"Content-Type": "text/html"},
+                     chunks=[b"Example Works official"]),
+    ])
+    result = OfficialSourceResolver(IrNightlyKnownSuccessfulTransport(
+        session_factory=lambda: session, dns_resolver=PUBLIC_DNS, journal=journal)).resolve(
+        verified_record(status="UNVERIFIED", verification_method=None,
+                        verified_at=None, evidence_hash=None),
+        "https://official.example/", FetchPolicy(max_redirects=1))
+    records, corrupt = journal._disk_records()
+    assert result.access_status == "VERIFIED" and corrupt == [] and len(records) == 2
+    assert records[1]["parent_request_id"] == records[0]["request_id"]
+    assert records[1]["redirect_source_url"] == "https://official.example/"
+    assert records[1]["redirect_location"] == "/company"
+    assert list((store.spool_root / "raw-http").glob("*.body"))
+
+    external = FakeSession([FakeResponse(302, headers={"Location": "https://evil.example/"})])
+    payload = IrNightlyKnownSuccessfulTransport(
+        session_factory=lambda: external, dns_resolver=PUBLIC_DNS).fetch(
+        "https://official.example/", "official.example", FetchPolicy(max_redirects=1))
+    assert payload.failure_reason == "REDIRECT_BLOCKED" and len(external.calls) == 1
+
+
+def test_ir_nightly_transport_allows_saved_http_only_as_one_logical_fetch():
+    session = FakeSession([FakeResponse(
+        200, headers={"Content-Type": "text/html"}, chunks=[b"Example Works official"])])
+    result = OfficialSourceResolver(IrNightlyKnownSuccessfulTransport(
+        session_factory=lambda: session, dns_resolver=PUBLIC_DNS)).resolve(
+        verified_record(status="UNVERIFIED", verification_method=None,
+                        verified_at=None, evidence_hash=None,
+                        verified_official_url="http://official.example/company"),
+        "http://official.example/company", FetchPolicy(max_redirects=1))
+    assert result.access_status == "VERIFIED" and result.final_url.startswith("http://")
+    with pytest.raises(OfficialSourceError, match="outside the official domain"):
+        promote_verified_identity(
+            verified_record(status="UNVERIFIED", verification_method=None,
+                            verified_at=None, evidence_hash=None),
+            result, verification_source="HTTP-only fixture")
+
+
+def test_ir_nightly_transport_http_to_https_redirect_can_verify():
+    session = FakeSession([
+        FakeResponse(301, headers={"Location": "https://official.example/company"}),
+        FakeResponse(200, headers={"Content-Type": "text/html"},
+                     chunks=[b"Example Works official"]),
+    ])
+    provisional = verified_record(
+        status="UNVERIFIED", verification_method=None, verified_at=None,
+        evidence_hash=None, verified_official_url="http://official.example/company")
+    result = OfficialSourceResolver(IrNightlyKnownSuccessfulTransport(
+        session_factory=lambda: session, dns_resolver=PUBLIC_DNS)).resolve(
+        provisional, "http://official.example/company", FetchPolicy(max_redirects=1))
+    promoted = promote_verified_identity(provisional, result, verification_source="fixture")
+    assert promoted.status == "VERIFIED" and promoted.verified_official_url.startswith("https://")
 
 
 def test_response_size_hard_cap_is_enforced():

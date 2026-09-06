@@ -147,6 +147,28 @@ class ResolverJournal:
         return len(self.resolver.calls)
 
 
+class NightlyResponse:
+    def __init__(self, status=200, *, headers=None, body=b""):
+        self.status_code, self.headers, self.body = status, headers or {}, body
+
+    def iter_content(self, _size):
+        return iter([self.body]) if self.body else iter(())
+
+
+class NightlySession:
+    def __init__(self, responses):
+        self.responses, self.calls, self.trust_env, self.verify = list(responses), [], True, True
+        self.cookies = type("Cookies", (), {"clear": lambda self: None})()
+        self.headers = {}
+
+    def get(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        return self.responses.pop(0)
+
+    def close(self):
+        pass
+
+
 class ReadyOfficial:
     def __init__(self, safe_at=None):
         self.safe_at = safe_at
@@ -474,6 +496,78 @@ def test_bare_domain_is_lowest_authority_and_not_globally_blocked(tmp_path):
     assert row["source"] == "DERIVED_ROOT_URL"
     assert row["classification"] == "C_EXACT_AUTHORITATIVE_URL_MISSING"
     assert row["failure_clusters"] == ["D_DERIVED_HOST_DNS_FAILURE"]
+
+
+def phase22g_plan(tmp_path, cohort, url):
+    value = {
+        "schema_version": multi.IDENTITY_RESOLUTION_PLAN_SCHEMA,
+        "cohort_sha256": cohort.cohort_sha256,
+        "ordered_tickers": [row.security_code for row in cohort.companies],
+        "companies": [{
+            "position": 1, "ticker": "1001", "company_name": "Company 1",
+            "official_domain": "example.test", "candidate_exact_url": url,
+            "source": "IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH",
+        }],
+    }
+    path = tmp_path / "resolution-plan.json"
+    path.write_text(json.dumps(value), encoding="utf-8")
+    return path, hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_known_successful_bootstrap_verifies_saves_reusable_body_and_prepares(tmp_path):
+    cohort = load(cohort_file(tmp_path, 1), 1, 1)
+    plan, plan_sha = phase22g_plan(tmp_path, cohort, "https://www.example.test/ir/")
+    sessions = []
+    def factory(company_dir, company):
+        store = multi.DurableArtifactStore.prepare(company_dir / "identity-http")
+        journal = multi.HttpFetchJournal(store, run_id="fixture", company=company.security_code)
+        session = NightlySession([NightlyResponse(
+            headers={"Content-Type": "text/html"}, body=b"Company 1 official identity")])
+        sessions.append(session)
+        return multi.OfficialSourceResolver(multi.IrNightlyKnownSuccessfulTransport(
+            session_factory=lambda: session,
+            dns_resolver=lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 443))],
+            journal=journal)), journal
+    output, prepared = tmp_path / "bootstrap", tmp_path / "prepared"
+    report = multi.bootstrap_identities_ir_nightly(
+        cohort, resolution_plan_path=plan, expected_resolution_plan_sha256=plan_sha,
+        output_dir=output, prepare_run_dir=prepared, resolver_factory=factory,
+        max_logical_fetches=1)
+    assert report["status"] == "READY" and report["verified_count"] == 1
+    assert report["logical_company_fetches"] == report["actual_http_requests"] == 1
+    assert report["research_companies"] == report["model_calls"] == report["web_calls"] == 0
+    assert report["prepare_result"] == {
+        "state": "PREPARED", "run_dir": str(prepared.resolve()), "company_directories": 0}
+    assert not (prepared / "companies").exists()
+    assert sessions[0].calls[0][0] == "https://www.example.test/ir/"
+    reused = multi._load_ir_nightly_verified_body_records(output)
+    assert reused["1001"].status == "VERIFIED"
+    assert multi._contains_forbidden_bootstrap_key(json.loads(
+        (output / "phase22-company-identity-registry.json").read_text())) is False
+
+
+def test_known_successful_bootstrap_http_only_final_fails_closed_without_formal_files(tmp_path):
+    cohort = load(cohort_file(tmp_path, 1), 1, 1)
+    plan, plan_sha = phase22g_plan(tmp_path, cohort, "http://www.example.test/ir/")
+    def factory(company_dir, company):
+        store = multi.DurableArtifactStore.prepare(company_dir / "identity-http")
+        journal = multi.HttpFetchJournal(store, run_id="fixture", company=company.security_code)
+        session = NightlySession([NightlyResponse(
+            headers={"Content-Type": "text/html"}, body=b"Company 1 official identity")])
+        return multi.OfficialSourceResolver(multi.IrNightlyKnownSuccessfulTransport(
+            session_factory=lambda: session,
+            dns_resolver=lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 80))],
+            journal=journal)), journal
+    output, prepared = tmp_path / "bootstrap", tmp_path / "prepared"
+    report = multi.bootstrap_identities_ir_nightly(
+        cohort, resolution_plan_path=plan, expected_resolution_plan_sha256=plan_sha,
+        output_dir=output, prepare_run_dir=prepared, resolver_factory=factory,
+        max_logical_fetches=1)
+    assert report["status"] == "PARTIAL"
+    assert report["matrix"][0]["identity_state"] == "UNVERIFIED_HTTP_ONLY"
+    assert report["verified_count"] == 0 and report["unverified_count"] == 1
+    assert report["registry_path"] is report["official_plan_path"] is None
+    assert not prepared.exists()
 
 
 def test_prepare_rejects_incomplete_frozen_inputs(tmp_path):

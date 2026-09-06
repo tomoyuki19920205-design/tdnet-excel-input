@@ -35,6 +35,7 @@ from tools.company_news_official_source import (
     DurableArtifactStore,
     FetchPolicy,
     HttpFetchJournal,
+    IrNightlyKnownSuccessfulTransport,
     OfficialSourceResolution,
     OfficialSourceResolver,
     OfficialSourceError,
@@ -568,6 +569,195 @@ def generate_identity_resolution_plan(
     cohort.assert_unchanged()
     _atomic(output_path.resolve(), plan)
     return plan
+
+
+def _default_ir_nightly_resolver(
+        company_dir: Path, company: FrozenCompany) -> tuple[OfficialSourceResolver, HttpFetchJournal]:
+    store = DurableArtifactStore.prepare(company_dir / "identity-http")
+    journal = HttpFetchJournal(
+        store, run_id=f"phase22g-identity-{company.position:02d}-{company.security_code}",
+        company=company.security_code)
+    return OfficialSourceResolver(IrNightlyKnownSuccessfulTransport(journal=journal)), journal
+
+
+def _journal_projection(company_dir: Path) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    chain, final_event = [], None
+    for path in sorted((company_dir / "identity-http" / "http-journal").glob("*.json")):
+        journal = _read(path)
+        received = [event for event in journal.get("history") or []
+                    if event.get("phase") == "RESPONSE_RECEIVED"]
+        event = received[-1] if received else None
+        chain.append({
+            "request_id": journal.get("request_id"),
+            "requested_url": journal.get("requested_url"),
+            "parent_request_id": journal.get("parent_request_id"),
+            "redirect_hop": journal.get("redirect_hop"),
+            "redirect_source_url": journal.get("redirect_source_url"),
+            "redirect_location": journal.get("redirect_location"),
+            "final_url": (event or {}).get("final_url"),
+            "status": (event or {}).get("status_code"),
+            "mime_type": (event or {}).get("mime_type"),
+            "response_bytes": (event or {}).get("response_bytes"),
+            "body_sha256": (event or {}).get("body_sha256"),
+            "failure": (event or {}).get("exception_category"),
+        })
+        if event and not (300 <= int(event.get("status_code") or 0) < 400):
+            final_event = event
+    return chain, final_event
+
+
+def bootstrap_identities_ir_nightly(
+        cohort: FrozenCohort, *, resolution_plan_path: Path,
+        expected_resolution_plan_sha256: str, output_dir: Path,
+        prepare_run_dir: Path, search_from: str = "2026-08-25",
+        search_to: str = "2026-08-31", max_redirects: int = 5,
+        resolver_factory: Callable[[Path, FrozenCompany], tuple[OfficialSourceResolver, Any]] | None = None,
+        max_logical_fetches: int = 12) -> dict[str, Any]:
+    """Verify only frozen exact URLs through the IR Nightly-compatible transport."""
+    if max_logical_fetches != len(cohort.companies) or max_logical_fetches > 12:
+        raise MultiRunnerError("logical identity fetch budget must exactly match the frozen cohort")
+    if max_redirects < 0 or max_redirects > 10:
+        raise MultiRunnerError("redirect cap must be 0..10")
+    if _sha_bytes(resolution_plan_path.read_bytes()) != expected_resolution_plan_sha256:
+        raise CohortIntegrityError("identity resolution plan SHA mismatch")
+    resolution_plan = _read(resolution_plan_path)
+    if (resolution_plan.get("schema_version") != IDENTITY_RESOLUTION_PLAN_SCHEMA
+            or resolution_plan.get("cohort_sha256") != cohort.cohort_sha256
+            or resolution_plan.get("ordered_tickers") != [row.security_code for row in cohort.companies]
+            or _contains_forbidden_bootstrap_key(resolution_plan)):
+        raise CohortIntegrityError("identity resolution plan contract mismatch")
+    rows = resolution_plan.get("companies")
+    if not isinstance(rows, list) or len(rows) != len(cohort.companies):
+        raise CohortIntegrityError("identity resolution plan company matrix incomplete")
+    output_dir = output_dir.resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    registry_path = output_dir / "phase22-company-identity-registry.json"
+    official_plan_path = output_dir / "phase22-official-source-plan.json"
+    if registry_path.exists() or official_plan_path.exists() or prepare_run_dir.exists():
+        raise MultiRunnerError("Phase2.2g formal artifact or prepare-run collision")
+    factory = resolver_factory or _default_ir_nightly_resolver
+    verified: dict[str, CompanyIdentityRecord] = {}
+    matrix, logical_fetches, actual_requests = [], 0, 0
+    for company, authority in zip(cohort.companies, rows, strict=True):
+        if (authority.get("ticker") != company.security_code
+                or authority.get("company_name") != company.company_name):
+            raise CohortIntegrityError("identity resolution plan company mismatch")
+        exact_url = authority.get("candidate_exact_url")
+        domain = authority.get("official_domain")
+        if not exact_url or not domain or authority.get("source") not in {
+                "IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH", "MASTER_EXACT_URL"}:
+            raise CohortIntegrityError("saved exact URL authority required")
+        if _exact_official_url(exact_url, domain) != exact_url:
+            raise CohortIntegrityError("candidate URL is outside saved official domain")
+        company_dir = output_dir / "companies" / f"{company.position:02d}-{company.security_code}"
+        resolver, journal = factory(company_dir, company)
+        provisional = CompanyIdentityRecord(
+            security_code=company.security_code, company_name=company.company_name,
+            normalized_name=_normalized_company_name(company.company_name),
+            official_domain=domain, verified_official_url=exact_url,
+            verification_source=f"Phase2.2f frozen exact authority: {resolution_plan_path}",
+            verification_method=None, verified_at=None, evidence_hash=None,
+            status="UNVERIFIED", evidence_excerpt=None)
+        logical_fetches += 1
+        result = resolver.resolve(provisional, exact_url, FetchPolicy(max_redirects=max_redirects))
+        request_count = int(journal.request_count())
+        actual_requests += request_count
+        redirect_chain, final_event = _journal_projection(company_dir)
+        final_scheme = urlsplit(result.final_url or "").scheme.lower()
+        record, failure = None, result.failure_reason
+        if result.access_status == "VERIFIED" and final_scheme != "https":
+            state, failure = "UNVERIFIED_HTTP_ONLY", "final identity body is not HTTPS"
+        elif result.access_status == "VERIFIED":
+            try:
+                record = promote_verified_identity(
+                    provisional, result,
+                    verification_source="Phase2.2g IR Nightly known-successful exact URL body")
+                state = "VERIFIED"
+            except OfficialSourceError as exc:
+                state, failure = "UNVERIFIED", str(exc)
+        else:
+            state = "BLOCKED" if result.access_status == "BLOCKED" else "UNVERIFIED"
+        body_manifest_path = None
+        if record is not None:
+            verified[company.security_code] = record
+            metadata = (final_event or {}).get("transport_metadata") or {}
+            raw_relative = metadata.get("raw_body_artifact")
+            if not raw_relative:
+                raise MultiRunnerError("verified identity raw body artifact missing")
+            body_manifest_path = company_dir / "company-ir-nightly-verified-body.json"
+            body_path = company_dir / "identity-http" / str(raw_relative)
+            manifest = {
+                "schema_version": IR_NIGHTLY_VERIFIED_BODY_SCHEMA,
+                "ticker": company.security_code, "company_name": company.company_name,
+                "official_domain": domain, "source_url": result.final_url,
+                "last_success_at": result.fetched_at,
+                "body_path": body_path.relative_to(company_dir).as_posix(),
+                "body_sha256": result.body_hash, "mime_type": result.mime_type,
+            }
+            _atomic(body_manifest_path, manifest)
+        company_result = {
+            "position": company.position, "ticker": company.security_code,
+            "company_name": company.company_name, "source_exact_url": exact_url,
+            "url_authority_source": authority.get("source"),
+            "transport": result.fetch_method, "logical_fetches": 1,
+            "actual_http_requests": request_count, "redirect_chain": redirect_chain,
+            "final_url": result.final_url, "http_status": result.status_code,
+            "mime_type": result.mime_type, "identity_state": state,
+            "evidence_hash": result.body_hash,
+            "evidence_excerpt": record.evidence_excerpt if record else None,
+            "verification_method": record.verification_method if record else None,
+            "verification_timestamp": record.verified_at if record else None,
+            "body_manifest_path": str(body_manifest_path) if body_manifest_path else None,
+            "failure_reason": failure,
+        }
+        _atomic(company_dir / "identity-result.json", company_result)
+        matrix.append(company_result)
+    ready = len(verified) == len(cohort.companies)
+    report = {
+        "schema_version": "company_news_phase22g_identity_bootstrap_v1",
+        "created_at": _now(), "status": "READY" if ready else "PARTIAL",
+        "transport": "ir-nightly-known-successful-v1",
+        "resolution_plan_path": str(resolution_plan_path.resolve()),
+        "resolution_plan_sha256": expected_resolution_plan_sha256,
+        "cohort_sha256": cohort.cohort_sha256,
+        "cohort_file_sha256": cohort.file_sha256,
+        "universe_order_sha256": cohort.universe_order_sha256,
+        "ordered_tickers": [row.security_code for row in cohort.companies],
+        "logical_company_fetches": logical_fetches,
+        "actual_http_requests": actual_requests,
+        "research_companies": 0, "model_calls": 0, "web_calls": 0,
+        "matrix": matrix,
+        "verified_count": sum(row["identity_state"] == "VERIFIED" for row in matrix),
+        "unverified_count": sum(row["identity_state"].startswith("UNVERIFIED") for row in matrix),
+        "blocked_count": sum(row["identity_state"] == "BLOCKED" for row in matrix),
+        "registry_path": str(registry_path) if ready else None,
+        "official_plan_path": str(official_plan_path) if ready else None,
+        "prepare_result": None,
+        "leakage_findings": [],
+    }
+    if ready:
+        registry = CompanyIdentityRegistry([verified[row.security_code] for row in cohort.companies])
+        official_plan = _official_plan(cohort, verified)
+        if _contains_forbidden_bootstrap_key(registry.to_dict()) or _contains_forbidden_bootstrap_key(official_plan):
+            raise CohortIntegrityError("formal identity artifacts contain historical answer leakage")
+        registry.save(registry_path)
+        _atomic(official_plan_path, official_plan)
+        validate_frozen_inputs(cohort, registry_path, official_plan_path)
+        prepared = prepare_run(
+            cohort, prepare_run_dir, search_from=search_from, search_to=search_to,
+            approved_company_count=len(cohort.companies),
+            identity_registry_path=registry_path, official_plan_path=official_plan_path)
+        report.update(
+            registry_logical_sha256=_canonical_sha(registry.to_dict()),
+            registry_file_sha256=_sha_bytes(registry_path.read_bytes()),
+            plan_logical_sha256=_canonical_sha(official_plan),
+            plan_file_sha256=_sha_bytes(official_plan_path.read_bytes()),
+            prepare_result={"state": prepared["state"],
+                            "run_dir": str(prepare_run_dir.resolve()),
+                            "company_directories": 0})
+    cohort.assert_unchanged()
+    _atomic(output_dir / "phase22g-identity-bootstrap-report.json", report)
+    return report
 
 
 def _official_plan(cohort: FrozenCohort,
@@ -1414,6 +1604,19 @@ def _parser() -> argparse.ArgumentParser:
     forensic.add_argument("--repository-artifacts-root", type=Path, required=True)
     forensic.add_argument("--phase22e-report", type=Path)
     forensic.add_argument("--output", type=Path, required=True)
+    nightly = sub.add_parser("bootstrap-known-successful")
+    nightly.add_argument("--cohort-file", type=Path, required=True)
+    nightly.add_argument("--cohort-sha256", required=True)
+    nightly.add_argument("--approved-company-count", type=int, required=True)
+    nightly.add_argument("--max-companies", type=int, required=True)
+    nightly.add_argument("--resolution-plan", type=Path, required=True)
+    nightly.add_argument("--resolution-plan-sha256", required=True)
+    nightly.add_argument("--output-dir", type=Path, required=True)
+    nightly.add_argument("--prepare-run-dir", type=Path, required=True)
+    nightly.add_argument("--search-from", default="2026-08-25")
+    nightly.add_argument("--search-to", default="2026-08-31")
+    nightly.add_argument("--max-redirects", type=int, default=5)
+    nightly.add_argument("--max-logical-fetches", type=int, default=12)
     report = sub.add_parser("aggregate"); report.add_argument("--run-dir", type=Path, required=True)
     run_next = sub.add_parser("run-next")
     run_next.add_argument("--root", type=Path, default=Path.cwd())
@@ -1426,12 +1629,20 @@ def _parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _parser().parse_args()
-    if args.command in {"bootstrap-inputs", "forensic-identity-authority"}:
+    if args.command in {"bootstrap-inputs", "forensic-identity-authority", "bootstrap-known-successful"}:
         cohort = FrozenCohort.load(args.cohort_file,
             approved_company_count=args.approved_company_count,
             max_companies=args.max_companies,
             expected_cohort_sha256=args.cohort_sha256)
-        if args.command == "forensic-identity-authority":
+        if args.command == "bootstrap-known-successful":
+            value = bootstrap_identities_ir_nightly(
+                cohort, resolution_plan_path=args.resolution_plan,
+                expected_resolution_plan_sha256=args.resolution_plan_sha256,
+                output_dir=args.output_dir, prepare_run_dir=args.prepare_run_dir,
+                search_from=args.search_from, search_to=args.search_to,
+                max_redirects=args.max_redirects,
+                max_logical_fetches=args.max_logical_fetches)
+        elif args.command == "forensic-identity-authority":
             value = generate_identity_resolution_plan(
                 cohort, company_master_db=args.company_master_db,
                 repository_artifacts_root=args.repository_artifacts_root,
