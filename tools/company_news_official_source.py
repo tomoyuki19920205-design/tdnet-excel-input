@@ -35,7 +35,7 @@ from requests.adapters import HTTPAdapter
 IDENTITY_STATUSES = {"VERIFIED", "UNVERIFIED", "STALE"}
 IDENTITY_TRANSPORT_ASSURANCES = {"HTTPS_VERIFIED", "LEGACY_HTTP", "REPOSITORY_VERIFIED"}
 LEGACY_HTTP_AUTHORITIES = {"IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH", "COMPANY_MASTER"}
-WINDOW_STATES = {"COMPLETE", "PARTIAL", "BLOCKED", "NOT_APPLICABLE"}
+WINDOW_STATES = {"PENDING", "COMPLETE", "PARTIAL", "BLOCKED", "NOT_APPLICABLE"}
 FAILURE_TYPES = {
     "HTTP_4XX", "HTTP_5XX", "TIMEOUT", "DNS", "TLS", "TLS_CA_CHAIN", "TLS_HOSTNAME",
     "TLS_EXPIRED", "TLS_NOT_YET_VALID", "TLS_PROTOCOL", "TLS_HANDSHAKE", "TLS_UNKNOWN",
@@ -259,6 +259,7 @@ class OfficialWindowCoverage:
     checked_families: tuple[str, ...] = ()
     gaps: tuple[str, ...] = ()
     evidence_hashes: tuple[str, ...] = ()
+    not_applicable_families: tuple[str, ...] = ()
 
 
 def validate_window_coverage(value: OfficialWindowCoverage) -> OfficialWindowCoverage:
@@ -266,8 +267,13 @@ def validate_window_coverage(value: OfficialWindowCoverage) -> OfficialWindowCov
         raise OfficialSourceError("invalid official window state")
     if value.state == "COMPLETE":
         required = {"news", "ir", "announcements"}
-        if not required <= set(value.checked_families) or value.gaps:
+        covered = set(value.checked_families) | set(value.not_applicable_families)
+        if not required <= covered or value.gaps:
             raise OfficialSourceError("COMPLETE official window lacks required checks")
+    if set(value.checked_families) & set(value.not_applicable_families):
+        raise OfficialSourceError("official window family cannot be checked and non-applicable")
+    if value.state == "PENDING" and (value.checked_families or value.gaps or value.evidence_hashes):
+        raise OfficialSourceError("PENDING official window must be unresolved")
     if value.state in {"PARTIAL", "BLOCKED"} and not value.gaps:
         raise OfficialSourceError("incomplete official window needs a gap reason")
     return value
@@ -1153,6 +1159,15 @@ def normalize_official_body(body: bytes, mime_type: str, final_url: str,
     else:
         soup = BeautifulSoup(body, "html.parser")
         identity_markers = _html_identity_markers(soup)
+        # Navigation/header links are often the only deterministic route from a
+        # verified corporate root to its news and IR indexes.  Capture exact
+        # same-domain hrefs before layout nodes are removed from visible text.
+        links = []
+        for node in soup.find_all("a", href=True):
+            candidate = urljoin(final_url, node["href"])
+            host = urlsplit(candidate).hostname or ""
+            if _is_official_host(host, official_domain):
+                links.append(_canonical_url(candidate))
         for node in soup(["script", "style", "nav", "footer", "header", "noscript"]):
             node.decompose()
         title = soup.title.get_text(" ", strip=True) if soup.title else ""
@@ -1160,12 +1175,6 @@ def normalize_official_body(body: bytes, mime_type: str, final_url: str,
         canonical = urljoin(final_url, canonical_node.get("href")) if canonical_node else final_url
         if not _is_official_host(urlsplit(canonical).hostname or "", official_domain):
             canonical = final_url
-        links = []
-        for node in soup.find_all("a", href=True):
-            candidate = urljoin(final_url, node["href"])
-            host = urlsplit(candidate).hostname or ""
-            if _is_official_host(host, official_domain):
-                links.append(_canonical_url(candidate))
         text = soup.get_text(" ", strip=True)
     if mime_type == "application/pdf":
         identity_markers = ()

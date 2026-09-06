@@ -106,6 +106,15 @@ def resolution(url, *, status="VERIFIED", method="repository_existing"):
                                     None if body else "ACCESS_DENIED")
 
 
+def linked_resolution(url, links):
+    body = NormalizedOfficialBody(
+        "Company 1 official", url, "Company 1 official body", (), tuple(links),
+        "Company 1 official body")
+    return OfficialSourceResolution(
+        url, url, 200, "VERIFIED", "text/html", body, "d" * 64,
+        "2026-09-06T00:00:00+00:00", "repository_existing", None)
+
+
 class FakeResolver:
     def __init__(self, outcome=None):
         self.outcome = outcome
@@ -114,6 +123,16 @@ class FakeResolver:
     def resolve(self, identity, url, policy=None):
         self.calls.append((identity, url, policy))
         return self.outcome or resolution(url)
+
+
+class UrlResolver:
+    def __init__(self, outcomes):
+        self.outcomes = dict(outcomes)
+        self.calls = []
+
+    def resolve(self, identity, url, policy=None):
+        self.calls.append((identity, url, policy))
+        return self.outcomes.get(url, resolution(url, status="BLOCKED"))
 
 
 class IdentityResolver:
@@ -184,8 +203,24 @@ class ReadyOfficial:
             ("blocked exact document",) if safe else (), ())
         return multi.OfficialPreflight(
             "SAFE_UNKNOWN" if safe else "READY", CompanyIdentityRegistry(), window, {},
-            {"http_requests": 0, "response_bytes": 0, "transports": [], "fetch_failures": int(safe)},
+            {"http_requests": 0, "response_bytes": 0, "transports": [],
+             "fetch_failures": int(safe), "official_discovery_started": safe},
             window.gaps)
+
+
+class ControlFailureOfficial:
+    def __init__(self):
+        self.calls = []
+
+    def prepare(self, assignment, company_dir):
+        self.calls.append(dict(assignment))
+        gap = "official plan control wiring unavailable"
+        window = OfficialWindowCoverage(
+            assignment["ticker"], assignment["search_from"], assignment["search_to"],
+            "BLOCKED", (), (gap,), ())
+        return multi.OfficialPreflight(
+            "CONTROL_FAILURE", CompanyIdentityRegistry(), window, {},
+            {"http_requests": 0, "official_discovery_started": False}, (gap,))
 
 
 class FakeExecutor:
@@ -327,6 +362,18 @@ def test_offline_bootstrap_reuses_verified_repository_identity_and_freezes(tmp_p
     multi.prepare_run(cohort, prepared, search_from="2026-08-25", search_to="2026-08-31",
                       approved_company_count=1, identity_registry_path=registry,
                       official_plan_path=plan)
+    assert not (prepared / "companies").exists()
+    pending = json.loads((prepared / "queue.json").read_text())["assignments"][0]
+    assert pending["research_started"] is pending["model_started"] is False
+    assert pending["token_gate"] == "NOT_MEASURED"
+    dry = multi.dry_control_preflight(prepared)
+    assert dry == {
+        "status": "OFFICIAL_DISCOVERY_PENDING", "ticker": "1001",
+        "identity_verified": True, "root_authority_available": True,
+        "family_urls_frozen": False, "runtime_discovery_reachable": True,
+        "official_window_state": "PENDING", "research_started": False,
+        "model_started": False, "http_requests": 0, "web_calls": 0, "model_calls": 0,
+    }
     assert not (prepared / "companies").exists()
 
 
@@ -631,7 +678,8 @@ def test_legacy_http_identity_does_not_complete_window_or_verify_document():
     preflight = integration.prepare({
         "ticker": "1001", "company_name": "Company 1",
         "search_from": "2026-08-25", "search_to": "2026-08-31"}, Path("."))
-    assert preflight.status == "SAFE_UNKNOWN" and preflight.window.state == "BLOCKED"
+    assert preflight.status == "OFFICIAL_DISCOVERY_PENDING"
+    assert preflight.window.state == "PENDING" and preflight.runtime_discovery is not None
     document = integration.fetch_document(
         record, title="価格改定", url="http://www.example.test/news")
     assert document["provenance_state"] == "ACCESS_FAILED"
@@ -678,8 +726,51 @@ def test_safe_unknown_continues_without_model_call(tmp_path):
     assert executor.calls == []
     assert ctl.run_next()["status"] == "COMPLETED"
     queue = json.loads((run / "queue.json").read_text())
-    assert queue["assignments"][0]["total_tokens"] == 0
+    assert queue["assignments"][0]["total_tokens"] is None
+    assert queue["assignments"][0]["token_gate"] == "NOT_MEASURED"
     assert queue["assignments"][1]["status"] == "COMPLETED"
+
+
+def test_common_control_defect_stops_first_company_and_preserves_remaining_queue(tmp_path):
+    official, executor = ControlFailureOfficial(), FakeExecutor()
+    run, ctl = controller(tmp_path, official=official, executor=executor)
+    result = ctl.run_next()
+    assert result["status"] == "INFRA_STOP" and executor.calls == []
+    manifest = json.loads((run / "manifest.json").read_text())
+    queue = json.loads((run / "queue.json").read_text())["assignments"]
+    assert manifest["state"] == "STOPPED"
+    assert queue[0]["status"] == "INFRA_STOP"
+    assert all(row["status"] == "PENDING" for row in queue[1:])
+    assert queue[0]["research_started"] is queue[0]["model_started"] is False
+
+
+def test_unstarted_zero_token_is_not_a_token_or_quality_sample(tmp_path):
+    official, executor = ReadyOfficial(safe_at=1), FakeExecutor()
+    run, ctl = controller(tmp_path, official=official, executor=executor, count=2)
+    ctl.run_next()
+    ctl.run_next()
+    report = multi.aggregate(run)
+    assert report["research_samples"] == 1 and report["not_measured"] == 1
+    assert report["within_hard_gate"] == report["within_preferred_gate"] == 1
+    assert report["ordered_results"][0]["token_gate"] == "NOT_MEASURED"
+
+
+def test_existing_all_unstarted_run_audit_is_external_and_invalid(tmp_path):
+    _, run = prepare(tmp_path, count=2)
+    manifest_path, queue_path = run / "manifest.json", run / "queue.json"
+    manifest = json.loads(manifest_path.read_text())
+    queue = json.loads(queue_path.read_text())
+    manifest["state"] = "COMPLETED"
+    for row in queue["assignments"]:
+        row.update(status="SAFE_UNKNOWN", total_tokens=0)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    queue_path.write_text(json.dumps(queue), encoding="utf-8")
+    before = (manifest_path.read_bytes(), queue_path.read_bytes())
+    output = tmp_path / "audit.json"
+    audit = multi.audit_unstarted_run(run, output)
+    assert audit["classification"] == "INVALID_FOR_TOKEN_QUALITY_EVALUATION"
+    assert audit["research_started_count"] == 0
+    assert before == (manifest_path.read_bytes(), queue_path.read_bytes())
 
 
 def test_token_and_semantic_gates_stop_before_next_company(tmp_path):
@@ -738,12 +829,67 @@ def test_official_resolver_registry_reuse_and_window_wiring(tmp_path):
     assert value.model_context["company_identity"]["verified_ticker"] == "1001"
 
 
-def test_official_missing_identity_is_safe_unknown_without_fetch(tmp_path):
+def test_empty_frozen_family_map_enters_runtime_root_discovery_without_fetch(tmp_path):
+    registry, repo = verified_registry(), FakeResolver()
+    plans = {"1001": {"verified_root_url": "https://example.test/",
+                       "allowed_hosts": ["example.test"]}}
+    integration = multi.OfficialResolverIntegration(registry, repo, None, {}, plans)
+    assignment = {"ticker": "1001", "company_name": "Company 1",
+                  "search_from": "2026-08-25", "search_to": "2026-08-31"}
+    value = integration.prepare(assignment, tmp_path)
+    assert value.status == "OFFICIAL_DISCOVERY_PENDING"
+    assert value.window.state == "PENDING" and value.runtime_discovery is not None
+    assert repo.calls == []
+
+
+def test_runtime_root_discovery_resolves_news_ir_and_consolidated_announcements(tmp_path):
+    registry = verified_registry()
+    root = "https://example.test/"
+    news, ir = "https://example.test/news/", "https://example.test/ir/"
+    repo = UrlResolver({root: linked_resolution(root, (news, ir)),
+                        news: resolution(news), ir: resolution(ir)})
+    plans = {"1001": {"verified_root_url": root, "allowed_hosts": ["example.test"]}}
+    integration = multi.OfficialResolverIntegration(registry, repo, None, {}, plans)
+    assignment = {"ticker": "1001", "company_name": "Company 1",
+                  "search_from": "2026-08-25", "search_to": "2026-08-31"}
+    discovered = integration.prepare(assignment, tmp_path).runtime_discovery()
+    assert discovered.status == "READY" and discovered.window.state == "COMPLETE"
+    assert set(discovered.window.checked_families) == {"news", "ir", "announcements"}
+    assert [call[1] for call in repo.calls] == [root, news, ir]
+    assert discovered.telemetry["official_discovery_started"] is True
+
+
+def test_runtime_discovery_marks_announcements_non_applicable_and_required_gap(tmp_path):
+    registry = verified_registry()
+    root, ir = "https://example.test/", "https://example.test/ir/"
+    repo = UrlResolver({root: linked_resolution(root, (ir,)), ir: resolution(ir)})
+    plans = {"1001": {"verified_root_url": root, "allowed_hosts": ["example.test"]}}
+    integration = multi.OfficialResolverIntegration(registry, repo, None, {}, plans)
+    assignment = {"ticker": "1001", "company_name": "Company 1",
+                  "search_from": "2026-08-25", "search_to": "2026-08-31"}
+    discovered = integration.prepare(assignment, tmp_path).runtime_discovery()
+    assert discovered.status == "SAFE_UNKNOWN" and discovered.window.state == "PARTIAL"
+    assert discovered.window.not_applicable_families == ("announcements",)
+    assert discovered.gaps == ("news: no exact URL discovered from verified root",)
+    assert [call[1] for call in repo.calls] == [root, ir]
+
+
+def test_missing_allowed_hosts_is_control_failure_before_discovery(tmp_path):
+    registry, repo = verified_registry(), FakeResolver()
+    integration = multi.OfficialResolverIntegration(
+        registry, repo, None, {}, {"1001": {"verified_root_url": "https://example.test/",
+                                             "allowed_hosts": []}})
+    value = integration.prepare({"ticker": "1001", "company_name": "Company 1",
+        "search_from": "2026-08-25", "search_to": "2026-08-31"}, tmp_path)
+    assert value.status == "CONTROL_FAILURE" and repo.calls == []
+
+
+def test_official_missing_identity_is_control_failure_without_fetch(tmp_path):
     repo = FakeResolver()
     integration = multi.OfficialResolverIntegration(CompanyIdentityRegistry(), repo, None, {})
     value = integration.prepare({"ticker": "1001", "company_name": "Company 1",
         "search_from": "2026-08-25", "search_to": "2026-08-31"}, tmp_path)
-    assert value.status == "SAFE_UNKNOWN" and value.window.state == "BLOCKED"
+    assert value.status == "CONTROL_FAILURE" and value.window.state == "BLOCKED"
     assert repo.calls == []
 
 

@@ -58,7 +58,7 @@ OFFICIAL_PLAN_SCHEMA = "company_news_official_source_plan_v1"
 IDENTITY_RESOLUTION_PLAN_SCHEMA = "company_news_identity_resolution_plan_v1"
 IR_NIGHTLY_VERIFIED_BODY_SCHEMA = "company_ir_nightly_verified_body_v1"
 RUN_STATES = {"PREPARED", "RUNNING", "STOPPED", "COMPLETED", "FAILED"}
-COMPANY_STATES = {"PENDING", "RUNNING", "COMPLETED", "FAILED", "SAFE_UNKNOWN"}
+COMPANY_STATES = {"PENDING", "RUNNING", "COMPLETED", "FAILED", "SAFE_UNKNOWN", "INFRA_STOP"}
 DOCUMENT_PROVENANCE_STATES = (
     "DISCOVERED_IN_INDEX", "URL_DISCOVERED", "BODY_FETCH_ATTEMPTED",
     "BODY_VERIFIED", "ACCESS_FAILED",
@@ -83,6 +83,12 @@ class CohortIntegrityError(MultiRunnerError):
 
 
 class ResumeRequired(MultiRunnerError):
+    pass
+
+
+class ControlContractError(MultiRunnerError):
+    """A company-independent runner/plan wiring defect; never a research UNKNOWN."""
+
     pass
 
 
@@ -1000,6 +1006,11 @@ def validate_frozen_inputs(cohort: FrozenCohort, registry_path: Path,
         raise CohortIntegrityError("official plan company matrix incomplete")
     if _contains_forbidden_bootstrap_key(plan):
         raise CohortIntegrityError("official plan contains result leakage")
+    policy = plan.get("resolver_policy") or {}
+    if (policy.get("root_authority") != "frozen_verified_identity_registry"
+            or policy.get("target_discovery") != "deterministic_links_from_verified_official_parent"
+            or policy.get("delegated_resource_authority") != "exact_embedded_url_only"):
+        raise CohortIntegrityError("official plan runtime discovery policy mismatch")
     for company, row in zip(cohort.companies, rows, strict=True):
         record = registry.usable(company.security_code, company.company_name)
         if record is None:
@@ -1015,6 +1026,15 @@ def validate_frozen_inputs(cohort: FrozenCohort, registry_path: Path,
                     else "HTTPS_VERIFIED"))
                 or row.get("transport_security_warning") != record.transport_security_warning):
             raise CohortIntegrityError(f"official plan identity mismatch: {company.security_code}")
+        hosts = row.get("allowed_hosts")
+        root_host = (urlsplit(str(row.get("verified_root_url") or "")).hostname or "").lower().rstrip(".")
+        normalized_hosts = [str(host).lower().rstrip(".") for host in hosts] if isinstance(hosts, list) else []
+        if (not root_host or not normalized_hosts
+                or any(host != record.official_domain and not host.endswith("." + record.official_domain)
+                       for host in normalized_hosts)
+                or not any(root_host == host or root_host.endswith("." + host)
+                           for host in normalized_hosts)):
+            raise CohortIntegrityError(f"official plan allowed-host mismatch: {company.security_code}")
     if _contains_forbidden_bootstrap_key({"records": registry_records}):
         raise CohortIntegrityError("identity registry contains result leakage")
     return registry, plan
@@ -1308,6 +1328,7 @@ class OfficialPreflight:
     telemetry: dict[str, Any]
     gaps: tuple[str, ...] = ()
     document_fetcher: Callable[..., dict[str, Any]] | None = None
+    runtime_discovery: Callable[[], "OfficialPreflight"] | None = None
 
 
 class OfficialPreflightProvider(Protocol):
@@ -1319,6 +1340,19 @@ class CompanyExecutor(Protocol):
                  official: OfficialPreflight) -> tuple[dict[str, Any], dict[str, Any]]: ...
 
 
+_FAMILY_PATH_MARKERS = {
+    "news": re.compile(r"(?:^|[/_.-])(?:news|topics?|press|releases?|information|info)(?:[/_.?-]|$)", re.I),
+    "ir": re.compile(r"(?:^|[/_.-])(?:ir|investors?|invest)(?:[/_.?-]|$)", re.I),
+    "announcements": re.compile(r"(?:^|[/_.-])(?:announcements?|notices?|releases?|topics?)(?:[/_.?-]|$)", re.I),
+}
+
+
+def _families_for_exact_url(url: str) -> set[str]:
+    parsed = urlsplit(url)
+    target = parsed.path + ("?" + parsed.query if parsed.query else "")
+    return {family for family, pattern in _FAMILY_PATH_MARKERS.items() if pattern.search(target)}
+
+
 class OfficialResolverIntegration:
     """Bound non-LLM official resolver used before any company model context.
 
@@ -1328,11 +1362,13 @@ class OfficialResolverIntegration:
     def __init__(self, registry: CompanyIdentityRegistry,
                  repository_resolver: OfficialSourceResolver,
                  live_resolver: OfficialSourceResolver | None,
-                 family_urls: Mapping[str, Mapping[str, str]]) -> None:
+                 family_urls: Mapping[str, Mapping[str, str]],
+                 company_plans: Mapping[str, Mapping[str, Any]] | None = None) -> None:
         self.registry = registry
         self.repository_resolver = repository_resolver
         self.live_resolver = live_resolver
         self.family_urls = {str(code): dict(urls) for code, urls in family_urls.items()}
+        self.company_plans = {str(code): dict(row) for code, row in (company_plans or {}).items()}
         self._cache: dict[str, OfficialSourceResolution] = {}
 
     def _resolve(self, identity, url: str) -> OfficialSourceResolution:
@@ -1344,16 +1380,138 @@ class OfficialResolverIntegration:
         self._cache[url] = result
         return result
 
+    @staticmethod
+    def _pending_window(assignment: Mapping[str, Any]) -> OfficialWindowCoverage:
+        return validate_window_coverage(OfficialWindowCoverage(
+            str(assignment["ticker"]), str(assignment["search_from"]),
+            str(assignment["search_to"]), "PENDING"))
+
+    def _control_failure(self, assignment: Mapping[str, Any], reason: str) -> OfficialPreflight:
+        ticker = str(assignment["ticker"])
+        window = OfficialWindowCoverage(ticker, str(assignment["search_from"]),
+                                        str(assignment["search_to"]), "BLOCKED", (), (reason,), ())
+        return OfficialPreflight(
+            "CONTROL_FAILURE", self.registry, validate_window_coverage(window), {},
+            {"http_requests": 0, "response_bytes": 0, "transports": [],
+             "fetch_failures": 0, "official_discovery_started": False}, (reason,))
+
+    def _plan_authority(self, identity, ticker: str) -> tuple[str, tuple[str, ...]]:
+        row = self.company_plans.get(ticker)
+        if row is None:
+            return identity.verified_official_url, (identity.official_domain,)
+        root = str(row.get("verified_root_url") or "")
+        hosts = tuple(str(host).lower().rstrip(".") for host in (row.get("allowed_hosts") or ()) if host)
+        if not root:
+            raise ControlContractError("verified root authority missing from official plan")
+        parsed = urlsplit(root)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        official_domain = str(identity.official_domain).lower().rstrip(".")
+        if (not hosts or not host
+                or any(allowed != official_domain and not allowed.endswith("." + official_domain)
+                       for allowed in hosts)
+                or not any(host == allowed or host.endswith("." + allowed) for allowed in hosts)):
+            raise ControlContractError("allowed-host authority missing or incompatible")
+        return root, hosts
+
+    def _resolve_window(self, assignment: Mapping[str, Any], identity,
+                        root_url: str) -> OfficialPreflight:
+        ticker = str(assignment["ticker"])
+        explicit = dict(self.family_urls.get(ticker, {}))
+        root = self._resolve(identity, root_url)
+        results: dict[str, OfficialSourceResolution] = {}
+        gaps: list[str] = []
+        not_applicable: set[str] = set()
+        candidates: dict[str, list[str]] = {key: [] for key in ("news", "ir", "announcements")}
+        if root.access_status != "VERIFIED" or root.normalized_content is None:
+            gaps.append(f"official root: {root.failure_reason or root.access_status}")
+        else:
+            urls = [root.final_url, *root.normalized_content.relevant_links]
+            for url in urls:
+                for family in _families_for_exact_url(url):
+                    if url not in candidates[family]:
+                        candidates[family].append(url)
+            for family, url in explicit.items():
+                if family in candidates and url not in candidates[family]:
+                    candidates[family].insert(0, url)
+            # A single release/topics index commonly carries both company news
+            # and announcements.  Preserve that exact URL rather than inventing
+            # a second path.  Announcements is otherwise non-applicable.
+            if candidates["news"] and not candidates["announcements"]:
+                candidates["announcements"] = [candidates["news"][0]]
+            if not candidates["announcements"]:
+                not_applicable.add("announcements")
+            for family in ("news", "ir", "announcements"):
+                if family in not_applicable:
+                    continue
+                if not candidates[family]:
+                    gaps.append(f"{family}: no exact URL discovered from verified root")
+                    continue
+                result = self._resolve(identity, candidates[family][0])
+                results[family] = result
+                if result.access_status != "VERIFIED":
+                    gaps.append(f"{family}: {result.failure_reason or result.access_status}")
+        checked = tuple(sorted(family for family, result in results.items()
+                               if result.access_status == "VERIFIED"))
+        covered = set(checked) | not_applicable
+        required = {"news", "ir", "announcements"}
+        state = "COMPLETE" if not gaps and required <= covered else (
+            "PARTIAL" if checked else "BLOCKED")
+        window = validate_window_coverage(OfficialWindowCoverage(
+            ticker, str(assignment["search_from"]), str(assignment["search_to"]), state,
+            checked, tuple(gaps), tuple(dict.fromkeys(
+                row.body_hash for row in results.values() if row.body_hash)),
+            tuple(sorted(not_applicable))))
+        cards = []
+        for family, result in results.items():
+            if result.access_status != "VERIFIED" or result.normalized_content is None:
+                continue
+            body = result.normalized_content
+            cards.append({"url": body.canonical_url, "source_type": "company_official",
+                          "title": body.title, "published_at": None,
+                          "excerpt": body.bounded_excerpt, "supports": f"official {family} window",
+                          "query_id": f"official-preflight-{family}",
+                          "verification_status": "VERIFIED"})
+        unique_results = {row.requested_url: row for row in (root, *results.values())}
+        telemetry = {
+            "http_requests": sum(row.fetch_method != "repository_existing" for row in unique_results.values()),
+            "response_bytes": None,
+            "transports": sorted({row.fetch_method for row in unique_results.values()}),
+            "fetch_failures": sum(row.access_status != "VERIFIED" for row in unique_results.values()),
+            "official_discovery_started": True,
+            "discovered_family_urls": {family: row.requested_url for family, row in results.items()},
+            "not_applicable_families": sorted(not_applicable),
+        }
+        model_identity = {"verified_ticker": ticker,
+                          "source_url": identity.verified_official_url,
+                          "evidence": "Stable VERIFIED CompanyIdentityRegistry evidence reused."}
+        status = "READY" if state == "COMPLETE" else "SAFE_UNKNOWN"
+        return OfficialPreflight(
+            status, self.registry, window,
+            {"company_identity": model_identity, "evidence_cards": cards, "telemetry": telemetry},
+            telemetry, tuple(gaps), lambda **kwargs: self.fetch_document(identity, **kwargs))
+
     def prepare(self, assignment: Mapping[str, Any], company_dir: Path) -> OfficialPreflight:
         ticker, name = str(assignment["ticker"]), str(assignment["company_name"])
         identity = self.registry.usable(ticker, name)
         if identity is None:
-            window = OfficialWindowCoverage(ticker, assignment["search_from"], assignment["search_to"],
-                                            "BLOCKED", (), ("verified identity unavailable",), ())
-            return OfficialPreflight("SAFE_UNKNOWN", self.registry, window, {},
-                                     {"http_requests": 0, "response_bytes": 0,
-                                      "transports": [], "fetch_failures": 0}, window.gaps)
+            return self._control_failure(assignment, "verified identity unavailable")
+        try:
+            root_url, _ = self._plan_authority(identity, ticker)
+        except ControlContractError as exc:
+            return self._control_failure(assignment, str(exc))
         urls = self.family_urls.get(ticker, {})
+        if not urls:
+            window = self._pending_window(assignment)
+            telemetry = {"http_requests": 0, "response_bytes": 0, "transports": [],
+                         "fetch_failures": 0, "official_discovery_started": False}
+            model_identity = {"verified_ticker": ticker,
+                              "source_url": identity.verified_official_url,
+                              "evidence": "Stable VERIFIED CompanyIdentityRegistry evidence reused."}
+            return OfficialPreflight(
+                "OFFICIAL_DISCOVERY_PENDING", self.registry, window,
+                {"company_identity": model_identity, "evidence_cards": [], "telemetry": telemetry},
+                telemetry, (), lambda **kwargs: self.fetch_document(identity, **kwargs),
+                lambda: self._resolve_window(assignment, identity, root_url))
         required = {"news", "ir", "announcements"}
         results: dict[str, OfficialSourceResolution] = {}
         gaps = []
@@ -1422,6 +1580,9 @@ class ConfiguredOfficialProvider:
         plan = _read(plan_path)
         self.family_urls = plan.get("family_urls", {})
         self.repository_artifacts = plan.get("repository_artifacts", {})
+        rows = plan.get("companies") or []
+        self.company_plans = {str(row.get("ticker")): dict(row) for row in rows
+                              if isinstance(row, Mapping) and row.get("ticker")}
         self.allow_live_http = allow_live_http
 
     def prepare(self, assignment: Mapping[str, Any], company_dir: Path) -> OfficialPreflight:
@@ -1438,7 +1599,7 @@ class ConfiguredOfficialProvider:
             live = OfficialSourceResolver(WindowsSchannelTransport(
                 journal=journal, retain_raw_html=True))
         integration = OfficialResolverIntegration(
-            self.registry, repository, live, self.family_urls)
+            self.registry, repository, live, self.family_urls, self.company_plans)
         return integration.prepare(assignment, company_dir)
 
 
@@ -1537,7 +1698,11 @@ def prepare_run(cohort: FrozenCohort, run_dir: Path, *, search_from: str,
     assignments = []
     for company in cohort.companies:
         assignment = company.assignment(search_from=search_from, search_to=search_to)
-        assignments.append({**assignment, "status": "PENDING"})
+        assignments.append({
+            **assignment, "status": "PENDING", "research_started": False,
+            "model_started": False, "official_discovery_started": False,
+            "quality_sample": False, "token_gate": "NOT_MEASURED",
+        })
     manifest = {
         "schema_version": SCHEMA, "state": "PREPARED", "created_at": _now(),
         "cohort_path": str(cohort.path), "cohort_file_sha256": cohort.file_sha256,
@@ -1619,6 +1784,15 @@ class FrozenCohortController:
     def _advance_manifest(self, manifest: dict[str, Any], queue: dict[str, Any]) -> None:
         if any(row["status"] == "PENDING" for row in queue["assignments"]):
             manifest["state"] = "PREPARED"
+        elif not all(
+                (row["status"] == "COMPLETED" and row.get("research_started") is True)
+                or (row["status"] == "SAFE_UNKNOWN"
+                    and row.get("official_discovery_started") is True)
+                for row in queue["assignments"]):
+            manifest.update(
+                state="STOPPED",
+                stop_reason="approved cohort lacks valid execution-stage terminal outcomes",
+                stopped_at=_now(), resume_approved=False)
         else:
             manifest.update(state="COMPLETED", completed_at=_now())
         _atomic(self.run_dir / "manifest.json", manifest)
@@ -1670,17 +1844,47 @@ class FrozenCohortController:
             return {"status": "FAILED", "reason": str(exc)}
         try:
             official = self.official.prepare(runtime, company_dir)
+            _atomic(company_dir / "official-preflight-control.json", {
+                "status": official.status, "official_window": asdict(official.window),
+                "telemetry": official.telemetry, "gaps": list(official.gaps)})
+            if official.status == "CONTROL_FAILURE":
+                reason = "; ".join(official.gaps) or "official preflight control failure"
+                assignment.update(
+                    status="INFRA_STOP", completed_at=_now(), error_type="CONTROL_CONTRACT_FAILURE",
+                    error_message=reason, research_started=False, model_started=False,
+                    official_discovery_started=False, quality_sample=False,
+                    token_gate="NOT_MEASURED")
+                _atomic(self.run_dir / "queue.json", queue)
+                guard.unlink(missing_ok=True)
+                self._stop(manifest, f"CONTROL_CONTRACT_FAILURE: {reason}")
+                return {"status": "INFRA_STOP", "assignment": assignment}
+            if official.status == "OFFICIAL_DISCOVERY_PENDING":
+                if official.runtime_discovery is None:
+                    raise ControlContractError("runtime official discovery component unavailable")
+                official = official.runtime_discovery()
             _atomic(company_dir / "official-preflight.json", {
                 "status": official.status, "official_window": asdict(official.window),
                 "telemetry": official.telemetry, "gaps": list(official.gaps)})
             if official.status == "SAFE_UNKNOWN":
+                if official.telemetry.get("official_discovery_started") is not True:
+                    raise ControlContractError("SAFE_UNKNOWN emitted before company-specific discovery")
                 assignment.update(status="SAFE_UNKNOWN", completed_at=_now(),
-                                  result_type="UNKNOWN", remaining_gaps=list(official.gaps),
-                                  total_tokens=0, worker_count=0, web_calls=0)
+                                  result_type="SAFE_UNKNOWN", remaining_gaps=list(official.gaps),
+                                  total_tokens=None, worker_count=0, web_calls=0,
+                                  research_started=False, model_started=False,
+                                  official_discovery_started=True, quality_sample=False,
+                                  token_gate="NOT_MEASURED")
                 _atomic(self.run_dir / "queue.json", queue)
                 guard.unlink(missing_ok=True)
                 self._advance_manifest(manifest, queue)
                 return {"status": "SAFE_UNKNOWN", "assignment": assignment}
+            if official.status != "READY":
+                raise ControlContractError(f"unknown official preflight status: {official.status}")
+            assignment.update(research_started=True, model_started=True,
+                              official_discovery_started=bool(
+                                  official.telemetry.get("official_discovery_started")),
+                              quality_sample=True)
+            _atomic(self.run_dir / "queue.json", queue)
             response, telemetry = self.executor(self.root, company_dir, runtime, official)
             audit = self.auditor(response, company_dir)
             _atomic(company_dir / "exhaustive-semantic-audit.json", audit)
@@ -1692,13 +1896,17 @@ class FrozenCohortController:
             if leakage:
                 raise MultiRunnerError("previous-company runtime marker leakage")
             _atomic(company_dir / "canonical-response.json", response)
+            telemetry.update(research_started=True, model_started=True)
             _atomic(company_dir / "token-telemetry.json", telemetry)
             assignment.update(status="COMPLETED", completed_at=_now(),
                               result_type="news_present" if response["research_result"]["items"] else "no_news",
                               total_tokens=total, worker_count=telemetry.get("worker_count"),
                               web_calls=telemetry.get("web_call_count"),
-                              first_model_input_tokens=(telemetry.get("workers") or [{}])[0].get("input_tokens"),
-                              cached_input_tokens=telemetry.get("cached_input_tokens"))
+                               first_model_input_tokens=(telemetry.get("workers") or [{}])[0].get("input_tokens"),
+                               cached_input_tokens=telemetry.get("cached_input_tokens"),
+                               token_gate=("HARD_FAIL" if total > manifest["hard_token_gate"] else
+                                           "PREFERRED_WARNING" if total > manifest["preferred_token_gate"]
+                                           else "PASS"))
             _atomic(self.run_dir / "queue.json", queue)
             guard.unlink(missing_ok=True)
             if total > manifest["hard_token_gate"]:
@@ -1708,12 +1916,13 @@ class FrozenCohortController:
                 self._advance_manifest(manifest, queue)
             return {"status": assignment["status"], "assignment": assignment}
         except Exception as exc:
-            assignment.update(status="FAILED", completed_at=_now(), error_type=type(exc).__name__,
+            control_failure = isinstance(exc, ControlContractError)
+            assignment.update(status="INFRA_STOP" if control_failure else "FAILED", completed_at=_now(), error_type=type(exc).__name__,
                               error_message=str(exc))
             _atomic(self.run_dir / "queue.json", queue)
             guard.unlink(missing_ok=True)
-            self._stop(manifest, f"{type(exc).__name__}: {exc}", failure=True)
-            return {"status": "FAILED", "assignment": assignment}
+            self._stop(manifest, f"{type(exc).__name__}: {exc}", failure=not control_failure)
+            return {"status": "INFRA_STOP" if control_failure else "FAILED", "assignment": assignment}
 
     def approve_resume(self) -> dict[str, Any]:
         manifest, _, _ = self._load()
@@ -1739,17 +1948,76 @@ def aggregate(run_dir: Path) -> dict[str, Any]:
     manifest, queue = _read(run_dir / "manifest.json"), _read(run_dir / "queue.json")
     rows = queue["assignments"]
     completed = [row for row in rows if row["status"] == "COMPLETED"]
-    tokens = [row["total_tokens"] for row in completed]
+    measured = [row for row in rows if row.get("research_started") is True
+                and type(row.get("total_tokens")) is int]
+    tokens = [row["total_tokens"] for row in measured]
+    ordered_tokens = sorted(tokens)
+    p90 = ordered_tokens[max(0, (9 * len(ordered_tokens) + 9) // 10 - 1)] if ordered_tokens else None
     return {
         "state": manifest["state"], "completed": len(completed),
         "safe_unknown": sum(row["status"] == "SAFE_UNKNOWN" for row in rows),
+        "infra_stop": sum(row["status"] == "INFRA_STOP" for row in rows),
         "failed": sum(row["status"] == "FAILED" for row in rows),
         "pending": sum(row["status"] == "PENDING" for row in rows),
+        "research_samples": len(measured),
+        "not_measured": sum(row.get("research_started") is not True for row in rows),
         "total_tokens": sum(tokens), "mean_tokens": statistics.mean(tokens) if tokens else None,
         "median_tokens": statistics.median(tokens) if tokens else None,
+        "min_tokens": min(tokens) if tokens else None, "p90_tokens": p90,
         "max_tokens": max(tokens) if tokens else None,
+        "within_hard_gate": sum(value <= manifest["hard_token_gate"] for value in tokens),
+        "within_preferred_gate": sum(value <= manifest["preferred_token_gate"] for value in tokens),
         "ordered_results": [{key: row.get(key) for key in (
-            "position", "ticker", "status", "result_type", "total_tokens")} for row in rows],
+            "position", "ticker", "status", "result_type", "research_started", "model_started",
+            "total_tokens", "token_gate")} for row in rows],
+    }
+
+
+def audit_unstarted_run(run_dir: Path, output_path: Path) -> dict[str, Any]:
+    """Annotate an immutable prior run without rewriting its manifest or queue."""
+    manifest_path, queue_path = run_dir / "manifest.json", run_dir / "queue.json"
+    manifest_bytes, queue_bytes = manifest_path.read_bytes(), queue_path.read_bytes()
+    manifest, queue = json.loads(manifest_bytes), json.loads(queue_bytes)
+    rows = queue.get("assignments") or []
+    started = sum(row.get("research_started") is True for row in rows)
+    value = {
+        "schema_version": "company_news_run_evaluation_audit_v1",
+        "created_at": _now(), "run_dir": str(run_dir.resolve()),
+        "manifest_sha256": _sha_bytes(manifest_bytes), "queue_sha256": _sha_bytes(queue_bytes),
+        "original_manifest_state": manifest.get("state"), "company_count": len(rows),
+        "research_started_count": started,
+        "classification": ("INVALID_FOR_TOKEN_QUALITY_EVALUATION" if started == 0
+                           else "RESEARCH_SAMPLES_PRESENT"),
+        "reason": ("No company entered research/model execution; zero-token rows are not samples."
+                   if started == 0 else None),
+        "source_artifacts_mutated": False,
+    }
+    _atomic(output_path, value)
+    if manifest_path.read_bytes() != manifest_bytes or queue_path.read_bytes() != queue_bytes:
+        raise MultiRunnerError("run audit mutated source artifacts")
+    return value
+
+
+def dry_control_preflight(run_dir: Path) -> dict[str, Any]:
+    """Check first pending assignment wiring without HTTP, Web, model, or run mutation."""
+    manifest, queue = _read(run_dir / "manifest.json"), _read(run_dir / "queue.json")
+    registry_path, plan_path = load_frozen_official_config(manifest)
+    assignment = next((row for row in queue["assignments"] if row["status"] == "PENDING"), None)
+    if assignment is None:
+        raise MultiRunnerError("dry preflight requires a pending assignment")
+    provider = ConfiguredOfficialProvider(
+        registry_path=registry_path, plan_path=plan_path, allow_live_http=False)
+    value = provider.prepare(assignment, run_dir / "dry-preflight-must-not-be-created")
+    return {
+        "status": value.status, "ticker": assignment["ticker"],
+        "identity_verified": provider.registry.usable(
+            assignment["ticker"], assignment["company_name"]) is not None,
+        "root_authority_available": bool(value.model_context.get("company_identity", {}).get("source_url")),
+        "family_urls_frozen": bool(provider.family_urls.get(str(assignment["ticker"]))),
+        "runtime_discovery_reachable": value.runtime_discovery is not None,
+        "official_window_state": value.window.state,
+        "research_started": False, "model_started": False,
+        "http_requests": 0, "web_calls": 0, "model_calls": 0,
     }
 
 
@@ -1816,6 +2084,11 @@ def _parser() -> argparse.ArgumentParser:
     finalize_identity.add_argument("--search-from", default="2026-08-25")
     finalize_identity.add_argument("--search-to", default="2026-08-31")
     report = sub.add_parser("aggregate"); report.add_argument("--run-dir", type=Path, required=True)
+    audit_run = sub.add_parser("audit-run")
+    audit_run.add_argument("--run-dir", type=Path, required=True)
+    audit_run.add_argument("--output", type=Path, required=True)
+    dry = sub.add_parser("dry-preflight")
+    dry.add_argument("--run-dir", type=Path, required=True)
     run_next = sub.add_parser("run-next")
     run_next.add_argument("--root", type=Path, default=Path.cwd())
     run_next.add_argument("--run-dir", type=Path, required=True)
@@ -1879,6 +2152,10 @@ def main() -> int:
                             official_plan_path=args.official_plan)
     elif args.command == "aggregate":
         value = aggregate(args.run_dir)
+    elif args.command == "audit-run":
+        value = audit_unstarted_run(args.run_dir, args.output)
+    elif args.command == "dry-preflight":
+        value = dry_control_preflight(args.run_dir)
     elif args.command == "approve-resume":
         value = approve_resume(args.run_dir)
     else:

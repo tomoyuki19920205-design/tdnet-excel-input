@@ -15,7 +15,8 @@ fails before execution if its bytes, logical SHA, count, or order changed.
 
 Run states are `PREPARED`, `RUNNING`, `STOPPED`, `COMPLETED`, and `FAILED`.
 Company states are `PENDING`, `RUNNING`, `COMPLETED`, `FAILED`, and
-`SAFE_UNKNOWN`.  Queue, manifest, guard, telemetry, and audit documents use
+`SAFE_UNKNOWN`; `INFRA_STOP` identifies a company-independent control failure.
+Queue, manifest, guard, telemetry, and audit documents use
 atomic replacement.  A stopped run cannot acquire another company until the
 separate `approve-resume` command records explicit approval.  There is no
 automatic retry, repair, reconciliation, or resume.
@@ -34,32 +35,45 @@ ephemeral process.
 `ConfiguredOfficialProvider` runs before model execution.  It loads a stable
 `CompanyIdentityRegistry`, tries `RepositoryExistingTransport`, and uses
 `OfficialSourceResolver` with `windows-schannel-v1` only when `--allow-live-http`
-is explicitly present.  Schannel uses a company-local durable HTTP journal and
-raw-body spool.  Missing verified identity or incomplete required official
-families produces `SAFE_UNKNOWN` with zero model calls.
+is explicitly present.  The control preflight requires the verified identity
+root, allowed hosts, and deterministic discovery policy; it does not require
+future news, IR, announcement, document, or delegated-resource URLs to be
+frozen.  An empty optional `family_urls` map therefore produces
+`OFFICIAL_DISCOVERY_PENDING`, not `SAFE_UNKNOWN`.
+
+At company execution time the non-LLM resolver opens the exact verified root,
+retains literal same-domain links (including navigation/header links),
+classifies exact news/IR/announcement candidates, and resolves one exact URL
+per applicable family.  It never constructs a path or changes a scheme.
+News and announcements may be the same index; a distinct announcements family
+is non-applicable when the site exposes only a consolidated news index.  News
+and IR remain required when their exact links cannot be discovered.  Only a
+company-specific access or discovery gap after this stage may produce
+`SAFE_UNKNOWN`.  Missing identity, allowed-host authority, or discovery wiring
+is `CONTROL_CONTRACT_FAILURE`, stops the run, and leaves later companies
+pending.
 
 The official plan is frozen metadata, never search output:
 
 ```json
 {
-  "family_urls": {
-    "5237": {
-      "news": "https://official.example/news/",
-      "ir": "https://official.example/ir/",
-      "announcements": "https://official.example/notices/"
-    }
+  "companies": [{
+    "ticker": "5237",
+    "verified_root_url": "https://official.example/",
+    "allowed_hosts": ["official.example"],
+    "transport_preference": ["repository_existing", "windows-schannel-v1"]
+  }],
+  "resolver_policy": {
+    "target_discovery": "deterministic_links_from_verified_official_parent",
+    "delegated_resource_authority": "exact_embedded_url_only"
   },
-  "repository_artifacts": {
-    "https://official.example/news/": {
-      "path": "C:/saved/news.html",
-      "mime_type": "text/html",
-      "status": 200
-    }
-  }
+  "family_urls": {},
+  "repository_artifacts": {}
 }
 ```
 
-URLs must come from stable identity metadata or a verified official parent.
+`family_urls` and `repository_artifacts` are optional runtime-discovery results,
+not prepare-time requirements. URLs must come from stable identity metadata or a verified official parent.
 The integration exposes an exact delegated-resource path with redirect count
 zero.  It also classifies each discovered document through the shared TDNET and
 IR Nightly scope authority before body retrieval.  Covered documents use zero
@@ -70,14 +84,24 @@ evidence.
 
 ## Execution gates
 
+Every queue row records `research_started` and `model_started`. A zero-token row
+with `research_started=false` is `NOT_MEASURED`: it is excluded from token and
+quality samples and from the 500k/400k pass counts. A prior run whose entire
+cohort stopped before research may be annotated externally as
+`INVALID_FOR_TOKEN_QUALITY_EVALUATION`; its original manifest and queue remain
+immutable.
+
 After research, Python injects assignment identity and checked time, derives
 provenance/search/coverage/materiality state, applies IR Nightly and TDNET
 scope, validates canonical/Strategy v4/Strategy v5/payload contracts, and runs
 the independent exhaustive semantic audit.  A semantic failure, artifact
 collision, guard leak, missing exact telemetry, or more than 500,000 tokens
 stops acquisition before the next company.  More than 400,000 tokens is only a
-warning.  Correctly fail-closed official access produces `SAFE_UNKNOWN` and may
-continue.
+warning. Correctly fail-closed company-specific official access after runtime
+discovery produces `SAFE_UNKNOWN` and may continue. `COMPLETED` requires each
+company to have either passed research execution or reached such a valid
+company-specific terminal state. Control/infra failures cannot exhaust a queue
+into a misleading completed run.
 
 The runner writes only beneath its supplied run directory.  It contains no
 Production inbox, database, Supabase, Viewer, scheduler, or routing path.

@@ -293,6 +293,24 @@ def test_verified_registry_identity_passes_without_per_run_identity_source_fetch
                        official_window_coverage=complete)
 
 
+def test_pending_window_is_unchecked_and_not_complete():
+    pending = OfficialWindowCoverage("X001", "2026-08-25", "2026-08-31", "PENDING")
+    assert validate_window_coverage(pending).state == "PENDING"
+    with pytest.raises(OfficialSourceError, match="must be unresolved"):
+        validate_window_coverage(OfficialWindowCoverage(
+            "X001", "2026-08-25", "2026-08-31", "PENDING", ("news",)))
+
+
+def test_normalizer_retains_exact_navigation_links_for_runtime_discovery():
+    body = b"""<html><head><title>Company 1</title></head><body>
+        <header><a href='/news/'>News</a><a href='/ir/'>IR</a></header>
+        <main>Company 1 official</main></body></html>"""
+    normalized = official_source.normalize_official_body(
+        body, "text/html", "https://example.test/", "example.test")
+    assert normalized.relevant_links == (
+        "https://example.test/news/", "https://example.test/ir/")
+
+
 def test_http_502_is_blocked_and_classified():
     session = FakeSession([FakeResponse(502, headers={"Content-Type": "text/html"})])
     resolver = OfficialSourceResolver(DirectHttpTransport(session_factory=lambda: session,
