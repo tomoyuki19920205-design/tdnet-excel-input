@@ -13,6 +13,12 @@ from datetime import date
 from urllib.parse import urlsplit
 
 from tools import company_news_batch_benchmark as b
+from tools.company_news_official_source import (
+    CompanyIdentityRegistry,
+    OfficialWindowCoverage,
+    identity_satisfies_validator,
+    window_allows_complete_coverage,
+)
 
 VERSION = 'company_news_research_strategy_v4'
 RUN_NAME = 'batch04v4'
@@ -121,7 +127,8 @@ def scope_decision(item):
     return label
 
 
-def validate(value, assignment, payload):
+def validate(value, assignment, payload, *, identity_registry: CompanyIdentityRegistry | None = None,
+             official_window_coverage: OfficialWindowCoverage | dict | None = None):
     require(isinstance(value, dict), 'telemetry must be object')
     v = value
     require(v.get('schema_version') == SCHEMA and v.get('strategy_version') == VERSION
@@ -137,9 +144,16 @@ def validate(value, assignment, payload):
         source_map[source['url']] = source
     require(payload.get('sources_checked_count') == len(source_map), 'source count mismatch')
     identity = v.get('company_identity', {})
-    require(identity.get('verified_ticker') == assignment['ticker'] and identity.get('source_url') in source_map
-            and text(identity.get('evidence')), 'wrong or unverified company identity')
-    require(source_map[identity['source_url']]['source_type'] in {'company', 'company_news', 'company_ir', 'ir', 'company_official'}, 'identity needs official evidence')
+    stable_identity = identity_satisfies_validator(
+        identity_registry, security_code=assignment['ticker'],
+        company_name=assignment.get('company_name'), identity=identity)
+    require(identity.get('verified_ticker') == assignment['ticker'] and text(identity.get('evidence')),
+            'wrong or unverified company identity')
+    if not stable_identity:
+        require(identity.get('source_url') in source_map, 'wrong or unverified company identity')
+        require(source_map[identity['source_url']]['source_type'] in
+                {'company', 'company_news', 'company_ir', 'ir', 'company_official'},
+                'identity needs official evidence')
     validate_exposures(v.get('economic_exposures'))
     queries = v.get('queries')
     require(isinstance(queries, list) and queries, 'searches missing')
@@ -238,6 +252,9 @@ def validate(value, assignment, payload):
             == sorted((x['headline'], b._normalized_url(x['source_url'])) for x in payload['items']), 'output/provenance mismatch')
     partial = bool(gaps)
     require(v.get('coverage_status') == ('PARTIAL' if partial else 'COMPLETE'), 'coverage status mismatch')
+    if official_window_coverage is not None and not window_allows_complete_coverage(official_window_coverage):
+        require(v.get('coverage_status') != 'COMPLETE',
+                'blocked/partial official window cannot produce COMPLETE coverage')
     gate = not partial and 'official' in reviewed and len(reviewed & {'external_media', 'counterparty', 'government'}) >= 2
     require(v.get('no_news_gate_pass') is (gate and not payload['items']), 'no-news gate mismatch')
     if not partial and not payload['items']:

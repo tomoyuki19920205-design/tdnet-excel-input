@@ -9,6 +9,11 @@ import pytest
 from tools import company_news_batch_benchmark as b
 from tools import company_news_strategy_v5 as v
 from tools.company_news_canonical_schema import SchemaContractError
+from tools.company_news_official_source import (
+    CompanyIdentityRecord,
+    CompanyIdentityRegistry,
+    OfficialWindowCoverage,
+)
 
 
 def fixture():
@@ -55,6 +60,38 @@ def fixture():
         "total_research_elapsed_seconds": 8,
     }
     return assignment, telemetry, {"sources_checked_count": 1, "items": []}
+
+
+def stable_identity_registry():
+    return CompanyIdentityRegistry([CompanyIdentityRecord(
+        security_code="X001", company_name="Example Works", normalized_name="exampleworks",
+        official_domain="official.example", verified_official_url="https://official.example/company",
+        verification_source="saved official body", verification_method="ACTUAL_OFFICIAL_BODY",
+        verified_at="2026-09-06T00:00:00+00:00", evidence_hash="a" * 64,
+        status="VERIFIED", evidence_excerpt="Example Works official profile")])
+
+
+def test_v5_accepts_verified_stable_identity_without_per_run_identity_fetch():
+    assignment, telemetry, payload = fixture()
+    telemetry["company_identity"] = {"verified_ticker": "X001",
+                                     "source_url": "https://official.example/company",
+                                     "evidence": "stable registry identity"}
+    window = OfficialWindowCoverage("X001", assignment["search_from"], assignment["search_to"],
+                                    "COMPLETE", ("news", "ir", "announcements"), (), ("a" * 64,))
+    assert v.validate(telemetry, assignment, payload, identity_registry=stable_identity_registry(),
+                      official_window_coverage=window)
+
+
+def test_v5_rejects_complete_coverage_when_official_window_is_blocked():
+    assignment, telemetry, payload = fixture()
+    telemetry["company_identity"] = {"verified_ticker": "X001",
+                                     "source_url": "https://official.example/company",
+                                     "evidence": "stable registry identity"}
+    window = OfficialWindowCoverage("X001", assignment["search_from"], assignment["search_to"],
+                                    "BLOCKED", (), ("TIMEOUT",), ())
+    with pytest.raises(Exception, match="official window"):
+        v.validate(telemetry, assignment, payload, identity_registry=stable_identity_registry(),
+                   official_window_coverage=window)
 
 
 def canonical_response():

@@ -13,6 +13,7 @@ from pathlib import Path
 from lib import news_monitor
 from tools import company_news_batch_benchmark as b
 from tools import company_news_strategy_v4 as v4
+from tools.company_news_official_source import CompanyIdentityRegistry, OfficialWindowCoverage
 from tools.company_news_canonical_schema import (
     canonical_output_schema as build_canonical_output_schema,
     schema_sha256,
@@ -159,7 +160,8 @@ def project_v4_validation(value, assignment):
     return common, common_assignment
 
 
-def validate(value, assignment, payload):
+def validate(value, assignment, payload, *, identity_registry: CompanyIdentityRegistry | None = None,
+             official_window_coverage: OfficialWindowCoverage | dict | None = None):
     require(isinstance(value, dict), "telemetry must be object")
     require(value.get("schema_version") == SCHEMA and value.get("strategy_version") == VERSION
             and assignment.get("strategy_version") == VERSION, "version mismatch")
@@ -239,7 +241,8 @@ def validate(value, assignment, payload):
     # Reuse the frozen v4 scope/candidate safety checks without inheriting its
     # query planning.  The copied object is validation-only and never persisted.
     common, common_assignment = project_v4_validation(value, assignment)
-    v4.validate(common, common_assignment, payload)
+    v4.validate(common, common_assignment, payload, identity_registry=identity_registry,
+                official_window_coverage=official_window_coverage)
     validate_instance(value, canonical_output_schema()["properties"]["strategy_telemetry"], "$.strategy_telemetry")
     return value
 
