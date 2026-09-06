@@ -19,6 +19,7 @@ from lib.sector_weekly import (
     iso_seconds,
     now_jst,
     sector_name,
+    weekly_window,
 )
 
 ASSIGNMENT_SCHEMA = "sector_weekly_assignment_v1"
@@ -113,6 +114,45 @@ def get_assignment_by_key(conn: sqlite3.Connection, stable_key: str) -> dict[str
     return _row(conn.execute(
         "SELECT * FROM sector_weekly_work_assignments WHERE stable_key=?", (stable_key,),
     ).fetchone())
+
+
+def completion_target_window(conn: sqlite3.Connection, at: datetime) -> WeeklyWindow:
+    """Keep the latest started, unfinished reporting period fixed until 33/33 succeeds.
+
+    ``ensure_week_runs`` creates all 33 canonical run rows when a reporting period
+    starts. Quality-only revisions leave those canonical runs successful, so they
+    do not pull normal generation back to an older completed period.
+    """
+    candidate = weekly_window(_now(at))
+    run_table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='canonical_sector_report_runs'"
+    ).fetchone()
+    if run_table is None:
+        return candidate
+    candidate_started = conn.execute(
+        "SELECT 1 FROM canonical_sector_report_runs WHERE report_type=? "
+        "AND datetime(period_start)=datetime(?) AND datetime(period_end)=datetime(?) LIMIT 1",
+        (REPORT_TYPE, _utc_text(candidate.period_start), _utc_text(candidate.period_end)),
+    ).fetchone()
+    if candidate_started is not None:
+        return candidate
+    row = conn.execute(
+        "SELECT period_start,period_end FROM canonical_sector_report_runs "
+        "WHERE report_type=? AND datetime(period_end)<=datetime(?) "
+        "GROUP BY period_start,period_end "
+        "HAVING SUM(CASE WHEN status='success' THEN 0 ELSE 1 END)>0 "
+        "ORDER BY datetime(period_end) DESC,period_end DESC LIMIT 1",
+        (REPORT_TYPE, _utc_text(candidate.period_end)),
+    ).fetchone()
+    if row is None:
+        return candidate
+    period_start = _parse(str(row["period_start"]))
+    period_end = _parse(str(row["period_end"]))
+    return WeeklyWindow(
+        period_start=period_start,
+        period_end=period_end,
+        week_key=period_end.astimezone(JST).date().isoformat(),
+    )
 
 
 def enqueue_assignment(
@@ -255,9 +295,8 @@ def claim_next(
             "AND attempt_count<? AND available_at<=? AND submitted_payload_hash IS NULL "
             "AND (last_error_type IS NULL OR last_error_type NOT IN "
             "('sync_pending','sync_error','quality_revision_sync_pending','quality_revision_sync_error')) "
-            f"{period_filter} ORDER BY CASE "
-            "WHEN attempt_count>0 AND last_error_type='SectorBridgeError' THEN 0 "
-            "WHEN attempt_count>0 THEN 1 ELSE 2 END,available_at,sector_code LIMIT 1",
+            f"{period_filter} ORDER BY CASE WHEN attempt_count>0 THEN 0 ELSE 1 END,"
+            "available_at,sector_code LIMIT 1",
             (MAX_ATTEMPTS, _utc_text(timestamp), *period_values),
         ).fetchone()
         if selected is None:

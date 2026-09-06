@@ -21,7 +21,6 @@ from lib.sector_weekly import (
     now_jst,
     sector_name,
     validate_report,
-    weekly_window,
 )
 from lib.sector_weekly_work import (
     DEFAULT_LEASE_SECONDS,
@@ -29,6 +28,7 @@ from lib.sector_weekly_work import (
     SectorWorkError,
     abandon_assignment,
     claim_next,
+    completion_target_window,
     completion_status,
     fail_assignment,
     get_assignment,
@@ -43,7 +43,7 @@ from lib.sector_weekly_work import (
 from lib.pipeline.db import get_supabase_read_config, load_env, supabase_select
 from lib.sector_weekly_sqlite import MigrationRequiredError, validate_work_schema
 from tools.company_news_atomic import atomic_write_json, atomic_write_text, replace_with_retry
-from tools.sector_weekly_scheduler import assemble_payload, build_prompt, in_worker_window
+from tools.sector_weekly_scheduler import assemble_payload, build_prompt
 
 LEGACY_RESULT_SCHEMA = "sector_weekly_work_result_v1"
 RESULT_SCHEMA = "sector_weekly_work_result_v2"
@@ -169,11 +169,9 @@ def claim_one(
     window: WeeklyWindow | None = None,
 ) -> dict[str, Any]:
     timestamp = at or now_jst()
-    if not in_worker_window(timestamp):
-        return {"status": "no_work", "claim_owner": owner, "reason": "outside_worker_window"}
-    target_window = window or weekly_window(timestamp)
     conn = connect_sector_db(db_path)
     try:
+        target_window = window or completion_target_window(conn, timestamp)
         row = claim_next(conn, owner, now=timestamp, lease_seconds=lease_seconds, window=target_window)
     finally:
         conn.close()
@@ -707,11 +705,16 @@ def fail_one(
     needs_review: bool = False,
     at: datetime | None = None,
 ) -> dict[str, Any]:
+    automatic_review = (
+        error_type in {"SectorBridgeError", "SectorContractError", "SystemInvariantError"}
+        or error_type.endswith("ContractError")
+        or error_type.endswith("InvariantError")
+    )
     conn = connect_sector_db(db_path)
     try:
         row = fail_assignment(
             conn, assignment_id, owner, RuntimeError(message), now=at,
-            error_type=error_type, retryable=not needs_review,
+            error_type=error_type, retryable=not (needs_review or automatic_review),
         )
     finally:
         conn.close()
@@ -729,9 +732,9 @@ def recover(db_path: Path, *, at: datetime | None = None) -> dict[str, Any]:
 
 def status_one(db_path: Path, *, at: datetime | None = None) -> dict[str, Any]:
     timestamp = at or now_jst()
-    target_window = weekly_window(timestamp)
     conn = connect_sector_db(db_path)
     try:
+        target_window = completion_target_window(conn, timestamp)
         return completion_status(conn, target_window)
     finally:
         conn.close()
