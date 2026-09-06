@@ -1448,8 +1448,13 @@ def aggregate_worker_telemetry(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return value
 
 
-def codex_runner(root: Path, experiment: Path, assignment: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Run Web slices in independent processes and synthesize from cards only."""
+def run_company(root: Path, experiment: Path, assignment: dict[str, Any], *,
+                official_context: dict[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Canonical isolated company execution path used by single and multi runners.
+
+    ``official_context`` contains only deterministic, bounded output from the
+    non-LLM official resolver.  Raw response bodies are never accepted here.
+    """
     company_dir = experiment / "companies" / f"{assignment['position']:02d}-{assignment['ticker']}"
     company_dir.mkdir(parents=True, exist_ok=True)
     store = EvidenceStore()
@@ -1498,6 +1503,9 @@ def codex_runner(root: Path, experiment: Path, assignment: dict[str, Any]) -> tu
     response = restore_effective_precision(response)
     telemetry_rows.append(synthesis_telemetry)
     measured = aggregate_worker_telemetry(telemetry_rows)
+    if official_context:
+        measured["non_llm"] = copy.deepcopy(official_context.get("telemetry", {}))
+        measured["position"] = assignment.get("position")
     _atomic_json(company_dir / "measured-token-telemetry.json", measured)
     _atomic_json(company_dir / "evidence-state.json", {
         "cards": store.cards(), "raw_body_retained": False,
@@ -1506,6 +1514,10 @@ def codex_runner(root: Path, experiment: Path, assignment: dict[str, Any]) -> tu
         "search_record_registry": search_registry,
     })
     return response, measured
+
+
+# Historical public name retained for the Phase1 harness and callers.
+codex_runner = run_company
 
 
 def offline_cost_model(worker_counts: tuple[int, ...] = (2, 3, 4, 5)) -> list[dict[str, Any]]:
@@ -1544,7 +1556,8 @@ def _owned(experiment: Path, run_token: str) -> tuple[Path, dict[str, Any], dict
     return guard_path, queue, assignment
 
 
-def finalize(experiment: Path, run_token: str, response: dict[str, Any], telemetry: dict[str, Any]) -> dict[str, Any]:
+def finalize(experiment: Path, run_token: str, response: dict[str, Any], telemetry: dict[str, Any], *,
+             identity_registry=None, official_window_coverage=None) -> dict[str, Any]:
     """Validate, save and atomically transition the private queue; always release guard."""
     experiment = experiment.resolve()
     guard_path, queue, assignment = _owned(experiment, run_token)
@@ -1559,7 +1572,12 @@ def finalize(experiment: Path, run_token: str, response: dict[str, Any], telemet
             raise LightweightError("payload assignment mismatch")
         if payload.get("ticker") != assignment["ticker"]:
             raise LightweightError("payload ticker mismatch")
-        strategy_v5.validate(strategy, assignment, payload)
+        validation_context = {}
+        if identity_registry is not None:
+            validation_context["identity_registry"] = identity_registry
+        if official_window_coverage is not None:
+            validation_context["official_window_coverage"] = official_window_coverage
+        strategy_v5.validate(strategy, assignment, payload, **validation_context)
         if set(telemetry) < {
             "input_tokens", "cached_input_tokens", "uncached_input_tokens", "output_tokens", "reasoning_tokens",
             "model_call_count", "tool_call_count", "web_call_count", "research_elapsed_seconds",
