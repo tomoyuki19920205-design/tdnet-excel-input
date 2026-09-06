@@ -763,3 +763,14 @@ def test_legacy_phase1_fixture_and_production_isolation_remain():
     assert multi.DOCUMENT_PROVENANCE_STATES == (
         "DISCOVERED_IN_INDEX", "URL_DISCOVERED", "BODY_FETCH_ATTEMPTED",
         "BODY_VERIFIED", "ACCESS_FAILED")
+
+
+def test_cli_json_is_cp932_safe_and_keeps_native_artifact_encoding(tmp_path):
+    artifact = tmp_path / "report.json"
+    value = {"company": "神戸製鋼所", "marker": "⼈"}
+    artifact.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+    before = artifact.read_bytes()
+    rendered = multi.render_cli_json(value)
+    rendered.encode("cp932")
+    assert "\\u" in rendered
+    assert artifact.read_bytes() == before

@@ -131,6 +131,11 @@ def _canonical_sha(value: Any) -> str:
     return _sha_bytes(raw)
 
 
+def render_cli_json(value: Any) -> str:
+    """Render an ASCII JSON view that is safe on legacy Windows consoles."""
+    return json.dumps(value, ensure_ascii=True, indent=2)
+
+
 def _normalized_company_name(value: str) -> str:
     normalized = re.sub(r"[\s\u3000]", "", value or "")
     for designator in ("株式会社", "㈱", "(株)", "（株）"):
@@ -1685,7 +1690,9 @@ def main() -> int:
             root=args.root, run_dir=args.run_dir, official=provider,
             executor=execute_lightweight_company, auditor=exhaustive_auditor,
         ).run_next()
-    print(json.dumps(value, ensure_ascii=False, indent=2))
+    # CLI output must remain printable on Windows consoles such as CP932. Durable
+    # artifacts stay UTF-8 with native characters; stdout is an ASCII JSON view.
+    print(render_cli_json(value))
     if args.command == "bootstrap-inputs" and value.get("status") != "READY":
         return 2
     return 0

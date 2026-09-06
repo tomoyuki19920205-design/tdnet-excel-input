@@ -970,6 +970,7 @@ class NormalizedOfficialBody:
     date_candidates: tuple[str, ...]
     relevant_links: tuple[str, ...]
     bounded_excerpt: str
+    identity_markers: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -986,6 +987,91 @@ _DYNAMIC_PATH = re.compile(
     re.IGNORECASE,
 )
 _QUOTED_RESOURCE = re.compile(r"[\"']((?:https://|/)[^\"'<>\\\s]+)[\"']", re.IGNORECASE)
+
+
+def _html_identity_markers(soup: BeautifulSoup) -> tuple[str, ...]:
+    """Keep bounded, structured corporate markers before layout nodes are removed."""
+    markers: list[str] = []
+
+    def add(value: Any) -> None:
+        text = re.sub(r"\s+", " ", str(value or "")).strip()
+        if text and text not in markers:
+            markers.append(text[:1_000])
+
+    if soup.title:
+        add(soup.title.get_text(" ", strip=True))
+    accepted_meta = {"description", "application-name", "og:site_name", "og:title"}
+    for node in soup.find_all("meta"):
+        key = str(node.get("property") or node.get("name") or "").casefold()
+        if key in accepted_meta:
+            add(node.get("content"))
+    for node in soup.find_all("img", alt=True):
+        descriptor = " ".join(str(node.get(key) or "") for key in ("src", "class", "id")).casefold()
+        if "logo" in descriptor:
+            add(node.get("alt"))
+    for node in soup.find_all(attrs={"itemprop": re.compile(r"^(?:name|legalName|alternateName)$", re.I)}):
+        add(node.get("content") or node.get_text(" ", strip=True))
+
+    def json_names(value: Any, *, organization: bool = False) -> None:
+        if isinstance(value, list):
+            for item in value:
+                json_names(item, organization=organization)
+        elif isinstance(value, dict):
+            kind = value.get("@type")
+            kinds = kind if isinstance(kind, list) else [kind]
+            is_org = organization or any(str(item).casefold() in {"organization", "corporation"}
+                                         for item in kinds)
+            if is_org:
+                for key in ("name", "legalName", "alternateName"):
+                    add(value.get(key))
+            for item in value.values():
+                json_names(item, organization=is_org)
+
+    for node in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        try:
+            json_names(json.loads(node.string or node.get_text(" ", strip=False)))
+        except (TypeError, ValueError):
+            continue
+    for node in soup.find_all("footer"):
+        add(node.get_text(" ", strip=True))
+    return tuple(markers[:40])
+
+
+def derive_exact_https_identity_urls(saved_body: bytes, official_domain: str) -> tuple[str, ...]:
+    """Return only literal, same-domain HTTPS identity authorities from saved HTML."""
+    soup = BeautifulSoup(saved_body, "html.parser")
+    candidates: list[str] = []
+    for node in soup.find_all("link"):
+        if "canonical" in [str(item).casefold() for item in node.get("rel", [])]:
+            candidates.append(str(node.get("href") or ""))
+    for node in soup.find_all("meta"):
+        key = str(node.get("property") or node.get("name") or "").casefold()
+        if key == "og:url":
+            candidates.append(str(node.get("content") or ""))
+        if str(node.get("http-equiv") or "").casefold() == "refresh":
+            match = re.search(r"(?i)(?:^|;)\s*url\s*=\s*([^;]+)", str(node.get("content") or ""))
+            if match:
+                candidates.append(match.group(1).strip(" \t\"'"))
+    for node in soup.find_all("base", href=True):
+        candidates.append(str(node["href"]))
+    for node in soup.find_all(True):
+        for attribute in ("href", "src", "action"):
+            value = node.get(attribute)
+            if isinstance(value, str) and value.casefold().startswith("https://"):
+                candidates.append(value)
+    decoded = saved_body.decode("utf-8", "ignore")
+    candidates.extend(re.findall(r"(?i)https://[^\s\"'<>]+", decoded))
+    accepted = []
+    for value in candidates:
+        parsed = urlsplit(value.strip())
+        if parsed.scheme.casefold() != "https" or not parsed.hostname:
+            continue
+        if not _is_official_host(parsed.hostname, official_domain):
+            continue
+        canonical = _canonical_url(value.strip())
+        if canonical not in accepted:
+            accepted.append(canonical)
+    return tuple(accepted)
 
 
 def discover_official_dynamic_sources(body: bytes, final_url: str,
@@ -1037,6 +1123,7 @@ def normalize_official_body(body: bytes, mime_type: str, final_url: str,
         title, canonical, links = Path(urlsplit(final_url).path).name, final_url, []
     else:
         soup = BeautifulSoup(body, "html.parser")
+        identity_markers = _html_identity_markers(soup)
         for node in soup(["script", "style", "nav", "footer", "header", "noscript"]):
             node.decompose()
         title = soup.title.get_text(" ", strip=True) if soup.title else ""
@@ -1051,10 +1138,13 @@ def normalize_official_body(body: bytes, mime_type: str, final_url: str,
             if _is_official_host(host, official_domain):
                 links.append(_canonical_url(candidate))
         text = soup.get_text(" ", strip=True)
+    if mime_type == "application/pdf":
+        identity_markers = ()
     visible = re.sub(r"\s+", " ", text).strip()[:text_limit]
     dates = tuple(dict.fromkeys(_DATE.findall(visible)))
     return NormalizedOfficialBody(title[:500], _canonical_url(canonical), visible,
-                                  dates[:20], tuple(dict.fromkeys(links))[:25], visible[:excerpt_limit])
+                                  dates[:20], tuple(dict.fromkeys(links))[:25], visible[:excerpt_limit],
+                                  identity_markers)
 
 
 @dataclass(frozen=True)
@@ -1463,22 +1553,37 @@ class OfficialSourceResolver:
                                         payload.fetch_method, None)
 
 
-def build_identity_evidence_card(result: OfficialSourceResolution, identity: CompanyIdentityRecord) -> dict[str, Any]:
+def _authoritative_identity_support(normalized: NormalizedOfficialBody,
+                                    identity: CompanyIdentityRecord,
+                                    authoritative_names: tuple[str, ...]) -> str | None:
+    names = (identity.company_name, *authoritative_names)
+    bodies = (normalized.visible_text, *normalized.identity_markers)
+    for name in names:
+        needle = _normalized_name(name)
+        if needle and any(needle in _normalized_name(body) for body in bodies):
+            return name
+    return None
+
+
+def build_identity_evidence_card(result: OfficialSourceResolution, identity: CompanyIdentityRecord,
+                                 *, authoritative_names: tuple[str, ...] = ()) -> dict[str, Any]:
     if result.access_status != "VERIFIED" or result.normalized_content is None or not result.body_hash:
         raise OfficialSourceError("verified body required for identity evidence")
     normalized = result.normalized_content
-    if _normalized_name(identity.company_name) not in _normalized_name(normalized.visible_text):
+    support = _authoritative_identity_support(normalized, identity, authoritative_names)
+    if support is None:
         raise OfficialSourceError("official body does not identify the company")
     return {"url": normalized.canonical_url, "source_type": "company_official",
             "title": normalized.title, "body_excerpt": normalized.bounded_excerpt,
-            "identity_support": identity.company_name, "body_hash": result.body_hash,
+            "identity_support": support, "body_hash": result.body_hash,
             "access_status": "VERIFIED"}
 
 
 def promote_verified_identity(identity: CompanyIdentityRecord, result: OfficialSourceResolution,
-                              *, verification_source: str) -> CompanyIdentityRecord:
+                              *, verification_source: str,
+                              authoritative_names: tuple[str, ...] = ()) -> CompanyIdentityRecord:
     """Create a VERIFIED registry record only from accepted official body evidence."""
-    card = build_identity_evidence_card(result, identity)
+    card = build_identity_evidence_card(result, identity, authoritative_names=authoritative_names)
     method = ("REPOSITORY_VERIFIED_ARTIFACT" if result.fetch_method == "repository_existing"
               else "ACTUAL_OFFICIAL_BODY")
     record = CompanyIdentityRecord(

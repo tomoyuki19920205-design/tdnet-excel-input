@@ -186,6 +186,21 @@ HTTPS final URL. An HTTP 200 final body remains `UNVERIFIED_HTTP_ONLY`.
 Formal registry/plan artifacts and a `PREPARED` runner are created only when the
 whole frozen cohort is verified. The command never starts company research.
 
+Identity matching uses the canonical Japanese name and explicitly supplied
+authoritative names against bounded visible text and structured corporate
+markers captured before layout removal: title, selected metadata, organization
+JSON-LD, logo alt text, and footer text. Brand text alone is never promoted
+unless that brand is already present in authoritative input.
+
+An HTTP-only saved page may yield an HTTPS identity candidate only when the
+saved HTML contains a literal same-domain HTTPS URL in canonical, Open Graph,
+meta-refresh, base, or URL-bearing attributes. The resolver never creates the
+candidate by changing the URL scheme.
+
+CLI summaries are rendered as ASCII-escaped JSON so a successful durable write
+cannot become a process failure because of a legacy Windows console encoding.
+Artifact JSON remains UTF-8 with native characters.
+
 ```powershell
 ..\.venv\Scripts\python.exe tools\company_news_multi_runner.py bootstrap-known-successful `
   --cohort-file artifacts\token_efficiency_phase22\phase22-fixed-cohort.json `

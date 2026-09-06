@@ -41,6 +41,7 @@ from tools.company_news_official_source import (
     build_identity_evidence_card,
     company_identity_registry_schema,
     create_verified_tls_context,
+    derive_exact_https_identity_urls,
     discover_official_dynamic_sources,
     identity_invalidation_reasons,
     identity_preflight,
@@ -57,6 +58,55 @@ from tools.company_news_official_source import (
     windows_system_trust_context,
     writable_probe,
 )
+
+
+def test_identity_matches_canonical_japanese_name_in_structured_logo_marker():
+    body = """<html><head><title>KOBELCO 神戸製鋼</title></head>
+    <body><header><img class='site-logo' alt='株式会社神戸製鋼所'></header>
+    <main>株主・投資家情報</main></body></html>""".encode()
+    identity = CompanyIdentityRecord(
+        "5406", "神戸製鋼所", "神戸製鋼所", "kobelco.co.jp", None, None,
+        None, None, None, "UNVERIFIED", None)
+    result = OfficialSourceResolver(RepositoryExistingTransport({
+        "https://www.kobelco.co.jp/ir/": (body, "text/html", 200)})).resolve(
+            identity, "https://www.kobelco.co.jp/ir/")
+    promoted = promote_verified_identity(identity, result, verification_source="saved official body")
+    assert promoted.status == "VERIFIED"
+
+
+def test_identity_matches_existing_authoritative_english_name_generically():
+    body = b"<html><body><footer>Copyright KOBE STEEL, LTD.</footer></body></html>"
+    identity = CompanyIdentityRecord(
+        "5406", "神戸製鋼所", "神戸製鋼所", "kobelco.co.jp", None, None,
+        None, None, None, "UNVERIFIED", None)
+    result = OfficialSourceResolver(RepositoryExistingTransport({
+        "https://www.kobelco.co.jp/ir/": (body, "text/html", 200)})).resolve(
+            identity, "https://www.kobelco.co.jp/ir/")
+    card = build_identity_evidence_card(
+        result, identity, authoritative_names=("Kobe Steel, Ltd.",))
+    assert card["identity_support"] == "Kobe Steel, Ltd."
+
+
+def test_unknown_brand_only_does_not_verify_without_authoritative_name():
+    body = b"<html><head><title>KOBELCO Investor Relations</title></head></html>"
+    identity = CompanyIdentityRecord(
+        "5406", "神戸製鋼所", "神戸製鋼所", "kobelco.co.jp", None, None,
+        None, None, None, "UNVERIFIED", None)
+    result = OfficialSourceResolver(RepositoryExistingTransport({
+        "https://www.kobelco.co.jp/ir/": (body, "text/html", 200)})).resolve(
+            identity, "https://www.kobelco.co.jp/ir/")
+    with pytest.raises(OfficialSourceError, match="does not identify"):
+        build_identity_evidence_card(result, identity)
+
+
+def test_saved_literal_https_identity_url_is_derived_without_scheme_guessing():
+    body = b"<link rel='canonical' href='https://www.rise-i.co.jp/ir/faq.html'>"
+    assert derive_exact_https_identity_urls(body, "rise-i.co.jp") == (
+        "https://www.rise-i.co.jp/ir/faq.html",)
+    assert derive_exact_https_identity_urls(
+        b"<a href='http://www.rise-i.co.jp/ir/faq.html'>RISE</a>", "rise-i.co.jp") == ()
+    assert derive_exact_https_identity_urls(
+        b"<a href='https://external.example/'>external</a>", "rise-i.co.jp") == ()
 
 
 PUBLIC_DNS = lambda *args, **kwargs: [(2, 1, 6, "", ("93.184.216.34", 443))]
