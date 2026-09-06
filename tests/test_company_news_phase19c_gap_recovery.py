@@ -70,3 +70,9 @@ def test_command_uses_the_current_schema_path(tmp_path: Path):
     index = command.index("--output-schema")
     assert Path(command[index + 1]) == schema_path
     assert "phase19c-gap-recovery" not in command[index + 1]
+
+
+def test_phase19d_worker_limits_are_fixed():
+    assert phase19c.WORKER_HARD_LIMIT == 70_000
+    assert phase19c.WORKER_PREFERRED_LIMIT == 50_000
+    assert phase19c.RECOVERY_HARD_LIMIT == 140_000

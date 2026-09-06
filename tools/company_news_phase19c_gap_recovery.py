@@ -22,6 +22,8 @@ from tools.company_news_canonical_schema import validate_instance
 
 BASELINE_TOKENS = 221_404
 RECOVERY_HARD_LIMIT = 140_000
+WORKER_HARD_LIMIT = 70_000
+WORKER_PREFERRED_LIMIT = 50_000
 COMPANY_HARD_LIMIT = 500_000
 COMPANY_PREFERRED_LIMIT = 400_000
 
@@ -307,6 +309,9 @@ def run_worker(root: Path, worker_id: str) -> dict[str, Any]:
         events = lightweight._parse_events(completed.stdout)
         lightweight._atomic_jsonl(stage / "raw-events.sanitized.jsonl", events)
         telemetry = lightweight.token_telemetry(events, elapsed)
+        telemetry["web_call_count"] = sum(
+            row.get("tool_type") in {"web_search", "web_fetch"}
+            for row in telemetry.get("tool_events", []))
         telemetry.update({"worker_id": worker_id, "started_at": started_at, "completed_at": completed_at,
                           "validation_status": "PENDING"})
         _write(stage / "telemetry.json", telemetry)
@@ -326,6 +331,8 @@ def run_worker(root: Path, worker_id: str) -> dict[str, Any]:
                 raise RuntimeError("exact token usage unavailable")
             if telemetry.get("web_call_count", 0) > 2:
                 raise RuntimeError(f"Web call budget exceeded: {telemetry['web_call_count']}")
+            if telemetry["total_tokens"] > WORKER_HARD_LIMIT:
+                raise RuntimeError(f"worker token hard limit exceeded: {telemetry['total_tokens']}")
             if len(response["calls"]) != telemetry.get("web_call_count"):
                 raise RuntimeError("reported calls do not equal actual Web call telemetry")
             if prior + telemetry["total_tokens"] > RECOVERY_HARD_LIMIT:
