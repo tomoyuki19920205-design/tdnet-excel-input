@@ -5,6 +5,7 @@ explicit transport supplied to :class:`OfficialSourceResolver`.
 """
 from __future__ import annotations
 
+import base64
 import copy
 import hashlib
 import io
@@ -15,6 +16,7 @@ import re
 import shutil
 import socket
 import ssl
+import subprocess
 import tempfile
 import time
 import uuid
@@ -39,6 +41,9 @@ FAILURE_TYPES = {
 }
 TLS_BACKEND_CURRENT_CA = "current-ca-v1"
 TLS_BACKEND_WINDOWS_SYSTEM_TRUST = "windows-system-trust-v1"
+TLS_BACKEND_WINDOWS_ROOT_BUNDLE_SEMANTIC = "windows-root-bundle-v1"
+SCHANNEL_TRANSPORT_ID = "windows-schannel-v1"
+SCHANNEL_IMPLEMENTATION_FINGERPRINT = "dotnet10-sslstream-schannel-cryptoapi-v1"
 HTTP_JOURNAL_PHASES = {
     "PLANNED", "REQUEST_STARTED", "RESPONSE_RECEIVED", "NORMALIZED", "FAILED", "OUTCOME_LOST",
 }
@@ -261,6 +266,7 @@ class TransportPayload:
     fetch_method: str
     failure_reason: str | None = None
     safe_headers: Mapping[str, str] | None = None
+    transport_metadata: Mapping[str, Any] | None = None
 
 
 class OfficialFetchTransport(Protocol):
@@ -547,6 +553,157 @@ class DirectHttpTransport:
         return TransportPayload(requested_url, current, 0, None, None, self.name, "UNKNOWN")
 
 
+class WindowsSchannelTransport:
+    """GET-only native Windows Schannel transport behind a strict JSON helper boundary."""
+
+    name = SCHANNEL_TRANSPORT_ID
+    implementation_fingerprint = SCHANNEL_IMPLEMENTATION_FINGERPRINT
+
+    def __init__(self, *, journal: "HttpFetchJournal | None" = None,
+                 dns_resolver: Callable[..., Any] = socket.getaddrinfo,
+                 helper_path: Path | None = None,
+                 helper_runner: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None) -> None:
+        self.journal, self.dns_resolver = journal, dns_resolver
+        self.helper_path = Path(helper_path or Path(__file__).with_name("company_news_windows_schannel_fetch.ps1"))
+        self.helper_runner = helper_runner or self._run_helper
+        self._attempts = 0
+        self._request_for_target: dict[str, str] = {}
+
+    def _run_helper(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
+        executable = shutil.which("pwsh")
+        if not executable and os.name == "nt":
+            candidate = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "PowerShell" / "7" / "pwsh.exe"
+            executable = str(candidate) if candidate.exists() else None
+        if not executable or not self.helper_path.is_file():
+            raise OfficialSourceError("SCHANNEL_HELPER: Windows Schannel helper unavailable")
+        completed = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-File", str(self.helper_path)],
+            input=json.dumps(dict(request), ensure_ascii=False), capture_output=True, text=True,
+            encoding="utf-8", timeout=float(request["timeout_seconds"]) + 5, check=False,
+        )
+        if completed.returncode != 0:
+            detail = (completed.stderr or "Schannel helper failed")[:2000]
+            raise OfficialSourceError(f"SCHANNEL_HELPER: {detail}")
+        try:
+            value = json.loads(completed.stdout)
+        except json.JSONDecodeError as exc:
+            raise OfficialSourceError("SCHANNEL_HELPER: invalid structured response") from exc
+        if value.get("schema_version") != "company_news_schannel_helper_v1":
+            raise OfficialSourceError("SCHANNEL_HELPER: invalid response schema")
+        if (value.get("transport_id") != self.name
+                or value.get("implementation_fingerprint") != self.implementation_fingerprint):
+            raise OfficialSourceError("SCHANNEL_HELPER: transport provenance mismatch")
+        return value
+
+    def _start_request(self, target_url: str) -> tuple[str | None, float]:
+        started = time.monotonic()
+        if self.journal is None:
+            return None, started
+        self._attempts += 1
+        request_id = f"request-{self._attempts:04d}-{uuid.uuid4().hex[:12]}"
+        self.journal.start(request_id=request_id, transport=self.name,
+                           requested_url=target_url, attempt_number=self._attempts)
+        self._request_for_target[_canonical_url(target_url)] = request_id
+        return request_id, started
+
+    def _finish_request(self, request_id: str | None, payload: TransportPayload,
+                        started: float) -> TransportPayload:
+        if self.journal is not None and request_id is not None:
+            elapsed = float((payload.transport_metadata or {}).get(
+                "elapsed_seconds", time.monotonic() - started))
+            self.journal.response_received(request_id, payload, elapsed=elapsed)
+            if payload.failure_reason:
+                self.journal.failed(request_id, category=payload.failure_reason)
+        return payload
+
+    def record_normalized(self, requested_url: str, *, normalized_chars: int, body_hash: str) -> None:
+        if self.journal is not None:
+            self.journal.normalized(self._request_for_target[_canonical_url(requested_url)],
+                                    normalized_chars=normalized_chars, body_hash=body_hash)
+
+    def record_normalization_failure(self, requested_url: str, exc: Exception) -> None:
+        if self.journal is not None:
+            self.journal.failed(self._request_for_target[_canonical_url(requested_url)],
+                                category="NORMALIZATION_FAILED", detail=str(exc))
+
+    def fetch(self, requested_url: str, official_domain: str, policy: FetchPolicy) -> TransportPayload:
+        if urlsplit(requested_url).scheme.lower() != "https":
+            raise OfficialSourceError("ACCESS_DENIED: Schannel transport requires HTTPS")
+        current = validate_fetch_url(requested_url, official_domain, self.dns_resolver)
+        for redirects in range(policy.max_redirects + 1):
+            request_id, started = self._start_request(current)
+            try:
+                response = dict(self.helper_runner({
+                    "url": current,
+                    "allowed_host": _domain(official_domain),
+                    "timeout_seconds": policy.timeout_seconds,
+                    "max_response_bytes": policy.max_response_bytes,
+                }))
+            except subprocess.TimeoutExpired as exc:
+                if self.journal is not None and request_id is not None:
+                    self.journal.failed(request_id, category="TIMEOUT", detail=str(exc))
+                return TransportPayload(requested_url, current, 0, None, None, self.name, "TIMEOUT")
+            except Exception as exc:
+                if self.journal is not None and request_id is not None:
+                    self.journal.failed(request_id, category="SCHANNEL_HELPER", detail=str(exc))
+                return TransportPayload(requested_url, current, 0, None, None, self.name, "UNKNOWN")
+            metadata = {
+                "tls_backend": "windows-schannel-cryptoapi",
+                "implementation_fingerprint": response.get("implementation_fingerprint"),
+                "certificate_summary": response.get("certificate_summary"),
+                "elapsed_seconds": response.get("elapsed_seconds"),
+                "error_detail": str(response.get("error_detail") or "")[:2000] or None,
+            }
+            if response.get("result") != "RESPONSE":
+                failure = str(response.get("failure_class") or "UNKNOWN")
+                payload = TransportPayload(
+                    requested_url, current, int(response.get("status_code") or 0),
+                    None, None, self.name, failure, response.get("safe_headers") or {}, metadata)
+                return self._finish_request(request_id, payload, started)
+            decode_failure = None
+            try:
+                body = base64.b64decode(str(response.get("body_base64") or ""), validate=True)
+            except Exception:
+                body, decode_failure = b"", "UNKNOWN"
+            if int(response.get("response_bytes") or 0) != len(body):
+                decode_failure = "UNKNOWN"
+            if _canonical_url(str(response.get("final_url") or "")) != _canonical_url(current):
+                decode_failure = "REDIRECT_BLOCKED"
+            status = int(response.get("status_code") or 0)
+            mime = response.get("mime_type")
+            safe_headers = response.get("safe_headers") or {}
+            if status in range(300, 400):
+                location = safe_headers.get("location")
+                if not location or redirects == policy.max_redirects:
+                    return self._finish_request(request_id, TransportPayload(
+                        requested_url, current, status, mime, None, self.name,
+                        "REDIRECT_BLOCKED", safe_headers, metadata), started)
+                destination = urljoin(current, location)
+                if (urlsplit(destination).scheme.lower() != "https"
+                        or not _is_official_host(urlsplit(destination).hostname or "", official_domain)):
+                    return self._finish_request(request_id, TransportPayload(
+                        requested_url, destination, status, mime, None, self.name,
+                        "REDIRECT_BLOCKED", safe_headers, metadata), started)
+                self._finish_request(request_id, TransportPayload(
+                    current, current, status, mime, None, self.name, None, safe_headers, metadata), started)
+                current = validate_fetch_url(destination, official_domain, self.dns_resolver)
+                continue
+            failure = decode_failure or response.get("failure_class")
+            if not failure and status >= 500:
+                failure = "HTTP_5XX"
+            elif not failure and status >= 400:
+                failure = "HTTP_4XX"
+            elif not failure and len(body) > policy.max_response_bytes:
+                failure = "SIZE_LIMIT"
+            elif not failure and mime not in policy.allowed_mime_types:
+                failure = "MIME_REJECTED"
+            payload = TransportPayload(
+                requested_url, current, status, mime, None if failure else body,
+                self.name, failure, safe_headers, metadata)
+            return self._finish_request(request_id, payload, started)
+        return TransportPayload(requested_url, current, 0, None, None, self.name, "UNKNOWN")
+
+
 def tls_backend_change_allows_attempt(old: DirectHttpTransport,
                                       new: DirectHttpTransport) -> bool:
     """A new retry identity requires an actual supported backend transition."""
@@ -622,6 +779,14 @@ class IdentityFailureRecord:
     retry_allowed: bool
 
 
+def _failure_transport_key(transport: str) -> str:
+    aliases = {
+        "direct_http/windows-system-trust-v1": "direct_http/openssl-windows-root-bundle-v1",
+        "direct_http/windows-root-bundle-v1": "direct_http/openssl-windows-root-bundle-v1",
+    }
+    return aliases.get(transport, transport)
+
+
 class IdentityFailureCache:
     def __init__(self, max_attempts_per_failure: int = 1) -> None:
         if max_attempts_per_failure < 1:
@@ -633,7 +798,8 @@ class IdentityFailureCache:
                failure_type: str, attempted_at: str) -> IdentityFailureRecord:
         if failure_type not in FAILURE_TYPES:
             failure_type = "UNKNOWN"
-        key = (security_code, _domain(domain), _canonical_url(url), transport, failure_type)
+        key = (security_code, _domain(domain), _canonical_url(url),
+               _failure_transport_key(transport), failure_type)
         prior = self._records.get(key)
         count = 1 if prior is None else prior.retry_count + 1
         value = IdentityFailureRecord(security_code, key[1], key[2], transport, failure_type,
@@ -642,7 +808,8 @@ class IdentityFailureCache:
         return value
 
     def retry_allowed(self, *, security_code: str, domain: str, url: str, transport: str) -> bool:
-        prefix = (security_code, _domain(domain), _canonical_url(url), transport)
+        prefix = (security_code, _domain(domain), _canonical_url(url),
+                  _failure_transport_key(transport))
         matches = [value for key, value in self._records.items() if key[:4] == prefix]
         return not matches or all(value.retry_allowed for value in matches)
 
@@ -815,6 +982,7 @@ class HttpFetchJournal:
             access_status=access_status or (
                 "BLOCKED" if payload.failure_reason or payload.body is None else "RECEIVED"),
             exception_category=payload.failure_reason, elapsed_seconds=elapsed,
+            transport_metadata=dict(payload.transport_metadata or {}),
         )
 
     def normalized(self, request_id: str, *, normalized_chars: int, body_hash: str) -> None:

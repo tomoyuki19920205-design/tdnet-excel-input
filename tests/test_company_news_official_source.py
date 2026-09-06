@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import ssl
+import base64
+import subprocess
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -26,8 +28,11 @@ from tools.company_news_official_source import (
     RepositoryExistingTransport,
     TLS_BACKEND_CURRENT_CA,
     TLS_BACKEND_WINDOWS_SYSTEM_TRUST,
+    SCHANNEL_IMPLEMENTATION_FINGERPRINT,
+    SCHANNEL_TRANSPORT_ID,
     TransportPayload,
     TlsTrustInitializationError,
+    WindowsSchannelTransport,
     apply_registry_identity,
     atomic_write_json,
     build_identity_evidence_card,
@@ -723,3 +728,144 @@ def test_system_trust_transport_mounts_verified_adapter_and_keeps_journal(tmp_pa
     assert session.mounts[0][0] == "https://"
     assert journal.request_count() == 1
     assert journal._disk_records()[0][0]["history"][-1]["phase"] == "NORMALIZED"
+
+
+def schannel_response(*, body=b"<html><body>Example Works official profile</body></html>",
+                      status=200, mime="text/html", result="RESPONSE",
+                      failure=None, safe_headers=None):
+    return {
+        "schema_version": "company_news_schannel_helper_v1",
+        "result": result,
+        "transport_id": SCHANNEL_TRANSPORT_ID,
+        "implementation_fingerprint": SCHANNEL_IMPLEMENTATION_FINGERPRINT,
+        "requested_url": "https://official.example/",
+        "final_url": "https://official.example/",
+        "status_code": status,
+        "mime_type": mime,
+        "response_bytes": len(body),
+        "body_base64": base64.b64encode(body).decode(),
+        "safe_headers": safe_headers or {},
+        "certificate_summary": {
+            "ssl_policy_errors": ["None"], "hostname_validation": "PASS",
+            "leaf": {"subject": "CN=official.example", "issuer": "CN=Fixture CA"},
+            "chain_elements": [], "chain_status": [],
+        },
+        "elapsed_seconds": 0.01,
+        "failure_class": failure,
+    }
+
+
+def test_schannel_transport_has_native_identity_and_fingerprint():
+    transport = WindowsSchannelTransport(helper_runner=lambda request: schannel_response())
+    assert transport.name == "windows-schannel-v1"
+    assert transport.implementation_fingerprint == "dotnet10-sslstream-schannel-cryptoapi-v1"
+
+
+def test_schannel_valid_chain_fixture_normalizes_and_journals(tmp_path):
+    calls = []
+    journal = journal_for(tmp_path)
+    transport = WindowsSchannelTransport(
+        journal=journal, dns_resolver=PUBLIC_DNS,
+        helper_runner=lambda request: calls.append(request) or schannel_response())
+    result = OfficialSourceResolver(transport).resolve(
+        unverified_example(), "https://official.example/", FetchPolicy(max_redirects=0))
+    assert result.access_status == "VERIFIED"
+    assert result.fetch_method == SCHANNEL_TRANSPORT_ID
+    assert len(calls) == 1 and calls[0]["allowed_host"] == "official.example"
+    record = journal._disk_records()[0][0]
+    assert record["history"][-1]["phase"] == "NORMALIZED"
+    received = next(row for row in record["history"] if row["phase"] == "RESPONSE_RECEIVED")
+    assert received["transport_metadata"]["implementation_fingerprint"] == SCHANNEL_IMPLEMENTATION_FINGERPRINT
+
+
+@pytest.mark.parametrize("failure,hostname", [
+    ("TLS_CA_CHAIN", "PASS"),
+    ("TLS_HOSTNAME", "FAIL"),
+])
+def test_schannel_rejects_untrusted_chain_and_hostname_mismatch(failure, hostname):
+    response = schannel_response(result="FAILURE", failure=failure, body=b"", status=0, mime=None)
+    response["certificate_summary"]["hostname_validation"] = hostname
+    result = OfficialSourceResolver(WindowsSchannelTransport(
+        dns_resolver=PUBLIC_DNS, helper_runner=lambda request: response)).resolve(
+        unverified_example(), "https://official.example/")
+    assert result.access_status == "BLOCKED" and result.failure_reason == failure
+
+
+def test_schannel_rejects_http_and_private_destinations_before_helper():
+    calls = []
+    transport = WindowsSchannelTransport(
+        dns_resolver=lambda *args, **kwargs: [(2, 1, 6, "", ("127.0.0.1", 443))],
+        helper_runner=lambda request: calls.append(request) or schannel_response())
+    with pytest.raises(OfficialSourceError, match="requires HTTPS"):
+        transport.fetch("http://official.example/", "official.example", FetchPolicy())
+    with pytest.raises(OfficialSourceError, match="non-public"):
+        transport.fetch("https://official.example/", "official.example", FetchPolicy())
+    assert calls == []
+
+
+def test_schannel_cross_domain_redirect_is_blocked_without_second_request():
+    calls = []
+    response = schannel_response(status=302, body=b"", mime="text/html",
+                                 safe_headers={"location": "https://outside.example/"})
+    payload = WindowsSchannelTransport(
+        dns_resolver=PUBLIC_DNS,
+        helper_runner=lambda request: calls.append(request) or response).fetch(
+            "https://official.example/", "official.example", FetchPolicy(max_redirects=2))
+    assert payload.failure_reason == "REDIRECT_BLOCKED" and len(calls) == 1
+
+
+@pytest.mark.parametrize("response,expected", [
+    (schannel_response(body=b"123456"), "SIZE_LIMIT"),
+    (schannel_response(body=b"ok", mime="application/octet-stream"), "MIME_REJECTED"),
+])
+def test_schannel_enforces_size_and_mime(response, expected):
+    payload = WindowsSchannelTransport(
+        dns_resolver=PUBLIC_DNS, helper_runner=lambda request: response).fetch(
+            "https://official.example/", "official.example", FetchPolicy(max_response_bytes=5))
+    assert payload.failure_reason == expected and payload.body is None
+
+
+def test_schannel_timeout_is_classified_and_durably_failed(tmp_path):
+    def timeout(_request):
+        raise subprocess.TimeoutExpired("pwsh", 1)
+
+    journal = journal_for(tmp_path)
+    result = OfficialSourceResolver(WindowsSchannelTransport(
+        journal=journal, dns_resolver=PUBLIC_DNS, helper_runner=timeout)).resolve(
+            unverified_example(), "https://official.example/")
+    assert result.failure_reason == "TIMEOUT"
+    assert journal._disk_records()[0][0]["history"][-1]["phase"] == "FAILED"
+
+
+def test_failure_cache_alias_cannot_bypass_but_schannel_is_distinct():
+    cache = IdentityFailureCache()
+    values = dict(security_code="6444", domain="sanden.co.jp",
+                  url="https://www.sanden.co.jp/", failure_type="TLS_CA_CHAIN",
+                  attempted_at="2026-09-06T00:00:00+00:00")
+    cache.record(transport="direct_http/windows-system-trust-v1", **values)
+    assert not cache.retry_allowed(transport="direct_http/windows-root-bundle-v1",
+                                   security_code="6444", domain="sanden.co.jp",
+                                   url="https://www.sanden.co.jp/")
+    assert cache.retry_allowed(transport=SCHANNEL_TRANSPORT_ID,
+                               security_code="6444", domain="sanden.co.jp",
+                               url="https://www.sanden.co.jp/")
+
+
+def test_schannel_model_context_is_bounded_and_contains_no_raw_body(tmp_path):
+    body = b"<html><body>Example Works " + (b"x" * 5000) + b" RAW_TAIL_SECRET</body></html>"
+    result = OfficialSourceResolver(WindowsSchannelTransport(
+        dns_resolver=PUBLIC_DNS,
+        helper_runner=lambda request: schannel_response(body=body))).resolve(
+            unverified_example(), "https://official.example/")
+    context = model_context_from_resolution(result, unverified_example())
+    encoded = json.dumps(context)
+    assert "RAW_TAIL_SECRET" not in encoded
+    assert len(context["company_identity_evidence"]["body_excerpt"]) <= 2000
+
+
+def test_schannel_helper_source_accepts_only_no_certificate_errors():
+    source = official_source.Path(official_source.__file__).with_name(
+        "company_news_windows_schannel_fetch.ps1").read_text(encoding="utf-8")
+    assert "return $errors -eq [Net.Security.SslPolicyErrors]::None" in source
+    assert "DangerousAcceptAnyServerCertificateValidator" not in source
+    assert "DisableCertificateDownloads = $true" in source
