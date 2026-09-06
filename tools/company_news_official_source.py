@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import socket
+import ssl
 import tempfile
 import time
 import uuid
@@ -25,14 +26,19 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import requests
 from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter
 
 
 IDENTITY_STATUSES = {"VERIFIED", "UNVERIFIED", "STALE"}
 WINDOW_STATES = {"COMPLETE", "PARTIAL", "BLOCKED", "NOT_APPLICABLE"}
 FAILURE_TYPES = {
-    "HTTP_4XX", "HTTP_5XX", "TIMEOUT", "DNS", "TLS", "REDIRECT_BLOCKED",
+    "HTTP_4XX", "HTTP_5XX", "TIMEOUT", "DNS", "TLS", "TLS_CA_CHAIN", "TLS_HOSTNAME",
+    "TLS_EXPIRED", "TLS_NOT_YET_VALID", "TLS_PROTOCOL", "TLS_HANDSHAKE", "TLS_UNKNOWN",
+    "TLS_TRUST_INIT", "REDIRECT_BLOCKED",
     "MIME_REJECTED", "SIZE_LIMIT", "ACCESS_DENIED", "OUTCOME_LOST", "UNKNOWN",
 }
+TLS_BACKEND_CURRENT_CA = "current-ca-v1"
+TLS_BACKEND_WINDOWS_SYSTEM_TRUST = "windows-system-trust-v1"
 HTTP_JOURNAL_PHASES = {
     "PLANNED", "REQUEST_STARTED", "RESPONSE_RECEIVED", "NORMALIZED", "FAILED", "OUTCOME_LOST",
 }
@@ -312,17 +318,120 @@ class RepositoryExistingTransport:
         return TransportPayload(key, key, status, mime_type, body, self.name)
 
 
+class TlsTrustInitializationError(OfficialSourceError):
+    """Raised before any request when a verified trust backend cannot initialize."""
+
+
+def create_verified_tls_context(*, cadata: str | None = None,
+                                cafile: str | None = None) -> ssl.SSLContext:
+    """Create a client context that always enforces CA and hostname verification."""
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.verify_mode = ssl.CERT_REQUIRED
+    context.check_hostname = True
+    if cadata is not None or cafile is not None:
+        context.load_verify_locations(cafile=cafile, cadata=cadata)
+    return context
+
+
+def windows_system_trust_context() -> ssl.SSLContext:
+    """Load the current Windows ROOT store into an OpenSSL verified client context."""
+    if not hasattr(ssl, "enum_certificates"):
+        raise TlsTrustInitializationError("TLS_TRUST_INIT: Windows certificate store API unavailable")
+    try:
+        certificates = [ssl.DER_cert_to_PEM_cert(body)
+                        for body, encoding, _trust in ssl.enum_certificates("ROOT")
+                        if encoding == "x509_asn"]
+        if not certificates:
+            raise TlsTrustInitializationError("TLS_TRUST_INIT: Windows ROOT store has no X.509 certificates")
+        context = create_verified_tls_context(cadata="\n".join(certificates))
+    except TlsTrustInitializationError:
+        raise
+    except Exception as exc:
+        raise TlsTrustInitializationError(
+            f"TLS_TRUST_INIT: Windows ROOT initialization failed: {type(exc).__name__}") from exc
+    return context
+
+
+def validate_verified_tls_context(context: ssl.SSLContext) -> ssl.SSLContext:
+    if context.verify_mode != ssl.CERT_REQUIRED or not context.check_hostname:
+        raise TlsTrustInitializationError("TLS_TRUST_INIT: certificate and hostname verification are required")
+    return context
+
+
+def classify_tls_failure(exc: BaseException) -> str:
+    message = str(exc).casefold()
+    if any(value in message for value in ("unable to get local issuer", "self-signed certificate",
+                                           "unknown ca", "certificate verify failed")):
+        return "TLS_CA_CHAIN"
+    if "hostname" in message or "doesn't match" in message or "does not match" in message:
+        return "TLS_HOSTNAME"
+    if "expired" in message:
+        return "TLS_EXPIRED"
+    if "not yet valid" in message:
+        return "TLS_NOT_YET_VALID"
+    if any(value in message for value in ("wrong version", "unsupported protocol", "protocol version")):
+        return "TLS_PROTOCOL"
+    if "handshake" in message:
+        return "TLS_HANDSHAKE"
+    return "TLS_UNKNOWN"
+
+
+class VerifiedSslContextAdapter(HTTPAdapter):
+    """Requests adapter whose pool uses a prevalidated SSLContext."""
+
+    def __init__(self, context: ssl.SSLContext, **kwargs: Any) -> None:
+        self._verified_context = validate_verified_tls_context(context)
+        super().__init__(**kwargs)
+
+    def init_poolmanager(self, connections: int, maxsize: int, block: bool = False,
+                         **pool_kwargs: Any) -> None:
+        pool_kwargs["ssl_context"] = self._verified_context
+        super().init_poolmanager(connections, maxsize, block=block, **pool_kwargs)
+
+    def proxy_manager_for(self, proxy: str, **proxy_kwargs: Any) -> Any:
+        proxy_kwargs["ssl_context"] = self._verified_context
+        return super().proxy_manager_for(proxy, **proxy_kwargs)
+
+
 class DirectHttpTransport:
     """GET-only requests adapter with DNS, redirect, MIME, and size enforcement."""
-    name = "direct_http"
 
     def __init__(self, *, session_factory: Callable[[], Any] = requests.Session,
                  dns_resolver: Callable[..., Any] = socket.getaddrinfo,
-                 journal: "HttpFetchJournal | None" = None) -> None:
+                 journal: "HttpFetchJournal | None" = None,
+                 tls_backend: str = TLS_BACKEND_CURRENT_CA,
+                 system_context_factory: Callable[[], ssl.SSLContext] = windows_system_trust_context) -> None:
+        if tls_backend not in {TLS_BACKEND_CURRENT_CA, TLS_BACKEND_WINDOWS_SYSTEM_TRUST}:
+            raise TlsTrustInitializationError("TLS_TRUST_INIT: unsupported TLS backend")
         self.session_factory, self.dns_resolver = session_factory, dns_resolver
         self.journal = journal
+        self.tls_backend = tls_backend
+        self._system_context = None
+        if tls_backend == TLS_BACKEND_WINDOWS_SYSTEM_TRUST:
+            self._system_context = validate_verified_tls_context(system_context_factory())
         self._attempts = 0
         self._request_for_target: dict[str, str] = {}
+
+    @property
+    def name(self) -> str:
+        if self.tls_backend == TLS_BACKEND_CURRENT_CA:
+            return "direct_http"
+        return "direct_http/windows-system-trust-v1"
+
+    def _session(self) -> Any:
+        session = self.session_factory()
+        if getattr(session, "verify", True) is False:
+            if hasattr(session, "close"):
+                session.close()
+            raise TlsTrustInitializationError("TLS_TRUST_INIT: verify=False session rejected")
+        if self._system_context is not None:
+            if not hasattr(session, "mount"):
+                if hasattr(session, "close"):
+                    session.close()
+                raise TlsTrustInitializationError("TLS_TRUST_INIT: session cannot mount verified context")
+            session.mount("https://", VerifiedSslContextAdapter(self._system_context))
+        return session
 
     def _start_request(self, target_url: str, wire_url: str) -> tuple[str | None, float]:
         started = time.monotonic()
@@ -361,7 +470,7 @@ class DirectHttpTransport:
 
     def fetch(self, requested_url: str, official_domain: str, policy: FetchPolicy) -> TransportPayload:
         current = validate_fetch_url(requested_url, official_domain, self.dns_resolver)
-        session = self.session_factory()
+        session = self._session()
         if hasattr(session, "trust_env"):
             session.trust_env = False
         if hasattr(session, "cookies"):
@@ -377,8 +486,9 @@ class DirectHttpTransport:
                     self._fail_request(request_id, exc, "TIMEOUT")
                     return TransportPayload(requested_url, current, 0, None, None, self.name, "TIMEOUT")
                 except requests.exceptions.SSLError as exc:
-                    self._fail_request(request_id, exc, "TLS")
-                    return TransportPayload(requested_url, current, 0, None, None, self.name, "TLS")
+                    failure = classify_tls_failure(exc)
+                    self._fail_request(request_id, exc, failure)
+                    return TransportPayload(requested_url, current, 0, None, None, self.name, failure)
                 except requests.exceptions.ConnectionError as exc:
                     self._fail_request(request_id, exc, "DNS")
                     return TransportPayload(requested_url, current, 0, None, None, self.name, "DNS")
@@ -435,6 +545,15 @@ class DirectHttpTransport:
             if hasattr(session, "close"):
                 session.close()
         return TransportPayload(requested_url, current, 0, None, None, self.name, "UNKNOWN")
+
+
+def tls_backend_change_allows_attempt(old: DirectHttpTransport,
+                                      new: DirectHttpTransport) -> bool:
+    """A new retry identity requires an actual supported backend transition."""
+    return (old.tls_backend != new.tls_backend
+            and {old.tls_backend, new.tls_backend}
+            <= {TLS_BACKEND_CURRENT_CA, TLS_BACKEND_WINDOWS_SYSTEM_TRUST}
+            and old.name != new.name)
 
 
 @dataclass(frozen=True)

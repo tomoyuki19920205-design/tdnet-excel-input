@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import ssl
+from datetime import datetime, timedelta, timezone
 
 import pytest
 import requests
@@ -22,19 +24,26 @@ from tools.company_news_official_source import (
     OfficialSourceResolver,
     OfficialWindowCoverage,
     RepositoryExistingTransport,
+    TLS_BACKEND_CURRENT_CA,
+    TLS_BACKEND_WINDOWS_SYSTEM_TRUST,
     TransportPayload,
+    TlsTrustInitializationError,
     apply_registry_identity,
     atomic_write_json,
     build_identity_evidence_card,
     company_identity_registry_schema,
+    create_verified_tls_context,
     identity_invalidation_reasons,
     identity_preflight,
     model_context_from_resolution,
     promote_verified_identity,
     project_offline_state,
+    tls_backend_change_allows_attempt,
     validate_fetch_url,
     validate_identity_record,
     validate_window_coverage,
+    validate_verified_tls_context,
+    windows_system_trust_context,
     writable_probe,
 )
 
@@ -69,8 +78,13 @@ class FakeSession:
     def __init__(self, responses):
         self.responses = list(responses)
         self.calls = []
+        self.mounts = []
         self.trust_env = True
+        self.verify = True
         self.cookies = type("Cookies", (), {"clear": lambda self: None})()
+
+    def mount(self, prefix, adapter):
+        self.mounts.append((prefix, adapter))
 
     def get(self, url, **kwargs):
         self.calls.append((url, kwargs))
@@ -516,3 +530,196 @@ def test_phase19g_6444_lost_attempt_projection_and_retry_suppression(tmp_path):
     assert journal.request_count() == 1
     assert not cache.retry_allowed(security_code="6444", domain="sanden.co.jp",
                                    url=url, transport="direct_http")
+
+
+def _certificate_material(tmp_path, *, hostname="official.example", expired=False):
+    cryptography = pytest.importorskip("cryptography")
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+    now = datetime.now(timezone.utc)
+    ca_key = ec.generate_private_key(ec.SECP256R1())
+    ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Phase19j Test CA")])
+    ca_cert = (x509.CertificateBuilder().subject_name(ca_name).issuer_name(ca_name)
+               .public_key(ca_key.public_key()).serial_number(x509.random_serial_number())
+               .not_valid_before(now - timedelta(days=30)).not_valid_after(now + timedelta(days=30))
+               .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+               .sign(ca_key, hashes.SHA256()))
+    leaf_key = ec.generate_private_key(ec.SECP256R1())
+    leaf_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, hostname)])
+    not_before = now - timedelta(days=10)
+    not_after = now - timedelta(days=1) if expired else now + timedelta(days=10)
+    leaf_cert = (x509.CertificateBuilder().subject_name(leaf_name).issuer_name(ca_name)
+                 .public_key(leaf_key.public_key()).serial_number(x509.random_serial_number())
+                 .not_valid_before(not_before).not_valid_after(not_after)
+                 .add_extension(x509.SubjectAlternativeName([x509.DNSName(hostname)]), critical=False)
+                 .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+                 .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
+                 .sign(ca_key, hashes.SHA256()))
+    cert_path, key_path = tmp_path / "server.pem", tmp_path / "server-key.pem"
+    cert_path.write_bytes(leaf_cert.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(leaf_key.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption()))
+    server = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    server.load_cert_chain(cert_path, key_path)
+    return ca_cert.public_bytes(serialization.Encoding.PEM).decode("ascii"), server
+
+
+def _memory_tls_handshake(client_context, server_context, hostname):
+    client_in, client_out = ssl.MemoryBIO(), ssl.MemoryBIO()
+    server_in, server_out = ssl.MemoryBIO(), ssl.MemoryBIO()
+    client = client_context.wrap_bio(client_in, client_out, server_hostname=hostname)
+    server = server_context.wrap_bio(server_in, server_out, server_side=True)
+    client_done = server_done = False
+    for _ in range(100):
+        if not client_done:
+            try:
+                client.do_handshake()
+                client_done = True
+            except ssl.SSLWantReadError:
+                pass
+        pending = client_out.read()
+        if pending:
+            server_in.write(pending)
+        if not server_done:
+            try:
+                server.do_handshake()
+                server_done = True
+            except ssl.SSLWantReadError:
+                pass
+        pending = server_out.read()
+        if pending:
+            client_in.write(pending)
+        if client_done and server_done:
+            return
+    raise RuntimeError("in-memory TLS handshake did not finish")
+
+
+def test_verified_tls_context_accepts_valid_trusted_certificate(tmp_path):
+    ca_pem, server = _certificate_material(tmp_path)
+    client = create_verified_tls_context(cadata=ca_pem)
+    _memory_tls_handshake(client, server, "official.example")
+    assert client.verify_mode == ssl.CERT_REQUIRED and client.check_hostname
+
+
+def test_verified_tls_context_rejects_untrusted_ca(tmp_path):
+    trusted_dir, untrusted_dir = tmp_path / "trusted", tmp_path / "untrusted"
+    trusted_dir.mkdir()
+    untrusted_dir.mkdir()
+    trusted_ca, _ = _certificate_material(trusted_dir)
+    _, untrusted_server = _certificate_material(untrusted_dir)
+    with pytest.raises(ssl.SSLCertVerificationError):
+        _memory_tls_handshake(create_verified_tls_context(cadata=trusted_ca),
+                              untrusted_server, "official.example")
+
+
+def test_verified_tls_context_rejects_hostname_mismatch(tmp_path):
+    ca_pem, server = _certificate_material(tmp_path, hostname="official.example")
+    with pytest.raises(ssl.SSLCertVerificationError):
+        _memory_tls_handshake(create_verified_tls_context(cadata=ca_pem),
+                              server, "wrong.example")
+
+
+def test_verified_tls_context_rejects_expired_certificate(tmp_path):
+    ca_pem, server = _certificate_material(tmp_path, expired=True)
+    with pytest.raises(ssl.SSLCertVerificationError):
+        _memory_tls_handshake(create_verified_tls_context(cadata=ca_pem),
+                              server, "official.example")
+
+
+def test_windows_system_trust_context_keeps_verification_enabled():
+    context = windows_system_trust_context()
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname is True
+    assert context.minimum_version >= ssl.TLSVersion.TLSv1_2
+
+
+def test_system_trust_initialization_failure_prevents_request_callable():
+    session = FakeSession([FakeResponse(200)])
+
+    def fail_context():
+        raise TlsTrustInitializationError("TLS_TRUST_INIT: fixture")
+
+    with pytest.raises(TlsTrustInitializationError, match="TLS_TRUST_INIT"):
+        DirectHttpTransport(session_factory=lambda: session,
+                            tls_backend=TLS_BACKEND_WINDOWS_SYSTEM_TRUST,
+                            system_context_factory=fail_context)
+    assert session.calls == []
+
+
+def test_insecure_context_and_verify_false_session_are_rejected_before_http():
+    insecure = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    insecure.check_hostname = False
+    insecure.verify_mode = ssl.CERT_NONE
+    with pytest.raises(TlsTrustInitializationError, match="verification are required"):
+        validate_verified_tls_context(insecure)
+    session = FakeSession([FakeResponse(200)])
+    session.verify = False
+    transport = DirectHttpTransport(session_factory=lambda: session, dns_resolver=PUBLIC_DNS)
+    with pytest.raises(TlsTrustInitializationError, match="verify=False"):
+        transport.fetch("https://official.example/", "official.example", FetchPolicy())
+    assert session.calls == []
+
+
+@pytest.mark.parametrize("message,expected", [
+    ("certificate verify failed: unable to get local issuer certificate", "TLS_CA_CHAIN"),
+    ("hostname mismatch", "TLS_HOSTNAME"),
+    ("certificate has expired", "TLS_EXPIRED"),
+    ("certificate is not yet valid", "TLS_NOT_YET_VALID"),
+    ("unsupported protocol version", "TLS_PROTOCOL"),
+    ("handshake failure", "TLS_HANDSHAKE"),
+    ("opaque TLS error", "TLS_UNKNOWN"),
+])
+def test_tls_failure_taxonomy(message, expected):
+    assert official_source.classify_tls_failure(requests.exceptions.SSLError(message)) == expected
+
+
+def test_backend_version_provenance_requires_real_supported_change():
+    context = create_verified_tls_context()
+    old = DirectHttpTransport(tls_backend=TLS_BACKEND_CURRENT_CA)
+    new = DirectHttpTransport(tls_backend=TLS_BACKEND_WINDOWS_SYSTEM_TRUST,
+                              system_context_factory=lambda: context)
+    another_new = DirectHttpTransport(tls_backend=TLS_BACKEND_WINDOWS_SYSTEM_TRUST,
+                                      system_context_factory=lambda: context)
+    assert old.name == "direct_http"
+    assert new.name == "direct_http/windows-system-trust-v1"
+    assert tls_backend_change_allows_attempt(old, new)
+    assert not tls_backend_change_allows_attempt(new, another_new)
+    with pytest.raises(TlsTrustInitializationError, match="unsupported TLS backend"):
+        DirectHttpTransport(tls_backend="renamed-only")
+
+
+def test_backend_change_preserves_old_failure_and_allows_only_new_identity():
+    cache = IdentityFailureCache()
+    url = "https://www.sanden.co.jp/"
+    cache.record(security_code="6444", domain="sanden.co.jp", url=url,
+                 transport="direct_http", failure_type="TLS_CA_CHAIN",
+                 attempted_at="2026-09-06T03:22:53+00:00")
+    context = create_verified_tls_context()
+    new = DirectHttpTransport(tls_backend=TLS_BACKEND_WINDOWS_SYSTEM_TRUST,
+                              system_context_factory=lambda: context)
+    assert not cache.retry_allowed(security_code="6444", domain="sanden.co.jp",
+                                   url=url, transport="direct_http")
+    assert cache.retry_allowed(security_code="6444", domain="sanden.co.jp",
+                               url=url, transport=new.name)
+    assert cache.records()[0].failure_type == "TLS_CA_CHAIN"
+
+
+def test_system_trust_transport_mounts_verified_adapter_and_keeps_journal(tmp_path):
+    context = create_verified_tls_context()
+    session = FakeSession([FakeResponse(200, headers={"Content-Type": "text/html"},
+                                                chunks=[b"<html><body>Example Works</body></html>"])])
+    journal = journal_for(tmp_path)
+    transport = DirectHttpTransport(
+        session_factory=lambda: session, dns_resolver=PUBLIC_DNS, journal=journal,
+        tls_backend=TLS_BACKEND_WINDOWS_SYSTEM_TRUST,
+        system_context_factory=lambda: context)
+    result = OfficialSourceResolver(transport).resolve(
+        unverified_example(), "https://official.example/")
+    assert result.access_status == "VERIFIED"
+    assert session.mounts[0][0] == "https://"
+    assert journal.request_count() == 1
+    assert journal._disk_records()[0][0]["history"][-1]["phase"] == "NORMALIZED"
