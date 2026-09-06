@@ -841,3 +841,7 @@ def test_cli_json_is_cp932_safe_and_keeps_native_artifact_encoding(tmp_path):
     rendered.encode("cp932")
     assert "\\u" in rendered
     assert artifact.read_bytes() == before
+
+
+def test_multi_runner_name_normalization_matches_registry_nfkc_contract():
+    assert multi._normalized_company_name(" ＳＵＭＣＯ 株式会社 ") == "sumco"

@@ -18,6 +18,7 @@ import secrets
 import sqlite3
 import statistics
 import sys
+import unicodedata
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -139,7 +140,8 @@ def render_cli_json(value: Any) -> str:
 
 
 def _normalized_company_name(value: str) -> str:
-    normalized = re.sub(r"[\s\u3000]", "", value or "")
+    normalized = unicodedata.normalize("NFKC", value or "")
+    normalized = re.sub(r"[\s\u3000]", "", normalized)
     for designator in ("株式会社", "㈱", "(株)", "（株）"):
         normalized = normalized.replace(designator, "")
     return normalized.casefold()
