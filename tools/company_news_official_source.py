@@ -33,6 +33,8 @@ from requests.adapters import HTTPAdapter
 
 
 IDENTITY_STATUSES = {"VERIFIED", "UNVERIFIED", "STALE"}
+IDENTITY_TRANSPORT_ASSURANCES = {"HTTPS_VERIFIED", "LEGACY_HTTP", "REPOSITORY_VERIFIED"}
+LEGACY_HTTP_AUTHORITIES = {"IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH", "COMPANY_MASTER"}
 WINDOW_STATES = {"COMPLETE", "PARTIAL", "BLOCKED", "NOT_APPLICABLE"}
 FAILURE_TYPES = {
     "HTTP_4XX", "HTTP_5XX", "TIMEOUT", "DNS", "TLS", "TLS_CA_CHAIN", "TLS_HOSTNAME",
@@ -101,6 +103,11 @@ class CompanyIdentityRecord:
     evidence_hash: str | None
     status: str
     evidence_excerpt: str | None = None
+    transport_assurance: str | None = None
+    transport_security_warning: bool = False
+    tls_verified: bool | None = None
+    url_authority: str | None = None
+    evidence_http_status: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -112,7 +119,9 @@ def company_identity_registry_schema() -> dict[str, Any]:
         "type": "object", "additionalProperties": False,
         "required": ["security_code", "company_name", "normalized_name", "official_domain",
                      "verified_official_url", "verification_source", "verification_method",
-                     "verified_at", "evidence_hash", "status", "evidence_excerpt"],
+                     "verified_at", "evidence_hash", "status", "evidence_excerpt",
+                     "transport_assurance", "transport_security_warning", "tls_verified",
+                     "url_authority", "evidence_http_status"],
         "properties": {
             "security_code": {"type": "string"}, "company_name": {"type": "string"},
             "normalized_name": {"type": "string"}, "official_domain": {"type": "string"},
@@ -120,6 +129,12 @@ def company_identity_registry_schema() -> dict[str, Any]:
             "verification_method": nullable("string"), "verified_at": nullable("string"),
             "evidence_hash": nullable("string"), "status": {"type": "string", "enum": sorted(IDENTITY_STATUSES)},
             "evidence_excerpt": nullable("string"),
+            "transport_assurance": {"type": ["string", "null"],
+                                    "enum": [*sorted(IDENTITY_TRANSPORT_ASSURANCES), None]},
+            "transport_security_warning": {"type": "boolean"},
+            "tls_verified": {"type": ["boolean", "null"]},
+            "url_authority": nullable("string"),
+            "evidence_http_status": {"type": ["integer", "null"]},
         },
     }
     return {"type": "object", "additionalProperties": False, "required": ["schema_version", "records"],
@@ -142,8 +157,22 @@ def validate_identity_record(record: CompanyIdentityRecord) -> CompanyIdentityRe
                 record.evidence_hash, record.evidence_excerpt)):
         raise OfficialSourceError("VERIFIED identity evidence is incomplete")
     parsed = urlsplit(record.verified_official_url or "")
-    if parsed.scheme != "https" or not parsed.hostname or not _is_official_host(parsed.hostname, record.official_domain):
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or not _is_official_host(parsed.hostname, record.official_domain):
         raise OfficialSourceError("verified identity URL is outside the official domain")
+    assurance = record.transport_assurance
+    if assurance is None:
+        assurance = ("REPOSITORY_VERIFIED" if record.verification_method == "REPOSITORY_VERIFIED_ARTIFACT"
+                     else "HTTPS_VERIFIED") if parsed.scheme == "https" else None
+    if assurance not in IDENTITY_TRANSPORT_ASSURANCES:
+        raise OfficialSourceError("VERIFIED identity requires transport assurance")
+    if assurance == "LEGACY_HTTP":
+        if (parsed.scheme != "http" or record.url_authority not in LEGACY_HTTP_AUTHORITIES
+                or record.evidence_http_status != 200 or not record.transport_security_warning
+                or record.tls_verified is not False):
+            raise OfficialSourceError("LEGACY_HTTP identity evidence is incomplete")
+    elif (parsed.scheme != "https" or record.transport_security_warning
+          or record.tls_verified is False):
+        raise OfficialSourceError("secure identity assurance requires HTTPS")
     if not _SHA256.fullmatch(record.evidence_hash or ""):
         raise OfficialSourceError("invalid identity evidence hash")
     try:
@@ -1581,17 +1610,33 @@ def build_identity_evidence_card(result: OfficialSourceResolution, identity: Com
 
 def promote_verified_identity(identity: CompanyIdentityRecord, result: OfficialSourceResolution,
                               *, verification_source: str,
-                              authoritative_names: tuple[str, ...] = ()) -> CompanyIdentityRecord:
+                              authoritative_names: tuple[str, ...] = (),
+                              url_authority: str | None = None,
+                              allow_legacy_http: bool = False) -> CompanyIdentityRecord:
     """Create a VERIFIED registry record only from accepted official body evidence."""
     card = build_identity_evidence_card(result, identity, authoritative_names=authoritative_names)
     method = ("REPOSITORY_VERIFIED_ARTIFACT" if result.fetch_method == "repository_existing"
               else "ACTUAL_OFFICIAL_BODY")
+    parsed = urlsplit(card["url"])
+    legacy = parsed.scheme == "http"
+    if legacy:
+        if (not allow_legacy_http or result.status_code != 200
+                or _canonical_url(result.requested_url) != _canonical_url(result.final_url)
+                or url_authority not in LEGACY_HTTP_AUTHORITIES):
+            raise OfficialSourceError("LEGACY_HTTP identity contract is not satisfied")
+        assurance, warning, tls_verified = "LEGACY_HTTP", True, False
+    else:
+        assurance = "REPOSITORY_VERIFIED" if method == "REPOSITORY_VERIFIED_ARTIFACT" else "HTTPS_VERIFIED"
+        warning, tls_verified = False, (True if assurance == "HTTPS_VERIFIED" else None)
     record = CompanyIdentityRecord(
         security_code=identity.security_code, company_name=identity.company_name,
         normalized_name=_normalized_name(identity.company_name), official_domain=identity.official_domain,
         verified_official_url=card["url"], verification_source=verification_source,
         verification_method=method, verified_at=result.fetched_at, evidence_hash=result.body_hash,
-        status="VERIFIED", evidence_excerpt=card["body_excerpt"])
+        status="VERIFIED", evidence_excerpt=card["body_excerpt"],
+        transport_assurance=assurance, transport_security_warning=warning,
+        tls_verified=tls_verified, url_authority=url_authority,
+        evidence_http_status=result.status_code)
     return validate_identity_record(record)
 
 

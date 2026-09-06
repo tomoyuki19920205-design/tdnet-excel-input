@@ -36,6 +36,7 @@ from tools.company_news_official_source import (
     FetchPolicy,
     HttpFetchJournal,
     IrNightlyKnownSuccessfulTransport,
+    LEGACY_HTTP_AUTHORITIES,
     OfficialSourceResolution,
     OfficialSourceResolver,
     OfficialSourceError,
@@ -44,6 +45,7 @@ from tools.company_news_official_source import (
     WindowsSchannelTransport,
     apply_registry_identity,
     promote_verified_identity,
+    validate_identity_record,
     validate_window_coverage,
 )
 from tools.company_news_overlap_scope import classify_news_monitor_scope
@@ -778,8 +780,13 @@ def _official_plan(cohort: FrozenCohort,
             "official_domain": record.official_domain,
             "verified_root_url": record.verified_official_url,
             "allowed_hosts": [record.official_domain],
+            "transport_assurance": record.transport_assurance or (
+                "REPOSITORY_VERIFIED" if record.verification_method == "REPOSITORY_VERIFIED_ARTIFACT"
+                else "HTTPS_VERIFIED"),
+            "transport_security_warning": record.transport_security_warning,
             "identity_registry_reference": "phase22-company-identity-registry.json",
-            "transport_preference": ["repository_existing", "windows-schannel-v1"],
+            "transport_preference": ["repository_existing"] if record.transport_assurance == "LEGACY_HTTP"
+            else ["repository_existing", "windows-schannel-v1"],
         })
     return {
         "schema_version": OFFICIAL_PLAN_SCHEMA,
@@ -795,12 +802,180 @@ def _official_plan(cohort: FrozenCohort,
             "root_authority": "frozen_verified_identity_registry",
             "target_discovery": "deterministic_links_from_verified_official_parent",
             "delegated_resource_authority": "exact_embedded_url_only",
-            "https_only": True,
+            "identity_https_only": False,
+            "current_content_https_only": True,
+            "legacy_http_scope": "stable_company_identity_only",
         },
         # Compatibility containers are intentionally empty at bootstrap.
         "family_urls": {},
         "repository_artifacts": {},
     }
+
+
+def finalize_legacy_http_identity_freeze(
+        cohort: FrozenCohort, *, phase22g_dir: Path, phase22h_report_path: Path,
+        expected_resolution_plan_sha256: str, output_dir: Path, prepare_run_dir: Path,
+        search_from: str, search_to: str) -> dict[str, Any]:
+    """Finalize one strict legacy-HTTP identity from existing durable evidence only."""
+    phase22g_dir = phase22g_dir.resolve()
+    phase22h_report_path = phase22h_report_path.resolve()
+    output_dir, prepare_run_dir = output_dir.resolve(), prepare_run_dir.resolve()
+    if output_dir.exists() or prepare_run_dir.exists():
+        raise MultiRunnerError("final identity freeze artifact collision")
+    phase22g = _read(phase22g_dir / "phase22g-identity-bootstrap-report.json")
+    phase22h = _read(phase22h_report_path)
+    if (phase22g.get("cohort_sha256") != cohort.cohort_sha256
+            or phase22g.get("resolution_plan_sha256") != expected_resolution_plan_sha256
+            or phase22h.get("cohort_sha256") != cohort.cohort_sha256
+            or phase22h.get("resolution_plan_sha256") != expected_resolution_plan_sha256):
+        raise CohortIntegrityError("identity evidence freeze hashes changed")
+    resolution_plan_path = Path(str(phase22g.get("resolution_plan_path") or "")).resolve()
+    if (not resolution_plan_path.is_file()
+            or _sha_bytes(resolution_plan_path.read_bytes()) != expected_resolution_plan_sha256):
+        raise CohortIntegrityError("identity resolution plan changed")
+    resolution_plan = _read(resolution_plan_path)
+    authority_rows = resolution_plan.get("companies")
+    if (not isinstance(authority_rows, list)
+            or [str(row.get("ticker")) for row in authority_rows]
+            != [row.security_code for row in cohort.companies]):
+        raise CohortIntegrityError("identity authority order changed")
+    authorities = {str(row["ticker"]): row for row in authority_rows}
+    matrix = phase22g.get("matrix")
+    if (not isinstance(matrix, list) or [str(row.get("ticker")) for row in matrix]
+            != [row.security_code for row in cohort.companies]):
+        raise CohortIntegrityError("identity evidence order changed")
+    companies = {row.security_code: row for row in cohort.companies}
+    verified: dict[str, CompanyIdentityRecord] = {}
+    for row in matrix:
+        ticker = str(row["ticker"])
+        if row.get("identity_state") != "VERIFIED":
+            continue
+        body_manifest = Path(str(row.get("body_manifest_path") or "")).resolve()
+        if not body_manifest.is_file() or not body_manifest.is_relative_to(phase22g_dir):
+            raise CohortIntegrityError(f"verified identity body manifest missing: {ticker}")
+        manifest = _read(body_manifest)
+        body_path = (body_manifest.parent / str(manifest.get("body_path", ""))).resolve()
+        if (not body_path.is_file() or not body_path.is_relative_to(phase22g_dir)
+                or _sha_bytes(body_path.read_bytes()) != row.get("evidence_hash")
+                or manifest.get("body_sha256") != row.get("evidence_hash")):
+            raise CohortIntegrityError(f"verified identity body changed: {ticker}")
+        company = companies[ticker]
+        record = CompanyIdentityRecord(
+            security_code=ticker, company_name=company.company_name,
+            normalized_name=_normalized_company_name(company.company_name),
+            official_domain=str(manifest["official_domain"]),
+            verified_official_url=str(row["final_url"]),
+            verification_source=str(row.get("url_authority_source") or "saved official body"),
+            verification_method=str(row.get("verification_method") or "ACTUAL_OFFICIAL_BODY"),
+            verified_at=str(row["verification_timestamp"]), evidence_hash=str(row["evidence_hash"]),
+            status="VERIFIED", evidence_excerpt=str(row["evidence_excerpt"]),
+            transport_assurance="HTTPS_VERIFIED", transport_security_warning=False,
+            tls_verified=True, url_authority=str(row.get("url_authority_source") or ""),
+            evidence_http_status=int(row["http_status"]),
+        )
+        validate_identity_record(record)
+        verified[ticker] = record
+
+    # Admit saved offline HTTPS verifications produced after the original matrix.
+    for ticker, state in (phase22h.get("phase22h") or {}).items():
+        if not isinstance(state, dict) or state.get("identity_state") != "VERIFIED" or ticker in verified:
+            continue
+        artifact_path = Path(str(state.get("verification_artifact") or "")).resolve()
+        if not artifact_path.is_file() or not artifact_path.is_relative_to(phase22h_report_path.parent):
+            raise CohortIntegrityError(f"offline identity artifact missing: {ticker}")
+        artifact = _read(artifact_path)
+        source = artifact.get("record") or {}
+        body_path = Path(str(artifact.get("saved_body_path") or "")).resolve()
+        body_hash = str(artifact.get("saved_body_sha256") or "")
+        if (ticker not in companies or not body_path.is_file() or not body_path.is_relative_to(phase22g_dir)
+                or _sha_bytes(body_path.read_bytes()) != body_hash or source.get("evidence_hash") != body_hash):
+            raise CohortIntegrityError(f"offline identity evidence changed: {ticker}")
+        company = companies[ticker]
+        record = CompanyIdentityRecord(
+            security_code=ticker, company_name=company.company_name,
+            normalized_name=_normalized_company_name(company.company_name),
+            official_domain=str(source["official_domain"]),
+            verified_official_url=str(source["verified_official_url"]),
+            verification_source=str(source["verification_source"]),
+            verification_method="REPOSITORY_VERIFIED_ARTIFACT",
+            verified_at=str(source["verified_at"]), evidence_hash=body_hash,
+            status="VERIFIED", evidence_excerpt=str(source["evidence_excerpt"]),
+            transport_assurance="REPOSITORY_VERIFIED", transport_security_warning=False,
+            tls_verified=None, url_authority="REPOSITORY_VERIFIED_ARTIFACT",
+            evidence_http_status=int(state["http_status"]),
+        )
+        validate_identity_record(record)
+        verified[ticker] = record
+
+    unresolved = [row for row in matrix if str(row["ticker"]) not in verified]
+    if len(unresolved) != 1 or unresolved[0].get("identity_state") != "UNVERIFIED_HTTP_ONLY":
+        raise CohortIntegrityError("expected exactly one legacy HTTP identity")
+    row = unresolved[0]
+    ticker, company = str(row["ticker"]), companies[str(row["ticker"])]
+    exact_url = str(row["source_exact_url"])
+    chain = row.get("redirect_chain") or []
+    company_dir = next(phase22g_dir.glob(f"companies/*-{ticker}"), None)
+    raw_paths = list((company_dir / "identity-http" / "raw-http").glob("*.body")) if company_dir else []
+    if (urlsplit(exact_url).scheme != "http" or row.get("final_url") != exact_url
+            or row.get("http_status") != 200 or len(chain) != 1
+            or chain[0].get("requested_url") != exact_url or chain[0].get("final_url") != exact_url
+            or row.get("url_authority_source") not in LEGACY_HTTP_AUTHORITIES
+            or len(raw_paths) != 1 or _sha_bytes(raw_paths[0].read_bytes()) != row.get("evidence_hash")):
+        raise CohortIntegrityError("legacy HTTP authority/evidence contract is incomplete")
+    authority = authorities[ticker]
+    if (authority.get("candidate_exact_url") != exact_url
+            or authority.get("source") != row.get("url_authority_source")):
+        raise CohortIntegrityError("legacy HTTP exact authority changed")
+    provisional = CompanyIdentityRecord(
+        security_code=ticker, company_name=company.company_name,
+        normalized_name=_normalized_company_name(company.company_name),
+        official_domain=str(authority["official_domain"]), verified_official_url=None,
+        verification_source=None, verification_method=None, verified_at=None,
+        evidence_hash=None, status="UNVERIFIED", evidence_excerpt=None)
+    resolution = OfficialSourceResolver(RepositoryExistingTransport({
+        exact_url: (raw_paths[0].read_bytes(), str(row["mime_type"]), 200)
+    })).resolve(provisional, exact_url)
+    legacy_record = promote_verified_identity(
+        provisional, resolution, verification_source=str(row["url_authority_source"]),
+        url_authority=str(row["url_authority_source"]), allow_legacy_http=True)
+    verified[ticker] = legacy_record
+    if len(verified) != len(cohort.companies):
+        raise CohortIntegrityError("formal identity registry remains incomplete")
+
+    output_dir.mkdir(parents=True)
+    registry = CompanyIdentityRegistry([verified[row.security_code] for row in cohort.companies])
+    plan = _official_plan(cohort, verified)
+    if _contains_forbidden_bootstrap_key(registry.to_dict()) or _contains_forbidden_bootstrap_key(plan):
+        raise CohortIntegrityError("formal identity artifacts contain historical answer leakage")
+    registry_path = output_dir / "phase22-company-identity-registry.json"
+    plan_path = output_dir / "phase22-official-source-plan.json"
+    registry.save(registry_path)
+    _atomic(plan_path, plan)
+    validate_frozen_inputs(cohort, registry_path, plan_path)
+    prepared = prepare_run(
+        cohort, prepare_run_dir, search_from=search_from, search_to=search_to,
+        approved_company_count=len(cohort.companies), identity_registry_path=registry_path,
+        official_plan_path=plan_path)
+    report = {
+        "schema_version": "company_news_phase22i_final_identity_freeze_v1",
+        "created_at": _now(), "status": "READY", "cohort_sha256": cohort.cohort_sha256,
+        "resolution_plan_sha256": expected_resolution_plan_sha256,
+        "verified_count": len(verified), "legacy_http_ticker": ticker,
+        "legacy_http_identity": legacy_record.to_dict(),
+        "registry_path": str(registry_path),
+        "registry_logical_sha256": _canonical_sha(registry.to_dict()),
+        "registry_file_sha256": _sha_bytes(registry_path.read_bytes()),
+        "official_plan_path": str(plan_path),
+        "plan_logical_sha256": _canonical_sha(plan),
+        "plan_file_sha256": _sha_bytes(plan_path.read_bytes()),
+        "leakage_findings": [],
+        "prepare_result": {"state": prepared["state"],
+                           "run_dir": str(prepare_run_dir), "company_directories": 0},
+        "research_companies": 0, "http_requests": 0, "model_calls": 0, "web_calls": 0,
+    }
+    cohort.assert_unchanged()
+    _atomic(output_dir / "phase22i-final-identity-freeze-report.json", report)
+    return report
 
 
 def validate_frozen_inputs(cohort: FrozenCohort, registry_path: Path,
@@ -832,7 +1007,11 @@ def validate_frozen_inputs(cohort: FrozenCohort, registry_path: Path,
                 or row.get("company_name") != company.company_name
                 or row.get("identity_status") != "VERIFIED"
                 or row.get("official_domain") != record.official_domain
-                or row.get("verified_root_url") != record.verified_official_url):
+                or row.get("verified_root_url") != record.verified_official_url
+                or row.get("transport_assurance") != (record.transport_assurance or (
+                    "REPOSITORY_VERIFIED" if record.verification_method == "REPOSITORY_VERIFIED_ARTIFACT"
+                    else "HTTPS_VERIFIED"))
+                or row.get("transport_security_warning") != record.transport_security_warning):
             raise CohortIntegrityError(f"official plan identity mismatch: {company.security_code}")
     if _contains_forbidden_bootstrap_key({"records": registry_records}):
         raise CohortIntegrityError("identity registry contains result leakage")
@@ -1622,6 +1801,18 @@ def _parser() -> argparse.ArgumentParser:
     nightly.add_argument("--search-to", default="2026-08-31")
     nightly.add_argument("--max-redirects", type=int, default=5)
     nightly.add_argument("--max-logical-fetches", type=int, default=12)
+    finalize_identity = sub.add_parser("finalize-legacy-http")
+    finalize_identity.add_argument("--cohort-file", type=Path, required=True)
+    finalize_identity.add_argument("--cohort-sha256", required=True)
+    finalize_identity.add_argument("--approved-company-count", type=int, required=True)
+    finalize_identity.add_argument("--max-companies", type=int, required=True)
+    finalize_identity.add_argument("--phase22g-dir", type=Path, required=True)
+    finalize_identity.add_argument("--phase22h-report", type=Path, required=True)
+    finalize_identity.add_argument("--resolution-plan-sha256", required=True)
+    finalize_identity.add_argument("--output-dir", type=Path, required=True)
+    finalize_identity.add_argument("--prepare-run-dir", type=Path, required=True)
+    finalize_identity.add_argument("--search-from", default="2026-08-25")
+    finalize_identity.add_argument("--search-to", default="2026-08-31")
     report = sub.add_parser("aggregate"); report.add_argument("--run-dir", type=Path, required=True)
     run_next = sub.add_parser("run-next")
     run_next.add_argument("--root", type=Path, default=Path.cwd())
@@ -1634,12 +1825,20 @@ def _parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _parser().parse_args()
-    if args.command in {"bootstrap-inputs", "forensic-identity-authority", "bootstrap-known-successful"}:
+    if args.command in {"bootstrap-inputs", "forensic-identity-authority", "bootstrap-known-successful",
+                        "finalize-legacy-http"}:
         cohort = FrozenCohort.load(args.cohort_file,
             approved_company_count=args.approved_company_count,
             max_companies=args.max_companies,
             expected_cohort_sha256=args.cohort_sha256)
-        if args.command == "bootstrap-known-successful":
+        if args.command == "finalize-legacy-http":
+            value = finalize_legacy_http_identity_freeze(
+                cohort, phase22g_dir=args.phase22g_dir,
+                phase22h_report_path=args.phase22h_report,
+                expected_resolution_plan_sha256=args.resolution_plan_sha256,
+                output_dir=args.output_dir, prepare_run_dir=args.prepare_run_dir,
+                search_from=args.search_from, search_to=args.search_to)
+        elif args.command == "bootstrap-known-successful":
             value = bootstrap_identities_ir_nightly(
                 cohort, resolution_plan_path=args.resolution_plan,
                 expected_resolution_plan_sha256=args.resolution_plan_sha256,

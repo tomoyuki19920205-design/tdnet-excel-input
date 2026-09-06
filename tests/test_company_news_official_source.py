@@ -109,6 +109,54 @@ def test_saved_literal_https_identity_url_is_derived_without_scheme_guessing():
         b"<a href='https://external.example/'>external</a>", "rise-i.co.jp") == ()
 
 
+def test_authoritative_legacy_http_identity_persists_transport_warning():
+    url = "http://official.example/company"
+    identity = verified_record(
+        status="UNVERIFIED", verified_official_url=None, verification_source=None,
+        verification_method=None, verified_at=None, evidence_hash=None, evidence_excerpt=None)
+    result = OfficialSourceResolver(RepositoryExistingTransport({
+        url: (b"<title>Example Works official</title>", "text/html", 200)})).resolve(identity, url)
+    record = promote_verified_identity(
+        identity, result, verification_source="IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH",
+        url_authority="IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH", allow_legacy_http=True)
+    assert record.status == "VERIFIED" and record.transport_assurance == "LEGACY_HTTP"
+    assert record.transport_security_warning is True and record.tls_verified is False
+    assert record.evidence_http_status == 200
+    assert CompanyIdentityRegistry([record]).usable("X001", "Example Works") == record
+
+
+def test_legacy_http_rejects_guessed_authority_company_mismatch_redirect_and_missing_hash():
+    url = "http://official.example/company"
+    identity = verified_record(
+        status="UNVERIFIED", verified_official_url=None, verification_source=None,
+        verification_method=None, verified_at=None, evidence_hash=None, evidence_excerpt=None)
+    good = OfficialSourceResolver(RepositoryExistingTransport({
+        url: (b"<title>Example Works official</title>", "text/html", 200)})).resolve(identity, url)
+    with pytest.raises(OfficialSourceError, match="contract is not satisfied"):
+        promote_verified_identity(identity, good, verification_source="guessed",
+                                  url_authority="GUESSED", allow_legacy_http=True)
+    mismatch = OfficialSourceResolver(RepositoryExistingTransport({
+        url: (b"<title>Different Company</title>", "text/html", 200)})).resolve(identity, url)
+    with pytest.raises(OfficialSourceError, match="does not identify"):
+        promote_verified_identity(
+            identity, mismatch, verification_source="IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH",
+            url_authority="IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH", allow_legacy_http=True)
+    redirected = official_source.OfficialSourceResolution(
+        url, "http://evil.example/company", 200, good.access_status, good.mime_type,
+        good.normalized_content, good.body_hash, good.fetched_at, good.fetch_method, None)
+    with pytest.raises(OfficialSourceError, match="contract is not satisfied"):
+        promote_verified_identity(
+            identity, redirected, verification_source="IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH",
+            url_authority="IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH", allow_legacy_http=True)
+    missing_hash = official_source.OfficialSourceResolution(
+        url, url, 200, good.access_status, good.mime_type,
+        good.normalized_content, None, good.fetched_at, good.fetch_method, None)
+    with pytest.raises(OfficialSourceError, match="verified body required"):
+        promote_verified_identity(
+            identity, missing_hash, verification_source="IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH",
+            url_authority="IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH", allow_legacy_http=True)
+
+
 PUBLIC_DNS = lambda *args, **kwargs: [(2, 1, 6, "", ("93.184.216.34", 443))]
 
 
@@ -347,7 +395,7 @@ def test_ir_nightly_transport_allows_saved_http_only_as_one_logical_fetch():
                         verified_official_url="http://official.example/company"),
         "http://official.example/company", FetchPolicy(max_redirects=1))
     assert result.access_status == "VERIFIED" and result.final_url.startswith("http://")
-    with pytest.raises(OfficialSourceError, match="outside the official domain"):
+    with pytest.raises(OfficialSourceError, match="contract is not satisfied"):
         promote_verified_identity(
             verified_record(status="UNVERIFIED", verification_method=None,
                             verified_at=None, evidence_hash=None),

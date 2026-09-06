@@ -201,6 +201,34 @@ CLI summaries are rendered as ASCII-escaped JSON so a successful durable write
 cannot become a process failure because of a legacy Windows console encoding.
 Artifact JSON remains UTF-8 with native characters.
 
+Company identity status and transport assurance are separate fields. Normal
+verified HTTPS evidence records `HTTPS_VERIFIED`; saved HTTPS evidence records
+`REPOSITORY_VERIFIED`. A legacy HTTP identity is allowed only for an exact URL
+from Company Master or an IR Nightly known-successful source, with a 200 body,
+matching official host and company marker, durable SHA-256 and excerpt, and no
+redirect. It is stored as `VERIFIED` plus `LEGACY_HTTP`,
+`transport_security_warning=true`, and `tls_verified=false`.
+
+`LEGACY_HTTP` applies only to stable company identity. It never marks current
+window coverage complete, never verifies a news document, and never claims TLS
+availability. Current content retains its independent HTTPS/body provenance
+requirements.
+
+After an offline review has reduced a frozen bootstrap to one qualifying HTTP
+identity, finalize without network or research:
+
+```powershell
+..\.venv\Scripts\python.exe tools\company_news_multi_runner.py finalize-legacy-http `
+  --cohort-file artifacts\token_efficiency_phase22\phase22-fixed-cohort.json `
+  --cohort-sha256 fc38bd476c68a0e47d75c59d664eb4fc2387c5a5c2580beece5668f395ff909e `
+  --approved-company-count 12 --max-companies 12 `
+  --phase22g-dir artifacts\token_efficiency_phase22\phase22g-identity-bootstrap `
+  --phase22h-report artifacts\token_efficiency_phase22\phase22h-final-identity-resolution\phase22h-final-identity-resolution-report.json `
+  --resolution-plan-sha256 9ac3097e207c811bbf947901bf3ba77c6eb2cfe78f8765bad5057ca42c438b08 `
+  --output-dir artifacts\token_efficiency_phase22\phase22i-final-freeze `
+  --prepare-run-dir artifacts\token_efficiency_phase22\phase22-run-001
+```
+
 ```powershell
 ..\.venv\Scripts\python.exe tools\company_news_multi_runner.py bootstrap-known-successful `
   --cohort-file artifacts\token_efficiency_phase22\phase22-fixed-cohort.json `

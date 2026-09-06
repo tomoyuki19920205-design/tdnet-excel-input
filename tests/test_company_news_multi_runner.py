@@ -570,6 +570,73 @@ def test_known_successful_bootstrap_http_only_final_fails_closed_without_formal_
     assert not prepared.exists()
 
 
+def test_legacy_http_offline_freeze_prepares_without_research_or_leakage(tmp_path):
+    cohort = load(cohort_file(tmp_path, 1), 1, 1)
+    plan, plan_sha = phase22g_plan(tmp_path, cohort, "http://www.example.test/ir/")
+    def factory(company_dir, company):
+        store = multi.DurableArtifactStore.prepare(company_dir / "identity-http")
+        journal = multi.HttpFetchJournal(store, run_id="fixture", company=company.security_code)
+        session = NightlySession([NightlyResponse(
+            headers={"Content-Type": "text/html"},
+            body=b"<title>Company 1 official identity</title>")])
+        return multi.OfficialSourceResolver(multi.IrNightlyKnownSuccessfulTransport(
+            session_factory=lambda: session,
+            dns_resolver=lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 80))],
+            journal=journal)), journal
+    phase22g = tmp_path / "phase22g"
+    first_prepare = tmp_path / "must-not-exist"
+    initial = multi.bootstrap_identities_ir_nightly(
+        cohort, resolution_plan_path=plan, expected_resolution_plan_sha256=plan_sha,
+        output_dir=phase22g, prepare_run_dir=first_prepare, resolver_factory=factory,
+        max_logical_fetches=1)
+    assert initial["status"] == "PARTIAL" and not first_prepare.exists()
+    phase22h = tmp_path / "phase22h"; phase22h.mkdir()
+    phase22h_report = phase22h / "report.json"
+    phase22h_report.write_text(json.dumps({
+        "cohort_sha256": cohort.cohort_sha256,
+        "resolution_plan_sha256": plan_sha,
+        "phase22h": {},
+    }), encoding="utf-8")
+    output, prepared = tmp_path / "formal", tmp_path / "prepared"
+    final = multi.finalize_legacy_http_identity_freeze(
+        cohort, phase22g_dir=phase22g, phase22h_report_path=phase22h_report,
+        expected_resolution_plan_sha256=plan_sha, output_dir=output,
+        prepare_run_dir=prepared, search_from="2026-08-25", search_to="2026-08-31")
+    assert final["status"] == "READY" and final["verified_count"] == 1
+    assert final["http_requests"] == final["research_companies"] == 0
+    assert final["model_calls"] == final["web_calls"] == 0
+    assert final["leakage_findings"] == []
+    assert final["prepare_result"]["state"] == "PREPARED"
+    assert not (prepared / "companies").exists()
+    registry = multi.CompanyIdentityRegistry.load(Path(final["registry_path"]))
+    record = registry.get("1001")
+    assert record.transport_assurance == "LEGACY_HTTP"
+    assert record.transport_security_warning is True and record.tls_verified is False
+    frozen_plan = json.loads(Path(final["official_plan_path"]).read_text())
+    assert frozen_plan["companies"][0]["transport_assurance"] == "LEGACY_HTTP"
+    assert frozen_plan["resolver_policy"]["current_content_https_only"] is True
+    assert multi._contains_forbidden_bootstrap_key(frozen_plan) is False
+
+
+def test_legacy_http_identity_does_not_complete_window_or_verify_document():
+    record = CompanyIdentityRecord(
+        "1001", "Company 1", "company1", "example.test",
+        "http://www.example.test/ir/", "IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH",
+        "REPOSITORY_VERIFIED_ARTIFACT", "2026-09-06T00:00:00+00:00", "a" * 64,
+        "VERIFIED", "Company 1 official identity", "LEGACY_HTTP", True, False,
+        "IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH", 200)
+    registry = CompanyIdentityRegistry([record])
+    blocked = FakeResolver(resolution("http://www.example.test/news", status="BLOCKED"))
+    integration = multi.OfficialResolverIntegration(registry, blocked, None, {})
+    preflight = integration.prepare({
+        "ticker": "1001", "company_name": "Company 1",
+        "search_from": "2026-08-25", "search_to": "2026-08-31"}, Path("."))
+    assert preflight.status == "SAFE_UNKNOWN" and preflight.window.state == "BLOCKED"
+    document = integration.fetch_document(
+        record, title="価格改定", url="http://www.example.test/news")
+    assert document["provenance_state"] == "ACCESS_FAILED"
+
+
 def test_prepare_rejects_incomplete_frozen_inputs(tmp_path):
     cohort = load(cohort_file(tmp_path, 1), 1, 1)
     registry = tmp_path / "empty-registry.json"
