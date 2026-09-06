@@ -60,6 +60,11 @@ $started = [Diagnostics.Stopwatch]::StartNew()
 $request = $null
 $tcp = $null
 $ssl = $null
+$stage = 'DNS'
+$statusCode = 0
+$mime = $null
+$safeHeaders = @{}
+$responseBytes = $null
 $certificateSummary = [ordered]@{ ssl_policy_errors = @(); hostname_validation = 'UNKNOWN'; leaf = $null; chain_elements = @(); chain_status = @() }
 try {
     $request = ([Console]::In.ReadToEnd() | ConvertFrom-Json)
@@ -76,6 +81,7 @@ try {
     if ($null -eq $address) { throw 'ACCESS_DENIED: no public destination address' }
 
     $tcp = [Net.Sockets.TcpClient]::new($address.AddressFamily)
+    $stage = 'TLS'
     $connectTimeout = [Threading.CancellationTokenSource]::new($timeoutMs)
     try { $tcp.ConnectAsync($address, 443, $connectTimeout.Token).GetAwaiter().GetResult() } finally { $connectTimeout.Dispose() }
     $tcp.ReceiveTimeout = $timeoutMs
@@ -119,6 +125,7 @@ try {
     $options.CertificateChainPolicy = $policy
     $ssl.AuthenticateAsClient($options)
 
+    $stage = 'HTTP'
     $pathAndQuery = if ($uri.PathAndQuery) { $uri.PathAndQuery } else { '/' }
     $wire = "GET $pathAndQuery HTTP/1.1`r`nHost: $hostName`r`nUser-Agent: CompanyNewsOfficialResolverSchannel/1.0`r`nAccept: text/html,application/xhtml+xml,application/pdf,text/plain`r`nConnection: close`r`n`r`n"
     $wireBytes = [Text.Encoding]::ASCII.GetBytes($wire)
@@ -126,6 +133,7 @@ try {
     $ssl.Flush()
 
     $raw = [IO.MemoryStream]::new()
+    $stage = 'BODY_READ'
     try {
         $buffer = [byte[]]::new(65536)
         while ($true) {
@@ -137,6 +145,7 @@ try {
         $rawBytes = $raw.ToArray()
     } finally { $raw.Dispose() }
     $headerEnd = Find-HeaderEnd $rawBytes
+    $stage = 'HTTP'
     if ($headerEnd -lt 0 -or $headerEnd -gt 65536) { throw 'HTTP_PROTOCOL: invalid response headers' }
     $headerText = [Text.Encoding]::ASCII.GetString($rawBytes, 0, $headerEnd)
     $lines = $headerText -split "`r`n"
@@ -147,30 +156,34 @@ try {
         $colon = $line.IndexOf(':')
         if ($colon -gt 0) { $headers[$line.Substring(0, $colon).Trim().ToLowerInvariant()] = $line.Substring($colon + 1).Trim() }
     }
-    $bodyStart = $headerEnd + 4
-    $encodedBody = if ($bodyStart -lt $rawBytes.Length) { $rawBytes[$bodyStart..($rawBytes.Length - 1)] } else { [byte[]]@() }
-    $body = if (($headers['transfer-encoding'] -as [string]) -match '(?i)chunked') { Decode-Chunked $encodedBody $maxBytes } else { [byte[]]$encodedBody }
-    if ($body.Length -gt $maxBytes) { throw 'SIZE_LIMIT' }
     $mime = if ($headers.ContainsKey('content-type')) { ([string]$headers['content-type']).Split(';', 2)[0].Trim().ToLowerInvariant() } else { $null }
-    $safeHeaders = @{}
-    foreach ($key in @('content-type','content-length','location','etag','last-modified')) { if ($headers.ContainsKey($key)) { $safeHeaders[$key] = ([string]$headers[$key]).Substring(0, [Math]::Min(1000, ([string]$headers[$key]).Length)) } }
+    foreach ($key in @('content-type','content-length','location','etag','last-modified','transfer-encoding')) { if ($headers.ContainsKey($key)) { $safeHeaders[$key] = ([string]$headers[$key]).Substring(0, [Math]::Min(1000, ([string]$headers[$key]).Length)) } }
+    $bodyStart = $headerEnd + 4
+    [byte[]]$encodedBody = if ($bodyStart -lt $rawBytes.Length) { @($rawBytes[$bodyStart..($rawBytes.Length - 1)]) } else { [byte[]]::new(0) }
+    $stage = 'BODY_READ'
+    [byte[]]$body = if (($headers['transfer-encoding'] -as [string]) -match '(?i)chunked') { @(Decode-Chunked $encodedBody $maxBytes) } else { @($encodedBody) }
+    if ($null -eq $body) { $body = [byte[]]::new(0) }
+    if ($body.Length -gt $maxBytes) { throw 'SIZE_LIMIT' }
+    $responseBytes = $body.Length
+    $stage = 'BODY_ENCODING'
+    $bodyBase64 = [Convert]::ToBase64String($body)
     $started.Stop()
     Write-Result @{
         schema_version = 'company_news_schannel_helper_v1'; result = 'RESPONSE'; transport_id = 'windows-schannel-v1'
-        implementation_fingerprint = 'dotnet10-sslstream-schannel-cryptoapi-v1'; requested_url = $uri.AbsoluteUri
+        implementation_fingerprint = 'dotnet10-sslstream-schannel-cryptoapi-v2'; requested_url = $uri.AbsoluteUri
         final_url = $uri.AbsoluteUri; status_code = $statusCode; mime_type = $mime
-        response_bytes = $body.Length; body_base64 = [Convert]::ToBase64String($body)
+        response_bytes = $responseBytes; body_base64 = $bodyBase64
         safe_headers = $safeHeaders; certificate_summary = $certificateSummary; elapsed_seconds = $started.Elapsed.TotalSeconds
     }
 } catch {
     $started.Stop()
     $message = $_.Exception.Message
-    $failure = if ($message -match '^SIZE_LIMIT') { 'SIZE_LIMIT' } elseif ($message -match '^ACCESS_DENIED') { 'ACCESS_DENIED' } elseif ($message -match 'timed out|canceled') { 'TIMEOUT' } elseif ($certificateSummary.hostname_validation -eq 'FAIL') { 'TLS_HOSTNAME' } elseif ($certificateSummary.chain_status.Count -gt 0) { 'TLS_CA_CHAIN' } elseif ($message -match 'authentication|certificate|SSL|TLS') { 'TLS_UNKNOWN' } else { 'DNS' }
+    $failure = if ($message -match '^SIZE_LIMIT') { 'SIZE_LIMIT' } elseif ($message -match '^ACCESS_DENIED') { 'ACCESS_DENIED' } elseif ($message -match '^HTTP_PROTOCOL') { 'HTTP' } elseif ($message -match 'timed out|canceled') { 'TIMEOUT' } elseif ($certificateSummary.hostname_validation -eq 'FAIL') { 'TLS_HOSTNAME' } elseif ($certificateSummary.chain_status.Count -gt 0) { 'TLS_CA_CHAIN' } elseif ($message -match 'authentication|certificate|SSL|TLS') { 'TLS_UNKNOWN' } elseif ($stage -eq 'BODY_READ') { 'BODY_READ' } elseif ($stage -eq 'BODY_ENCODING') { 'BODY_ENCODING' } elseif ($stage -eq 'HTTP') { 'HTTP' } else { 'DNS' }
     Write-Result @{
         schema_version = 'company_news_schannel_helper_v1'; result = 'FAILURE'; transport_id = 'windows-schannel-v1'
-        implementation_fingerprint = 'dotnet10-sslstream-schannel-cryptoapi-v1'
-        requested_url = if ($null -ne $request) { [string]$request.url } else { $null }; final_url = $null
-        status_code = 0; mime_type = $null; response_bytes = $null; body_base64 = $null; safe_headers = @{}
+        implementation_fingerprint = 'dotnet10-sslstream-schannel-cryptoapi-v2'
+        requested_url = if ($null -ne $request) { [string]$request.url } else { $null }; final_url = if ($statusCode -gt 0) { $uri.AbsoluteUri } else { $null }
+        status_code = $statusCode; mime_type = $mime; response_bytes = $responseBytes; body_base64 = $null; safe_headers = $safeHeaders
         certificate_summary = $certificateSummary; elapsed_seconds = $started.Elapsed.TotalSeconds
         failure_class = $failure; error_detail = $message.Substring(0, [Math]::Min(2000, $message.Length))
     }

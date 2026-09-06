@@ -37,13 +37,14 @@ FAILURE_TYPES = {
     "HTTP_4XX", "HTTP_5XX", "TIMEOUT", "DNS", "TLS", "TLS_CA_CHAIN", "TLS_HOSTNAME",
     "TLS_EXPIRED", "TLS_NOT_YET_VALID", "TLS_PROTOCOL", "TLS_HANDSHAKE", "TLS_UNKNOWN",
     "TLS_TRUST_INIT", "REDIRECT_BLOCKED",
-    "MIME_REJECTED", "SIZE_LIMIT", "ACCESS_DENIED", "OUTCOME_LOST", "UNKNOWN",
+    "MIME_REJECTED", "SIZE_LIMIT", "ACCESS_DENIED", "OUTCOME_LOST",
+    "BODY_READ", "BODY_ENCODING", "NORMALIZATION", "EMPTY_BODY", "UNKNOWN",
 }
 TLS_BACKEND_CURRENT_CA = "current-ca-v1"
 TLS_BACKEND_WINDOWS_SYSTEM_TRUST = "windows-system-trust-v1"
 TLS_BACKEND_WINDOWS_ROOT_BUNDLE_SEMANTIC = "windows-root-bundle-v1"
 SCHANNEL_TRANSPORT_ID = "windows-schannel-v1"
-SCHANNEL_IMPLEMENTATION_FINGERPRINT = "dotnet10-sslstream-schannel-cryptoapi-v1"
+SCHANNEL_IMPLEMENTATION_FINGERPRINT = "dotnet10-sslstream-schannel-cryptoapi-v2"
 HTTP_JOURNAL_PHASES = {
     "PLANNED", "REQUEST_STARTED", "RESPONSE_RECEIVED", "NORMALIZED", "FAILED", "OUTCOME_LOST",
 }
@@ -624,7 +625,7 @@ class WindowsSchannelTransport:
     def record_normalization_failure(self, requested_url: str, exc: Exception) -> None:
         if self.journal is not None:
             self.journal.failed(self._request_for_target[_canonical_url(requested_url)],
-                                category="NORMALIZATION_FAILED", detail=str(exc))
+                                category="NORMALIZATION", detail=str(exc))
 
     def fetch(self, requested_url: str, official_domain: str, policy: FetchPolicy) -> TransportPayload:
         if urlsplit(requested_url).scheme.lower() != "https":
@@ -658,15 +659,16 @@ class WindowsSchannelTransport:
                 failure = str(response.get("failure_class") or "UNKNOWN")
                 payload = TransportPayload(
                     requested_url, current, int(response.get("status_code") or 0),
-                    None, None, self.name, failure, response.get("safe_headers") or {}, metadata)
+                    response.get("mime_type"), None, self.name, failure,
+                    response.get("safe_headers") or {}, metadata)
                 return self._finish_request(request_id, payload, started)
-            decode_failure = None
+            decode_failure: str | None = None
             try:
                 body = base64.b64decode(str(response.get("body_base64") or ""), validate=True)
             except Exception:
-                body, decode_failure = b"", "UNKNOWN"
+                body, decode_failure = b"", "BODY_ENCODING"
             if int(response.get("response_bytes") or 0) != len(body):
-                decode_failure = "UNKNOWN"
+                decode_failure = "BODY_ENCODING"
             if _canonical_url(str(response.get("final_url") or "")) != _canonical_url(current):
                 decode_failure = "REDIRECT_BLOCKED"
             status = int(response.get("status_code") or 0)
@@ -697,6 +699,8 @@ class WindowsSchannelTransport:
                 failure = "SIZE_LIMIT"
             elif not failure and mime not in policy.allowed_mime_types:
                 failure = "MIME_REJECTED"
+            elif not failure and status not in {204, 205, 304} and not body:
+                failure = "EMPTY_BODY"
             payload = TransportPayload(
                 requested_url, current, status, mime, None if failure else body,
                 self.name, failure, safe_headers, metadata)
@@ -721,6 +725,61 @@ class NormalizedOfficialBody:
     date_candidates: tuple[str, ...]
     relevant_links: tuple[str, ...]
     bounded_excerpt: str
+
+
+@dataclass(frozen=True)
+class DynamicOfficialSource:
+    """An explicit same-domain resource reference found in saved official HTML."""
+
+    url: str
+    source_location: str
+    expected_content_type: str
+
+
+_DYNAMIC_PATH = re.compile(
+    r"(?:/api/|/wp-json/|ajax|\.json(?:[?#]|$)|\.xml(?:[?#]|$)|\.csv(?:[?#]|$))",
+    re.IGNORECASE,
+)
+_QUOTED_RESOURCE = re.compile(r"[\"']((?:https://|/)[^\"'<>\\\s]+)[\"']", re.IGNORECASE)
+
+
+def discover_official_dynamic_sources(body: bytes, final_url: str,
+                                      official_domain: str) -> tuple[DynamicOfficialSource, ...]:
+    """Extract explicit dynamic-resource references without guessing or network access."""
+    soup = BeautifulSoup(body, "html.parser")
+    discovered: dict[str, DynamicOfficialSource] = {}
+
+    def add(value: str, location: str, expected: str, *, require_dynamic: bool = False) -> None:
+        candidate = (value or "").strip()
+        if not candidate or candidate.startswith(("#", "javascript:", "data:")):
+            return
+        absolute = urljoin(final_url, candidate)
+        parsed = urlsplit(absolute)
+        if parsed.scheme.lower() != "https" or not _is_official_host(parsed.hostname or "", official_domain):
+            return
+        if require_dynamic and not _DYNAMIC_PATH.search(parsed.path + ("?" + parsed.query if parsed.query else "")):
+            return
+        canonical = _canonical_url(absolute)
+        discovered.setdefault(canonical, DynamicOfficialSource(canonical, location, expected))
+
+    for index, script in enumerate(soup.find_all("script")):
+        source = script.get("src")
+        if source:
+            add(str(source), f"script[{index}].src", "application/javascript")
+        inline = script.string or script.get_text(" ", strip=False)
+        for match in _QUOTED_RESOURCE.finditer(inline or ""):
+            add(match.group(1), f"script[{index}].inline", "application/json", require_dynamic=True)
+
+    for element_index, element in enumerate(soup.find_all(True)):
+        for attribute, value in element.attrs.items():
+            if not attribute.startswith("data-"):
+                continue
+            values = value if isinstance(value, list) else [value]
+            for item in values:
+                add(str(item), f"element[{element_index}].{attribute}", "application/json",
+                    require_dynamic=True)
+
+    return tuple(discovered[url] for url in sorted(discovered))
 
 
 def normalize_official_body(body: bytes, mime_type: str, final_url: str,
@@ -1066,7 +1125,7 @@ class JournaledTransport:
 
     def record_normalization_failure(self, requested_url: str, exc: Exception) -> None:
         request_id = self._request_for_url[_canonical_url(requested_url)]
-        self.journal.failed(request_id, category="NORMALIZATION_FAILED", detail=str(exc))
+        self.journal.failed(request_id, category="NORMALIZATION", detail=str(exc))
 
 
 class OfficialSourceResolver:

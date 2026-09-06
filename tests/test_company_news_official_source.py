@@ -38,6 +38,7 @@ from tools.company_news_official_source import (
     build_identity_evidence_card,
     company_identity_registry_schema,
     create_verified_tls_context,
+    discover_official_dynamic_sources,
     identity_invalidation_reasons,
     identity_preflight,
     model_context_from_resolution,
@@ -758,7 +759,7 @@ def schannel_response(*, body=b"<html><body>Example Works official profile</body
 def test_schannel_transport_has_native_identity_and_fingerprint():
     transport = WindowsSchannelTransport(helper_runner=lambda request: schannel_response())
     assert transport.name == "windows-schannel-v1"
-    assert transport.implementation_fingerprint == "dotnet10-sslstream-schannel-cryptoapi-v1"
+    assert transport.implementation_fingerprint == SCHANNEL_IMPLEMENTATION_FINGERPRINT
 
 
 def test_schannel_valid_chain_fixture_normalizes_and_journals(tmp_path):
@@ -776,6 +777,109 @@ def test_schannel_valid_chain_fixture_normalizes_and_journals(tmp_path):
     assert record["history"][-1]["phase"] == "NORMALIZED"
     received = next(row for row in record["history"] if row["phase"] == "RESPONSE_RECEIVED")
     assert received["transport_metadata"]["implementation_fingerprint"] == SCHANNEL_IMPLEMENTATION_FINGERPRINT
+
+
+def test_schannel_http_200_empty_body_is_classified_without_crash(tmp_path):
+    journal = journal_for(tmp_path)
+    payload = WindowsSchannelTransport(
+        journal=journal, dns_resolver=PUBLIC_DNS,
+        helper_runner=lambda request: schannel_response(body=b"", status=200)).fetch(
+            "https://official.example/", "official.example", FetchPolicy(max_redirects=0))
+    assert payload.status_code == 200
+    assert payload.failure_reason == "EMPTY_BODY"
+    assert payload.body is None
+    record = journal._disk_records()[0][0]
+    received = next(row for row in record["history"] if row["phase"] == "RESPONSE_RECEIVED")
+    assert received["status_code"] == 200
+    assert received["exception_category"] == "EMPTY_BODY"
+
+
+@pytest.mark.parametrize("status", [204, 205])
+def test_schannel_valid_no_body_status_is_preserved(status):
+    response = schannel_response(body=b"", status=status)
+    payload = WindowsSchannelTransport(
+        dns_resolver=PUBLIC_DNS, helper_runner=lambda request: response).fetch(
+            "https://official.example/", "official.example", FetchPolicy(max_redirects=0))
+    assert payload.status_code == status
+    assert payload.failure_reason is None
+    assert payload.body == b""
+
+
+def test_schannel_null_body_representation_is_deterministic():
+    response = schannel_response(body=b"", status=204)
+    response["body_base64"] = None
+    payload = WindowsSchannelTransport(
+        dns_resolver=PUBLIC_DNS, helper_runner=lambda request: response).fetch(
+            "https://official.example/", "official.example", FetchPolicy(max_redirects=0))
+    assert payload.status_code == 204
+    assert payload.failure_reason is None
+    assert payload.body == b""
+
+
+def test_schannel_body_encoding_failure_keeps_http_metadata(tmp_path):
+    journal = journal_for(tmp_path)
+    response = schannel_response(body=b"expected", status=200,
+                                 safe_headers={"content-length": "8"})
+    response["body_base64"] = "%%%invalid-base64%%%"
+    payload = WindowsSchannelTransport(
+        journal=journal, dns_resolver=PUBLIC_DNS,
+        helper_runner=lambda request: response).fetch(
+            "https://official.example/", "official.example", FetchPolicy(max_redirects=0))
+    assert payload.status_code == 200
+    assert payload.failure_reason == "BODY_ENCODING"
+    assert payload.safe_headers == {"content-length": "8"}
+    record = journal._disk_records()[0][0]
+    received = next(row for row in record["history"] if row["phase"] == "RESPONSE_RECEIVED")
+    assert received["status_code"] == 200
+    assert received["safe_headers"] == {"content-length": "8"}
+    assert record["history"][-1]["exception_category"] == "BODY_ENCODING"
+
+
+def test_schannel_helper_failure_after_response_keeps_status_headers_and_stage(tmp_path):
+    journal = journal_for(tmp_path)
+    response = schannel_response(result="FAILURE", failure="BODY_ENCODING",
+                                 body=b"", status=200, mime="text/html",
+                                 safe_headers={"content-type": "text/html"})
+    payload = WindowsSchannelTransport(
+        journal=journal, dns_resolver=PUBLIC_DNS,
+        helper_runner=lambda request: response).fetch(
+            "https://official.example/", "official.example", FetchPolicy(max_redirects=0))
+    assert payload.status_code == 200
+    assert payload.mime_type == "text/html"
+    assert payload.failure_reason == "BODY_ENCODING"
+    record = journal._disk_records()[0][0]
+    received = next(row for row in record["history"] if row["phase"] == "RESPONSE_RECEIVED")
+    assert received["status_code"] == 200
+    assert received["safe_headers"] == {"content-type": "text/html"}
+
+
+def test_schannel_normalization_failure_keeps_received_http_result(tmp_path, monkeypatch):
+    journal = journal_for(tmp_path)
+    transport = WindowsSchannelTransport(
+        journal=journal, dns_resolver=PUBLIC_DNS,
+        helper_runner=lambda request: schannel_response(status=200))
+    monkeypatch.setattr(
+        official_source, "normalize_official_body",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("bad normalization")))
+    with pytest.raises(RuntimeError, match="bad normalization"):
+        OfficialSourceResolver(transport).resolve(
+            unverified_example(), "https://official.example/", FetchPolicy(max_redirects=0))
+    record = journal._disk_records()[0][0]
+    received = next(row for row in record["history"] if row["phase"] == "RESPONSE_RECEIVED")
+    assert received["status_code"] == 200
+    assert record["history"][-1]["exception_category"] == "NORMALIZATION"
+
+
+def test_schannel_journal_primary_and_spool_sha_match(tmp_path):
+    primary, spool = tmp_path / "primary", tmp_path / "spool"
+    store = durable_store(tmp_path, primary=primary, spool=spool)
+    journal = HttpFetchJournal(store, run_id="run-1", company="6444")
+    OfficialSourceResolver(WindowsSchannelTransport(
+        journal=journal, dns_resolver=PUBLIC_DNS,
+        helper_runner=lambda request: schannel_response())).resolve(
+            unverified_example(), "https://official.example/", FetchPolicy(max_redirects=0))
+    relative = next((spool / "http-journal").glob("*.json")).relative_to(spool)
+    assert (primary / relative).read_bytes() == (spool / relative).read_bytes()
 
 
 @pytest.mark.parametrize("failure,hostname", [
@@ -869,3 +973,28 @@ def test_schannel_helper_source_accepts_only_no_certificate_errors():
     assert "return $errors -eq [Net.Security.SslPolicyErrors]::None" in source
     assert "DangerousAcceptAnyServerCertificateValidator" not in source
     assert "DisableCertificateDownloads = $true" in source
+    assert "[byte[]]::new(0)" in source
+    assert "'BODY_ENCODING'" in source
+    assert "status_code = $statusCode" in source
+
+
+def test_dynamic_source_discovery_uses_only_explicit_same_domain_references():
+    body = b"""<html><body data-feed='/wp-json/company/v1/ir'>
+      <script src='/assets/ir-list.js'></script>
+      <script>fetch('/api/ir/news.json'); fetch('https://outside.example/api/news.json')</script>
+      <div data-label='/ordinary/page'></div>
+    </body></html>"""
+    found = discover_official_dynamic_sources(
+        body, "https://www.sanden.co.jp/ir/news/", "sanden.co.jp")
+    assert [item.url for item in found] == [
+        "https://www.sanden.co.jp/api/ir/news.json",
+        "https://www.sanden.co.jp/assets/ir-list.js",
+        "https://www.sanden.co.jp/wp-json/company/v1/ir",
+    ]
+    assert all(item.source_location for item in found)
+
+
+def test_dynamic_source_discovery_does_not_guess_from_static_shell():
+    body = "<html><title>IR News</title><body>2026 IR news list</body></html>".encode()
+    assert discover_official_dynamic_sources(
+        body, "https://www.sanden.co.jp/ir/news/", "sanden.co.jp") == ()
