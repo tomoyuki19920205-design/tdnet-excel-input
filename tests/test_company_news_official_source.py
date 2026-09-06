@@ -758,6 +758,13 @@ def schannel_response(*, body=b"<html><body>Example Works official profile</body
     }
 
 
+def schannel_response_for(request, **kwargs):
+    response = schannel_response(**kwargs)
+    response["requested_url"] = request["url"]
+    response["final_url"] = request["url"]
+    return response
+
+
 def test_schannel_transport_has_native_identity_and_fingerprint():
     transport = WindowsSchannelTransport(helper_runner=lambda request: schannel_response())
     assert transport.name == "windows-schannel-v1"
@@ -919,6 +926,196 @@ def test_schannel_cross_domain_redirect_is_blocked_without_second_request():
             "https://official.example/", "official.example", FetchPolicy(max_redirects=2))
     assert payload.failure_reason == "REDIRECT_BLOCKED" and len(calls) == 1
     assert payload.body is None
+
+
+@pytest.mark.parametrize("status", [301, 302])
+def test_schannel_same_domain_https_redirect_follows_one_hop(status, tmp_path):
+    calls = []
+    journal = journal_for(tmp_path)
+
+    def helper(request):
+        calls.append(request["url"])
+        if len(calls) == 1:
+            return schannel_response_for(
+                request, status=status, body=b"",
+                safe_headers={"location": "/next", "content-length": "0"})
+        return schannel_response_for(request)
+
+    result = OfficialSourceResolver(WindowsSchannelTransport(
+        journal=journal, dns_resolver=PUBLIC_DNS, helper_runner=helper)).resolve(
+            unverified_example(), "https://official.example/", FetchPolicy(max_redirects=1))
+    assert result.access_status == "VERIFIED"
+    assert result.final_url == "https://official.example/next"
+    assert calls == ["https://official.example/", "https://official.example/next"]
+    records = sorted(journal._disk_records()[0], key=lambda row: row["attempt_number"])
+    assert records[0]["parent_request_id"] is None
+    original = next(row for row in records[0]["history"] if row["phase"] == "RESPONSE_RECEIVED")
+    assert original["status_code"] == status and original["access_status"] == "REDIRECT"
+    assert records[1]["parent_request_id"] == records[0]["request_id"]
+    assert records[1]["redirect_hop"] == 1
+    assert records[1]["redirect_source_url"] == "https://official.example/"
+    assert records[1]["redirect_location"] == "/next"
+    assert records[1]["redirect_target_url"] == "https://official.example/next"
+    child = next(row for row in records[1]["history"] if row["phase"] == "RESPONSE_RECEIVED")
+    assert child["status_code"] == 200
+
+
+@pytest.mark.parametrize("location", [
+    "https://outside.example/next",
+    "http://official.example/next",
+])
+def test_schannel_redirect_rejects_external_domain_and_http_downgrade(location):
+    calls = []
+
+    def helper(request):
+        calls.append(request["url"])
+        return schannel_response_for(request, status=301, body=b"",
+                                     safe_headers={"location": location})
+
+    payload = WindowsSchannelTransport(
+        dns_resolver=PUBLIC_DNS, helper_runner=helper).fetch(
+            "https://official.example/", "official.example", FetchPolicy(max_redirects=1))
+    assert payload.failure_reason == "REDIRECT_BLOCKED"
+    assert len(calls) == 1
+
+
+def test_schannel_redirect_revalidates_private_destination_before_child_request(tmp_path):
+    calls = []
+
+    def resolver(host, *_args, **_kwargs):
+        address = "127.0.0.1" if host == "private.official.example" else "93.184.216.34"
+        return [(2, 1, 6, "", (address, 443))]
+
+    def helper(request):
+        calls.append(request["url"])
+        return schannel_response_for(
+            request, status=301, body=b"",
+            safe_headers={"location": "https://private.official.example/next"})
+
+    journal = journal_for(tmp_path)
+    with pytest.raises(OfficialSourceError, match="non-public"):
+        WindowsSchannelTransport(
+            journal=journal, dns_resolver=resolver, helper_runner=helper).fetch(
+                "https://official.example/", "official.example", FetchPolicy(max_redirects=1))
+    assert len(calls) == 1
+    assert journal.request_count() == 1
+
+
+def test_schannel_redirect_loop_is_blocked_without_child_request():
+    calls = []
+
+    def helper(request):
+        calls.append(request["url"])
+        return schannel_response_for(request, status=301, body=b"",
+                                     safe_headers={"location": "/"})
+
+    payload = WindowsSchannelTransport(
+        dns_resolver=PUBLIC_DNS, helper_runner=helper).fetch(
+            "https://official.example/", "official.example", FetchPolicy(max_redirects=1))
+    assert payload.failure_reason == "REDIRECT_BLOCKED"
+    assert len(calls) == 1
+
+
+def test_schannel_second_redirect_is_blocked_without_third_request(tmp_path):
+    calls = []
+    journal = journal_for(tmp_path)
+
+    def helper(request):
+        calls.append(request["url"])
+        location = "/second" if len(calls) == 1 else "/third"
+        return schannel_response_for(request, status=302, body=b"",
+                                     safe_headers={"location": location})
+
+    payload = WindowsSchannelTransport(
+        journal=journal, dns_resolver=PUBLIC_DNS, helper_runner=helper).fetch(
+            "https://official.example/", "official.example", FetchPolicy(max_redirects=1))
+    assert payload.failure_reason == "REDIRECT_BLOCKED"
+    assert calls == ["https://official.example/", "https://official.example/second"]
+    assert journal.request_count() == 2
+
+
+def test_schannel_raw_html_is_durable_and_hash_matches(tmp_path):
+    primary, spool = tmp_path / "primary", tmp_path / "spool"
+    store = durable_store(tmp_path, primary=primary, spool=spool)
+    journal = HttpFetchJournal(store, run_id="raw", company="6444")
+    body = b"<html><body>Example Works retained source</body></html>"
+    result = OfficialSourceResolver(WindowsSchannelTransport(
+        journal=journal, dns_resolver=PUBLIC_DNS, retain_raw_html=True,
+        helper_runner=lambda request: schannel_response_for(request, body=body))).resolve(
+            unverified_example(), "https://official.example/", FetchPolicy(max_redirects=0))
+    assert result.access_status == "VERIFIED"
+    record = journal._disk_records()[0][0]
+    received = next(row for row in record["history"] if row["phase"] == "RESPONSE_RECEIVED")
+    relative = received["transport_metadata"]["raw_body_artifact"]
+    assert received["transport_metadata"]["raw_body_sha256"] == hashlib.sha256(body).hexdigest()
+    assert (spool / relative).read_bytes() == body
+    assert (primary / relative).read_bytes() == body
+
+
+def test_schannel_empty_html_body_is_retained(tmp_path):
+    journal = journal_for(tmp_path)
+    payload = WindowsSchannelTransport(
+        journal=journal, dns_resolver=PUBLIC_DNS, retain_raw_html=True,
+        helper_runner=lambda request: schannel_response_for(request, body=b"", status=200)).fetch(
+            "https://official.example/", "official.example", FetchPolicy(max_redirects=0))
+    assert payload.failure_reason == "EMPTY_BODY"
+    received = next(row for row in journal._disk_records()[0][0]["history"]
+                    if row["phase"] == "RESPONSE_RECEIVED")
+    relative = received["transport_metadata"]["raw_body_artifact"]
+    assert (journal.store.spool_root / relative).read_bytes() == b""
+
+
+def test_schannel_oversized_html_is_not_retained(tmp_path):
+    journal = journal_for(tmp_path)
+    payload = WindowsSchannelTransport(
+        journal=journal, dns_resolver=PUBLIC_DNS, retain_raw_html=True,
+        helper_runner=lambda request: schannel_response_for(request, body=b"123456")).fetch(
+            "https://official.example/", "official.example", FetchPolicy(
+                max_redirects=0, max_response_bytes=5))
+    assert payload.failure_reason == "SIZE_LIMIT"
+    assert not (journal.store.spool_root / "raw-http").exists()
+
+
+def test_schannel_normalization_failure_keeps_raw_html(tmp_path, monkeypatch):
+    journal = journal_for(tmp_path)
+    body = b"<html><body>Example Works raw before normalization</body></html>"
+    transport = WindowsSchannelTransport(
+        journal=journal, dns_resolver=PUBLIC_DNS, retain_raw_html=True,
+        helper_runner=lambda request: schannel_response_for(request, body=body))
+    monkeypatch.setattr(
+        official_source, "normalize_official_body",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("normalizer failed")))
+    with pytest.raises(RuntimeError, match="normalizer failed"):
+        OfficialSourceResolver(transport).resolve(
+            unverified_example(), "https://official.example/", FetchPolicy(max_redirects=0))
+    received = next(row for row in journal._disk_records()[0][0]["history"]
+                    if row["phase"] == "RESPONSE_RECEIVED")
+    relative = received["transport_metadata"]["raw_body_artifact"]
+    assert (journal.store.spool_root / relative).read_bytes() == body
+
+
+def test_schannel_primary_raw_write_failure_keeps_spool(tmp_path, monkeypatch):
+    primary, spool = tmp_path / "primary", tmp_path / "spool"
+    store = durable_store(tmp_path, primary=primary, spool=spool)
+    real_write = official_source.atomic_write_bytes
+
+    def fail_primary(path, value):
+        if primary in path.parents:
+            raise PermissionError("primary raw blocked")
+        real_write(path, value)
+
+    monkeypatch.setattr(official_source, "atomic_write_bytes", fail_primary)
+    journal = HttpFetchJournal(store, run_id="raw", company="6444")
+    body = b"<html><body>Example Works spool survives</body></html>"
+    OfficialSourceResolver(WindowsSchannelTransport(
+        journal=journal, dns_resolver=PUBLIC_DNS, retain_raw_html=True,
+        helper_runner=lambda request: schannel_response_for(request, body=body))).resolve(
+            unverified_example(), "https://official.example/", FetchPolicy(max_redirects=0))
+    received = next(row for row in journal._disk_records()[0][0]["history"]
+                    if row["phase"] == "RESPONSE_RECEIVED")
+    relative = received["transport_metadata"]["raw_body_artifact"]
+    assert (spool / relative).read_bytes() == body
+    assert store.mirror_errors
 
 
 def test_schannel_redirect_journal_keeps_zero_body_and_hash(tmp_path):

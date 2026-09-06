@@ -44,7 +44,7 @@ TLS_BACKEND_CURRENT_CA = "current-ca-v1"
 TLS_BACKEND_WINDOWS_SYSTEM_TRUST = "windows-system-trust-v1"
 TLS_BACKEND_WINDOWS_ROOT_BUNDLE_SEMANTIC = "windows-root-bundle-v1"
 SCHANNEL_TRANSPORT_ID = "windows-schannel-v1"
-SCHANNEL_IMPLEMENTATION_FINGERPRINT = "dotnet10-sslstream-schannel-cryptoapi-v2"
+SCHANNEL_IMPLEMENTATION_FINGERPRINT = "dotnet10-sslstream-schannel-cryptoapi-v3"
 HTTP_JOURNAL_PHASES = {
     "PLANNED", "REQUEST_STARTED", "RESPONSE_RECEIVED", "NORMALIZED", "FAILED", "OUTCOME_LOST",
 }
@@ -563,10 +563,12 @@ class WindowsSchannelTransport:
     def __init__(self, *, journal: "HttpFetchJournal | None" = None,
                  dns_resolver: Callable[..., Any] = socket.getaddrinfo,
                  helper_path: Path | None = None,
-                 helper_runner: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None) -> None:
+                 helper_runner: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
+                 retain_raw_html: bool = False) -> None:
         self.journal, self.dns_resolver = journal, dns_resolver
         self.helper_path = Path(helper_path or Path(__file__).with_name("company_news_windows_schannel_fetch.ps1"))
         self.helper_runner = helper_runner or self._run_helper
+        self.retain_raw_html = retain_raw_html
         self._attempts = 0
         self._request_for_target: dict[str, str] = {}
 
@@ -596,23 +598,48 @@ class WindowsSchannelTransport:
             raise OfficialSourceError("SCHANNEL_HELPER: transport provenance mismatch")
         return value
 
-    def _start_request(self, target_url: str) -> tuple[str | None, float]:
+    def _start_request(self, target_url: str, *, parent_request_id: str | None = None,
+                       redirect_hop: int = 0, redirect_source_url: str | None = None,
+                       redirect_location: str | None = None) -> tuple[str | None, float]:
         started = time.monotonic()
         if self.journal is None:
             return None, started
         self._attempts += 1
         request_id = f"request-{self._attempts:04d}-{uuid.uuid4().hex[:12]}"
         self.journal.start(request_id=request_id, transport=self.name,
-                           requested_url=target_url, attempt_number=self._attempts)
+                           requested_url=target_url, attempt_number=self._attempts,
+                           parent_request_id=parent_request_id, redirect_hop=redirect_hop,
+                           redirect_source_url=redirect_source_url,
+                           redirect_location=redirect_location,
+                           redirect_target_url=target_url if parent_request_id else None)
         self._request_for_target[_canonical_url(target_url)] = request_id
         return request_id, started
 
     def _finish_request(self, request_id: str | None, payload: TransportPayload,
-                        started: float) -> TransportPayload:
+                        started: float, *, raw_body: bytes | None = None) -> TransportPayload:
         if self.journal is not None and request_id is not None:
+            retained = payload.body if raw_body is None else raw_body
+            if (self.retain_raw_html and retained is not None
+                    and payload.mime_type in {"text/html", "application/xhtml+xml"}):
+                relative = Path("raw-http") / f"{request_id}.html"
+                self.journal.store.write_bytes(relative, retained)
+                metadata = dict(payload.transport_metadata or {})
+                metadata.update({
+                    "raw_body_artifact": relative.as_posix(),
+                    "raw_body_sha256": hashlib.sha256(retained).hexdigest(),
+                    "raw_body_bytes": len(retained),
+                })
+                payload = TransportPayload(
+                    payload.requested_url, payload.final_url, payload.status_code,
+                    payload.mime_type, payload.body, payload.fetch_method,
+                    payload.failure_reason, payload.safe_headers, metadata,
+                )
             elapsed = float((payload.transport_metadata or {}).get(
                 "elapsed_seconds", time.monotonic() - started))
-            self.journal.response_received(request_id, payload, elapsed=elapsed)
+            access_status = ("REDIRECT" if payload.status_code in range(300, 400)
+                             and not payload.failure_reason else None)
+            self.journal.response_received(request_id, payload, elapsed=elapsed,
+                                           access_status=access_status)
             if payload.failure_reason:
                 self.journal.failed(request_id, category=payload.failure_reason)
         return payload
@@ -631,8 +658,14 @@ class WindowsSchannelTransport:
         if urlsplit(requested_url).scheme.lower() != "https":
             raise OfficialSourceError("ACCESS_DENIED: Schannel transport requires HTTPS")
         current = validate_fetch_url(requested_url, official_domain, self.dns_resolver)
+        visited = {_canonical_url(current)}
+        parent_request_id: str | None = None
+        redirect_source_url: str | None = None
+        redirect_location: str | None = None
         for redirects in range(policy.max_redirects + 1):
-            request_id, started = self._start_request(current)
+            request_id, started = self._start_request(
+                current, parent_request_id=parent_request_id, redirect_hop=redirects,
+                redirect_source_url=redirect_source_url, redirect_location=redirect_location)
             try:
                 response = dict(self.helper_runner({
                     "url": current,
@@ -681,16 +714,25 @@ class WindowsSchannelTransport:
                 if not location or redirects == policy.max_redirects:
                     return self._finish_request(request_id, TransportPayload(
                         requested_url, current, status, mime, None, self.name,
-                        "REDIRECT_BLOCKED", safe_headers, metadata), started)
+                        "REDIRECT_BLOCKED", safe_headers, metadata), started, raw_body=body)
                 destination = urljoin(current, location)
                 if (urlsplit(destination).scheme.lower() != "https"
                         or not _is_official_host(urlsplit(destination).hostname or "", official_domain)):
                     return self._finish_request(request_id, TransportPayload(
                         requested_url, destination, status, mime, None, self.name,
-                        "REDIRECT_BLOCKED", safe_headers, metadata), started)
+                        "REDIRECT_BLOCKED", safe_headers, metadata), started, raw_body=body)
+                if _canonical_url(destination) in visited:
+                    return self._finish_request(request_id, TransportPayload(
+                        requested_url, destination, status, mime, None, self.name,
+                        "REDIRECT_BLOCKED", safe_headers, metadata), started, raw_body=body)
                 self._finish_request(request_id, TransportPayload(
-                    current, current, status, mime, None, self.name, None, safe_headers, metadata), started)
+                    current, current, status, mime, None, self.name, None, safe_headers, metadata),
+                    started, raw_body=body)
+                parent_request_id = request_id
+                redirect_source_url = current
+                redirect_location = str(location)
                 current = validate_fetch_url(destination, official_domain, self.dns_resolver)
+                visited.add(_canonical_url(current))
                 continue
             failure = decode_failure or response.get("failure_class")
             if not failure and status >= 500:
@@ -706,7 +748,9 @@ class WindowsSchannelTransport:
             payload = TransportPayload(
                 requested_url, current, status, mime, None if failure else body,
                 self.name, failure, safe_headers, metadata)
-            return self._finish_request(request_id, payload, started)
+            self._request_for_target[_canonical_url(requested_url)] = request_id
+            retained_body = None if failure == "SIZE_LIMIT" else body
+            return self._finish_request(request_id, payload, started, raw_body=retained_body)
         return TransportPayload(requested_url, current, 0, None, None, self.name, "UNKNOWN")
 
 
@@ -904,6 +948,20 @@ def atomic_write_json(path: Path, value: Any) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def atomic_write_bytes(path: Path, value: bytes) -> None:
+    """Durably replace one binary artifact without exposing a partial body."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("xb") as stream:
+            stream.write(value)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def writable_probe(path: Path) -> None:
     """Create, fsync, read back, and remove a probe before any HTTP is allowed."""
     path.mkdir(parents=True, exist_ok=True)
@@ -972,6 +1030,18 @@ class DurableArtifactStore:
                 self.mirror_errors.append(f"{relative}: {type(exc).__name__}: {exc}")
         return spool_path
 
+    def write_bytes(self, relative_path: str | Path, value: bytes) -> Path:
+        relative = Path(relative_path)
+        spool_path = self.spool_root / relative
+        atomic_write_bytes(spool_path, value)
+        if self.spool_root != self.primary_root:
+            try:
+                atomic_write_bytes(self.primary_root / relative, value)
+            except Exception as exc:
+                assert self.mirror_errors is not None
+                self.mirror_errors.append(f"{relative}: {type(exc).__name__}: {exc}")
+        return spool_path
+
     def copy_spool_to_primary(self) -> bool:
         if self.spool_root == self.primary_root:
             return True
@@ -984,9 +1054,7 @@ class DurableArtifactStore:
                         atomic_write_json(self.primary_root / relative,
                                           json.loads(source.read_text(encoding="utf-8")))
                     else:
-                        destination = self.primary_root / relative
-                        destination.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(source, destination)
+                        atomic_write_bytes(self.primary_root / relative, source.read_bytes())
             return True
         except Exception as exc:
             assert self.mirror_errors is not None
@@ -1011,13 +1079,21 @@ class HttpFetchJournal:
         return self.store.write_json(self._path(record["request_id"]), record)
 
     def planned(self, *, request_id: str, transport: str, requested_url: str,
-                attempt_number: int) -> None:
-        self._persist({
+                attempt_number: int, parent_request_id: str | None = None,
+                redirect_hop: int = 0, redirect_source_url: str | None = None,
+                redirect_location: str | None = None,
+                redirect_target_url: str | None = None) -> None:
+        record = {
             "schema_version": self.schema_version, "run_id": self.run_id,
             "request_id": request_id, "company": self.company, "transport": transport,
             "requested_url": requested_url, "attempt_number": attempt_number,
+            "parent_request_id": parent_request_id, "redirect_hop": redirect_hop,
+            "redirect_source_url": redirect_source_url,
+            "redirect_location": redirect_location,
+            "redirect_target_url": redirect_target_url,
             "history": [{"phase": "PLANNED", "at": self.clock()}],
-        })
+        }
+        self._persist(record)
 
     def transition(self, request_id: str, phase: str, **values: Any) -> None:
         if phase not in HTTP_JOURNAL_PHASES:
@@ -1027,9 +1103,16 @@ class HttpFetchJournal:
         self._persist(record)
 
     def start(self, *, request_id: str, transport: str, requested_url: str,
-              attempt_number: int) -> None:
+              attempt_number: int, parent_request_id: str | None = None,
+              redirect_hop: int = 0, redirect_source_url: str | None = None,
+              redirect_location: str | None = None,
+              redirect_target_url: str | None = None) -> None:
         self.planned(request_id=request_id, transport=transport,
-                     requested_url=requested_url, attempt_number=attempt_number)
+                     requested_url=requested_url, attempt_number=attempt_number,
+                     parent_request_id=parent_request_id, redirect_hop=redirect_hop,
+                     redirect_source_url=redirect_source_url,
+                     redirect_location=redirect_location,
+                     redirect_target_url=redirect_target_url)
         self.transition(request_id, "REQUEST_STARTED", started_at=self.clock())
 
     def response_received(self, request_id: str, payload: TransportPayload, *, elapsed: float,
