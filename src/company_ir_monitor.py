@@ -27,6 +27,13 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 import requests
 from bs4 import BeautifulSoup, Tag
 
+from src.company_ir_document_contract import (
+    ASSET_MATERIAL,
+    ASSET_VIDEO,
+    classify_ir_nightly_asset as classify_asset,
+    is_pdf_url as _is_pdf_url,
+    normalize_text,
+)
 from src.events.common_models import EventRecord
 from src.events.tdnet_event_store import save_event_to_supabase
 from src.material_url_retry import (
@@ -39,28 +46,8 @@ from src.material_url_retry import (
 logger = logging.getLogger("company_ir_monitor")
 JST = timezone(timedelta(hours=9))
 
-ASSET_MATERIAL = "earnings_material"
-ASSET_VIDEO = "earnings_video"
 EVENT_MATERIAL = "company_ir_material"
 EVENT_VIDEO = "company_ir_video"
-
-_MATERIAL_TERMS = (
-    "決算説明資料", "決算説明会資料", "決算補足説明資料", "決算説明補足資料",
-    "決算補足資料", "決算説明会プレゼンテーション",
-    "financialresultspresentation", "earningspresentation",
-    "resultsbriefingmaterials", "presentationmaterialsforfinancialresults",
-)
-_VIDEO_TERMS = (
-    "決算説明動画", "決算説明会動画", "決算説明会webcast", "決算説明会ライブ配信",
-    "financialresultsbriefingvideo", "earningswebcast", "resultspresentationvideo",
-)
-_EXCLUDES = (
-    "決算短信", "有価証券報告書", "四半期報告書", "適時開示", "株主総会", "招集通知",
-    "統合報告書", "q&a", "qa要旨", "質疑応答", "書き起こし", "文字おこし",
-    "transcript", "中期経営計画", "事業説明会", "個人投資家", "irセミナー",
-    "会社説明会", "訂正", "修正について",
-)
-_VIDEO_HOSTS = ("youtube.com", "youtu.be", "vimeo.com", "daiwair.jp", "logmi.jp")
 _PERIOD_RE = re.compile(
     r"(?:20\d{2}|19\d{2}|令和\d+)年\s*\d{1,2}月期(?:\s*(?:第\s*[1-4一二三四]\s*四半期|通期))?"
 )
@@ -111,10 +98,6 @@ def _now_iso() -> str:
     return datetime.now(JST).isoformat(timespec="seconds")
 
 
-def normalize_text(value: str) -> str:
-    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", value or "")).lower()
-
-
 def normalize_company_ir_display_title(value: str) -> str:
     """Derive a stable viewer title without changing persisted source metadata."""
     title = unicodedata.normalize("NFKC", value or "")
@@ -153,27 +136,6 @@ def normalize_url(value: str) -> str:
     if is_pdf:
         netloc = re.sub(r"^www\d+\.", "www.", netloc)
     return urlunsplit((parts.scheme.lower(), netloc, path, urlencode(query), ""))
-
-
-def _is_pdf_url(url: str) -> bool:
-    value = normalize_text(url)
-    return bool(re.search(r"\.pdf(?:$|[?&#])", value))
-
-
-def classify_asset(title: str, url: str, context: str = "") -> str | None:
-    """High-precision allowlist classifier for only the two requested types."""
-    title_n = normalize_text(title)
-    # Context is deliberately not used for positive/exclusion classification:
-    # one accordion often contains a presentation, transcript, and Q&A, and a
-    # sibling must never turn a generic PDF into an earnings presentation.
-    combined = title_n
-    if not title_n or any(term in title_n for term in _EXCLUDES):
-        return None
-    if any(term in combined for term in _VIDEO_TERMS):
-        return ASSET_VIDEO
-    if any(term in combined for term in _MATERIAL_TERMS) and _is_pdf_url(url):
-        return ASSET_MATERIAL
-    return None
 
 
 def _context_for(node: Tag, text_cache: dict[int, str] | None = None) -> str:

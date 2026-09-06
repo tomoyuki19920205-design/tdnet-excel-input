@@ -74,3 +74,15 @@ All SQLite and notification decisions remain on the main thread.
 Viewer publication failures remain `notified=0` and are retried on the next
 nightly run with the same stable event identity. TDnet matches are retained with
 `suppression_reason='tdnet_duplicate'` for auditability and are never published.
+
+## Company News overlap contract
+
+`src/company_ir_document_contract.py` is the shared high-precision classifier.
+IR Nightly uses it for notification detection; Company News uses the same result
+to mark `OUT_OF_SCOPE_IR_NIGHTLY`. Matching listing entries remain in official
+window inventories, but Company News does not fetch their body, create a
+material candidate, run incremental-IR analysis, or count them as access gaps.
+This is not an IR-channel exclusion: price changes, orders, partnerships,
+capacity and customer-adoption releases remain eligible unless the shared
+classifier (or an authoritative IR Nightly inventory record) covers them.
+TDNET overlap remains the distinct `OUT_OF_SCOPE_TDNET` state.

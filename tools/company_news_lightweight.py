@@ -29,6 +29,11 @@ from lib.news_monitor import canonicalize_url, parse_datetime, validate_payload
 from tools import company_news_strategy_v4 as strategy_v4
 from tools import company_news_strategy_v5 as strategy_v5
 from tools.company_news_canonical_schema import validate_instance
+from tools.company_news_overlap_scope import (
+    OverlapScopeError,
+    apply_ir_nightly_overlap,
+    assert_incremental_ir_candidate_allowed,
+)
 
 
 SCHEMA = "company_news_lightweight_phase1_v1"
@@ -966,6 +971,10 @@ def apply_incremental_ir_authority(response: dict[str, Any],
     if not isinstance(documents, list):
         raise LightweightError("canonical documents are missing")
     for index, document in enumerate(documents):
+        try:
+            assert_incremental_ir_candidate_allowed(document)
+        except OverlapScopeError as exc:
+            raise LightweightError(str(exc)) from exc
         if document.get("scope_label") != "IN_SCOPE_INCREMENTAL_IR":
             continue
         if applicable:
@@ -1395,6 +1404,7 @@ def codex_runner(root: Path, experiment: Path, assignment: dict[str, Any]) -> tu
     response = apply_source_count_authority(response)
     response = apply_search_record_registry(response, search_registry, discovery)
     response = normalize_documents_from_evidence(response, store.cards(), assignment)
+    response = apply_ir_nightly_overlap(response)
     response = apply_incremental_ir_authority(response, store.cards(), discovery)
     response, _ = apply_materiality_authority(
         response, store.cards(), company_name=assignment["company_name"])

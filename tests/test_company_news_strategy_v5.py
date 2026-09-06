@@ -140,7 +140,7 @@ def test_final_synthesis_api_schema_lints_and_accepts_valid_sample():
     schema = light.synthesis_output_schema()
     assert light.lint_api_schema(schema) == []
     light.validate_instance(canonical_response(), schema)
-    assert v.canonical_schema_sha256() == "d1f28aa1e09eb2ed32cdde3810a7d5bda7d6ec0d7fd2831895a4b28aba5fe34c"
+    assert v.canonical_schema_sha256() == "8c50803cc936224945ed18c59f691690df003259dea4fa9814cbd2c19813e6d5"
 
 
 @pytest.mark.parametrize("mutation,pattern", [

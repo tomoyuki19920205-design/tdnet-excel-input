@@ -13,6 +13,10 @@ from datetime import date
 from urllib.parse import urlsplit
 
 from tools import company_news_batch_benchmark as b
+from tools.company_news_overlap_scope import (
+    OUT_OF_SCOPE_IR_NIGHTLY,
+    ir_nightly_coverage,
+)
 from tools.company_news_official_source import (
     CompanyIdentityRegistry,
     OfficialWindowCoverage,
@@ -27,7 +31,7 @@ SCOPE_SCHEMA = 'news_monitor_scope_v1'
 PROMPT_NAME = 'company_news_research_strategy_v4_prompt.md'
 IN_SCOPE = {'IN_SCOPE_COMPANY_WEB', 'IN_SCOPE_EXTERNAL_MEDIA', 'IN_SCOPE_GOVERNMENT',
             'IN_SCOPE_COUNTERPARTY', 'IN_SCOPE_INCREMENTAL_IR'}
-OUT_SCOPE = {'OUT_OF_SCOPE_TDNET', 'OUT_OF_SCOPE_TRIVIAL'}
+OUT_SCOPE = {'OUT_OF_SCOPE_TDNET', 'OUT_OF_SCOPE_IR_NIGHTLY', 'OUT_OF_SCOPE_TRIVIAL'}
 SCOPE_LABELS = IN_SCOPE | OUT_SCOPE | {'AMBIGUOUS'}
 CHANNELS = {'official', 'external_media', 'government', 'counterparty', 'incremental_ir'}
 MATERIAL_TITLE = re.compile(r'価格改定|値上げ|値下げ|提携|受注|生産停止|工場停止|操業|設備投資|顧客採用|行政処分|回収|不具合|承認|供給契約|capacity|price|partnership|recall|order', re.I)
@@ -116,6 +120,11 @@ def scope_decision(item):
         require(item.get('tdnet_same_content_verified') is True and url(item.get('tdnet_url'))
                 and text(item.get('tdnet_identity_evidence')) and item.get('incremental_information') is False,
                 'TDNET equivalence not established')
+    if label == OUT_OF_SCOPE_IR_NIGHTLY:
+        nightly = ir_nightly_coverage(item.get('title', ''), item.get('url', ''))
+        require(nightly.covered and item.get('material') is False
+                and item.get('body_status') == 'SKIPPED',
+                'IR Nightly exclusion is not established')
     if label == 'OUT_OF_SCOPE_TRIVIAL':
         require(text(item.get('index_evidence')), 'trivial index evidence missing')
         require(not MATERIAL_TITLE.search(item.get('title', '')), 'potentially material title cannot be skipped as trivial')

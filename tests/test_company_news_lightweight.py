@@ -273,7 +273,7 @@ def test_worker_limits_schema_sharing_and_context_boundaries():
     specs = light.plan_exposure_workers(assignment, discovery, light.EvidenceStore())
     assert len(specs) == 3 and all(len(spec.queries) <= 2 for spec in specs)
     assert specs[0].queries[0]["canonical_driver_phrase"] in specs[0].queries[0]["query"]
-    assert light.strategy_v5.canonical_schema_sha256() == "d1f28aa1e09eb2ed32cdde3810a7d5bda7d6ec0d7fd2831895a4b28aba5fe34c"
+    assert light.strategy_v5.canonical_schema_sha256() == "8c50803cc936224945ed18c59f691690df003259dea4fa9814cbd2c19813e6d5"
     prompt = light.worker_contract(specs[1], assignment)
     assert "prior worker history" in prompt and "electronics capex" in prompt
     assert "vibration testing demand" not in prompt
