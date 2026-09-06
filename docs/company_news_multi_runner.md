@@ -114,7 +114,13 @@ the complete registry/plan pair before creating a manifest or queue.
 
 With separate network authorization, the same operation accepts
 `--windows-schannel`.  It deterministically constructs only
-`https://<company-master-domain>/`, permits one same-domain HTTPS redirect,
+an exact HTTPS URL using this authority order: verified registry body, verified
+IR Nightly body, IR Nightly's last successful company-controlled URL, company
+master exact URL, then a derived `https://<official-domain>/` URL. Domain
+ownership and exact fetch authority remain separate. A derived root is the
+lowest authority and its failure does not establish that the company's official
+source is globally blocked. Saved `www` hosts may be used; the runner never
+constructs a `www` hostname. The selected URL permits one same-domain HTTPS redirect,
 and promotes identity only when the normalized official body directly names
 the assigned company.  If the root lacks that support, one additional URL may
 be fetched only when its literal same-domain href contains a generic company,
@@ -138,6 +144,32 @@ fallback.  Every request uses the company-local durable Schannel journal.
 Formal registry/plan files and the `PREPARED` run are emitted only after all
 cohort identities pass.  Any `UNVERIFIED` or `BLOCKED` company leaves the
 research run unprepared and records the exact gap in the bootstrap report.
+
+## Offline identity authority forensics
+
+`forensic-identity-authority` audits the company master, successful IR Nightly
+source rows, strict saved-body manifests, and a prior bootstrap report without
+opening a transport. It writes a result-neutral resolution plan and classifies
+each company as already verified, ready for one exact HTTPS GET, or lacking an
+exact URL compatible with the verified-identity contract.
+
+An optional reusable IR Nightly body has schema
+`company_ir_nightly_verified_body_v1` and must include ticker, company name,
+official domain, exact source URL, last-success timestamp, MIME type, a relative
+body path, and its SHA-256. The body hash and direct company linkage are checked
+through `RepositoryExistingTransport`; a configured URL or successful timestamp
+alone never becomes `VERIFIED`.
+
+```powershell
+..\.venv\Scripts\python.exe tools\company_news_multi_runner.py forensic-identity-authority `
+  --cohort-file artifacts\token_efficiency_phase22\phase22-fixed-cohort.json `
+  --cohort-sha256 fc38bd476c68a0e47d75c59d664eb4fc2387c5a5c2580beece5668f395ff909e `
+  --approved-company-count 12 --max-companies 12 `
+  --company-master-db data\company_ir_monitor.db `
+  --repository-artifacts-root artifacts `
+  --phase22e-report artifacts\token_efficiency_phase22\phase22-identity-bootstrap\phase22-schannel-bootstrap-report.json `
+  --output artifacts\token_efficiency_phase22\phase22-identity-resolution-plan.json
+```
 
 ## Commands
 

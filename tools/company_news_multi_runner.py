@@ -51,6 +51,8 @@ from tools.company_news_overlap_scope import classify_news_monitor_scope
 SCHEMA = "company_news_frozen_cohort_run_v1"
 BOOTSTRAP_SCHEMA = "company_news_frozen_input_bootstrap_v1"
 OFFICIAL_PLAN_SCHEMA = "company_news_official_source_plan_v1"
+IDENTITY_RESOLUTION_PLAN_SCHEMA = "company_news_identity_resolution_plan_v1"
+IR_NIGHTLY_VERIFIED_BODY_SCHEMA = "company_ir_nightly_verified_body_v1"
 RUN_STATES = {"PREPARED", "RUNNING", "STOPPED", "COMPLETED", "FAILED"}
 COMPANY_STATES = {"PENDING", "RUNNING", "COMPLETED", "FAILED", "SAFE_UNKNOWN"}
 DOCUMENT_PROVENANCE_STATES = (
@@ -277,13 +279,295 @@ def _load_company_master(company_master_db: Path,
         if table is None:
             raise MultiRunnerError("company master has no company_ir_companies table")
         placeholders = ",".join("?" for _ in tickers)
+        available = {str(row[1]) for row in connection.execute(
+            "PRAGMA table_info(company_ir_companies)").fetchall()}
+        wanted = (
+            "ticker", "company_name", "official_url", "official_domain", "ir_top_url",
+            "ir_library_url", "ir_event_url", "discovery_status", "source_origin",
+            "last_validated_at", "last_http_status", "last_error",
+        )
+        selection = [name if name in available else f"NULL AS {name}" for name in wanted]
         rows = connection.execute(
-            "SELECT ticker,official_url,official_domain,discovery_status,source_origin,"
-            "last_validated_at,last_http_status FROM company_ir_companies "
+            f"SELECT {','.join(selection)} FROM company_ir_companies "
             f"WHERE ticker IN ({placeholders})", tuple(tickers)).fetchall()
         return {str(row["ticker"]): dict(row) for row in rows}
     finally:
         connection.close()
+
+
+def _load_ir_nightly_sources(company_master_db: Path,
+                             tickers: Sequence[str]) -> dict[str, list[dict[str, Any]]]:
+    """Read exact URLs that IR Nightly has actually fetched successfully."""
+    result = {str(ticker): [] for ticker in tickers}
+    if not company_master_db.is_file():
+        return result
+    connection = sqlite3.connect(company_master_db.resolve().as_uri() + "?mode=ro", uri=True)
+    connection.row_factory = sqlite3.Row
+    try:
+        table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='company_ir_sources'"
+        ).fetchone()
+        if table is None:
+            return result
+        available = {str(row[1]) for row in connection.execute(
+            "PRAGMA table_info(company_ir_sources)").fetchall()}
+        required = {"ticker", "source_url"}
+        if not required <= available:
+            return result
+        optional = ("status", "baseline_completed_at", "last_checked_at", "last_success_at",
+                    "last_error", "failure_count", "page_kind", "discovered_from",
+                    "provenance_url", "is_external", "verified_from_official")
+        selection = ["ticker", "source_url"] + [
+            name if name in available else f"NULL AS {name}" for name in optional]
+        placeholders = ",".join("?" for _ in tickers)
+        order = "ticker,id" if "id" in available else "ticker,source_url"
+        rows = connection.execute(
+            f"SELECT {','.join(selection)} FROM company_ir_sources "
+            f"WHERE ticker IN ({placeholders}) ORDER BY {order}", tuple(tickers)).fetchall()
+        for row in rows:
+            result[str(row["ticker"])].append(dict(row))
+        return result
+    finally:
+        connection.close()
+
+
+def _exact_official_url(value: Any, official_domain: str) -> str | None:
+    try:
+        parsed = urlsplit(str(value or ""))
+    except ValueError:
+        return None
+    host = (parsed.hostname or "").lower().rstrip(".")
+    domain = str(official_domain or "").lower().rstrip(".")
+    if (parsed.scheme.lower() not in {"http", "https"} or not host or not domain
+            or (host != domain and not host.endswith("." + domain))):
+        return None
+    return str(value)
+
+
+def _select_identity_url_authority(
+        authority: Mapping[str, Any] | None,
+        sources: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Keep domain ownership separate from an exact URL suitable for a fetch."""
+    domain = str((authority or {}).get("official_domain") or "").strip().lower().rstrip(".")
+    successful = [dict(row) for row in sources
+                  if row.get("last_success_at") and row.get("status") == "active"
+                  and row.get("verified_from_official") in {1, True}
+                  and _exact_official_url(row.get("source_url"), domain)]
+    priority = {"top": 0, "library": 1, "event": 2}
+    successful.sort(key=lambda row: (
+        0 if urlsplit(str(row["source_url"])).scheme.lower() == "https" else 1,
+        priority.get(str(row.get("page_kind") or ""), 9),
+        str(row.get("source_url"))))
+    if successful:
+        row = successful[0]
+        return {
+            "identity_fetch_url": row["source_url"],
+            "identity_fetch_url_source": "IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH",
+            "identity_fetch_verification": "KNOWN_SUCCESSFUL_FETCH",
+            "previously_successful": True,
+            "last_success_at": row.get("last_success_at"),
+        }
+    master_url = _exact_official_url((authority or {}).get("official_url"), domain)
+    if master_url:
+        return {
+            "identity_fetch_url": master_url,
+            "identity_fetch_url_source": "MASTER_EXACT_URL",
+            "identity_fetch_verification": "UNVERIFIED",
+            "previously_successful": False,
+            "last_success_at": None,
+        }
+    return {
+        "identity_fetch_url": deterministic_https_root(domain) if domain else None,
+        "identity_fetch_url_source": "DERIVED_ROOT_URL" if domain else None,
+        "identity_fetch_verification": "UNVERIFIED",
+        "previously_successful": False,
+        "last_success_at": None,
+    }
+
+
+def _load_ir_nightly_verified_body_records(
+        repository_artifacts_root: Path) -> dict[str, CompanyIdentityRecord]:
+    """Promote only strict IR Nightly manifests backed by saved bytes and hashes."""
+    records: dict[str, CompanyIdentityRecord] = {}
+    root = repository_artifacts_root.resolve()
+    if not root.is_dir():
+        return records
+    for manifest_path in sorted(root.glob("**/*ir-nightly-verified-body*.json")):
+        try:
+            manifest = _read(manifest_path)
+            if (manifest.get("schema_version") != IR_NIGHTLY_VERIFIED_BODY_SCHEMA
+                    or _contains_forbidden_bootstrap_key(manifest)):
+                continue
+            body_path = (manifest_path.parent / str(manifest["body_path"])).resolve()
+            body_path.relative_to(root)
+            body = body_path.read_bytes()
+            if hashlib.sha256(body).hexdigest() != manifest.get("body_sha256"):
+                continue
+            datetime.fromisoformat(str(manifest["last_success_at"]).replace("Z", "+00:00"))
+            provisional = CompanyIdentityRecord(
+                security_code=str(manifest["ticker"]), company_name=str(manifest["company_name"]),
+                normalized_name=_normalized_company_name(str(manifest["company_name"])),
+                official_domain=str(manifest["official_domain"]),
+                verified_official_url=str(manifest["source_url"]),
+                verification_source=str(manifest_path), verification_method=None,
+                verified_at=None, evidence_hash=None, status="UNVERIFIED", evidence_excerpt=None)
+            resolver = OfficialSourceResolver(RepositoryExistingTransport({
+                str(manifest["source_url"]): (body, str(manifest["mime_type"]), 200)}))
+            resolution = resolver.resolve(provisional, str(manifest["source_url"]), FetchPolicy())
+            record = promote_verified_identity(
+                provisional, resolution,
+                verification_source=f"IR Nightly verified body manifest: {manifest_path}")
+            records[record.security_code] = record
+        except (KeyError, OSError, ValueError, TypeError, json.JSONDecodeError, OfficialSourceError):
+            continue
+    return records
+
+
+def _phase22e_failure_details(report_path: Path | None) -> dict[str, dict[str, Any]]:
+    if report_path is None or not report_path.is_file():
+        return {}
+    report = _read(report_path)
+    result: dict[str, dict[str, Any]] = {}
+    for row in report.get("matrix") or []:
+        ticker = str(row.get("ticker"))
+        detail = {
+            "requested_url": row.get("deterministic_root_url"),
+            "failure": row.get("failure"), "http_requests": row.get("http_requests"),
+            "failure_stage": "DNS_PREFLIGHT" if row.get("failure") == "DNS" else None,
+            "outer_exception": None, "exception_chain": [], "certificate_evidence": False,
+            "protocol_evidence": None,
+        }
+        company_dir = report_path.parent / "companies" / f"{int(row['position']):02d}-{ticker}"
+        journals = sorted(company_dir.glob("identity-http/http-journal/*.json"))
+        if journals:
+            journal = _read(journals[-1])
+            events = [event for event in journal.get("history") or []
+                      if event.get("phase") == "RESPONSE_RECEIVED"]
+            if events:
+                metadata = events[-1].get("transport_metadata") or {}
+                certificate = metadata.get("certificate_summary") or {}
+                detail.update(
+                    requested_url=journal.get("requested_url"),
+                    failure_stage=metadata.get("failure_stage"),
+                    outer_exception=metadata.get("exception_type"),
+                    exception_chain=metadata.get("exception_chain") or [],
+                    certificate_evidence=bool(certificate.get("leaf") or certificate.get("chain_elements")),
+                    protocol_evidence=metadata.get("protocol"),
+                    error_detail=metadata.get("error_detail"),
+                )
+        result[ticker] = detail
+    return result
+
+
+def generate_identity_resolution_plan(
+        cohort: FrozenCohort, *, company_master_db: Path,
+        repository_artifacts_root: Path, output_path: Path,
+        phase22e_report_path: Path | None = None) -> dict[str, Any]:
+    """Create an offline-only exact-URL plan; this function has no transport path."""
+    tickers = [row.security_code for row in cohort.companies]
+    registry_records, _states = _load_repository_identity_records(repository_artifacts_root)
+    nightly_body_records = _load_ir_nightly_verified_body_records(repository_artifacts_root)
+    verified = {**nightly_body_records, **registry_records}
+    master = _load_company_master(company_master_db, tickers)
+    nightly_sources = _load_ir_nightly_sources(company_master_db, tickers)
+    failures = _phase22e_failure_details(phase22e_report_path)
+    companies = []
+    for company in cohort.companies:
+        authority = master.get(company.security_code)
+        domain = str((authority or {}).get("official_domain") or "") or None
+        record = verified.get(company.security_code)
+        selected = _select_identity_url_authority(authority, nightly_sources[company.security_code])
+        if record and record.normalized_name == _normalized_company_name(company.company_name):
+            selected = {
+                "identity_fetch_url": record.verified_official_url,
+                "identity_fetch_url_source": "REGISTRY_VERIFIED_BODY",
+                "identity_fetch_verification": "VERIFIED_BODY",
+                "previously_successful": True, "last_success_at": record.verified_at,
+            }
+            classification, requires_network = "A_EXISTING_VERIFIED_ARTIFACT", False
+        else:
+            candidate = selected.get("identity_fetch_url")
+            source = selected.get("identity_fetch_url_source")
+            is_https = bool(candidate and urlsplit(str(candidate)).scheme.lower() == "https")
+            if source in {"IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH", "MASTER_EXACT_URL"} and is_https:
+                classification, requires_network = "B_EXACT_AUTHORITATIVE_URL_ONE_GET", True
+            elif source in {"IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH", "MASTER_EXACT_URL"}:
+                classification, requires_network = "C_EXACT_URL_INCOMPATIBLE_WITH_HTTPS_POLICY", False
+            else:
+                classification, requires_network = "C_EXACT_AUTHORITATIVE_URL_MISSING", False
+        failure = failures.get(company.security_code) or {}
+        derived_host = (urlsplit(str(failure.get("requested_url") or "")).hostname or "").lower()
+        exact_host = (urlsplit(str(selected.get("identity_fetch_url") or "")).hostname or "").lower()
+        clusters = []
+        if derived_host and exact_host and derived_host != exact_host:
+            clusters.extend(["A_DERIVED_APEX_INAPPROPRIATE", "B_SAVED_CANONICAL_HOST_EXISTS"])
+        if failure.get("failure") == "DNS":
+            clusters.append("D_DERIVED_HOST_DNS_FAILURE")
+        if failure.get("failure") == "TLS_HANDSHAKE" and any(
+                "資格情報がありません" in str(value) for value in failure.get("exception_chain") or []):
+            clusters.append("C_SCHANNEL_HELPER_COMMON_FAILURE")
+        if not clusters and failure:
+            clusters.append("F_INSUFFICIENT_EVIDENCE")
+        companies.append({
+            "position": company.position, "ticker": company.security_code,
+            "company_name": company.company_name, "official_domain": domain,
+            "company_root_url": (authority or {}).get("official_url"),
+            "ir_root_url": (authority or {}).get("ir_top_url"),
+            "ir_library_url": (authority or {}).get("ir_library_url"),
+            "ir_news_or_event_url": (authority or {}).get("ir_event_url"),
+            "nightly_successful_urls": [row.get("source_url") for row in nightly_sources[company.security_code]
+                                        if row.get("last_success_at") and row.get("status") == "active"],
+            "candidate_exact_url": selected.get("identity_fetch_url"),
+            "source": selected.get("identity_fetch_url_source"),
+            "authority_level": selected.get("identity_fetch_verification"),
+            "previously_successful": selected.get("previously_successful"),
+            "last_success_at": selected.get("last_success_at"),
+            "requires_network": requires_network, "classification": classification,
+            "reason": ("saved verified body completes identity" if not requires_network and classification.startswith("A_")
+                       else "one exact HTTPS GET is required to verify body/company linkage" if requires_network
+                       else "saved exact URL is HTTP but VERIFIED identity contract requires HTTPS"
+                       if classification == "C_EXACT_URL_INCOMPATIBLE_WITH_HTTPS_POLICY"
+                       else "no saved exact official URL"),
+            "phase22e_failure": failure, "failure_clusters": sorted(set(clusters)),
+        })
+    plan = {
+        "schema_version": IDENTITY_RESOLUTION_PLAN_SCHEMA, "created_at": _now(),
+        "offline_only": True, "research_companies": 0, "http_calls": 0,
+        "web_calls": 0, "model_calls": 0,
+        "cohort_path": str(cohort.path), "cohort_sha256": cohort.cohort_sha256,
+        "cohort_file_sha256": cohort.file_sha256,
+        "universe_order_sha256": cohort.universe_order_sha256,
+        "ordered_tickers": tickers,
+        "authority_hierarchy": ["REGISTRY_VERIFIED_BODY", "IR_NIGHTLY_VERIFIED_BODY",
+                                "IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH", "MASTER_EXACT_URL",
+                                "DERIVED_ROOT_URL"],
+        "contract": {
+            "domain_authority_is_exact_url_authority": False,
+            "configured_url_is_verified_identity": False,
+            "derived_root_is_lowest_authority": True,
+            "derived_root_failure_blocks_official_source_globally": False,
+            "www_may_be_used_only_from_saved_evidence": True,
+            "historical_benchmark_answer_input": False,
+        },
+        "companies": companies,
+        "draft_verified_count": sum(row["classification"].startswith("A_") for row in companies),
+        "network_needed_count": sum(row["requires_network"] for row in companies),
+        "unresolved_url_count": sum(row["classification"].startswith("C_") for row in companies),
+        "exact_authoritative_url_count": sum(row["source"] in {
+            "REGISTRY_VERIFIED_BODY", "IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH", "MASTER_EXACT_URL"}
+            for row in companies),
+        "bare_domain_only_count": sum(row["source"] == "DERIVED_ROOT_URL" for row in companies),
+        "network_candidate_tickers": [row["ticker"] for row in companies if row["requires_network"]],
+        "unresolved_tickers": [row["ticker"] for row in companies
+                               if row["classification"].startswith("C_")],
+        "common_transport_review_required": sum(
+            "C_SCHANNEL_HELPER_COMMON_FAILURE" in row["failure_clusters"] for row in companies) > 1,
+    }
+    if _contains_forbidden_bootstrap_key(plan):
+        raise CohortIntegrityError("identity resolution plan contains historical answer leakage")
+    cohort.assert_unchanged()
+    _atomic(output_path.resolve(), plan)
+    return plan
 
 
 def _official_plan(cohort: FrozenCohort,
@@ -481,7 +765,9 @@ def bootstrap_identities_schannel(
     if max_http_requests < 1 or max_http_requests > 24:
         raise MultiRunnerError("identity bootstrap HTTP budget must be 1..24")
     verified, observed_states = _load_repository_identity_records(repository_artifacts_root)
-    master = _load_company_master(company_master_db, [row.security_code for row in cohort.companies])
+    tickers = [row.security_code for row in cohort.companies]
+    master = _load_company_master(company_master_db, tickers)
+    nightly_sources = _load_ir_nightly_sources(company_master_db, tickers)
     output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     registry_path = output_dir / "phase22-company-identity-registry.json"
@@ -509,12 +795,28 @@ def bootstrap_identities_schannel(
             state, failure = "BLOCKED", "global HTTP budget exhausted"
         else:
             domain = str(authority["official_domain"])
-            root_url = deterministic_https_root(domain)
+            selected = _select_identity_url_authority(
+                authority, nightly_sources[company.security_code])
+            root_url = selected["identity_fetch_url"]
+            if not root_url or urlsplit(str(root_url)).scheme.lower() != "https":
+                matrix.append({
+                    "position": company.position, "ticker": company.security_code,
+                    "company": company.company_name, "identity_state": "UNVERIFIED",
+                    "official_domain": domain,
+                    "deterministic_root_url": deterministic_https_root(domain),
+                    "identity_fetch_url": root_url,
+                    "identity_fetch_url_source": selected["identity_fetch_url_source"],
+                    "identity_fetch_verification": selected["identity_fetch_verification"],
+                    "verified_url": None, "transport": None, "http_requests": 0,
+                    "failure": "exact authoritative HTTPS URL unavailable",
+                })
+                continue
             provisional = CompanyIdentityRecord(
                 security_code=company.security_code, company_name=company.company_name,
                 normalized_name=_normalized_company_name(company.company_name),
                 official_domain=domain, verified_official_url=root_url,
-                verification_source="company_ir_monitor.db:company_ir_companies",
+                verification_source=(
+                    f"company_ir_monitor.db:{selected['identity_fetch_url_source'].lower()}"),
                 verification_method=None, verified_at=None, evidence_hash=None,
                 status="UNVERIFIED", evidence_excerpt=None)
             company_dir = output_dir / "companies" / f"{company.position:02d}-{company.security_code}"
@@ -562,6 +864,14 @@ def bootstrap_identities_schannel(
                 record.official_domain if record else None),
             "deterministic_root_url": (
                 deterministic_https_root(authority["official_domain"])
+                if authority and authority.get("official_domain") else None),
+            "identity_fetch_url": (
+                _select_identity_url_authority(
+                    authority, nightly_sources[company.security_code])["identity_fetch_url"]
+                if authority and authority.get("official_domain") else None),
+            "identity_fetch_url_source": (
+                _select_identity_url_authority(
+                    authority, nightly_sources[company.security_code])["identity_fetch_url_source"]
                 if authority and authority.get("official_domain") else None),
             "verified_url": verified_url, "transport": transport,
             "http_requests": request_count, "failure": failure,
@@ -1095,6 +1405,15 @@ def _parser() -> argparse.ArgumentParser:
     bootstrap.add_argument("--prepare-run-dir", type=Path)
     bootstrap.add_argument("--search-from", default="2026-08-25")
     bootstrap.add_argument("--search-to", default="2026-08-31")
+    forensic = sub.add_parser("forensic-identity-authority")
+    forensic.add_argument("--cohort-file", type=Path, required=True)
+    forensic.add_argument("--cohort-sha256", required=True)
+    forensic.add_argument("--approved-company-count", type=int, required=True)
+    forensic.add_argument("--max-companies", type=int, required=True)
+    forensic.add_argument("--company-master-db", type=Path, required=True)
+    forensic.add_argument("--repository-artifacts-root", type=Path, required=True)
+    forensic.add_argument("--phase22e-report", type=Path)
+    forensic.add_argument("--output", type=Path, required=True)
     report = sub.add_parser("aggregate"); report.add_argument("--run-dir", type=Path, required=True)
     run_next = sub.add_parser("run-next")
     run_next.add_argument("--root", type=Path, default=Path.cwd())
@@ -1107,12 +1426,17 @@ def _parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _parser().parse_args()
-    if args.command == "bootstrap-inputs":
+    if args.command in {"bootstrap-inputs", "forensic-identity-authority"}:
         cohort = FrozenCohort.load(args.cohort_file,
             approved_company_count=args.approved_company_count,
             max_companies=args.max_companies,
             expected_cohort_sha256=args.cohort_sha256)
-        if args.offline_only:
+        if args.command == "forensic-identity-authority":
+            value = generate_identity_resolution_plan(
+                cohort, company_master_db=args.company_master_db,
+                repository_artifacts_root=args.repository_artifacts_root,
+                phase22e_report_path=args.phase22e_report, output_path=args.output)
+        elif args.offline_only:
             if args.prepare_run_dir is not None:
                 raise MultiRunnerError("offline-only incomplete bootstrap cannot prepare a run")
             value = bootstrap_inputs(

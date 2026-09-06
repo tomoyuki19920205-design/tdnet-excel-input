@@ -69,6 +69,20 @@ def company_master(path: Path, rows):
     connection.close()
 
 
+def company_sources(path: Path, rows):
+    connection = sqlite3.connect(path)
+    connection.execute("""CREATE TABLE company_ir_sources (
+        id INTEGER PRIMARY KEY, ticker TEXT, source_url TEXT, status TEXT,
+        baseline_completed_at TEXT, last_checked_at TEXT, last_success_at TEXT,
+        last_error TEXT, failure_count INTEGER, page_kind TEXT,
+        discovered_from TEXT, provenance_url TEXT, is_external INTEGER,
+        verified_from_official INTEGER)""")
+    connection.executemany(
+        "INSERT INTO company_ir_sources VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+    connection.commit()
+    connection.close()
+
+
 def complete_inputs(tmp_path: Path, cohort):
     records = []
     for company in cohort.companies:
@@ -368,6 +382,98 @@ def test_identity_bootstrap_rejects_guessed_path_and_preserves_failure_state(tmp
             tls_blocked, ResolverJournal(tls_blocked)))
     assert report["matrix"][0]["identity_state"] == "BLOCKED"
     assert report["matrix"][0]["failure"] == "TLS"
+
+
+def test_identity_authority_separates_domain_exact_url_and_prefers_nightly_success(tmp_path):
+    master = tmp_path / "master.db"
+    company_master(master, [("1001", "https://www.example.test/", "example.test",
+                             "discovered", "master", "2026-08-20T00:00:00+00:00", 200)])
+    company_sources(master, [(1, "1001", "https://www.example.test/ir/", "active",
+                              "2026-08-20", "2026-09-06", "2026-09-06", None, 0,
+                              "top", "master", "https://www.example.test/", 0, 1)])
+    authority = multi._load_company_master(master, ["1001"])["1001"]
+    sources = multi._load_ir_nightly_sources(master, ["1001"])["1001"]
+    selected = multi._select_identity_url_authority(authority, sources)
+    assert authority["official_domain"] == "example.test"
+    assert selected["identity_fetch_url"] == "https://www.example.test/ir/"
+    assert selected["identity_fetch_url_source"] == "IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH"
+    assert selected["identity_fetch_verification"] == "KNOWN_SUCCESSFUL_FETCH"
+    assert selected["identity_fetch_url"] != multi.deterministic_https_root("example.test")
+
+
+def test_ir_nightly_saved_body_hash_and_linkage_can_be_reused(tmp_path):
+    root = tmp_path / "artifacts"
+    saved = root / "ir-nightly"; saved.mkdir(parents=True)
+    body = b"<html><title>Company 1</title><body>Company 1 official</body></html>"
+    (saved / "body.html").write_bytes(body)
+    (saved / "company-ir-nightly-verified-body.json").write_text(json.dumps({
+        "schema_version": multi.IR_NIGHTLY_VERIFIED_BODY_SCHEMA,
+        "ticker": "1001", "company_name": "Company 1",
+        "official_domain": "example.test", "source_url": "https://www.example.test/ir/",
+        "last_success_at": "2026-09-06T00:00:00+00:00", "body_path": "body.html",
+        "body_sha256": hashlib.sha256(body).hexdigest(), "mime_type": "text/html",
+    }), encoding="utf-8")
+    records = multi._load_ir_nightly_verified_body_records(root)
+    assert records["1001"].status == "VERIFIED"
+    assert records["1001"].verification_method == "REPOSITORY_VERIFIED_ARTIFACT"
+    assert records["1001"].evidence_hash == hashlib.sha256(body).hexdigest()
+
+
+def test_configured_url_or_bad_saved_body_never_becomes_verified(tmp_path):
+    root = tmp_path / "artifacts"
+    saved = root / "ir-nightly"; saved.mkdir(parents=True)
+    (saved / "body.html").write_text("unrelated company", encoding="utf-8")
+    (saved / "company-ir-nightly-verified-body.json").write_text(json.dumps({
+        "schema_version": multi.IR_NIGHTLY_VERIFIED_BODY_SCHEMA,
+        "ticker": "1001", "company_name": "Company 1",
+        "official_domain": "example.test", "source_url": "https://www.example.test/ir/",
+        "last_success_at": "2026-09-06T00:00:00+00:00", "body_path": "body.html",
+        "body_sha256": "0" * 64, "mime_type": "text/html",
+    }), encoding="utf-8")
+    assert multi._load_ir_nightly_verified_body_records(root) == {}
+
+
+def test_offline_resolution_plan_uses_saved_www_only_and_never_calls_network(tmp_path, monkeypatch):
+    cohort = load(cohort_file(tmp_path, 1), 1, 1)
+    master = tmp_path / "master.db"
+    company_master(master, [("1001", "https://www.example.test/", "example.test",
+                             "discovered", "master", "2026-08-20T00:00:00+00:00", 200)])
+    company_sources(master, [(1, "1001", "https://www.example.test/ir/", "active",
+                              "2026-08-20", "2026-09-06", "2026-09-06", None, 0,
+                              "top", "master", "https://www.example.test/", 0, 1)])
+    calls = []
+    monkeypatch.setattr(multi.OfficialSourceResolver, "resolve",
+                        lambda *args, **kwargs: calls.append(args))
+    artifacts = tmp_path / "artifacts"; artifacts.mkdir()
+    plan = multi.generate_identity_resolution_plan(
+        cohort, company_master_db=master, repository_artifacts_root=artifacts,
+        output_path=tmp_path / "plan.json")
+    row = plan["companies"][0]
+    assert calls == [] and plan["http_calls"] == plan["web_calls"] == plan["model_calls"] == 0
+    assert row["classification"] == "B_EXACT_AUTHORITATIVE_URL_ONE_GET"
+    assert row["candidate_exact_url"] == "https://www.example.test/ir/"
+    assert plan["contract"]["configured_url_is_verified_identity"] is False
+    assert plan["contract"]["derived_root_failure_blocks_official_source_globally"] is False
+    assert plan["contract"]["historical_benchmark_answer_input"] is False
+
+
+def test_bare_domain_is_lowest_authority_and_not_globally_blocked(tmp_path):
+    cohort = load(cohort_file(tmp_path, 1), 1, 1)
+    master = tmp_path / "master.db"
+    company_master(master, [("1001", None, "example.test", "discovered", "master",
+                             "2026-08-20T00:00:00+00:00", None)])
+    artifacts = tmp_path / "artifacts"; artifacts.mkdir()
+    phase22e = tmp_path / "phase22e.json"
+    phase22e.write_text(json.dumps({"matrix": [{"position": 1, "ticker": "1001",
+        "deterministic_root_url": "https://example.test/", "failure": "DNS",
+        "http_requests": 0}]}), encoding="utf-8")
+    plan = multi.generate_identity_resolution_plan(
+        cohort, company_master_db=master, repository_artifacts_root=artifacts,
+        phase22e_report_path=phase22e, output_path=tmp_path / "plan.json")
+    row = plan["companies"][0]
+    assert row["source"] == "DERIVED_ROOT_URL"
+    assert row["classification"] == "C_EXACT_AUTHORITATIVE_URL_MISSING"
+    assert row["failure_clusters"] == ["D_DERIVED_HOST_DNS_FAILURE"]
 
 
 def test_prepare_rejects_incomplete_frozen_inputs(tmp_path):
