@@ -44,4 +44,12 @@ When `retain_raw_html=True`, each size-accepted HTML/XHTML response is atomicall
 
 Transport provenance is derived from the implementation. The legacy identities remain `direct_http` and `direct_http/windows-system-trust-v1`; the latter aliases `direct_http/windows-root-bundle-v1` for retry-cache decisions, so a semantic rename cannot bypass a recorded failure. `windows-schannel-v1` is a separate retry identity because it uses the native Schannel/CryptoAPI implementation. Earlier failure records remain intact.
 
+## Delegated static resources
+
+`DelegatedStaticResourcePolicy` applies only when a `VERIFIED` company page explicitly embeds an exact HTTPS child resource and the parent body SHA-256 is retained as provenance. The child provider remains `DELEGATED_OFFICIAL_RESOURCE`; using it does not add that provider to the company's official identity domains. The policy rejects unverified parents, guessed or alternate child paths, redirects, nonstandard ports, arbitrary Referer values, control characters, and an `Accept` value that does not cover the expected child MIME.
+
+The Phase1.9q evidence supports one request change: a JavaScript resource must advertise JavaScript in `Accept`. This is required because both exact `.js` requests returned HTTP 406 while the prior Schannel profile advertised only HTML, XHTML, PDF, and plain text. The delegated policy changes `Accept` only for the bound transport instance. It preserves the existing resolver User-Agent and omits `Referer`, `Accept-Encoding`, `Accept-Language`, cookies, authorization, and cache controls. Referer and User-Agent changes remain unsupported by the available evidence. The helper records a safe sent/omitted request-header inventory in transport metadata; it never accepts Cookie or Authorization headers.
+
+`parse_http_rejection_artifact` reads only previously retained bytes and returns bounded title, text, provider markers, requirement markers, reference IDs, size, and SHA-256. Cookie, authentication, CAPTCHA, or anti-automation evidence is diagnostic only and never enables bypass behavior. Raw rejection bodies and raw JavaScript are never sent to a model.
+
 Certificate failures are classified as `TLS_CA_CHAIN`, `TLS_HOSTNAME`, `TLS_EXPIRED`, `TLS_NOT_YET_VALID`, `TLS_PROTOCOL`, `TLS_HANDSHAKE`, or `TLS_UNKNOWN`. A system-store initialization or verification-policy failure is `TLS_TRUST_INIT` and occurs before the request callable. HTTP journaling, SSRF checks, same-domain redirect limits, MIME limits, response-size limits, and timeout handling are unchanged.

@@ -258,6 +258,82 @@ class FetchPolicy:
 
 
 @dataclass(frozen=True)
+class DelegatedStaticResourcePolicy:
+    """Bound request metadata to an exact resource embedded by a verified official page."""
+
+    parent_identity: CompanyIdentityRecord
+    parent_url: str
+    parent_body_sha256: str
+    embedded_child_urls: tuple[str, ...]
+    expected_mime_types: tuple[str, ...]
+    accept: str
+    referer: str | None = None
+
+    def headers_for(self, child_url: str) -> dict[str, str]:
+        identity = validate_identity_record(self.parent_identity)
+        parent = urlsplit(self.parent_url)
+        if (identity.status != "VERIFIED" or parent.scheme.lower() != "https"
+                or not _is_official_host(parent.hostname or "", identity.official_domain)):
+            raise OfficialSourceError("ACCESS_DENIED: delegated parent must be a verified official HTTPS page")
+        if not _SHA256.fullmatch(self.parent_body_sha256):
+            raise OfficialSourceError("ACCESS_DENIED: delegated parent evidence hash is required")
+        child = _canonical_url(child_url)
+        allowed = {_canonical_url(value) for value in self.embedded_child_urls}
+        parsed_child = urlsplit(child)
+        if (child not in allowed or parsed_child.scheme.lower() != "https"
+                or not parsed_child.hostname or parsed_child.username or parsed_child.password
+                or parsed_child.port not in {None, 443}):
+            raise OfficialSourceError("ACCESS_DENIED: child is not an exact embedded HTTPS resource")
+        if not self.expected_mime_types or not any(value in self.accept for value in self.expected_mime_types):
+            raise OfficialSourceError("ACCESS_DENIED: Accept does not cover the delegated resource MIME")
+        headers = {"accept": _safe_request_header_value(self.accept, "Accept")}
+        if self.referer is not None:
+            if _canonical_url(self.referer) != _canonical_url(self.parent_url):
+                raise OfficialSourceError("ACCESS_DENIED: delegated Referer must equal the verified parent URL")
+            headers["referer"] = _safe_request_header_value(self.referer, "Referer")
+        return headers
+
+
+def _safe_request_header_value(value: str, name: str) -> str:
+    if (not value or len(value) > 1000 or any(ord(char) < 32 or ord(char) > 126 for char in value)):
+        raise OfficialSourceError(f"ACCESS_DENIED: invalid delegated {name} header")
+    return value
+
+
+def parse_http_rejection_artifact(body: bytes, *, max_text_chars: int = 2000) -> dict[str, Any]:
+    """Extract bounded offline evidence from an already retained HTTP rejection body."""
+    soup = BeautifulSoup(body, "html.parser")
+    title = soup.title.get_text(" ", strip=True) if soup.title else None
+    text = " ".join(soup.get_text(" ", strip=True).split())[:max_text_chars]
+    lower = text.lower()
+    providers = [name for name in ("akamai", "cloudflare", "cloudfront", "imperva", "fastly")
+                 if name in lower]
+    markers = {
+        "cookie": "cookie" in lower,
+        "authentication": any(value in lower for value in ("authenticate", "authentication", "login")),
+        "captcha": "captcha" in lower,
+        "waf_or_anti_automation": any(value in lower for value in (
+            "access denied", "request rejected", "security policy", "bot", "automated")),
+    }
+    references = sorted(set(re.findall(
+        r"(?i)\b(?:reference|request|error|incident)[- _]?(?:id|number)?\s*[:#]?\s*([A-Za-z0-9._-]{6,80})",
+        text)))[:10]
+    return {
+        "title": title,
+        "body_text": text,
+        "provider_markers": providers,
+        "requirement_markers": markers,
+        "reference_ids": references,
+        "body_sha256": hashlib.sha256(body).hexdigest(),
+        "body_bytes": len(body),
+    }
+
+
+def rejection_bodies_are_identical(bodies: list[bytes] | tuple[bytes, ...]) -> bool:
+    return bool(bodies) and len({hashlib.sha256(value).digest() for value in bodies}) == 1
+
+
+@dataclass(frozen=True)
 class TransportPayload:
     requested_url: str
     final_url: str
@@ -564,11 +640,13 @@ class WindowsSchannelTransport:
                  dns_resolver: Callable[..., Any] = socket.getaddrinfo,
                  helper_path: Path | None = None,
                  helper_runner: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
-                 retain_raw_html: bool = False) -> None:
+                 retain_raw_html: bool = False,
+                 delegated_policy: DelegatedStaticResourcePolicy | None = None) -> None:
         self.journal, self.dns_resolver = journal, dns_resolver
         self.helper_path = Path(helper_path or Path(__file__).with_name("company_news_windows_schannel_fetch.ps1"))
         self.helper_runner = helper_runner or self._run_helper
         self.retain_raw_html = retain_raw_html
+        self.delegated_policy = delegated_policy
         self._attempts = 0
         self._request_for_target: dict[str, str] = {}
 
@@ -658,6 +736,11 @@ class WindowsSchannelTransport:
         if urlsplit(requested_url).scheme.lower() != "https":
             raise OfficialSourceError("ACCESS_DENIED: Schannel transport requires HTTPS")
         current = validate_fetch_url(requested_url, official_domain, self.dns_resolver)
+        request_headers: dict[str, str] = {}
+        if self.delegated_policy is not None:
+            if policy.max_redirects != 0:
+                raise OfficialSourceError("ACCESS_DENIED: delegated static resources cannot follow redirects")
+            request_headers = self.delegated_policy.headers_for(current)
         visited = {_canonical_url(current)}
         parent_request_id: str | None = None
         redirect_source_url: str | None = None
@@ -672,6 +755,7 @@ class WindowsSchannelTransport:
                     "allowed_host": _domain(official_domain),
                     "timeout_seconds": policy.timeout_seconds,
                     "max_response_bytes": policy.max_response_bytes,
+                    "request_headers": request_headers,
                 }))
             except subprocess.TimeoutExpired as exc:
                 if self.journal is not None and request_id is not None:
@@ -689,6 +773,7 @@ class WindowsSchannelTransport:
                 "error_detail": str(response.get("error_detail") or "")[:2000] or None,
                 "response_bytes": response.get("response_bytes"),
                 "body_sha256": response.get("body_sha256"),
+                "request_header_profile": response.get("request_header_profile"),
             }
             if response.get("result") != "RESPONSE":
                 failure = str(response.get("failure_class") or "UNKNOWN")

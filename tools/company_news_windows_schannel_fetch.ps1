@@ -66,6 +66,7 @@ $mime = $null
 $safeHeaders = @{}
 $responseBytes = $null
 $bodySha256 = $null
+$requestHeaderProfile = $null
 $certificateSummary = [ordered]@{ ssl_policy_errors = @(); hostname_validation = 'UNKNOWN'; leaf = $null; chain_elements = @(); chain_status = @() }
 try {
     $request = ([Console]::In.ReadToEnd() | ConvertFrom-Json)
@@ -77,6 +78,29 @@ try {
     $timeoutMs = [Math]::Max(1, [int]([double]$request.timeout_seconds * 1000))
     $maxBytes = [int]$request.max_response_bytes
     if ($maxBytes -lt 1) { throw 'ACCESS_DENIED: invalid response limit' }
+    $userAgent = 'CompanyNewsOfficialResolverSchannel/1.0'
+    $accept = 'text/html,application/xhtml+xml,application/pdf,text/plain'
+    $referer = $null
+    if ($null -ne $request.request_headers) {
+        foreach ($property in $request.request_headers.PSObject.Properties) {
+            $name = $property.Name.ToLowerInvariant()
+            if ($name -notin @('accept', 'referer')) { throw 'ACCESS_DENIED: unsupported delegated request header' }
+            $value = [string]$property.Value
+            if (-not $value -or $value.Length -gt 1000 -or $value.Contains("`r") -or $value.Contains("`n")) { throw 'ACCESS_DENIED: invalid delegated request header' }
+            if ($name -eq 'accept') { $accept = $value }
+            if ($name -eq 'referer') { $referer = $value }
+        }
+    }
+    $requestHeaderProfile = [ordered]@{
+        host = [ordered]@{ sent = $true; value = $hostName }
+        user_agent = [ordered]@{ sent = $true; value = $userAgent }
+        accept = [ordered]@{ sent = $true; value = $accept }
+        accept_encoding = [ordered]@{ sent = $false; value = $null }
+        accept_language = [ordered]@{ sent = $false; value = $null }
+        referer = [ordered]@{ sent = ($null -ne $referer); value = $referer }
+        connection = [ordered]@{ sent = $true; value = 'close' }
+        cache_control = [ordered]@{ sent = $false; value = $null }
+    }
     $addresses = [Net.Dns]::GetHostAddresses($hostName)
     $address = $addresses | Where-Object { Test-PublicAddress $_ } | Select-Object -First 1
     if ($null -eq $address) { throw 'ACCESS_DENIED: no public destination address' }
@@ -128,7 +152,9 @@ try {
 
     $stage = 'HTTP'
     $pathAndQuery = if ($uri.PathAndQuery) { $uri.PathAndQuery } else { '/' }
-    $wire = "GET $pathAndQuery HTTP/1.1`r`nHost: $hostName`r`nUser-Agent: CompanyNewsOfficialResolverSchannel/1.0`r`nAccept: text/html,application/xhtml+xml,application/pdf,text/plain`r`nConnection: close`r`n`r`n"
+    $wire = "GET $pathAndQuery HTTP/1.1`r`nHost: $hostName`r`nUser-Agent: $userAgent`r`nAccept: $accept`r`n"
+    if ($null -ne $referer) { $wire += "Referer: $referer`r`n" }
+    $wire += "Connection: close`r`n`r`n"
     $wireBytes = [Text.Encoding]::ASCII.GetBytes($wire)
     $ssl.Write($wireBytes, 0, $wireBytes.Length)
     $ssl.Flush()
@@ -176,6 +202,7 @@ try {
         final_url = $uri.AbsoluteUri; status_code = $statusCode; mime_type = $mime
         response_bytes = $responseBytes; body_sha256 = $bodySha256; body_base64 = $bodyBase64
         safe_headers = $safeHeaders; certificate_summary = $certificateSummary; elapsed_seconds = $started.Elapsed.TotalSeconds
+        request_header_profile = $requestHeaderProfile
     }
 } catch {
     $started.Stop()
@@ -187,6 +214,7 @@ try {
         requested_url = if ($null -ne $request) { [string]$request.url } else { $null }; final_url = if ($statusCode -gt 0) { $uri.AbsoluteUri } else { $null }
         status_code = $statusCode; mime_type = $mime; response_bytes = $responseBytes; body_sha256 = $bodySha256; body_base64 = $null; safe_headers = $safeHeaders
         certificate_summary = $certificateSummary; elapsed_seconds = $started.Elapsed.TotalSeconds
+        request_header_profile = $requestHeaderProfile
         failure_class = $failure; error_detail = $message.Substring(0, [Math]::Min(2000, $message.Length))
     }
 } finally {

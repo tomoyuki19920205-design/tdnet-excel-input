@@ -17,6 +17,7 @@ from tools.company_news_official_source import (
     ArtifactStorageUnavailable,
     CompanyIdentityRecord,
     CompanyIdentityRegistry,
+    DelegatedStaticResourcePolicy,
     DirectHttpTransport,
     DurableArtifactStore,
     FetchPolicy,
@@ -43,8 +44,10 @@ from tools.company_news_official_source import (
     identity_invalidation_reasons,
     identity_preflight,
     model_context_from_resolution,
+    parse_http_rejection_artifact,
     promote_verified_identity,
     project_offline_state,
+    rejection_bodies_are_identical,
     tls_backend_change_allows_attempt,
     validate_fetch_url,
     validate_identity_record,
@@ -1214,3 +1217,94 @@ def test_dynamic_source_discovery_does_not_guess_from_static_shell():
     body = "<html><title>IR News</title><body>2026 IR news list</body></html>".encode()
     assert discover_official_dynamic_sources(
         body, "https://www.sanden.co.jp/ir/news/", "sanden.co.jp") == ()
+
+
+def delegated_policy(**changes):
+    values = dict(
+        parent_identity=verified_record(
+            official_domain="sanden.co.jp",
+            verified_official_url="https://www.sanden.co.jp/"),
+        parent_url="https://www.sanden.co.jp/ir/news/",
+        parent_body_sha256="b" * 64,
+        embedded_child_urls=("https://cdn.example/resources/company/list.js",),
+        expected_mime_types=("application/javascript", "text/javascript"),
+        accept="application/javascript,text/javascript;q=0.9,*/*;q=0.1",
+    )
+    values.update(changes)
+    return DelegatedStaticResourcePolicy(**values)
+
+
+def test_rejection_artifact_parser_is_bounded_and_extracts_evidence():
+    body = b"<html><title>Request Rejected</title><body>Access denied by CloudFront. Reference ID: ABCDEF123456 cookie required</body></html>"
+    result = parse_http_rejection_artifact(body, max_text_chars=80)
+    assert result["title"] == "Request Rejected"
+    assert "cloudfront" in result["provider_markers"]
+    assert result["requirement_markers"]["cookie"] is True
+    assert len(result["body_text"]) <= 80
+
+
+def test_identical_rejection_responses_use_body_hash():
+    assert rejection_bodies_are_identical([b"same", b"same"])
+    assert not rejection_bodies_are_identical([b"same", b"different"])
+
+
+def test_delegated_policy_requires_verified_parent_and_exact_embedded_child():
+    assert delegated_policy().headers_for("https://cdn.example/resources/company/list.js")["accept"].startswith("application/javascript")
+    with pytest.raises(OfficialSourceError, match="verified official"):
+        delegated_policy(parent_identity=verified_record(status="UNVERIFIED")).headers_for(
+            "https://cdn.example/resources/company/list.js")
+    with pytest.raises(OfficialSourceError, match="exact embedded"):
+        delegated_policy().headers_for("https://cdn.example/resources/company/other.js")
+
+
+def test_delegated_policy_rejects_arbitrary_referer():
+    with pytest.raises(OfficialSourceError, match="Referer"):
+        delegated_policy(referer="https://unrelated.example/").headers_for(
+            "https://cdn.example/resources/company/list.js")
+
+
+def test_delegated_policy_accept_must_cover_expected_resource_mime():
+    with pytest.raises(OfficialSourceError, match="Accept"):
+        delegated_policy(accept="text/html").headers_for(
+            "https://cdn.example/resources/company/list.js")
+
+
+def test_delegated_policy_is_scoped_to_one_transport_and_preserves_ua():
+    calls = []
+    policy = delegated_policy()
+    transport = WindowsSchannelTransport(
+        delegated_policy=policy, dns_resolver=PUBLIC_DNS,
+        helper_runner=lambda request: calls.append(request) or schannel_response_for(
+            request, body=b"const data = [];", mime="application/javascript"))
+    payload = transport.fetch(
+        "https://cdn.example/resources/company/list.js", "cdn.example",
+        FetchPolicy(max_redirects=0, allowed_mime_types=frozenset({"application/javascript"})))
+    assert payload.failure_reason is None
+    assert calls[0]["request_headers"] == {"accept": policy.accept}
+    assert "user-agent" not in calls[0]["request_headers"]
+    ordinary_calls = []
+    WindowsSchannelTransport(
+        dns_resolver=PUBLIC_DNS,
+        helper_runner=lambda request: ordinary_calls.append(request) or schannel_response_for(request),
+    ).fetch("https://official.example/", "official.example", FetchPolicy(max_redirects=0))
+    assert ordinary_calls[0]["request_headers"] == {}
+
+
+def test_delegated_policy_fails_closed_for_redirect_cookie_auth_and_captcha():
+    evidence = parse_http_rejection_artifact(
+        b"<html><body>Authentication and cookie required. CAPTCHA challenge.</body></html>")
+    assert evidence["requirement_markers"] == {
+        "cookie": True, "authentication": True, "captcha": True,
+        "waf_or_anti_automation": False,
+    }
+    with pytest.raises(OfficialSourceError, match="cannot follow redirects"):
+        WindowsSchannelTransport(
+            delegated_policy=delegated_policy(), dns_resolver=PUBLIC_DNS,
+            helper_runner=lambda request: pytest.fail("must fail before helper"),
+        ).fetch("https://cdn.example/resources/company/list.js", "cdn.example", FetchPolicy(max_redirects=1))
+
+
+def test_delegated_rejection_parser_and_policy_do_not_invoke_model_or_store_raw_in_context():
+    source = official_source.Path(official_source.__file__).read_text(encoding="utf-8")
+    assert "parse_http_rejection_artifact" in source
+    assert "model_context_from_resolution(parse_http_rejection_artifact" not in source
