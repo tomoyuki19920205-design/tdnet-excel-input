@@ -7,17 +7,24 @@ import pytest
 import requests
 
 from tools import company_news_strategy_v4 as v4
+from tools import company_news_official_source as official_source
 from tools.company_news_official_source import (
+    ArtifactStorageUnavailable,
     CompanyIdentityRecord,
     CompanyIdentityRegistry,
     DirectHttpTransport,
+    DurableArtifactStore,
     FetchPolicy,
+    HttpFetchJournal,
     IdentityFailureCache,
+    JournaledTransport,
     OfficialSourceError,
     OfficialSourceResolver,
     OfficialWindowCoverage,
     RepositoryExistingTransport,
+    TransportPayload,
     apply_registry_identity,
+    atomic_write_json,
     build_identity_evidence_card,
     company_identity_registry_schema,
     identity_invalidation_reasons,
@@ -28,6 +35,7 @@ from tools.company_news_official_source import (
     validate_fetch_url,
     validate_identity_record,
     validate_window_coverage,
+    writable_probe,
 )
 
 
@@ -271,3 +279,240 @@ def test_6444_offline_projection_remains_unverified_blocked_and_not_no_news():
     assert value["search_snippets"] == "DISCOVERY_ONLY"
     assert value["no_news_allowed"] is False
     assert value["web_calls"] == value["llm_calls"] == 0
+
+
+class CountingTransport:
+    name = "direct_http"
+
+    def __init__(self, body=b"<html><body>Example Works</body></html>"):
+        self.body = body
+        self.calls = 0
+
+    def fetch(self, requested_url, _official_domain, _policy):
+        self.calls += 1
+        return TransportPayload(requested_url, requested_url, 200, "text/html", self.body,
+                                self.name, safe_headers={"content-type": "text/html"})
+
+
+def durable_store(tmp_path, *, primary=None, spool=None, probe=writable_probe):
+    primary = primary or tmp_path / "primary"
+    spool = spool or tmp_path / "spool"
+    return DurableArtifactStore.prepare(primary, fallback_factory=lambda: spool, probe=probe)
+
+
+def journal_for(tmp_path, **kwargs):
+    return HttpFetchJournal(durable_store(tmp_path, **kwargs), run_id="run-1", company="6444")
+
+
+def unverified_example():
+    return verified_record(status="UNVERIFIED", verification_method=None, verified_at=None,
+                           evidence_hash=None, evidence_excerpt=None)
+
+
+def test_writable_artifact_preflight_allows_transport_only_after_probe(tmp_path):
+    journal = journal_for(tmp_path)
+    transport = CountingTransport()
+    result = OfficialSourceResolver(JournaledTransport(transport, journal)).resolve(
+        unverified_example(), "https://official.example/company")
+    assert result.access_status == "VERIFIED"
+    assert transport.calls == journal.request_count() == 1
+
+
+def test_primary_permission_error_uses_prevalidated_fallback(tmp_path):
+    primary, spool = tmp_path / "primary", tmp_path / "spool"
+
+    def probe(path):
+        if path == primary:
+            raise PermissionError("primary blocked")
+        writable_probe(path)
+
+    store = durable_store(tmp_path, primary=primary, spool=spool, probe=probe)
+    assert store.using_fallback and not store.primary_writable and store.spool_root == spool
+
+
+def test_no_primary_or_fallback_storage_prevents_http_callable(tmp_path):
+    transport = CountingTransport()
+    with pytest.raises(ArtifactStorageUnavailable, match="ARTIFACT_STORAGE_UNAVAILABLE"):
+        durable_store(tmp_path, probe=lambda _path: (_ for _ in ()).throw(PermissionError("blocked")))
+    assert transport.calls == 0
+
+
+def test_request_started_must_persist_before_http_callable():
+    transport = CountingTransport()
+
+    class BrokenJournal:
+        def start(self, **_kwargs):
+            raise PermissionError("journal unavailable")
+
+    with pytest.raises(PermissionError, match="journal unavailable"):
+        JournaledTransport(transport, BrokenJournal()).fetch(
+            "https://official.example/company", "official.example", FetchPolicy())
+    assert transport.calls == 0
+
+
+def test_response_metadata_survives_normalization_failure(tmp_path, monkeypatch):
+    journal = journal_for(tmp_path)
+    body = b"<html><body>RAW-BODY</body></html>"
+    transport = JournaledTransport(CountingTransport(body), journal)
+    monkeypatch.setattr(official_source, "normalize_official_body",
+                        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("normalizer failed")))
+    with pytest.raises(RuntimeError, match="normalizer failed"):
+        OfficialSourceResolver(transport).resolve(
+            unverified_example(), "https://official.example/company")
+    record = journal._disk_records()[0][0]
+    received = next(row for row in record["history"] if row["phase"] == "RESPONSE_RECEIVED")
+    assert received["status_code"] == 200
+    assert received["response_bytes"] == len(body)
+    assert received["body_sha256"]
+    assert record["history"][-1]["phase"] == "FAILED"
+
+
+def test_post_response_primary_failure_keeps_fallback_spool(tmp_path, monkeypatch):
+    primary, spool = tmp_path / "primary", tmp_path / "spool"
+    store = durable_store(tmp_path, primary=primary, spool=spool)
+    real_atomic = official_source.atomic_write_json
+
+    def fail_primary(path, value):
+        if primary in path.parents:
+            raise PermissionError("primary failed after response")
+        real_atomic(path, value)
+
+    monkeypatch.setattr(official_source, "atomic_write_json", fail_primary)
+    journal = HttpFetchJournal(store, run_id="run-1", company="6444")
+    OfficialSourceResolver(JournaledTransport(CountingTransport(), journal)).resolve(
+        unverified_example(), "https://official.example/company")
+    records, corrupt = journal._disk_records()
+    assert records[0]["history"][-1]["phase"] == "NORMALIZED"
+    assert not corrupt and store.mirror_errors
+
+
+def test_atomic_json_write_is_valid_and_leaves_no_partial_file(tmp_path):
+    target = tmp_path / "telemetry.json"
+    atomic_write_json(target, {"ok": True})
+    assert json.loads(target.read_text(encoding="utf-8")) == {"ok": True}
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_corrupt_journal_is_not_counted_as_formal_result(tmp_path):
+    journal = journal_for(tmp_path)
+    path = journal.store.spool_root / "http-journal" / "corrupt.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{partial", encoding="utf-8")
+    assert journal.request_count() == 0
+    assert journal.corrupt_records() == ["corrupt.json"]
+
+
+def test_outcome_lost_suppresses_same_url_same_transport_retry():
+    cache = IdentityFailureCache()
+    cache.record_outcome_lost(security_code="6444", domain="sanden.co.jp",
+                              url="https://www.sanden.co.jp/company/about/",
+                              transport="direct_http", attempted_at="2026-09-06T00:00:00+00:00")
+    assert not cache.retry_allowed(security_code="6444", domain="sanden.co.jp",
+                                   url="https://www.sanden.co.jp/company/about/",
+                                   transport="direct_http")
+    assert cache.records()[0].failure_type == "OUTCOME_LOST"
+
+
+def test_outcome_lost_allows_different_url_under_policy():
+    cache = IdentityFailureCache()
+    cache.record_outcome_lost(security_code="6444", domain="sanden.co.jp",
+                              url="https://www.sanden.co.jp/company/about/",
+                              transport="direct_http", attempted_at="2026-09-06T00:00:00+00:00")
+    assert cache.retry_allowed(security_code="6444", domain="sanden.co.jp",
+                               url="https://www.sanden.co.jp/ir/index.html",
+                               transport="direct_http")
+
+
+def test_outcome_lost_keeps_transport_specific_retry_semantics():
+    cache = IdentityFailureCache()
+    cache.record_outcome_lost(security_code="6444", domain="sanden.co.jp",
+                              url="https://www.sanden.co.jp/company/about/",
+                              transport="direct_http", attempted_at="2026-09-06T00:00:00+00:00")
+    assert cache.retry_allowed(security_code="6444", domain="sanden.co.jp",
+                               url="https://www.sanden.co.jp/company/about/",
+                               transport="repository_existing")
+
+
+def test_request_count_is_recovered_from_durable_journal(tmp_path):
+    journal = journal_for(tmp_path)
+    journal.start(request_id="request-1", transport="direct_http",
+                  requested_url="https://official.example/a", attempt_number=1)
+    journal.failed("request-1", category="TIMEOUT")
+    journal.start(request_id="request-2", transport="direct_http",
+                  requested_url="https://official.example/b", attempt_number=2)
+    journal.failed("request-2", category="HTTP_5XX")
+    recovered = HttpFetchJournal(journal.store, run_id="run-1", company="6444")
+    assert recovered.request_count() == 2
+
+
+def test_direct_http_redirect_journals_each_wire_request(tmp_path):
+    journal = journal_for(tmp_path)
+    session = FakeSession([
+        FakeResponse(302, headers={"Location": "/company/final"}),
+        FakeResponse(200, headers={"Content-Type": "text/html"},
+                     chunks=[b"<html><body>Example Works</body></html>"]),
+    ])
+    transport = DirectHttpTransport(session_factory=lambda: session,
+                                    dns_resolver=PUBLIC_DNS, journal=journal)
+    result = OfficialSourceResolver(transport).resolve(
+        unverified_example(), "https://official.example/company")
+    assert result.access_status == "VERIFIED"
+    assert len(session.calls) == journal.request_count() == 2
+    records = journal._disk_records()[0]
+    assert any(event.get("access_status") == "REDIRECT"
+               for event in records[0]["history"])
+    assert records[1]["history"][-1]["phase"] == "NORMALIZED"
+
+
+def test_started_without_terminal_state_is_detected_after_crash(tmp_path):
+    journal = journal_for(tmp_path)
+    journal.start(request_id="request-crashed", transport="direct_http",
+                  requested_url="https://official.example/a", attempt_number=1)
+    assert journal.incomplete_started() == ["request-crashed"]
+
+
+def test_outcome_lost_projection_is_terminal_and_counted(tmp_path):
+    journal = journal_for(tmp_path)
+    journal.project_outcome_lost(
+        request_id="phase19g-company-about", transport="direct_http",
+        requested_url="https://www.sanden.co.jp/company/about/", attempt_number=1,
+        reason="TELEMETRY_PERSISTENCE_FAILURE")
+    assert journal.request_count() == 1
+    assert journal.incomplete_started() == []
+    record = journal._disk_records()[0][0]
+    assert record["history"][-1]["phase"] == "OUTCOME_LOST"
+
+
+def test_http_journal_does_not_fabricate_search_registry_rows(tmp_path):
+    journal = journal_for(tmp_path)
+    journal.project_outcome_lost(
+        request_id="lost", transport="direct_http",
+        requested_url="https://www.sanden.co.jp/company/about/", attempt_number=1,
+        reason="TELEMETRY_PERSISTENCE_FAILURE")
+    serialized = json.dumps(journal._disk_records()[0], ensure_ascii=False)
+    assert "query_text" not in serialized and "result_count" not in serialized
+
+
+def test_raw_body_is_absent_from_http_journal(tmp_path):
+    journal = journal_for(tmp_path)
+    secret = "RAW-SECRET-NEVER-PERSIST"
+    OfficialSourceResolver(JournaledTransport(CountingTransport(
+        f"<html><body>Example Works {secret}</body></html>".encode()), journal)).resolve(
+            unverified_example(), "https://official.example/company")
+    serialized = json.dumps(journal._disk_records()[0], ensure_ascii=False)
+    assert secret not in serialized
+    assert "body_sha256" in serialized
+
+
+def test_phase19g_6444_lost_attempt_projection_and_retry_suppression(tmp_path):
+    journal = journal_for(tmp_path)
+    url = "https://www.sanden.co.jp/company/about/"
+    journal.project_outcome_lost(request_id="phase19g-lost", transport="direct_http",
+                                 requested_url=url, attempt_number=1,
+                                 reason="TELEMETRY_PERSISTENCE_FAILURE")
+    cache = IdentityFailureCache()
+    cache.record_outcome_lost(security_code="6444", domain="sanden.co.jp", url=url,
+                              transport="direct_http", attempted_at="2026-09-06T02:50:00+00:00")
+    assert journal.request_count() == 1
+    assert not cache.retry_allowed(security_code="6444", domain="sanden.co.jp",
+                                   url=url, transport="direct_http")
