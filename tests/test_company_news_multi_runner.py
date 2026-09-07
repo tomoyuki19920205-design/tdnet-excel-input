@@ -735,6 +735,132 @@ def test_safe_unknown_continues_without_model_call(tmp_path):
     assert queue["assignments"][1]["status"] == "COMPLETED"
 
 
+def transport_journal(url, *, failure="TLS_HANDSHAKE", stage="TLS", message="handshake failed",
+                      status=0):
+    return {
+        "requested_url": url,
+        "transport": "windows-schannel-v1",
+        "history": [{
+            "phase": "RESPONSE_RECEIVED",
+            "status_code": status,
+            "exception_category": failure or None,
+            "transport_metadata": {
+                "failure_stage": stage,
+                "error_detail": message,
+                "exception_chain": [message] if message else [],
+                "certificate_summary": {},
+            },
+        }],
+    }
+
+
+@pytest.mark.parametrize(("failure", "stage", "message", "status", "scope", "signature"), [
+    ("DNS", "DNS", "No such host is known", 0, "DOMAIN_OR_REMOTE", None),
+    ("TCP", "TCP", "socket access is denied 10013", 0, "LOCAL_SYSTEMIC",
+     "LOCAL_SOCKET_ACCESS_DENIED"),
+    ("TLS_HANDSHAKE", "TLS", "Authentication failed", 0, "DOMAIN_OR_REMOTE", None),
+    ("TLS_CA_CHAIN", "TLS", "UntrustedRoot", 0, "DOMAIN_CERTIFICATE", None),
+    ("TIMEOUT", "TLS", "operation timed out", 0, "AMBIGUOUS_TIMEOUT", None),
+    (None, "HTTP", "", 403, "REMOTE_HTTP", None),
+])
+def test_transport_failure_stage_taxonomy(failure, stage, message, status, scope, signature):
+    value = multi.classify_transport_failure_evidence(transport_journal(
+        "https://official.example/", failure=failure, stage=stage,
+        message=message, status=status))
+    assert value["scope"] == scope
+    assert value["systemic_signature"] == signature
+    assert value["failure_class"] == ("HTTP_4XX" if status == 403 else failure)
+
+
+def test_schannel_no_credentials_is_local_systemic_signature():
+    value = multi.classify_transport_failure_evidence(transport_journal(
+        "https://official.example/",
+        message="Win32Exception: セキュリティ パッケージで利用できる資格情報がありません"))
+    assert value["scope"] == "LOCAL_SYSTEMIC"
+    assert value["systemic_signature"] == "SCHANNEL_SEC_E_NO_CREDENTIALS"
+
+
+def test_phase22q_run004_success_run005_failure_fixture_attributes_local_boundary():
+    fixture = json.loads((Path(__file__).parent / "fixtures" /
+        "company_news_phase22q_5237_transport_comparison.json").read_text(encoding="utf-8"))
+    success, failed, probe = fixture["run004"], fixture["run005"], fixture["independent_probe"]
+    assert success["requested_url"] == failed["requested_url"] == probe["requested_url"]
+    assert success["transport"] == failed["transport"] == probe["transport"]
+    assert success["implementation_fingerprint"] == failed["implementation_fingerprint"]
+    assert success["status_code"] == probe["status_code"] == 200
+    assert success["body_sha256"] == probe["body_sha256"]
+    classified = multi.classify_transport_failure_evidence({
+        "requested_url": failed["requested_url"], "transport": failed["transport"],
+        "history": [{"phase": "RESPONSE_RECEIVED", "status_code": failed["status_code"],
+            "exception_category": failed["failure_class"], "transport_metadata": {
+                "failure_stage": failed["failure_stage"],
+                "exception_chain": failed["exception_chain"]}}]})
+    assert classified["systemic_signature"] == "SCHANNEL_SEC_E_NO_CREDENTIALS"
+    assert classified["scope"] == "LOCAL_SYSTEMIC"
+
+
+class JournalSafeOfficial:
+    def __init__(self, failure="TLS_HANDSHAKE", message="SEC_E_NO_CREDENTIALS 0x8009030E"):
+        self.failure, self.message = failure, message
+
+    def prepare(self, assignment, company_dir):
+        journal_dir = company_dir / "official-http" / "http-journal"
+        journal_dir.mkdir(parents=True)
+        value = transport_journal(
+            f"https://{assignment['ticker']}.example/", failure=self.failure,
+            stage="TLS", message=self.message)
+        (journal_dir / "request-0001.json").write_text(json.dumps(value), encoding="utf-8")
+        window = OfficialWindowCoverage(
+            assignment["ticker"], assignment["search_from"], assignment["search_to"],
+            "BLOCKED", (), (self.failure,), ())
+        return multi.OfficialPreflight(
+            "SAFE_UNKNOWN", CompanyIdentityRegistry(), window, {},
+            {"http_requests": 1, "official_discovery_started": True}, window.gaps)
+
+
+def test_three_consecutive_distinct_domains_trip_run_level_circuit_breaker(tmp_path):
+    run, ctl = controller(tmp_path, official=JournalSafeOfficial(), count=5)
+    assert ctl.run_next()["status"] == "SAFE_UNKNOWN"
+    assert ctl.run_next()["status"] == "SAFE_UNKNOWN"
+    assert ctl.run_next()["status"] == "INFRA_STOP"
+    manifest = json.loads((run / "manifest.json").read_text())
+    rows = json.loads((run / "queue.json").read_text())["assignments"]
+    assert manifest["state"] == "STOPPED"
+    assert manifest["transport_circuit_breaker"] == {
+        "threshold": 3,
+        "signature": "SCHANNEL_SEC_E_NO_CREDENTIALS",
+        "consecutive_distinct_domains": ["1001.example", "1002.example", "1003.example"],
+        "triggered_at": manifest["transport_circuit_breaker"]["triggered_at"],
+    }
+    assert [row["status"] for row in rows] == [
+        "SAFE_UNKNOWN", "SAFE_UNKNOWN", "INFRA_STOP", "PENDING", "PENDING"]
+    with pytest.raises(multi.ResumeRequired):
+        ctl.run_next()
+    report = multi.aggregate(run)
+    assert report["overall_evaluation"] == "BLOCKED"
+    assert report["live_research_e2e"] == "BLOCKED"
+
+
+def test_domain_certificate_failures_do_not_trip_systemic_circuit_breaker(tmp_path):
+    run, ctl = controller(tmp_path, official=JournalSafeOfficial(
+        failure="TLS_CA_CHAIN", message="UntrustedRoot"), count=3)
+    assert [ctl.run_next()["status"] for _ in range(3)] == [
+        "SAFE_UNKNOWN", "SAFE_UNKNOWN", "SAFE_UNKNOWN"]
+    assert json.loads((run / "manifest.json").read_text())["state"] == "COMPLETED"
+
+
+def test_run005_style_all_transport_blocked_is_not_overall_pass(tmp_path):
+    run, ctl = controller(tmp_path, official=ReadyOfficial(safe_at=1), count=1)
+    assert ctl.run_next()["status"] == "SAFE_UNKNOWN"
+    report = multi.aggregate(run)
+    assert report["queue_fail_closed_behavior"] == "PASS"
+    assert report["publication_safety"] == "PASS"
+    assert report["token_efficiency"] == "NOT_MEASURED"
+    assert report["live_research_e2e"] == "BLOCKED"
+    assert report["live_provenance_reconciliation"] == "NOT_REACHED"
+    assert report["overall_evaluation"] == "BLOCKED"
+
+
 def test_common_control_defect_stops_first_company_and_preserves_remaining_queue(tmp_path):
     official, executor = ControlFailureOfficial(), FakeExecutor()
     run, ctl = controller(tmp_path, official=official, executor=executor)

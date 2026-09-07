@@ -984,6 +984,34 @@ def test_schannel_valid_chain_fixture_normalizes_and_journals(tmp_path):
     assert received["transport_metadata"]["implementation_fingerprint"] == SCHANNEL_IMPLEMENTATION_FINGERPRINT
 
 
+def test_schannel_failure_journal_preserves_native_stage_and_launcher_provenance(tmp_path):
+    response = schannel_response(result="FAILURE", failure="TLS_HANDSHAKE")
+    response.update({
+        "status_code": 0, "body_base64": None, "response_bytes": None,
+        "body_sha256": None, "failure_stage": "TLS",
+        "exception_chain": ["Win32Exception: no credentials"],
+        "native_error": [{"hresult": "0x8009030E", "native_error_code": -2146893042}],
+        "stage_timings_seconds": {"dns_complete": 0.01, "tcp_complete": 0.02},
+        "tls_policy": {"sni": "official.example", "certificate_verification": True},
+        "helper_exit_code": 0,
+        "launcher_provenance": {"executable_path": "C:/Program Files/PowerShell/7/pwsh.exe"},
+    })
+    journal = journal_for(tmp_path)
+    payload = WindowsSchannelTransport(
+        journal=journal, dns_resolver=PUBLIC_DNS,
+        helper_runner=lambda request: response).fetch(
+            "https://official.example/", "official.example", FetchPolicy(max_redirects=0))
+    assert payload.failure_reason == "TLS_HANDSHAKE"
+    record = journal._disk_records()[0][0]
+    received = next(row for row in record["history"] if row["phase"] == "RESPONSE_RECEIVED")
+    metadata = received["transport_metadata"]
+    assert metadata["native_error"][0]["hresult"] == "0x8009030E"
+    assert metadata["stage_timings_seconds"]["tcp_complete"] == 0.02
+    assert metadata["tls_policy"]["certificate_verification"] is True
+    assert metadata["helper_exit_code"] == 0
+    assert metadata["launcher_provenance"]["executable_path"].endswith("pwsh.exe")
+
+
 def test_schannel_http_200_empty_body_is_classified_without_crash(tmp_path):
     journal = journal_for(tmp_path)
     payload = WindowsSchannelTransport(

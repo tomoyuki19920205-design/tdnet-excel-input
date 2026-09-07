@@ -1,0 +1,37 @@
+{
+  "schema_version": "company_news_phase22q_transport_comparison_fixture_v1",
+  "ticker": "5237",
+  "run004": {
+    "requested_url": "https://www.nozawa-kobe.co.jp/cgi-bin/topics/index.cgi?mode=list&y=2026&genre=3",
+    "transport": "windows-schannel-v1",
+    "implementation_fingerprint": "dotnet10-sslstream-schannel-cryptoapi-v4",
+    "status_code": 200,
+    "failure_class": null,
+    "failure_stage": null,
+    "body_sha256": "3d17b0290ba1665a01d6ab330a5c6c731a426ae6682ac632bb46fc2d7ab67e57",
+    "certificate_present": true
+  },
+  "run005": {
+    "requested_url": "https://www.nozawa-kobe.co.jp/cgi-bin/topics/index.cgi?mode=list&y=2026&genre=3",
+    "transport": "windows-schannel-v1",
+    "implementation_fingerprint": "dotnet10-sslstream-schannel-cryptoapi-v4",
+    "status_code": 0,
+    "failure_class": "TLS_HANDSHAKE",
+    "failure_stage": "TLS",
+    "body_sha256": null,
+    "certificate_present": false,
+    "exception_chain": [
+      "System.Management.Automation.MethodInvocationException: AuthenticateAsClient failed",
+      "System.Security.Authentication.AuthenticationException: Authentication failed",
+      "System.ComponentModel.Win32Exception: セキュリティ パッケージで利用できる資格情報がありません"
+    ]
+  },
+  "independent_probe": {
+    "requested_url": "https://www.nozawa-kobe.co.jp/cgi-bin/topics/index.cgi?mode=list&y=2026&genre=3",
+    "transport": "windows-schannel-v1",
+    "implementation_fingerprint": "dotnet10-sslstream-schannel-cryptoapi-v4",
+    "status_code": 200,
+    "body_sha256": "3d17b0290ba1665a01d6ab330a5c6c731a426ae6682ac632bb46fc2d7ab67e57",
+    "certificate_present": true
+  }
+}

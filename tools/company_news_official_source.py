@@ -39,7 +39,7 @@ IDENTITY_TRANSPORT_ASSURANCES = {"HTTPS_VERIFIED", "LEGACY_HTTP", "REPOSITORY_VE
 LEGACY_HTTP_AUTHORITIES = {"IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH", "COMPANY_MASTER"}
 WINDOW_STATES = {"PENDING", "COMPLETE", "PARTIAL", "BLOCKED", "NOT_APPLICABLE"}
 FAILURE_TYPES = {
-    "HTTP_4XX", "HTTP_5XX", "TIMEOUT", "DNS", "TLS", "TLS_CA_CHAIN", "TLS_HOSTNAME",
+    "HTTP_4XX", "HTTP_5XX", "TIMEOUT", "DNS", "TCP", "TLS", "TLS_CA_CHAIN", "TLS_HOSTNAME",
     "TLS_EXPIRED", "TLS_NOT_YET_VALID", "TLS_PROTOCOL", "TLS_HANDSHAKE", "TLS_UNKNOWN",
     "TLS_TRUST_INIT", "REDIRECT_BLOCKED",
     "MIME_REJECTED", "SIZE_LIMIT", "ACCESS_DENIED", "OUTCOME_LOST",
@@ -50,7 +50,7 @@ TLS_BACKEND_WINDOWS_SYSTEM_TRUST = "windows-system-trust-v1"
 TLS_BACKEND_WINDOWS_ROOT_BUNDLE_SEMANTIC = "windows-root-bundle-v1"
 SCHANNEL_TRANSPORT_ID = "windows-schannel-v1"
 IR_NIGHTLY_KNOWN_SUCCESSFUL_TRANSPORT_ID = "ir-nightly-known-successful-v1"
-SCHANNEL_IMPLEMENTATION_FINGERPRINT = "dotnet10-sslstream-schannel-cryptoapi-v4"
+SCHANNEL_IMPLEMENTATION_FINGERPRINT = "dotnet10-sslstream-schannel-cryptoapi-v5"
 HTTP_JOURNAL_PHASES = {
     "PLANNED", "REQUEST_STARTED", "RESPONSE_RECEIVED", "NORMALIZED", "FAILED", "OUTCOME_LOST",
 }
@@ -805,8 +805,9 @@ class WindowsSchannelTransport:
             executable = str(candidate) if candidate.exists() else None
         if not executable or not self.helper_path.is_file():
             raise OfficialSourceError("SCHANNEL_HELPER: Windows Schannel helper unavailable")
+        argv = [executable, "-NoProfile", "-NonInteractive", "-File", str(self.helper_path)]
         completed = subprocess.run(
-            [executable, "-NoProfile", "-NonInteractive", "-File", str(self.helper_path)],
+            argv,
             input=json.dumps(dict(request), ensure_ascii=False), capture_output=True, text=True,
             encoding="utf-8", timeout=float(request["timeout_seconds"]) + 5, check=False,
         )
@@ -822,6 +823,46 @@ class WindowsSchannelTransport:
         if (value.get("transport_id") != self.name
                 or value.get("implementation_fingerprint") != self.implementation_fingerprint):
             raise OfficialSourceError("SCHANNEL_HELPER: transport provenance mismatch")
+        def environment_marker(name: str) -> dict[str, Any]:
+            raw = os.environ.get(name)
+            return {
+                "present": raw is not None,
+                "value_sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest()
+                if raw is not None else None,
+            }
+
+        executable_path = Path(executable).resolve()
+        try:
+            executable_sha = hashlib.sha256(executable_path.read_bytes()).hexdigest()
+        except OSError:
+            executable_sha = None
+        try:
+            version = subprocess.run(
+                [executable, "-NoProfile", "-NonInteractive", "-Command",
+                 "$PSVersionTable.PSVersion.ToString()"],
+                capture_output=True, text=True, encoding="utf-8", timeout=5, check=False,
+            )
+            executable_version = version.stdout.strip() if version.returncode == 0 else None
+        except (OSError, subprocess.SubprocessError):
+            executable_version = None
+        value["helper_exit_code"] = completed.returncode
+        value["launcher_provenance"] = {
+            "executable_path": str(executable_path),
+            "executable_sha256": executable_sha,
+            "executable_version": executable_version,
+            "helper_path": str(self.helper_path.resolve()),
+            "helper_sha256": hashlib.sha256(self.helper_path.read_bytes()).hexdigest(),
+            "argv": argv,
+            "timeout_seconds": float(request["timeout_seconds"]) + 5,
+            "parent_process_id": os.getpid(),
+            "parent_parent_process_id": os.getppid(),
+            "execution_user": os.environ.get("USERNAME") or os.environ.get("USER"),
+            "working_directory": str(Path.cwd().resolve()),
+            "environment": {name: environment_marker(name) for name in (
+                "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
+            )},
+            "proxy_behavior": "DIRECT_TCP_PROXY_ENV_NOT_CONSUMED",
+        }
         return value
 
     def _start_request(self, target_url: str, *, parent_request_id: str | None = None,
@@ -925,6 +966,11 @@ class WindowsSchannelTransport:
                 "failure_stage": response.get("failure_stage"),
                 "exception_type": response.get("exception_type"),
                 "exception_chain": response.get("exception_chain") or [],
+                "native_error": response.get("native_error"),
+                "stage_timings_seconds": response.get("stage_timings_seconds") or {},
+                "tls_policy": response.get("tls_policy") or {},
+                "helper_exit_code": response.get("helper_exit_code"),
+                "launcher_provenance": response.get("launcher_provenance") or {},
             }
             if response.get("result") != "RESPONSE":
                 failure = classify_schannel_failure(response)

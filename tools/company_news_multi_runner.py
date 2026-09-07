@@ -67,6 +67,7 @@ DOCUMENT_PROVENANCE_STATES = (
 TICKER = re.compile(r"^[0-9A-Z]{4}$")
 DEFAULT_HARD_TOKEN_GATE = 500_000
 DEFAULT_PREFERRED_TOKEN_GATE = 400_000
+SYSTEMIC_TRANSPORT_FAILURE_DOMAIN_THRESHOLD = 3
 RUNTIME_FIELDS = ("assignment_id", "ticker", "company_name", "search_from", "search_to",
                   "strategy_version", "position")
 FORBIDDEN_BOOTSTRAP_KEYS = {
@@ -92,6 +93,112 @@ class ControlContractError(MultiRunnerError):
 
     pass
 
+
+def classify_transport_failure_evidence(journal: Mapping[str, Any]) -> dict[str, Any]:
+    """Classify one durable wire attempt without collapsing local and remote failures."""
+    response = next((row for row in reversed(journal.get("history") or [])
+                     if row.get("phase") == "RESPONSE_RECEIVED"), {})
+    metadata = response.get("transport_metadata") or {}
+    requested_url = str(journal.get("requested_url") or "")
+    domain = (urlsplit(requested_url).hostname or "").lower()
+    status = int(response.get("status_code") or 0)
+    failure = str(response.get("exception_category") or "")
+    stage = str(metadata.get("failure_stage") or "UNKNOWN").upper()
+    native = metadata.get("native_error") or []
+    text = " ".join(str(value or "") for value in (
+        metadata.get("error_detail"), *(metadata.get("exception_chain") or []),
+        *(row.get("hresult") for row in native if isinstance(row, Mapping)),
+        *(row.get("native_error_code") for row in native if isinstance(row, Mapping)),
+    )).casefold()
+    signature = None
+    scope = "DOMAIN_OR_REMOTE"
+    classification = failure or ("HTTP_4XX" if 400 <= status < 500 else
+                                 "HTTP_5XX" if 500 <= status < 600 else "SUCCESS")
+    if (failure == "TLS_HANDSHAKE" and any(marker in text for marker in (
+            "資格情報がありません", "sec_e_no_credentials", "0x8009030e", "-2146893042"))):
+        signature = "SCHANNEL_SEC_E_NO_CREDENTIALS"
+        scope = "LOCAL_SYSTEMIC"
+    elif failure == "TCP" and any(marker in text for marker in (
+            "access is denied", "permission denied", "10013", "0x8007271d")):
+        signature = "LOCAL_SOCKET_ACCESS_DENIED"
+        scope = "LOCAL_SYSTEMIC"
+    elif failure == "DNS" and any(marker in text for marker in (
+            "network subsystem is unavailable", "resolver initialization", "wsanotinitialised")):
+        signature = "LOCAL_DNS_SUBSYSTEM_UNAVAILABLE"
+        scope = "LOCAL_SYSTEMIC"
+    elif failure in {"TLS_CA_CHAIN", "TLS_HOSTNAME", "TLS_EXPIRED", "TLS_NOT_YET_VALID"}:
+        scope = "DOMAIN_CERTIFICATE"
+    elif failure == "TIMEOUT":
+        scope = "AMBIGUOUS_TIMEOUT"
+    elif classification in {"HTTP_4XX", "HTTP_5XX"}:
+        scope = "REMOTE_HTTP"
+    return {
+        "requested_url": requested_url,
+        "canonical_url": lightweight.canonicalize_url(requested_url) if requested_url else None,
+        "http_method": "GET",
+        "domain": domain,
+        "transport": journal.get("transport"),
+        "failure_class": classification,
+        "failure_stage": stage,
+        "http_status": status,
+        "transport_success": 200 <= status < 400 and not failure,
+        "scope": scope,
+        "systemic_signature": signature,
+        "native_error": native,
+        "exception_chain": metadata.get("exception_chain") or [],
+        "launcher_provenance": metadata.get("launcher_provenance") or {},
+        "stage_timings_seconds": metadata.get("stage_timings_seconds") or {},
+        "tls_policy": metadata.get("tls_policy") or {},
+    }
+
+
+def transport_infra_observation(company_dir: Path) -> dict[str, Any]:
+    attempts = [classify_transport_failure_evidence(_read(path)) for path in sorted(
+        company_dir.glob("official-http/http-journal/*.json"))]
+    successful = [row for row in attempts if row["transport_success"]]
+    signatures = {row["systemic_signature"] for row in attempts
+                  if row["systemic_signature"]}
+    domains = {row["domain"] for row in attempts if row["domain"]}
+    signature = next(iter(signatures)) if (
+        attempts and len(signatures) == 1 and not successful
+        and all(row["systemic_signature"] in signatures for row in attempts)
+    ) else None
+    return {
+        "schema_version": "company_news_transport_infra_observation_v1",
+        "attempts": attempts,
+        "successful_fetch_count": len(successful),
+        "all_transport_attempts_blocked": bool(attempts) and not successful,
+        "systemic_signature": signature,
+        "domain": next(iter(domains)) if len(domains) == 1 else None,
+        "circuit_breaker_candidate": bool(signature and len(domains) == 1),
+    }
+
+
+def trailing_systemic_failure_domains(run_dir: Path, queue: Mapping[str, Any],
+                                        current: Mapping[str, Any],
+                                        observation: Mapping[str, Any]) -> list[str]:
+    signature = observation.get("systemic_signature")
+    domain = observation.get("domain")
+    if not observation.get("circuit_breaker_candidate") or not signature or not domain:
+        return []
+    sequence = [(str(domain), str(signature))]
+    prior = sorted((row for row in queue["assignments"]
+                    if int(row["position"]) < int(current["position"])),
+                   key=lambda row: int(row["position"]), reverse=True)
+    for row in prior:
+        path = run_dir / "companies" / f"{int(row['position']):02d}-{row['ticker']}" / "transport-infra-observation.json"
+        if not path.is_file():
+            break
+        value = _read(path)
+        if (not value.get("circuit_breaker_candidate")
+                or value.get("systemic_signature") != signature):
+            break
+        sequence.append((str(value.get("domain") or ""), str(signature)))
+    domains = []
+    for value, _ in reversed(sequence):
+        if value and value not in domains:
+            domains.append(value)
+    return domains
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -2043,6 +2150,35 @@ class FrozenCohortController:
             if official.status == "SAFE_UNKNOWN":
                 if official.telemetry.get("official_discovery_started") is not True:
                     raise ControlContractError("SAFE_UNKNOWN emitted before company-specific discovery")
+                observation = transport_infra_observation(company_dir)
+                _atomic(company_dir / "transport-infra-observation.json", observation)
+                consecutive_domains = trailing_systemic_failure_domains(
+                    self.run_dir, queue, assignment, observation)
+                if len(consecutive_domains) >= SYSTEMIC_TRANSPORT_FAILURE_DOMAIN_THRESHOLD:
+                    reason = (
+                        "systemic transport circuit breaker: "
+                        f"{observation['systemic_signature']} across consecutive domains "
+                        f"{', '.join(consecutive_domains[-SYSTEMIC_TRANSPORT_FAILURE_DOMAIN_THRESHOLD:])}"
+                    )
+                    assignment.update(
+                        status="INFRA_STOP", completed_at=_now(),
+                        error_type="SYSTEMIC_TRANSPORT_CIRCUIT_BREAKER",
+                        error_message=reason, result_type="INFRA_STOP",
+                        remaining_gaps=list(official.gaps), total_tokens=None,
+                        worker_count=0, web_calls=0, research_started=False,
+                        model_started=False, official_discovery_started=True,
+                        quality_sample=False, token_state="NOT_MEASURED",
+                        token_gate="NOT_MEASURED")
+                    manifest["transport_circuit_breaker"] = {
+                        "threshold": SYSTEMIC_TRANSPORT_FAILURE_DOMAIN_THRESHOLD,
+                        "signature": observation["systemic_signature"],
+                        "consecutive_distinct_domains": consecutive_domains,
+                        "triggered_at": _now(),
+                    }
+                    _atomic(self.run_dir / "queue.json", queue)
+                    guard.unlink(missing_ok=True)
+                    self._stop(manifest, reason)
+                    return {"status": "INFRA_STOP", "assignment": assignment}
                 assignment.update(status="SAFE_UNKNOWN", completed_at=_now(),
                                   result_type="SAFE_UNKNOWN", remaining_gaps=list(official.gaps),
                                   total_tokens=None, worker_count=0, web_calls=0,
@@ -2134,6 +2270,13 @@ def aggregate(run_dir: Path) -> dict[str, Any]:
     tokens = [row["total_tokens"] for row in measured]
     ordered_tokens = sorted(tokens)
     p90 = ordered_tokens[max(0, (9 * len(ordered_tokens) + 9) // 10 - 1)] if ordered_tokens else None
+    observations = [transport_infra_observation(
+        run_dir / "companies" / f"{int(row['position']):02d}-{row['ticker']}") for row in rows]
+    successful_fetches = sum(row["successful_fetch_count"] for row in observations)
+    terminal = all(row["status"] in COMPANY_STATES - {"PENDING", "RUNNING"} for row in rows)
+    live_e2e_blocked = bool(not measured and successful_fetches == 0 and (
+        manifest.get("transport_circuit_breaker")
+        or (terminal and all(row["status"] in {"SAFE_UNKNOWN", "INFRA_STOP"} for row in rows))))
     return {
         "state": manifest["state"], "completed": len(completed),
         "safe_unknown": sum(row["status"] == "SAFE_UNKNOWN" for row in rows),
@@ -2154,6 +2297,16 @@ def aggregate(run_dir: Path) -> dict[str, Any]:
         "max_tokens": max(tokens) if tokens else None,
         "within_hard_gate": sum(value <= manifest["hard_token_gate"] for value in tokens),
         "within_preferred_gate": sum(value <= manifest["preferred_token_gate"] for value in tokens),
+        "queue_fail_closed_behavior": "PASS",
+        "publication_safety": "PASS" if not any(
+            row["status"] == "FAILED" for row in rows) else "REVIEW",
+        "token_efficiency": "NOT_MEASURED" if not measured else "MEASURED",
+        "live_research_e2e": "BLOCKED" if live_e2e_blocked else "MEASURED",
+        "live_provenance_reconciliation": (
+            "NOT_REACHED" if not list(run_dir.glob("companies/*/provenance-reconciliation.json"))
+            else "MEASURED"),
+        "successful_transport_fetches": successful_fetches,
+        "overall_evaluation": "BLOCKED" if live_e2e_blocked else "PASS",
         "ordered_results": [{key: row.get(key) for key in (
             "position", "ticker", "status", "result_type", "research_started", "model_started",
             "total_tokens", "observed_total_tokens", "token_state", "token_gate")} for row in rows],

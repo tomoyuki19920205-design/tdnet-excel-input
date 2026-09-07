@@ -67,6 +67,8 @@ $safeHeaders = @{}
 $responseBytes = $null
 $bodySha256 = $null
 $requestHeaderProfile = $null
+$stageTimings = [ordered]@{}
+$tlsPolicy = $null
 $certificateSummary = [ordered]@{ ssl_policy_errors = @(); hostname_validation = 'UNKNOWN'; leaf = $null; chain_elements = @(); chain_status = @() }
 try {
     $request = ([Console]::In.ReadToEnd() | ConvertFrom-Json)
@@ -104,11 +106,13 @@ try {
     $addresses = [Net.Dns]::GetHostAddresses($hostName)
     $address = $addresses | Where-Object { Test-PublicAddress $_ } | Select-Object -First 1
     if ($null -eq $address) { throw 'ACCESS_DENIED: no public destination address' }
+    $stageTimings.dns_complete = $started.Elapsed.TotalSeconds
 
     $tcp = [Net.Sockets.TcpClient]::new($address.AddressFamily)
-    $stage = 'TLS'
+    $stage = 'TCP'
     $connectTimeout = [Threading.CancellationTokenSource]::new($timeoutMs)
     try { $tcp.ConnectAsync($address, 443, $connectTimeout.Token).GetAwaiter().GetResult() } finally { $connectTimeout.Dispose() }
+    $stageTimings.tcp_complete = $started.Elapsed.TotalSeconds
     $tcp.ReceiveTimeout = $timeoutMs
     $tcp.SendTimeout = $timeoutMs
 
@@ -137,6 +141,7 @@ try {
         return $errors -eq [Net.Security.SslPolicyErrors]::None
     }
     $ssl = [Net.Security.SslStream]::new($tcp.GetStream(), $false, $callback)
+    $stage = 'TLS'
     $ssl.ReadTimeout = $timeoutMs
     $ssl.WriteTimeout = $timeoutMs
     $policy = [Security.Cryptography.X509Certificates.X509ChainPolicy]::new()
@@ -148,7 +153,19 @@ try {
     $options.TargetHost = $hostName
     $options.EnabledSslProtocols = [Security.Authentication.SslProtocols]::Tls12 -bor [Security.Authentication.SslProtocols]::Tls13
     $options.CertificateChainPolicy = $policy
+    $tlsPolicy = [ordered]@{
+        sni = $hostName
+        enabled_protocols = @('Tls12', 'Tls13')
+        certificate_verification = $true
+        hostname_verification = $true
+        trust_mode = 'System'
+        revocation_mode = 'NoCheck'
+        certificate_downloads_disabled = $true
+        proxy_mode = 'DIRECT_TCP_NO_PROXY'
+    }
     $ssl.AuthenticateAsClient($options)
+    $stageTimings.tls_complete = $started.Elapsed.TotalSeconds
+    $tlsPolicy.negotiated_protocol = $ssl.SslProtocol.ToString()
 
     $stage = 'HTTP'
     $pathAndQuery = if ($uri.PathAndQuery) { $uri.PathAndQuery } else { '/' }
@@ -195,34 +212,44 @@ try {
     $bodySha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($body)).ToLowerInvariant()
     $stage = 'BODY_ENCODING'
     $bodyBase64 = [Convert]::ToBase64String($body)
+    $stageTimings.body_complete = $started.Elapsed.TotalSeconds
     $started.Stop()
     Write-Result @{
         schema_version = 'company_news_schannel_helper_v1'; result = 'RESPONSE'; transport_id = 'windows-schannel-v1'
-        implementation_fingerprint = 'dotnet10-sslstream-schannel-cryptoapi-v4'; requested_url = $uri.AbsoluteUri
+        implementation_fingerprint = 'dotnet10-sslstream-schannel-cryptoapi-v5'; requested_url = $uri.AbsoluteUri
         final_url = $uri.AbsoluteUri; status_code = $statusCode; mime_type = $mime
         response_bytes = $responseBytes; body_sha256 = $bodySha256; body_base64 = $bodyBase64
         safe_headers = $safeHeaders; certificate_summary = $certificateSummary; elapsed_seconds = $started.Elapsed.TotalSeconds
         request_header_profile = $requestHeaderProfile
+        stage_timings_seconds = $stageTimings; tls_policy = $tlsPolicy; native_error = $null
     }
 } catch {
     $started.Stop()
     $message = $_.Exception.Message
     $exceptionType = $_.Exception.GetType().FullName
     $exceptionChain = @()
+    $nativeErrors = @()
     $cursor = $_.Exception
     while ($null -ne $cursor -and $exceptionChain.Count -lt 8) {
         $exceptionChain += ('{0}: {1}' -f $cursor.GetType().FullName, $cursor.Message)
+        $nativeCode = if ($cursor -is [ComponentModel.Win32Exception]) { $cursor.NativeErrorCode } else { $null }
+        $nativeErrors += [ordered]@{
+            exception_type = $cursor.GetType().FullName
+            hresult = ('0x{0:X8}' -f ([uint32]([int64]$cursor.HResult -band 0xffffffffL)))
+            native_error_code = $nativeCode
+        }
         $cursor = $cursor.InnerException
     }
-    $failure = if ($message -match '^SIZE_LIMIT') { 'SIZE_LIMIT' } elseif ($message -match '^ACCESS_DENIED') { 'ACCESS_DENIED' } elseif ($message -match '^HTTP_PROTOCOL') { 'HTTP' } elseif ($message -match 'timed out|canceled') { 'TIMEOUT' } elseif ($certificateSummary.hostname_validation -eq 'FAIL') { 'TLS_HOSTNAME' } elseif ($certificateSummary.chain_status.Count -gt 0) { 'TLS_CA_CHAIN' } elseif ($stage -eq 'TLS' -and $message -match 'authentication|AuthenticateAsClient|handshake') { 'TLS_HANDSHAKE' } elseif ($message -match 'certificate|SSL|TLS') { 'TLS_UNKNOWN' } elseif ($stage -eq 'BODY_READ') { 'BODY_READ' } elseif ($stage -eq 'BODY_ENCODING') { 'BODY_ENCODING' } elseif ($stage -eq 'HTTP') { 'HTTP' } else { 'DNS' }
+    $failure = if ($message -match '^SIZE_LIMIT') { 'SIZE_LIMIT' } elseif ($message -match '^ACCESS_DENIED') { 'ACCESS_DENIED' } elseif ($message -match '^HTTP_PROTOCOL') { 'HTTP' } elseif ($message -match 'timed out|canceled') { 'TIMEOUT' } elseif ($stage -eq 'TCP') { 'TCP' } elseif ($certificateSummary.hostname_validation -eq 'FAIL') { 'TLS_HOSTNAME' } elseif ($certificateSummary.chain_status.Count -gt 0) { 'TLS_CA_CHAIN' } elseif ($stage -eq 'TLS' -and $message -match 'authentication|AuthenticateAsClient|handshake') { 'TLS_HANDSHAKE' } elseif ($message -match 'certificate|SSL|TLS') { 'TLS_UNKNOWN' } elseif ($stage -eq 'BODY_READ') { 'BODY_READ' } elseif ($stage -eq 'BODY_ENCODING') { 'BODY_ENCODING' } elseif ($stage -eq 'HTTP') { 'HTTP' } else { 'DNS' }
     Write-Result @{
         schema_version = 'company_news_schannel_helper_v1'; result = 'FAILURE'; transport_id = 'windows-schannel-v1'
-        implementation_fingerprint = 'dotnet10-sslstream-schannel-cryptoapi-v4'
+        implementation_fingerprint = 'dotnet10-sslstream-schannel-cryptoapi-v5'
         requested_url = if ($null -ne $request) { [string]$request.url } else { $null }; final_url = if ($statusCode -gt 0) { $uri.AbsoluteUri } else { $null }
         status_code = $statusCode; mime_type = $mime; response_bytes = $responseBytes; body_sha256 = $bodySha256; body_base64 = $null; safe_headers = $safeHeaders
         certificate_summary = $certificateSummary; elapsed_seconds = $started.Elapsed.TotalSeconds
         request_header_profile = $requestHeaderProfile
         failure_stage = $stage; exception_type = $exceptionType; exception_chain = $exceptionChain
+        native_error = $nativeErrors; stage_timings_seconds = $stageTimings; tls_policy = $tlsPolicy
         failure_class = $failure; error_detail = $message.Substring(0, [Math]::Min(2000, $message.Length))
     }
 } finally {
