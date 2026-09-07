@@ -411,6 +411,11 @@ def synthesis_output_schema() -> dict[str, Any]:
     # an empty string or null, but the runner replaces it with its authoritative
     # completion timestamp before canonical validation.
     schema["properties"]["research_result"]["properties"]["checked_at"]["type"] = ["string", "null"]
+    # Company identity is a frozen Python-side authority in the multi-company
+    # runner.  Keep the field for canonical-schema compatibility, but permit the
+    # synthesis transport to return null before the registry value is injected.
+    schema["properties"]["strategy_telemetry"]["properties"]["company_identity"]["type"] = [
+        "object", "null"]
     item = schema["properties"]["research_result"]["properties"]["items"]["items"]
     item["properties"]["supporting_evidence_ids"] = {
         "type": "array", "items": {"type": "string", "maxLength": 80},
@@ -500,17 +505,24 @@ def worker_contract(spec: WorkerSpec, assignment: dict[str, Any]) -> str:
 
 def synthesis_contract(assignment: dict[str, Any], discovery: dict[str, Any],
                        queries: list[dict[str, Any]], store: EvidenceStore,
-                       elapsed_by_kind: dict[str, float]) -> str:
+                       elapsed_by_kind: dict[str, float], *,
+                       registry_identity_authoritative: bool = False) -> str:
     minimal = {key: assignment.get(key) for key in
                ("assignment_id", "ticker", "company_name", "search_from", "search_to")}
-    payload = {"assignment": minimal, "company_identity": discovery["company_identity"],
+    payload = {"assignment": minimal,
                "economic_exposures": discovery["economic_exposures"], "queries": queries,
                "evidence_cards": store.cards(), "stage_elapsed_seconds": elapsed_by_kind}
+    if not registry_identity_authoritative:
+        payload["company_identity"] = discovery["company_identity"]
     return "\n".join((
         "Synthesize the canonical Company News Strategy v5 JSON object from the bounded input only.",
         "No Web or tools are available. Do not invent facts, URLs, queries, evidence, or elapsed times.",
         "Map verified cards to source_provenance/documents/candidates and final events; no_news requires complete evidence.",
         "Every final event must list exact supporting_evidence_ids from BOUNDED_INPUT. Never invent or alter an evidence ID.",
+        ("Set strategy_telemetry.company_identity to null. Python injects the frozen registry identity; "
+         "do not select or infer an identity URL."
+         if registry_identity_authoritative else
+         "Use only the supplied company identity; Python still validates its official evidence."),
         "Use the exact canonical schema. Python performs validation/finalization and no LLM retry is allowed.",
         "BOUNDED_INPUT=" + json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
     ))
@@ -1570,6 +1582,7 @@ def aggregate_worker_telemetry(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def run_company(root: Path, experiment: Path, assignment: dict[str, Any], *,
                 official_context: dict[str, Any] | None = None,
                 usage_checkpoint: Callable[[dict[str, Any]], None] | None = None,
+                registry_identity_authoritative: bool = False,
                 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Canonical isolated company execution path used by single and multi runners.
 
@@ -1604,7 +1617,9 @@ def run_company(root: Path, experiment: Path, assignment: dict[str, Any], *,
         "external": sum(row["research_elapsed_seconds"] for row in telemetry_rows[1:]),
         "provenance": 0.0,
     }
-    synthesis_prompt = synthesis_contract(assignment, discovery, queries, store, elapsed)
+    synthesis_prompt = synthesis_contract(
+        assignment, discovery, queries, store, elapsed,
+        registry_identity_authoritative=registry_identity_authoritative)
     search_registry = build_search_record_registry(list(zip(outputs, telemetry_rows)))
     response, synthesis_telemetry = _run_isolated_stage(
         root, company_dir, None, synthesis_prompt, synthesis_output_schema(), web_enabled=False)
@@ -1623,7 +1638,8 @@ def run_company(root: Path, experiment: Path, assignment: dict[str, Any], *,
         usage_checkpoint(copy.deepcopy(measured))
     response = inject_runtime_identity(response, assignment)
     response = inject_runtime_metadata(response, completed_at=synthesis_telemetry.get("completed_at"))
-    response = inject_identity_provenance(response, discovery, store.cards())
+    if not registry_identity_authoritative:
+        response = inject_identity_provenance(response, discovery, store.cards())
     response = apply_source_count_authority(response)
     response = apply_search_record_registry(response, search_registry, discovery)
     response = normalize_documents_from_evidence(response, store.cards(), assignment)

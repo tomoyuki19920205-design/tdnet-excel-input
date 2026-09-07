@@ -371,9 +371,11 @@ def test_offline_bootstrap_reuses_verified_repository_identity_and_freezes(tmp_p
     dry = multi.dry_control_preflight(prepared)
     assert dry == {
         "status": "OFFICIAL_DISCOVERY_PENDING", "ticker": "1001",
-        "identity_verified": True, "root_authority_available": True,
-        "family_urls_frozen": False, "runtime_discovery_reachable": True,
-        "official_window_state": "PENDING", "research_started": False,
+            "identity_verified": True, "root_authority_available": True,
+            "family_urls_frozen": False, "runtime_discovery_reachable": True,
+            "ir_nightly_repository_authority_reachable": False,
+            "known_successful_exact_source_candidates": [],
+            "official_window_state": "PENDING", "research_started": False,
         "model_started": False, "http_requests": 0, "web_calls": 0, "model_calls": 0,
     }
     assert not (prepared / "companies").exists()
@@ -927,6 +929,89 @@ def test_runtime_root_discovery_resolves_news_ir_and_consolidated_announcements(
     assert set(discovered.window.checked_families) == {"news", "ir", "announcements"}
     assert [call[1] for call in repo.calls] == [root, news, ir]
     assert discovered.telemetry["official_discovery_started"] is True
+
+
+def test_frozen_registry_identity_overrides_third_party_synthesis_identity():
+    response = {
+        "research_result": {"sources_checked_count": 1},
+        "strategy_telemetry": {
+            "company_identity": {"verified_ticker": "1001",
+                                 "source_url": "https://third-party.test/profile",
+                                 "evidence": "model selected"},
+            "source_provenance": [{
+                "url": "https://third-party.test/profile", "source_type": "company_profile",
+                "content_verified": True, "evidence_excerpt": "third-party profile"}],
+        },
+    }
+    repaired = multi.apply_registry_identity(response, verified_registry(), {
+        "ticker": "1001", "company_name": "Company 1"})
+    identity = repaired["strategy_telemetry"]["company_identity"]
+    assert identity["source_url"] == "https://example.test/"
+    assert "Formal CompanyIdentityRegistry" in identity["evidence"]
+    assert any(row["url"] == "https://third-party.test/profile"
+               and row["source_type"] == "company_profile"
+               for row in repaired["strategy_telemetry"]["source_provenance"])
+    assert any(row["url"] == "https://example.test/"
+               and row["source_type"] == "company_official"
+               for row in repaired["strategy_telemetry"]["source_provenance"])
+
+
+def test_frozen_registry_identity_does_not_require_synthesis_identity():
+    response = {"research_result": {"sources_checked_count": 0},
+                "strategy_telemetry": {"company_identity": None,
+                                       "source_provenance": []}}
+    repaired = multi.apply_registry_identity(response, verified_registry(), {
+        "ticker": "1001", "company_name": "Company 1"})
+    assert repaired["strategy_telemetry"]["company_identity"]["verified_ticker"] == "1001"
+
+
+@pytest.mark.parametrize("ticker,name", [("9999", "Company 1"), ("1001", "Wrong Name")])
+def test_frozen_registry_identity_mismatch_fails_closed(ticker, name):
+    with pytest.raises(Exception, match="no reusable VERIFIED identity"):
+        multi.apply_registry_identity(
+            {"research_result": {}, "strategy_telemetry": {}}, verified_registry(),
+            {"ticker": ticker, "company_name": name})
+
+
+def test_ir_nightly_known_successful_source_is_exact_ir_family_authority(tmp_path):
+    database = tmp_path / "company_ir_monitor.db"
+    company_sources(database, [
+        (1, "1001", "https://example.test/cgi-bin/topics/index.cgi?mode=list&genre=3",
+         "active", "baseline", "checked", "2026-09-06T10:00:00+09:00", None, 0,
+         "top", "official discovery", "https://example.test/", 0, 1),
+        (2, "1001", "https://evil.test/ir", "active", "baseline", "checked",
+         "2026-09-06T10:00:00+09:00", None, 0, "top", "unknown", None, 1, 0),
+    ])
+    urls, authority = multi.load_ir_nightly_repository_source_authority(
+        database, verified_registry())
+    expected = "https://example.test/cgi-bin/topics/index.cgi?mode=list&genre=3"
+    assert urls == {"1001": {"ir": expected}}
+    assert authority["1001"][0]["authority_source_type"] == \
+        "IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH"
+    assert authority["1001"][0]["current_body_verified"] is False
+    assert authority["1001"][0]["current_window_complete"] is False
+
+
+def test_repository_exact_ir_source_fills_root_link_gap_without_guessing(tmp_path):
+    registry = verified_registry()
+    root, news = "https://example.test/", "https://example.test/news/"
+    exact_ir = "https://example.test/cgi-bin/topics/index.cgi?mode=list&genre=3"
+    repo = UrlResolver({root: linked_resolution(root, (news,)),
+                        news: resolution(news), exact_ir: resolution(exact_ir)})
+    plans = {"1001": {"verified_root_url": root, "allowed_hosts": ["example.test"]}}
+    source_rows = [{"family": "ir", "url": exact_ir,
+                    "authority_source_type": "IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH",
+                    "current_body_verified": False, "current_window_complete": False}]
+    integration = multi.OfficialResolverIntegration(
+        registry, repo, None, {}, plans, {"1001": {"ir": exact_ir}},
+        {"1001": source_rows})
+    assignment = {"ticker": "1001", "company_name": "Company 1",
+                  "search_from": "2026-08-25", "search_to": "2026-08-31"}
+    discovered = integration.prepare(assignment, tmp_path).runtime_discovery()
+    assert discovered.status == "READY" and discovered.window.state == "COMPLETE"
+    assert discovered.telemetry["discovered_family_urls"]["ir"] == exact_ir
+    assert discovered.telemetry["repository_source_authority"] == source_rows
+    assert [call[1] for call in repo.calls] == [root, news, exact_ir]
 
 
 def test_runtime_discovery_marks_announcements_non_applicable_and_required_gap(tmp_path):

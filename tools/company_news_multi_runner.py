@@ -347,6 +347,49 @@ def _load_ir_nightly_sources(company_master_db: Path,
         connection.close()
 
 
+def load_ir_nightly_repository_source_authority(
+        company_master_db: Path,
+        registry: CompanyIdentityRegistry,
+        ) -> tuple[dict[str, dict[str, str]], dict[str, list[dict[str, Any]]]]:
+    """Load exact IR Nightly fetch locations without promoting current coverage.
+
+    ``company_ir_sources`` is itself the family authority: every accepted row is
+    an IR Nightly source.  URL text is used only for same-domain validation, not
+    for family guessing.  A row must have succeeded, remain active, and retain
+    its official-origin flag.
+    """
+    records = registry.to_dict().get("records", [])
+    tickers = [str(row["security_code"]) for row in records]
+    rows_by_ticker = _load_ir_nightly_sources(company_master_db, tickers)
+    family_urls: dict[str, dict[str, str]] = {}
+    authority: dict[str, list[dict[str, Any]]] = {}
+    for ticker in tickers:
+        identity = registry.get(ticker)
+        if identity is None:
+            continue
+        accepted: list[dict[str, Any]] = []
+        for row in rows_by_ticker.get(ticker, []):
+            url = _exact_official_url(row.get("source_url"), identity.official_domain)
+            if (not url or row.get("status") != "active" or not row.get("last_success_at")
+                    or row.get("verified_from_official") not in {1, True}
+                    or row.get("page_kind") not in {"top", "library", "event"}):
+                continue
+            accepted.append({
+                "family": "ir", "url": url,
+                "authority_source_type": "IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH",
+                "source_table": "company_ir_sources",
+                "page_kind": row.get("page_kind"),
+                "last_success_at": row.get("last_success_at"),
+                "current_body_verified": False,
+                "current_window_complete": False,
+            })
+        if accepted:
+            accepted.sort(key=lambda row: (str(row["url"]), str(row["page_kind"])))
+            family_urls[ticker] = {"ir": accepted[0]["url"]}
+            authority[ticker] = accepted
+    return family_urls, authority
+
+
 def _exact_official_url(value: Any, official_domain: str) -> str | None:
     try:
         parsed = urlsplit(str(value or ""))
@@ -1365,12 +1408,20 @@ class OfficialResolverIntegration:
                  repository_resolver: OfficialSourceResolver,
                  live_resolver: OfficialSourceResolver | None,
                  family_urls: Mapping[str, Mapping[str, str]],
-                 company_plans: Mapping[str, Mapping[str, Any]] | None = None) -> None:
+                 company_plans: Mapping[str, Mapping[str, Any]] | None = None,
+                 repository_family_urls: Mapping[str, Mapping[str, str]] | None = None,
+                 repository_source_authority: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
+                 ) -> None:
         self.registry = registry
         self.repository_resolver = repository_resolver
         self.live_resolver = live_resolver
         self.family_urls = {str(code): dict(urls) for code, urls in family_urls.items()}
         self.company_plans = {str(code): dict(row) for code, row in (company_plans or {}).items()}
+        self.repository_family_urls = {
+            str(code): dict(urls) for code, urls in (repository_family_urls or {}).items()}
+        self.repository_source_authority = {
+            str(code): [dict(row) for row in rows]
+            for code, rows in (repository_source_authority or {}).items()}
         self._cache: dict[str, OfficialSourceResolution] = {}
 
     def _resolve(self, identity, url: str) -> OfficialSourceResolution:
@@ -1419,11 +1470,18 @@ class OfficialResolverIntegration:
                         root_url: str) -> OfficialPreflight:
         ticker = str(assignment["ticker"])
         explicit = dict(self.family_urls.get(ticker, {}))
+        repository_exact = dict(self.repository_family_urls.get(ticker, {}))
         root = self._resolve(identity, root_url)
         results: dict[str, OfficialSourceResolution] = {}
         gaps: list[str] = []
         not_applicable: set[str] = set()
         candidates: dict[str, list[str]] = {key: [] for key in ("news", "ir", "announcements")}
+        for family, url in repository_exact.items():
+            if family in candidates and url not in candidates[family]:
+                candidates[family].append(url)
+        for family, url in explicit.items():
+            if family in candidates and url not in candidates[family]:
+                candidates[family].insert(0, url)
         if root.access_status != "VERIFIED" or root.normalized_content is None:
             gaps.append(f"official root: {root.failure_reason or root.access_status}")
         else:
@@ -1432,26 +1490,22 @@ class OfficialResolverIntegration:
                 for family in _families_for_exact_url(url):
                     if url not in candidates[family]:
                         candidates[family].append(url)
-            for family, url in explicit.items():
-                if family in candidates and url not in candidates[family]:
-                    candidates[family].insert(0, url)
-            # A single release/topics index commonly carries both company news
-            # and announcements.  Preserve that exact URL rather than inventing
-            # a second path.  Announcements is otherwise non-applicable.
-            if candidates["news"] and not candidates["announcements"]:
-                candidates["announcements"] = [candidates["news"][0]]
-            if not candidates["announcements"]:
-                not_applicable.add("announcements")
-            for family in ("news", "ir", "announcements"):
-                if family in not_applicable:
-                    continue
-                if not candidates[family]:
-                    gaps.append(f"{family}: no exact URL discovered from verified root")
-                    continue
-                result = self._resolve(identity, candidates[family][0])
-                results[family] = result
-                if result.access_status != "VERIFIED":
-                    gaps.append(f"{family}: {result.failure_reason or result.access_status}")
+        # A single release/topics index commonly carries both company news and
+        # announcements. Preserve that exact URL rather than inventing a path.
+        if candidates["news"] and not candidates["announcements"]:
+            candidates["announcements"] = [candidates["news"][0]]
+        if not candidates["announcements"]:
+            not_applicable.add("announcements")
+        for family in ("news", "ir", "announcements"):
+            if family in not_applicable:
+                continue
+            if not candidates[family]:
+                gaps.append(f"{family}: no exact URL discovered from verified root")
+                continue
+            result = self._resolve(identity, candidates[family][0])
+            results[family] = result
+            if result.access_status != "VERIFIED":
+                gaps.append(f"{family}: {result.failure_reason or result.access_status}")
         checked = tuple(sorted(family for family, result in results.items()
                                if result.access_status == "VERIFIED"))
         covered = set(checked) | not_applicable
@@ -1482,6 +1536,7 @@ class OfficialResolverIntegration:
             "official_discovery_started": True,
             "discovered_family_urls": {family: row.requested_url for family, row in results.items()},
             "not_applicable_families": sorted(not_applicable),
+            "repository_source_authority": self.repository_source_authority.get(ticker, []),
         }
         model_identity = {"verified_ticker": ticker,
                           "source_url": identity.verified_official_url,
@@ -1511,7 +1566,9 @@ class OfficialResolverIntegration:
                               "evidence": "Stable VERIFIED CompanyIdentityRegistry evidence reused."}
             return OfficialPreflight(
                 "OFFICIAL_DISCOVERY_PENDING", self.registry, window,
-                {"company_identity": model_identity, "evidence_cards": [], "telemetry": telemetry},
+                {"company_identity": model_identity, "evidence_cards": [], "telemetry": telemetry,
+                 "registry_identity_authoritative": True,
+                 "repository_source_authority": self.repository_source_authority.get(ticker, [])},
                 telemetry, (), lambda **kwargs: self.fetch_document(identity, **kwargs),
                 lambda: self._resolve_window(assignment, identity, root_url))
         required = {"news", "ir", "announcements"}
@@ -1577,7 +1634,8 @@ class OfficialResolverIntegration:
 class ConfiguredOfficialProvider:
     """Create company-scoped resolver/journal instances from frozen metadata."""
     def __init__(self, *, registry_path: Path, plan_path: Path,
-                 allow_live_http: bool) -> None:
+                 allow_live_http: bool,
+                 repository_db_path: Path | None = None) -> None:
         self.registry = CompanyIdentityRegistry.load(registry_path)
         plan = _read(plan_path)
         self.family_urls = plan.get("family_urls", {})
@@ -1586,6 +1644,15 @@ class ConfiguredOfficialProvider:
         self.company_plans = {str(row.get("ticker")): dict(row) for row in rows
                               if isinstance(row, Mapping) and row.get("ticker")}
         self.allow_live_http = allow_live_http
+        if repository_db_path is None:
+            repository_db_path = next(
+                (parent / "data" / "company_ir_monitor.db" for parent in plan_path.resolve().parents
+                 if (parent / "data" / "company_ir_monitor.db").is_file()),
+                Path("__missing_company_ir_monitor__.db"))
+        self.repository_db_path = repository_db_path
+        (self.repository_family_urls,
+         self.repository_source_authority) = load_ir_nightly_repository_source_authority(
+             self.repository_db_path, self.registry)
 
     def prepare(self, assignment: Mapping[str, Any], company_dir: Path) -> OfficialPreflight:
         artifacts = {}
@@ -1601,7 +1668,8 @@ class ConfiguredOfficialProvider:
             live = OfficialSourceResolver(WindowsSchannelTransport(
                 journal=journal, retain_raw_html=True))
         integration = OfficialResolverIntegration(
-            self.registry, repository, live, self.family_urls, self.company_plans)
+            self.registry, repository, live, self.family_urls, self.company_plans,
+            self.repository_family_urls, self.repository_source_authority)
         return integration.prepare(assignment, company_dir)
 
 
@@ -1614,8 +1682,24 @@ def execute_lightweight_company(root: Path, company_dir: Path,
     experiment = company_dir.parents[1]
     response, telemetry = lightweight.run_company(
         root, experiment, assignment, official_context=official.model_context,
-        usage_checkpoint=usage_checkpoint)
+        usage_checkpoint=usage_checkpoint, registry_identity_authoritative=True)
     response = apply_registry_identity(response, official.registry, assignment)
+    identity_record = official.registry.usable(
+        str(assignment["ticker"]), str(assignment["company_name"]))
+    if identity_record is None:
+        raise ControlContractError("frozen registry identity unavailable at finalization")
+    lightweight._atomic_json(company_dir / "identity-authority.json", {
+        "schema_version": "company_news_frozen_identity_authority_v1",
+        "authority": "Formal CompanyIdentityRegistry",
+        "ticker": identity_record.security_code,
+        "company_name": identity_record.company_name,
+        "official_domain": identity_record.official_domain,
+        "verified_identity_url": identity_record.verified_official_url,
+        "identity_evidence_sha256": identity_record.evidence_hash,
+        "transport_assurance": identity_record.transport_assurance,
+        "registry_reference": "frozen manifest identity_registry_path",
+        "model_identity_accepted": False,
+    })
     document_states = []
     additional_http = 0
     for document in response["strategy_telemetry"].get("documents", []):
@@ -2122,7 +2206,9 @@ def offline_replay_saved_company(run_dir: Path, ticker: str, output_path: Path) 
     response = lightweight.inject_runtime_identity(response, runtime)
     response = lightweight.inject_runtime_metadata(
         response, completed_at=synthesis_telemetry.get("completed_at"))
-    response = lightweight.inject_identity_provenance(response, discovery, store.cards())
+    registry_path, _ = load_frozen_official_config(manifest)
+    identity_registry = CompanyIdentityRegistry.load(registry_path)
+    response = apply_registry_identity(response, identity_registry, runtime)
     response = lightweight.apply_source_count_authority(response)
     response = lightweight.apply_search_record_registry(response, registry, discovery)
     response = lightweight.normalize_documents_from_evidence(response, store.cards(), runtime)
@@ -2138,9 +2224,6 @@ def offline_replay_saved_company(run_dir: Path, ticker: str, output_path: Path) 
         response, registry, discovery, store.cards())
     response = lightweight.restore_publication_from_evidence(response, store.cards())
     response = lightweight.restore_effective_precision(response)
-    registry_path, _ = load_frozen_official_config(manifest)
-    identity_registry = CompanyIdentityRegistry.load(registry_path)
-    response = apply_registry_identity(response, identity_registry, runtime)
     lightweight.strategy_v5.validate_generated_response(response)
     lightweight.validate_payload(response["research_result"])
     official_raw = _read(company_dir / "official-preflight.json")["official_window"]
@@ -2164,6 +2247,35 @@ def offline_replay_saved_company(run_dir: Path, ticker: str, output_path: Path) 
         "remaining_gaps": response["strategy_telemetry"]["coverage_gaps"],
         "document_provenance": provenance,
         "validation_status": "PASS", "response": response,
+    }
+    _atomic(output_path, report)
+    return report
+
+
+def offline_replay_repository_source(run_dir: Path, ticker: str,
+                                     output_path: Path) -> dict[str, Any]:
+    """Project repository source-location authority without fetching its body."""
+    manifest, queue = _read(run_dir / "manifest.json"), _read(run_dir / "queue.json")
+    assignment = next((row for row in queue["assignments"]
+                       if str(row["ticker"]) == str(ticker)), None)
+    if assignment is None:
+        raise MultiRunnerError(f"ticker not present in run: {ticker}")
+    registry_path, plan_path = load_frozen_official_config(manifest)
+    provider = ConfiguredOfficialProvider(
+        registry_path=registry_path, plan_path=plan_path, allow_live_http=False)
+    identity = provider.registry.usable(str(ticker), assignment["company_name"])
+    rows = provider.repository_source_authority.get(str(ticker), [])
+    report = {
+        "schema_version": "company_news_repository_source_replay_v1",
+        "created_at": _now(), "source_run": str(run_dir.resolve()), "ticker": str(ticker),
+        "identity_verified": identity is not None,
+        "authority_source_type": "IR_NIGHTLY_KNOWN_SUCCESSFUL_FETCH" if rows else None,
+        "known_successful_exact_source_candidates": [row["url"] for row in rows],
+        "source_family": "ir" if rows else None,
+        "state": "READY_FOR_FETCH" if rows else "SOURCE_AUTHORITY_UNAVAILABLE",
+        "official_window_state": "PENDING",
+        "current_body_verified": False, "current_window_complete": False,
+        "research_companies": 0, "http_calls": 0, "web_calls": 0, "model_calls": 0,
     }
     _atomic(output_path, report)
     return report
@@ -2194,11 +2306,13 @@ def audit_unstarted_run(run_dir: Path, output_path: Path) -> dict[str, Any]:
     return value
 
 
-def dry_control_preflight(run_dir: Path) -> dict[str, Any]:
+def dry_control_preflight(run_dir: Path, ticker: str | None = None) -> dict[str, Any]:
     """Check first pending assignment wiring without HTTP, Web, model, or run mutation."""
     manifest, queue = _read(run_dir / "manifest.json"), _read(run_dir / "queue.json")
     registry_path, plan_path = load_frozen_official_config(manifest)
-    assignment = next((row for row in queue["assignments"] if row["status"] == "PENDING"), None)
+    assignment = next((row for row in queue["assignments"]
+                       if row["status"] == "PENDING"
+                       and (ticker is None or str(row["ticker"]) == str(ticker))), None)
     if assignment is None:
         raise MultiRunnerError("dry preflight requires a pending assignment")
     provider = ConfiguredOfficialProvider(
@@ -2211,6 +2325,11 @@ def dry_control_preflight(run_dir: Path) -> dict[str, Any]:
         "root_authority_available": bool(value.model_context.get("company_identity", {}).get("source_url")),
         "family_urls_frozen": bool(provider.family_urls.get(str(assignment["ticker"]))),
         "runtime_discovery_reachable": value.runtime_discovery is not None,
+        "ir_nightly_repository_authority_reachable": bool(
+            provider.repository_source_authority.get(str(assignment["ticker"]))),
+        "known_successful_exact_source_candidates": [
+            row["url"] for row in provider.repository_source_authority.get(
+                str(assignment["ticker"]), [])],
         "official_window_state": value.window.state,
         "research_started": False, "model_started": False,
         "http_requests": 0, "web_calls": 0, "model_calls": 0,
@@ -2287,11 +2406,16 @@ def _parser() -> argparse.ArgumentParser:
     replay.add_argument("--run-dir", type=Path, required=True)
     replay.add_argument("--ticker", required=True)
     replay.add_argument("--output", type=Path, required=True)
+    source_replay = sub.add_parser("offline-source-replay")
+    source_replay.add_argument("--run-dir", type=Path, required=True)
+    source_replay.add_argument("--ticker", required=True)
+    source_replay.add_argument("--output", type=Path, required=True)
     audit_run = sub.add_parser("audit-run")
     audit_run.add_argument("--run-dir", type=Path, required=True)
     audit_run.add_argument("--output", type=Path, required=True)
     dry = sub.add_parser("dry-preflight")
     dry.add_argument("--run-dir", type=Path, required=True)
+    dry.add_argument("--ticker")
     run_next = sub.add_parser("run-next")
     run_next.add_argument("--root", type=Path, default=Path.cwd())
     run_next.add_argument("--run-dir", type=Path, required=True)
@@ -2359,10 +2483,12 @@ def main() -> int:
         value = audit_consumed_usage(args.run_dir, args.output)
     elif args.command == "offline-replay":
         value = offline_replay_saved_company(args.run_dir, args.ticker, args.output)
+    elif args.command == "offline-source-replay":
+        value = offline_replay_repository_source(args.run_dir, args.ticker, args.output)
     elif args.command == "audit-run":
         value = audit_unstarted_run(args.run_dir, args.output)
     elif args.command == "dry-preflight":
-        value = dry_control_preflight(args.run_dir)
+        value = dry_control_preflight(args.run_dir, args.ticker)
     elif args.command == "approve-resume":
         value = approve_resume(args.run_dir)
     else:

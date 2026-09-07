@@ -280,6 +280,23 @@ def test_worker_limits_schema_sharing_and_context_boundaries():
     assert "evidence_cards" not in prompt and "SECRET_RAW_PAGE_BODY" not in prompt
 
 
+def test_registry_authoritative_synthesis_omits_model_identity_decision():
+    assignment = {"assignment_id": "a", "ticker": "3436", "company_name": "SUMCO",
+                  "search_from": "2026-08-25", "search_to": "2026-08-31"}
+    discovery = {"company_identity": {"verified_ticker": "3436",
+                                      "source_url": "https://third-party.test/profile",
+                                      "evidence": "model"},
+                 "economic_exposures": []}
+    prompt = light.synthesis_contract(
+        assignment, discovery, [], light.EvidenceStore(), {},
+        registry_identity_authoritative=True)
+    assert '"company_identity"' not in prompt.split("BOUNDED_INPUT=", 1)[1]
+    assert "Set strategy_telemetry.company_identity to null" in prompt
+    identity_schema = light.synthesis_output_schema()["properties"][
+        "strategy_telemetry"]["properties"]["company_identity"]
+    assert identity_schema["type"] == ["object", "null"]
+
+
 def test_maximum_worker_count_is_enforced(monkeypatch):
     assignment = {"company_name": "IMV", "search_from": "2026-08-25", "search_to": "2026-08-31"}
     exposure = {"canonical_driver_phrase": "driver one", "metadata_evidence": "business",

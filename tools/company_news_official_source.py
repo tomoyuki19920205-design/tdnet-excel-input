@@ -1676,6 +1676,7 @@ def identity_satisfies_validator(registry: CompanyIdentityRegistry | None, *, se
 
 def apply_registry_identity(response: dict[str, Any], registry: CompanyIdentityRegistry,
                             assignment: Mapping[str, Any]) -> dict[str, Any]:
+    """Replace every model identity value with the frozen registry authority."""
     record = registry.usable(str(assignment.get("ticker", "")), assignment.get("company_name"))
     if record is None:
         raise OfficialSourceError("no reusable VERIFIED identity")
@@ -1688,8 +1689,21 @@ def apply_registry_identity(response: dict[str, Any], registry: CompanyIdentityR
                   if _canonical_url(str(item.get("url", ""))) != url]
     provenance.append(row)
     strategy["source_provenance"] = provenance
-    strategy["company_identity"] = {"verified_ticker": record.security_code, "source_url": url,
-                                    "evidence": "Stable VERIFIED CompanyIdentityRegistry evidence reused."}
+    authority = {
+        "ticker": record.security_code,
+        "company_name": record.company_name,
+        "official_domain": record.official_domain,
+        "verified_identity_url": url,
+        "identity_evidence_sha256": record.evidence_hash,
+        "transport_assurance": record.transport_assurance,
+        "registry_reference": "Formal CompanyIdentityRegistry",
+    }
+    strategy["company_identity"] = {
+        "verified_ticker": record.security_code,
+        "source_url": url,
+        "evidence": json.dumps(authority, ensure_ascii=False, sort_keys=True,
+                               separators=(",", ":")),
+    }
     payload["sources_checked_count"] = len(provenance)
     return repaired
 
