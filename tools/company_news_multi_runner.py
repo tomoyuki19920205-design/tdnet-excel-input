@@ -42,7 +42,10 @@ from tools.company_news_official_source import (
     OfficialSourceResolver,
     OfficialSourceError,
     OfficialWindowCoverage,
+    PYTHON_OPENSSL_SYSTEM_TRUST_TRANSPORT_ID,
+    PythonOpenSslSystemTrustTransport,
     RepositoryExistingTransport,
+    SCHANNEL_TRANSPORT_ID,
     WindowsSchannelTransport,
     apply_registry_identity,
     apply_registry_identity_with_audit,
@@ -68,6 +71,9 @@ TICKER = re.compile(r"^[0-9A-Z]{4}$")
 DEFAULT_HARD_TOKEN_GATE = 500_000
 DEFAULT_PREFERRED_TOKEN_GATE = 400_000
 SYSTEMIC_TRANSPORT_FAILURE_DOMAIN_THRESHOLD = 3
+LIVE_TRANSPORT_PROFILES = {
+    SCHANNEL_TRANSPORT_ID, PYTHON_OPENSSL_SYSTEM_TRUST_TRANSPORT_ID,
+}
 RUNTIME_FIELDS = ("assignment_id", "ticker", "company_name", "search_from", "search_to",
                   "strategy_version", "position")
 FORBIDDEN_BOOTSTRAP_KEYS = {
@@ -92,6 +98,17 @@ class ControlContractError(MultiRunnerError):
     """A company-independent runner/plan wiring defect; never a research UNKNOWN."""
 
     pass
+
+
+def select_live_transport_profile(manifest: Mapping[str, Any],
+                                  requested: str | None = None) -> str:
+    """Keep a prepared run on exactly one frozen live transport profile."""
+    frozen = str(manifest.get("live_transport_profile") or SCHANNEL_TRANSPORT_ID)
+    if frozen not in LIVE_TRANSPORT_PROFILES:
+        raise ControlContractError("prepared run has unsupported live transport profile")
+    if requested is not None and requested != frozen:
+        raise ControlContractError("CLI transport profile does not match frozen run manifest")
+    return frozen
 
 
 def classify_transport_failure_evidence(journal: Mapping[str, Any]) -> dict[str, Any]:
@@ -1767,6 +1784,7 @@ class ConfiguredOfficialProvider:
     """Create company-scoped resolver/journal instances from frozen metadata."""
     def __init__(self, *, registry_path: Path, plan_path: Path,
                  allow_live_http: bool,
+                 transport_profile: str = SCHANNEL_TRANSPORT_ID,
                  repository_db_path: Path | None = None) -> None:
         self.registry = CompanyIdentityRegistry.load(registry_path)
         plan = _read(plan_path)
@@ -1776,6 +1794,9 @@ class ConfiguredOfficialProvider:
         self.company_plans = {str(row.get("ticker")): dict(row) for row in rows
                               if isinstance(row, Mapping) and row.get("ticker")}
         self.allow_live_http = allow_live_http
+        if transport_profile not in LIVE_TRANSPORT_PROFILES:
+            raise ControlContractError("unsupported live transport profile")
+        self.transport_profile = transport_profile
         if repository_db_path is None:
             repository_db_path = next(
                 (parent / "data" / "company_ir_monitor.db" for parent in plan_path.resolve().parents
@@ -1797,8 +1818,11 @@ class ConfiguredOfficialProvider:
             store = DurableArtifactStore.prepare(company_dir / "official-http")
             journal = HttpFetchJournal(store, run_id=assignment["assignment_id"],
                                        company=assignment["ticker"])
-            live = OfficialSourceResolver(WindowsSchannelTransport(
-                journal=journal, retain_raw_html=True))
+            transport = (PythonOpenSslSystemTrustTransport(
+                journal=journal, retain_raw_html=True)
+                if self.transport_profile == PYTHON_OPENSSL_SYSTEM_TRUST_TRANSPORT_ID
+                else WindowsSchannelTransport(journal=journal, retain_raw_html=True))
+            live = OfficialSourceResolver(transport)
         integration = OfficialResolverIntegration(
             self.registry, repository, live, self.family_urls, self.company_plans,
             self.repository_family_urls, self.repository_source_authority)
@@ -1916,7 +1940,8 @@ def prepare_run(cohort: FrozenCohort, run_dir: Path, *, search_from: str,
                 hard_token_gate: int = DEFAULT_HARD_TOKEN_GATE,
                 preferred_token_gate: int = DEFAULT_PREFERRED_TOKEN_GATE,
                 identity_registry_path: Path | None = None,
-                official_plan_path: Path | None = None) -> dict[str, Any]:
+                official_plan_path: Path | None = None,
+                transport_profile: str = SCHANNEL_TRANSPORT_ID) -> dict[str, Any]:
     run_dir = run_dir.resolve()
     if (run_dir / "manifest.json").exists() or (run_dir / "queue.json").exists():
         raise MultiRunnerError("run artifact collision")
@@ -1929,6 +1954,8 @@ def prepare_run(cohort: FrozenCohort, run_dir: Path, *, search_from: str,
             "quality_sample": False, "token_state": "NOT_MEASURED",
             "token_gate": "NOT_MEASURED",
         })
+    if transport_profile not in LIVE_TRANSPORT_PROFILES:
+        raise ControlContractError("unsupported live transport profile")
     manifest = {
         "schema_version": SCHEMA, "state": "PREPARED", "created_at": _now(),
         "cohort_path": str(cohort.path), "cohort_file_sha256": cohort.file_sha256,
@@ -1939,6 +1966,7 @@ def prepare_run(cohort: FrozenCohort, run_dir: Path, *, search_from: str,
         "hard_token_gate": hard_token_gate, "preferred_token_gate": preferred_token_gate,
         "resume_approved": False, "production_routing": False,
         "production_write_forbidden": True, "automatic_retry": False,
+        "live_transport_profile": transport_profile,
     }
     if identity_registry_path is not None or official_plan_path is not None:
         if identity_registry_path is None or official_plan_path is None:
@@ -2535,6 +2563,8 @@ def _parser() -> argparse.ArgumentParser:
     prepare.add_argument("--search-to", required=True)
     prepare.add_argument("--identity-registry", type=Path, required=True)
     prepare.add_argument("--official-plan", type=Path, required=True)
+    prepare.add_argument("--transport-profile", choices=sorted(LIVE_TRANSPORT_PROFILES),
+                         default=SCHANNEL_TRANSPORT_ID)
     bootstrap = sub.add_parser("bootstrap-inputs")
     bootstrap.add_argument("--cohort-file", type=Path, required=True)
     bootstrap.add_argument("--cohort-sha256", required=True)
@@ -2606,6 +2636,7 @@ def _parser() -> argparse.ArgumentParser:
     run_next.add_argument("--root", type=Path, default=Path.cwd())
     run_next.add_argument("--run-dir", type=Path, required=True)
     run_next.add_argument("--allow-live-http", action="store_true")
+    run_next.add_argument("--transport-profile", choices=sorted(LIVE_TRANSPORT_PROFILES))
     resume = sub.add_parser("approve-resume")
     resume.add_argument("--run-dir", type=Path, required=True)
     return parser
@@ -2662,7 +2693,8 @@ def main() -> int:
                             search_to=args.search_to,
                             approved_company_count=args.approved_company_count,
                             identity_registry_path=args.identity_registry,
-                            official_plan_path=args.official_plan)
+                            official_plan_path=args.official_plan,
+                            transport_profile=args.transport_profile)
     elif args.command == "aggregate":
         value = aggregate(args.run_dir)
     elif args.command == "audit-consumption":
@@ -2679,10 +2711,11 @@ def main() -> int:
         value = approve_resume(args.run_dir)
     else:
         manifest = _read(args.run_dir / "manifest.json")
+        frozen_profile = select_live_transport_profile(manifest, args.transport_profile)
         registry_path, plan_path = load_frozen_official_config(manifest)
         provider = ConfiguredOfficialProvider(
             registry_path=registry_path, plan_path=plan_path,
-            allow_live_http=args.allow_live_http)
+            allow_live_http=args.allow_live_http, transport_profile=frozen_profile)
         value = FrozenCohortController(
             root=args.root, run_dir=args.run_dir, official=provider,
             executor=execute_lightweight_company, auditor=exhaustive_auditor,

@@ -315,6 +315,26 @@ def test_official_registry_and_plan_are_frozen_together(tmp_path):
         multi.load_frozen_official_config(manifest)
 
 
+def test_live_transport_profile_is_frozen_and_cannot_switch_mid_run(tmp_path):
+    path = cohort_file(tmp_path, 1)
+    cohort = load(path, 1, 1)
+    registry, plan = complete_inputs(tmp_path, cohort)
+    manifest = multi.prepare_run(
+        cohort, tmp_path / "run", search_from="2026-08-25", search_to="2026-08-31",
+        approved_company_count=1, identity_registry_path=registry,
+        official_plan_path=plan,
+        transport_profile="python-openssl-system-trust-v1")
+    assert multi.select_live_transport_profile(manifest) == "python-openssl-system-trust-v1"
+    assert multi.select_live_transport_profile(
+        manifest, "python-openssl-system-trust-v1") == "python-openssl-system-trust-v1"
+    with pytest.raises(multi.ControlContractError, match="does not match"):
+        multi.select_live_transport_profile(manifest, "windows-schannel-v1")
+
+
+def test_legacy_prepared_run_defaults_to_schannel_profile():
+    assert multi.select_live_transport_profile({}) == "windows-schannel-v1"
+
+
 def test_offline_bootstrap_fails_closed_without_verified_identity(tmp_path):
     cohort = load(cohort_file(tmp_path), 12, 12)
     master = tmp_path / "company-master.db"

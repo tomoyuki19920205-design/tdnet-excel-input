@@ -28,6 +28,9 @@ from tools.company_news_official_source import (
     OfficialSourceError,
     OfficialSourceResolver,
     OfficialWindowCoverage,
+    PYTHON_OPENSSL_IMPLEMENTATION_FINGERPRINT,
+    PYTHON_OPENSSL_SYSTEM_TRUST_TRANSPORT_ID,
+    PythonOpenSslSystemTrustTransport,
     RepositoryExistingTransport,
     TLS_BACKEND_CURRENT_CA,
     TLS_BACKEND_WINDOWS_SYSTEM_TRUST,
@@ -47,6 +50,7 @@ from tools.company_news_official_source import (
     identity_preflight,
     model_context_from_resolution,
     parse_http_rejection_artifact,
+    python_openssl_system_trust_context,
     promote_verified_identity,
     project_offline_state,
     rejection_bodies_are_identical,
@@ -1416,6 +1420,130 @@ def test_schannel_helper_source_accepts_only_no_certificate_errors():
     assert "[byte[]]::new(0)" in source
     assert "'BODY_ENCODING'" in source
     assert "status_code = $statusCode" in source
+
+
+def python_openssl_wire(url, *, status=200, body=b"<html>ok</html>",
+                        mime="text/html", location=None, failure=None):
+    headers = {"content-type": mime}
+    if location is not None:
+        headers["location"] = location
+    return TransportPayload(
+        url, url, status, mime, body,
+        PYTHON_OPENSSL_SYSTEM_TRUST_TRANSPORT_ID, failure, headers, {
+            "transport_profile": PYTHON_OPENSSL_SYSTEM_TRUST_TRANSPORT_ID,
+            "implementation_fingerprint": PYTHON_OPENSSL_IMPLEMENTATION_FINGERPRINT,
+            "certificate_chain_validation": "PASS",
+            "hostname_validation": "PASS",
+            "helper_process_started": False,
+            "response_bytes": len(body),
+            "body_sha256": hashlib.sha256(body).hexdigest(),
+        })
+
+
+def test_python_openssl_context_accepts_valid_certificate(tmp_path):
+    ca_pem, server = _certificate_material(tmp_path)
+    context = python_openssl_system_trust_context(
+        lambda purpose: create_verified_tls_context(cadata=ca_pem))
+    _memory_tls_handshake(context, server, "official.example")
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname is True
+    assert context.minimum_version >= ssl.TLSVersion.TLSv1_2
+
+
+@pytest.mark.parametrize("case", ["hostname", "expired", "untrusted"])
+def test_python_openssl_context_rejects_invalid_peer(tmp_path, case):
+    trusted_dir, other_dir = tmp_path / "trusted", tmp_path / "other"
+    trusted_dir.mkdir(); other_dir.mkdir()
+    ca_pem, server = _certificate_material(
+        trusted_dir, expired=case == "expired")
+    if case == "untrusted":
+        _, server = _certificate_material(other_dir)
+    context = python_openssl_system_trust_context(
+        lambda purpose: create_verified_tls_context(cadata=ca_pem))
+    with pytest.raises(ssl.SSLCertVerificationError):
+        _memory_tls_handshake(
+            context, server, "wrong.example" if case == "hostname" else "official.example")
+
+
+def test_python_openssl_transport_rejects_disabled_verification():
+    def insecure(_purpose):
+        return ssl._create_unverified_context()
+    with pytest.raises(TlsTrustInitializationError, match="verification are required"):
+        PythonOpenSslSystemTrustTransport(context_factory=insecure)
+
+
+def test_python_openssl_same_host_https_redirect_and_provenance(tmp_path):
+    calls = []
+    body = b"<html><body>Example Works official</body></html>"
+    def wire(url, policy):
+        calls.append(url)
+        if len(calls) == 1:
+            return python_openssl_wire(url, status=301, body=b"", location="/next")
+        return python_openssl_wire(url, body=body)
+    journal = journal_for(tmp_path)
+    result = OfficialSourceResolver(PythonOpenSslSystemTrustTransport(
+        journal=journal, dns_resolver=PUBLIC_DNS, wire_fetcher=wire,
+        retain_raw_html=True)).resolve(
+            unverified_example(), "https://official.example/", FetchPolicy(max_redirects=1))
+    assert result.access_status == "VERIFIED"
+    assert result.final_url == "https://official.example/next"
+    assert result.body_hash == hashlib.sha256(body).hexdigest()
+    assert calls == ["https://official.example/", "https://official.example/next"]
+    records = journal._disk_records()[0]
+    assert len(records) == 2
+    final = next(row for row in records[1]["history"] if row["phase"] == "RESPONSE_RECEIVED")
+    assert records[1]["transport"] == PYTHON_OPENSSL_SYSTEM_TRUST_TRANSPORT_ID
+    assert final["transport_metadata"]["helper_process_started"] is False
+
+
+@pytest.mark.parametrize("location", [
+    "https://outside.example/next", "https://sub.official.example/next",
+    "http://official.example/next", "/",
+])
+def test_python_openssl_redirect_rejects_cross_host_downgrade_and_loop(location):
+    calls = []
+    def wire(url, policy):
+        calls.append(url)
+        return python_openssl_wire(url, status=301, body=b"", location=location)
+    payload = PythonOpenSslSystemTrustTransport(
+        dns_resolver=PUBLIC_DNS, wire_fetcher=wire).fetch(
+            "https://official.example/", "official.example", FetchPolicy(max_redirects=2))
+    assert payload.failure_reason == "REDIRECT_BLOCKED"
+    assert len(calls) == 1
+
+
+def test_python_openssl_http_url_is_access_denied_before_wire():
+    calls = []
+    transport = PythonOpenSslSystemTrustTransport(
+        dns_resolver=PUBLIC_DNS,
+        wire_fetcher=lambda url, policy: calls.append(url))
+    with pytest.raises(OfficialSourceError, match="requires HTTPS"):
+        transport.fetch("http://official.example/", "official.example", FetchPolicy())
+    assert calls == []
+
+
+@pytest.mark.parametrize("payload,expected", [
+    (python_openssl_wire("https://official.example/", failure="TIMEOUT", body=b""), "TIMEOUT"),
+    (python_openssl_wire("https://official.example/", body=b"123456"), "SIZE_LIMIT"),
+])
+def test_python_openssl_timeout_and_size_limit(payload, expected):
+    result = PythonOpenSslSystemTrustTransport(
+        dns_resolver=PUBLIC_DNS, wire_fetcher=lambda url, policy: payload).fetch(
+            "https://official.example/", "official.example",
+            FetchPolicy(max_response_bytes=5))
+    assert result.failure_reason == expected
+    assert result.body is None
+
+
+def test_python_openssl_and_schannel_provenance_are_distinct():
+    assert PYTHON_OPENSSL_SYSTEM_TRUST_TRANSPORT_ID != SCHANNEL_TRANSPORT_ID
+    assert PYTHON_OPENSSL_IMPLEMENTATION_FINGERPRINT != SCHANNEL_IMPLEMENTATION_FINGERPRINT
+    payload = PythonOpenSslSystemTrustTransport(
+        dns_resolver=PUBLIC_DNS,
+        wire_fetcher=lambda url, policy: python_openssl_wire(url)).fetch(
+            "https://official.example/", "official.example", FetchPolicy(max_redirects=0))
+    assert payload.fetch_method == PYTHON_OPENSSL_SYSTEM_TRUST_TRANSPORT_ID
+    assert payload.transport_metadata["helper_process_started"] is False
 
 
 def test_dynamic_source_discovery_uses_only_explicit_same_domain_references():

@@ -8,15 +8,18 @@ from __future__ import annotations
 import base64
 import copy
 import hashlib
+import http.client
 import io
 import ipaddress
 import json
 import os
+import platform
 import re
 import shutil
 import socket
 import ssl
 import subprocess
+import sys
 import tempfile
 import time
 import unicodedata
@@ -49,8 +52,10 @@ TLS_BACKEND_CURRENT_CA = "current-ca-v1"
 TLS_BACKEND_WINDOWS_SYSTEM_TRUST = "windows-system-trust-v1"
 TLS_BACKEND_WINDOWS_ROOT_BUNDLE_SEMANTIC = "windows-root-bundle-v1"
 SCHANNEL_TRANSPORT_ID = "windows-schannel-v1"
+PYTHON_OPENSSL_SYSTEM_TRUST_TRANSPORT_ID = "python-openssl-system-trust-v1"
 IR_NIGHTLY_KNOWN_SUCCESSFUL_TRANSPORT_ID = "ir-nightly-known-successful-v1"
 SCHANNEL_IMPLEMENTATION_FINGERPRINT = "dotnet10-sslstream-schannel-cryptoapi-v5"
+PYTHON_OPENSSL_IMPLEMENTATION_FINGERPRINT = "python-ssl-default-context-v1"
 HTTP_JOURNAL_PHASES = {
     "PLANNED", "REQUEST_STARTED", "RESPONSE_RECEIVED", "NORMALIZED", "FAILED", "OUTCOME_LOST",
 }
@@ -486,15 +491,15 @@ def validate_verified_tls_context(context: ssl.SSLContext) -> ssl.SSLContext:
 
 def classify_tls_failure(exc: BaseException) -> str:
     message = str(exc).casefold()
-    if any(value in message for value in ("unable to get local issuer", "self-signed certificate",
-                                           "unknown ca", "certificate verify failed")):
-        return "TLS_CA_CHAIN"
     if "hostname" in message or "doesn't match" in message or "does not match" in message:
         return "TLS_HOSTNAME"
     if "expired" in message:
         return "TLS_EXPIRED"
     if "not yet valid" in message:
         return "TLS_NOT_YET_VALID"
+    if any(value in message for value in ("unable to get local issuer", "self-signed certificate",
+                                           "unknown ca", "certificate verify failed")):
+        return "TLS_CA_CHAIN"
     if any(value in message for value in ("wrong version", "unsupported protocol", "protocol version")):
         return "TLS_PROTOCOL"
     if "handshake" in message:
@@ -776,6 +781,328 @@ class IrNightlyKnownSuccessfulTransport(DirectHttpTransport):
             transport_name=IR_NIGHTLY_KNOWN_SUCCESSFUL_TRANSPORT_ID,
             retain_raw_html=True,
             user_agent="tdnet-company-ir-monitor/1.0 (+nightly; metadata-only)")
+
+
+def python_openssl_system_trust_context(
+        context_factory: Callable[..., ssl.SSLContext] = ssl.create_default_context,
+        ) -> ssl.SSLContext:
+    """Build the immutable verified TLS policy for the in-process transport."""
+    context = context_factory(ssl.Purpose.SERVER_AUTH)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    return validate_verified_tls_context(context)
+
+
+def _certificate_name(value: Any) -> list[list[list[str]]]:
+    return [[[str(key), str(item)] for key, item in group] for group in (value or ())]
+
+
+class PythonOpenSslSystemTrustTransport:
+    """Strict in-process HTTPS transport using Python's default OpenSSL trust.
+
+    The profile has no helper process and never falls back to another transport.
+    A successful ``wrap_socket`` is the authority for both chain and hostname
+    validation because the context is fixed to CERT_REQUIRED/check_hostname.
+    """
+
+    name = PYTHON_OPENSSL_SYSTEM_TRUST_TRANSPORT_ID
+    implementation_fingerprint = PYTHON_OPENSSL_IMPLEMENTATION_FINGERPRINT
+
+    def __init__(self, *, journal: "HttpFetchJournal | None" = None,
+                 dns_resolver: Callable[..., Any] = socket.getaddrinfo,
+                 socket_connector: Callable[..., Any] = socket.create_connection,
+                 context_factory: Callable[..., ssl.SSLContext] = ssl.create_default_context,
+                 response_factory: Callable[..., Any] = http.client.HTTPResponse,
+                 retain_raw_html: bool = False,
+                 wire_fetcher: Callable[[str, FetchPolicy], TransportPayload] | None = None,
+                 ) -> None:
+        self.journal = journal
+        self.dns_resolver = dns_resolver
+        self.socket_connector = socket_connector
+        self.response_factory = response_factory
+        self.retain_raw_html = retain_raw_html
+        self.context = python_openssl_system_trust_context(context_factory)
+        self.wire_fetcher = wire_fetcher or self._fetch_once
+        self._attempts = 0
+        self._request_for_target: dict[str, str] = {}
+
+    def _context_provenance(self) -> dict[str, Any]:
+        defaults = ssl.get_default_verify_paths()
+        return {
+            "transport_profile": self.name,
+            "implementation_fingerprint": self.implementation_fingerprint,
+            "python_version": platform.python_version(),
+            "python_executable": str(Path(sys.executable).resolve()),
+            "openssl_version": ssl.OPENSSL_VERSION,
+            "ca_source": "ssl.create_default_context(Purpose.SERVER_AUTH)",
+            "default_verify_paths": {
+                "cafile": defaults.cafile, "capath": defaults.capath,
+                "openssl_cafile_env": defaults.openssl_cafile_env,
+                "openssl_cafile": defaults.openssl_cafile,
+                "openssl_capath_env": defaults.openssl_capath_env,
+                "openssl_capath": defaults.openssl_capath,
+            },
+            "cert_store_stats": self.context.cert_store_stats(),
+            "verify_mode": "CERT_REQUIRED",
+            "check_hostname": True,
+            "minimum_tls_version": "TLSv1_2",
+            "helper_process_started": False,
+        }
+
+    def _start_request(self, target_url: str, *, parent_request_id: str | None = None,
+                       redirect_hop: int = 0, redirect_source_url: str | None = None,
+                       redirect_location: str | None = None) -> tuple[str | None, float]:
+        started = time.monotonic()
+        if self.journal is None:
+            return None, started
+        self._attempts += 1
+        request_id = f"request-{self._attempts:04d}-{uuid.uuid4().hex[:12]}"
+        self.journal.start(
+            request_id=request_id, transport=self.name, requested_url=target_url,
+            attempt_number=self._attempts, parent_request_id=parent_request_id,
+            redirect_hop=redirect_hop, redirect_source_url=redirect_source_url,
+            redirect_location=redirect_location,
+            redirect_target_url=target_url if parent_request_id else None)
+        self._request_for_target[_canonical_url(target_url)] = request_id
+        return request_id, started
+
+    def _finish_request(self, request_id: str | None, payload: TransportPayload,
+                        started: float, *, raw_body: bytes | None = None,
+                        access_status: str | None = None) -> TransportPayload:
+        if self.journal is not None and request_id is not None:
+            retained = payload.body if raw_body is None else raw_body
+            if (self.retain_raw_html and retained is not None
+                    and payload.mime_type in {"text/html", "application/xhtml+xml", "text/plain"}):
+                relative = Path("raw-http") / f"{request_id}.body"
+                self.journal.store.write_bytes(relative, retained)
+                metadata = dict(payload.transport_metadata or {})
+                metadata.update({
+                    "raw_body_artifact": relative.as_posix(),
+                    "raw_body_sha256": hashlib.sha256(retained).hexdigest(),
+                    "raw_body_bytes": len(retained),
+                })
+                payload = TransportPayload(
+                    payload.requested_url, payload.final_url, payload.status_code,
+                    payload.mime_type, payload.body, payload.fetch_method,
+                    payload.failure_reason, payload.safe_headers, metadata)
+            self.journal.response_received(
+                request_id, payload,
+                elapsed=float((payload.transport_metadata or {}).get(
+                    "elapsed_seconds", time.monotonic() - started)),
+                access_status=access_status)
+            if payload.failure_reason:
+                self.journal.failed(request_id, category=payload.failure_reason)
+        return payload
+
+    def record_normalized(self, requested_url: str, *, normalized_chars: int,
+                          body_hash: str) -> None:
+        if self.journal is not None:
+            self.journal.normalized(
+                self._request_for_target[_canonical_url(requested_url)],
+                normalized_chars=normalized_chars, body_hash=body_hash)
+
+    def record_normalization_failure(self, requested_url: str, exc: Exception) -> None:
+        if self.journal is not None:
+            self.journal.failed(
+                self._request_for_target[_canonical_url(requested_url)],
+                category="NORMALIZATION", detail=str(exc))
+
+    def _failure(self, requested_url: str, current: str, category: str,
+                 started: float, stage: str, exc: BaseException,
+                 metadata: Mapping[str, Any]) -> TransportPayload:
+        detail = dict(metadata)
+        detail.update({
+            "failure_stage": stage,
+            "exception_type": type(exc).__name__,
+            "error_detail": str(exc)[:2000],
+            "elapsed_seconds": time.monotonic() - started,
+        })
+        if isinstance(exc, ssl.SSLCertVerificationError):
+            detail["certificate_verification"] = {
+                "verify_code": getattr(exc, "verify_code", None),
+                "verify_message": getattr(exc, "verify_message", None),
+            }
+        return TransportPayload(
+            requested_url, current, 0, None, None, self.name, category, {}, detail)
+
+    def _fetch_once(self, current: str, policy: FetchPolicy) -> TransportPayload:
+        parsed = urlsplit(current)
+        hostname = parsed.hostname or ""
+        started = time.monotonic()
+        metadata = self._context_provenance()
+        metadata["sni"] = hostname
+        timings: dict[str, float] = {}
+        metadata["stage_timings_seconds"] = timings
+        try:
+            self.dns_resolver(hostname, 443, type=socket.SOCK_STREAM)
+            timings["dns_complete"] = time.monotonic() - started
+        except socket.timeout as exc:
+            return self._failure(current, current, "TIMEOUT", started, "DNS", exc, metadata)
+        except OSError as exc:
+            return self._failure(current, current, "DNS", started, "DNS", exc, metadata)
+        raw_socket = tls_socket = None
+        try:
+            try:
+                raw_socket = self.socket_connector((hostname, 443), timeout=policy.timeout_seconds)
+                timings["tcp_complete"] = time.monotonic() - started
+            except (socket.timeout, TimeoutError) as exc:
+                return self._failure(current, current, "TIMEOUT", started, "TCP", exc, metadata)
+            except OSError as exc:
+                return self._failure(current, current, "TCP", started, "TCP", exc, metadata)
+            try:
+                tls_socket = self.context.wrap_socket(raw_socket, server_hostname=hostname)
+                raw_socket = None
+                timings["tls_complete"] = time.monotonic() - started
+            except ssl.SSLCertVerificationError as exc:
+                return self._failure(
+                    current, current, classify_tls_failure(exc), started, "CERTIFICATE",
+                    exc, metadata)
+            except (ssl.SSLError, OSError) as exc:
+                category = classify_tls_failure(exc)
+                if category == "TLS_UNKNOWN":
+                    category = "TLS_HANDSHAKE"
+                return self._failure(current, current, category, started, "TLS", exc, metadata)
+            certificate_der = tls_socket.getpeercert(binary_form=True)
+            certificate = tls_socket.getpeercert()
+            cipher = tls_socket.cipher()
+            metadata.update({
+                "certificate_chain_validation": "PASS",
+                "hostname_validation": "PASS",
+                "peer_certificate": {
+                    "der_sha256": hashlib.sha256(certificate_der).hexdigest(),
+                    "subject": _certificate_name(certificate.get("subject")),
+                    "issuer": _certificate_name(certificate.get("issuer")),
+                    "subject_alt_name": [[str(k), str(v)] for k, v in certificate.get("subjectAltName", ())],
+                    "not_before": certificate.get("notBefore"),
+                    "not_after": certificate.get("notAfter"),
+                },
+                "negotiated_tls_version": tls_socket.version(),
+                "cipher": {"name": cipher[0], "protocol": cipher[1], "bits": cipher[2]} if cipher else None,
+                "alpn": tls_socket.selected_alpn_protocol(),
+            })
+            target = parsed.path or "/"
+            if parsed.query:
+                target += "?" + parsed.query
+            request = (
+                f"GET {target} HTTP/1.1\r\nHost: {hostname}\r\n"
+                "User-Agent: CompanyNewsOfficialResolverPythonOpenSSL/1.0\r\n"
+                "Accept: text/html,application/xhtml+xml,application/pdf,text/plain\r\n"
+                "Connection: close\r\n\r\n"
+            ).encode("ascii")
+            tls_socket.sendall(request)
+            response = self.response_factory(tls_socket)
+            response.begin()
+            status = int(response.status)
+            headers = {str(key).lower(): str(value)[:1000] for key, value in response.getheaders()
+                       if str(key).lower() in {"content-type", "content-length", "location", "etag", "last-modified"}}
+            mime = headers.get("content-type", "").split(";", 1)[0].strip().lower() or None
+            content_length = headers.get("content-length")
+            if content_length and int(content_length) > policy.max_response_bytes:
+                metadata.update(elapsed_seconds=time.monotonic() - started,
+                                failure_stage="BODY", response_bytes=0)
+                return TransportPayload(current, current, status, mime, None, self.name,
+                                        "SIZE_LIMIT", headers, metadata)
+            body = response.read(policy.max_response_bytes + 1)
+            timings["body_complete"] = time.monotonic() - started
+            metadata.update({
+                "elapsed_seconds": time.monotonic() - started,
+                "failure_stage": None,
+                "response_bytes": len(body),
+                "body_sha256": hashlib.sha256(body).hexdigest(),
+                "request_header_profile": {
+                    "host": hostname,
+                    "user_agent": "CompanyNewsOfficialResolverPythonOpenSSL/1.0",
+                    "accept": "text/html,application/xhtml+xml,application/pdf,text/plain",
+                    "connection": "close",
+                },
+            })
+            if len(body) > policy.max_response_bytes:
+                return TransportPayload(current, current, status, mime, None, self.name,
+                                        "SIZE_LIMIT", headers, metadata)
+            return TransportPayload(current, current, status, mime, body, self.name,
+                                    None, headers, metadata)
+        except (socket.timeout, TimeoutError) as exc:
+            return self._failure(current, current, "TIMEOUT", started, "HTTP", exc, metadata)
+        except (http.client.HTTPException, OSError, ValueError) as exc:
+            return self._failure(current, current, "BODY_READ", started, "HTTP", exc, metadata)
+        finally:
+            for stream in (tls_socket, raw_socket):
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except OSError:
+                        pass
+
+    def fetch(self, requested_url: str, official_domain: str,
+              policy: FetchPolicy) -> TransportPayload:
+        if urlsplit(requested_url).scheme.lower() != "https":
+            raise OfficialSourceError(
+                "ACCESS_DENIED: python OpenSSL system-trust transport requires HTTPS")
+        current = validate_fetch_url(requested_url, official_domain, self.dns_resolver)
+        visited = {_canonical_url(current)}
+        parent_request_id = redirect_source_url = redirect_location = None
+        for redirects in range(policy.max_redirects + 1):
+            request_id, started = self._start_request(
+                current, parent_request_id=parent_request_id, redirect_hop=redirects,
+                redirect_source_url=redirect_source_url,
+                redirect_location=redirect_location)
+            payload = self.wire_fetcher(current, policy)
+            if payload.fetch_method != self.name:
+                payload = TransportPayload(
+                    payload.requested_url, payload.final_url, payload.status_code,
+                    payload.mime_type, None, self.name, "UNKNOWN", payload.safe_headers,
+                    {**(payload.transport_metadata or {}),
+                     "provenance_error": "wire fetcher transport mismatch"})
+            status = payload.status_code
+            if status in range(300, 400) and not payload.failure_reason:
+                location = (payload.safe_headers or {}).get("location")
+                if not location or redirects == policy.max_redirects:
+                    blocked = TransportPayload(
+                        requested_url, current, status, payload.mime_type, None,
+                        self.name, "REDIRECT_BLOCKED", payload.safe_headers,
+                        payload.transport_metadata)
+                    return self._finish_request(request_id, blocked, started,
+                                                raw_body=payload.body)
+                destination = urljoin(current, location)
+                current_host = _domain(urlsplit(current).hostname or "")
+                destination_host = _domain(urlsplit(destination).hostname or "")
+                if (urlsplit(destination).scheme.lower() != "https"
+                        or destination_host != current_host
+                        or _canonical_url(destination) in visited):
+                    blocked = TransportPayload(
+                        requested_url, destination, status, payload.mime_type, None,
+                        self.name, "REDIRECT_BLOCKED", payload.safe_headers,
+                        payload.transport_metadata)
+                    return self._finish_request(request_id, blocked, started,
+                                                raw_body=payload.body)
+                self._finish_request(request_id, payload, started, raw_body=payload.body,
+                                     access_status="REDIRECT")
+                parent_request_id = request_id
+                redirect_source_url = current
+                redirect_location = str(location)
+                current = validate_fetch_url(destination, official_domain, self.dns_resolver)
+                visited.add(_canonical_url(current))
+                continue
+            failure = payload.failure_reason
+            if not failure and status >= 500:
+                failure = "HTTP_5XX"
+            elif not failure and status >= 400:
+                failure = "HTTP_4XX"
+            elif not failure and payload.body is not None and len(payload.body) > policy.max_response_bytes:
+                failure = "SIZE_LIMIT"
+            elif not failure and payload.mime_type not in policy.allowed_mime_types:
+                failure = "MIME_REJECTED"
+            elif not failure and status not in {204, 205, 304} and not payload.body:
+                failure = "EMPTY_BODY"
+            final = TransportPayload(
+                requested_url, current, status, payload.mime_type,
+                None if failure else payload.body, self.name, failure,
+                payload.safe_headers, payload.transport_metadata)
+            self._request_for_target[_canonical_url(requested_url)] = request_id
+            return self._finish_request(
+                request_id, final, started,
+                raw_body=None if failure == "SIZE_LIMIT" else payload.body)
+        return TransportPayload(requested_url, current, 0, None, None,
+                                self.name, "UNKNOWN")
 
 
 class WindowsSchannelTransport:
