@@ -528,8 +528,63 @@ def synthesis_contract(assignment: dict[str, Any], discovery: dict[str, Any],
     ))
 
 
+ISOLATED_CODEX_STATE_POLICY = {
+    "profile": "worker-isolated-sqlite-v1",
+    "sqlite_location": "worker_artifact_directory",
+    "ephemeral": True,
+    "history_persistence": "none",
+    "shared_sqlite": False,
+    "codex_home_unchanged": True,
+    "auth_copy_forbidden": True,
+}
+
+
+def _state_component(value: str, *, label: str) -> str:
+    """Accept one short path component and reject traversal or aliases."""
+    if (not isinstance(value, str) or not value or len(value) > 80
+            or value in {".", ".."} or "/" in value or "\\" in value
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", value) is None):
+        raise LightweightError(f"invalid isolated state {label}")
+    return value
+
+
+def validate_worker_sqlite_home(root: Path, worker_dir: Path) -> Path:
+    """Validate an existing worker artifact directory for child Codex state."""
+    workspace = root.resolve()
+    target = worker_dir.resolve()
+    try:
+        target.relative_to(workspace)
+    except ValueError as exc:
+        raise LightweightError("isolated sqlite_home is outside workspace") from exc
+    if not target.is_dir():
+        raise LightweightError("isolated sqlite_home worker directory is missing")
+    forbidden = ("state_5.sqlite", "state_5.sqlite-wal", "state_5.sqlite-shm", "auth.json")
+    if any((target / name).exists() for name in forbidden):
+        raise LightweightError(f"isolated sqlite_home collision: {target}")
+    try:
+        probe = target / ".parent-write-probe"
+        with probe.open("x", encoding="utf-8") as handle:
+            handle.write("")
+        probe.unlink()
+    except OSError as exc:
+        raise LightweightError(f"isolated sqlite_home initialization failed: {exc}") from exc
+    return target
+
+
+def isolated_sqlite_home(root: Path, company_dir: Path, worker_id: str) -> Path:
+    """Use the already-created unique worker artifact directory as sqlite_home."""
+    workspace = root.resolve()
+    company = company_dir.resolve()
+    try:
+        company.relative_to(workspace)
+    except ValueError as exc:
+        raise LightweightError("isolated state company directory is outside workspace") from exc
+    stage_id = _state_component(worker_id, label="worker id")
+    return validate_worker_sqlite_home(root, company / "workers" / stage_id)
+
+
 def codex_command(root: Path, schema_path: Path, result_path: Path, prompt: str,
-                  *, web_enabled: bool = True) -> list[str]:
+                  *, sqlite_home: Path, web_enabled: bool = True) -> list[str]:
     """Create one ephemeral context; only Web workers receive native Web."""
     disabled = ("shell_tool", "unified_exec", "apps", "plugins", "computer_use",
                 "browser_use", "browser_use_external", "browser_use_full_cdp_access",
@@ -537,7 +592,14 @@ def codex_command(root: Path, schema_path: Path, result_path: Path, prompt: str,
     command = ["codex"]
     if web_enabled:
         command.append("--search")
-    command.extend(("exec", "--ephemeral", "--ignore-user-config"))
+    sqlite_path = sqlite_home.resolve()
+    try:
+        sqlite_path.relative_to(root.resolve())
+    except ValueError as exc:
+        raise LightweightError("sqlite_home must remain inside workspace") from exc
+    command.extend(("exec", "--ephemeral", "--ignore-user-config", "--strict-config",
+                    "-c", "sqlite_home=" + json.dumps(str(sqlite_path)),
+                    "-c", "history.persistence=none"))
     for feature in disabled:
         command.extend(("--disable", feature))
     command.extend(("--json", "--color", "never", "--sandbox", "read-only",
@@ -659,13 +721,24 @@ def _parse_events(stdout: str) -> list[dict[str, Any]]:
 
 
 def _run_isolated_stage(root: Path, company_dir: Path, spec: WorkerSpec | None,
-                        prompt: str, schema: dict[str, Any], *, web_enabled: bool) -> tuple[dict[str, Any], dict[str, Any]]:
+                        prompt: str, schema: dict[str, Any], *, web_enabled: bool,
+                        precreated_worker_dir: Path | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     stage_id = spec.worker_id if spec else "final-synthesis"
-    stage_dir = company_dir / "workers" / stage_id
-    stage_dir.mkdir(parents=True, exist_ok=True)
+    if precreated_worker_dir is None:
+        stage_dir = company_dir / "workers" / stage_id
+        try:
+            stage_dir.mkdir(parents=True, exist_ok=False)
+        except OSError as exc:
+            raise LightweightError(
+                f"worker artifact directory collision or initialization failure: {exc}") from exc
+        sqlite_home = isolated_sqlite_home(root, company_dir, stage_id)
+    else:
+        stage_dir = precreated_worker_dir.resolve()
+        sqlite_home = validate_worker_sqlite_home(root, stage_dir)
     schema_path, result_path = stage_dir / "output-schema.json", stage_dir / "last-message.json"
     _atomic_json(schema_path, schema)
-    command = codex_command(root, schema_path, result_path, prompt, web_enabled=web_enabled)
+    command = codex_command(root, schema_path, result_path, prompt,
+                            sqlite_home=sqlite_home, web_enabled=web_enabled)
     started_at = datetime.now(timezone.utc).isoformat()
     started = time.monotonic()
     completed = subprocess.run(command, text=True, encoding="utf-8", errors="replace",
@@ -681,6 +754,10 @@ def _run_isolated_stage(root: Path, company_dir: Path, spec: WorkerSpec | None,
         "exposure_id": spec.exposure_id if spec else None,
         "kind": spec.kind if spec else "final_synthesis",
         "model_visible_chars": sum(item["model_visible_chars"] for item in telemetry["tool_events"]),
+        "sqlite_home": str(sqlite_home),
+        "sqlite_state_path": str((sqlite_home / "state_5.sqlite").resolve()),
+        "sqlite_state_file_created": (sqlite_home / "state_5.sqlite").is_file(),
+        "sqlite_state_policy": copy.deepcopy(ISOLATED_CODEX_STATE_POLICY),
         "started_at": started_at,
         "completed_at": completed_at,
         "validation_status": "PENDING" if completed.returncode == 0 and result_path.exists() else "PROCESS_FAILED",
@@ -690,6 +767,9 @@ def _run_isolated_stage(root: Path, company_dir: Path, spec: WorkerSpec | None,
         "exit_code": completed.returncode,
         "stderr": bounded_text(completed.stderr, max_chars=8_000, max_lines=80),
         "event_types": [event.get("type") for event in events],
+        "sqlite_home": str(sqlite_home),
+        "sqlite_state_path": str((sqlite_home / "state_5.sqlite").resolve()),
+        "global_codex_home_changed": False,
     })
     if completed.returncode != 0 or not result_path.exists():
         raise LightweightError(f"isolated stage failed: {stage_id} exit={completed.returncode}")

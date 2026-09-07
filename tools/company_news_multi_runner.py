@@ -1967,6 +1967,8 @@ def prepare_run(cohort: FrozenCohort, run_dir: Path, *, search_from: str,
         "resume_approved": False, "production_routing": False,
         "production_write_forbidden": True, "automatic_retry": False,
         "live_transport_profile": transport_profile,
+        "isolated_codex_state_policy": copy.deepcopy(
+            lightweight.ISOLATED_CODEX_STATE_POLICY),
     }
     if identity_registry_path is not None or official_plan_path is not None:
         if identity_registry_path is None or official_plan_path is None:
@@ -2008,6 +2010,12 @@ def load_frozen_official_config(manifest: Mapping[str, Any]) -> tuple[Path, Path
             or _canonical_sha(plan) != manifest["official_plan_logical_sha256"]):
         raise CohortIntegrityError("frozen official preflight metadata changed")
     return registry_path, plan_path
+
+
+def validate_isolated_codex_state_policy(manifest: Mapping[str, Any]) -> None:
+    """Fail before assignment acquisition if per-worker Codex state is not frozen."""
+    if manifest.get("isolated_codex_state_policy") != lightweight.ISOLATED_CODEX_STATE_POLICY:
+        raise CohortIntegrityError("isolated Codex state policy changed after prepare")
 
 
 _USAGE_FIELDS = (
@@ -2076,6 +2084,7 @@ class FrozenCohortController:
         manifest, queue = _read(self.run_dir / "manifest.json"), _read(self.run_dir / "queue.json")
         if manifest.get("schema_version") != SCHEMA or manifest.get("state") not in RUN_STATES:
             raise MultiRunnerError("invalid run manifest")
+        validate_isolated_codex_state_policy(manifest)
         cohort = FrozenCohort.load(Path(manifest["cohort_path"]),
             approved_company_count=manifest["approved_company_count"],
             max_companies=manifest["approved_company_count"],

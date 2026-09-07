@@ -327,8 +327,29 @@ def test_live_transport_profile_is_frozen_and_cannot_switch_mid_run(tmp_path):
     assert multi.select_live_transport_profile(manifest) == "python-openssl-system-trust-v1"
     assert multi.select_live_transport_profile(
         manifest, "python-openssl-system-trust-v1") == "python-openssl-system-trust-v1"
+    assert manifest["isolated_codex_state_policy"] == {
+        "profile": "worker-isolated-sqlite-v1",
+        "sqlite_location": "worker_artifact_directory",
+        "ephemeral": True,
+        "history_persistence": "none",
+        "shared_sqlite": False,
+        "codex_home_unchanged": True,
+        "auth_copy_forbidden": True,
+    }
     with pytest.raises(multi.ControlContractError, match="does not match"):
         multi.select_live_transport_profile(manifest, "windows-schannel-v1")
+
+
+def test_isolated_codex_state_policy_is_frozen_before_assignment(tmp_path):
+    run, ctl = controller(tmp_path, count=1)
+    manifest = json.loads((run / "manifest.json").read_text(encoding="utf-8"))
+    manifest["isolated_codex_state_policy"]["shared_sqlite"] = True
+    (run / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(multi.CohortIntegrityError, match="state policy changed"):
+        ctl.run_next()
+    queue = json.loads((run / "queue.json").read_text(encoding="utf-8"))
+    assert queue["assignments"][0]["status"] == "PENDING"
+    assert not (run / "guard.json").exists()
 
 
 def test_legacy_prepared_run_defaults_to_schannel_profile():

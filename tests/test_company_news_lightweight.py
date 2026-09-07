@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -56,10 +57,13 @@ def test_context_isolation_and_no_previous_history(tmp_path):
 def test_canonical_schema_is_wired_to_actual_command(tmp_path):
     schema = tmp_path / "canonical.json"
     result = tmp_path / "result.json"
-    command = light.codex_command(tmp_path, schema, result, "prompt")
+    state = tmp_path / "state"
+    state.mkdir()
+    command = light.codex_command(tmp_path, schema, result, "prompt", sqlite_home=state)
     assert command[command.index("--output-schema") + 1] == str(schema)
     assert "--search" in command and "shell_tool" in command and "--ignore-user-config" in command
-    synthesis = light.codex_command(tmp_path, schema, result, "prompt", web_enabled=False)
+    synthesis = light.codex_command(
+        tmp_path, schema, result, "prompt", sqlite_home=state, web_enabled=False)
     assert "--search" not in synthesis
     assert light.output_schema() == light.strategy_v5.canonical_output_schema()
     assert light.strategy_v5.schema_sha256(light.output_schema()) == light.strategy_v5.canonical_schema_sha256()
@@ -138,8 +142,132 @@ def test_output_schema_file_is_utf8_json_and_command_uses_it(tmp_path):
     schema_path, result_path = tmp_path / "worker-schema.json", tmp_path / "result.json"
     light._atomic_json(schema_path, light.worker_output_schema(spec))
     assert json.loads(schema_path.read_text(encoding="utf-8"))["type"] == "object"
-    command = light.codex_command(tmp_path, schema_path, result_path, "prompt")
+    state = tmp_path / "state"
+    state.mkdir()
+    command = light.codex_command(
+        tmp_path, schema_path, result_path, "prompt", sqlite_home=state)
     assert Path(command[command.index("--output-schema") + 1]).exists()
+
+
+def test_worker_sqlite_home_is_unique_short_and_repo_local(tmp_path):
+    company = tmp_path / "artifacts" / "token" / "phase22-run-008" / "companies" / "01-5237"
+    (company / "workers" / "company-web").mkdir(parents=True)
+    (company / "workers" / "exposure-1").mkdir()
+    first = light.isolated_sqlite_home(tmp_path, company, "company-web")
+    second = light.isolated_sqlite_home(tmp_path, company, "exposure-1")
+    assert first == company / "workers" / "company-web"
+    assert second != first and first.is_dir() and second.is_dir()
+    assert not list(first.iterdir()) and not list(second.iterdir())
+
+
+def test_worker_sqlite_home_collision_and_traversal_fail_closed(tmp_path):
+    company = tmp_path / "run" / "companies" / "01-5237"
+    stage = company / "workers" / "company-web"
+    stage.mkdir(parents=True)
+    (stage / "state_5.sqlite").write_bytes(b"existing")
+    with pytest.raises(light.LightweightError, match="collision"):
+        light.isolated_sqlite_home(tmp_path, company, "company-web")
+    with pytest.raises(light.LightweightError, match="worker id"):
+        light.isolated_sqlite_home(tmp_path, company, "../worker")
+    outside = tmp_path.parent / "outside-company"
+    with pytest.raises(light.LightweightError, match="outside workspace"):
+        light.isolated_sqlite_home(tmp_path, outside, "company-web")
+
+
+def test_missing_worker_directory_fails_before_state_initialization(tmp_path):
+    company = tmp_path / "run" / "companies" / "01-5237"
+    company.mkdir(parents=True)
+    with pytest.raises(light.LightweightError, match="worker directory is missing"):
+        light.isolated_sqlite_home(tmp_path, company, "company-web")
+
+
+def test_codex_command_enforces_ephemeral_isolated_state_without_auth_copy(tmp_path):
+    schema, result, state = tmp_path / "s.json", tmp_path / "r.json", tmp_path / "state"
+    state.mkdir()
+    command = light.codex_command(
+        tmp_path, schema, result, "fixed prompt", sqlite_home=state,
+        web_enabled=False)
+    assert "--ephemeral" in command and "--json" in command
+    assert "--ignore-user-config" in command and "history.persistence=none" in command
+    sqlite_config = command[command.index("sqlite_home=" + json.dumps(str(state.resolve())))]
+    assert sqlite_config == "sqlite_home=" + json.dumps(str(state.resolve()))
+    assert "--search" not in command
+    assert os.environ.get("CODEX_HOME") not in command
+    assert not (state / "auth.json").exists()
+
+
+def test_codex_command_rejects_workspace_external_sqlite_home(tmp_path):
+    outside = tmp_path.parent / "outside-state"
+    with pytest.raises(light.LightweightError, match="inside workspace"):
+        light.codex_command(
+            tmp_path, tmp_path / "s.json", tmp_path / "r.json", "prompt",
+            sqlite_home=outside)
+
+
+def test_state_initialization_failure_stops_before_child_process(tmp_path, monkeypatch):
+    spec = light.WorkerSpec("company-web", "company_web", None, None, ())
+    called = False
+
+    def forbidden_run(*args, **kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("child process must not start")
+
+    monkeypatch.setattr(
+        light, "isolated_sqlite_home",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            light.LightweightError("isolated sqlite_home initialization failed")))
+    monkeypatch.setattr(light.subprocess, "run", forbidden_run)
+    with pytest.raises(light.LightweightError, match="initialization failed"):
+        light._run_isolated_stage(
+            tmp_path, tmp_path / "company", spec, "prompt",
+            light.worker_output_schema(spec), web_enabled=False)
+    assert called is False
+
+
+def test_isolated_runtime_does_not_write_global_state_and_keeps_exact_usage(
+        tmp_path, monkeypatch):
+    global_home = tmp_path / "global-codex-home"
+    global_home.mkdir()
+    global_state = global_home / "state_5.sqlite"
+    global_state.write_bytes(b"READ-ONLY-GLOBAL-STATE")
+    global_state.chmod(0o444)
+    before = (global_state.read_bytes(), global_state.stat().st_size,
+              global_state.stat().st_mtime_ns)
+    monkeypatch.setenv("CODEX_HOME", str(global_home))
+    spec = light.WorkerSpec("company-web", "company_web", None, None, ({
+        "query_id": "company-web-q1", "channel": "official",
+        "query": "fixed smoke query", "exposure_index": None,
+        "canonical_driver_phrase": None},))
+
+    def fake_run(command, **kwargs):
+        sqlite_arg = next(value for value in command if value.startswith("sqlite_home="))
+        sqlite_home = Path(json.loads(sqlite_arg.split("=", 1)[1]))
+        (sqlite_home / "state_5.sqlite").write_bytes(b"isolated")
+        result_path = Path(command[command.index("--output-last-message") + 1])
+        write(result_path, _worker_fixture(spec))
+        events = [
+            {"type": "thread.started", "thread_id": "fixture"},
+            {"type": "turn.started"},
+            {"type": "turn.completed", "usage": {
+                "input_tokens": 100, "cached_input_tokens": 40,
+                "output_tokens": 10, "reasoning_tokens": 2}},
+        ]
+        return SimpleNamespace(
+            returncode=0, stdout="\n".join(json.dumps(row) for row in events), stderr="")
+
+    monkeypatch.setattr(light.subprocess, "run", fake_run)
+    _, telemetry = light._run_isolated_stage(
+        tmp_path, tmp_path / "run" / "companies" / "01-5237", spec,
+        "prompt", light.worker_output_schema(spec), web_enabled=False)
+    after = (global_state.read_bytes(), global_state.stat().st_size,
+             global_state.stat().st_mtime_ns)
+    assert before == after
+    assert telemetry["total_tokens"] == 110
+    assert telemetry["cached_input_tokens"] == 40
+    assert telemetry["sqlite_state_file_created"] is True
+    assert Path(telemetry["sqlite_home"]).is_relative_to(tmp_path)
+    assert not (Path(telemetry["sqlite_home"]) / "auth.json").exists()
 
 
 def test_bounded_tool_output_and_no_broad_repo_search():

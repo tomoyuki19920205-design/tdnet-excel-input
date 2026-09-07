@@ -65,8 +65,11 @@ def test_cumulative_tokens_requires_exact_values(tmp_path: Path):
 def test_command_uses_the_current_schema_path(tmp_path: Path):
     schema_path = tmp_path / "current-output-schema.json"
     result_path = tmp_path / "last-message.json"
+    sqlite_home = tmp_path / "state"
+    sqlite_home.mkdir()
     command = phase19c.lightweight.codex_command(
-        tmp_path, schema_path, result_path, "fixture", web_enabled=True)
+        tmp_path, schema_path, result_path, "fixture",
+        sqlite_home=sqlite_home, web_enabled=True)
     index = command.index("--output-schema")
     assert Path(command[index + 1]) == schema_path
     assert "phase19c-gap-recovery" not in command[index + 1]

@@ -294,11 +294,14 @@ def run_worker(root: Path, worker_id: str) -> dict[str, Any]:
     if guard.exists():
         raise RuntimeError(f"active guard exists: {guard}")
     stage.mkdir(parents=True)
+    sqlite_home = lightweight.isolated_sqlite_home(root, base, worker_id)
     schema = output_schema(spec)
     schema_path, result_path = stage / "output-schema.json", stage / "last-message.json"
     _write(schema_path, schema)
     _write(guard, {"worker_id": worker_id, "created_at": datetime.now(timezone.utc).isoformat()})
-    command = lightweight.codex_command(root, schema_path, result_path, prompt(spec), web_enabled=True)
+    command = lightweight.codex_command(
+        root, schema_path, result_path, prompt(spec), sqlite_home=sqlite_home,
+        web_enabled=True)
     started_at = datetime.now(timezone.utc).isoformat()
     started = time.monotonic()
     try:
