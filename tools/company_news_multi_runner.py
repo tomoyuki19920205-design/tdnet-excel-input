@@ -45,6 +45,7 @@ from tools.company_news_official_source import (
     RepositoryExistingTransport,
     WindowsSchannelTransport,
     apply_registry_identity,
+    apply_registry_identity_with_audit,
     promote_verified_identity,
     validate_identity_record,
     validate_window_coverage,
@@ -1378,6 +1379,30 @@ class OfficialPreflightProvider(Protocol):
     def prepare(self, assignment: Mapping[str, Any], company_dir: Path) -> OfficialPreflight: ...
 
 
+def load_resolver_document_equivalences(company_dir: Path) -> list[dict[str, Any]]:
+    """Load only durable, successful same-host redirect facts from this company run."""
+    result: list[dict[str, Any]] = []
+    for path in sorted((company_dir / "official-http" / "http-journal").glob("*.json")):
+        journal = _read(path)
+        declared = journal.get("redirect_source_url")
+        resolved = journal.get("redirect_target_url")
+        if not declared or not resolved:
+            continue
+        received = [row for row in journal.get("history", [])
+                    if row.get("phase") == "RESPONSE_RECEIVED"]
+        if not received or received[-1].get("status_code") != 200:
+            continue
+        event = received[-1]
+        result.append({
+            "declared_url": declared,
+            "resolved_url": event.get("final_url") or resolved,
+            "body_sha256": event.get("body_sha256"),
+            "transport": journal.get("transport"),
+            "journal_path": str(path),
+        })
+    return result
+
+
 class CompanyExecutor(Protocol):
     def __call__(self, root: Path, company_dir: Path, assignment: dict[str, Any],
                  official: OfficialPreflight, *,
@@ -1683,7 +1708,12 @@ def execute_lightweight_company(root: Path, company_dir: Path,
     response, telemetry = lightweight.run_company(
         root, experiment, assignment, official_context=official.model_context,
         usage_checkpoint=usage_checkpoint, registry_identity_authoritative=True)
-    response = apply_registry_identity(response, official.registry, assignment)
+    evidence = lightweight._read_json(company_dir / "evidence-state.json")
+    response, reconciliation = apply_registry_identity_with_audit(
+        response, official.registry, assignment,
+        document_equivalences=load_resolver_document_equivalences(company_dir),
+        evidence_cards=evidence.get("cards", []))
+    lightweight._atomic_json(company_dir / "provenance-reconciliation.json", reconciliation)
     identity_record = official.registry.usable(
         str(assignment["ticker"]), str(assignment["company_name"]))
     if identity_record is None:
@@ -1750,7 +1780,6 @@ def execute_lightweight_company(root: Path, company_dir: Path,
     lightweight._atomic_json(company_dir / "official-document-provenance.json", {
         "states": document_states, "index_only_promoted": False})
     response = lightweight.apply_source_count_authority(response)
-    evidence = lightweight._read_json(company_dir / "evidence-state.json")
     discovery = lightweight._read_json(company_dir / "workers" / "company-web" / "last-message.json")
     response, _ = lightweight.apply_coverage_authority(
         response, evidence["search_record_registry"], discovery, evidence["cards"])
@@ -2208,16 +2237,19 @@ def offline_replay_saved_company(run_dir: Path, ticker: str, output_path: Path) 
         response, completed_at=synthesis_telemetry.get("completed_at"))
     registry_path, _ = load_frozen_official_config(manifest)
     identity_registry = CompanyIdentityRegistry.load(registry_path)
-    response = apply_registry_identity(response, identity_registry, runtime)
+    response, reconciliation = apply_registry_identity_with_audit(
+        response, identity_registry, runtime,
+        document_equivalences=load_resolver_document_equivalences(company_dir),
+        evidence_cards=store.cards())
     response = lightweight.apply_source_count_authority(response)
     response = lightweight.apply_search_record_registry(response, registry, discovery)
     response = lightweight.normalize_documents_from_evidence(response, store.cards(), runtime)
+    response = lightweight.apply_candidate_selection_authority(response)
     response, provenance = lightweight.apply_document_provenance_authority(
         response, store.cards())
     response = lightweight.apply_ir_nightly_overlap(response)
     response = lightweight.apply_incremental_ir_authority(response, store.cards(), discovery)
-    publication_probe = lightweight.restore_publication_from_evidence(
-        copy.deepcopy(response), store.cards())
+    item_count_before_materiality = len(response["research_result"]["items"])
     response, materiality = lightweight.apply_materiality_authority(
         response, store.cards(), company_name=runtime["company_name"])
     response, coverage = lightweight.apply_coverage_authority(
@@ -2240,8 +2272,9 @@ def offline_replay_saved_company(run_dir: Path, ticker: str, output_path: Path) 
         "research_companies": 0, "http_calls": 0, "web_calls": 0, "model_calls": 0,
         "publication_authority": {
             "status": "PASS", "headline_title_equality_required": False,
-            "item_count_before_materiality": len(publication_probe["research_result"]["items"]),
+            "item_count_before_materiality": item_count_before_materiality,
         },
+        "provenance_reconciliation": reconciliation,
         "materiality_decisions": materiality,
         "final_state": state, "coverage_status": coverage["coverage_status"],
         "remaining_gaps": response["strategy_telemetry"]["coverage_gaps"],

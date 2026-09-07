@@ -965,6 +965,84 @@ def test_frozen_registry_identity_does_not_require_synthesis_identity():
     assert repaired["strategy_telemetry"]["company_identity"]["verified_ticker"] == "1001"
 
 
+def test_registry_identity_reconciles_query_order_and_preserves_both_roles():
+    registry = verified_registry()
+    record = registry.get("1001")
+    registry = CompanyIdentityRegistry([CompanyIdentityRecord(**{
+        **record.to_dict(), "verified_official_url": "HTTPS://EXAMPLE.TEST:443/?b=2&a=1"})])
+    response = {"research_result": {"sources_checked_count": 1},
+                "strategy_telemetry": {"company_identity": None, "source_provenance": [{
+                    "url": "https://example.test/?a=1&b=2", "source_type": "official_news",
+                    "content_verified": True, "evidence_excerpt": "event context"}]}}
+    repaired, audit = multi.apply_registry_identity_with_audit(
+        response, registry, {"ticker": "1001", "company_name": "Company 1"},
+        evidence_cards=[{"url": "https://example.test/?b=2&a=1",
+                         "evidence_id": "evidence-event"}])
+    sources = repaired["strategy_telemetry"]["source_provenance"]
+    assert sources == [{"url": "https://example.test/?a=1&b=2",
+                        "source_type": "company_official", "content_verified": True,
+                        "evidence_excerpt": "event context"}]
+    assert [row["source_role"] for row in audit["records"]] == [
+        "event_or_context", "company_identity"]
+    assert audit["records"][0]["evidence_ids"] == ["evidence-event"]
+    assert {row["field"] for row in audit["differing_fields"]} == {
+        "url", "source_type", "evidence_excerpt"}
+    assert audit["model_identity_accepted"] is False
+
+
+def test_registry_identity_reconciles_same_host_redirect_only_with_body_hash():
+    registry = verified_registry()
+    record = registry.get("1001")
+    registry = CompanyIdentityRegistry([CompanyIdentityRecord(**{
+        **record.to_dict(), "verified_official_url": "https://example.test/declared"})])
+    response = {"research_result": {"sources_checked_count": 1},
+                "strategy_telemetry": {"company_identity": None, "source_provenance": [{
+                    "url": "https://example.test/final", "source_type": "official_news",
+                    "content_verified": True, "evidence_excerpt": "resolved body"}]}}
+    repaired, audit = multi.apply_registry_identity_with_audit(
+        response, registry, {"ticker": "1001", "company_name": "Company 1"},
+        document_equivalences=[{
+            "declared_url": "https://example.test/declared",
+            "resolved_url": "https://example.test/final", "body_sha256": "b" * 64}])
+    assert len(repaired["strategy_telemetry"]["source_provenance"]) == 1
+    assert audit["equivalence_basis"] == "resolver_redirect_body_hash"
+
+
+@pytest.mark.parametrize("mutation,pattern", [
+    ({"body_sha256": "c" * 64}, "body hash conflict"),
+    ({"transport_assurance": "LEGACY_HTTP"}, "transport assurance conflict"),
+    ({"official_domain": "evil.test"}, "official domain conflict"),
+])
+def test_registry_identity_true_metadata_conflicts_fail_closed(mutation, pattern):
+    source = {"url": "https://example.test/", "source_type": "official_news",
+              "content_verified": True, "evidence_excerpt": "body", **mutation}
+    response = {"research_result": {"sources_checked_count": 1},
+                "strategy_telemetry": {"company_identity": None,
+                                       "source_provenance": [source]}}
+    base = verified_registry().get("1001")
+    registry = CompanyIdentityRegistry([CompanyIdentityRecord(**{
+        **base.to_dict(), "transport_assurance": "HTTPS_VERIFIED"})])
+    with pytest.raises(Exception, match=pattern):
+        multi.apply_registry_identity_with_audit(
+            response, registry, {"ticker": "1001", "company_name": "Company 1"})
+
+
+def test_candidate_selection_keeps_unique_primary_and_retains_supporting_row():
+    response = {"research_result": {"items": [{}]}, "strategy_telemetry": {
+        "candidate_provenance": [
+            {"document_url": "https://media.test/story", "source_url": "https://gov.test/data",
+             "headline": "Event", "event_key": "event", "selected_for_output": True,
+             "selection_reason": "support"},
+            {"document_url": "https://gov.test/data", "source_url": "https://gov.test/data",
+             "headline": "Event", "event_key": "event", "selected_for_output": True,
+             "selection_reason": "primary"}]}}
+    repaired = multi.lightweight.apply_candidate_selection_authority(response)
+    rows = repaired["strategy_telemetry"]["candidate_provenance"]
+    assert [row["selected_for_output"] for row in rows] == [False, True]
+    assert "supporting context" in rows[0]["selection_reason"]
+    assert repaired["strategy_telemetry"]["final_event_count"] == 1
+
+
 @pytest.mark.parametrize("ticker,name", [("9999", "Company 1"), ("1001", "Wrong Name")])
 def test_frozen_registry_identity_mismatch_fails_closed(ticker, name):
     with pytest.raises(Exception, match="no reusable VERIFIED identity"):

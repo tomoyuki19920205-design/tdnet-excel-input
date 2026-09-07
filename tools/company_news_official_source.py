@@ -31,6 +31,8 @@ import requests
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 
+from lib.news_monitor import canonicalize_url as _canonical_document_url
+
 
 IDENTITY_STATUSES = {"VERIFIED", "UNVERIFIED", "STALE"}
 IDENTITY_TRANSPORT_ASSURANCES = {"HTTPS_VERIFIED", "LEGACY_HTTP", "REPOSITORY_VERIFIED"}
@@ -1670,24 +1672,124 @@ def identity_satisfies_validator(registry: CompanyIdentityRegistry | None, *, se
         return False
     record = registry.usable(security_code, company_name)
     return bool(record and identity.get("verified_ticker") == security_code
-                and _canonical_url(str(identity.get("source_url", ""))) ==
-                _canonical_url(record.verified_official_url or ""))
+                and _canonical_document_url(str(identity.get("source_url", ""))) ==
+                _canonical_document_url(record.verified_official_url or ""))
 
 
-def apply_registry_identity(response: dict[str, Any], registry: CompanyIdentityRegistry,
-                            assignment: Mapping[str, Any]) -> dict[str, Any]:
-    """Replace every model identity value with the frozen registry authority."""
+def _same_document_aliases(
+        record: CompanyIdentityRecord,
+        equivalences: Sequence[Mapping[str, Any]],
+        ) -> dict[str, str]:
+    """Validate resolver-proven aliases and map them to one document key."""
+    identity_url = _canonical_document_url(record.verified_official_url or "")
+    expected_hash = record.evidence_hash
+    expected_domain = _domain(record.official_domain)
+    edges: list[tuple[str, str, str]] = []
+    for index, item in enumerate(equivalences):
+        declared = _canonical_document_url(str(item.get("declared_url") or ""))
+        resolved = _canonical_document_url(str(item.get("resolved_url") or ""))
+        body_hash = item.get("body_sha256")
+        if not declared or not resolved or not body_hash:
+            raise OfficialSourceError(f"document equivalence[{index}] is incomplete")
+        if not _SHA256.fullmatch(str(body_hash).lower()):
+            raise OfficialSourceError(f"document equivalence[{index}] body hash is invalid")
+        if not (_is_official_host(urlsplit(declared).hostname or "", expected_domain)
+                and _is_official_host(urlsplit(resolved).hostname or "", expected_domain)):
+            raise OfficialSourceError("document equivalence crosses official-domain authority")
+        edges.append((declared, resolved, str(body_hash).lower()))
+    connected = {identity_url}
+    changed = True
+    while changed:
+        changed = False
+        for declared, resolved, _body_hash in edges:
+            if declared in connected or resolved in connected:
+                before = len(connected)
+                connected.update((declared, resolved))
+                changed = changed or len(connected) != before
+    relevant_hashes = {body_hash for declared, resolved, body_hash in edges
+                       if declared in connected and resolved in connected}
+    if len(relevant_hashes) > 1 or (relevant_hashes and expected_hash
+            and str(expected_hash).lower() not in relevant_hashes):
+        raise OfficialSourceError("document equivalence conflicts with identity body hash")
+    key = min(connected)
+    aliases = {url: key for url in connected} if len(connected) > 1 else {}
+    return aliases
+
+
+def _authority_excerpt(record: CompanyIdentityRecord, model_rows: Sequence[Mapping[str, Any]]) -> str:
+    """Keep event/context evidence visible while identity evidence stays in its authority record."""
+    model_evidence = sorted({
+        str(row.get("evidence_excerpt") or "").strip()
+        for row in model_rows if str(row.get("evidence_excerpt") or "").strip()
+    })
+    if model_evidence:
+        value = " | ".join(model_evidence)
+    else:
+        value = str(record.evidence_excerpt or "").strip()
+    if not value:
+        raise OfficialSourceError("registry identity provenance evidence is empty")
+    # Canonical schema bounds this projection. The complete Registry evidence,
+    # body hash, and event Evidence Cards remain in their separate authorities.
+    return value[:1000]
+
+
+def apply_registry_identity_with_audit(
+        response: dict[str, Any], registry: CompanyIdentityRegistry,
+        assignment: Mapping[str, Any], *,
+        document_equivalences: Sequence[Mapping[str, Any]] = (),
+        evidence_cards: Sequence[Mapping[str, Any]] = (),
+        ) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Apply frozen identity and reconcile only proven same-document provenance.
+
+    Identity authority and event/context linkage remain separate authorities.
+    The canonical response receives one document row, while this function's
+    audit return preserves every input role, evidence id, and differing field.
+    """
     record = registry.usable(str(assignment.get("ticker", "")), assignment.get("company_name"))
     if record is None:
         raise OfficialSourceError("no reusable VERIFIED identity")
     repaired = copy.deepcopy(response)
     strategy, payload = repaired["strategy_telemetry"], repaired["research_result"]
-    url = _canonical_url(record.verified_official_url or "")
-    row = {"url": url, "source_type": "company_official", "content_verified": True,
-           "evidence_excerpt": record.evidence_excerpt}
-    provenance = [item for item in strategy.get("source_provenance", [])
-                  if _canonical_url(str(item.get("url", ""))) != url]
-    provenance.append(row)
+    url = _canonical_document_url(record.verified_official_url or "")
+    if not url or not _is_official_host(urlsplit(url).hostname or "", record.official_domain):
+        raise OfficialSourceError("registry identity URL conflicts with official domain")
+    aliases = _same_document_aliases(record, document_equivalences)
+    identity_key = aliases.get(url, url)
+    original = strategy.get("source_provenance", [])
+    if not isinstance(original, list):
+        raise OfficialSourceError("source provenance is missing")
+    matches, provenance = [], []
+    for index, item in enumerate(original):
+        if not isinstance(item, Mapping):
+            raise OfficialSourceError(f"source provenance[{index}] is invalid")
+        normalized = {**item, "url": _canonical_document_url(str(item.get("url") or ""))}
+        key = aliases.get(normalized["url"], normalized["url"])
+        if key == identity_key:
+            if item.get("content_verified") is not True:
+                raise OfficialSourceError("identity-linked provenance is not body verified")
+            supplied_hashes = {
+                str(item.get(name)).lower() for name in ("body_hash", "body_sha256")
+                if item.get(name)
+            }
+            if len(supplied_hashes) > 1 or (supplied_hashes and record.evidence_hash
+                    and str(record.evidence_hash).lower() not in supplied_hashes):
+                raise OfficialSourceError("identity-linked provenance body hash conflict")
+            supplied_domains = {str(item.get("official_domain")).lower()
+                                for item in (item,) if item.get("official_domain")}
+            if supplied_domains and _domain(record.official_domain) not in supplied_domains:
+                raise OfficialSourceError("identity-linked provenance official domain conflict")
+            supplied_transport = item.get("transport_assurance")
+            if (supplied_transport and record.transport_assurance
+                    and supplied_transport != record.transport_assurance):
+                raise OfficialSourceError("identity-linked provenance transport assurance conflict")
+            matches.append((index, dict(item), normalized))
+        else:
+            provenance.append(normalized)
+    authority_row = {
+        "url": url, "source_type": "company_official", "content_verified": True,
+        "evidence_excerpt": _authority_excerpt(record, [row[1] for row in matches]),
+    }
+    provenance.append(authority_row)
     strategy["source_provenance"] = provenance
     authority = {
         "ticker": record.security_code,
@@ -1705,6 +1807,59 @@ def apply_registry_identity(response: dict[str, Any], registry: CompanyIdentityR
                                separators=(",", ":")),
     }
     payload["sources_checked_count"] = len(provenance)
+    cards_by_url: dict[str, list[str]] = {}
+    for card in evidence_cards:
+        try:
+            card_url = _canonical_document_url(str(card.get("url") or ""))
+        except (TypeError, ValueError):
+            continue
+        evidence_id = card.get("evidence_id")
+        if evidence_id:
+            cards_by_url.setdefault(aliases.get(card_url, card_url), []).append(str(evidence_id))
+    authority_input = {
+        "url": record.verified_official_url,
+        "source_type": "company_official",
+        "content_verified": True,
+        "evidence_excerpt": record.evidence_excerpt,
+    }
+    differing = []
+    for key in ("url", "source_type", "content_verified", "evidence_excerpt"):
+        values = [row[1].get(key) for row in matches]
+        values.append(authority_input.get(key))
+        if len({json.dumps(value, ensure_ascii=False, sort_keys=True) for value in values}) > 1:
+            differing.append({"field": key, "values": values})
+    audit = {
+        "schema_version": "company_news_authority_provenance_reconciliation_v1",
+        "canonical_document_key": identity_key,
+        "equivalence_basis": "resolver_redirect_body_hash" if aliases else "canonical_url",
+        "same_document_verified": True,
+        "records": [
+            *[{"origin": "final_synthesis", "source_role": "event_or_context",
+               "authority_tier": "MODEL_PROVENANCE", "input_index": index,
+               "evidence_ids": sorted(set(cards_by_url.get(identity_key, []))), **row}
+              for index, row, _normalized in matches],
+            {"origin": "python_registry_injection", "source_role": "company_identity",
+             "authority_tier": "FORMAL_COMPANY_IDENTITY_REGISTRY",
+             "evidence_ids": sorted(set(cards_by_url.get(identity_key, []))),
+             "url": record.verified_official_url, "canonical_url": url,
+             "source_type": "company_official", "content_verified": True,
+             "evidence_excerpt": record.evidence_excerpt,
+             "body_sha256": record.evidence_hash,
+             "transport_assurance": record.transport_assurance,
+             "official_domain": record.official_domain}],
+        "differing_fields": differing,
+        "reconciled_source": authority_row,
+        "identity_authority_preserved": True,
+        "event_context_evidence_preserved_in_authorities": True,
+        "model_identity_accepted": False,
+    }
+    return repaired, audit
+
+
+def apply_registry_identity(response: dict[str, Any], registry: CompanyIdentityRegistry,
+                            assignment: Mapping[str, Any]) -> dict[str, Any]:
+    """Compatibility wrapper for frozen identity with authority-aware provenance."""
+    repaired, _audit = apply_registry_identity_with_audit(response, registry, assignment)
     return repaired
 
 

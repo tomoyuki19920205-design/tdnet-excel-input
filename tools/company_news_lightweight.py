@@ -1038,6 +1038,43 @@ def apply_materiality_authority(response: dict[str, Any], evidence_cards: list[d
     return repaired, decisions
 
 
+def apply_candidate_selection_authority(response: dict[str, Any]) -> dict[str, Any]:
+    """Collapse one event's supporting candidates onto its unique primary source."""
+    repaired = copy.deepcopy(response)
+    strategy = repaired.get("strategy_telemetry")
+    payload = repaired.get("research_result")
+    if not isinstance(strategy, dict) or not isinstance(payload, dict):
+        raise LightweightError("canonical candidate selection state is incomplete")
+    candidates = strategy.get("candidate_provenance")
+    if not isinstance(candidates, list):
+        raise LightweightError("candidate provenance is missing")
+    groups: dict[tuple[Any, str, Any], list[dict[str, Any]]] = {}
+    for candidate in candidates:
+        if not isinstance(candidate, dict) or candidate.get("selected_for_output") is not True:
+            continue
+        source_url = canonicalize_url(candidate.get("source_url"))
+        key = (candidate.get("event_key"), source_url, candidate.get("headline"))
+        groups.setdefault(key, []).append(candidate)
+    for rows in groups.values():
+        if len(rows) < 2:
+            continue
+        primary = [row for row in rows if canonicalize_url(row.get("document_url")) ==
+                   canonicalize_url(row.get("source_url"))]
+        if len(primary) != 1:
+            raise LightweightError("duplicate selected candidates lack unique primary source")
+        for row in rows:
+            if row is primary[0]:
+                continue
+            row["selected_for_output"] = False
+            row["selection_reason"] = (
+                "Python candidate authority: retained as supporting context for the "
+                "same event's unique primary-source candidate. " +
+                str(row.get("selection_reason") or ""))
+    strategy["final_event_count"] = sum(
+        row.get("selected_for_output") is True for row in candidates if isinstance(row, dict))
+    return repaired
+
+
 def _card_has_authoritative_content(card: dict[str, Any]) -> bool:
     return (card.get("verification_status") == "VERIFIED"
             and card.get("source_type") not in INDEX_ONLY_SOURCE_TYPES
@@ -1643,6 +1680,7 @@ def run_company(root: Path, experiment: Path, assignment: dict[str, Any], *,
     response = apply_source_count_authority(response)
     response = apply_search_record_registry(response, search_registry, discovery)
     response = normalize_documents_from_evidence(response, store.cards(), assignment)
+    response = apply_candidate_selection_authority(response)
     response, document_provenance = apply_document_provenance_authority(response, store.cards())
     response = apply_ir_nightly_overlap(response)
     response = apply_incremental_ir_authority(response, store.cards(), discovery)
