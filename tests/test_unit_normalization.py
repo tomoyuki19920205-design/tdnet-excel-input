@@ -63,6 +63,29 @@ class TestToMillions:
         assert _to_millions(-659000000) == -659
 
 
+class TestGrossProfitToMillions:
+    """details由来GP専用変換は従来の整数変換から責務を分離する。"""
+
+    def test_preserves_sub_million_remainder(self):
+        from tools.sync_financials import _gross_profit_to_millions
+
+        assert _gross_profit_to_millions(112_291_000) == 112.291
+        assert _gross_profit_to_millions(232_660_000) == 232.660
+        assert _gross_profit_to_millions(500_000) == 0.5
+
+    def test_preserves_negative_sign_and_integer_shape(self):
+        from tools.sync_financials import _gross_profit_to_millions
+
+        assert _gross_profit_to_millions(-1_500_000) == -1.5
+        assert _gross_profit_to_millions(2_597_000_000) == 2597
+        assert isinstance(_gross_profit_to_millions(2_597_000_000), int)
+
+    def test_none_passthrough(self):
+        from tools.sync_financials import _gross_profit_to_millions
+
+        assert _gross_profit_to_millions(None) is None
+
+
 # ================================================================
 # sync_financials で百万円に正規化されることの統合テスト
 # ================================================================
@@ -116,6 +139,59 @@ class TestSyncFinancialsNormalization:
         assert row["gross_profit"] == 2597
         assert row["operating_profit"] == -659
         assert row["source"] == "jquants"
+
+    def test_bestone_6577_details_gp_keeps_precision_for_q_delta(self, tmp_path):
+        """6577 fixture: 累計GPは端数保持し、Q単独値は高精度累計の差分。"""
+        import sqlite3
+
+        db_path = str(tmp_path / "bestone_6577.db")
+        conn = sqlite3.connect(db_path)
+        conn.execute("""
+            CREATE TABLE jquants_financials_normalized (
+                local_code TEXT,
+                disclosed_date TEXT,
+                current_fiscal_year_end_date TEXT,
+                type_of_current_period TEXT,
+                type_of_document TEXT,
+                net_sales REAL,
+                gross_profit REAL,
+                operating_profit REAL,
+                raw_json TEXT,
+                fetched_at TEXT
+            )
+        """)
+        conn.executemany("""
+            INSERT INTO jquants_financials_normalized
+            (local_code, disclosed_date, current_fiscal_year_end_date,
+             type_of_current_period, type_of_document,
+             net_sales, gross_profit, operating_profit, raw_json, fetched_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [
+            ("65770", "2025-12-12", "2026-07-31", "1Q",
+             "1QFinancialStatements_Consolidated_JP",
+             1_995_000_000, 112_291_000, -22_000_000, "{}", "2026-09-10"),
+            ("65770", "2026-03-13", "2026-07-31", "2Q",
+             "2QFinancialStatements_Consolidated_JP",
+             5_825_000_000, 232_660_000, -38_000_000, "{}", "2026-09-10"),
+        ])
+        conn.commit()
+        conn.close()
+
+        with patch("tools.sync_financials.logger"):
+            from tools.sync_financials import read_sqlite
+            data, _ = read_sqlite(db_path, recent_days=9999)
+
+        rows = {item["quarter"]: item for item in data}
+        assert rows["1Q"]["gross_profit"] == 112.291
+        assert rows["2Q"]["gross_profit"] == 232.660
+        standalone_gp = rows["2Q"]["gross_profit"] - rows["1Q"]["gross_profit"]
+        assert standalone_gp == pytest.approx(120.369)
+        assert round(standalone_gp) == 120
+        # GP以外は既存の整数百万円変換のまま。
+        assert rows["1Q"]["sales"] == 1995
+        assert rows["2Q"]["sales"] == 5825
+        assert rows["1Q"]["operating_profit"] == -22
+        assert rows["2Q"]["operating_profit"] == -38
 
 
 # ================================================================

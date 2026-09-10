@@ -61,7 +61,10 @@ JST = timezone(timedelta(hours=9))
 # J-Quants API は円単位で数値を返す。
 # Viewer / canonical の基準単位は百万円なので、push 前に変換する。
 from lib.runtime_paths import runtime_path
-from lib.pipeline.unit_convert import to_millions as _to_millions  # noqa: E402
+from lib.pipeline.unit_convert import (  # noqa: E402
+    gross_profit_to_millions as _gross_profit_to_millions,
+    to_millions as _to_millions,
+)
 
 # 百万円単位としては異常に大きい閾値 (= 元が円単位のまま混入した可能性)
 _ABNORMAL_MILLIONS_THRESHOLD = 1_000_000_000  # 百万円で10億 = 円で1000兆
@@ -373,7 +376,9 @@ def read_sqlite(
     for r in rows:
         # J-Quants は円単位 → 百万円に正規化
         sales_m = _to_millions(r["sales"])
-        gp_m = _to_millions(r["gross_profit"])
+        # gross_profitはJ-Quants details由来。累計差分を取るViewerまで端数を
+        # 保持する。Sales/OP/PBTは既存の整数百万円変換契約を維持する。
+        gp_m = _gross_profit_to_millions(r["gross_profit"])
         op_m = _to_millions(r["operating_profit"])
         pbt_m = _to_millions(r["profit_before_tax"])
 
