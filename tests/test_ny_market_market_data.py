@@ -11,6 +11,7 @@ from lib.ny_market_market_data import (
     DailyBar,
     DailySeries,
     MarketDataError,
+    NasdaqOfficialCloseProvider,
     YahooChartProvider,
     build_canonical_market_data_packet,
     build_index_sector_snapshot,
@@ -83,6 +84,73 @@ def test_yahoo_parses_unadjusted_regular_close_and_provenance():
     assert unquote(parsed.path).endswith("/^SOX")
     assert parse_qs(parsed.query)["interval"] == ["1d"]
     assert parse_qs(parsed.query)["includeAdjustedClose"] == ["false"]
+
+
+def test_yahoo_preserves_zero_volume_for_no_trade_detection():
+    payload = json.loads(yahoo_bytes())
+    payload["chart"]["result"][0]["indicators"]["quote"][0]["volume"] = [123, 0]
+    provider = YahooChartProvider(
+        transport=lambda *_: json.dumps(payload).encode(), now=lambda: NOW,
+    )
+    result = provider.fetch("^SOX", date(2026, 8, 31), date(2026, 9, 1))
+    assert [bar.volume for bar in result.bars] == [123.0, 0.0]
+
+
+def test_nasdaq_official_close_uses_dated_historical_row_when_info_date_is_stale():
+    def transport(url, _headers):
+        if "/historical?" in url:
+            return json.dumps({
+                "status": {"rCode": 200},
+                "data": {"tradesTable": {"rows": [
+                    {"date": "09/04/2026", "close": "$1.04", "volume": "747,778"},
+                    {"date": "09/03/2026", "close": "$0.8866", "volume": "404,574"},
+                ]}},
+            }).encode()
+        if "/realtime-trades?" in url:
+            return json.dumps({"data": {"topTable": {"rows": [
+                {"previousClose": "$0.8866"},
+            ]}}}).encode()
+        return json.dumps({"data": {
+            "symbol": "PAAI", "assetClass": "STOCKS", "notifications": [],
+            "primaryData": {"lastSalePrice": "$1.02", "lastTradeTimestamp": "Sep 3, 2026"},
+            "secondaryData": None,
+        }}).encode()
+
+    result = NasdaqOfficialCloseProvider(transport=transport, now=lambda: NOW).fetch(
+        "PAAI", date(2026, 9, 4), 1.04,
+    )
+    assert result["previous_session_date"] == "2026-09-03"
+    assert result["previous_close"] == pytest.approx(0.8866)
+    assert result["target_close"] == pytest.approx(1.04)
+    assert result["target_close_source"] == "nasdaq_historical"
+    assert result["target_timestamp"] == "Nasdaq historical close 09/04/2026"
+
+
+def test_nasdaq_official_close_rejects_info_historical_target_mismatch():
+    def transport(url, _headers):
+        if "/historical?" in url:
+            return json.dumps({
+                "status": {"rCode": 200},
+                "data": {"tradesTable": {"rows": [
+                    {"date": "09/04/2026", "close": "$1.04", "volume": "747,778"},
+                    {"date": "09/03/2026", "close": "$0.8866", "volume": "404,574"},
+                ]}},
+            }).encode()
+        if "/realtime-trades?" in url:
+            return json.dumps({"data": {"topTable": {"rows": [
+                {"previousClose": "$0.8866"},
+            ]}}}).encode()
+        return json.dumps({"data": {
+            "symbol": "PAAI", "assetClass": "STOCKS", "notifications": [],
+            "primaryData": None,
+            "secondaryData": {
+                "lastSalePrice": "$1.02",
+                "lastTradeTimestamp": "Closed at Sep 4, 2026 4:00 PM ET",
+            },
+        }}).encode()
+
+    with pytest.raises(MarketDataError, match="info/historical target close mismatch"):
+        NasdaqOfficialCloseProvider(transport=transport).fetch("PAAI", date(2026, 9, 4), 1.04)
 
 
 @pytest.mark.parametrize(("raw", "expected"), [
@@ -206,6 +274,17 @@ def test_dual_class_issuer_total_market_cap_covers_rdib_fixture():
     assert len(rdib["share_class_components"]) == 2
 
 
+def test_ads_issuer_total_market_cap_uses_underlying_share_price():
+    rows = [row("GENR", 17.219, close=9)] + [row(f"T{i:02}", 16 - i / 10, close=10) for i in range(19)]
+    rows[0]["name"] = "Generic Holdings American Depositary Shares"
+    components = {"GENR": [{"class": "Ordinary shares represented by ADS",
+                             "price": 9 / 3, "shares_outstanding": 6_000_000,
+                             "quoted_security_ratio": 3}]}
+    ranked = rank_top20(screener(rows), target_session_date=date(2026, 9, 1), issuer_components=components)
+    assert ranked[0]["market_cap"] == pytest.approx(18_000_000)
+    assert ranked[0]["market_cap_method"] == "issuer_total_ads"
+
+
 def test_screener_history_mismatch_fails_closed_when_not_split_pattern():
     rows = [row(f"T{i:02}", 20 - i / 10, close=11) for i in range(20)]
     history = {f"T{i:02}": series(f"T{i:02}", (10, 11)) for i in range(20)}
@@ -248,6 +327,55 @@ class GenericFixtureArbitrator:
             independent_sources=independent, tolerance_pct=tolerance_pct,
             resolved_at="2026-09-02T00:00:00+00:00",
         )
+
+
+class MissingHistoryFixtureArbitrator(GenericFixtureArbitrator):
+    def resolve_missing_previous(self, *, candidate, historical_series, target, **_kwargs):
+        official_previous = float(candidate["_close"]) / (1.0 + float(candidate["_change_pct"]) / 100.0)
+        return {
+            "discrepancy_status": "resolved",
+            "discrepancy_reason": "future_corporate_action_vendor_history_omission",
+            "compared_providers": ["nasdaq", "yahoo", "independent_fixture"],
+            "official_previous_close": official_previous,
+            "official_target_close": float(candidate["_close"]),
+            "supporting_sources": [{
+                "provider": "fixture", "role": "official_market_source",
+                "raw_response_sha256": "a" * 64,
+            }],
+            "resolved_at": "2026-09-11T00:00:00+00:00",
+            "corporate_action_status": "official_future_action_verified",
+            "liquidity_flag": "normal_liquidity",
+            "screener_change_pct": float(candidate["_change_pct"]),
+            "screener_last_sale": float(candidate["_close"]),
+            "screener_net_change": None,
+            "screener_implied_previous_close": official_previous,
+            "historical_previous_close": None,
+            "historical_target_close": target.regular_close,
+            "historical_change_pct": float(candidate["_change_pct"]),
+        }
+
+def test_missing_vendor_previous_bar_requires_and_uses_verified_fallback():
+    rows = [row("MISS", 20.0, close=12.0)] + [row(f"T{i:02}", 19 - i / 10, close=10) for i in range(19)]
+    history = {
+        "MISS": DailySeries(
+            symbol="MISS", provider="yahoo_chart_query1",
+            source_identifier="https://query1.finance.yahoo.com/chart/MISS",
+            retrieved_at="2026-09-11T00:00:00+00:00", raw_response_sha256="c" * 64,
+            bars=(DailyBar(date(2026, 9, 1), 12.0),),
+        ),
+    }
+    history.update({
+        f"T{i:02}": series(f"T{i:02}", (10 / (1 + (19 - i / 10) / 100), 10))
+        for i in range(19)
+    })
+    ranked = rank_top20(
+        screener(rows), target_session_date=date(2026, 9, 1), historical_series=history,
+        discrepancy_arbitrator=MissingHistoryFixtureArbitrator(),
+    )
+    assert ranked[0]["ticker"] == "MISS"
+    assert ranked[0]["discrepancy_reason"] == "future_corporate_action_vendor_history_omission"
+    assert ranked[0]["historical_previous_close"] is None
+    assert ranked[0]["historical_change_pct"] == pytest.approx(20.0)
 
 
 def test_generic_stale_daily_bar_discrepancy_is_resolved_without_ticker_special_case():
@@ -398,3 +526,41 @@ def test_canonical_packet_contains_full_provider_and_raw_hash_provenance():
     assert packet["providers"] == ["nasdaq_stock_screener", "packet_fixture"]
     assert packet["screener"]["raw_response_sha256"] == "b" * 64
     assert set(packet["raw_response_hashes"]) == {"a" * 64, "b" * 64}
+
+
+def test_top20_excludes_zero_volume_target_bar_and_records_provenance():
+    rows = [row("HALT", 25.0, close=10.0)]
+    rows.extend(row(f"T{i:02}", 24.0 - i / 10, close=10.0) for i in range(20))
+    history = {
+        item["symbol"]: series(
+            item["symbol"],
+            (10.0 / (1 + float(item["pctchange"]) / 100.0), 10.0),
+        )
+        for item in rows
+    }
+    halted = history["HALT"]
+    history["HALT"] = DailySeries(
+        symbol=halted.symbol,
+        provider=halted.provider,
+        source_identifier=halted.source_identifier,
+        retrieved_at=halted.retrieved_at,
+        raw_response_sha256=halted.raw_response_sha256,
+        bars=(halted.bars[0], DailyBar(date(2026, 9, 1), 10.0, 0.0)),
+    )
+    excluded: list[dict] = []
+    ranked = rank_top20(
+        screener(rows),
+        target_session_date=date(2026, 9, 1),
+        historical_series=history,
+        excluded_candidates=excluded,
+    )
+    assert "HALT" not in [item["ticker"] for item in ranked]
+    assert len(ranked) == 20
+    assert excluded == [{
+        "ticker": "HALT",
+        "reason": "zero_volume_target_bar",
+        "session_date": "2026-09-01",
+        "provider": "fixture",
+        "source_identifier": "https://example.test/HALT",
+        "raw_response_sha256": "a" * 64,
+    }]

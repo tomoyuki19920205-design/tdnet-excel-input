@@ -11,12 +11,13 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
+from pathlib import Path
 from typing import Any, Callable, Iterable, Protocol
 from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
-from lib.ny_market_price_basis import (official_regular_close, parse_exchange_split_notice,
+from lib.ny_market_price_basis import (close_matches, official_regular_close, parse_exchange_split_notice,
     classify_official_discrepancy, previous_on_target_basis, validate_notice_url, validate_vendor_actions)
 
 
@@ -85,6 +86,7 @@ def default_transport(url: str, headers: dict[str, str]) -> bytes:
 class DailyBar:
     session_date: date
     regular_close: float
+    volume: float | None = None
 
 
 @dataclass(frozen=True)
@@ -140,13 +142,15 @@ class YahooChartProvider:
         host: str = "query1.finance.yahoo.com",
         transport: Transport = default_transport,
         now: Callable[[], datetime] | None = None,
+        closed_meta_fallback: bool = False,
     ) -> None:
         if host not in {"query1.finance.yahoo.com", "query2.finance.yahoo.com"}:
             raise ValueError("unsupported Yahoo chart host")
         self.host = host
-        self.name = "yahoo_chart_query1" if host.startswith("query1") else "yahoo_chart_query2"
+        self.name = ("yahoo_closed_meta_query1" if host.startswith("query1") else "yahoo_closed_meta_query2") if closed_meta_fallback else ("yahoo_chart_query1" if host.startswith("query1") else "yahoo_chart_query2")
         self.transport = transport
         self.now = now or (lambda: datetime.now(timezone.utc))
+        self.closed_meta_fallback = closed_meta_fallback
 
     @staticmethod
     def _unix(day: date) -> int:
@@ -188,21 +192,50 @@ class YahooChartProvider:
         closes = quotes[0].get("close")
         if not isinstance(closes, list) or len(closes) != len(timestamps):
             raise MarketDataError(f"{self.name}:{symbol}: close/timestamp mismatch")
+        volumes = quotes[0].get("volume")
+        if volumes is not None and (
+            not isinstance(volumes, list) or len(volumes) != len(timestamps)
+        ):
+            raise MarketDataError(f"{self.name}:{symbol}: volume/timestamp mismatch")
         timezone_name = meta.get("exchangeTimezoneName") or "America/New_York"
         try:
             exchange_tz = ZoneInfo(timezone_name)
         except Exception as exc:
             raise MarketDataError(f"{self.name}:{symbol}: invalid exchange timezone") from exc
         bars: list[DailyBar] = []
-        for stamp, close in zip(timestamps, closes):
+        volume_values = volumes if isinstance(volumes, list) else [None] * len(timestamps)
+        for stamp, close, volume in zip(timestamps, closes, volume_values):
             if close is None:
                 continue
             if isinstance(close, bool) or not isinstance(close, (int, float)):
                 raise MarketDataError(f"{self.name}:{symbol}: invalid regular close")
+            if volume is not None and (isinstance(volume, bool) or not isinstance(volume, (int, float))):
+                raise MarketDataError(f"{self.name}:{symbol}: invalid daily volume")
             session_date = datetime.fromtimestamp(int(stamp), timezone.utc).astimezone(exchange_tz).date()
             if start_date <= session_date <= end_date:
-                bars.append(DailyBar(session_date=session_date, regular_close=float(close)))
+                bars.append(DailyBar(
+                    session_date=session_date,
+                    regular_close=float(close),
+                    volume=float(volume) if volume is not None else None,
+                ))
         deduplicated = {bar.session_date: bar for bar in bars}
+        used_closed_meta = False
+        if self.closed_meta_fallback and end_date not in deduplicated:
+            trading_period = (meta.get("currentTradingPeriod") or {}).get("regular") or {}
+            market_end = trading_period.get("end")
+            market_time = meta.get("regularMarketTime")
+            market_price = meta.get("regularMarketPrice")
+            if (isinstance(market_end, int) and isinstance(market_time, int)
+                    and market_end - 30 <= market_time <= market_end + 2
+                    and self.now().timestamp() > market_end
+                    and datetime.fromtimestamp(market_time, timezone.utc).astimezone(exchange_tz).date() == end_date
+                    and isinstance(market_price, (int, float)) and not isinstance(market_price, bool)
+                    and market_price > 0 and deduplicated):
+                deduplicated[end_date] = DailyBar(
+                    session_date=end_date, regular_close=float(market_price),
+                    volume=float(meta["regularMarketVolume"]) if isinstance(meta.get("regularMarketVolume"), (int, float)) else None,
+                )
+                used_closed_meta = True
         ordered = tuple(deduplicated[day] for day in sorted(deduplicated))
         if not ordered:
             raise MarketDataError(f"{self.name}:{symbol}: no completed daily bars in requested window")
@@ -212,7 +245,7 @@ class YahooChartProvider:
         return DailySeries(
             symbol=symbol,
             provider=self.name,
-            source_identifier=url,
+            source_identifier=url + ("#closed-regularMarketPrice" if used_closed_meta else ""),
             retrieved_at=self.now().astimezone(timezone.utc).isoformat(timespec="seconds"),
             raw_response_sha256=raw_hash,
             bars=ordered,
@@ -224,6 +257,7 @@ def fetch_all_or_fallback(
     symbols: Iterable[str],
     start_date: date,
     end_date: date,
+    *, required_session_date: date | None = None,
 ) -> BatchResult:
     """Fetch the complete group from one provider; never mix providers."""
     requested = tuple(symbols)
@@ -234,6 +268,8 @@ def fetch_all_or_fallback(
         for symbol in requested:
             try:
                 fetched[symbol] = provider.fetch(symbol, start_date, end_date)
+                if required_session_date and not any(bar.session_date == required_session_date for bar in fetched[symbol].bars):
+                    errors.append(f"{symbol}: required target session {required_session_date} missing")
             except Exception as exc:
                 errors.append(f"{symbol}: {exc}")
         if not errors and len(fetched) == len(requested):
@@ -241,7 +277,8 @@ def fetch_all_or_fallback(
             return BatchResult(provider=provider.name, series=fetched, attempts=tuple(attempts))
         attempts.append(ProviderAttempt(provider.name, "failed", tuple(errors)))
     summary = "; ".join(f"{item.provider}={len(item.errors)} errors" for item in attempts)
-    raise MarketDataError(f"all historical providers failed complete-group acquisition: {summary}")
+    target_note = f" for target session {required_session_date}" if required_session_date else ""
+    raise MarketDataError(f"all historical providers failed complete-group acquisition{target_note}: {summary}")
 
 
 def completed_session_pair(series: DailySeries, target_session_date: date) -> tuple[DailyBar, DailyBar]:
@@ -300,7 +337,10 @@ def build_index_sector_snapshot(
     last_error: Exception | None = None
     for start_date in starts:
         try:
-            batch = fetch_all_or_fallback(providers, all_symbols, start_date, target_session_date)
+            batch = fetch_all_or_fallback(
+                providers, all_symbols, start_date, target_session_date,
+                required_session_date=target_session_date,
+            )
             pairs = {
                 symbol: completed_session_pair(series, target_session_date)
                 for symbol, series in batch.series.items()
@@ -432,6 +472,7 @@ class NasdaqOfficialCloseProvider:
         if not isinstance(rows, list):
             raise MarketDataError(f"{self.name}:{symbol}: historical rows missing")
         parsed_rows: list[tuple[date, dict[str, Any]]] = []
+        target_rows: list[dict[str, Any]] = []
         for row in rows:
             if not isinstance(row, dict):
                 continue
@@ -441,6 +482,10 @@ class NasdaqOfficialCloseProvider:
                 continue
             if row_date < target_session_date:
                 parsed_rows.append((row_date, row))
+            elif row_date == target_session_date:
+                target_rows.append(row)
+        if len(target_rows) > 1:
+            raise MarketDataError(f"{self.name}:{symbol}: duplicate official target close")
         if not parsed_rows:
             raise MarketDataError(f"{self.name}:{symbol}: official previous close missing")
         previous_day, previous_row = max(parsed_rows, key=lambda item: item[0])
@@ -463,11 +508,21 @@ class NasdaqOfficialCloseProvider:
         info = _raw_json(info_raw, self.name).get("data") or {}
         try:
             target_close, target_stamp = official_regular_close(info, symbol, target_session_date)
+            target_close_source = "nasdaq_info"
         except ValueError as exc:
-            raise MarketDataError(f"{self.name}:{symbol}: {exc}") from exc
+            if len(target_rows) != 1:
+                raise MarketDataError(f"{self.name}:{symbol}: {exc}") from exc
+            target_close = _numeric(target_rows[0].get("close"), "official target close")
+            target_stamp = f"Nasdaq historical close {target_session_date:%m/%d/%Y}"
+            target_close_source = "nasdaq_historical"
+        if target_rows:
+            historical_target_close = _numeric(target_rows[0].get("close"), "official target close")
+            if abs(target_close - historical_target_close) > max(1e-7, historical_target_close * 1e-6):
+                raise MarketDataError(f"{self.name}:{symbol}: official info/historical target close mismatch")
         return {
             "provider": self.name, "provider_family": self.family,
             "target_close_verified": True, "target_timestamp": target_stamp,
+            "target_close_source": target_close_source,
             "target_session_date": target_session_date.isoformat(),
             "notifications": info.get("notifications", []),
             "previous_session_date": previous_day.isoformat(),
@@ -559,6 +614,7 @@ class YahooMinuteCloseProvider:
             "price_field": "boundary_open",
             "boundary_note": "16:00 bar open corroborates exchange close; bar close is post-market",
             "previous_last_regular_bar_close": last_regular_bar.get(previous_date),
+            "target_last_regular_bar_close": last_regular_bar.get(target_date),
             "previous_close": close_by_date[previous_date][1], "target_close": close_by_date[target_date][1],
             "previous_timestamp": close_by_date[previous_date][0], "target_timestamp": close_by_date[target_date][0],
             "previous_volume": close_by_date[previous_date][2], "target_volume": close_by_date[target_date][2],
@@ -598,6 +654,56 @@ class PublicPreviousCloseProvider:
             "previous_close": parsed_value, "target_close": None,
             "target_session_date": target_session_date.isoformat(), "source_identifier": url,
             "raw_response_sha256": hashlib.sha256(raw).hexdigest(),
+        }
+
+
+class CapturedEndOfDayQuoteProvider:
+    """Parse a captured quote-page accessibility record as independent EOD evidence."""
+
+    name = "captured_end_of_day_quote"
+    family = "factset"
+
+    def __init__(self, snapshots: dict[str, dict[str, str]]) -> None:
+        self.snapshots = snapshots
+
+    def fetch(self, symbol: str, target_session_date: date) -> dict[str, Any]:
+        entry = self.snapshots.get(symbol)
+        if not entry:
+            raise MarketDataError(f"{self.name}:{symbol}: snapshot unavailable")
+        url = str(entry["source_url"])
+        if urlsplit(url).hostname != "www.marketwatch.com" or not url.endswith(f"/stock/{symbol.lower()}"):
+            raise MarketDataError(f"{self.name}:{symbol}: snapshot URL/symbol mismatch")
+        raw = Path(entry["path"]).read_bytes()
+        state = raw.decode("utf-8")
+        if not re.search(rf"AXWebArea .*\b{re.escape(symbol)}\b.*MarketWatch", state):
+            raise MarketDataError(f"{self.name}:{symbol}: captured page identity mismatch")
+        stamp = re.search(r"AFTER HOURS Last Updated:\s*([A-Za-z]{3} \d{1,2}, \d{4})", state)
+        if not stamp or datetime.strptime(stamp[1], "%b %d, %Y").date() != target_session_date:
+            raise MarketDataError(f"{self.name}:{symbol}: quote session date mismatch")
+        row = re.search(
+            r"text CLOSE\s+\d+ cell.*?text CHG\s+\d+ cell.*?text CHG %"
+            r"\s+\d+ row.*?text \$(\d+(?:\.\d+)?)\s+\d+ cell.*?text (\d+(?:\.\d+)?)"
+            r"\s+\d+ cell.*?text (\d+(?:\.\d+)?)%",
+            state, re.S,
+        )
+        if not row:
+            raise MarketDataError(f"{self.name}:{symbol}: separate regular close row missing")
+        close_raw, delta_raw, pct_raw = row.groups()
+        close, delta, pct = map(float, row.groups())
+        previous = close - delta
+        if previous <= 0 or abs((close / previous - 1) * 100 - pct) > 0.011:
+            raise MarketDataError(f"{self.name}:{symbol}: EOD quote arithmetic mismatch")
+        if "Historical and current end-of-day data provided by" not in state or "FACTSET" not in state:
+            raise MarketDataError(f"{self.name}:{symbol}: end-of-day source attribution missing")
+        return {
+            "provider": self.name, "provider_family": self.family,
+            "session": "regular_close", "target_session_date": target_session_date.isoformat(),
+            "previous_close": previous, "target_close": close,
+            "raw_value": close_raw, "parsed_value": close,
+            "reported_change_raw": delta_raw, "reported_pct_raw": pct_raw,
+            "display_decimal_places": len(close_raw.partition(".")[2]),
+            "capture_type": "browser_accessibility_snapshot",
+            "source_identifier": url, "raw_response_sha256": hashlib.sha256(raw).hexdigest(),
         }
 
 
@@ -684,11 +790,51 @@ def resolve_discrepancy(
         ):
             reason = "stale_daily_bar"
 
-    # Some sub-dollar Yahoo daily bars are rounded to cents even though the
-    # official Nasdaq close and screener retain four decimal places.  Resolve
-    # that generic precision loss only when the target close agrees exactly,
-    # the official screener arithmetic is already supported, and a genuinely
-    # independent source supports the official previous close.
+    if reason is None and action_status == "checked_none" and minute_close is not None:
+        dated_closed = (
+            official.get("target_close_verified") is True
+            and official.get("target_close_source") in {"nasdaq_info", "nasdaq_historical"}
+            and re.fullmatch(r"Closed at .* 4:00 PM ET", str(official.get("target_timestamp", ""))) is not None
+        )
+        eod_support = [source for source in independent_support if (
+            source.get("session") == "regular_close"
+            and source.get("target_session_date") == official.get("target_session_date")
+            and close_matches(float(source["target_close"]), official_target)
+            and close_matches(float(source["previous_close"]), official_previous)
+        )]
+        rounded_vendor_previous = any(
+            close_matches(historical_previous_close, round(official_previous, digits))
+            for digits in range(2, 5)
+        )
+        rounded_vendor_target = any(
+            close_matches(historical_target_close, round(official_target, digits))
+            for digits in range(2, 5)
+        )
+        if (dated_closed and eod_support and rounded_vendor_previous
+                and rounded_vendor_target
+                and not close_matches(float(minute_close["target_close"]), official_target)):
+            reason = "official_closed_eod_with_secondary_boundary_difference"
+            basis_evidence = {
+                "official_previous_close": official_previous,
+                "vendor_daily_previous_close": historical_previous_close,
+                "official_target_close": official_target,
+                "vendor_daily_target_close": historical_target_close,
+                "vendor_previous_rounding_places": [digits for digits in range(2, 5) if close_matches(historical_previous_close, round(official_previous, digits))],
+                "vendor_target_rounding_places": [digits for digits in range(2, 5) if close_matches(historical_target_close, round(official_target, digits))],
+                "secondary_boundary_open": float(minute_close["target_close"]),
+                "secondary_boundary_price_field": minute_close.get("price_field"),
+                "independent_eod": [{
+                    "provider_family": s["provider_family"], "raw_value": s["raw_value"],
+                    "reported_change_raw": s["reported_change_raw"],
+                    "display_decimal_places": s["display_decimal_places"],
+                    "source_identifier": s["source_identifier"],
+                    "raw_response_sha256": s["raw_response_sha256"],
+                } for s in eod_support],
+                "comparison_basis": "dated_regular_close_not_secondary_boundary_open",
+            }
+
+    # Preserve the pre-existing sub-dollar Yahoo precision fallback when the
+    # stronger dated-close/EOD arbitration above does not apply.
     target_tolerance = max(0.0001, official_target * 0.002)
     previous_tolerance = max(0.0001, official_previous * 0.002)
     previous_delta = abs(historical_previous_close - official_previous)
@@ -768,6 +914,7 @@ class LiveDiscrepancyArbitrator:
         action_provider: YahooCorporateActionProvider | None = None,
         minute_provider: YahooMinuteCloseProvider | None = None,
         independent_providers: Iterable[PublicPreviousCloseProvider] | None = None,
+        independent_snapshots: dict[str, dict[str, str]] | None = None,
         corporate_action_notices: dict[str, str] | None = None,
         notice_transport: Transport = default_transport,
         now: Callable[[], datetime] | None = None,
@@ -777,7 +924,10 @@ class LiveDiscrepancyArbitrator:
         self.official_provider = official_provider or NasdaqOfficialCloseProvider()
         self.action_provider = action_provider or YahooCorporateActionProvider()
         self.minute_provider = minute_provider or YahooMinuteCloseProvider()
-        self.independent_providers = tuple(independent_providers or (PublicPreviousCloseProvider(),))
+        self.independent_providers = tuple(independent_providers or (
+            PublicPreviousCloseProvider(),
+            CapturedEndOfDayQuoteProvider(independent_snapshots or {}),
+        ))
         self.now = now or (lambda: datetime.now(timezone.utc))
 
     def resolve(
@@ -835,6 +985,139 @@ class LiveDiscrepancyArbitrator:
             detail = f"; independent errors: {', '.join(errors)}" if errors else ""
             raise MarketDataError(f"Top20 {ticker} arbitration failed: {exc}{detail}") from exc
 
+    def resolve_missing_previous(
+        self,
+        *,
+        ticker: str,
+        candidate: dict[str, Any],
+        historical_series: DailySeries,
+        target: DailyBar,
+        target_session_date: date,
+        tolerance_pct: float,
+    ) -> dict[str, Any]:
+        """Resolve a vendor history omission only around a verified future split."""
+        notice_url = self.corporate_action_notices.get(ticker)
+        if not notice_url:
+            raise MarketDataError(f"Top20 {ticker}: official split notice URL required for missing history")
+        try:
+            validate_notice_url(notice_url)
+            raw_notice = self.notice_transport(notice_url, {"User-Agent": "Mozilla/5.0"})
+            notice = parse_exchange_split_notice(raw_notice, notice_url, ticker)
+        except ValueError as exc:
+            raise MarketDataError(str(exc)) from exc
+        effective = date.fromisoformat(notice["effective_session_date"])
+        if effective <= target_session_date:
+            raise MarketDataError(f"Top20 {ticker}: missing history is not before the official split effective date")
+
+        official = self.official_provider.fetch(ticker, target_session_date, float(candidate["_close"]))
+        previous_date = date.fromisoformat(official["previous_session_date"])
+        if previous_date >= target_session_date:
+            raise MarketDataError(f"Top20 {ticker}: official previous session is invalid")
+        action = self.action_provider.fetch(ticker, target_session_date)
+        try:
+            validate_vendor_actions(action.get("events") or {}, notice)
+        except ValueError as exc:
+            raise MarketDataError(str(exc)) from exc
+        minute = self.minute_provider.fetch(ticker, previous_date, target_session_date)
+        official_previous = float(official["previous_close"])
+        official_target = float(official["target_close"])
+        if not close_matches(target.regular_close, official_target):
+            raise MarketDataError(f"Top20 {ticker}: remaining vendor target bar differs from official close")
+        if not (
+            official.get("target_close_verified")
+            and minute.get("price_field") == "boundary_open"
+            and close_matches(float(minute["previous_close"]), official_previous)
+            and close_matches(float(minute["target_close"]), official_target)
+        ):
+            raise MarketDataError(f"Top20 {ticker}: official and boundary evidence do not agree")
+
+        screener_change = float(candidate["_change_pct"])
+        screener_last = float(candidate["_close"])
+        screener_net = _numeric(candidate.get("netchange"), "screener net change", nullable=True)
+        official_change = (official_target / official_previous - 1.0) * 100.0
+        if abs(official_change - screener_change) > tolerance_pct or not close_matches(screener_last, official_target):
+            raise MarketDataError(f"Top20 {ticker}: official market source does not support Screener")
+        if screener_net is not None and abs((screener_last - official_previous) - screener_net) > 0.02:
+            raise MarketDataError(f"Top20 {ticker}: Screener net change differs from official closes")
+
+        independent_support: list[dict[str, Any]] = []
+        errors: list[str] = []
+        for provider in self.independent_providers:
+            try:
+                source = provider.fetch(ticker, target_session_date)
+                source_previous = _numeric(source.get("previous_close"), "independent previous close", nullable=True)
+                if source_previous is not None and abs(source_previous - official_previous) <= max(0.02, official_previous * 0.002):
+                    independent_support.append(source)
+            except Exception as exc:
+                errors.append(f"{provider.name}: {exc}")
+        if not independent_support:
+            detail = f"; independent errors: {', '.join(errors)}" if errors else ""
+            raise MarketDataError(f"Top20 {ticker}: no independent supporting source{detail}")
+
+        resolved_at = self.now().astimezone(timezone.utc).isoformat(timespec="seconds")
+        volume = _numeric(candidate.get("volume"), "screener volume", nullable=True)
+        liquidity_flag = "low_liquidity" if volume is not None and volume < 250_000 else "normal_liquidity"
+        sources = [
+            {
+                "provider": official["provider"], "provider_family": official.get("provider_family", "nasdaq"),
+                "source_identifier": official.get("source_identifiers"),
+                "raw_response_sha256": official.get("raw_response_sha256"), "role": "official_market_source",
+            },
+            {
+                "provider": action["provider"], "provider_family": action.get("provider_family"),
+                "source_identifier": action.get("source_identifier"),
+                "raw_response_sha256": action.get("raw_response_sha256"), "role": "corporate_action_check",
+            },
+            {
+                **notice, "provider": "nasdaq_corporate_action_notice", "provider_family": "nasdaq",
+                "role": "official_corporate_action",
+            },
+            {
+                "provider": minute["provider"], "provider_family": minute.get("provider_family"),
+                "source_identifier": minute.get("source_identifier"),
+                "raw_response_sha256": minute.get("raw_response_sha256"), "role": "missing_history_diagnosis",
+            },
+            {
+                "provider": historical_series.provider,
+                "provider_family": provider_family(historical_series.provider),
+                "source_identifier": historical_series.source_identifier,
+                "raw_response_sha256": historical_series.raw_response_sha256,
+                "role": "missing_history_diagnosis",
+            },
+        ]
+        sources.extend({
+            "provider": item["provider"], "provider_family": item.get("provider_family"),
+            "source_identifier": item.get("source_identifier"),
+            "raw_response_sha256": item.get("raw_response_sha256"), "role": "independent_support",
+            "raw_value": item.get("raw_value"), "parsed_value": item.get("parsed_value"),
+        } for item in independent_support)
+        return {
+            "discrepancy_status": "resolved",
+            "discrepancy_reason": "future_corporate_action_vendor_history_omission",
+            "basis_evidence": {
+                "vendor_history_dates": [bar.session_date.isoformat() for bar in historical_series.bars],
+                "official_previous_session_date": previous_date.isoformat(),
+                "official_split_effective_session_date": effective.isoformat(),
+                "comparison_basis": "pre_action_regular_close",
+            },
+            "screener_change_pct": screener_change,
+            "screener_last_sale": screener_last,
+            "screener_net_change": screener_net,
+            "screener_implied_previous_close": screener_last / (1.0 + screener_change / 100.0),
+            "historical_previous_close": None,
+            "historical_target_close": target.regular_close,
+            "historical_change_pct": official_change,
+            "official_previous_close": official_previous,
+            "official_target_close": official_target,
+            "corporate_action_status": "official_future_action_verified",
+            "liquidity_flag": liquidity_flag,
+            "compared_providers": sorted({
+                "nasdaq", provider_family(historical_series.provider),
+                *(provider_family(str(item.get("provider_family") or item["provider"])) for item in independent_support),
+            }),
+            "supporting_sources": sources,
+            "resolved_at": resolved_at,
+        }
 
 def eligible_screener_row(row: dict[str, Any]) -> bool:
     symbol = str(row.get("symbol") or "").strip().upper()
@@ -867,6 +1150,7 @@ def rank_top20(
     issuer_components: dict[str, list[dict[str, Any]]] | None = None,
     discrepancy_arbitrator: DiscrepancyArbitrator | None = None,
     mismatch_tolerance_pct: float = 0.20,
+    excluded_candidates: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Filter and rank Nasdaq rows, optionally fail-closing on history mismatch."""
     issuer_components = issuer_components or {}
@@ -897,8 +1181,36 @@ def rank_top20(
             series = historical_series.get(ticker)
             if series is None:
                 raise MarketDataError(f"Top20 candidate {ticker} lacks historical cross-check")
-            previous, target = completed_session_pair(series, target_session_date)
-            historical_change = (target.regular_close / previous.regular_close - 1.0) * 100.0
+            try:
+                previous, target = completed_session_pair(series, target_session_date)
+            except MarketDataError as exc:
+                target_bars = [bar for bar in series.bars if bar.session_date == target_session_date]
+                missing_resolver = getattr(discrepancy_arbitrator, "resolve_missing_previous", None)
+                if "previous completed session is missing" not in str(exc) or len(target_bars) != 1 or missing_resolver is None:
+                    raise
+                target = target_bars[0]
+                discrepancy = missing_resolver(
+                    ticker=ticker, candidate=candidate, historical_series=series,
+                    target=target, target_session_date=target_session_date,
+                    tolerance_pct=mismatch_tolerance_pct,
+                )
+                historical_change = float(discrepancy["historical_change_pct"])
+                review_flags.extend(["discrepancy_resolved", str(discrepancy["discrepancy_reason"])])
+                if discrepancy.get("liquidity_flag") == "low_liquidity":
+                    review_flags.append("low_liquidity")
+            else:
+                historical_change = (target.regular_close / previous.regular_close - 1.0) * 100.0
+            if target.volume == 0:
+                if excluded_candidates is not None:
+                    excluded_candidates.append({
+                        "ticker": ticker,
+                        "reason": "zero_volume_target_bar",
+                        "session_date": target_session_date.isoformat(),
+                        "provider": series.provider,
+                        "source_identifier": series.source_identifier,
+                        "raw_response_sha256": series.raw_response_sha256,
+                    })
+                continue
             if abs(historical_change - candidate["_change_pct"]) > mismatch_tolerance_pct:
                 # A large screener move that vanishes in split-adjusted history is
                 # treated as a possible reverse split and excluded, never silently used.
@@ -908,14 +1220,15 @@ def rank_top20(
                     raise MarketDataError(
                         f"Top20 {ticker} screener/history mismatch: {candidate['_change_pct']:.3f} vs {historical_change:.3f}"
                     )
-                discrepancy = discrepancy_arbitrator.resolve(
-                    ticker=ticker, candidate=candidate, historical_series=series,
-                    previous=previous, target=target, target_session_date=target_session_date,
-                    tolerance_pct=mismatch_tolerance_pct,
-                )
-                review_flags.extend(["discrepancy_resolved", str(discrepancy["discrepancy_reason"])])
-                if discrepancy.get("liquidity_flag") == "low_liquidity":
-                    review_flags.append("low_liquidity")
+                if discrepancy["discrepancy_status"] == "not_applicable":
+                    discrepancy = discrepancy_arbitrator.resolve(
+                        ticker=ticker, candidate=candidate, historical_series=series,
+                        previous=previous, target=target, target_session_date=target_session_date,
+                        tolerance_pct=mismatch_tolerance_pct,
+                    )
+                    review_flags.extend(["discrepancy_resolved", str(discrepancy["discrepancy_reason"])])
+                    if discrepancy.get("liquidity_flag") == "low_liquidity":
+                        review_flags.append("low_liquidity")
             if abs(target.regular_close - candidate["_close"]) > max(0.02, target.regular_close * 0.005):
                 raise MarketDataError(f"Top20 {ticker} screener close is stale or non-regular")
         vendor_cap = _numeric(candidate.get("marketCap"), "marketCap", nullable=True)
@@ -924,7 +1237,12 @@ def rank_top20(
         components = issuer_components.get(ticker, [])
         if components:
             market_cap = issuer_total_market_cap(components)
-            market_cap_method = "issuer_total_dual_class" if len(components) > 1 else "issuer_total_single_class"
+            if len(components) > 1:
+                market_cap_method = "issuer_total_dual_class"
+            elif re.search(r"(?i)American Depositary|ADS\b|ADR\b", str(candidate.get("name"))):
+                market_cap_method = "issuer_total_ads"
+            else:
+                market_cap_method = "issuer_total_single_class"
         else:
             market_cap = vendor_cap
             market_cap_method = "vendor_market_cap" if market_cap is not None else "unavailable"
@@ -968,19 +1286,24 @@ def build_canonical_market_data_packet(
     providers = tuple(historical_providers or (
         YahooChartProvider(host="query1.finance.yahoo.com"),
         YahooChartProvider(host="query2.finance.yahoo.com"),
+        YahooChartProvider(host="query1.finance.yahoo.com", closed_meta_fallback=True),
+        YahooChartProvider(host="query2.finance.yahoo.com", closed_meta_fallback=True),
     ))
     snapshot = build_index_sector_snapshot(providers, target_session_date)
     screener = (screener_provider or NasdaqScreenerProvider()).fetch()
     symbols = screener_candidate_symbols(screener, limit=candidate_limit)
     historical = fetch_all_or_fallback(
         providers, symbols, target_session_date - timedelta(days=10), target_session_date,
+        required_session_date=target_session_date,
     )
+    excluded_candidates: list[dict[str, Any]] = []
     top20 = rank_top20(
         screener,
         target_session_date=target_session_date,
         historical_series=historical.series,
         issuer_components=issuer_components,
         discrepancy_arbitrator=discrepancy_arbitrator or LiveDiscrepancyArbitrator(),
+        excluded_candidates=excluded_candidates,
     )
     provider_names = {
         snapshot["source"]["name"], screener["provider"], historical.provider,
@@ -1011,6 +1334,7 @@ def build_canonical_market_data_packet(
         "providers": sorted(provider_names),
         "discrepancy_count": sum(item["discrepancy_status"] != "not_applicable" for item in top20),
         "top_gainers_20": top20,
+        "excluded_no_trade_candidates": excluded_candidates,
         "screener": {key: screener[key] for key in (
             "provider", "source_identifier", "retrieved_at", "raw_response_sha256",
         )},

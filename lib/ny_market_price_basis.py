@@ -108,13 +108,52 @@ def classify_official_discrepancy(*, official: dict, history_previous: float,
                 "normalization_divisor": factor, "effective_session_date": effective.isoformat(),
                 "comparison_basis": "pre_action_regular_close",
             }
-    last_trade = minute.get("previous_last_regular_bar_close")
+    previous_last_trade = minute.get("previous_last_regular_bar_close")
+    target_last_trade = minute.get("target_last_regular_bar_close")
     basis_unchanged = action.get("status") == "checked_none" or (
         notice and date.fromisoformat(official["target_session_date"]) < date.fromisoformat(notice["effective_session_date"]))
-    if (basis_unchanged and last_trade is not None and close_matches(history_previous, last_trade)
+    rounding_decimal_places = next(
+        (
+            digits
+            for digits in range(2, 5)
+            if close_matches(history_previous, round(previous, digits))
+        ),
+        None,
+    )
+    if (basis_unchanged and close_matches(history_target, target)
+            and abs(history_previous - previous) > max(1e-6, abs(previous) * 1e-6)
+            and rounding_decimal_places is not None):
+        rounded_previous = round(previous, rounding_decimal_places)
+        return "provider_rounding", {
+            "affected_session": "previous",
+            "vendor_daily_previous_close": history_previous,
+            "official_previous_close": previous,
+            "official_previous_close_rounded": rounded_previous,
+            "rounding_decimal_places": rounding_decimal_places,
+            "boundary_open_previous_close": minute["previous_close"],
+            "comparison_basis": "regular_close",
+        }
+    if (basis_unchanged and previous_last_trade is not None and close_matches(history_previous, previous_last_trade)
             and close_matches(history_target, target) and not close_matches(history_previous, previous)):
         return "provider_error", {
             "diagnosis": "vendor_daily_matches_last_minute_trade_not_exchange_close",
-            "last_regular_minute_close": last_trade, "official_previous_close": previous,
+            "affected_session": "previous",
+            "last_regular_minute_close": previous_last_trade, "official_previous_close": previous,
+        }
+    if (basis_unchanged and target_last_trade is not None and close_matches(history_previous, previous)
+            and close_matches(history_target, target_last_trade) and not close_matches(history_target, target)):
+        return "provider_error", {
+            "diagnosis": "vendor_daily_matches_last_minute_trade_not_exchange_close",
+            "affected_session": "target",
+            "last_regular_minute_close": target_last_trade, "official_target_close": target,
+        }
+    if basis_unchanged and close_matches(history_previous, previous) and not close_matches(history_target, target):
+        return "provider_error", {
+            "diagnosis": "vendor_daily_target_differs_from_exchange_close",
+            "affected_session": "target",
+            "vendor_daily_target_close": history_target,
+            "last_regular_minute_close": target_last_trade,
+            "official_target_close": target,
+            "boundary_open_close": minute["target_close"],
         }
     return None, {}

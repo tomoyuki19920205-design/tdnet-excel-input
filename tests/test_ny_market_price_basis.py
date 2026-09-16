@@ -87,6 +87,7 @@ def test_16_hour_bar_close_is_after_hours_and_not_boundary_evidence():
     assert value["previous_close"] == .2299
     assert value["target_close"] == .3838
     assert value["price_field"] == "boundary_open"
+    assert value["target_last_regular_bar_close"] is None
 
 
 def test_non_official_notice_cannot_authorize_normalization():
@@ -134,3 +135,105 @@ def test_original_small_discrepancy_is_not_claimed_to_be_split_adjustment():
     assert evidence["diagnosis"] == "vendor_daily_matches_last_minute_trade_not_exchange_close"
     del args["minute"]["previous_last_regular_bar_close"]
     assert classify_official_discrepancy(**args)[0] is None
+
+
+def test_previous_daily_close_rounded_to_cents_is_classified_as_provider_rounding():
+    args = {
+        "official": {
+            "target_close_verified": True,
+            "previous_close": 0.8866,
+            "target_close": 1.04,
+            "target_session_date": "2026-09-04",
+        },
+        "history_previous": 0.8899999856948853,
+        "history_target": 1.0399999618530273,
+        "minute": {
+            "price_field": "boundary_open",
+            "previous_close": 0.8866,
+            "target_close": 1.04,
+            "previous_last_regular_bar_close": 0.8834999799728394,
+            "target_last_regular_bar_close": 1.0299999713897705,
+        },
+        "action": {"status": "checked_none"},
+    }
+    reason, evidence = classify_official_discrepancy(**args)
+    assert reason == "provider_rounding"
+    assert evidence["vendor_daily_previous_close"] == pytest.approx(0.89)
+    assert evidence["official_previous_close"] == pytest.approx(0.8866)
+    assert evidence["official_previous_close_rounded"] == pytest.approx(0.89)
+    assert evidence["rounding_decimal_places"] == 2
+    assert evidence["boundary_open_previous_close"] == pytest.approx(0.8866)
+
+
+def test_small_cent_rounding_difference_can_change_percentage_materially():
+    args = {
+        "official": {
+            "target_close_verified": True,
+            "previous_close": 0.6411,
+            "target_close": 1.0,
+            "target_session_date": "2026-09-15",
+        },
+        "history_previous": 0.64,
+        "history_target": 1.0,
+        "minute": {
+            "price_field": "boundary_open",
+            "previous_close": 0.6411,
+            "target_close": 1.0,
+        },
+        "action": {"status": "checked_none"},
+    }
+    reason, evidence = classify_official_discrepancy(**args)
+    assert reason == "provider_rounding"
+    assert evidence["rounding_decimal_places"] == 2
+
+
+def test_previous_daily_close_rounded_to_mills_is_classified_as_provider_rounding():
+    args = {
+        "official": {
+            "target_close_verified": True,
+            "previous_close": 0.0827,
+            "target_close": 0.108,
+            "target_session_date": "2026-09-10",
+        },
+        "history_previous": 0.08299999684095383,
+        "history_target": 0.1080000028014183,
+        "minute": {
+            "price_field": "boundary_open",
+            "previous_close": 0.0827,
+            "target_close": 0.108,
+            "previous_last_regular_bar_close": 0.08020000159740448,
+            "target_last_regular_bar_close": 0.10999999940395355,
+        },
+        "action": {"status": "checked_none"},
+    }
+    reason, evidence = classify_official_discrepancy(**args)
+    assert reason == "provider_rounding"
+    assert evidence["official_previous_close_rounded"] == pytest.approx(0.083)
+    assert evidence["rounding_decimal_places"] == 3
+
+
+def test_target_daily_close_differing_from_exchange_close_is_classified_as_provider_error():
+    args = {
+        "official": {
+            "target_close_verified": True,
+            "previous_close": 0.8866,
+            "target_close": 1.04,
+            "target_session_date": "2026-09-04",
+        },
+        "history_previous": 0.8866,
+        "history_target": 1.0199999809265137,
+        "minute": {
+            "price_field": "boundary_open",
+            "previous_close": 0.8866,
+            "target_close": 1.04,
+            "target_last_regular_bar_close": 1.0299999713897705,
+        },
+        "action": {"status": "checked_none"},
+    }
+    reason, evidence = classify_official_discrepancy(**args)
+    assert reason == "provider_error"
+    assert evidence["affected_session"] == "target"
+    assert evidence["last_regular_minute_close"] == pytest.approx(1.0299999713897705)
+    assert evidence["official_target_close"] == pytest.approx(1.04)
+    assert evidence["boundary_open_close"] == pytest.approx(1.04)
+    assert evidence["vendor_daily_target_close"] == pytest.approx(1.0199999809265137)
