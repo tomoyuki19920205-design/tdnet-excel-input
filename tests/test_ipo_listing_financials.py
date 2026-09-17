@@ -10,6 +10,7 @@ from src.ipo_listing_financials import (
     build_canonical_rows,
     build_ipo_notification_event,
     disclosure_identity,
+    display_company_name,
     extract_ipo_listing_financials,
     is_ipo_listing_financial_title,
     normalize_disclosure_title,
@@ -241,6 +242,78 @@ def test_existing_tanshin_classification_regression():
     assert classify_disclosure("2026年3月期 第1四半期決算短信〔日本基準〕") == (
         DisclosureType.FINANCIAL_STATEMENT
     )
+
+
+@pytest.mark.parametrize(
+    ("doc_id", "ticker", "company", "period", "quarter", "sales", "net_income"),
+    [
+        ("140120260804508284", "614A", "山八商事株式会社", "2026-08-31", "2Q", 3188.448, 268.217),
+        ("140120260821524549", "616A", "数理技研", "2026-09-30", "2Q", 530.146, 14.409),
+        ("140120260827527377", "615A", "インターパーク", "2026-08-31", "2Q", 407.563, 5.230),
+        ("140120260910534302", "618A", "KOMPEITO", "2026-08-31", "3Q", 7047.954, 554.959),
+        ("140120260915536762", "619A", "オリバー", "2026-12-31", "2Q", 18645.0, 1444.0),
+        ("140120260910533876", "621A", "オーディオストック", "2026-09-30", "3Q", 1310.617, 344.755),
+    ],
+)
+def test_real_monthly_ipo_variants_extract_cumulative_detail(
+    doc_id, ticker, company, period, quarter, sales, net_income,
+):
+    pytest.importorskip("pdfplumber")
+    result = extract_ipo_listing_financials(FIXTURE.parent / f"{doc_id}.pdf")
+    assert (result.ticker, result.company_name) == (ticker, company)
+    cumulative = _period(result, period, quarter, "actual")
+    assert cumulative.metrics["sales"] == pytest.approx(sales)
+    assert cumulative.metrics["net_income"] == pytest.approx(net_income)
+    assert cumulative.period_start is not None
+    assert cumulative.period_end is not None
+
+
+def test_thousand_yen_summary_values_are_converted_but_eps_is_not():
+    pytest.importorskip("pdfplumber")
+    result = extract_ipo_listing_financials(FIXTURE.parent / "140120260827527377.pdf")
+    forecast = _period(result, "2026-08-31", "FY", "forecast")
+    prior = _period(result, "2025-08-31", "FY", "actual")
+    assert forecast.source_unit == "千円"
+    assert forecast.metrics["sales"] == pytest.approx(823.463)
+    assert forecast.metrics["eps"] == pytest.approx(9.17)
+    assert prior.metrics["sales"] == pytest.approx(745.117)
+
+
+def test_negative_yen_sen_eps_keeps_sign_on_fraction():
+    pytest.importorskip("pdfplumber")
+    result = extract_ipo_listing_financials(FIXTURE.parent / "140120260910534302.pdf")
+    prior = _period(result, "2025-08-31", "FY", "actual")
+    assert prior.metrics["eps"] == pytest.approx(-16.35)
+
+
+def test_ifrs_midyear_uses_pbt_and_current_comparative_dates():
+    pytest.importorskip("pdfplumber")
+    result = extract_ipo_listing_financials(FIXTURE.parent / "140120260915536762.pdf")
+    cumulative = _period(result, "2026-12-31", "2Q", "actual")
+    assert cumulative.period_start == "2026-01-01"
+    assert cumulative.period_end == "2026-06-30"
+    assert cumulative.metrics["profit_before_tax"] == pytest.approx(2081.0)
+    assert cumulative.metrics["non_operating_income"] == pytest.approx(17.0)
+    assert cumulative.metrics["non_operating_expenses"] == pytest.approx(41.0)
+    assert "ordinary_profit" not in cumulative.metrics
+
+
+def test_midyear_detail_keeps_unrounded_profit_before_tax():
+    pytest.importorskip("pdfplumber")
+    result = extract_ipo_listing_financials(FIXTURE.parent / "140120260821524549.pdf")
+    cumulative = _period(result, "2026-09-30", "2Q", "actual")
+    assert cumulative.metrics["profit_before_tax"] == pytest.approx(22.664)
+
+
+def test_full_year_only_listing_notice_is_held_instead_of_inventing_cumulative():
+    pytest.importorskip("pdfplumber")
+    with pytest.raises(ValueError, match="forecast/cumulative/prior"):
+        extract_ipo_listing_financials(FIXTURE.parent / "140120260825525642.pdf")
+
+
+def test_market_prefix_is_not_shown_in_notification_company_name():
+    assert display_company_name("Ｐ－株式会社レイシャス") == "レイシャス"
+    assert display_company_name("Ｇ－Ｓｋｙｆａｌｌ") == "Skyfall"
 
 
 def test_ingest_notification_survives_pl_parse_failure(monkeypatch):

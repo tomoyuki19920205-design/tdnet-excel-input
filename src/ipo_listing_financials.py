@@ -57,6 +57,7 @@ def disclosure_identity(source_url: str, source_doc_id: str | None = None) -> st
 def display_company_name(company_name: str) -> str:
     """Apply the card convention: omit a leading corporate designator."""
     name = unicodedata.normalize("NFKC", str(company_name or "")).strip()
+    name = re.sub(r"^[PGR]-\s*", "", name, flags=re.IGNORECASE)
     name = re.sub(r"^(?:株式会社|\(株\)|㈱)\s*", "", name)
     return name.strip()
 
@@ -85,10 +86,21 @@ class IpoListingExtraction:
 
 
 _SUMMARY_METRICS = {
+    "税引前当期(中間)利益": "profit_before_tax",
+    "税引前当期利益": "profit_before_tax",
+    "税引前中間利益": "profit_before_tax",
+    "基本的1株当たり当期(中間)利益": "eps",
+    "1株当たり当期(四半期)純利益": "eps",
+    "1株当たり当期(中間)純利益": "eps",
     "売上高": "sales",
+    "売上収益": "sales",
     "営業利益": "operating_profit",
     "経常利益": "ordinary_profit",
+    "当期(四半期)純利益": "net_income",
+    "当期(中間)純利益": "net_income",
+    "当期(中間)利益": "net_income",
     "当期純利益": "net_income",
+    "中間利益": "net_income",
     "四半期純利益": "net_income",
     "1株当たり当期(四半期)純利益": "eps",
     "1株当たり当期純利益": "eps",
@@ -97,17 +109,29 @@ _SUMMARY_METRICS = {
 
 _DETAIL_METRICS = {
     "売上高": "sales",
+    "売上収益": "sales",
     "売上原価": "cost_of_sales",
     "売上総利益": "gross_profit",
     "販売費及び一般管理費": "sga",
     "営業利益": "operating_profit",
     "営業外収益合計": "non_operating_income",
     "営業外費用合計": "non_operating_expenses",
+    "金融収益": "non_operating_income",
+    "金融費用": "non_operating_expenses",
     "経常利益": "ordinary_profit",
     "税引前四半期純利益": "profit_before_tax",
     "税引前当期純利益": "profit_before_tax",
+    "税引前中間利益": "profit_before_tax",
+    "税引前中間純利益": "profit_before_tax",
+    "税引前当期利益": "profit_before_tax",
+    "税金等調整前中間純利益": "profit_before_tax",
+    "税金等調整前四半期純利益": "profit_before_tax",
+    "税金等調整前当期純利益": "profit_before_tax",
     "法人税等": "income_taxes",
+    "法人所得税費用": "income_taxes",
     "四半期純利益": "net_income",
+    "中間純利益": "net_income",
+    "中間利益": "net_income",
     "当期純利益": "net_income",
 }
 
@@ -120,7 +144,9 @@ def _number(value: Any) -> float | None:
     text = _compact(value).replace(",", "").replace("△", "-").replace("▲", "-")
     eps = re.fullmatch(r"(-?\d+)円(\d{1,2})銭", text)
     if eps:
-        return float(Decimal(eps.group(1)) + (Decimal(eps.group(2)) / Decimal(100)))
+        whole = Decimal(eps.group(1))
+        fractional = Decimal(eps.group(2)) / Decimal(100)
+        return float(whole - fractional if whole < 0 else whole + fractional)
     match = re.search(r"-?\d+(?:\.\d+)?", text)
     if not match:
         return None
@@ -139,7 +165,10 @@ def _period_end_from_header(header: str) -> str | None:
 
 
 def _quarter_from_header(header: str) -> str:
-    match = re.search(r"第([1-4])四半期", _compact(header))
+    compact = _compact(header)
+    match = re.search(r"第([1-4])四半期", compact)
+    if not match and "中間" in compact:
+        return "2Q"
     return f"{match.group(1)}Q" if match else "FY"
 
 
@@ -157,11 +186,9 @@ def _extract_summary_periods(pdf: Any) -> tuple[list[IpoFinancialPeriod], int]:
             if not table or not table[0]:
                 continue
             headers = [_compact(cell) for cell in table[0]]
-            if not any("決算期" in value for value in headers):
+            if not any("予想" in value or "予測" in value for value in headers):
                 continue
-            if not any("予想" in value for value in headers):
-                continue
-            if not any("累計" in value and "実績" in value for value in headers):
+            if sum("実績" in value for value in headers) < 1:
                 continue
 
             value_columns: list[tuple[int, str, str, str]] = []
@@ -169,7 +196,7 @@ def _extract_summary_periods(pdf: Any) -> tuple[list[IpoFinancialPeriod], int]:
                 period = _period_end_from_header(header)
                 if not period:
                     continue
-                if "予想" in header:
+                if "予想" in header or "予測" in header:
                     value_columns.append((column, period, "FY", "forecast"))
                 elif "実績" in header:
                     value_columns.append((column, period, _quarter_from_header(header), "actual"))
@@ -177,6 +204,9 @@ def _extract_summary_periods(pdf: Any) -> tuple[list[IpoFinancialPeriod], int]:
             if len(value_columns) < 3:
                 continue
 
+            page_text = _compact(page.extract_text() or "")
+            unit = "千円" if "単位:千円" in page_text else "百万円"
+            factor = Decimal("0.001") if unit == "千円" else Decimal("1")
             metrics_by_column: dict[int, dict[str, float]] = {
                 column: {} for column, *_ in value_columns
             }
@@ -191,7 +221,8 @@ def _extract_summary_periods(pdf: Any) -> tuple[list[IpoFinancialPeriod], int]:
                         continue
                     value = _number(row[column])
                     if value is not None:
-                        metrics_by_column[column][metric] = value
+                        converted = Decimal(str(value)) if metric == "eps" else Decimal(str(value)) * factor
+                        metrics_by_column[column][metric] = float(converted)
 
             periods = [
                 IpoFinancialPeriod(
@@ -199,7 +230,7 @@ def _extract_summary_periods(pdf: Any) -> tuple[list[IpoFinancialPeriod], int]:
                     quarter=quarter,
                     kind=kind,
                     metrics=metrics_by_column[column],
-                    source_unit="百万円",
+                    source_unit=unit,
                     source_page=page_index + 1,
                 )
                 for column, period, quarter, kind in value_columns
@@ -220,21 +251,38 @@ def _lines_from_words(words: list[dict[str, Any]], tolerance: float = 2.0) -> li
     return lines
 
 
-def _extract_detailed_cumulative(pdf: Any) -> IpoFinancialPeriod | None:
+def _extract_detailed_cumulative(
+    pdf: Any,
+    *,
+    expected_period: str | None = None,
+    expected_quarter: str | None = None,
+) -> IpoFinancialPeriod | None:
     for page_index, page in enumerate(pdf.pages):
         words = page.extract_words() or []
         page_text = "".join(_compact(word.get("text")) for word in words)
-        if "四半期損益計算書" not in page_text or "累計期間" not in page_text:
+        is_cumulative_statement = (
+            ("四半期" in page_text and "損益計算書" in page_text and "累計期間" in page_text)
+            or ("中間" in page_text and "損益計算書" in page_text)
+        )
+        if not is_cumulative_statement:
             continue
         if "売上原価" not in page_text or "販売費及び一般管理費" not in page_text:
             continue
 
-        period = _period_end_from_header(page_text)
+        period = _period_end_from_header(page_text) or expected_period
         quarter = _quarter_from_header(page_text)
+        if quarter == "FY" and expected_quarter:
+            quarter = expected_quarter
         date_matches = re.findall(r"(\d{4})年(\d{1,2})月(\d{1,2})日", page_text)
         period_start = period_end = None
         if len(date_matches) >= 2:
-            start, end = date_matches[-2], date_matches[-1]
+            # Comparative statements lay out prior/current dates side by side,
+            # so word extraction returns both starts followed by both ends.
+            start, end = (
+                (date_matches[1], date_matches[3])
+                if len(date_matches) == 4
+                else (date_matches[-2], date_matches[-1])
+            )
             period_start = f"{int(start[0]):04d}-{int(start[1]):02d}-{int(start[2]):02d}"
             period_end = f"{int(end[0]):04d}-{int(end[1]):02d}-{int(end[2]):02d}"
         if not period and period_end:
@@ -257,12 +305,15 @@ def _extract_detailed_cumulative(pdf: Any) -> IpoFinancialPeriod | None:
                 continue
             metrics[metric] = float(Decimal(str(value)) * factor)
 
-        required = {"sales", "cost_of_sales", "gross_profit", "sga", "operating_profit", "ordinary_profit", "net_income"}
-        if not required.issubset(metrics):
+        required = {"sales", "cost_of_sales", "gross_profit", "sga", "operating_profit", "net_income"}
+        missing = required - set(metrics)
+        if not ({"ordinary_profit", "profit_before_tax"} & set(metrics)):
+            missing.add("ordinary_profit_or_profit_before_tax")
+        if missing:
             logger.warning(
                 "[IPO_FINANCIALS] detailed PL page=%s incomplete missing=%s",
                 page_index + 1,
-                sorted(required - set(metrics)),
+                sorted(missing),
             )
             continue
         return IpoFinancialPeriod(
@@ -279,17 +330,25 @@ def _extract_detailed_cumulative(pdf: Any) -> IpoFinancialPeriod | None:
 
 
 def _extract_identity(pdf: Any) -> tuple[str, str]:
-    for page in pdf.pages:
-        words = page.extract_words() or []
-        text = " ".join(_compact(word.get("text")) for word in words[:80])
-        match = re.search(r"(?:株式会社)?([^()（）\s]+)[(（]([0-9]{3}[A-Za-z]|[0-9]{4})[)）]", text)
-        if match:
-            return normalize_ticker(match.group(2)), display_company_name(match.group(1))
-    return "", ""
+    text = pdf.pages[0].extract_text() or ""
+    compact = _compact(text)
+    code_match = re.search(r"コード(?:番号)?[:：]?([0-9]{3}[A-Za-z]|[0-9]{4})", compact)
+    company_name = ""
+    for line in text.splitlines():
+        compact_line = _compact(line)
+        if compact_line.startswith("会社名"):
+            company_name = display_company_name(compact_line.removeprefix("会社名"))
+            break
+    return (
+        normalize_ticker(code_match.group(1)) if code_match else "",
+        company_name,
+    )
 
 
 def _validate_summary_detail(summary: IpoFinancialPeriod, detail: IpoFinancialPeriod) -> None:
-    for metric in ("sales", "operating_profit", "ordinary_profit", "net_income"):
+    for metric in (
+        "sales", "operating_profit", "ordinary_profit", "profit_before_tax", "net_income",
+    ):
         summary_value = summary.metrics.get(metric)
         detail_value = detail.metrics.get(metric)
         if summary_value is None or detail_value is None:
@@ -307,12 +366,15 @@ def extract_ipo_listing_financials(pdf_path: str | Path) -> IpoListingExtraction
     with pdfplumber.open(str(pdf_path)) as pdf:
         periods, summary_page = _extract_summary_periods(pdf)
         ticker, company_name = _extract_identity(pdf)
-        detail = _extract_detailed_cumulative(pdf)
-
-    actual_cumulative = next(
-        (period for period in periods if period.kind == "actual" and period.quarter != "FY"),
-        None,
-    )
+        actual_cumulative = next(
+            (period for period in periods if period.kind == "actual" and period.quarter != "FY"),
+            None,
+        )
+        detail = _extract_detailed_cumulative(
+            pdf,
+            expected_period=actual_cumulative.period if actual_cumulative else None,
+            expected_quarter=actual_cumulative.quarter if actual_cumulative else None,
+        )
     if detail is not None and actual_cumulative is not None:
         if detail.period != actual_cumulative.period or detail.quarter != actual_cumulative.quarter:
             raise ValueError(
