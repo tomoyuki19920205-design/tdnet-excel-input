@@ -128,6 +128,7 @@ _DETAIL_METRICS = {
     "税金等調整前四半期純利益": "profit_before_tax",
     "税金等調整前当期純利益": "profit_before_tax",
     "法人税等": "income_taxes",
+    "法人税等合計": "income_taxes",
     "法人所得税費用": "income_taxes",
     "四半期純利益": "net_income",
     "中間純利益": "net_income",
@@ -174,6 +175,8 @@ def _quarter_from_header(header: str) -> str:
 
 def _metric_for_summary_label(label: str) -> str | None:
     normalized = _compact(label).replace("１", "1")
+    if "1株当たり" in normalized and "利益" in normalized:
+        return "eps"
     for candidate, metric in _SUMMARY_METRICS.items():
         if candidate in normalized:
             return metric
@@ -201,7 +204,7 @@ def _extract_summary_periods(pdf: Any) -> tuple[list[IpoFinancialPeriod], int]:
                 elif "実績" in header:
                     value_columns.append((column, period, _quarter_from_header(header), "actual"))
 
-            if len(value_columns) < 3:
+            if len(value_columns) < 2:
                 continue
 
             page_text = _compact(page.extract_text() or "")
@@ -236,9 +239,12 @@ def _extract_summary_periods(pdf: Any) -> tuple[list[IpoFinancialPeriod], int]:
                 for column, period, quarter, kind in value_columns
                 if metrics_by_column[column]
             ]
-            if len(periods) >= 3:
+            if (
+                any(period.kind == "forecast" for period in periods)
+                and any(period.kind == "actual" for period in periods)
+            ):
                 return periods, page_index + 1
-    raise ValueError("IPO summary table with forecast/cumulative/prior columns was not found")
+    raise ValueError("IPO summary table with independently usable actual/forecast periods was not found")
 
 
 def _lines_from_words(words: list[dict[str, Any]], tolerance: float = 2.0) -> list[list[dict[str, Any]]]:
@@ -329,6 +335,118 @@ def _extract_detailed_cumulative(
     return None
 
 
+def _extract_detailed_annual_actual(
+    pdf: Any,
+    *,
+    expected_period: str,
+) -> IpoFinancialPeriod | None:
+    """Extract the current column of a comparative full-year income statement."""
+    for page_index, page in enumerate(pdf.pages):
+        words = page.extract_words() or []
+        page_text = "".join(_compact(word.get("text")) for word in words)
+        if "損益計算書" not in page_text or "売上原価" not in page_text:
+            continue
+        if "四半期損益計算書" in page_text or "中間損益計算書" in page_text:
+            continue
+        if "販売費及び一般管理費" not in page_text:
+            continue
+
+        period = _period_end_from_header(page_text) or expected_period
+        if period != expected_period:
+            continue
+        date_matches = re.findall(r"(\d{4})年(\d{1,2})月(\d{1,2})日", page_text)
+        period_start = period_end = None
+        if len(date_matches) >= 2:
+            start, end = (
+                (date_matches[1], date_matches[3])
+                if len(date_matches) == 4
+                else (date_matches[-2], date_matches[-1])
+            )
+            period_start = f"{int(start[0]):04d}-{int(start[1]):02d}-{int(start[2]):02d}"
+            period_end = f"{int(end[0]):04d}-{int(end[1]):02d}-{int(end[2]):02d}"
+
+        unit = "千円" if "単位:千円" in page_text or "単位：千円" in page_text else "百万円"
+        factor = Decimal("0.001") if unit == "千円" else Decimal("1")
+        metrics: dict[str, float] = {}
+        for line in _lines_from_words(words):
+            label_words = [word for word in line if float(word["x0"]) < 250]
+            value_words = [word for word in line if float(word["x0"]) >= 250]
+            label = "".join(_compact(word["text"]) for word in label_words)
+            metric = _DETAIL_METRICS.get(label)
+            if not metric or not value_words:
+                continue
+            value = _number(value_words[-1]["text"])
+            if value is not None:
+                metrics[metric] = float(Decimal(str(value)) * factor)
+
+        required = {
+            "sales", "cost_of_sales", "gross_profit", "sga",
+            "operating_profit", "ordinary_profit", "profit_before_tax",
+            "income_taxes", "net_income",
+        }
+        if not required.issubset(metrics):
+            logger.warning(
+                "[IPO_FINANCIALS] detailed annual PL page=%s incomplete missing=%s",
+                page_index + 1,
+                sorted(required - set(metrics)),
+            )
+            continue
+        return IpoFinancialPeriod(
+            period=period,
+            quarter="FY",
+            kind="actual",
+            metrics=metrics,
+            period_start=period_start,
+            period_end=period_end,
+            source_unit=unit,
+            source_page=page_index + 1,
+        )
+    return None
+
+
+def _extract_detailed_annual_forecast(
+    pdf: Any,
+    *,
+    expected_period: str,
+) -> IpoFinancialPeriod | None:
+    """Extract exact full-year forecast PL values stated in Japanese narrative."""
+    labels = (
+        ("販売費及び一般管理費", "sga"),
+        ("売上総利益", "gross_profit"),
+        ("売上原価", "cost_of_sales"),
+        ("営業利益", "operating_profit"),
+        ("経常利益", "ordinary_profit"),
+        ("当期純利益", "net_income"),
+        ("売上高", "sales"),
+    )
+    metrics: dict[str, float] = {}
+    source_page = 0
+    for page_index, page in enumerate(pdf.pages):
+        text = _compact(page.extract_text() or "")
+        if "予想" not in text and "予測" not in text and "見込" not in text:
+            continue
+        for label, metric in labels:
+            match = re.search(
+                rf"{re.escape(label)}[^。]{{0,100}}?(\d+)億(\d+)百万円",
+                text,
+            )
+            if not match:
+                continue
+            metrics[metric] = float(int(match.group(1)) * 100 + int(match.group(2)))
+            source_page = source_page or page_index + 1
+    detail_metrics = {"cost_of_sales", "gross_profit", "sga"}
+    if not detail_metrics.issubset(metrics):
+        return None
+    return IpoFinancialPeriod(
+        period=expected_period,
+        quarter="FY",
+        kind="forecast",
+        metrics=metrics,
+        source_unit="百万円",
+        source_page=source_page,
+    )
+
+
 def _extract_identity(pdf: Any) -> tuple[str, str]:
     text = pdf.pages[0].extract_text() or ""
     compact = _compact(text)
@@ -360,7 +478,7 @@ def _validate_summary_detail(summary: IpoFinancialPeriod, detail: IpoFinancialPe
 
 
 def extract_ipo_listing_financials(pdf_path: str | Path) -> IpoListingExtraction:
-    """Extract prior FY actual, current cumulative actual and current FY forecast."""
+    """Extract every independently supported actual/forecast period in an IPO notice."""
     import pdfplumber
 
     with pdfplumber.open(str(pdf_path)) as pdf:
@@ -374,6 +492,24 @@ def extract_ipo_listing_financials(pdf_path: str | Path) -> IpoListingExtraction
             pdf,
             expected_period=actual_cumulative.period if actual_cumulative else None,
             expected_quarter=actual_cumulative.quarter if actual_cumulative else None,
+        )
+        annual_actual = next(
+            (period for period in periods if period.kind == "actual" and period.quarter == "FY"),
+            None,
+        )
+        annual_forecast = next(
+            (period for period in periods if period.kind == "forecast" and period.quarter == "FY"),
+            None,
+        )
+        annual_actual_detail = (
+            _extract_detailed_annual_actual(pdf, expected_period=annual_actual.period)
+            if actual_cumulative is None and annual_actual is not None
+            else None
+        )
+        annual_forecast_detail = (
+            _extract_detailed_annual_forecast(pdf, expected_period=annual_forecast.period)
+            if actual_cumulative is None and annual_forecast is not None
+            else None
         )
     if detail is not None and actual_cumulative is not None:
         if detail.period != actual_cumulative.period or detail.quarter != actual_cumulative.quarter:
@@ -397,9 +533,34 @@ def extract_ipo_listing_financials(pdf_path: str | Path) -> IpoListingExtraction
         )
         periods = [replacement if period is actual_cumulative else period for period in periods]
 
+    for summary, annual_detail in (
+        (annual_actual, annual_actual_detail),
+        (annual_forecast, annual_forecast_detail),
+    ):
+        if summary is None or annual_detail is None:
+            continue
+        _validate_summary_detail(summary, annual_detail)
+        merged = dict(summary.metrics)
+        merged.update(annual_detail.metrics)
+        replacement = IpoFinancialPeriod(
+            period=summary.period,
+            quarter="FY",
+            kind=summary.kind,
+            metrics=merged,
+            period_start=annual_detail.period_start,
+            period_end=annual_detail.period_end,
+            source_unit=annual_detail.source_unit,
+            source_page=annual_detail.source_page,
+        )
+        periods = [replacement if period is summary else period for period in periods]
+
     keys = {(period.period, period.quarter, period.kind) for period in periods}
-    if len(keys) != 3:
-        raise ValueError(f"expected exactly three distinct IPO financial periods, got {sorted(keys)}")
+    if len(keys) != len(periods):
+        raise ValueError(f"duplicate IPO financial periods: {sorted(keys)}")
+    if not any(period.kind == "actual" for period in periods):
+        raise ValueError("IPO disclosure has no independently usable actual period")
+    if not any(period.kind == "forecast" for period in periods):
+        raise ValueError("IPO disclosure has no independently usable forecast period")
 
     pages = tuple(sorted({summary_page, *(period.source_page for period in periods)}))
     return IpoListingExtraction(
@@ -458,7 +619,7 @@ def write_ipo_financials(
     config: dict[str, Any] | None = None,
     upsert: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Upsert all three periods atomically at the disclosure identity level."""
+    """Upsert every extracted period at the disclosure identity level."""
     from lib.pipeline.db import supabase_upsert
 
     rows = build_canonical_rows(

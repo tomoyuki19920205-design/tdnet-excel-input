@@ -305,10 +305,78 @@ def test_midyear_detail_keeps_unrounded_profit_before_tax():
     assert cumulative.metrics["profit_before_tax"] == pytest.approx(22.664)
 
 
-def test_full_year_only_listing_notice_is_held_instead_of_inventing_cumulative():
+def test_full_year_only_listing_notice_saves_two_periods_without_inventing_cumulative():
     pytest.importorskip("pdfplumber")
-    with pytest.raises(ValueError, match="forecast/cumulative/prior"):
-        extract_ipo_listing_financials(FIXTURE.parent / "140120260825525642.pdf")
+    result = extract_ipo_listing_financials(FIXTURE.parent / "140120260825525642.pdf")
+    assert result.ticker == "617A"
+    assert {(p.period, p.quarter, p.kind) for p in result.periods} == {
+        ("2026-06-30", "FY", "actual"),
+        ("2027-06-30", "FY", "forecast"),
+    }
+
+    actual = _period(result, "2026-06-30", "FY", "actual")
+    assert actual.period_start == "2025-07-01"
+    assert actual.period_end == "2026-06-30"
+    assert actual.source_unit == "千円"
+    assert actual.metrics == {
+        "sales": pytest.approx(18809.167),
+        "operating_profit": pytest.approx(562.897),
+        "ordinary_profit": pytest.approx(287.140),
+        "net_income": pytest.approx(174.212),
+        "eps": pytest.approx(316.75),
+        "cost_of_sales": pytest.approx(15939.329),
+        "gross_profit": pytest.approx(2869.837),
+        "sga": pytest.approx(2306.939),
+        "non_operating_income": pytest.approx(3.909),
+        "non_operating_expenses": pytest.approx(279.667),
+        "profit_before_tax": pytest.approx(267.140),
+        "income_taxes": pytest.approx(92.928),
+    }
+
+    forecast = _period(result, "2027-06-30", "FY", "forecast")
+    assert forecast.source_unit == "百万円"
+    assert forecast.metrics == {
+        "sales": pytest.approx(19463.0),
+        "operating_profit": pytest.approx(818.0),
+        "ordinary_profit": pytest.approx(588.0),
+        "net_income": pytest.approx(366.0),
+        "eps": pytest.approx(666.74),
+        "cost_of_sales": pytest.approx(16176.0),
+        "gross_profit": pytest.approx(3287.0),
+        "sga": pytest.approx(2468.0),
+    }
+
+    rows = build_canonical_rows(
+        result,
+        ticker="617A",
+        filing_id="140120260825525642",
+        disclosed_at="2026-08-26 08:00",
+    )
+    assert len(rows) == 20
+    assert {row["quarter"] for row in rows} == {"FY"}
+
+
+def test_full_year_only_listing_notice_repeated_upsert_is_idempotent():
+    pytest.importorskip("pdfplumber")
+    result = extract_ipo_listing_financials(FIXTURE.parent / "140120260825525642.pdf")
+    stored = {}
+
+    def fake_upsert(table, rows, **kwargs):
+        for row in rows:
+            stored[row["source_row_key"]] = row
+        return {"ok": True, "count": len(rows), "status": 201, "error": None}
+
+    kwargs = dict(
+        ticker="617A",
+        filing_id="140120260825525642",
+        disclosed_at="2026-08-26 08:00",
+        config={"test": True},
+        upsert=fake_upsert,
+    )
+    first = write_ipo_financials(result, **kwargs)
+    second = write_ipo_financials(result, **kwargs)
+    assert first["rows"] == second["rows"] == 20
+    assert len(stored) == 20
 
 
 def test_market_prefix_is_not_shown_in_notification_company_name():
