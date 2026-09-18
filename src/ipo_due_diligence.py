@@ -377,8 +377,18 @@ def extract_lockups(documents: list[tuple[str, BeautifulSoup]], source_id: str,
 
 def extract_stock_options(documents: list[tuple[str, BeautifulSoup]], source_id: str,
                           pdf_bytes: bytes) -> list[dict[str, Any]]:
+    # EDINET's 0204010 company-information document contains the current
+    # ``新株予約権等の状況``.  Financial-statement notes (0205400) also contain
+    # historical grant/activity tables, including already exercised or expired
+    # series.  Mixing both documents overstates current potential dilution.
+    current_documents = [item for item in documents
+                         if re.search(r"(?:^|/)0204010_", item[0].replace("\\", "/"))]
+    option_documents = current_documents or documents
+    option_text = unicodedata.normalize("NFKC", re.sub(r"\s+", "", " ".join(
+        soup.get_text(" ", strip=True) for _, soup in documents
+    )))
     options: list[dict[str, Any]] = []
-    for _, soup in documents:
+    for _, soup in option_documents:
         document_text = re.sub(r"\s+", "", soup.get_text(" ", strip=True))
         for table in soup.find_all("table"):
             rows = [[re.sub(r"\s+", " ", cell.get_text(" ", strip=True)) for cell in row.find_all(["th", "td"])]
@@ -427,7 +437,7 @@ def extract_stock_options(documents: list[tuple[str, BeautifulSoup]], source_id:
     # EDINET also represents grants as one vertical table per series.  Parse the
     # post-split values in square brackets when present; they are the current
     # potential shares and exercise price used at listing.
-    for _, soup in documents:
+    for _, soup in option_documents:
         vertical_index = 0
         for table in soup.find_all("table"):
             rows = [[re.sub(r"\s+", " ", cell.get_text(" ", strip=True))
@@ -445,6 +455,12 @@ def extract_stock_options(documents: list[tuple[str, BeautifulSoup]], source_id:
             share_numbers = re.findall(r"[\[［]\s*([\d,]+)\s*[\]］]", shares_text)
             price_numbers = re.findall(r"[\[［]\s*([\d,]+)\s*[\]］]", price_text)
             plain_shares = re.findall(r"([\d,]+)\s*株", shares_text)
+            if not plain_shares:
+                # EDINET commonly puts the unit only in the row label
+                # ``...数(株)`` and prints ``普通株式 709,893 (注)1`` in the
+                # value cell.  The first value is the share count; later
+                # integers are note markers.
+                plain_shares = re.findall(r"[\d,]+", shares_text)[:1]
             plain_prices = re.findall(r"([\d,]+)", price_text)
             if not (share_numbers or plain_shares) or not (price_numbers or plain_prices):
                 continue
@@ -459,11 +475,18 @@ def extract_stock_options(documents: list[tuple[str, BeautifulSoup]], source_id:
                 r"ストック[・･]?オプション", "新株予約権",
                 re.sub(r"\s+", "", series_match.group())
             )) if series_match else f"第{vertical_index}回新株予約権"
+            series_key = series.split("(", 1)[0].split("（", 1)[0]
+            effective_shares = current_shares
+            changed = re.search(re.escape(series_key) + r".{0,1200}?発行数は([\d,]+)株", option_text)
+            if changed:
+                adjusted = int(changed.group(1).replace(",", ""))
+                if current_shares * 0.1 <= adjusted <= current_shares:
+                    effective_shares = adjusted
             issue_date = next((value for label, value in values.items() if "決議年月日" in label), None)
             options.append({"series": series, "issue_date": issue_date,
                             "issued_potential_shares": current_shares,
-                            "forfeited_shares": 0,
-                            "effective_potential_shares": current_shares,
+                            "forfeited_shares": current_shares - effective_shares,
+                            "effective_potential_shares": effective_shares,
                             "exercise_price_yen": current_price,
                             "exercise_period": period_text, "source_id": source_id,
                             "_layout": "vertical_detail"})
@@ -511,9 +534,19 @@ def extract_stock_options(documents: list[tuple[str, BeautifulSoup]], source_id:
                         if merged[key].get("issued_potential_shares") is not None:
                             merged[key]["effective_potential_shares"] = max(
                                 0, merged[key]["issued_potential_shares"] - loss)
-    options.extend(row for row in merged.values()
-                   if row.get("effective_potential_shares") is not None
-                   and row.get("exercise_price_yen") is not None)
+    current_series_numbers = {
+        match.group(1) for row in options
+        if (match := re.search(r"第\s*(\d+)\s*回", unicodedata.normalize("NFKC", row["series"])))
+    }
+    options.extend(
+        row for row in merged.values()
+        if row.get("effective_potential_shares") is not None
+        and row.get("exercise_price_yen") is not None
+        and (not current_documents or (
+            (match := re.search(r"第\s*(\d+)\s*回", unicodedata.normalize("NFKC", row["series"])))
+            and match.group(1) in current_series_numbers
+        ))
+    )
     # Remove structurally impossible partial-table candidates before merging.
     # Otherwise a spurious one-share row can contaminate a valid vertical table
     # through the conservative min(effective) merge below.

@@ -70,6 +70,36 @@ def test_vertical_single_series_stock_option_table_is_supported():
     assert rows[0]["exercise_price_yen"] == 660
 
 
+def test_current_option_section_excludes_historical_financial_note_tables():
+    current = """
+    <html><body><p>第８回新株予約権</p><table>
+      <tr><td>決議年月日</td><td>2024年11月15日</td></tr>
+      <tr><td>新株予約権の目的となる株式の種類、内容及び数（株）</td><td>普通株式 709,893株</td></tr>
+      <tr><td>新株予約権の行使時の払込金額（円）</td><td>550円</td></tr>
+      <tr><td>新株予約権の行使期間</td><td>2026年11月30日～2034年11月14日</td></tr>
+    </table></body></html>"""
+    historical = """
+    <html><body><table>
+      <tr><th></th><th>第１回新株予約権（ストック・オプション）</th></tr>
+      <tr><td>株式の種類別のストック・オプションの数</td><td>普通株式 231,000株</td></tr>
+      <tr><td>権利行使価格（円）</td><td>287円</td></tr>
+      <tr><td>権利行使期間</td><td>2017年2月28日～2025年2月23日</td></tr>
+      <tr><td>失効</td><td>139,200</td></tr>
+    </table></body></html>"""
+    adjustment = """
+    <html><body><p>第８回新株予約権については、退職による権利の喪失により、
+    発行数は699,393株となっております。</p></body></html>"""
+    data = BytesIO()
+    with zipfile.ZipFile(data, "w") as archive:
+        archive.writestr("XBRL/PublicDoc/0204010_fixture_ixbrl.htm", current)
+        archive.writestr("XBRL/PublicDoc/0205400_fixture_ixbrl.htm", historical)
+        archive.writestr("XBRL/PublicDoc/0402010_fixture_ixbrl.htm", adjustment)
+    rows = diligence.extract_stock_options(diligence._html_documents(data.getvalue()), "P01", b"")
+    assert [(row["series"], row["forfeited_shares"], row["effective_potential_shares"]) for row in rows] == [
+        ("第8回新株予約権", 10_500, 699_393),
+    ]
+
+
 def test_shareholder_header_whitespace_is_normalized():
     documents = html_documents("""
     <html><body><table><tr><th>氏名又は名称</th><th>住所</th><th>所有株式数</th><th>割合</th>
