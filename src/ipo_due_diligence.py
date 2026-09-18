@@ -923,9 +923,10 @@ def extract_kpis_and_narratives(documents: list[tuple[str, BeautifulSoup]], sour
             + 4 * int("駐車場マーケットプレイス" in sentence)
             + 3 * int("マッチング" in sentence)
             + 3 * int("自ら" in sentence and "資産" in sentence and "保有" in sentence)
+            + 5 * int("単一セグメント" in sentence)
             + 2 * sum(cue in sentence for cue in ("提供", "運営", "サービス", "プラットフォーム"))
             - 10 * sum(cue in sentence for cue in ("リスク", "依存", "発生可能性", "ロックアップ", "充当する予定"))
-            - 20 * sum(cue in sentence for cue in ("手取金", "資金使途", "使途】"))
+            - 20 * sum(cue in sentence for cue in ("コーポレートブランディング費用", "広告出稿", "費用として"))
         ),
         default=None,
     )

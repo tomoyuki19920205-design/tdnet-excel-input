@@ -233,6 +233,18 @@ def test_single_segment_name_is_taken_from_source_without_company_hardcode():
     assert "アキッパ" not in facts["single_segment"]
 
 
+def test_business_model_prefers_segment_description_over_funding_advertising():
+    documents = html_documents("""
+    <html><body>
+      <p>(2) 【手取金の使途】当社は不動産コンサルティングと不動産管理を一体運営し、「不動産事業」の単一セグメントとして事業展開しております。</p>
+      <p>2 コーポレートブランディング費用 当社は拠点展開に伴い広告出稿を行い、サービスの提供を促進します。</p>
+    </body></html>
+    """)
+    facts = diligence.extract_kpis_and_narratives(documents, "P01", b"")
+    assert "不動産コンサルティング" in facts["business_model"]
+    assert "広告出稿" not in facts["business_model"]
+
+
 def test_reason_code_distinguishes_parser_failure_from_absence():
     gate = diligence.build_completeness(manifests=[], financials=[], offering={}, diligence={},
                                         discovery={"reason_code": "SOURCE_NOT_DISCOVERED"})
