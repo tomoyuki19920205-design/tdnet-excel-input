@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import tempfile
 import unicodedata
 import uuid
@@ -106,7 +107,29 @@ def _pdf_page_count_and_text(data: bytes) -> tuple[int, str]:
     import pdfplumber
     from io import BytesIO
     with pdfplumber.open(BytesIO(data)) as pdf:
-        return len(pdf.pages), "\n".join((page.extract_text() or "") for page in pdf.pages)
+        native = [page.extract_text() or "" for page in pdf.pages]
+        if sum(len(value.strip()) for value in native) >= max(100, len(pdf.pages) * 20):
+            return len(pdf.pages), "\n".join(
+                f"[[PDF_PAGE:{index}]]\n{text}" for index, text in enumerate(native, 1)
+            )
+        if os.name != "nt":
+            return len(pdf.pages), "\n".join(native)
+        script = Path(__file__).resolve().parents[1] / "tools" / "windows_ocr_pdf_pages.ps1"
+        if not script.exists():
+            return len(pdf.pages), "\n".join(native)
+        with tempfile.TemporaryDirectory(prefix="ipo-pdf-ocr-") as directory:
+            for index, page in enumerate(pdf.pages, 1):
+                # 300 dpi is required for the small Japanese table glyphs used
+                # by scanned TOKYO PRO Market primary documents.
+                page.to_image(resolution=300).save(Path(directory) / f"page-{index:04d}.png", format="PNG")
+            completed = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
+                 "-Directory", directory], capture_output=True, check=True, timeout=300,
+            )
+            pages = json.loads(completed.stdout.decode("utf-8-sig"))
+        return len(pdf.pages), "\n".join(
+            f"[[PDF_PAGE:{index}]]\n{row.get('text', '')}" for index, row in enumerate(pages, 1)
+        )
 
 
 def _download_source(url: str, session: requests.Session) -> tuple[bytes, str, int | None, str]:
@@ -300,7 +323,7 @@ def collect_sources(ticker: str, listing_date: str, tdnet_documents: Iterable[An
     # Resolve EDINET identity from already-fetched official application documents before
     # falling back to normalized issuer-name matching. This also handles romanized names.
     from src.ipo_due_diligence import (discover_edinet_documents, download_edinet_document,
-                                       extract_due_diligence)
+                                       extract_due_diligence, extract_exchange_text_due_diligence)
     edinet_codes = sorted({match for text in source_text.values() if isinstance(text, str)
                            for match in re.findall(r"E\d{5}", text)})
     try:
@@ -395,11 +418,24 @@ def collect_sources(ticker: str, listing_date: str, tdnet_documents: Iterable[An
                         "kpi_growth": "事業の状況／重要KPI",
                         "risks": "事業等のリスク",
                     }.items()}
-        offering["due_diligence"] = {
-            "business_model": business_match.group(1).strip() if business_match else None,
-            "shareholders": [], "lockups": [], "stock_options": [], "kpis": [],
-            "financial_position": {}, "offering_terms": {}, "expected_locations": expected,
-        }
+        primary_text = str(source_text.get(primary["source_id"], "")) if primary else ""
+        if primary and primary_text:
+            diligence = extract_exchange_text_due_diligence(primary_text, primary["source_id"])
+            if not diligence.get("business_model") and business_match:
+                diligence["business_model"] = business_match.group(1).strip()
+            if offering.get("not_applicable_evidence"):
+                evidence = dict(offering["not_applicable_evidence"])
+                evidence["source_page"] = evidence.pop("pdf_page", None)
+                diligence.setdefault("absence_evidence", {})["lockup"] = evidence
+            diligence["expected_locations"] = expected
+            offering["due_diligence"] = diligence
+        else:
+            offering["due_diligence"] = {
+                "business_model": business_match.group(1).strip() if business_match else None,
+                "shareholders": [], "lockups": [], "stock_options": [], "kpis": [],
+                "financial_position": {}, "financial_facts": [], "offering_terms": {},
+                "expected_locations": expected,
+            }
     return manifests, offering, source_text
 
 
@@ -466,7 +502,7 @@ def _fact_citation(fact: dict[str, Any], manifests: list[dict[str, Any]]) -> str
     source = next((item for item in manifests if item.get("source_id") == fact.get("source_id")), None)
     if not source:
         return "[出典未解決]"
-    page = str(fact.get("pdf_page") or "")
+    page = str(fact.get("source_page") or fact.get("pdf_page") or "")
     return _source_link(source, page)
 
 
@@ -476,6 +512,7 @@ def render_report(*, ticker: str, company_name: str, listing_date: str, market: 
                   missing: list[str], generated_at: str, diligence: dict[str, Any] | None = None,
                   completeness_gate: dict[str, Any] | None = None) -> str:
     diligence = diligence or {}
+    absence_evidence = diligence.get("absence_evidence", {})
     sources_ok = [source for source in manifests if source["fetch_status"] == "success"]
     financial_source = next((source for source in sources_ok if "決算情報" in source["title"]), sources_ok[0] if sources_ok else None)
     citation = _source_link(financial_source) if financial_source else "[未確認]"
@@ -521,13 +558,39 @@ def render_report(*, ticker: str, company_name: str, listing_date: str, market: 
     lines += ["- 配当予想、公開価格ベースPER・PSRは確認できた資料の範囲でのみ表示します。", "",
               "## 05 財務・キャッシュフロー"]
     position = diligence.get("financial_position", {})
-    if position.get("total_assets_million_yen") is not None:
-        pcite = _fact_citation(position, manifests)
-        lines += [f"- 総資産: {_fmt(position.get('total_assets_million_yen'))}百万円 {pcite}",
-                  f"- 純資産: {_fmt(position.get('net_assets_million_yen'))}百万円 / 自己資本比率相当: {_fmt(position.get('equity_ratio_pct'),2)}% {pcite}",
-                  f"- 現金及び預金: {_fmt(position.get('cash_million_yen'))}百万円 / 有利子負債: {_fmt(position.get('interest_bearing_debt_million_yen'))}百万円 {pcite}",
-                  f"- 営業CF: {_fmt(position.get('operating_cf_million_yen'))}百万円 / 投資CF: {_fmt(position.get('investing_cf_million_yen'))}百万円 / 財務CF: {_fmt(position.get('financing_cf_million_yen'))}百万円 {pcite}",
-                  f"- 法人税等調整額: {_fmt(position.get('income_taxes_deferred_million_yen'))}百万円 {pcite}"]
+    financial_facts = diligence.get("financial_facts", [])
+    if financial_facts:
+        groups: dict[tuple[Any, ...], dict[str, Any]] = {}
+        for fact in financial_facts:
+            key = (fact.get("period_start"), fact.get("period_end"), fact.get("as_of_date"),
+                   fact.get("period_type"), fact.get("consolidation_scope"), fact.get("accounting_standard"),
+                   fact.get("statement_type"))
+            group = groups.setdefault(key, {"facts": {}, "sample": fact})
+            group["facts"][fact["metric_name"]] = fact
+        for key, group in sorted(groups.items(), key=lambda item: (item[0][2] or item[0][1] or "")):
+            start, end, as_of, period_type, scope, standard, statement_type = key
+            metrics = group["facts"]
+            label = f"{as_of}時点BS" if statement_type == "BS" else f"{start}〜{end} {'中間期' if period_type == 'interim' else '通期'}CF"
+            lines.append(f"### {label}（{scope}／{standard}）")
+            if statement_type == "BS":
+                total = metrics.get("total_assets_million_yen", {}).get("value_million_yen")
+                net = metrics.get("net_assets_million_yen", {}).get("value_million_yen")
+                cash = metrics.get("cash_million_yen", {}).get("value_million_yen")
+                current = metrics.get("current_debt_million_yen", {}).get("value_million_yen")
+                long_term = metrics.get("long_term_debt_million_yen", {}).get("value_million_yen")
+                debt = (current or 0) + (long_term or 0) if current is not None or long_term is not None else None
+                equity = net / total * 100 if total and net is not None else None
+                lines.append(f"- 総資産 {_fmt(total)}百万円 / 純資産 {_fmt(net)}百万円 / 自己資本比率相当 {_fmt(equity,2)}% {_fact_citation(group['sample'], manifests)}")
+                lines.append(f"- 現金及び預金 {_fmt(cash)}百万円 / 有利子負債 {_fmt(debt)}百万円 {_fact_citation(group['sample'], manifests)}")
+            else:
+                lines.append(
+                    f"- 営業CF {_fmt(metrics.get('operating_cf_million_yen', {}).get('value_million_yen'))}百万円 / "
+                    f"投資CF {_fmt(metrics.get('investing_cf_million_yen', {}).get('value_million_yen'))}百万円 / "
+                    f"財務CF {_fmt(metrics.get('financing_cf_million_yen', {}).get('value_million_yen'))}百万円 "
+                    f"{_fact_citation(group['sample'], manifests)}"
+                )
+                if "income_taxes_deferred_million_yen" in metrics:
+                    lines.append(f"- 法人税等調整額 {_fmt(metrics['income_taxes_deferred_million_yen']['value_million_yen'])}百万円 {_fact_citation(metrics['income_taxes_deferred_million_yen'], manifests)}")
     else:
         lines.append("- [解析未完了] BS・CFを公式資料から構造化できませんでした。")
     lines += ["", "## 06 公募・売出し・公開規模"]
@@ -575,7 +638,8 @@ def render_report(*, ticker: str, company_name: str, listing_date: str, market: 
             change = -row["sold_or_allotted_shares"]
             lines.append(f"|{row['name']}|{_fmt(row['before_shares'],0)}|{change:+,.0f}|{_fmt(row['after_shares'],0)}|{_fact_citation(row, manifests)}|")
     else:
-        lines.append("- [解析未完了] 主要株主表を構造化できませんでした。")
+        absence = absence_evidence.get("shareholders_sellers")
+        lines.append(f"- [{absence['reason_code']}] {absence['detail']} {_fact_citation(absence, manifests)}" if absence else "- [解析未完了] 主要株主表を構造化できませんでした。")
     lines += ["", "## 09 期間別ロックアップ"]
     lockups = diligence.get("lockups", [])
     if lockups:
@@ -584,7 +648,8 @@ def render_report(*, ticker: str, company_name: str, listing_date: str, market: 
             release = f"公開価格の{row['price_release_multiple']}倍" if row.get("price_release_multiple") else "価格解除なし"
             lines.append(f"|{row['days']}日|{row['until']}|{release}|{row['holders_text']}|{_fact_citation(row, manifests)}|")
     else:
-        lines.append("- [解析未完了] ロックアップ条項を構造化できませんでした。")
+        absence = absence_evidence.get("lockup")
+        lines.append(f"- [{absence['reason_code']}] {absence['detail']} {_fact_citation(absence, manifests)}" if absence else "- [解析未完了] ロックアップ条項を構造化できませんでした。")
     lines += ["", "## 10 OA・親引け"]
     if terms:
         lines += [f"- OA／グリーンシュー対象株数: {_fmt(terms.get('greenshoe_shares', offering.get('oa_shares')),0)}株",
@@ -612,19 +677,44 @@ def render_report(*, ticker: str, company_name: str, listing_date: str, market: 
             lines.append(f"|{row['series']}|{_fmt(row['issued_potential_shares'],0)}|{_fmt(row['forfeited_shares'],0)}|{_fmt(row['effective_potential_shares'],0)}|{_fmt(row['exercise_price_yen'],0)}円|{_fact_citation(row, manifests)}|")
         lines.append(f"- 合計有効潜在株式: {_fmt(diligence.get('effective_potential_shares'),0)}株")
     else:
-        lines.append("- [解析未完了] SO表を構造化できませんでした。")
+        absence = absence_evidence.get("stock_options")
+        lines.append(f"- [{absence['reason_code']}] {absence['detail']} {_fact_citation(absence, manifests)}" if absence else "- [解析未完了] SO表を構造化できませんでした。")
     lines += ["", "## 13 SOの行使・売却条件"]
     for row in options:
         lines.append(f"- {row['series']}: {row.get('exercise_period') or '行使期間解析未完了'} {_fact_citation(row, manifests)}")
     lines += ["", "## 14 成長性・重要KPI"]
     for row in diligence.get("kpis", []):
-        lines.append(f"- {row['name']}: {_fmt(row['value'],2)}{row['unit']}（{row['period']}） {_fact_citation(row, manifests)}")
-    if not diligence.get("kpis"):
+        period = row.get("as_of_date") or (
+            f"{row.get('period_start') or '開始日未記載'}〜{row.get('period_end') or '終了日未記載'}"
+        )
+        normalized = f"{_fmt(row.get('value_normalized'),2)}{row.get('unit_normalized')}"
+        original = f"{row.get('value_original')}{row.get('unit_original')}"
+        yoy = f" / 前年同期比 {row['yoy_pct']:+.1f}%" if row.get("yoy_pct") is not None else ""
+        lines.append(
+            f"- {row.get('metric_name_original')}（{row.get('metric_name_normalized')}）: "
+            f"原資料 {original} / 正規化 {normalized}（{period}、{row.get('cumulative_or_period')}）{yoy}。"
+            f"定義: {row.get('definition_note')} {_fact_citation(row, manifests)}"
+        )
+    if diligence.get("kpi_definitions"):
+        lines.append("### 資料が定義する管理指標（数値の記載がない項目を含む）")
+        for row in diligence["kpi_definitions"]:
+            lines.append(f"- {row['category']}: {row['metric_name_original']} — {row['definition_note']} {_fact_citation(row, manifests)}")
+    if not diligence.get("kpis") and not diligence.get("kpi_definitions"):
         lines.append("- [解析未完了] KPIの定義・単位・期間を抽出できませんでした。")
     lines += ["", "## 15 利益の質・キャッシュフロー"]
-    if position:
-        lines += [f"- 営業CF {_fmt(position.get('operating_cf_million_yen'))}百万円。純利益との整合は実績期間を揃えて評価します。 {_fact_citation(position, manifests)}",
-                  f"- 法人税等調整額 {_fmt(position.get('income_taxes_deferred_million_yen'))}百万円は純利益を押し上げる方向です。 {_fact_citation(position, manifests)}"]
+    cf_facts = [row for row in financial_facts if row.get("statement_type") == "CF"]
+    if cf_facts:
+        cf_groups: dict[tuple[str | None, str | None], dict[str, dict[str, Any]]] = {}
+        for row in cf_facts:
+            cf_groups.setdefault((row.get("period_start"), row.get("period_end")), {})[row["metric_name"]] = row
+        for (start, end), metrics in sorted(cf_groups.items()):
+            operating = metrics.get("operating_cf_million_yen")
+            if operating:
+                lines.append(f"- {start}〜{end}: 営業CF {_fmt(operating['value_million_yen'])}百万円。実績期間を揃えて評価します。 {_fact_citation(operating, manifests)}")
+            deferred = metrics.get("income_taxes_deferred_million_yen")
+            if deferred:
+                direction = "純利益を押し上げる" if deferred["value_million_yen"] < 0 else "純利益を押し下げる"
+                lines.append(f"- {start}〜{end}: 法人税等調整額 {_fmt(deferred['value_million_yen'])}百万円（{direction}方向）。 {_fact_citation(deferred, manifests)}")
     else:
         lines.append("- [解析未完了] 利益の質を判定するCF・税効果情報が不足しています。")
     lines += ["", "## 16 競争・主要顧客・海外"]
@@ -698,8 +788,10 @@ def generate_ai_explanation(facts: dict[str, Any]) -> tuple[str | None, str | No
     return text.strip(), None, model
 
 
-def validate_report(markdown: str, manifests: list[dict[str, Any]], calculations: list[dict[str, Any]], financials: list[dict[str, Any]]) -> dict[str, Any]:
+def validate_report(markdown: str, manifests: list[dict[str, Any]], calculations: list[dict[str, Any]],
+                    financials: list[dict[str, Any]], diligence: dict[str, Any] | None = None) -> dict[str, Any]:
     errors: list[str] = []
+    diligence = diligence or {}
     for title in SECTION_TITLES:
         if f"## {title}" not in markdown:
             errors.append(f"missing_section:{title}")
@@ -713,12 +805,56 @@ def validate_report(markdown: str, manifests: list[dict[str, Any]], calculations
         errors.append("invalid_period_kind")
     if any(calc.get("unrounded_value") is None or not calc.get("formula") for calc in calculations):
         errors.append("invalid_calculation")
+    required_financial = {
+        "period_start", "period_end", "as_of_date", "period_type", "fiscal_year", "quarter",
+        "consolidation_scope", "accounting_standard", "source_id", "source_page", "statement_type",
+    }
+    for index, fact in enumerate(diligence.get("financial_facts", [])):
+        missing_fields = [field for field in required_financial if fact.get(field) in (None, "")]
+        if missing_fields:
+            errors.append(f"financial_fact_missing_metadata:{index}:{','.join(sorted(missing_fields))}")
+        if fact.get("statement_type") == "BS" and fact.get("as_of_date") != fact.get("period_end"):
+            errors.append(f"balance_sheet_period_mismatch:{index}")
+        if fact.get("statement_type") == "CF" and fact.get("period_end") != fact.get("as_of_date"):
+            errors.append(f"cash_flow_period_mismatch:{index}")
+    required_kpi = {
+        "metric_name_original", "metric_name_normalized", "value_original", "unit_original",
+        "value_normalized", "unit_normalized", "as_of_date", "period_start", "period_end",
+        "cumulative_or_period", "definition_note", "source_id", "source_page",
+    }
+    unit_multipliers = {"万人": ("人", 10_000), "万台": ("台", 10_000), "千円": ("円", 1_000),
+                        "百万円": ("円", 1_000_000), "億円": ("円", 100_000_000)}
+    kpi_identity: dict[tuple[Any, ...], tuple[str, str]] = {}
+    for index, fact in enumerate(diligence.get("kpis", [])):
+        absent_keys = [field for field in required_kpi if field not in fact]
+        if absent_keys:
+            errors.append(f"kpi_missing_metadata:{index}:{','.join(sorted(absent_keys))}")
+        if not fact.get("as_of_date") and not (fact.get("period_start") and fact.get("period_end")):
+            errors.append(f"kpi_period_missing:{index}")
+        multiplier = unit_multipliers.get(fact.get("unit_original"))
+        original_number = parse_number(fact.get("value_original"))
+        if multiplier and original_number is not None:
+            expected_unit, factor = multiplier
+            if fact.get("unit_normalized") != expected_unit or abs(float(fact.get("value_normalized")) - original_number * factor) > 1e-6:
+                errors.append(f"kpi_unit_multiplier_mismatch:{index}")
+        key = (fact.get("metric_name_normalized"), fact.get("as_of_date"), fact.get("period_start"), fact.get("period_end"))
+        identity = (str(fact.get("metric_name_original")), str(fact.get("unit_original")))
+        if key in kpi_identity and kpi_identity[key] != identity:
+            errors.append(f"kpi_definition_merged:{index}")
+        kpi_identity[key] = identity
+    for index, fact in enumerate(diligence.get("kpi_definitions", [])):
+        if not all(fact.get(field) not in (None, "") for field in (
+                "metric_name_original", "metric_name_normalized", "category",
+                "definition_note", "source_id", "source_page")):
+            errors.append(f"kpi_definition_missing_metadata:{index}")
     return {"passed": not errors, "errors": errors, "checks": {
         "fixed_20_sections": len([title for title in SECTION_TITLES if f"## {title}" in markdown]),
         "all_citations_resolve": not any(error.startswith("unresolved_source") for error in errors),
         "no_embedded_images": "embedded_image_forbidden" not in errors,
         "period_kinds_valid": "invalid_period_kind" not in errors,
         "calculation_formulas_present": "invalid_calculation" not in errors,
+        "financial_period_metadata_valid": not any(error.startswith(("financial_fact_", "balance_sheet_", "cash_flow_")) for error in errors),
+        "kpi_definition_and_units_valid": not any(error.startswith("kpi_") for error in errors),
     }}
 
 
@@ -780,7 +916,7 @@ def build_report_payload(*, event_id: str, ticker: str, company_name: str, listi
                              financials=financials, offering=offering, calculations=calculations,
                              ai_text=ai_text, missing=missing, generated_at=generated_at,
                              diligence=diligence, completeness_gate=completeness)
-    validation = validate_report(markdown, manifests, calculations, financials)
+    validation = validate_report(markdown, manifests, calculations, financials, diligence)
     validation["integrity_gate"] = {"passed": validation["passed"], "errors": list(validation["errors"])}
     validation["completeness_gate"] = completeness
     if not validation["passed"] or not completeness["passed"]:

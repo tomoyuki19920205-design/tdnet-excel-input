@@ -66,6 +66,11 @@ def test_launcher_child_metadata_without_jobs(tmp_path, monkeypatch):
         def __exit__(self, *args): pass
         def wait(self): return 17
     monkeypatch.setattr(launch.subprocess, 'Popen', Child)
+    # Keep the version probe independent from the child-process assertion.
+    # subprocess.run delegates to Popen, so without this stub the probe is
+    # incorrectly counted as a launched runtime child by the test double.
+    monkeypatch.setattr(launch.subprocess, 'run', lambda *args, **kwargs: type(
+        'Result', (), {'returncode': 1, 'stdout': ''})())
     # main modifies only this process environment; monkeypatch restores it.
     for name in ('TDNET_RUNTIME_STATE_ROOT','PYTHONUTF8','PYTHONIOENCODING'):
         monkeypatch.setenv(name, os.environ.get(name, ''))
