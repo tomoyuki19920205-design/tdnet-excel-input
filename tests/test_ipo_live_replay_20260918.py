@@ -127,6 +127,7 @@ def test_scheduler_live_entrypoint_replay_creates_five_cards_and_is_idempotent(t
         "sentinel-non-ipo": {"ticker": "9999", "value": 1.0},
     }
     stats = {"new_cards": 0, "new_rows": 0, "write_calls": 0}
+    queued_reports: dict[str, int] = {}
 
     general_event = EventRecord(
         source_doc_id="20260917538161",
@@ -181,6 +182,16 @@ def test_scheduler_live_entrypoint_replay_creates_five_cards_and_is_idempotent(t
         assert path.exists()
         return str(path)
 
+    def fake_ensure_pending(item, event_id):
+        ticker = item.ticker
+        queued_reports[ticker] = queued_reports.get(ticker, 0) + 1
+        return {
+            "action": "inserted" if queued_reports[ticker] == 1 else "existing",
+            "id": f"report-{ticker}",
+            "status": "pending",
+            "event_id": event_id,
+        }
+
     event_result = SimpleNamespace(
         processed=len(items), detected=0, saved=0, notified=0, errors=[],
         skipped_all_doc_ids=[item.disclosure_id for item in items if item.disclosure_type != IPO_LISTING_FINANCIALS],
@@ -198,6 +209,7 @@ def test_scheduler_live_entrypoint_replay_creates_five_cards_and_is_idempotent(t
         patch("tools.tdnet_ingest.download_document", side_effect=fake_download),
         patch("tools.tdnet_ingest.save_ipo_notification", side_effect=fake_notification),
         patch("tools.tdnet_ingest.write_ipo_financials", side_effect=fake_write),
+        patch("tools.tdnet_ingest.ensure_pending_report", side_effect=fake_ensure_pending),
         patch("tools.tdnet_ingest._run_jquants_shadow"),
         patch("src.events.event_pipeline.process_documents", return_value=event_result),
         patch("lib.pipeline.financial_reconciliation_runtime.reconcile_ingest_run"),
@@ -220,6 +232,7 @@ def test_scheduler_live_entrypoint_replay_creates_five_cards_and_is_idempotent(t
     assert all(row["status"] == "skipped" for row in second["results"])
     assert cards[old_key] is old_ipo
     assert canonical["sentinel-non-ipo"] == {"ticker": "9999", "value": 1.0}
+    assert queued_reports == {ticker: 2 for ticker in ("620A", "622A", "623A", "624A", "627A")}
 
     new_titles = {
         event.title for key, event in cards.items()

@@ -11,7 +11,7 @@ def job_steps(job, code_root):
     if job == 'realtime':
         return [('tools/scheduler_realtime.py',), ('tools/retry_material_urls.py','--runner','realtime')]
     if job == 'nightly':
-        return [('tools/scheduler_nightly.py',), ('tools/retry_material_urls.py','--runner','nightly'), ('tools/backfill_earnings_tdnet_events.py','--since','60')]
+        return [('tools/scheduler_nightly.py',), ('tools/retry_material_urls.py','--runner','nightly'), ('tools/backfill_earnings_tdnet_events.py','--since','60'), ('tools/backfill_ipo_analysis_reports.py','--date','today','--retry-partial','--apply','--best-effort')]
     if job == 'reconcile':
         return [('tools/scheduler_reconcile.py',)]
     worker={'news':'company_news_inbox_worker.py','sector':'sector_weekly_inbox_worker.py'}[job]
@@ -48,6 +48,14 @@ def main():
     os.environ[STATE_ROOT_ENV] = args.state_root
     os.environ["PYTHONUTF8"] = "1"
     os.environ["PYTHONIOENCODING"] = "utf-8"
+    try:
+        git_sha = subprocess.run(
+            ["git", "-C", str(args.code_root), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10, check=True,
+        ).stdout.strip()
+    except Exception:
+        git_sha = "unknown"
+    print(f"[RUNTIME_VERSION] code_root={args.code_root} git_sha={git_sha}", flush=True)
     if args.job == 'realtime' and not args.steps_only:
         from tools.run_tdnet_realtime_background import run_realtime, _append_event
         from lib.runtime_paths import runtime_path

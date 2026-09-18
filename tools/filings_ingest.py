@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from datetime import date
 from pathlib import Path
 
 # ── path setup ──
@@ -82,6 +83,19 @@ def run(
     # ── Step: 成功した disclosure_id を job_queue に enqueue ──
     if not dry_run:
         _enqueue_disclosure_ids(result)
+        try:
+            from src.ipo_analysis_report import process_pending_reports
+            ipo_reports = process_pending_reports(
+                listing_date=date.today().isoformat(), apply=True, pending_only=True,
+            )
+            result.setdefault("summary", {})["ipo_analysis_reports"] = ipo_reports
+            logger.info(
+                "[IPO_ANALYSIS] processed=%s created=%s failed=%s",
+                ipo_reports.get("processed", 0), ipo_reports.get("created", 0), ipo_reports.get("failed", 0),
+            )
+        except Exception as exc:
+            # Report work is explicitly best-effort and must never fail cards or PL.
+            logger.warning("[IPO_ANALYSIS] post-ingest generation failed independently: %s", exc, exc_info=True)
 
     return result
 

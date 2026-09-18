@@ -23,6 +23,7 @@ import os
 import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from typing import Any
 
 # プロジェクトルートを sys.path に追加
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -46,6 +47,7 @@ from src.ipo_listing_financials import (
     save_ipo_notification,
     write_ipo_financials,
 )
+from src.ipo_analysis_report import ensure_pending_report
 from src.utils import (
     setup_logger,
     convert_to_excel_unit,
@@ -191,6 +193,7 @@ def _process_single(
     # Parser failure must not hide a valid listing notification, and replaying
     # an already-processed document must be able to repair a missing card.
     if is_ipo_financials:
+        card_result: dict[str, Any] = {}
         try:
             card_result = save_ipo_notification(item, dry_run=dry_run)
             logger.info(
@@ -204,6 +207,18 @@ def _process_single(
                 "[IPO_NOTIFICATION] ticker=%s save failed (PL continues): %s",
                 code, exc, exc_info=True,
             )
+        if not dry_run:
+            try:
+                report_result = ensure_pending_report(item, card_result.get("id"))
+                logger.info(
+                    "[IPO_ANALYSIS_QUEUE] ticker=%s action=%s report_id=%s status=%s",
+                    code, report_result.get("action"), report_result.get("id"), report_result.get("status", "pending"),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[IPO_ANALYSIS_QUEUE] ticker=%s enqueue failed independently: %s",
+                    code, exc, exc_info=True,
+                )
 
     # 冪等性チェック
     if state_db.is_processed(disclosure_id):
