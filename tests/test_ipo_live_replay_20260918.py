@@ -105,7 +105,12 @@ def test_620a_cover_without_actual_label_keeps_stated_fy_interim_and_forecast():
     assert interim.period_end == "2026-06-30"
     assert interim.metrics["sales"] == 2929.0
     assert interim.metrics["income_taxes"] == 304.0
-    assert periods[("2026-12-31", "FY", "forecast")].metrics["sales"] == 6337.0
+    assert interim.metrics["eps"] == 151.34
+    forecast = periods[("2026-12-31", "FY", "forecast")]
+    assert forecast.metrics["sales"] == 6337.0
+    assert forecast.metrics["cost_of_sales"] == 1849.0
+    assert forecast.metrics["gross_profit"] == 4487.0
+    assert forecast.metrics["sga"] == 2274.0
 
 
 def test_scheduler_live_entrypoint_replay_creates_five_cards_and_is_idempotent(tmp_path):

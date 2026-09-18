@@ -417,10 +417,6 @@ def _extract_detailed_annual_forecast(
         ("販売費及び一般管理費", "sga"),
         ("売上総利益", "gross_profit"),
         ("売上原価", "cost_of_sales"),
-        ("営業利益", "operating_profit"),
-        ("経常利益", "ordinary_profit"),
-        ("当期純利益", "net_income"),
-        ("売上高", "sales"),
     )
     metrics: dict[str, float] = {}
     source_page = 0
@@ -428,14 +424,31 @@ def _extract_detailed_annual_forecast(
         text = _compact(page.extract_text() or "")
         if "予想" not in text and "予測" not in text and "見込" not in text:
             continue
+        if "損益計算書" in text:
+            # A statement page can contain a forecast footnote while all table
+            # values are actuals; never mine forecast detail from that page.
+            continue
         for label, metric in labels:
-            match = re.search(
+            oku_match = re.search(
                 rf"{re.escape(label)}[^。]{{0,100}}?(\d+)億(\d+)百万円",
                 text,
             )
-            if not match:
+            million_match = re.search(
+                rf"{re.escape(label)}[^。]{{0,100}}?([0-9][0-9,]*)百万円",
+                text,
+            )
+            if oku_match:
+                metrics.setdefault(
+                    metric,
+                    float(int(oku_match.group(1)) * 100 + int(oku_match.group(2))),
+                )
+            elif million_match:
+                metrics.setdefault(
+                    metric,
+                    float(million_match.group(1).replace(",", "")),
+                )
+            else:
                 continue
-            metrics[metric] = float(int(match.group(1)) * 100 + int(match.group(2)))
             source_page = source_page or page_index + 1
     detail_metrics = {"cost_of_sales", "gross_profit", "sga"}
     if not detail_metrics.issubset(metrics):
@@ -448,6 +461,42 @@ def _extract_detailed_annual_forecast(
         source_unit="百万円",
         source_page=source_page,
     )
+
+
+def _extract_stated_cumulative_eps(
+    pdf: Any,
+    *,
+    expected_period: str,
+    expected_quarter: str,
+) -> tuple[float, int] | None:
+    """Read an explicitly stated cumulative EPS from an attached summary table."""
+    year, month = expected_period[:4], str(int(expected_period[5:7]))
+    period_label = f"{year}年{month}月期"
+    quarter_marker = "中間" if expected_quarter == "2Q" else f"第{expected_quarter[:1]}四半期"
+    for page_index, page in enumerate(pdf.pages):
+        for table in page.extract_tables() or []:
+            if len(table) < 2 or not table[0]:
+                continue
+            headers = [_compact(cell).replace("１", "1") for cell in table[0]]
+            eps_columns = [
+                index for index, header in enumerate(headers)
+                if "1株当たり" in header and "純利益" in header and "潜在" not in header
+            ]
+            if not eps_columns:
+                continue
+            for row in table[1:]:
+                if not row:
+                    continue
+                label = _compact(row[0])
+                if period_label not in label or quarter_marker not in label:
+                    continue
+                for column in eps_columns:
+                    if column >= len(row):
+                        continue
+                    value = _number(row[column])
+                    if value is not None:
+                        return value, page_index + 1
+    return None
 
 
 def _extract_identity(pdf: Any) -> tuple[str, str]:
@@ -496,6 +545,24 @@ def extract_ipo_listing_financials(pdf_path: str | Path) -> IpoListingExtraction
             expected_period=actual_cumulative.period if actual_cumulative else None,
             expected_quarter=actual_cumulative.quarter if actual_cumulative else None,
         )
+        if detail is not None and "eps" not in detail.metrics:
+            stated_eps = _extract_stated_cumulative_eps(
+                pdf,
+                expected_period=detail.period,
+                expected_quarter=detail.quarter,
+            )
+            if stated_eps is not None:
+                eps, _eps_page = stated_eps
+                detail = IpoFinancialPeriod(
+                    period=detail.period,
+                    quarter=detail.quarter,
+                    kind=detail.kind,
+                    metrics={**detail.metrics, "eps": eps},
+                    period_start=detail.period_start,
+                    period_end=detail.period_end,
+                    source_unit=detail.source_unit,
+                    source_page=detail.source_page,
+                )
         annual_actual = next(
             (period for period in periods if period.kind == "actual" and period.quarter == "FY"),
             None,
