@@ -70,6 +70,11 @@ def test_signed_number_notation(value, expected):
     assert report.parse_number(value) == expected
 
 
+@pytest.mark.parametrize("value,expected", [(570, "570"), (378000, "378,000"), (1833100, "1,833,100")])
+def test_integer_formatting_preserves_significant_trailing_zeroes(value, expected):
+    assert report._fmt(value, 0) == expected
+
+
 @pytest.mark.parametrize("value,unit,expected", [(2, "億円", 200_000_000), (2, "百万円", 2_000_000), (2, "千円", 2_000), (2, "千株", 2_000)])
 def test_units_are_normalized(value, unit, expected):
     assert report.to_base_units(value, unit) == expected

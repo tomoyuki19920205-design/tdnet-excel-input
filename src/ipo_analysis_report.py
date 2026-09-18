@@ -292,7 +292,8 @@ def _fmt(value: Any, digits: int = 3) -> str:
     if value is None:
         return "未確認"
     number = float(value)
-    return f"{number:,.{digits}f}".rstrip("0").rstrip(".")
+    formatted = f"{number:,.{digits}f}"
+    return formatted if digits == 0 else formatted.rstrip("0").rstrip(".")
 
 
 def _source_link(source: dict[str, Any], pages: str = "") -> str:
