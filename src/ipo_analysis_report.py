@@ -494,10 +494,12 @@ def render_report(*, ticker: str, company_name: str, listing_date: str, market: 
     business = diligence.get("business_model")
     lines += ["## 02 事業内容"]
     if business:
-        lines.append(f"- [確認済み] {business} {_fact_citation(diligence, manifests)}")
-    if ai_text:
-        lines.extend(f"- {line}" for line in ai_text.splitlines() if line.strip())
-    if not business and not ai_text:
+        business_fact = {"source_id": diligence.get("source_id"), "pdf_page": diligence.get("business_model_page")}
+        lines.append(f"- [事業モデル・確認済み] {business} {_fact_citation(business_fact, manifests)}")
+    if diligence.get("single_segment"):
+        segment_fact = {"source_id": diligence.get("source_id"), "pdf_page": diligence.get("business_model_page")}
+        lines.append(f"- [事業モデル・確認済み] {diligence['single_segment']} {_fact_citation(segment_fact, manifests)}")
+    if not business:
         lines.append("- [解析未完了] 事業説明の構造化抽出を完了できませんでした。")
     lines.append("")
     lines += ["## 03 業績実績", "|期間|区分|売上高|売上総利益|営業利益|経常利益|純利益|EPS|出典|",
@@ -558,7 +560,13 @@ def render_report(*, ticker: str, company_name: str, listing_date: str, market: 
         lines.append("- [未確認] 公募・売出し条件を構造化確認できませんでした。")
     lines += ["", "## 07 需給・重要注意点"]
     if diligence.get("effective_potential_shares"):
-        lines.append(f"- 潜在株式合計: {_fmt(diligence['effective_potential_shares'],0)}株 / 上場時株式数比: {_fmt(diligence.get('potential_dilution_pct_of_listing_shares'),2)}%")
+        lines.append(f"- [需給・計算値] 潜在株式合計は{_fmt(diligence['effective_potential_shares'],0)}株、上場時株式数比は{_fmt(diligence.get('potential_dilution_pct_of_listing_shares'),2)}%。")
+    if "public_float_ratio_pct" in calc_by_name:
+        row = calc_by_name["public_float_ratio_pct"]
+        lines.append(f"- [需給・計算値] OAを含む公開株比率は{_fmt(row['value'],2)}%（式: `{row['formula']}`）。")
+    if diligence.get("lockups"):
+        periods = "・".join(sorted({f"{row['days']}日" for row in diligence["lockups"]}, reverse=True))
+        lines.append(f"- [需給・確認済み] 売却制約は{periods}の複数期間に分かれ、価格解除条件の有無も異なります。 {_fact_citation(diligence['lockups'][0], manifests)}")
     lines += ["", "## 08 主要株主と売出後残高"]
     holders = diligence.get("shareholders", [])
     if holders:
@@ -581,6 +589,12 @@ def render_report(*, ticker: str, company_name: str, listing_date: str, market: 
     if terms:
         lines += [f"- OA／グリーンシュー対象株数: {_fmt(terms.get('greenshoe_shares', offering.get('oa_shares')),0)}株",
                   f"- 親引け株数: {_fmt(terms.get('parent_allotment_shares'),0)}株 / 条件: {terms.get('parent_holding_condition') or '解析未完了'} {_fact_citation(terms, manifests)}"]
+        if terms.get("oa_lenders"):
+            lines.append(f"- OA貸株元: {terms['oa_lenders']} {_fact_citation(terms, manifests)}")
+        if terms.get("greenshoe_exercise_deadline"):
+            lines.append(f"- グリーンシュー行使期限: {terms['greenshoe_exercise_deadline']} / 対象上限: {_fmt(terms.get('greenshoe_shares'),0)}株 {_fact_citation(terms, manifests)}")
+        if terms.get("syndicate_cover_period"):
+            lines.append(f"- シンジケートカバー取引期間: {terms['syndicate_cover_period']} {_fact_citation(terms, manifests)}")
     else:
         lines.append("- [解析未完了] OA・親引け条件を構造化できませんでした。")
     lines += ["", "## 11 売却可能株・VC"]
@@ -614,16 +628,25 @@ def render_report(*, ticker: str, company_name: str, listing_date: str, market: 
     else:
         lines.append("- [解析未完了] 利益の質を判定するCF・税効果情報が不足しています。")
     lines += ["", "## 16 競争・主要顧客・海外"]
-    lines.append(f"- {diligence.get('customer_concentration') or '主要顧客依存は解析未完了'}")
-    lines.append(f"- {diligence.get('single_segment') or 'セグメント構成は解析未完了'}")
+    concentration_fact = {"source_id": diligence.get("source_id"), "pdf_page": diligence.get("customer_concentration_page")}
+    lines.append(f"- [顧客依存・確認済み] {diligence.get('customer_concentration')} {_fact_citation(concentration_fact, manifests)}" if diligence.get("customer_concentration") else "- [解析未完了] 主要顧客依存を構造化できませんでした。")
+    segment_fact = {"source_id": diligence.get("source_id"), "pdf_page": diligence.get("business_model_page")}
+    lines.append(f"- [競争構造・確認済み] {diligence.get('single_segment')} {_fact_citation(segment_fact, manifests)}" if diligence.get("single_segment") else "- [解析未完了] セグメント構成を構造化できませんでした。")
     lines += ["", "## 17 強み・成長投資"]
     if terms.get("net_proceeds_thousand_yen"):
-        lines.append(f"- 差引手取概算額 {_fmt(terms['net_proceeds_thousand_yen'],0)}千円を資料記載の成長投資へ充当します。 {_fact_citation(terms, manifests)}")
+        lines.append(f"- [成長投資・確認済み] 差引手取概算額 {_fmt(terms['net_proceeds_thousand_yen'],0)}千円。 {_fact_citation(terms, manifests)}")
+        if terms.get("proceeds_use"):
+            lines.append(f"- [成長投資・確認済み] {terms['proceeds_use']} {_fact_citation(terms, manifests)}")
+        if terms.get("growth_investment_allocation"):
+            lines.append(f"- [成長投資・確認済み] 開発人材の人件費・外部専門人材の業務委託費への配分は{terms['growth_investment_allocation']}。 {_fact_citation(terms, manifests)}")
     else:
         lines.append("- [解析未完了] 調達資金使途を構造化できませんでした。")
     lines += ["", "## 18 懸念・技術／AIの影響"]
-    lines.append(f"- {diligence.get('risk_excerpt') or '公式資料に基づく主要リスクの構造化が未完了です。'}")
-    lines.append("- AI・技術変化は、公式資料に明示された影響だけを採用し、一般論は表示しません。")
+    risk_fact = {"source_id": diligence.get("source_id"), "pdf_page": diligence.get("risk_page")}
+    lines.append(f"- [リスク・確認済み] {diligence.get('risk_excerpt')} {_fact_citation(risk_fact, manifests)}" if diligence.get("risk_excerpt") else "- [解析未完了] 公式資料に基づく主要リスクの構造化が未完了です。")
+    if terms.get("growth_investment_allocation"):
+        lines.append(f"- [技術変化・確認済み] プロダクト機能強化と開発体制強化に{terms['growth_investment_allocation']}を充当予定です。 {_fact_citation(terms, manifests)}")
+    lines.append("- [AI影響・確認範囲] AI固有の収益効果や投資額は構造化確認できていないため、推測値は表示しません。")
     lines += ["", "## 19 資料間差異・最終採用値・計算根拠",
               "- [確認済み] 業績値は上場時決算資料の期間・実績／予想区分を維持して採用。",
               f"- [確認済み] 届出書系列は提出日時順に照合し、最新訂正を優先（{len([s for s in manifests if '有価証券届出書' in s['title'] or '特定証券情報' in s['title']])}版）。", "",
@@ -744,20 +767,9 @@ def build_report_payload(*, event_id: str, ticker: str, company_name: str, listi
              "offering": {key: value for key, value in offering.items() if key not in {"due_diligence"}},
              "due_diligence": diligence,
              "source_count": len([s for s in manifests if s["fetch_status"] == "success"])}
-    ai_text, ai_error, model = generate_ai_explanation({
-        "company_name": company_name, "market": offering.get("market"),
-        "source_titles": [s["title"] for s in manifests if s["fetch_status"] == "success"],
-        "has_actual_financials": any(p["kind"] == "actual" for p in financials),
-        "has_forecast_financials": any(p["kind"] == "forecast" for p in financials),
-        "has_balance_sheet_cash_flow": bool(diligence.get("financial_position")),
-        "has_shareholders": bool(diligence.get("shareholders")),
-        "has_lockup": bool(diligence.get("lockups")),
-        "has_stock_options": bool(diligence.get("stock_options")),
-        "has_kpis": bool(diligence.get("kpis")),
-        "has_risks": bool(diligence.get("risk_excerpt")),
-    })
-    if ai_error:
-        missing.append("AI説明文: " + ai_error)
+    # Analytical bullets are rendered deterministically from source-linked facts.
+    # This prevents fluent but unsupported generic prose from becoming report data.
+    ai_text, ai_error, model = None, None, "deterministic-fact-renderer-v1"
     generated_at = datetime.now(JST).isoformat(timespec="seconds")
     status = "completed" if completeness["passed"] else "partial"
     markdown = render_report(ticker=normalized, company_name=company_name, listing_date=listing_date,

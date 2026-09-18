@@ -93,7 +93,33 @@ def test_627_kpi_units_and_periods_are_preserved():
     facts = diligence.extract_kpis_and_narratives(fixture_documents(), "P01", b"")
     assert [(row["name"], row["value"], row["unit"]) for row in facts["kpis"]] == [
         ("cumulative_users", 500.0, "万人"), ("available_parking_spaces", 5.5, "万台")]
-    assert facts["customer_concentration"] == "10%以上の販売先なし"
+    assert facts["customer_concentration"] == "総販売実績の10%以上を占める相手先なし"
+
+
+def test_final_correction_offering_table_oa_lenders_and_greenshoe_terms():
+    documents = html_documents("""
+    <html><body><table>
+      <tr><th>発行価格 (円)</th><th>引受価額 (円)</th><th>払込金額 (円)</th><th>資本 組入額 (円)</th></tr>
+      <tr><td>570</td><td>524.40</td><td>459</td><td>262.20</td></tr>
+    </table><p>差引手取概算額179,713千円については、駐車場マーケットプレイスの競争力強化及び顧客基盤の拡大を目的として充当する予定であります。プロダクト開発費用として179,713千円（2026年12月期：40,000千円、2027年12月期：70,000千円、2028年12月期：69,713千円）を充当する予定であります。</p>
+    <p>グリーンシューオプションとシンジケートカバー取引について オーバーアロットメントによる売出しのために、主幹事会社が当社株主である株主A及び株主B(以下「貸株人」という。)より借入れる株式であります。主幹事会社は、331,600株について貸株人より追加的に当社株式を取得する権利(以下「グリーンシューオプション」という。)を、2026年10月16日を行使期限として貸株人より付与されております。主幹事会社は、2026年９月18日から2026年10月16日までの間、貸株人から借入れる株式の返却を目的として、シンジケートカバー取引を行う場合があります。</p>
+    </body></html>""")
+    terms = diligence.extract_offering_terms(documents, "P03", b"")
+    assert terms["capital_per_share"] == pytest.approx(262.20)
+    assert terms["oa_lenders"] == "株主A及び株主B"
+    assert terms["greenshoe_shares"] == 331_600
+    assert terms["greenshoe_exercise_deadline"] == "2026年10月16日"
+    assert terms["syndicate_cover_period"] == "2026年９月18日から2026年10月16日までの間"
+    assert terms["proceeds_use"].startswith("駐車場マーケットプレイス")
+
+
+def test_deterministic_report_rejects_generic_ai_prose(monkeypatch):
+    monkeypatch.setattr(report, "generate_ai_explanation", lambda facts: ("一般論だけの分析", None, "test"))
+    manifests = [{"source_id": "P01", "title": "上場に伴う決算情報等のお知らせ", "url": "https://example.test/p.pdf",
+                  "fetch_status": "success", "sha256": "a" * 64, "used_pages": [], "page_count": 1}]
+    payload = report.build_report_payload(event_id="e", ticker="627A", company_name="アキッパ", listing_date="2026-09-18",
+                                          manifests=manifests, offering={}, financial_rows=[])
+    assert "一般論だけの分析" not in payload["report_markdown"]
 
 
 def test_reason_code_distinguishes_parser_failure_from_absence():

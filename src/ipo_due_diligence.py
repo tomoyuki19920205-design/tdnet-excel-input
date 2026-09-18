@@ -186,6 +186,8 @@ def locate_pdf_page_by_values(pdf_bytes: bytes, values: Iterable[float | int], *
 
 def locate_pdf_page_by_text(pdf_bytes: bytes, needles: Iterable[str]) -> int | None:
     """Locate a section heading in the official PDF for extraction-failure diagnostics."""
+    if not pdf_bytes:
+        return None
     import pdfplumber
     wanted = [re.sub(r"\s+", "", value) for value in needles if value]
     with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
@@ -472,18 +474,38 @@ def extract_kpis_and_narratives(documents: list[tuple[str, BeautifulSoup]], sour
     page = locate_pdf_page_by_values(pdf_bytes, values + [2025], minimum=2) if kpis else None
     for row in kpis:
         row["pdf_page"] = page
+    customer_concentration = None
+    if re.search(r"総販売実績に対する割合(?:が|は)10[％%]以上[^。]{0,40}(?:相手先がいない|相手先はありません)", text):
+        customer_concentration = "総販売実績の10%以上を占める相手先なし"
+    business_candidates = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=。)", text)
+        if 40 < len(sentence) < 500
+        and any(cue in sentence for cue in ("当社は", "当社グループは", "事業", "サービス"))
+        and any(cue in sentence for cue in ("提供", "運営", "販売", "開発", "プラットフォーム", "マーケットプレイス"))
+    ]
+    business_model = max(
+        business_candidates,
+        key=lambda sentence: sum(cue in sentence for cue in ("提供", "運営", "サービス", "プラットフォーム", "マーケットプレイス")),
+        default=None,
+    )
+    risk_candidates = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=。)", text)
+        if 40 < len(sentence) < 500
+        and any(cue in sentence for cue in ("競合", "法的規制", "システム障害", "情報漏洩", "事業等のリスク"))
+    ]
     return {
         "kpis": kpis,
-        "customer_concentration": "10%以上の販売先なし" if (
-            "総販売実績に対する割合が10％以上の相手先はありません" in text
-            or "総販売実績に対する割合が10％以上を占める相手先がない" in text
-        ) else None,
+        "customer_concentration": customer_concentration,
+        "customer_concentration_page": locate_pdf_page_by_text(
+            pdf_bytes, ("総販売実績に対する割合", "10％以上の相手先")
+        ) if customer_concentration else None,
         "single_segment": "アキッパ事業の単一セグメント" if "単一セグメント" in text else None,
-        "business_model": next((sentence.strip() for sentence in re.split(r"(?<=。)", text)
-                                if 40 < len(sentence) < 500 and "事業" in sentence
-                                and any(cue in sentence for cue in ("当社は", "当社グループは", "提供", "販売"))), None),
-        "risk_excerpt": next((sentence for sentence in re.split(r"(?<=。)", text)
-                              if ("リスク" in sentence or "競合" in sentence) and 40 < len(sentence) < 500), None),
+        "business_model": business_model,
+        "business_model_page": locate_pdf_page_by_text(pdf_bytes, ("事業の内容", "プラットフォーム", "マーケットプレイス")) if business_model else None,
+        "risk_excerpt": risk_candidates[0] if risk_candidates else None,
+        "risk_page": locate_pdf_page_by_text(pdf_bytes, ("事業等のリスク", "競合", "法的規制")) if risk_candidates else None,
         "source_id": source_id,
     }
 
@@ -503,13 +525,70 @@ def extract_offering_terms(documents: list[tuple[str, BeautifulSoup]], source_id
         match = re.search(pattern, text)
         if match:
             result[field] = float(match.group(1).replace(",", ""))
+    # Final corrected filings commonly carry the four per-share amounts only in
+    # one horizontal table.  Parse by header position rather than issuer name.
+    for _, soup in documents:
+        for table in soup.find_all("table"):
+            rows = [
+                [cell.get_text(" ", strip=True) for cell in row.find_all(["th", "td"])]
+                for row in table.find_all("tr")
+            ]
+            if len(rows) < 2:
+                continue
+            header = [re.sub(r"\s+", "", value) for value in rows[0]]
+            if not all(any(token in value for value in header) for token in ("発行価格", "引受価額", "払込金額", "資本組入額")):
+                continue
+            values = rows[1]
+            for field, token in (
+                ("offering_price", "発行価格"),
+                ("underwriting_price", "引受価額"),
+                ("company_law_payment_price", "払込金額"),
+                ("capital_per_share", "資本組入額"),
+            ):
+                index = next((i for i, value in enumerate(header) if token in value), None)
+                if index is not None and index < len(values):
+                    number = _number(values[index])
+                    if number is not None:
+                        result[field] = number
+            break
     parent = re.search(r"親引けしようとする株式の数[^\d]{0,80}([\d,]+)株", text)
     if parent:
         result["parent_allotment_shares"] = int(parent.group(1).replace(",", ""))
     result["parent_holding_condition"] = "上場後180日継続保有" if "親引け" in text and "180日目" in text else None
-    oa = re.search(r"グリーンシューオプション[^。]{0,400}?([\d,]+)株", text)
+    oa = re.search(r"主幹事会社は、?([\d,]+)株について貸株人より追加的に[^。]{0,200}?グリーンシューオプション", text)
+    if not oa:
+        oa = re.search(r"グリーンシューオプション[^。]{0,400}?([\d,]+)株", text)
     if oa:
         result["greenshoe_shares"] = int(oa.group(1).replace(",", ""))
+    lenders = re.search(
+        r"オーバーアロットメントによる売出しのために、?主幹事会社が当社株主である(.{1,300}?)(?:\(以下|（以下)[「『]貸株人[」』]",
+        text,
+    )
+    if lenders:
+        result["oa_lenders"] = re.sub(r"\s+", " ", lenders.group(1)).strip(" 、")
+    deadline = re.search(r"([0-9０-９]{4}年[0-9０-９]{1,2}月[0-9０-９]{1,2}日)を行使期限として貸株人より付与", text)
+    if deadline:
+        result["greenshoe_exercise_deadline"] = deadline.group(1)
+    cover = re.search(
+        r"主幹事会社は、?([0-9０-９]{4}年[0-9０-９]{1,2}月[0-9０-９]{1,2}日から[0-9０-９]{4}年[0-9０-９]{1,2}月[0-9０-９]{1,2}日までの間)[^。]{0,160}?シンジケートカバー取引",
+        text,
+    )
+    if cover:
+        result["syndicate_cover_period"] = cover.group(1)
+    use = re.search(
+        r"差引手取概算額[\d,]+千円については、(.{20,500}?)(?=プロダクト開発費用|。)",
+        text,
+    )
+    if use:
+        result["proceeds_use"] = use.group(1).strip()
+    allocation = re.search(
+        r"(?:人件費|業務委託費用)として([\d,]+)千円（([^）]+)）を充当する予定",
+        text,
+    )
+    if allocation:
+        result["growth_investment_allocation"] = (
+            f"{int(allocation.group(1).replace(',', '')):,}千円（{allocation.group(2)}）"
+        )
     result["pdf_page"] = locate_pdf_page_by_values(pdf_bytes,
         [value for value in result.values() if isinstance(value, (int, float))], minimum=2)
     return result
@@ -563,16 +642,25 @@ def build_completeness(*, manifests: list[dict[str, Any]], financials: list[dict
     ok("basic_business", diligence.get("business_model"))
     ok("financial_performance", financials)
     ok("balance_sheet_cash_flow", diligence.get("financial_position", {}).get("total_assets_million_yen"))
+    terms = diligence.get("offering_terms", {})
     offering_evidence = (offering.get("offering_price") is not None
-                         or diligence.get("offering_terms", {}).get("offering_price") is not None)
-    ok("offering", offering_evidence or offering.get("not_applicable_evidence"))
+                         or terms.get("offering_price") is not None)
+    detailed_offering = offering_evidence and all(
+        terms.get(field) is not None
+        for field in ("underwriting_price", "company_law_payment_price", "capital_per_share", "net_proceeds_thousand_yen")
+    )
+    if (offering.get("oa_shares") or terms.get("greenshoe_shares")):
+        detailed_offering = detailed_offering and all(
+            terms.get(field) for field in ("oa_lenders", "greenshoe_exercise_deadline", "syndicate_cover_period")
+        )
+    ok("offering", detailed_offering or offering.get("not_applicable_evidence"))
     if offering.get("not_applicable_evidence") and not offering_evidence:
         statuses["offering"]["reason_code"] = "NOT_APPLICABLE"
     ok("shareholders_sellers", diligence.get("shareholders"))
     ok("lockup", diligence.get("lockups"))
     ok("stock_options", diligence.get("stock_options"))
     ok("kpi_growth", diligence.get("kpis"))
-    ok("risks", diligence.get("risk_excerpt"))
+    ok("risks", diligence.get("risk_excerpt") and diligence.get("customer_concentration"))
     revisions = [item for item in manifests if any(token in item.get("title", "")
                  for token in ("有価証券届出書", "特定証券情報"))]
     ok("sources_revisions", len(revisions) >= 1)
