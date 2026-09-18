@@ -644,6 +644,9 @@ def render_report(*, ticker: str, company_name: str, listing_date: str, market: 
     lines += ["", "## 18 懸念・技術／AIの影響"]
     risk_fact = {"source_id": diligence.get("source_id"), "pdf_page": diligence.get("risk_page")}
     lines.append(f"- [リスク・確認済み] {diligence.get('risk_excerpt')} {_fact_citation(risk_fact, manifests)}" if diligence.get("risk_excerpt") else "- [解析未完了] 公式資料に基づく主要リスクの構造化が未完了です。")
+    technology_fact = {"source_id": diligence.get("source_id"), "pdf_page": diligence.get("technology_page")}
+    if diligence.get("technology_excerpt"):
+        lines.append(f"- [AI・技術変化・確認済み] {diligence['technology_excerpt']} {_fact_citation(technology_fact, manifests)}")
     if terms.get("growth_investment_allocation"):
         lines.append(f"- [技術変化・確認済み] プロダクト機能強化と開発体制強化に{terms['growth_investment_allocation']}を充当予定です。 {_fact_citation(terms, manifests)}")
     lines.append("- [AI影響・確認範囲] AI固有の収益効果や投資額は構造化確認できていないため、推測値は表示しません。")

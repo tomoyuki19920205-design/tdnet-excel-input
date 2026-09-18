@@ -486,14 +486,27 @@ def extract_kpis_and_narratives(documents: list[tuple[str, BeautifulSoup]], sour
     ]
     business_model = max(
         business_candidates,
-        key=lambda sentence: sum(cue in sentence for cue in ("提供", "運営", "サービス", "プラットフォーム", "マーケットプレイス")),
+        key=lambda sentence: (
+            5 * int("ユーザー" in sentence and "オーナー" in sentence)
+            + 4 * int("駐車場マーケットプレイス" in sentence)
+            + 3 * int("マッチング" in sentence)
+            + 3 * int("自ら" in sentence and "資産" in sentence and "保有" in sentence)
+            + 2 * sum(cue in sentence for cue in ("提供", "運営", "サービス", "プラットフォーム"))
+            - 10 * sum(cue in sentence for cue in ("リスク", "依存", "発生可能性", "ロックアップ", "充当する予定"))
+        ),
         default=None,
     )
     risk_candidates = [
         sentence.strip()
         for sentence in re.split(r"(?<=。)", text)
         if 40 < len(sentence) < 500
-        and any(cue in sentence for cue in ("競合", "法的規制", "システム障害", "情報漏洩", "事業等のリスク"))
+        and any(cue in sentence for cue in ("競合他社", "競争激化", "法的規制", "システム障害", "情報漏洩"))
+    ]
+    technology_candidates = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=。)", text)
+        if 20 < len(sentence) < 500
+        and any(cue in sentence for cue in ("AIカメラ", "IoT", "技術革新", "システム基盤", "プロダクト開発"))
     ]
     return {
         "kpis": kpis,
@@ -506,6 +519,8 @@ def extract_kpis_and_narratives(documents: list[tuple[str, BeautifulSoup]], sour
         "business_model_page": locate_pdf_page_by_text(pdf_bytes, ("事業の内容", "プラットフォーム", "マーケットプレイス")) if business_model else None,
         "risk_excerpt": risk_candidates[0] if risk_candidates else None,
         "risk_page": locate_pdf_page_by_text(pdf_bytes, ("事業等のリスク", "競合", "法的規制")) if risk_candidates else None,
+        "technology_excerpt": technology_candidates[0] if technology_candidates else None,
+        "technology_page": locate_pdf_page_by_text(pdf_bytes, ("AIカメラ", "IoT", "技術革新", "システム基盤")) if technology_candidates else None,
         "source_id": source_id,
     }
 

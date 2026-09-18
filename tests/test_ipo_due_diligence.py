@@ -122,6 +122,20 @@ def test_deterministic_report_rejects_generic_ai_prose(monkeypatch):
     assert "一般論だけの分析" not in payload["report_markdown"]
 
 
+def test_business_model_prefers_operating_model_over_platform_dependency_risk():
+    documents = html_documents("""
+    <html><body>
+      <p>当社はアプリを中心にサービスを展開しているため、外部プラットフォームへの依存リスクがあります。</p>
+      <p>当社は駐車場を利用したいユーザーと空きスペースを提供するオーナーをマッチングし、自ら駐車場資産を保有せずに駐車場マーケットプレイスを運営しております。</p>
+      <p>競合他社の参入により競争が激化した場合、経営成績に影響を及ぼす可能性があります。</p>
+      <p>AIカメラを用いた予約不要なキャッシュレス駐車場の実証実験を行っています。</p>
+    </body></html>""")
+    facts = diligence.extract_kpis_and_narratives(documents, "P01", b"")
+    assert "ユーザー" in facts["business_model"] and "オーナー" in facts["business_model"]
+    assert "競合他社" in facts["risk_excerpt"]
+    assert "AIカメラ" in facts["technology_excerpt"]
+
+
 def test_reason_code_distinguishes_parser_failure_from_absence():
     gate = diligence.build_completeness(manifests=[], financials=[], offering={}, diligence={},
                                         discovery={"reason_code": "SOURCE_NOT_DISCOVERED"})
