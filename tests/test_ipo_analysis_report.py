@@ -182,6 +182,37 @@ def test_all_source_manifest_ids_are_dynamic_and_unique():
     assert [source["source_id"] for source in manifests()] == ["P01", "P02", "P03"]
 
 
+def test_tpm_source_discovery_uses_document_type_headers_without_ticker_hardcode():
+    class Response:
+        def __init__(self, text):
+            self.text = text
+            self.content = text.encode("utf-8")
+            self.encoding = "utf-8"
+            self.apparent_encoding = "utf-8"
+
+        def raise_for_status(self):
+            return None
+
+    class Session:
+        def get(self, url, timeout=60):
+            if "jpx.co.jp" in url:
+                return Response("""<table><tr><th>上場日</th><th>銘柄名</th><th>コード</th><th>申請日</th>
+                    <th>特定証券情報</th><th>概要等</th><th>CG報告書</th><th>代表インタビュー</th></tr>
+                    <tr><td rowspan='2'>2026/09/18</td><td>テスト社</td><td>620A</td><td>2026/08/14</td>
+                    <td><a href='/specific.pdf'>PDF</a></td><td><a href='/outline.pdf'>PDF</a></td>
+                    <td><a href='/cg.pdf'>PDF</a></td><td></td></tr>
+                    <tr><td>J-Adviser</td><td>2026/08/28</td><td><a href='/declaration.pdf'>PDF</a></td>
+                    <td><a href='/articles.pdf'>PDF</a></td></tr></table>""")
+            return Response("<table><tr><td>別会社</td><td>9999</td></tr></table>")
+
+    sources = report.collect_exchange_listing_sources("620A", Session())
+    titles = [row["title"] for row in sources]
+    assert any("特定証券情報（発行者情報）" in title for title in titles)
+    assert any("新規上場会社概要" in title for title in titles)
+    assert any("J-Adviser宣誓書" in title for title in titles)
+    assert any("定款" in title for title in titles)
+
+
 def test_ai_numeric_output_is_rejected(monkeypatch):
     class Response:
         def raise_for_status(self): pass

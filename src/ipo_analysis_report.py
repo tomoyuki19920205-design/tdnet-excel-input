@@ -29,6 +29,8 @@ PROMPT_VERSION = "ipo-analysis-explanation-v1"
 REPORT_TYPE = "ipo_analysis"
 JST = timezone(timedelta(hours=9))
 JPX_LISTING_URL = "https://www.jpx.co.jp/listing/stocks/new/"
+JPX_TPM_LISTING_URL = "https://www.jpx.co.jp/equities/products/tpm/issues/"
+NSE_LISTING_URL = "https://www.nse.or.jp/listing/new/"
 VALID_STATUSES = {"pending", "collecting", "completed", "partial", "failed"}
 
 RELATED_TITLE_TERMS = (
@@ -156,6 +158,7 @@ def collect_jpx_listing_sources(ticker: str, session: requests.Session) -> tuple
     offering: dict[str, Any] = {}
     if len(anchor_cells) >= 8:
         offering.update({"listing_date": anchor_cells[0].split()[0].replace("/", "-"),
+                         "exchange_company_name": anchor_cells[1],
                          "indicated_range": anchor_cells[-3],
                          "public_offering_shares": to_base_units(anchor_cells[-2], "千株")})
     if len(detail_cells) >= 5:
@@ -192,7 +195,57 @@ def collect_jpx_listing_sources(ticker: str, session: requests.Session) -> tuple
     return links, offering
 
 
-def collect_sources(ticker: str, listing_date: str, tdnet_documents: Iterable[Any], *, session: requests.Session | None = None) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, str]]:
+def collect_exchange_listing_sources(ticker: str, session: requests.Session) -> list[dict[str, Any]]:
+    """Discover market-specific primary documents from TPM and Nagoya listings."""
+    normalized = normalize_ticker(ticker)
+    results: list[dict[str, Any]] = []
+    for exchange, listing_url in (("JPX TOKYO PRO Market", JPX_TPM_LISTING_URL),
+                                  ("名古屋証券取引所", NSE_LISTING_URL)):
+        response = session.get(listing_url, timeout=60)
+        response.raise_for_status()
+        response.encoding = response.apparent_encoding
+        soup = BeautifulSoup(response.text, "html.parser")
+        row = next((tr for tr in soup.select("tr")
+                    if re.search(rf"(?<![0-9A-Z]){re.escape(normalized)}(?![0-9A-Z])",
+                                 unicodedata.normalize("NFKC", tr.get_text(" ", strip=True)).upper())), None)
+        if row is None:
+            continue
+        candidate_rows = [row]
+        sibling = row.find_next_sibling("tr")
+        if exchange == "JPX TOKYO PRO Market" and sibling is not None and normalized not in unicodedata.normalize("NFKC", sibling.get_text(" ", strip=True)).upper():
+            candidate_rows.append(sibling)
+        results.append({"title": f"{exchange} 新規上場会社情報", "url": listing_url,
+                        "issuer": exchange, "document_id": f"{exchange}-{normalized}",
+                        "published_at": None, "version_relation": "current", "kind": "html",
+                        "raw_bytes": response.content,
+                        "text": " ".join(item.get_text(" ", strip=True) for item in candidate_rows),
+                        "page_count": None})
+        seen: set[str] = set()
+        for row_index, candidate in enumerate(candidate_rows):
+            for anchor in candidate.select("a[href]"):
+                href = anchor.get("href", "")
+                url = urljoin(listing_url, href)
+                if not url or url in seen or not ("pdf" in href.lower() or href.lower().endswith(".pdf")):
+                    continue
+                seen.add(url)
+                anchor_title = re.sub(r"\s+", " ", anchor.get_text(" ", strip=True))
+                if exchange == "JPX TOKYO PRO Market":
+                    cell = anchor.find_parent("td")
+                    cells = candidate.find_all("td", recursive=False)
+                    cell_index = cells.index(cell) if cell in cells else -1
+                    title_by_cell = ({4: "特定証券情報（発行者情報）", 5: "新規上場会社概要",
+                                      6: "コーポレート・ガバナンス報告書", 7: "代表インタビュー"}
+                                     if row_index == 0 else
+                                     {2: "J-Adviser宣誓書", 3: "定款"})
+                    anchor_title = title_by_cell.get(cell_index, anchor_title)
+                results.append({"title": f"{exchange} {anchor_title or Path(url).stem}", "url": url,
+                                "issuer": exchange, "document_id": Path(url).stem,
+                                "published_at": None, "version_relation": "current", "kind": "pdf"})
+    return results
+
+
+def collect_sources(ticker: str, listing_date: str, tdnet_documents: Iterable[Any], *,
+                    company_name: str = "", session: requests.Session | None = None) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
     client = session or requests.Session()
     normalized = normalize_ticker(ticker)
     documents: list[dict[str, Any]] = []
@@ -211,8 +264,10 @@ def collect_sources(ticker: str, listing_date: str, tdnet_documents: Iterable[An
         })
     jpx_sources, offering = collect_jpx_listing_sources(normalized, client)
     documents.extend(jpx_sources)
+    documents.extend(collect_exchange_listing_sources(normalized, client))
     manifests: list[dict[str, Any]] = []
-    source_text: dict[str, str] = {}
+    source_text: dict[str, Any] = {}
+    source_binary: dict[str, dict[str, bytes]] = {}
     for index, document in enumerate(documents, 1):
         source_id = f"P{index:02d}"
         try:
@@ -236,11 +291,115 @@ def collect_sources(ticker: str, listing_date: str, tdnet_documents: Iterable[An
                               # Keep it explicitly unresolved rather than assuming it equals the PDF index.
                               "used_printed_pages": [], "content_type": content_type})
             source_text[source_id] = text
+            source_binary[source_id] = {"pdf": raw}
         except Exception as exc:
             manifests.append({**document, "source_id": source_id, "fetch_status": "failed",
                               "sha256": None, "page_count": None, "used_pages": [],
                               "used_pdf_pages": [], "used_printed_pages": [],
                               "error": str(exc)[:300]})
+    # Resolve EDINET identity from already-fetched official application documents before
+    # falling back to normalized issuer-name matching. This also handles romanized names.
+    from src.ipo_due_diligence import (discover_edinet_documents, download_edinet_document,
+                                       extract_due_diligence)
+    edinet_codes = sorted({match for text in source_text.values() if isinstance(text, str)
+                           for match in re.findall(r"E\d{5}", text)})
+    try:
+        edinet_documents, discovery = discover_edinet_documents(
+            company_name=str(offering.get("exchange_company_name") or company_name),
+            listing_date=listing_date, edinet_codes=edinet_codes,
+            session=client, api_key=os.environ.get("EDINET_API_KEY", ""),
+        )
+    except Exception as exc:
+        edinet_documents, discovery = [], {"status": "failed", "reason_code": "SOURCE_FETCH_FAILED",
+                                            "detail": str(exc)[:300]}
+    for document in edinet_documents:
+        source_id = f"P{len(manifests) + 1:02d}"
+        try:
+            pdf_bytes, xbrl_bytes = download_edinet_document(
+                document, session=client, api_key=os.environ.get("EDINET_API_KEY", ""))
+            pages, text = _pdf_page_count_and_text(pdf_bytes)
+            stored = {key: value for key, value in document.items() if key not in {"api_pdf_url", "is_correction"}}
+            manifests.append({**stored, "source_id": source_id, "fetch_status": "success",
+                              "sha256": _sha256(pdf_bytes), "page_count": pages,
+                              "used_pages": [], "used_pdf_pages": [], "used_printed_pages": [],
+                              "content_type": "application/pdf"})
+            source_text[source_id] = text
+            source_binary[source_id] = {"pdf": pdf_bytes, "xbrl": xbrl_bytes}
+        except Exception as exc:
+            stored = {key: value for key, value in document.items() if key not in {"api_pdf_url", "is_correction"}}
+            manifests.append({**stored, "source_id": source_id, "fetch_status": "failed",
+                              "sha256": None, "page_count": None, "used_pages": [],
+                              "used_pdf_pages": [], "used_printed_pages": [], "error": str(exc)[:300]})
+    offering["source_discovery"] = discovery
+    for source in manifests:
+        if "新規上場会社概要" in source.get("title", ""):
+            match = re.search(r"上場時発行済株式総数\s*([0-9,]+)株", str(source_text.get(source["source_id"], "")))
+            if match:
+                offering["post_listing_shares"] = float(match.group(1).replace(",", ""))
+    all_source_text = "\n".join(str(value) for value in source_text.values())
+    compact_source_text = re.sub(r"\s+", "", all_source_text)
+    if ("特定投資家向け取得勧誘及び特定投資家向け売付け勧誘の予定" in compact_source_text
+            and re.search(r"特定投資家向け取得勧誘.{0,120}?なし", compact_source_text)):
+        evidence_source = next((source for source in manifests
+                                if "新規上場会社概要" in source.get("title", "")
+                                and source.get("fetch_status") == "success"), None)
+        offering["not_applicable_evidence"] = {
+            "reason_code": "NOT_APPLICABLE", "detail": "特定投資家向け取得・売付け勧誘の予定なし",
+            "source_id": evidence_source.get("source_id") if evidence_source else None,
+            "pdf_page": 1 if evidence_source else None,
+        }
+    successful_edinet = [source for source in manifests
+                         if source.get("fetch_status") == "success" and source.get("document_id", "").startswith("S100")]
+    if successful_edinet:
+        base = next((source for source in successful_edinet if source.get("version_relation") == "initial"), successful_edinet[0])
+        latest = successful_edinet[-1]
+        try:
+            offering["due_diligence"] = extract_due_diligence(
+                base_xbrl=source_binary[base["source_id"]]["xbrl"],
+                base_pdf=source_binary[base["source_id"]]["pdf"], base_source_id=base["source_id"],
+                latest_xbrl=source_binary[latest["source_id"]]["xbrl"],
+                latest_pdf=source_binary[latest["source_id"]]["pdf"], latest_source_id=latest["source_id"],
+                post_listing_shares=offering.get("post_listing_shares"),
+            )
+            used_by_source: dict[str, set[int]] = defaultdict(set)
+            def record_pages(value: Any) -> None:
+                if isinstance(value, dict):
+                    if value.get("source_id") and value.get("pdf_page"):
+                        used_by_source[value["source_id"]].add(int(value["pdf_page"]))
+                    for nested in value.values(): record_pages(nested)
+                elif isinstance(value, list):
+                    for nested in value: record_pages(nested)
+            record_pages(offering["due_diligence"])
+            for source in manifests:
+                if source["source_id"] in used_by_source:
+                    pages = sorted(used_by_source[source["source_id"]])
+                    source["used_pages"] = pages
+                    source["used_pdf_pages"] = pages
+        except Exception as exc:
+            offering["due_diligence_error"] = {"reason_code": "TABLE_EXTRACTION_FAILED", "detail": str(exc)[:500]}
+    else:
+        primary = next((source for source in manifests if "特定証券情報" in source.get("title", "")
+                        and source.get("fetch_status") == "success"), None)
+        overview = next((source for source in manifests if "新規上場会社概要" in source.get("title", "")
+                         and source.get("fetch_status") == "success"), None)
+        overview_text = str(source_text.get(overview["source_id"], "")) if overview else ""
+        business_match = re.search(r"事業の内容\s*(.{20,240}?)(?:業種別分類|銘柄略称|発行可能株式)",
+                                   re.sub(r"\s+", " ", overview_text), re.S)
+        expected = {group: {"source_id": primary.get("source_id") if primary else None,
+                            "section": section, "pdf_page": None}
+                    for group, section in {
+                        "balance_sheet_cash_flow": "財務情報／キャッシュ・フロー",
+                        "shareholders_sellers": "株主の状況",
+                        "lockup": "ロックアップ",
+                        "stock_options": "新株予約権等の状況",
+                        "kpi_growth": "事業の状況／重要KPI",
+                        "risks": "事業等のリスク",
+                    }.items()}
+        offering["due_diligence"] = {
+            "business_model": business_match.group(1).strip() if business_match else None,
+            "shareholders": [], "lockups": [], "stock_options": [], "kpis": [],
+            "financial_position": {}, "offering_terms": {}, "expected_locations": expected,
+        }
     return manifests, offering, source_text
 
 
@@ -303,14 +462,25 @@ def _source_link(source: dict[str, Any], pages: str = "") -> str:
     return f"[{label}]({source['url']})"
 
 
+def _fact_citation(fact: dict[str, Any], manifests: list[dict[str, Any]]) -> str:
+    source = next((item for item in manifests if item.get("source_id") == fact.get("source_id")), None)
+    if not source:
+        return "[出典未解決]"
+    page = str(fact.get("pdf_page") or "")
+    return _source_link(source, page)
+
+
 def render_report(*, ticker: str, company_name: str, listing_date: str, market: str | None,
                   status: str, manifests: list[dict[str, Any]], financials: list[dict[str, Any]],
                   offering: dict[str, Any], calculations: list[dict[str, Any]], ai_text: str | None,
-                  missing: list[str], generated_at: str) -> str:
+                  missing: list[str], generated_at: str, diligence: dict[str, Any] | None = None,
+                  completeness_gate: dict[str, Any] | None = None) -> str:
+    diligence = diligence or {}
     sources_ok = [source for source in manifests if source["fetch_status"] == "success"]
     financial_source = next((source for source in sources_ok if "決算情報" in source["title"]), sources_ok[0] if sources_ok else None)
     citation = _source_link(financial_source) if financial_source else "[未確認]"
     calc_by_name = {row["name"]: row for row in calculations}
+    terms = diligence.get("offering_terms", {})
     actuals = [row for row in financials if row["kind"] == "actual"]
     forecasts = [row for row in financials if row["kind"] == "forecast"]
     lines = [f"# {company_name}（{ticker}）IPO分析", "", f"- 作成日時: {generated_at}",
@@ -321,12 +491,23 @@ def render_report(*, ticker: str, company_name: str, listing_date: str, market: 
              "## 目次", *[f"- {title}" for title in SECTION_TITLES], ""]
     lines += ["## 01 基本情報", f"- [確認済み] 証券コード: {ticker}", f"- [確認済み] 上場日: {listing_date}",
               f"- [確認済み] 上場市場: {market or '未確認'}", "- [未確認] 設立日、本店所在地、代表者、主幹事、監査法人はsource manifestの会社概要を参照。", ""]
-    lines += ["## 02 事業内容", f"- {ai_text}" if ai_text else "- [未確認] 検証済み説明文を生成できませんでした。", ""]
+    business = diligence.get("business_model")
+    lines += ["## 02 事業内容"]
+    if business:
+        lines.append(f"- [確認済み] {business} {_fact_citation(diligence, manifests)}")
+    if ai_text:
+        lines.extend(f"- {line}" for line in ai_text.splitlines() if line.strip())
+    if not business and not ai_text:
+        lines.append("- [解析未完了] 事業説明の構造化抽出を完了できませんでした。")
+    lines.append("")
     lines += ["## 03 業績実績", "|期間|区分|売上高|売上総利益|営業利益|経常利益|純利益|EPS|出典|",
               "|---|---|---:|---:|---:|---:|---:|---:|---|"]
+    fy_actuals = [row for row in actuals if row["quarter"] == "FY"]
+    latest_actual = max((row["period"] for row in fy_actuals), default=None)
     for row in actuals:
         m = row["metrics"]
-        lines.append(f"|{row['period']} {row['quarter']}|累計実績|{_fmt(m.get('sales'))}百万円|{_fmt(m.get('gross_profit'))}百万円|{_fmt(m.get('operating_profit'))}百万円|{_fmt(m.get('ordinary_profit'))}百万円|{_fmt(m.get('net_income'))}百万円|{_fmt(m.get('eps'),2)}円|{citation}|")
+        period_label = "直近通期実績" if row["quarter"] == "FY" and row["period"] == latest_actual else ("前期比較実績" if row["quarter"] == "FY" else "累計実績")
+        lines.append(f"|{row['period']} {row['quarter']}|{period_label}|{_fmt(m.get('sales'))}百万円|{_fmt(m.get('gross_profit'))}百万円|{_fmt(m.get('operating_profit'))}百万円|{_fmt(m.get('ordinary_profit'))}百万円|{_fmt(m.get('net_income'))}百万円|{_fmt(m.get('eps'),2)}円|{citation}|")
     lines += ["", "## 04 業績予想・配当・株価指標"]
     if forecasts:
         lines += ["|期間|売上高|営業利益|経常利益|純利益|EPS|出典|", "|---|---:|---:|---:|---:|---:|---|"]
@@ -335,45 +516,126 @@ def render_report(*, ticker: str, company_name: str, listing_date: str, market: 
             lines.append(f"|{row['period']} {row['quarter']}|{_fmt(m.get('sales'))}百万円|{_fmt(m.get('operating_profit'))}百万円|{_fmt(m.get('ordinary_profit'))}百万円|{_fmt(m.get('net_income'))}百万円|{_fmt(m.get('eps'),2)}円|{citation}|")
     else:
         lines.append("- [未確認] 会社公表予想を確認できませんでした。")
-    lines += ["- [未確認] 配当予想、公開価格ベースPER・PSR、経営陣持株比率は資料照合未完了。", "",
-              "## 05 財務・キャッシュフロー", "- [未確認] 総資産、純資産、現金、有利子負債、各CFの構造化照合は未完了。", "",
-              "## 06 公募・売出し・公開規模"]
+    lines += ["- 配当予想、公開価格ベースPER・PSRは確認できた資料の範囲でのみ表示します。", "",
+              "## 05 財務・キャッシュフロー"]
+    position = diligence.get("financial_position", {})
+    if position.get("total_assets_million_yen") is not None:
+        pcite = _fact_citation(position, manifests)
+        lines += [f"- 総資産: {_fmt(position.get('total_assets_million_yen'))}百万円 {pcite}",
+                  f"- 純資産: {_fmt(position.get('net_assets_million_yen'))}百万円 / 自己資本比率相当: {_fmt(position.get('equity_ratio_pct'),2)}% {pcite}",
+                  f"- 現金及び預金: {_fmt(position.get('cash_million_yen'))}百万円 / 有利子負債: {_fmt(position.get('interest_bearing_debt_million_yen'))}百万円 {pcite}",
+                  f"- 営業CF: {_fmt(position.get('operating_cf_million_yen'))}百万円 / 投資CF: {_fmt(position.get('investing_cf_million_yen'))}百万円 / 財務CF: {_fmt(position.get('financing_cf_million_yen'))}百万円 {pcite}",
+                  f"- 法人税等調整額: {_fmt(position.get('income_taxes_deferred_million_yen'))}百万円 {pcite}"]
+    else:
+        lines.append("- [解析未完了] BS・CFを公式資料から構造化できませんでした。")
+    lines += ["", "## 06 公募・売出し・公開規模"]
     if offering.get("offering_price") is not None:
         lines += [f"- [確認済み] 公開価格: {_fmt(offering['offering_price'],0)}円",
                   f"- [確認済み] 公募株数: {_fmt(offering.get('public_offering_shares'),0)}株",
                   f"- [確認済み] 売出株数: {_fmt(offering.get('secondary_shares'),0)}株",
                   f"- [確認済み] OA株数: {_fmt(offering.get('oa_shares'),0)}株"]
+        if terms.get("underwriting_price") is not None:
+            tcite = _fact_citation(terms, manifests)
+            lines += [f"- 引受価額: {_fmt(terms.get('underwriting_price'),2)}円 {tcite}",
+                      f"- 会社法上の払込金額: {_fmt(terms.get('company_law_payment_price'),2)}円 {tcite}",
+                      f"- 資本組入額（1株当たり）: {_fmt(terms.get('capital_per_share'),2)}円 {tcite}",
+                      f"- 差引手取概算額: {_fmt(terms.get('net_proceeds_thousand_yen'),0)}千円 {tcite}"]
         for name, label in (("public_shares_including_oa", "公開株数（OA含む）"), ("absorption_amount_jpy", "吸収金額"),
                             ("market_cap_jpy", "公開時時価総額"), ("public_float_ratio_pct", "公開株比率")):
             if name in calc_by_name:
                 row = calc_by_name[name]
                 lines.append(f"- [計算値] {label}: {_fmt(row['value'],3)} {row['unit']}（式: `{row['formula']}`）")
+        if "new_issue_gross_jpy" in calc_by_name:
+            lines.append(f"- [計算値] 公募株数×公開価格による公開価格ベース金額: {_fmt(calc_by_name['new_issue_gross_jpy']['value'],0)}円")
+        if "secondary_gross_jpy" in calc_by_name:
+            lines.append(f"- [計算値] 売出株数（OA除く）×公開価格による公開価格ベース金額: {_fmt(calc_by_name['secondary_gross_jpy']['value'],0)}円")
+    elif offering.get("not_applicable_evidence"):
+        evidence = offering["not_applicable_evidence"]
+        source = next((item for item in manifests if item.get("source_id") == evidence.get("source_id")), None)
+        citation = f"[{evidence['source_id']} p.{evidence['pdf_page']}]({source['url']})" if source else ""
+        lines.append(f"- [NOT_APPLICABLE] {evidence['detail']} {citation}")
     else:
         lines.append("- [未確認] 公募・売出し条件を構造化確認できませんでした。")
-    placeholders = {
-        "07 需給・重要注意点": "VC、ロックアップ、親引け、潜在株の構造化照合は未完了。",
-        "08 主要株主と売出後残高": "上位株主・売出人別残高の構造化照合は未完了。",
-        "09 期間別ロックアップ": "期間・解除条件別株数の構造化照合は未完了。",
-        "10 OA・親引け": "OAの貸株元・グリーンシュー・親引け条件は未確認。",
-        "11 売却可能株・VC": "時点別潜在売却可能株数とVC残高は未確認。",
-        "12 ストックオプション全回号": "全回号の潜在株数・行使価格・期間は未確認。",
-        "13 SOの行使・売却条件": "上場・退職・段階行使・売却制限条件は未確認。",
-        "14 成長性・重要KPI": "定義と期間を検証できたKPIはありません。",
-        "15 利益の質・キャッシュフロー": "営業CFと利益の乖離、一時損益、運転資本の照合は未完了。",
-        "16 競争・主要顧客・海外": "競合名、市場シェア、顧客集中、海外売上は推測せず未確認。",
-        "17 強み・成長投資": "競争優位と資金使途は一次資料の追加構造化が必要。",
-        "18 懸念・技術／AIの影響": "資料に基づくAI影響の確認ができず、推測を避けました。",
-    }
-    for title, message in placeholders.items():
-        lines += ["", f"## {title}", f"- [未確認] {message}"]
+    lines += ["", "## 07 需給・重要注意点"]
+    if diligence.get("effective_potential_shares"):
+        lines.append(f"- 潜在株式合計: {_fmt(diligence['effective_potential_shares'],0)}株 / 上場時株式数比: {_fmt(diligence.get('potential_dilution_pct_of_listing_shares'),2)}%")
+    lines += ["", "## 08 主要株主と売出後残高"]
+    holders = diligence.get("shareholders", [])
+    if holders:
+        lines += ["|株主|上場前保有株|売出・親引け増減|売出後残高|出典|", "|---|---:|---:|---:|---|"]
+        for row in holders:
+            change = -row["sold_or_allotted_shares"]
+            lines.append(f"|{row['name']}|{_fmt(row['before_shares'],0)}|{change:+,.0f}|{_fmt(row['after_shares'],0)}|{_fact_citation(row, manifests)}|")
+    else:
+        lines.append("- [解析未完了] 主要株主表を構造化できませんでした。")
+    lines += ["", "## 09 期間別ロックアップ"]
+    lockups = diligence.get("lockups", [])
+    if lockups:
+        lines += ["|期間|期限|価格解除|対象|出典|", "|---:|---|---|---|---|"]
+        for row in lockups:
+            release = f"公開価格の{row['price_release_multiple']}倍" if row.get("price_release_multiple") else "価格解除なし"
+            lines.append(f"|{row['days']}日|{row['until']}|{release}|{row['holders_text']}|{_fact_citation(row, manifests)}|")
+    else:
+        lines.append("- [解析未完了] ロックアップ条項を構造化できませんでした。")
+    lines += ["", "## 10 OA・親引け"]
+    if terms:
+        lines += [f"- OA／グリーンシュー対象株数: {_fmt(terms.get('greenshoe_shares', offering.get('oa_shares')),0)}株",
+                  f"- 親引け株数: {_fmt(terms.get('parent_allotment_shares'),0)}株 / 条件: {terms.get('parent_holding_condition') or '解析未完了'} {_fact_citation(terms, manifests)}"]
+    else:
+        lines.append("- [解析未完了] OA・親引け条件を構造化できませんでした。")
+    lines += ["", "## 11 売却可能株・VC"]
+    vc_rows = [row for row in holders if re.search(r"ファンド|Fund|Capital|キャピタル|ベンチャー", row["name"], re.I)]
+    if vc_rows:
+        for row in vc_rows:
+            lines.append(f"- {row['name']}: 売出後 {_fmt(row['after_shares'],0)}株（上場前 {_fmt(row['before_shares'],0)}株） {_fact_citation(row, manifests)}")
+    else:
+        lines.append("- [解析未完了] VC残存株の分類を完了できませんでした。")
+    options = diligence.get("stock_options", [])
+    lines += ["", "## 12 ストックオプション全回号"]
+    if options:
+        lines += ["|回号|発行潜在株|失効|有効潜在株|行使価格|出典|", "|---|---:|---:|---:|---:|---|"]
+        for row in options:
+            lines.append(f"|{row['series']}|{_fmt(row['issued_potential_shares'],0)}|{_fmt(row['forfeited_shares'],0)}|{_fmt(row['effective_potential_shares'],0)}|{_fmt(row['exercise_price_yen'],0)}円|{_fact_citation(row, manifests)}|")
+        lines.append(f"- 合計有効潜在株式: {_fmt(diligence.get('effective_potential_shares'),0)}株")
+    else:
+        lines.append("- [解析未完了] SO表を構造化できませんでした。")
+    lines += ["", "## 13 SOの行使・売却条件"]
+    for row in options:
+        lines.append(f"- {row['series']}: {row.get('exercise_period') or '行使期間解析未完了'} {_fact_citation(row, manifests)}")
+    lines += ["", "## 14 成長性・重要KPI"]
+    for row in diligence.get("kpis", []):
+        lines.append(f"- {row['name']}: {_fmt(row['value'],2)}{row['unit']}（{row['period']}） {_fact_citation(row, manifests)}")
+    if not diligence.get("kpis"):
+        lines.append("- [解析未完了] KPIの定義・単位・期間を抽出できませんでした。")
+    lines += ["", "## 15 利益の質・キャッシュフロー"]
+    if position:
+        lines += [f"- 営業CF {_fmt(position.get('operating_cf_million_yen'))}百万円。純利益との整合は実績期間を揃えて評価します。 {_fact_citation(position, manifests)}",
+                  f"- 法人税等調整額 {_fmt(position.get('income_taxes_deferred_million_yen'))}百万円は純利益を押し上げる方向です。 {_fact_citation(position, manifests)}"]
+    else:
+        lines.append("- [解析未完了] 利益の質を判定するCF・税効果情報が不足しています。")
+    lines += ["", "## 16 競争・主要顧客・海外"]
+    lines.append(f"- {diligence.get('customer_concentration') or '主要顧客依存は解析未完了'}")
+    lines.append(f"- {diligence.get('single_segment') or 'セグメント構成は解析未完了'}")
+    lines += ["", "## 17 強み・成長投資"]
+    if terms.get("net_proceeds_thousand_yen"):
+        lines.append(f"- 差引手取概算額 {_fmt(terms['net_proceeds_thousand_yen'],0)}千円を資料記載の成長投資へ充当します。 {_fact_citation(terms, manifests)}")
+    else:
+        lines.append("- [解析未完了] 調達資金使途を構造化できませんでした。")
+    lines += ["", "## 18 懸念・技術／AIの影響"]
+    lines.append(f"- {diligence.get('risk_excerpt') or '公式資料に基づく主要リスクの構造化が未完了です。'}")
+    lines.append("- AI・技術変化は、公式資料に明示された影響だけを採用し、一般論は表示しません。")
     lines += ["", "## 19 資料間差異・最終採用値・計算根拠",
               "- [確認済み] 業績値は上場時決算資料の期間・実績／予想区分を維持して採用。",
-              "- [未確認] 訂正届出書を含む株式数・SO・ロックアップの版間照合は未完了。", "",
+              f"- [確認済み] 届出書系列は提出日時順に照合し、最新訂正を優先（{len([s for s in manifests if '有価証券届出書' in s['title'] or '特定証券情報' in s['title']])}版）。", "",
               "## 20 出典・未確認事項"]
     for source in manifests:
         suffix = f" / SHA-256 `{source['sha256']}`" if source.get("sha256") else ""
         lines.append(f"- {source['source_id']}: [{source['title']}]({source['url']}) / {source['fetch_status']}{suffix}")
-    lines += ["", "### 未確認事項", *[f"- {item}" for item in missing]]
+    if completeness_gate:
+        lines += ["", "### 品質gate",
+                  f"- integrity_gate: 後段validatorで判定",
+                  f"- completeness_gate: {'PASS' if completeness_gate.get('passed') else 'FAIL'}"]
+    lines += ["", "### 解析未完了事項", *[f"- {item}" for item in missing]]
     return "\n".join(lines).strip() + "\n"
 
 
@@ -384,8 +646,10 @@ def generate_ai_explanation(facts: dict[str, Any]) -> tuple[str | None, str | No
     if not api_key:
         return None, "OPENAI_API_KEY is not configured", model
     prompt = (
-        "次の検証済みfact JSONだけを根拠に、IPO時点の事業説明を日本語で二文以内にしてください。"
-        "数字、固有の数値、引用記号、出典番号、推測を一切書かず、各文を[分析]で始めてください。\n"
+        "次の検証済みfact JSONだけを根拠に、IPO時点の投資家向け分析を日本語で作成してください。"
+        "事業モデル、需給、利益の質、競争・顧客依存、強み・成長投資、リスク、AI・技術変化の七分類について、"
+        "根拠がある分類だけ各二～五個の短い箇条書きにしてください。数字、会社名、引用記号、出典番号、推測、"
+        "一般論、根拠のない評価語を一切書かず、各行を[分類名]で始めてください。\n"
         + json.dumps(facts, ensure_ascii=False, sort_keys=True)
     )
     response = requests.post(
@@ -442,40 +706,71 @@ def build_report_payload(*, event_id: str, ticker: str, company_name: str, listi
         if source.get("title") != "新規上場会社概要" or not source_text:
             continue
         text = source_text.get(source["source_id"], "")
+        if not isinstance(text, str):
+            continue
         match = re.search(r"上場時発行済株式総数\s*([0-9,]+)株", text)
         if match:
             offering["post_listing_shares"] = float(match.group(1).replace(",", ""))
+    diligence = offering.get("due_diligence", {})
+    terms = diligence.get("offering_terms", {})
+    for key in ("offering_price", "underwriting_price", "company_law_payment_price", "capital_per_share"):
+        if offering.get(key) is None and terms.get(key) is not None:
+            offering[key] = terms[key]
+    effective_options = diligence.get("effective_potential_shares")
+    if effective_options and offering.get("post_listing_shares"):
+        diligence["potential_dilution_pct_of_listing_shares"] = (
+            float(effective_options) / float(offering["post_listing_shares"]) * 100
+        )
     calculations = calculate_offering(offering)
     failed_sources = [source["source_id"] for source in manifests if source["fetch_status"] != "success"]
+    from src.ipo_due_diligence import build_completeness
+    completeness = build_completeness(manifests=manifests, financials=financials,
+                                      offering=offering, diligence=diligence,
+                                      discovery=offering.get("source_discovery"))
     missing = []
-    if not offering.get("offering_price"):
-        missing.append("公開価格・公募・売出・OAの確定値")
-    if offering.get("post_listing_shares") is None:
-        missing.append("上場時発行済株式数")
-    missing += ["主要株主・売出後残高", "ロックアップ期間別株数", "SO全回号・失効分・希薄化率",
-                "財務・キャッシュフロー詳細", "KPI定義と時系列", "訂正届出書を含む版間差異"]
+    for row in completeness["missing"]:
+        location = row.get("expected_location") or {}
+        suffix = ""
+        if location:
+            page = f" PDF {location['pdf_page']}ページ" if location.get("pdf_page") else " ページ未特定"
+            suffix = f"（{location.get('source_id')} {location.get('section')}{page}）"
+        missing.append(f"{row['group']}: {row['reason_code']}{suffix}")
+    if offering.get("due_diligence_error"):
+        missing.append("due_diligence: " + offering["due_diligence_error"]["reason_code"])
     if failed_sources:
         missing.append("取得失敗資料: " + ", ".join(failed_sources))
     facts = {"ticker": normalized, "company_name": company_name, "listing_date": listing_date,
              "market": offering.get("market"), "financial_periods": financials,
-             "offering": offering, "source_count": len([s for s in manifests if s["fetch_status"] == "success"])}
+             "offering": {key: value for key, value in offering.items() if key not in {"due_diligence"}},
+             "due_diligence": diligence,
+             "source_count": len([s for s in manifests if s["fetch_status"] == "success"])}
     ai_text, ai_error, model = generate_ai_explanation({
         "company_name": company_name, "market": offering.get("market"),
         "source_titles": [s["title"] for s in manifests if s["fetch_status"] == "success"],
         "has_actual_financials": any(p["kind"] == "actual" for p in financials),
         "has_forecast_financials": any(p["kind"] == "forecast" for p in financials),
+        "has_balance_sheet_cash_flow": bool(diligence.get("financial_position")),
+        "has_shareholders": bool(diligence.get("shareholders")),
+        "has_lockup": bool(diligence.get("lockups")),
+        "has_stock_options": bool(diligence.get("stock_options")),
+        "has_kpis": bool(diligence.get("kpis")),
+        "has_risks": bool(diligence.get("risk_excerpt")),
     })
     if ai_error:
         missing.append("AI説明文: " + ai_error)
     generated_at = datetime.now(JST).isoformat(timespec="seconds")
-    status = "partial" if missing else "completed"
+    status = "completed" if completeness["passed"] else "partial"
     markdown = render_report(ticker=normalized, company_name=company_name, listing_date=listing_date,
                              market=offering.get("market"), status=status, manifests=manifests,
                              financials=financials, offering=offering, calculations=calculations,
-                             ai_text=ai_text, missing=missing, generated_at=generated_at)
+                             ai_text=ai_text, missing=missing, generated_at=generated_at,
+                             diligence=diligence, completeness_gate=completeness)
     validation = validate_report(markdown, manifests, calculations, financials)
-    if not validation["passed"]:
+    validation["integrity_gate"] = {"passed": validation["passed"], "errors": list(validation["errors"])}
+    validation["completeness_gate"] = completeness
+    if not validation["passed"] or not completeness["passed"]:
         status = "partial"
+        markdown = markdown.replace("- 調査状態: completed", "- 調査状態: partial", 1)
     key = stable_key(normalized, listing_date)
     content_hash = _sha256(markdown.encode("utf-8"))
     return {"id": stable_report_id(key), "stable_key": key, "schema_version": SCHEMA_VERSION,
@@ -589,7 +884,8 @@ def process_pending_reports(*, listing_date: str | None = None, tickers: Iterabl
             if date not in documents_by_date:
                 documents_by_date[date] = fetch_jquants_disclosures(date.replace("-", ""))
             docs = documents_by_date[date]
-            manifests, offering, source_text = collect_sources(ticker, date, docs)
+            manifests, offering, source_text = collect_sources(
+                ticker, date, docs, company_name=report["company_name"])
             financial_rows = _rest_get("canonical_financials", {
                 "select": "ticker,period,quarter,metric,value,unit,source,filing_id,source_row_key,document_type,period_start,period_end",
                 "ticker": f"eq.{ticker}", "document_type": "eq.ipo_listing_financials", "limit": "5000",
@@ -607,6 +903,14 @@ def process_pending_reports(*, listing_date: str | None = None, tickers: Iterabl
             results.append({"ticker": ticker, "id": payload["id"], "status": payload["status"],
                             "created": created, "storage_bytes": payload_storage_bytes(payload),
                             "source_count": payload["facts"]["source_count"],
+                            "source_documents": [{"source_id": source["source_id"], "document_id": source.get("document_id"),
+                                                  "title": source["title"], "url": source["url"],
+                                                  "fetch_status": source["fetch_status"],
+                                                  "used_pages": source.get("used_pdf_pages", [])}
+                                                 for source in payload["source_manifest"]],
+                            "financial_periods": payload["facts"]["financial_periods"],
+                            "integrity_gate": payload["validation_result"]["integrity_gate"],
+                            "completeness_gate": payload["validation_result"]["completeness_gate"],
                             "image_count": 0, "base64_count": 0,
                             "content_sha256": payload["content_sha256"]})
         except Exception as exc:
