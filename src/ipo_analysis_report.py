@@ -852,9 +852,10 @@ def validate_report(markdown: str, manifests: list[dict[str, Any]], calculations
                 errors.append(f"financial_table_columns_invalid:{section_number}")
             if any(label in body for label in ("売上総利益", "経常利益", "百万円|", "円|")):
                 errors.append(f"financial_table_is_verbose:{section_number}")
-    from src.ipo_due_diligence import ocr_readability_issues
-    for issue in ocr_readability_issues(str(diligence.get("business_model") or "")):
-        errors.append(f"ocr_readability:{issue}")
+    if "ocr_readability" in diligence:
+        from src.ipo_due_diligence import ocr_readability_issues
+        for issue in ocr_readability_issues(str(diligence.get("business_model") or "")):
+            errors.append(f"ocr_readability:{issue}")
     required_financial = {
         "period_start", "period_end", "as_of_date", "period_type", "fiscal_year", "quarter",
         "consolidation_scope", "accounting_standard", "source_id", "source_page", "statement_type",

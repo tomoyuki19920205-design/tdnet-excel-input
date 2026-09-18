@@ -259,3 +259,12 @@ def test_sources_section_contains_only_used_human_readable_sources():
     assert "上場に伴う当社決算情報等のお知らせ" in markdown
     assert "会社説明及び今後の戦略概要" not in markdown
     assert "SHA-256" not in markdown and "fetch_status" not in markdown
+
+
+def test_ocr_gate_is_scoped_to_scanned_documents():
+    diligence = {"business_model": "公式XBRLの表記上、語句間に 空白 がある説明です。"}
+    result = report.validate_report("## 01 基本情報\n- 証券コード: 622A\n", manifests(), [], [], diligence)
+    assert not any(error.startswith("ocr_readability:") for error in result["errors"])
+    diligence["ocr_readability"] = {"passed": False, "issues": ["japanese_intra_character_space"]}
+    result = report.validate_report("## 01 基本情報\n- 証券コード: 620A\n", manifests(), [], [], diligence)
+    assert any(error.startswith("ocr_readability:") for error in result["errors"])
