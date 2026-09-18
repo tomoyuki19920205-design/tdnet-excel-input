@@ -261,8 +261,8 @@ def test_624_latest_full_year_actual_is_selected_after_comparative_year(monkeypa
     payload = report.build_report_payload(event_id="e", ticker="624A", company_name="かがやきHD", listing_date="2026-09-18",
                                           manifests=manifests, offering={}, financial_rows=rows)
     markdown = payload["report_markdown"]
-    assert markdown.index("2025-06-30 FY") < markdown.index("2026-06-30 FY") < markdown.index("2027-06-30 FY")
-    assert "|2026-06-30 FY|直近通期実績|" in markdown
+    assert markdown.index("2025/06期") < markdown.index("2026/06期") < markdown.index("2027/06期")
+    assert "|2026/06期|直近通期実績|" in markdown
 
 
 def test_completed_requires_both_gates(monkeypatch):
@@ -313,6 +313,21 @@ def test_620_tpm_scanned_primary_document_uses_generic_ocr_parser():
     assert {row["value_normalized"] for row in facts["kpis"]} == {122.9, 110.4, 101.5}
     assert facts["absence_evidence"]["stock_options"]["reason_code"] == "SOURCE_ACTUALLY_ABSENT"
     assert facts["risk_excerpt"]
+    assert facts["business_model"] == (
+        "財務会計、人事労務、販売管理、顧客管理などの基幹業務ソフトブランド「大臣シリーズ」を開発しています。"
+        "パッケージソフトとクラウドサービスを、全国の販売代理店網を通じて企業へ提供する間接販売モデルを主軸としています。"
+    )
+    assert facts["ocr_readability"] == {"passed": True, "issues": []}
+    assert "シ・リ・ズ" not in facts["business_model"] and "フ・ランド" not in facts["business_model"]
+
+
+def test_ocr_readability_gate_rejects_raw_split_japanese_and_broken_katakana():
+    raw = "財 務 会 計 ソ フ トの大 臣 シ・リ・ズを提供します 。"
+    assert {"japanese_intra_character_space", "broken_katakana", "space_before_punctuation"} <= set(
+        diligence.ocr_readability_issues(raw))
+    normalized = diligence.normalize_ocr_japanese(raw)
+    assert normalized == "財務会計ソフトの大臣シリーズを提供します。"
+    assert diligence.ocr_readability_issues(normalized) == []
 
 
 def test_622_separate_ownership_and_seller_tables_are_joined_deterministically():

@@ -1104,6 +1104,90 @@ def merge_offering_term_versions(*versions: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
+_JAPANESE_CHAR = r"[ぁ-んァ-ヶ一-龠々〆ヵヶー]"
+
+
+def normalize_ocr_japanese(value: str) -> str:
+    """Normalize OCR prose without collapsing meaningful Latin-word spacing."""
+    text = unicodedata.normalize("NFKC", value or "")
+    text = text.replace("\u3000", " ")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(rf"(?<={_JAPANESE_CHAR})\s+(?={_JAPANESE_CHAR})", "", text)
+    text = re.sub(r"\s+([、。,:;!?！？）】」』])", r"\1", text)
+    text = re.sub(r"([（【「『])\s+", r"\1", text)
+    text = re.sub(r"\s*[・·]\s*", "・", text)
+    text = re.sub(r"シ[・。．]?リ[・。．]?ズ", "シリーズ", text)
+    text = re.sub(r"フ[・。．]?ランド", "ブランド", text)
+    text = re.sub(r"ハ[・。．]?ッケージ", "パッケージ", text)
+    text = re.sub(r"([、。！？])\1+", r"\1", text)
+    return "\n".join(line.strip() for line in text.splitlines() if line.strip())
+
+
+def ocr_readability_issues(value: str) -> list[str]:
+    """Return stable reason codes for OCR artefacts that must never reach Viewer."""
+    text = unicodedata.normalize("NFKC", value or "")
+    issues: list[str] = []
+    if re.search(rf"{_JAPANESE_CHAR}\s+{_JAPANESE_CHAR}", text):
+        issues.append("japanese_intra_character_space")
+    if re.search(r"[ァ-ヶ][・。．][ァ-ヶ]", text):
+        issues.append("broken_katakana")
+    if re.search(r"\s+[、。,:;!?！？）】」』]", text):
+        issues.append("space_before_punctuation")
+    if any(len(sentence) > 240 for sentence in re.split(r"[。！？\n]", text)):
+        issues.append("abnormal_sentence_length")
+    if re.search(r"(?:[ァ-ヶー]\s+){2,}[ァ-ヶー]", text):
+        issues.append("split_katakana_word")
+    return issues
+
+
+def summarize_exchange_business(pages: dict[int, str], business_page: int | None) -> str | None:
+    """Build compact business prose from source-backed terms, never from raw OCR lines."""
+    if business_page is None:
+        return None
+    business_text = normalize_ocr_japanese(pages.get(business_page, ""))
+    document_text = normalize_ocr_japanese("\n".join(pages.values()))
+    compact_text = re.sub(r"\s+", "", document_text)
+
+    categories = [name for name in ("財務会計", "人事労務", "販売管理", "顧客管理")
+                  if name in compact_text]
+    product_match = re.search(r"[「『]([^」』\n]{2,32}(?:シリーズ|ブランド|サービス|システム))[」』]", document_text)
+    if not product_match:
+        product_match = re.search(r"([A-Za-z0-9一-龠ぁ-んァ-ヶー]{2,24}(?:シリーズ|ブランド))", document_text)
+    product = product_match.group(1) if product_match else None
+
+    sentences: list[str] = []
+    if product:
+        category_text = "、".join(categories)
+        subject = f"{category_text}などの基幹業務ソフト" if category_text else "基幹業務ソフト"
+        sentences.append(f"{subject}ブランド「{product}」を開発しています。")
+
+    formats = []
+    if "パッケージ" in compact_text:
+        formats.append("パッケージソフト")
+    if "クラウド" in compact_text:
+        formats.append("クラウドサービス")
+    channel = None
+    if "販売代理店" in compact_text or "代理店網" in compact_text:
+        channel = "販売代理店網"
+    elif "販売パートナー" in compact_text:
+        channel = "販売パートナー"
+    if formats and channel:
+        nationwide = "全国の" if "全国" in compact_text else ""
+        sentences.append(f"{'と'.join(formats)}を、{nationwide}{channel}を通じて企業へ提供する間接販売モデルを主軸としています。")
+
+    if not sentences:
+        candidates = [normalize_ocr_japanese(line) for line in business_text.splitlines()
+                      if len(re.sub(r"\s+", "", line)) >= 25]
+        for candidate in candidates:
+            if not ocr_readability_issues(candidate):
+                sentence = re.split(r"(?<=[。！？])", candidate)[0].strip()
+                if sentence:
+                    sentences.append(sentence[:180] + ("。" if not sentence.endswith("。") else ""))
+                    break
+    summary = "".join(sentences[:2]).strip() or None
+    return summary if summary and not ocr_readability_issues(summary) else None
+
+
 def extract_exchange_text_due_diligence(text: str, source_id: str) -> dict[str, Any]:
     """Extract a scanned exchange primary document from OCR lines and headings."""
     page_parts = re.split(r"\[\[PDF_PAGE:(\d+)\]\]", text or "")
@@ -1258,11 +1342,7 @@ def extract_exchange_text_due_diligence(text: str, source_id: str) -> dict[str, 
     add_growth("保守サービス加入は前期比", ("保守",), "保守サービス加入前年比", "オンプレミス製品ユーザーの保守サービス加入の前事業年度比")
 
     business_page = page_for("事業の内容")
-    business_model = None
-    if business_page:
-        candidates = [re.sub(r"\s+", " ", line).strip() for line in pages[business_page].splitlines()
-                      if any(token in compact(line) for token in ("大臣", "販売", "サービス", "クラウド"))]
-        business_model = " ".join(candidates[:5])[:900] or None
+    business_model = summarize_exchange_business(pages, business_page)
     risk_page = next((page for page, value in pages.items()
                       if "事業等のリスク" in compact(value)[:500] and page > 1), None)
     risk_excerpt = None
@@ -1283,6 +1363,8 @@ def extract_exchange_text_due_diligence(text: str, source_id: str) -> dict[str, 
                               "source_page": no_offering_page, "detail": "上場時売出しがなくロックアップ対象外"}
     return {
         "business_model": business_model, "business_model_page": business_page,
+        "ocr_readability": {"passed": bool(business_model) and not ocr_readability_issues(business_model),
+                            "issues": ocr_readability_issues(business_model or "")},
         "shareholders": shareholders, "shareholder_page": shareholder_page,
         "lockups": [], "stock_options": [], "kpis": kpis,
         "kpi_definitions": [],

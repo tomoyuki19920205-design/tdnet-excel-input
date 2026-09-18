@@ -501,9 +501,63 @@ def _source_link(source: dict[str, Any], pages: str = "") -> str:
 def _fact_citation(fact: dict[str, Any], manifests: list[dict[str, Any]]) -> str:
     source = next((item for item in manifests if item.get("source_id") == fact.get("source_id")), None)
     if not source:
-        return "[出典未解決]"
+        return ""
     page = str(fact.get("source_page") or fact.get("pdf_page") or "")
     return _source_link(source, page)
+
+
+def _table_fmt(value: Any, digits: int = 3) -> str:
+    return "―" if value is None else _fmt(value, digits)
+
+
+def _period_label(period: Any, quarter: str | None = None) -> str:
+    value = str(period or "")
+    match = re.match(r"(20\d{2})-(\d{2})-(\d{2})", value)
+    label = f"{match.group(1)}/{match.group(2)}期" if match else value
+    if quarter and quarter != "FY":
+        label += f" {quarter}累計"
+    return label
+
+
+def _date_label(value: Any) -> str:
+    match = re.match(r"(20\d{2})-(\d{2})-(\d{2})", str(value or ""))
+    return f"{match.group(1)}年{int(match.group(2))}月{int(match.group(3))}日" if match else str(value or "")
+
+
+def _compact_sentence(value: Any, limit: int = 180) -> str:
+    text = unicodedata.normalize("NFKC", str(value or "")).strip()
+    text = re.sub(r"\s+", " ", text)
+    sentences = [part.strip() for part in re.split(r"(?<=[。！？])", text) if part.strip()]
+    result = "".join(sentences[:2]) if sentences else text
+    return result if len(result) <= limit else result[:limit].rstrip("、 ,") + "…"
+
+
+def _append_section(lines: list[str], title: str, body: list[str]) -> None:
+    content = [line for line in body if line is not None]
+    if not any(line.strip() for line in content):
+        return
+    if lines and lines[-1] != "":
+        lines.append("")
+    lines.extend([f"## {title}", *content])
+
+
+def _source_note(source: dict[str, Any] | None) -> str:
+    return f"出典: {_source_link(source)}" if source else ""
+
+
+def _display_kpis(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Suppress rounded duplicates while retaining genuinely different KPI definitions."""
+    selected: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for row in rows:
+        name = re.sub(r"（表(?:・[^）]*)?）", "", str(row.get("metric_name_normalized") or row.get("metric_name_original") or ""))
+        key = (name, row.get("as_of_date"), row.get("period_start"), row.get("period_end"),
+               row.get("cumulative_or_period"))
+        current = selected.get(key)
+        exact = not str(row.get("unit_original") or "").startswith("万")
+        current_exact = current is not None and not str(current.get("unit_original") or "").startswith("万")
+        if current is None or (exact and not current_exact):
+            selected[key] = row
+    return list(selected.values())
 
 
 def render_report(*, ticker: str, company_name: str, listing_date: str, market: str | None,
@@ -513,245 +567,220 @@ def render_report(*, ticker: str, company_name: str, listing_date: str, market: 
                   completeness_gate: dict[str, Any] | None = None) -> str:
     diligence = diligence or {}
     absence_evidence = diligence.get("absence_evidence", {})
-    sources_ok = [source for source in manifests if source["fetch_status"] == "success"]
-    financial_source = next((source for source in sources_ok if "決算情報" in source["title"]), sources_ok[0] if sources_ok else None)
-    citation = _source_link(financial_source) if financial_source else "[未確認]"
+    sources_ok = [source for source in manifests if source.get("fetch_status") == "success"]
+    financial_source = next((source for source in sources_ok if "決算情報" in source.get("title", "")),
+                            sources_ok[0] if sources_ok else None)
+    listing_source = next((source for source in sources_ok if "新規上場会社情報" in source.get("title", "")), None)
     calc_by_name = {row["name"]: row for row in calculations}
     terms = diligence.get("offering_terms", {})
     actuals = [row for row in financials if row["kind"] == "actual"]
     forecasts = [row for row in financials if row["kind"] == "forecast"]
-    lines = [f"# {company_name}（{ticker}）IPO分析", "", f"- 作成日時: {generated_at}",
-             f"- 上場日: {listing_date}", f"- 市場: {market or '未確認'}", "- 決算期: 資料の各期間欄を参照",
-             "- 連結／単体: 資料上確認できず", "- 会計基準: 資料上確認できず",
-             f"- 調査状態: {status}", f"- 使用資料数: {len(sources_ok)}",
-             "- 注意: 添付収録資料に基づく上場時点の分析であり、現在株価の分析ではありません。", "",
-             "## 目次", *[f"- {title}" for title in SECTION_TITLES], ""]
-    lines += ["## 01 基本情報", f"- [確認済み] 証券コード: {ticker}", f"- [確認済み] 上場日: {listing_date}",
-              f"- [確認済み] 上場市場: {market or '未確認'}", "- [未確認] 設立日、本店所在地、代表者、主幹事、監査法人はsource manifestの会社概要を参照。", ""]
+    holders = diligence.get("shareholders", [])
+    lockups = diligence.get("lockups", [])
+    options = diligence.get("stock_options", [])
+    lines: list[str] = []
+
+    basic = [f"- 証券コード: {ticker}", f"- 上場日: {_date_label(listing_date)}"]
+    if market:
+        basic.append(f"- 上場市場: {market}")
+    if listing_source:
+        basic.append(_source_note(listing_source))
+    _append_section(lines, "01 基本情報", basic)
+
+    business_body: list[str] = []
     business = diligence.get("business_model")
-    lines += ["## 02 事業内容"]
+    business_fact = {"source_id": diligence.get("source_id"), "pdf_page": diligence.get("business_model_page")}
     if business:
-        business_fact = {"source_id": diligence.get("source_id"), "pdf_page": diligence.get("business_model_page")}
-        lines.append(f"- [事業モデル・確認済み] {business} {_fact_citation(business_fact, manifests)}")
-    if diligence.get("single_segment"):
-        segment_fact = {"source_id": diligence.get("source_id"), "pdf_page": diligence.get("business_model_page")}
-        lines.append(f"- [事業モデル・確認済み] {diligence['single_segment']} {_fact_citation(segment_fact, manifests)}")
-    if not business:
-        lines.append("- [解析未完了] 事業説明の構造化抽出を完了できませんでした。")
-    lines.append("")
-    lines += ["## 03 業績実績", "|期間|区分|売上高|売上総利益|営業利益|経常利益|純利益|EPS|出典|",
-              "|---|---|---:|---:|---:|---:|---:|---:|---|"]
-    fy_actuals = [row for row in actuals if row["quarter"] == "FY"]
-    latest_actual = max((row["period"] for row in fy_actuals), default=None)
-    for row in actuals:
-        m = row["metrics"]
-        period_label = "直近通期実績" if row["quarter"] == "FY" and row["period"] == latest_actual else ("前期比較実績" if row["quarter"] == "FY" else "累計実績")
-        lines.append(f"|{row['period']} {row['quarter']}|{period_label}|{_fmt(m.get('sales'))}百万円|{_fmt(m.get('gross_profit'))}百万円|{_fmt(m.get('operating_profit'))}百万円|{_fmt(m.get('ordinary_profit'))}百万円|{_fmt(m.get('net_income'))}百万円|{_fmt(m.get('eps'),2)}円|{citation}|")
-    lines += ["", "## 04 業績予想・配当・株価指標"]
+        business_body.append(f"- {_compact_sentence(business, 280)} {_fact_citation(business_fact, manifests)}".rstrip())
+    if diligence.get("single_segment") and diligence["single_segment"] not in str(business):
+        business_body.append(f"- {_compact_sentence(diligence['single_segment'])} {_fact_citation(business_fact, manifests)}".rstrip())
+    _append_section(lines, "02 事業内容", business_body)
+
+    if actuals:
+        body = ["金額：百万円、EPS：円", "", "|期間|区分|売上高|営業利益|純利益|EPS|",
+                "|---|---|---:|---:|---:|---:|"]
+        fy_actuals = [row for row in actuals if row["quarter"] == "FY"]
+        latest_actual = max((row["period"] for row in fy_actuals), default=None)
+        for row in actuals:
+            metrics = row["metrics"]
+            category = ("直近通期実績" if row["quarter"] == "FY" and row["period"] == latest_actual
+                        else "前期実績" if row["quarter"] == "FY" else "累計実績")
+            body.append(f"|{_period_label(row['period'], row['quarter'])}|{category}|{_table_fmt(metrics.get('sales'))}|"
+                        f"{_table_fmt(metrics.get('operating_profit'))}|{_table_fmt(metrics.get('net_income'))}|"
+                        f"{_table_fmt(metrics.get('eps'), 2)}|")
+        if financial_source:
+            body += ["", _source_note(financial_source)]
+        _append_section(lines, "03 業績実績", body)
+
     if forecasts:
-        lines += ["|期間|売上高|営業利益|経常利益|純利益|EPS|出典|", "|---|---:|---:|---:|---:|---:|---|"]
+        body = ["金額：百万円、EPS：円", "", "|期間|区分|売上高|営業利益|純利益|EPS|",
+                "|---|---|---:|---:|---:|---:|"]
         for row in forecasts:
-            m = row["metrics"]
-            lines.append(f"|{row['period']} {row['quarter']}|{_fmt(m.get('sales'))}百万円|{_fmt(m.get('operating_profit'))}百万円|{_fmt(m.get('ordinary_profit'))}百万円|{_fmt(m.get('net_income'))}百万円|{_fmt(m.get('eps'),2)}円|{citation}|")
-    else:
-        lines.append("- [未確認] 会社公表予想を確認できませんでした。")
-    lines += ["- 配当予想、公開価格ベースPER・PSRは確認できた資料の範囲でのみ表示します。", "",
-              "## 05 財務・キャッシュフロー"]
-    position = diligence.get("financial_position", {})
-    financial_facts = diligence.get("financial_facts", [])
-    if financial_facts:
-        groups: dict[tuple[Any, ...], dict[str, Any]] = {}
-        for fact in financial_facts:
-            key = (fact.get("period_start"), fact.get("period_end"), fact.get("as_of_date"),
-                   fact.get("period_type"), fact.get("consolidation_scope"), fact.get("accounting_standard"),
-                   fact.get("statement_type"))
-            group = groups.setdefault(key, {"facts": {}, "sample": fact})
-            group["facts"][fact["metric_name"]] = fact
-        for key, group in sorted(groups.items(), key=lambda item: (item[0][2] or item[0][1] or "")):
-            start, end, as_of, period_type, scope, standard, statement_type = key
-            metrics = group["facts"]
-            label = f"{as_of}時点BS" if statement_type == "BS" else f"{start}〜{end} {'中間期' if period_type == 'interim' else '通期'}CF"
-            lines.append(f"### {label}（{scope}／{standard}）")
-            if statement_type == "BS":
-                total = metrics.get("total_assets_million_yen", {}).get("value_million_yen")
-                net = metrics.get("net_assets_million_yen", {}).get("value_million_yen")
-                cash = metrics.get("cash_million_yen", {}).get("value_million_yen")
-                current = metrics.get("current_debt_million_yen", {}).get("value_million_yen")
-                long_term = metrics.get("long_term_debt_million_yen", {}).get("value_million_yen")
-                debt = (current or 0) + (long_term or 0) if current is not None or long_term is not None else None
-                equity = net / total * 100 if total and net is not None else None
-                lines.append(f"- 総資産 {_fmt(total)}百万円 / 純資産 {_fmt(net)}百万円 / 自己資本比率相当 {_fmt(equity,2)}% {_fact_citation(group['sample'], manifests)}")
-                lines.append(f"- 現金及び預金 {_fmt(cash)}百万円 / 有利子負債 {_fmt(debt)}百万円 {_fact_citation(group['sample'], manifests)}")
-            else:
-                lines.append(
-                    f"- 営業CF {_fmt(metrics.get('operating_cf_million_yen', {}).get('value_million_yen'))}百万円 / "
-                    f"投資CF {_fmt(metrics.get('investing_cf_million_yen', {}).get('value_million_yen'))}百万円 / "
-                    f"財務CF {_fmt(metrics.get('financing_cf_million_yen', {}).get('value_million_yen'))}百万円 "
-                    f"{_fact_citation(group['sample'], manifests)}"
-                )
-                if "income_taxes_deferred_million_yen" in metrics:
-                    lines.append(f"- 法人税等調整額 {_fmt(metrics['income_taxes_deferred_million_yen']['value_million_yen'])}百万円 {_fact_citation(metrics['income_taxes_deferred_million_yen'], manifests)}")
-    else:
-        lines.append("- [解析未完了] BS・CFを公式資料から構造化できませんでした。")
-    lines += ["", "## 06 公募・売出し・公開規模"]
+            metrics = row["metrics"]
+            category = "通期予想" if row["quarter"] == "FY" else "累計予想"
+            body.append(f"|{_period_label(row['period'], row['quarter'])}|{category}|{_table_fmt(metrics.get('sales'))}|"
+                        f"{_table_fmt(metrics.get('operating_profit'))}|{_table_fmt(metrics.get('net_income'))}|"
+                        f"{_table_fmt(metrics.get('eps'), 2)}|")
+        if financial_source:
+            body += ["", _source_note(financial_source)]
+        _append_section(lines, "04 業績予想", body)
+
+    offering_body: list[str] = []
     if offering.get("offering_price") is not None:
-        lines += [f"- [確認済み] 公開価格: {_fmt(offering['offering_price'],0)}円",
-                  f"- [確認済み] 公募株数: {_fmt(offering.get('public_offering_shares'),0)}株",
-                  f"- [確認済み] 売出株数: {_fmt(offering.get('secondary_shares'),0)}株",
-                  f"- [確認済み] OA株数: {_fmt(offering.get('oa_shares'),0)}株"]
-        if terms.get("underwriting_price") is not None:
-            tcite = _fact_citation(terms, manifests)
-            lines += [f"- 引受価額: {_fmt(terms.get('underwriting_price'),2)}円 {tcite}",
-                      f"- 会社法上の払込金額: {_fmt(terms.get('company_law_payment_price'),2)}円 {tcite}",
-                      f"- 資本組入額（1株当たり）: {_fmt(terms.get('capital_per_share'),2)}円 {tcite}",
-                      f"- 差引手取概算額: {_fmt(terms.get('net_proceeds_thousand_yen'),0)}千円 {tcite}"]
-        for name, label in (("public_shares_including_oa", "公開株数（OA含む）"), ("absorption_amount_jpy", "吸収金額"),
-                            ("market_cap_jpy", "公開時時価総額"), ("public_float_ratio_pct", "公開株比率")):
-            if name in calc_by_name:
-                row = calc_by_name[name]
-                lines.append(f"- [計算値] {label}: {_fmt(row['value'],3)} {row['unit']}（式: `{row['formula']}`）")
-        if "new_issue_gross_jpy" in calc_by_name:
-            lines.append(f"- [計算値] 公募株数×公開価格による公開価格ベース金額: {_fmt(calc_by_name['new_issue_gross_jpy']['value'],0)}円")
-        if "secondary_gross_jpy" in calc_by_name:
-            lines.append(f"- [計算値] 売出株数（OA除く）×公開価格による公開価格ベース金額: {_fmt(calc_by_name['secondary_gross_jpy']['value'],0)}円")
+        for key, label, unit in (("offering_price", "公開価格", "円"),
+                                 ("public_offering_shares", "公募株数", "株"),
+                                 ("secondary_shares", "売出株数", "株"), ("oa_shares", "OA株数", "株")):
+            if offering.get(key) is not None:
+                offering_body.append(f"- {label}: {_fmt(offering[key], 0)}{unit}")
+        for key, label, unit in (("underwriting_price", "引受価額", "円"),
+                                 ("company_law_payment_price", "会社法上の払込金額", "円"),
+                                 ("capital_per_share", "資本組入額（1株当たり）", "円"),
+                                 ("net_proceeds_thousand_yen", "差引手取概算額", "千円")):
+            if terms.get(key) is not None:
+                offering_body.append(f"- {label}: {_fmt(terms[key], 2 if unit == '円' else 0)}{unit} {_fact_citation(terms, manifests)}".rstrip())
+        for key, label, divisor, unit in (("public_shares_including_oa", "公開株数（OA含む）", 1, "株"),
+                                          ("absorption_amount_jpy", "吸収金額", 1_000_000, "百万円"),
+                                          ("market_cap_jpy", "公開時時価総額", 1_000_000, "百万円"),
+                                          ("public_float_ratio_pct", "公開株比率", 1, "%")):
+            if key in calc_by_name:
+                offering_body.append(f"- {label}: {_fmt(calc_by_name[key]['value'] / divisor, 2)}{unit}")
+        if listing_source:
+            offering_body.append(_source_note(listing_source))
     elif offering.get("not_applicable_evidence"):
         evidence = offering["not_applicable_evidence"]
-        source = next((item for item in manifests if item.get("source_id") == evidence.get("source_id")), None)
-        citation = f"[{evidence['source_id']} p.{evidence['pdf_page']}]({source['url']})" if source else ""
-        lines.append(f"- [NOT_APPLICABLE] {evidence['detail']} {citation}")
-    else:
-        lines.append("- [未確認] 公募・売出し条件を構造化確認できませんでした。")
-    lines += ["", "## 07 需給・重要注意点"]
-    if diligence.get("effective_potential_shares"):
-        lines.append(f"- [需給・計算値] 潜在株式合計は{_fmt(diligence['effective_potential_shares'],0)}株、上場時株式数比は{_fmt(diligence.get('potential_dilution_pct_of_listing_shares'),2)}%。")
+        offering_body.append(f"- 公募・売出しなし {_fact_citation(evidence, manifests)}".rstrip())
+    _append_section(lines, "06 公募・売出し・公開規模", offering_body)
+
+    supply_body: list[str] = []
+    if diligence.get("effective_potential_shares") is not None:
+        supply_body.append(f"- 潜在株式は{_fmt(diligence['effective_potential_shares'], 0)}株、上場時株式数比は"
+                           f"{_table_fmt(diligence.get('potential_dilution_pct_of_listing_shares'), 2)}%。")
     if "public_float_ratio_pct" in calc_by_name:
-        row = calc_by_name["public_float_ratio_pct"]
-        lines.append(f"- [需給・計算値] OAを含む公開株比率は{_fmt(row['value'],2)}%（式: `{row['formula']}`）。")
-    if diligence.get("lockups"):
-        periods = "・".join(sorted({f"{row['days']}日" for row in diligence["lockups"]}, reverse=True))
-        lines.append(f"- [需給・確認済み] 売却制約は{periods}の複数期間に分かれ、価格解除条件の有無も異なります。 {_fact_citation(diligence['lockups'][0], manifests)}")
-    lines += ["", "## 08 主要株主と売出後残高"]
-    holders = diligence.get("shareholders", [])
+        supply_body.append(f"- OAを含む公開株比率は{_fmt(calc_by_name['public_float_ratio_pct']['value'], 2)}%。")
+    if lockups:
+        periods = "・".join(sorted({f"{row['days']}日" for row in lockups}, reverse=True))
+        supply_body.append(f"- ロックアップは{periods}。価格解除条件は株主ごとに異なります。 {_fact_citation(lockups[0], manifests)}".rstrip())
+    if not supply_body and offering.get("not_applicable_evidence"):
+        supply_body.append("- 公募・売出しなし。")
+    _append_section(lines, "07 需給・重要注意点", supply_body)
+
     if holders:
-        lines += ["|株主|上場前保有株|売出・親引け増減|売出後残高|出典|", "|---|---:|---:|---:|---|"]
+        body = ["|株主|上場前保有株|売出・親引け増減|売出後残高|", "|---|---:|---:|---:|"]
         for row in holders:
             change = -row["sold_or_allotted_shares"]
-            lines.append(f"|{row['name']}|{_fmt(row['before_shares'],0)}|{change:+,.0f}|{_fmt(row['after_shares'],0)}|{_fact_citation(row, manifests)}|")
-    else:
-        absence = absence_evidence.get("shareholders_sellers")
-        lines.append(f"- [{absence['reason_code']}] {absence['detail']} {_fact_citation(absence, manifests)}" if absence else "- [解析未完了] 主要株主表を構造化できませんでした。")
-    lines += ["", "## 09 期間別ロックアップ"]
-    lockups = diligence.get("lockups", [])
+            body.append(f"|{row['name']}|{_fmt(row['before_shares'], 0)}|{change:+,.0f}|{_fmt(row['after_shares'], 0)}|")
+        refs = list(dict.fromkeys(_fact_citation(row, manifests) for row in holders if _fact_citation(row, manifests)))
+        if refs:
+            body += ["", "出典: " + "、".join(refs)]
+        _append_section(lines, "08 主要株主と売出後残高", body)
+
+    lockup_body: list[str] = []
     if lockups:
-        lines += ["|期間|期限|価格解除|対象|出典|", "|---:|---|---|---|---|"]
+        lockup_body = ["|期間|期限|価格解除|対象|", "|---:|---|---|---|"]
         for row in lockups:
-            release = f"公開価格の{row['price_release_multiple']}倍" if row.get("price_release_multiple") else "価格解除なし"
-            lines.append(f"|{row['days']}日|{row['until']}|{release}|{row['holders_text']}|{_fact_citation(row, manifests)}|")
-    else:
-        absence = absence_evidence.get("lockup")
-        lines.append(f"- [{absence['reason_code']}] {absence['detail']} {_fact_citation(absence, manifests)}" if absence else "- [解析未完了] ロックアップ条項を構造化できませんでした。")
-    lines += ["", "## 10 OA・親引け"]
-    if terms:
-        lines += [f"- OA／グリーンシュー対象株数: {_fmt(terms.get('greenshoe_shares', offering.get('oa_shares')),0)}株",
-                  f"- 親引け株数: {_fmt(terms.get('parent_allotment_shares'),0)}株 / 条件: {terms.get('parent_holding_condition') or '解析未完了'} {_fact_citation(terms, manifests)}"]
-        if terms.get("oa_lenders"):
-            lines.append(f"- OA貸株元: {terms['oa_lenders']} {_fact_citation(terms, manifests)}")
-        if terms.get("greenshoe_exercise_deadline"):
-            lines.append(f"- グリーンシュー行使期限: {terms['greenshoe_exercise_deadline']} / 対象上限: {_fmt(terms.get('greenshoe_shares'),0)}株 {_fact_citation(terms, manifests)}")
-        if terms.get("syndicate_cover_period"):
-            lines.append(f"- シンジケートカバー取引期間: {terms['syndicate_cover_period']} {_fact_citation(terms, manifests)}")
-    else:
-        lines.append("- [解析未完了] OA・親引け条件を構造化できませんでした。")
-    lines += ["", "## 11 売却可能株・VC"]
+            release = f"公開価格の{row['price_release_multiple']}倍" if row.get("price_release_multiple") else "なし"
+            lockup_body.append(f"|{row['days']}日|{row['until']}|{release}|{_compact_sentence(row.get('holders_text'), 100)}|")
+        lockup_body += ["", "出典: " + "、".join(dict.fromkeys(_fact_citation(row, manifests) for row in lockups if _fact_citation(row, manifests)))]
+    elif absence_evidence.get("lockup"):
+        lockup_body = [f"- ロックアップ対象なし {_fact_citation(absence_evidence['lockup'], manifests)}".rstrip()]
+    _append_section(lines, "09 期間別ロックアップ", lockup_body)
+
+    terms_body: list[str] = []
+    term_values = (("greenshoe_shares", "OA／グリーンシュー対象株数", "株"),
+                   ("parent_allotment_shares", "親引け株数", "株"),
+                   ("oa_lenders", "OA貸株元", ""),
+                   ("greenshoe_exercise_deadline", "グリーンシュー行使期限", ""),
+                   ("syndicate_cover_period", "シンジケートカバー取引期間", ""))
+    for key, label, unit in term_values:
+        value = terms.get(key)
+        if value is not None:
+            shown = _fmt(value, 0) if isinstance(value, (int, float)) else value
+            terms_body.append(f"- {label}: {shown}{unit} {_fact_citation(terms, manifests)}".rstrip())
+    if terms.get("parent_holding_condition"):
+        terms_body.append(f"- 親引け継続保有条件: {_compact_sentence(terms['parent_holding_condition'])} {_fact_citation(terms, manifests)}".rstrip())
+    _append_section(lines, "10 OA・親引け", terms_body)
+
     vc_rows = [row for row in holders if re.search(r"ファンド|Fund|Capital|キャピタル|ベンチャー", row["name"], re.I)]
-    if vc_rows:
-        for row in vc_rows:
-            lines.append(f"- {row['name']}: 売出後 {_fmt(row['after_shares'],0)}株（上場前 {_fmt(row['before_shares'],0)}株） {_fact_citation(row, manifests)}")
-    else:
-        lines.append("- [解析未完了] VC残存株の分類を完了できませんでした。")
-    options = diligence.get("stock_options", [])
-    lines += ["", "## 12 ストックオプション全回号"]
+    _append_section(lines, "11 売却可能株・VC", [
+        f"- {row['name']}: 売出後 {_fmt(row['after_shares'], 0)}株（上場前 {_fmt(row['before_shares'], 0)}株） {_fact_citation(row, manifests)}".rstrip()
+        for row in vc_rows])
+
+    option_body: list[str] = []
     if options:
-        lines += ["|回号|発行潜在株|失効|有効潜在株|行使価格|出典|", "|---|---:|---:|---:|---:|---|"]
+        option_body = ["|回号|発行潜在株|失効|有効潜在株|行使価格|", "|---|---:|---:|---:|---:|"]
         for row in options:
-            lines.append(f"|{row['series']}|{_fmt(row['issued_potential_shares'],0)}|{_fmt(row['forfeited_shares'],0)}|{_fmt(row['effective_potential_shares'],0)}|{_fmt(row['exercise_price_yen'],0)}円|{_fact_citation(row, manifests)}|")
-        lines.append(f"- 合計有効潜在株式: {_fmt(diligence.get('effective_potential_shares'),0)}株")
-    else:
-        absence = absence_evidence.get("stock_options")
-        lines.append(f"- [{absence['reason_code']}] {absence['detail']} {_fact_citation(absence, manifests)}" if absence else "- [解析未完了] SO表を構造化できませんでした。")
-    lines += ["", "## 13 SOの行使・売却条件"]
-    for row in options:
-        lines.append(f"- {row['series']}: {row.get('exercise_period') or '行使期間解析未完了'} {_fact_citation(row, manifests)}")
-    lines += ["", "## 14 成長性・重要KPI"]
-    for row in diligence.get("kpis", []):
-        period = row.get("as_of_date") or (
-            f"{row.get('period_start') or '開始日未記載'}〜{row.get('period_end') or '終了日未記載'}"
-        )
-        normalized = f"{_fmt(row.get('value_normalized'),2)}{row.get('unit_normalized')}"
-        original = f"{row.get('value_original')}{row.get('unit_original')}"
-        yoy = f" / 前年同期比 {row['yoy_pct']:+.1f}%" if row.get("yoy_pct") is not None else ""
-        lines.append(
-            f"- {row.get('metric_name_original')}（{row.get('metric_name_normalized')}）: "
-            f"原資料 {original} / 正規化 {normalized}（{period}、{row.get('cumulative_or_period')}）{yoy}。"
-            f"定義: {row.get('definition_note')} {_fact_citation(row, manifests)}"
-        )
-    if diligence.get("kpi_definitions"):
-        lines.append("### 資料が定義する管理指標（数値の記載がない項目を含む）")
-        for row in diligence["kpi_definitions"]:
-            lines.append(f"- {row['category']}: {row['metric_name_original']} — {row['definition_note']} {_fact_citation(row, manifests)}")
-    if not diligence.get("kpis") and not diligence.get("kpi_definitions"):
-        lines.append("- [解析未完了] KPIの定義・単位・期間を抽出できませんでした。")
-    lines += ["", "## 15 利益の質・キャッシュフロー"]
-    cf_facts = [row for row in financial_facts if row.get("statement_type") == "CF"]
-    if cf_facts:
-        cf_groups: dict[tuple[str | None, str | None], dict[str, dict[str, Any]]] = {}
-        for row in cf_facts:
-            cf_groups.setdefault((row.get("period_start"), row.get("period_end")), {})[row["metric_name"]] = row
-        for (start, end), metrics in sorted(cf_groups.items()):
-            operating = metrics.get("operating_cf_million_yen")
-            if operating:
-                lines.append(f"- {start}〜{end}: 営業CF {_fmt(operating['value_million_yen'])}百万円。実績期間を揃えて評価します。 {_fact_citation(operating, manifests)}")
-            deferred = metrics.get("income_taxes_deferred_million_yen")
-            if deferred:
-                direction = "純利益を押し上げる" if deferred["value_million_yen"] < 0 else "純利益を押し下げる"
-                lines.append(f"- {start}〜{end}: 法人税等調整額 {_fmt(deferred['value_million_yen'])}百万円（{direction}方向）。 {_fact_citation(deferred, manifests)}")
-    else:
-        lines.append("- [解析未完了] 利益の質を判定するCF・税効果情報が不足しています。")
-    lines += ["", "## 16 競争・主要顧客・海外"]
-    concentration_fact = {"source_id": diligence.get("source_id"), "pdf_page": diligence.get("customer_concentration_page")}
-    lines.append(f"- [顧客依存・確認済み] {diligence.get('customer_concentration')} {_fact_citation(concentration_fact, manifests)}" if diligence.get("customer_concentration") else "- [解析未完了] 主要顧客依存を構造化できませんでした。")
-    segment_fact = {"source_id": diligence.get("source_id"), "pdf_page": diligence.get("business_model_page")}
-    lines.append(f"- [競争構造・確認済み] {diligence.get('single_segment')} {_fact_citation(segment_fact, manifests)}" if diligence.get("single_segment") else "- [解析未完了] セグメント構成を構造化できませんでした。")
-    lines += ["", "## 17 強み・成長投資"]
-    if terms.get("net_proceeds_thousand_yen"):
-        lines.append(f"- [成長投資・確認済み] 差引手取概算額 {_fmt(terms['net_proceeds_thousand_yen'],0)}千円。 {_fact_citation(terms, manifests)}")
-        if terms.get("proceeds_use"):
-            lines.append(f"- [成長投資・確認済み] {terms['proceeds_use']} {_fact_citation(terms, manifests)}")
-        if terms.get("growth_investment_allocation"):
-            lines.append(f"- [成長投資・確認済み] 開発人材の人件費・外部専門人材の業務委託費への配分は{terms['growth_investment_allocation']}。 {_fact_citation(terms, manifests)}")
-    else:
-        lines.append("- [解析未完了] 調達資金使途を構造化できませんでした。")
-    lines += ["", "## 18 懸念・技術／AIの影響"]
-    risk_fact = {"source_id": diligence.get("source_id"), "pdf_page": diligence.get("risk_page")}
-    lines.append(f"- [リスク・確認済み] {diligence.get('risk_excerpt')} {_fact_citation(risk_fact, manifests)}" if diligence.get("risk_excerpt") else "- [解析未完了] 公式資料に基づく主要リスクの構造化が未完了です。")
-    technology_fact = {"source_id": diligence.get("source_id"), "pdf_page": diligence.get("technology_page")}
+            option_body.append(f"|{row['series']}|{_table_fmt(row.get('issued_potential_shares'), 0)}|"
+                               f"{_table_fmt(row.get('forfeited_shares'), 0)}|{_table_fmt(row.get('effective_potential_shares'), 0)}|"
+                               f"{_table_fmt(row.get('exercise_price_yen'), 0)}|")
+        if diligence.get("effective_potential_shares") is not None:
+            option_body += ["", f"- 合計有効潜在株式: {_fmt(diligence['effective_potential_shares'], 0)}株"]
+        refs = list(dict.fromkeys(_fact_citation(row, manifests) for row in options if _fact_citation(row, manifests)))
+        if refs:
+            option_body.append("出典: " + "、".join(refs))
+    elif absence_evidence.get("stock_options"):
+        option_body = [f"- SOなし {_fact_citation(absence_evidence['stock_options'], manifests)}".rstrip()]
+    _append_section(lines, "12 ストックオプション", option_body)
+
+    _append_section(lines, "13 SOの行使・売却条件", [
+        f"- {row['series']}: {_compact_sentence(row['exercise_period'])} {_fact_citation(row, manifests)}".rstrip()
+        for row in options if row.get("exercise_period")])
+
+    kpi_body: list[str] = []
+    for row in _display_kpis(diligence.get("kpis", [])):
+        period = _date_label(row.get("as_of_date")) if row.get("as_of_date") else (
+            f"{_date_label(row.get('period_start'))}〜{_date_label(row.get('period_end'))}")
+        value = f"{row.get('value_original')}{row.get('unit_original')}"
+        yoy = f"、前年比{row['yoy_pct']:+.1f}%" if row.get("yoy_pct") is not None else ""
+        definition = _compact_sentence(row.get("definition_note"), 110)
+        note = f"。{definition}" if definition else ""
+        kpi_body.append(f"- {row.get('metric_name_original')}: {value}（{period}{yoy}）{note} {_fact_citation(row, manifests)}".rstrip())
+    for row in diligence.get("kpi_definitions", []):
+        kpi_body.append(f"- {row['metric_name_original']}: {_compact_sentence(row['definition_note'], 120)} {_fact_citation(row, manifests)}".rstrip())
+    _append_section(lines, "14 成長性・重要KPI", kpi_body)
+
+    concentration_body: list[str] = []
+    if diligence.get("customer_concentration"):
+        fact = {"source_id": diligence.get("source_id"), "pdf_page": diligence.get("customer_concentration_page")}
+        concentration_body.append(f"- {_compact_sentence(diligence['customer_concentration'])} {_fact_citation(fact, manifests)}".rstrip())
+    _append_section(lines, "16 競争・主要顧客・海外", concentration_body)
+
+    growth_body: list[str] = []
+    if terms.get("net_proceeds_thousand_yen") is not None:
+        growth_body.append(f"- 差引手取概算額: {_fmt(terms['net_proceeds_thousand_yen'], 0)}千円 {_fact_citation(terms, manifests)}".rstrip())
+    for key in ("proceeds_use", "growth_investment_allocation"):
+        if terms.get(key):
+            growth_body.append(f"- {_compact_sentence(terms[key])} {_fact_citation(terms, manifests)}".rstrip())
+    _append_section(lines, "17 強み・成長投資", growth_body)
+
+    risk_body: list[str] = []
+    if diligence.get("risk_excerpt"):
+        fact = {"source_id": diligence.get("source_id"), "pdf_page": diligence.get("risk_page")}
+        risk_body.append(f"- {_compact_sentence(diligence['risk_excerpt'])} {_fact_citation(fact, manifests)}".rstrip())
     if diligence.get("technology_excerpt"):
-        lines.append(f"- [AI・技術変化・確認済み] {diligence['technology_excerpt']} {_fact_citation(technology_fact, manifests)}")
-    if terms.get("growth_investment_allocation"):
-        lines.append(f"- [技術変化・確認済み] プロダクト機能強化と開発体制強化に{terms['growth_investment_allocation']}を充当予定です。 {_fact_citation(terms, manifests)}")
-    lines.append("- [AI影響・確認範囲] AI固有の収益効果や投資額は構造化確認できていないため、推測値は表示しません。")
-    lines += ["", "## 19 資料間差異・最終採用値・計算根拠",
-              "- [確認済み] 業績値は上場時決算資料の期間・実績／予想区分を維持して採用。",
-              f"- [確認済み] 届出書系列は提出日時順に照合し、最新訂正を優先（{len([s for s in manifests if '有価証券届出書' in s['title'] or '特定証券情報' in s['title']])}版）。", "",
-              "## 20 出典・未確認事項"]
-    for source in manifests:
-        suffix = f" / SHA-256 `{source['sha256']}`" if source.get("sha256") else ""
-        lines.append(f"- {source['source_id']}: [{source['title']}]({source['url']}) / {source['fetch_status']}{suffix}")
-    if completeness_gate:
-        lines += ["", "### 品質gate",
-                  f"- integrity_gate: 後段validatorで判定",
-                  f"- completeness_gate: {'PASS' if completeness_gate.get('passed') else 'FAIL'}"]
-    lines += ["", "### 解析未完了事項", *[f"- {item}" for item in missing]]
+        fact = {"source_id": diligence.get("source_id"), "pdf_page": diligence.get("technology_page")}
+        risk_body.append(f"- {_compact_sentence(diligence['technology_excerpt'])} {_fact_citation(fact, manifests)}".rstrip())
+    _append_section(lines, "18 懸念・技術／AIの影響", risk_body)
+
+    rendered = "\n".join(lines)
+    used_citations = re.findall(r"\[(P\d{2})(?: PDF p\.([^\]]+))?\]", rendered)
+    used_ids = {source_id for source_id, _ in used_citations}
+    source_body: list[str] = []
+    for source in sources_ok:
+        if source.get("source_id") not in used_ids:
+            continue
+        details = []
+        if source.get("published_at"):
+            details.append(f"公開日: {_date_label(str(source['published_at'])[:10])}")
+        pages = sorted({page.strip() for source_id, value in used_citations if source_id == source.get("source_id")
+                        for page in value.split(",") if page.strip()},
+                       key=lambda value: (0, int(value)) if value.isdigit() else (1, value))
+        if not pages:
+            pages = source.get("used_pdf_pages") or source.get("used_pages") or []
+        if pages:
+            details.append("使用ページ: " + ", ".join(f"p.{page}" for page in pages))
+        suffix = f"（{'、'.join(details)}）" if details else ""
+        source_body.append(f"- [{source['title']}]({source['url']}){suffix}")
+    _append_section(lines, "20 出典", source_body)
     return "\n".join(lines).strip() + "\n"
 
 
@@ -792,11 +821,20 @@ def validate_report(markdown: str, manifests: list[dict[str, Any]], calculations
                     financials: list[dict[str, Any]], diligence: dict[str, Any] | None = None) -> dict[str, Any]:
     errors: list[str] = []
     diligence = diligence or {}
-    for title in SECTION_TITLES:
-        if f"## {title}" not in markdown:
-            errors.append(f"missing_section:{title}")
+    if not markdown.startswith("## 01 基本情報"):
+        errors.append("report_does_not_start_with_basic_information")
+    for number in ("05", "15", "19"):
+        if re.search(rf"^## {number}\b", markdown, re.M):
+            errors.append(f"hidden_section_rendered:{number}")
+    forbidden_labels = ("[確認済み]", "[未確認]", "[計算値]", "[分析]", "[解析未完了]",
+                        "[NOT_APPLICABLE]", "作成日時:", "調査状態:", "使用資料数:", "## 目次")
+    for label in forbidden_labels:
+        if label in markdown:
+            errors.append(f"internal_label_rendered:{label}")
+    if "## 20 出典・" in markdown or "SHA-256" in markdown or "quality_gate" in markdown:
+        errors.append("technical_source_metadata_rendered")
     source_ids = {source["source_id"] for source in manifests}
-    for reference in re.findall(r"\[(P\d{2})(?: p\.[^\]]+)?\]", markdown):
+    for reference in re.findall(r"\[(P\d{2})(?:(?: PDF)? p\.[^\]]+)?\]", markdown):
         if reference not in source_ids:
             errors.append(f"unresolved_source:{reference}")
     if "base64" in markdown.lower() or re.search(r"data:image/", markdown, re.I):
@@ -805,6 +843,18 @@ def validate_report(markdown: str, manifests: list[dict[str, Any]], calculations
         errors.append("invalid_period_kind")
     if any(calc.get("unrounded_value") is None or not calc.get("formula") for calc in calculations):
         errors.append("invalid_calculation")
+    for section_number in ("03", "04"):
+        match = re.search(rf"^## {section_number}[^\n]*\n(.*?)(?=^## |\Z)", markdown, re.M | re.S)
+        if match:
+            body = match.group(1)
+            expected = "|期間|区分|売上高|営業利益|純利益|EPS|"
+            if expected not in body:
+                errors.append(f"financial_table_columns_invalid:{section_number}")
+            if any(label in body for label in ("売上総利益", "経常利益", "百万円|", "円|")):
+                errors.append(f"financial_table_is_verbose:{section_number}")
+    from src.ipo_due_diligence import ocr_readability_issues
+    for issue in ocr_readability_issues(str(diligence.get("business_model") or "")):
+        errors.append(f"ocr_readability:{issue}")
     required_financial = {
         "period_start", "period_end", "as_of_date", "period_type", "fiscal_year", "quarter",
         "consolidation_scope", "accounting_standard", "source_id", "source_page", "statement_type",
@@ -848,7 +898,9 @@ def validate_report(markdown: str, manifests: list[dict[str, Any]], calculations
                 "definition_note", "source_id", "source_page")):
             errors.append(f"kpi_definition_missing_metadata:{index}")
     return {"passed": not errors, "errors": errors, "checks": {
-        "fixed_20_sections": len([title for title in SECTION_TITLES if f"## {title}" in markdown]),
+        "visible_section_count": len(re.findall(r"^## \d{2} ", markdown, re.M)),
+        "compact_display_policy": not any(error.startswith(("hidden_section_", "internal_label_", "technical_source_", "financial_table_")) for error in errors),
+        "ocr_readability": not any(error.startswith("ocr_readability:") for error in errors),
         "all_citations_resolve": not any(error.startswith("unresolved_source") for error in errors),
         "no_embedded_images": "embedded_image_forbidden" not in errors,
         "period_kinds_valid": "invalid_period_kind" not in errors,
@@ -921,7 +973,6 @@ def build_report_payload(*, event_id: str, ticker: str, company_name: str, listi
     validation["completeness_gate"] = completeness
     if not validation["passed"] or not completeness["passed"]:
         status = "partial"
-        markdown = markdown.replace("- 調査状態: completed", "- 調査状態: partial", 1)
     key = stable_key(normalized, listing_date)
     content_hash = _sha256(markdown.encode("utf-8"))
     return {"id": stable_report_id(key), "stable_key": key, "schema_version": SCHEMA_VERSION,

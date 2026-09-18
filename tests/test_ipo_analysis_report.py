@@ -117,13 +117,17 @@ def test_report_id_is_idempotent():
     assert report.stable_report_id(key) == report.stable_report_id(key)
 
 
-def test_fixed_twenty_sections_are_always_rendered(monkeypatch):
+def test_compact_report_hides_empty_and_internal_sections(monkeypatch):
     monkeypatch.setattr(report, "generate_ai_explanation", lambda facts: ("[分析] 一次資料の範囲で事業を確認しました。", None, "test-model"))
     payload = report.build_report_payload(event_id=str(report.uuid.uuid4()), ticker="627A", company_name="アキッパ",
                                           listing_date="2026-09-18", manifests=manifests(), offering=offering(),
                                           financial_rows=financial_rows())
-    assert all(f"## {title}" in payload["report_markdown"] for title in report.SECTION_TITLES)
-    assert payload["validation_result"]["checks"]["fixed_20_sections"] == 20
+    markdown = payload["report_markdown"]
+    assert markdown.startswith("## 01 基本情報")
+    assert "## 05 " not in markdown and "## 15 " not in markdown and "## 19 " not in markdown
+    assert "## 目次" not in markdown and "作成日時:" not in markdown
+    assert all(label not in markdown for label in ("[確認済み]", "[未確認]", "[計算値]", "[分析]"))
+    assert payload["validation_result"]["checks"]["compact_display_policy"]
 
 
 def test_source_shortage_results_in_partial_without_guess(monkeypatch):
@@ -132,7 +136,9 @@ def test_source_shortage_results_in_partial_without_guess(monkeypatch):
                                           listing_date="2026-09-18", manifests=manifests()[:1], offering={},
                                           financial_rows=[])
     assert payload["status"] == "partial"
-    assert "未確認" in payload["report_markdown"]
+    assert "未確認" not in payload["report_markdown"]
+    assert "PARSER_UNSUPPORTED" not in payload["report_markdown"]
+    assert payload["report_markdown"].strip().endswith("上場日: 2026年9月18日")
 
 
 def test_every_markdown_citation_resolves(monkeypatch):
@@ -228,5 +234,28 @@ def test_ifrs_and_consolidation_are_not_inferred():
                                     market="スタンダード", status="partial", manifests=manifests(),
                                     financials=[], offering={}, calculations=[], ai_text=None,
                                     missing=["会計基準"], generated_at="2026-09-18T10:00:00+09:00")
-    assert "連結／単体: 資料上確認できず" in markdown
-    assert "会計基準: 資料上確認できず" in markdown
+    assert "連結／単体" not in markdown
+    assert "会計基準" not in markdown
+    assert "資料上確認できず" not in markdown
+
+
+def test_financial_tables_show_only_four_metrics_and_one_unit_note():
+    payload = report.build_report_payload(event_id="e", ticker="627A", company_name="アキッパ",
+                                          listing_date="2026-09-18", manifests=manifests(), offering=offering(),
+                                          financial_rows=financial_rows())
+    markdown = payload["report_markdown"]
+    assert markdown.count("|期間|区分|売上高|営業利益|純利益|EPS|") == 2
+    assert "売上総利益" not in markdown and "経常利益" not in markdown
+    assert "未確認百万円" not in markdown
+    assert "|2025/12期|直近通期実績|3,828|201|223|54.22|" in markdown
+
+
+def test_sources_section_contains_only_used_human_readable_sources():
+    payload = report.build_report_payload(event_id="e", ticker="627A", company_name="アキッパ",
+                                          listing_date="2026-09-18", manifests=manifests(), offering=offering(),
+                                          financial_rows=financial_rows())
+    markdown = payload["report_markdown"]
+    assert "## 20 出典" in markdown
+    assert "上場に伴う当社決算情報等のお知らせ" in markdown
+    assert "会社説明及び今後の戦略概要" not in markdown
+    assert "SHA-256" not in markdown and "fetch_status" not in markdown
