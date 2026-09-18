@@ -30,6 +30,7 @@ sys.path.insert(0, _PROJECT_ROOT)
 
 from lib.runtime_paths import runtime_path
 from src.config import load_config, Config
+from src.common_ticker import normalize_ticker
 from src.db import StateDB
 from src.downloader import download_document
 from src.extractor import extract_financials, extract_order_metrics, extract_segment_financials
@@ -37,6 +38,14 @@ from src.fetcher import fetch_new_disclosures
 from src.security_eligibility import classify_disclosure_security
 from src.migration.migration_db import MigrationDB
 from src.models import Status, DisclosureType
+from src.ipo_listing_financials import (
+    IPO_LISTING_FINANCIALS,
+    disclosure_identity,
+    extract_ipo_listing_financials,
+    is_ipo_listing_financial_title,
+    save_ipo_notification,
+    write_ipo_financials,
+)
 from src.utils import (
     setup_logger,
     convert_to_excel_unit,
@@ -173,6 +182,29 @@ def _process_single(
             "classification_source": security_decision.source,
         }
 
+    is_ipo_financials = (
+        item.disclosure_type == IPO_LISTING_FINANCIALS
+        or is_ipo_listing_financial_title(item.title)
+    )
+
+    # Persist the card before PL parsing and before the state short-circuit.
+    # Parser failure must not hide a valid listing notification, and replaying
+    # an already-processed document must be able to repair a missing card.
+    if is_ipo_financials:
+        try:
+            card_result = save_ipo_notification(item, dry_run=dry_run)
+            logger.info(
+                "[IPO_NOTIFICATION] ticker=%s action=%s title=%s",
+                code,
+                card_result.get("action"),
+                card_result.get("display_title", ""),
+            )
+        except Exception as exc:
+            logger.warning(
+                "[IPO_NOTIFICATION] ticker=%s save failed (PL continues): %s",
+                code, exc, exc_info=True,
+            )
+
     # 冪等性チェック
     if state_db.is_processed(disclosure_id):
         return {"status": "skipped", "detail": "処理済み", "code": code}
@@ -198,6 +230,61 @@ def _process_single(
             f"source_url={item.doc_url} status=download_failed"
         )
         return {"status": "error", "detail": "ダウンロード失敗", "code": code}
+
+    if is_ipo_financials:
+        try:
+            extraction = (
+                pre_fetched.get("ipo_extraction")
+                if pre_fetched and pre_fetched.get("ipo_extraction") is not None
+                else extract_ipo_listing_financials(doc_path)
+            )
+            if extraction.ticker and normalize_ticker(extraction.ticker) != normalize_ticker(code):
+                raise ValueError(
+                    f"ticker mismatch metadata={code} pdf={extraction.ticker}"
+                )
+            identity = disclosure_identity(item.doc_url, getattr(item, "source_doc_id", None))
+            if dry_run:
+                return {
+                    "status": "dry_run",
+                    "detail": f"{code} IPO periods={len(extraction.periods)}",
+                    "code": code,
+                    "extraction": extraction.to_dict(),
+                }
+            write_result = write_ipo_financials(
+                extraction,
+                ticker=code,
+                filing_id=identity,
+                disclosed_at=item.published_at,
+            )
+            if not write_result.get("ok"):
+                raise RuntimeError(write_result.get("error") or "canonical upsert failed")
+            state_db.record(
+                disclosure_id=disclosure_id,
+                code=code,
+                year="",
+                quarter="MULTI",
+                status=Status.SUCCESS,
+                new_values={"canonical_rows": write_result.get("rows", 0)},
+            )
+            return {
+                "status": "inserted",
+                "detail": f"{code} IPO periods={len(extraction.periods)} rows={write_result.get('rows', 0)}",
+                "code": code,
+                "canonical": write_result,
+                "extraction": extraction.to_dict(),
+            }
+        except Exception as exc:
+            logger.error("[IPO_FINANCIALS] ticker=%s failed: %s", code, exc, exc_info=True)
+            if not dry_run:
+                state_db.record(
+                    disclosure_id=disclosure_id,
+                    code=code,
+                    year="",
+                    quarter="MULTI",
+                    status=Status.PARSE_FAILED,
+                    error_detail=str(exc),
+                )
+            return {"status": "error", "detail": str(exc), "code": code}
 
     # ZIPハッシュ
     zip_hash = _sha256_file(doc_path) if os.path.isfile(doc_path) else None
@@ -827,10 +914,13 @@ def run_ingest(
             date_str=getattr(config, "start_date", None),
         )
 
-        # 決算短信のみフィルタ（予想修正は別処理）
+        # 決算短信 + IPO当日の決算情報をフィルタ（予想修正は別処理）
         target_items = [
             item for item in items
-            if item.disclosure_type == DisclosureType.FINANCIAL_STATEMENT
+            if item.disclosure_type in (
+                DisclosureType.FINANCIAL_STATEMENT,
+                IPO_LISTING_FINANCIALS,
+            )
         ]
         non_target = len(items) - len(target_items)
         forecast_in_new = sum(
@@ -868,6 +958,15 @@ def run_ingest(
             doc_path = download_document(item.doc_url, docs_dir, session=session)
             if not doc_path:
                 return None
+            if (
+                item.disclosure_type == IPO_LISTING_FINANCIALS
+                or is_ipo_listing_financial_title(item.title)
+            ):
+                return {
+                    "doc_path": doc_path,
+                    "xbrl_path": None,
+                    "ipo_extraction": extract_ipo_listing_financials(doc_path),
+                }
             xbrl_path = None
             if item.xbrl_url:
                 xbrl_path = download_document(item.xbrl_url, docs_dir, session=session)
@@ -931,7 +1030,12 @@ def run_ingest(
                     last_progress_time = current_time
 
                 # ── 旧ルートからの V2 takeover 対象除外 ──
-                if v2_takeover_active and item.ticker in v2_allowlist and item.disclosure_id:
+                if (
+                    v2_takeover_active
+                    and item.disclosure_type != IPO_LISTING_FINANCIALS
+                    and item.ticker in v2_allowlist
+                    and item.disclosure_id
+                ):
                     results.append({
                         "status": "skipped",
                         "detail": "V2_TAKEOVER_ACTIVE",
