@@ -857,8 +857,9 @@ def validate_report(markdown: str, manifests: list[dict[str, Any]], calculations
                 errors.append(f"financial_table_is_verbose:{section_number}")
     if "ocr_readability" in diligence:
         from src.ipo_due_diligence import ocr_readability_issues
-        for issue in ocr_readability_issues(str(diligence.get("business_model") or "")):
-            errors.append(f"ocr_readability:{issue}")
+        for field in ("business_model", "risk_excerpt", "technology_excerpt"):
+            for issue in ocr_readability_issues(str(diligence.get(field) or "")):
+                errors.append(f"ocr_readability:{field}:{issue}")
     required_financial = {
         "period_start", "period_end", "as_of_date", "period_type", "fiscal_year", "quarter",
         "consolidation_scope", "accounting_standard", "source_id", "source_page", "statement_type",

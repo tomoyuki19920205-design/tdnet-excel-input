@@ -1198,6 +1198,32 @@ def summarize_exchange_business(pages: dict[int, str], business_page: int | None
     return summary if summary and not ocr_readability_issues(summary) else None
 
 
+def summarize_exchange_risk(pages: dict[int, str], risk_page: int | None) -> str | None:
+    """Return concise, source-backed risk prose without exposing OCR fragments."""
+    if risk_page is None:
+        return None
+    normalized_page = normalize_ocr_japanese(pages.get(risk_page, ""))
+    compact_page = re.sub(r"\s+", "", normalized_page).lower()
+    if ("saas" in compact_page or "クラウド" in compact_page) and any(
+        cue in compact_page for cue in ("競争激化", "競合製品", "市場のシフト", "市場へのシフト")
+    ):
+        return "クラウド（SaaS）市場へのシフトや競争激化への対応が遅れた場合、業績に影響する可能性があります。"
+    if any(cue in compact_page for cue in ("情報漏洩", "サイバー攻撃", "情報セキュリティ")):
+        return "情報漏洩やサイバー攻撃などの情報セキュリティ事象が、事業運営や業績に影響する可能性があります。"
+    if any(cue in compact_page for cue in ("システム障害", "サービス停止")):
+        return "システム障害やサービス停止が、事業運営や業績に影響する可能性があります。"
+
+    readable_candidates = [
+        candidate
+        for candidate in (normalize_ocr_japanese(line) for line in normalized_page.splitlines())
+        if len(re.sub(r"\s+", "", candidate)) > 25 and not ocr_readability_issues(candidate)
+    ]
+    for candidate in readable_candidates:
+        if any(cue in candidate for cue in ("競争激化", "競合", "法的規制", "システム障害", "情報漏洩")):
+            return candidate
+    return None
+
+
 def extract_exchange_text_due_diligence(text: str, source_id: str) -> dict[str, Any]:
     """Extract a scanned exchange primary document from OCR lines and headings."""
     page_parts = re.split(r"\[\[PDF_PAGE:(\d+)\]\]", text or "")
@@ -1355,10 +1381,7 @@ def extract_exchange_text_due_diligence(text: str, source_id: str) -> dict[str, 
     business_model = summarize_exchange_business(pages, business_page)
     risk_page = next((page for page, value in pages.items()
                       if "事業等のリスク" in compact(value)[:500] and page > 1), None)
-    risk_excerpt = None
-    if risk_page:
-        candidates = [re.sub(r"\s+", " ", line).strip() for line in pages[risk_page].splitlines() if len(compact(line)) > 25]
-        risk_excerpt = " ".join(candidates[:4])[:900] or None
+    risk_excerpt = summarize_exchange_risk(pages, risk_page)
 
     absence: dict[str, Any] = {}
     option_page = page_for("潜在株式調整後", "潜在株式が存在しない")

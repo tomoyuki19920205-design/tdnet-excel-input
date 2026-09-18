@@ -270,6 +270,17 @@ def test_ocr_gate_is_scoped_to_scanned_documents():
     assert any(error.startswith("ocr_readability:") for error in result["errors"])
 
 
+def test_ocr_gate_covers_all_published_scanned_document_prose():
+    diligence_data = {
+        "business_model": "読みやすい事業説明です。",
+        "risk_excerpt": "当 社 は パ ケ ジ ソ フ ト ウ ア 大 臣 シ リ ズを提供します。",
+        "ocr_readability": {"passed": True, "issues": []},
+    }
+    result = report.validate_report(
+        "## 01 基本情報\n- 証券コード: 620A\n", manifests(), [], [], diligence_data)
+    assert "ocr_readability:risk_excerpt:japanese_intra_character_space" in result["errors"]
+
+
 def test_display_prose_removes_japanese_intra_word_spaces_and_section_prefixes():
     assert report._compact_sentence("(2) 【手取金の使途】 国 内 シェアを誇 り、サービスを提供します 。") == (
         "国内シェアを誇り、サービスを提供します。"

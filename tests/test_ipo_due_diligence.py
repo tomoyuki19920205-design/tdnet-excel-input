@@ -352,6 +352,20 @@ def test_ocr_readability_gate_rejects_raw_split_japanese_and_broken_katakana():
     assert diligence.ocr_readability_issues(normalized) == []
 
 
+def test_tpm_ocr_parser_summarizes_risk_without_publishing_unreadable_fragments():
+    text = (FIXTURES / "ipo_620_tpm_ocr_excerpt.txt").read_text(encoding="utf-8")
+    text = text.replace(
+        "34【事業等のリスク】 SaaSへの移行遅延や競合製品の機能向上は業績に影響する可能性があります。",
+        "34【事 業 等 の リ ス ク】 ク ラ ウ ド (SaaS) 市 場 へ の シ フ ト お よ び 競 争 激 化について、"
+        "当 社 は 基 幹 業 務 用 パ ケ ジ ソ フ ト ウ ア『大 臣 シ リ ズ』と"
+        "ク ラ ウ ド サ ビ ス『ス マ ト 大 臣』を提供しています。",
+    )
+    facts = diligence.extract_exchange_text_due_diligence(text, "P02")
+    assert facts["risk_excerpt"] == (
+        "クラウド（SaaS）市場へのシフトや競争激化への対応が遅れた場合、業績に影響する可能性があります。")
+    assert "パケジ" not in facts["risk_excerpt"]
+
+
 def test_622_separate_ownership_and_seller_tables_are_joined_deterministically():
     documents = html_documents((FIXTURES / "ipo_622_latest_shareholders_excerpt.html").read_text(encoding="utf-8"))
     rows = diligence.extract_shareholders(documents, "P03", b"")
