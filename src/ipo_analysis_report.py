@@ -527,6 +527,9 @@ def _date_label(value: Any) -> str:
 def _compact_sentence(value: Any, limit: int = 180) -> str:
     text = unicodedata.normalize("NFKC", str(value or "")).strip()
     text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"(?<=[ぁ-んァ-ヶ一-龠々〆ヵヶー])\s+(?=[ぁ-んァ-ヶ一-龠々〆ヵヶー])", "", text)
+    text = re.sub(r"\s+([、。,:;!?！？）】」』])", r"\1", text)
+    text = re.sub(r"^\s*[（(]?\d+[）)]?\s*【[^】]+】\s*", "", text)
     sentences = [part.strip() for part in re.split(r"(?<=[。！？])", text) if part.strip()]
     result = "".join(sentences[:2]) if sentences else text
     return result if len(result) <= limit else result[:limit].rstrip("、 ,") + "…"

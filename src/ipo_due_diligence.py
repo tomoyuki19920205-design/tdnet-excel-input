@@ -925,9 +925,18 @@ def extract_kpis_and_narratives(documents: list[tuple[str, BeautifulSoup]], sour
             + 3 * int("自ら" in sentence and "資産" in sentence and "保有" in sentence)
             + 2 * sum(cue in sentence for cue in ("提供", "運営", "サービス", "プラットフォーム"))
             - 10 * sum(cue in sentence for cue in ("リスク", "依存", "発生可能性", "ロックアップ", "充当する予定"))
+            - 20 * sum(cue in sentence for cue in ("手取金", "資金使途", "使途】"))
         ),
         default=None,
     )
+    single_segment = None
+    for sentence in re.split(r"(?<=。)", text):
+        if "単一セグメント" not in sentence:
+            continue
+        normalized_sentence = re.sub(r"\s+", "", unicodedata.normalize("NFKC", sentence))
+        match = re.search(r"(?:「[^」]{1,30}」|[A-Za-z0-9一-龠ぁ-んァ-ヶー・]{2,30}事業)の?単一セグメント", normalized_sentence)
+        single_segment = match.group(0) if match else "単一セグメント"
+        break
     risk_candidates = [
         sentence.strip()
         for sentence in re.split(r"(?<=。)", text)
@@ -947,7 +956,7 @@ def extract_kpis_and_narratives(documents: list[tuple[str, BeautifulSoup]], sour
         "customer_concentration_page": locate_pdf_page_by_text(
             pdf_bytes, ("総販売実績に対する割合", "10％以上の相手先")
         ) if customer_concentration else None,
-        "single_segment": "アキッパ事業の単一セグメント" if "単一セグメント" in text else None,
+        "single_segment": single_segment,
         "business_model": business_model,
         "business_model_page": locate_pdf_page_by_text(pdf_bytes, ("事業の内容", "プラットフォーム", "マーケットプレイス")) if business_model else None,
         "risk_excerpt": risk_candidates[0] if risk_candidates else None,
@@ -1162,7 +1171,7 @@ def summarize_exchange_business(pages: dict[int, str], business_page: int | None
         sentences.append(f"{subject}ブランド「{product}」を開発しています。")
 
     formats = []
-    if "パッケージ" in compact_text:
+    if "パッケージ" in compact_text or ("パッケ" in compact_text and "ソフト" in compact_text):
         formats.append("パッケージソフト")
     if "クラウド" in compact_text:
         formats.append("クラウドサービス")

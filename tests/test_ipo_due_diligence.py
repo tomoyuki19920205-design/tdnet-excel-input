@@ -221,6 +221,16 @@ def test_business_model_prefers_operating_model_over_platform_dependency_risk():
     assert "ユーザー" in facts["business_model"] and "オーナー" in facts["business_model"]
     assert "競合他社" in facts["risk_excerpt"]
     assert "AIカメラ" in facts["technology_excerpt"]
+    assert facts["single_segment"] is None
+
+
+def test_single_segment_name_is_taken_from_source_without_company_hardcode():
+    documents = html_documents("""
+    <html><body><p>当社は不動産サービスを運営し、「不動産事業」の単一セグメントとして事業展開しております。</p></body></html>
+    """)
+    facts = diligence.extract_kpis_and_narratives(documents, "P01", b"")
+    assert facts["single_segment"] == "「不動産事業」の単一セグメント"
+    assert "アキッパ" not in facts["single_segment"]
 
 
 def test_reason_code_distinguishes_parser_failure_from_absence():

@@ -268,3 +268,9 @@ def test_ocr_gate_is_scoped_to_scanned_documents():
     diligence["ocr_readability"] = {"passed": False, "issues": ["japanese_intra_character_space"]}
     result = report.validate_report("## 01 基本情報\n- 証券コード: 620A\n", manifests(), [], [], diligence)
     assert any(error.startswith("ocr_readability:") for error in result["errors"])
+
+
+def test_display_prose_removes_japanese_intra_word_spaces_and_section_prefixes():
+    assert report._compact_sentence("(2) 【手取金の使途】 国 内 シェアを誇 り、サービスを提供します 。") == (
+        "国内シェアを誇り、サービスを提供します。"
+    )
