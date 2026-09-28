@@ -53,6 +53,7 @@ class BuybackEvent:
 
     # 取得実績系
     shares_acquired: Optional[int] = None
+    shares_acquired_cumulative: Optional[int] = None
     amount_acquired_million_yen: Optional[float] = None
 
     # 消却系
@@ -61,6 +62,16 @@ class BuybackEvent:
 
     # 共通
     ratio_to_outstanding: Optional[float] = None
+    ratio_numerator_shares: Optional[int] = None
+    ratio_scope: Optional[str] = None
+    ratio_source: Optional[str] = None
+    ratio_denominator_shares: Optional[int] = None
+    ratio_denominator_as_of: Optional[str] = None
+    ratio_denominator_base_as_of: Optional[str] = None
+    ratio_denominator_source_url: Optional[str] = None
+    ratio_denominator_source_title: Optional[str] = None
+    ratio_denominator_adjustment_shares: Optional[int] = None
+    ratio_denominator_adjustment_source_url: Optional[str] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     acquisition_method: Optional[str] = None

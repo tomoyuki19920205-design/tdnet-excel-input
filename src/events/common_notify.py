@@ -144,7 +144,7 @@ def _format_buyback_new_program(payload: dict, disp: str) -> str:
 
     ratio = payload.get("ratio_to_outstanding")
     if ratio is not None:
-        lines.append(f"割合: {ratio:.2f}%")
+        lines.append(f"自己株式を除く発行済株式数比: {ratio:.2f}%（{'算出値' if payload.get('ratio_source') == 'calculated' else '開示値'}）")
 
     start = payload.get("start_date")
     end = payload.get("end_date")
@@ -183,7 +183,7 @@ def _format_buyback_tostnet(payload: dict, disp: str) -> str:
 
     ratio = payload.get("ratio_to_outstanding")
     if ratio is not None:
-        lines.append(f"割合: {ratio:.2f}%")
+        lines.append(f"自己株式を除く発行済株式数比: {ratio:.2f}%（{'算出値' if payload.get('ratio_source') == 'calculated' else '開示値'}）")
 
     start = payload.get("start_date")
     if start:

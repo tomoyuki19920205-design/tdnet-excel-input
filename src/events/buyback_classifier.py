@@ -265,10 +265,17 @@ def classify_buyback(title: str, body_head: str = "") -> ClassificationResult:
 
     # 5. event_type 推定（タイトル優先）
     event_type = _detect_event_type(title)
+    # A ToSTNeT purchase notice may mention when the *result will be
+    # published*.  That is a proposed purchase, not a result disclosure.
+    if (not event_type and ("買付けに関する" in title or "買付に関する" in title)
+            and ("自己株式" in title or "ToSTNeT" in title or "ＴｏＳＴＮｅＴ" in title)):
+        event_type = BUYBACK_DECISION
 
     # タイトルで確定しなかった場合は本文で試行（拡大範囲）
     if not event_type and body_head:
-        event_type = _detect_event_type(body_head[:2000])
+        primary_body = re.split(r"[（(]\s*ご参考\s*[）)]", body_head[:2000], maxsplit=1)[0]
+        primary_body = primary_body.replace("取得結果の公表", "").replace("取 得 結 果 の 公 表", "")
+        event_type = _detect_event_type(primary_body)
 
     # 5b. 本文構造から decision を推定
     if not event_type and body_head:

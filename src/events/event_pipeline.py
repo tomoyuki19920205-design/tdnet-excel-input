@@ -206,7 +206,13 @@ def _buyback_to_event_record(
     # summary
     summary_parts = [f"自社株買い({subtype})"]
     if buyback_event.shares_limit:
-        summary_parts.append(f"上限{buyback_event.shares_limit:,}株")
+        scope = "今回の買付上限" if buyback_event.ratio_scope == "transaction_limit" else "取得枠上限"
+        summary_parts.append(f"{scope}{buyback_event.shares_limit:,}株")
+    elif buyback_event.shares_acquired:
+        summary_parts.append(f"取得株数{buyback_event.shares_acquired:,}株")
+    if buyback_event.ratio_to_outstanding is not None and buyback_event.ratio_numerator_shares:
+        note = "算出値" if buyback_event.ratio_source == "calculated" else "開示値"
+        summary_parts.append(f"自己株式を除く発行済株式数比{buyback_event.ratio_to_outstanding:.2f}%({note})")
     if buyback_event.amount_limit_million_yen:
         summary_parts.append(f"上限{buyback_event.amount_limit_million_yen:.0f}百万円")
     summary = " ".join(summary_parts)

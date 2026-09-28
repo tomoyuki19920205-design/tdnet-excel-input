@@ -822,7 +822,8 @@ def build_supabase_row(event: EventRecord, client=None) -> tuple[dict, dict, str
             "total_amount", "share_count", "ratio_to_issued",
             "previous_dividend", "revised_dividend",
             "revised_dividend_per_share", "previous_dividend_per_share",
-            "shares_limit", "amount_limit_million_yen",
+            "shares_limit", "shares_acquired", "shares_acquired_cumulative",
+            "ratio_to_outstanding", "amount_limit_million_yen",
             "offering_shares", "offering_oa_shares", "new_shares",
             "additional_new_shares", "distribution_shares", "issued_shares_before",
         ]

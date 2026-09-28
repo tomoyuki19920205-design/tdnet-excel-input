@@ -104,12 +104,23 @@ def upsert_event(
         "SELECT id, event_id, extracted_payload_json FROM events WHERE fingerprint = ?",
         (event.fingerprint,),
     ).fetchone()
+    # Corrected buyback extraction changes the fingerprint. Keep the original
+    # notification identity for the same issuer and disclosure document.
+    matched_by_source = False
+    if row is None and event.event_type == "buyback":
+        row = conn.execute(
+            """SELECT id, event_id, extracted_payload_json FROM events
+               WHERE source_doc_id=? AND ticker=? AND event_type='buyback'
+               ORDER BY id LIMIT 1""",
+            (event.source_doc_id, event.ticker),
+        ).fetchone()
+        matched_by_source = row is not None
 
     if row is not None:
         existing_id = row[0]
         existing_event_id = row[1]
         # 内容が同一なら no_change
-        if row[2] == event.extracted_payload_json:
+        if row[2] == event.extracted_payload_json and not matched_by_source:
             conn.execute(
                 "UPDATE events SET last_seen_at = ?, updated_at = ? WHERE id = ?",
                 (now, now, existing_id),
@@ -123,14 +134,14 @@ def upsert_event(
                 source_doc_id=?, ticker=?, company_name=?,
                 disclosure_datetime=?, title=?, event_type=?, subtype=?,
                 importance=?, summary_text=?, raw_payload_json=?,
-                extracted_payload_json=?, doc_url=?,
+                extracted_payload_json=?, fingerprint=?, doc_url=?,
                 last_seen_at=?, updated_at=?
             WHERE id = ?""",
             (
                 event.source_doc_id, event.ticker, event.company_name,
                 event.disclosure_datetime, event.title, event.event_type, event.subtype,
                 event.importance, event.summary_text, event.raw_payload_json,
-                event.extracted_payload_json, event.doc_url,
+                event.extracted_payload_json, event.fingerprint, event.doc_url,
                 now, now, existing_id,
             ),
         )
