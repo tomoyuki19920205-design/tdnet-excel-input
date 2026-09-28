@@ -76,3 +76,21 @@ def test_status_uses_disclosed_period_ratio_not_reference_program_ratio():
     assert event.ratio_scope == "period_acquired"
     assert event.ratio_to_outstanding == 0.25
     assert event.ratio_source == "disclosed"
+
+
+def test_result_uses_this_acquisition_not_cumulative():
+    title = "自己株式立会外買付取引（ＴｏＳＴＮｅＴ－３）による自己株式の取得結果に関するお知らせ"
+    text = (
+        "取得した株式の総数 403,400株\n"
+        "（ご参考）\n取得しうる株式の総数 4,000,000株（8.5％）\n"
+        "取得した株式の総数 2,110,400株"
+    )
+    event = extract_buyback_event(
+        text, "buyback_result", ticker="4220", disclosure_date="2026-09-18",
+        title=title, source_url="https://www.release.tdnet.info/inbs/140120260917538071.pdf",
+    )
+    assert event.shares_acquired == event.ratio_numerator_shares == 403_400
+    assert event.shares_acquired_cumulative == 2_110_400
+    assert event.ratio_scope == "transaction_acquired"
+    assert event.ratio_denominator_shares == 44_994_705
+    assert round(event.ratio_to_outstanding, 2) == 0.90
