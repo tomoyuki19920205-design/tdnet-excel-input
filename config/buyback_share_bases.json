@@ -1,6 +1,50 @@
 [
   {
     "ticker": "4220",
+    "applies_to_source_url": "https://www.release.tdnet.info/inbs/140120260910534374.pdf",
+    "base_ex_treasury_shares": 47105105,
+    "base_as_of": "2026-06-30",
+    "base_source_title": "自己株式取得に係る事項の決定に関するお知らせ",
+    "base_source_url": "https://www.release.tdnet.info/inbs/140120260730504194.pdf",
+    "cumulative_acquired_shares": 405100,
+    "adjustment_as_of": "2026-09-10",
+    "adjustment_source_url": "https://www.release.tdnet.info/inbs/140120260910534374.pdf"
+  },
+  {
+    "ticker": "4220",
+    "applies_to_source_url": "https://www.release.tdnet.info/inbs/140120260910534375.pdf",
+    "base_ex_treasury_shares": 47105105,
+    "base_as_of": "2026-06-30",
+    "base_source_title": "自己株式取得に係る事項の決定に関するお知らせ",
+    "base_source_url": "https://www.release.tdnet.info/inbs/140120260730504194.pdf",
+    "cumulative_acquired_shares": 1707000,
+    "adjustment_as_of": "2026-09-11",
+    "adjustment_source_url": "https://www.release.tdnet.info/inbs/140120260910534375.pdf"
+  },
+  {
+    "ticker": "4220",
+    "applies_to_source_url": "https://www.release.tdnet.info/inbs/140120260917538059.pdf",
+    "base_ex_treasury_shares": 47105105,
+    "base_as_of": "2026-06-30",
+    "base_source_title": "自己株式取得に係る事項の決定に関するお知らせ",
+    "base_source_url": "https://www.release.tdnet.info/inbs/140120260730504194.pdf",
+    "cumulative_acquired_shares": 1707000,
+    "adjustment_as_of": "2026-09-17",
+    "adjustment_source_url": "https://www.release.tdnet.info/inbs/140120260917538059.pdf"
+  },
+  {
+    "ticker": "4220",
+    "applies_to_source_url": "https://www.release.tdnet.info/inbs/140120260917538071.pdf",
+    "base_ex_treasury_shares": 47105105,
+    "base_as_of": "2026-06-30",
+    "base_source_title": "自己株式取得に係る事項の決定に関するお知らせ",
+    "base_source_url": "https://www.release.tdnet.info/inbs/140120260730504194.pdf",
+    "cumulative_acquired_shares": 2110400,
+    "adjustment_as_of": "2026-09-18",
+    "adjustment_source_url": "https://www.release.tdnet.info/inbs/140120260917538071.pdf"
+  },
+  {
+    "ticker": "4220",
     "applies_to_source_url": "https://www.release.tdnet.info/inbs/140120260925540559.pdf",
     "base_ex_treasury_shares": 47105105,
     "base_as_of": "2026-06-30",
