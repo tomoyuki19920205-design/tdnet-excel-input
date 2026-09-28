@@ -71,7 +71,9 @@ class BuybackEvent:
     ratio_denominator_source_url: Optional[str] = None
     ratio_denominator_source_title: Optional[str] = None
     ratio_denominator_adjustment_shares: Optional[int] = None
+    ratio_denominator_adjustment_as_of: Optional[str] = None
     ratio_denominator_adjustment_source_url: Optional[str] = None
+    ratio_denominator_timing: Optional[str] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     acquisition_method: Optional[str] = None

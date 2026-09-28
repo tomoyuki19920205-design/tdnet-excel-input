@@ -92,5 +92,37 @@ def test_result_uses_this_acquisition_not_cumulative():
     assert event.shares_acquired == event.ratio_numerator_shares == 403_400
     assert event.shares_acquired_cumulative == 2_110_400
     assert event.ratio_scope == "transaction_acquired"
-    assert event.ratio_denominator_shares == 44_994_705
-    assert round(event.ratio_to_outstanding, 2) == 0.90
+    assert event.ratio_denominator_shares == 45_398_105
+    assert event.ratio_denominator_as_of == "2026-09-18"
+    assert event.ratio_denominator_timing == "before_acquisition"
+    assert event.ratio_denominator_adjustment_shares == 1_707_000
+    assert event.ratio_denominator_adjustment_as_of == "2026-09-17"
+    assert round(event.ratio_to_outstanding, 2) == 0.89
+
+
+def test_first_result_uses_shares_before_that_acquisition():
+    text = (
+        "取得した株式の総数 1,301,900株\n"
+        "（ご参考）\n取得しうる株式の総数 4,000,000株（8.5％）\n"
+        "取得した株式の総数 1,707,000株"
+    )
+    event = extract_buyback_event(
+        text, "buyback_result", ticker="4220", disclosure_date="2026-09-11",
+        title="自己株式立会外買付取引（ＴｏＳＴＮｅＴ－３）による自己株式の取得結果に関するお知らせ",
+        source_url="https://www.release.tdnet.info/inbs/140120260910534375.pdf",
+    )
+    assert event.ratio_numerator_shares == 1_301_900
+    assert event.ratio_denominator_shares == 46_700_005
+    assert event.ratio_denominator_adjustment_shares == 405_100
+    assert event.ratio_denominator_adjustment_as_of == "2026-09-10"
+    assert event.ratio_denominator_timing == "before_acquisition"
+    assert round(event.ratio_to_outstanding, 2) == 2.79
+
+
+def test_result_with_ambiguous_same_day_count_keeps_ratio_empty():
+    event = extract_buyback_event(
+        "取得した株式の総数 100,000株\n発行済株式総数（自己株式を除く） 9,000,000株",
+        "buyback_result", ticker="9999", disclosure_date="2026-09-18",
+    )
+    assert event.shares_acquired == 100_000
+    assert event.ratio_to_outstanding is None
