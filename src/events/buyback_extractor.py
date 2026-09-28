@@ -584,6 +584,8 @@ def extract_buyback_event(
                 text, ticker=ticker, source_url=source_url or "",
                 disclosure_date=disclosure_date,
                 cumulative_acquired=event.shares_acquired_cumulative,
+                current_acquired=event.shares_acquired,
+                acquisition_result=event_type in (BUYBACK_RESULT, BUYBACK_STATUS),
             )
             if denominator:
                 event.ratio_to_outstanding = round(numerator / denominator["shares"] * 100, 4)
@@ -594,7 +596,9 @@ def extract_buyback_event(
                 event.ratio_denominator_source_url = denominator["source_url"]
                 event.ratio_denominator_source_title = denominator["source_title"]
                 event.ratio_denominator_adjustment_shares = denominator["adjustment_shares"]
+                event.ratio_denominator_adjustment_as_of = denominator["adjustment_as_of"]
                 event.ratio_denominator_adjustment_source_url = denominator["adjustment_source_url"]
+                event.ratio_denominator_timing = denominator["timing"]
     # + 必須キーワード確認
     required_kw = ["自己株式", "取得", "株式"]
     kw_count = sum(1 for kw in required_kw if kw in text)
