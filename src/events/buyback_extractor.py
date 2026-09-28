@@ -487,6 +487,11 @@ def extract_buyback_event(
         # ステータス期間ラベル
         event.status_period_label = _extract_status_period_label(primary_text)
 
+        ratio, snip = _extract_ratio(primary_text)
+        if ratio is not None:
+            event.ratio_to_outstanding = ratio
+            raw_snippets["raw_ratio_text"] = snip
+
     elif event_type == BUYBACK_RESULT:
         # 取得株数
         shares, snip = _extract_shares(primary_text, [
