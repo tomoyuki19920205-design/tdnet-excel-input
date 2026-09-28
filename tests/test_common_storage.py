@@ -59,11 +59,22 @@ class TestEventsTable(unittest.TestCase):
 
     def test_different_fingerprint_inserts_new(self):
         ev1 = self._make_event(fingerprint="fp_001")
-        ev2 = self._make_event(fingerprint="fp_002")
+        ev2 = self._make_event(fingerprint="fp_002", source_doc_id="doc456")
         action1, _ = upsert_event(self.conn, ev1)
         action2, _ = upsert_event(self.conn, ev2)
         self.assertEqual(action1, "inserted")
         self.assertEqual(action2, "inserted")
+
+    def test_corrected_buyback_keeps_identity_and_notification_status(self):
+        original = self._make_event(fingerprint="old", extracted_payload_json='{"shares_acquired": 2110400}')
+        _, original_id = upsert_event(self.conn, original)
+        self.conn.execute("UPDATE events SET status='skipped' WHERE event_id=?", (original_id,))
+        corrected = self._make_event(fingerprint="new", extracted_payload_json='{"shares_limit": 560000}')
+        action, corrected_id = upsert_event(self.conn, corrected)
+        self.assertEqual(action, "updated")
+        self.assertEqual(corrected_id, original_id)
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM events").fetchone()[0], 1)
+        self.assertEqual(self.conn.execute("SELECT status FROM events").fetchone()[0], "skipped")
 
     def test_get_unnotified_events(self):
         ev = self._make_event()

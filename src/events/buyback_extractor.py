@@ -327,17 +327,12 @@ def _extract_date(text: str, anchors: list[str]) -> tuple[Optional[str], str]:
 
 
 def _extract_ratio(text: str) -> tuple[Optional[float], str]:
-    """比率を抽出"""
-    anchors = [
-        "発行済株式総数",
-        "発行済株式",
-        "割合",
-    ]
-    snippet = _find_near_anchor(text, anchors)
-    if not snippet:
+    """発行済株式比だけを抽出（取得金額の時価総額比は対象外）。"""
+    match = re.search(r"発行済株式[^\n]{0,95}?[\d.]+\s*[%％]", text)
+    if not match:
         return None, ""
-    val = normalize_percent(snippet)
-    return val, snippet
+    snippet = match.group(0)
+    return normalize_percent(snippet), snippet
 
 
 def _extract_method(text: str) -> tuple[Optional[str], str]:
@@ -393,6 +388,9 @@ def extract_buyback_event(
     """
     raw_snippets: dict = {}
     confidence = 0.40  # event_type 確定済み
+    sections = re.split(r"[（(]\s*ご参考\s*[）)]", text, maxsplit=1)
+    primary_text = sections[0]
+    reference_text = sections[1] if len(sections) > 1 else ""
 
     event = BuybackEvent(
         ticker=ticker,
@@ -410,9 +408,9 @@ def extract_buyback_event(
     # ------ event_type 別の抽出 ------
     if event_type == BUYBACK_DECISION:
         # 株数上限
-        shares, snip = _extract_shares(text, [
-            "取得し得る株式の総数", "取得株式の種類及び数",
+        shares, snip = _extract_shares(primary_text, [
             "取得する株式の総数", "取得する株式の数",
+            "取得し得る株式の総数", "取得しうる株式の総数", "取得株式の種類及び数",
             "株式の総数",
         ])
         if shares:
@@ -421,7 +419,7 @@ def extract_buyback_event(
             confidence += 0.15
 
         # 金額上限
-        amt, snip = _extract_amount(text, [
+        amt, snip = _extract_amount(primary_text, [
             "取得価額の総額", "取得し得る株式の総額",
             "取得に要する資金", "取得総額",
         ])
@@ -431,7 +429,7 @@ def extract_buyback_event(
             confidence += 0.15
 
         # 取得期間
-        start, end, snip = _extract_period(text)
+        start, end, snip = _extract_period(primary_text)
         if start or end:
             event.start_date = start
             event.end_date = end
@@ -439,28 +437,28 @@ def extract_buyback_event(
             confidence += 0.10
 
         # 取得方法
-        method, snip = _extract_method(text)
+        method, snip = _extract_method(primary_text)
         if method:
             event.acquisition_method = method
             raw_snippets["raw_method_text"] = snip
             confidence += 0.05
 
         # 取締役会決議日
-        res_date, snip = _extract_date(text, [
+        res_date, snip = _extract_date(primary_text, [
             "取締役会決議", "決議日", "取締役会において決議",
         ])
         if res_date:
             event.board_resolution_date = res_date
 
         # 比率
-        ratio, snip = _extract_ratio(text)
+        ratio, snip = _extract_ratio(primary_text)
         if ratio:
             event.ratio_to_outstanding = ratio
             raw_snippets["raw_ratio_text"] = snip
 
     elif event_type == BUYBACK_STATUS:
         # 取得株数
-        shares, snip = _extract_shares(text, [
+        shares, snip = _extract_shares(primary_text, [
             "取得した株式の数", "取得株式数", "買付株式数",
             "当月の取得", "取得した株式",
         ])
@@ -470,7 +468,7 @@ def extract_buyback_event(
             confidence += 0.15
 
         # 取得金額
-        amt, snip = _extract_amount(text, [
+        amt, snip = _extract_amount(primary_text, [
             "取得価額の総額", "取得金額", "買付金額",
             "当月の取得価額",
         ])
@@ -480,18 +478,18 @@ def extract_buyback_event(
             confidence += 0.15
 
         # 取得方法
-        method, snip = _extract_method(text)
+        method, snip = _extract_method(primary_text)
         if method:
             event.acquisition_method = method
             raw_snippets["raw_method_text"] = snip
             confidence += 0.05
 
         # ステータス期間ラベル
-        event.status_period_label = _extract_status_period_label(text)
+        event.status_period_label = _extract_status_period_label(primary_text)
 
     elif event_type == BUYBACK_RESULT:
         # 取得株数
-        shares, snip = _extract_shares(text, [
+        shares, snip = _extract_shares(primary_text, [
             "取得した株式の総数", "取得株式数",
             "取得した株式の数",
         ])
@@ -501,7 +499,7 @@ def extract_buyback_event(
             confidence += 0.15
 
         # 取得金額
-        amt, snip = _extract_amount(text, [
+        amt, snip = _extract_amount(primary_text, [
             "取得価額の総額", "取得金額",
         ])
         if amt:
@@ -510,7 +508,7 @@ def extract_buyback_event(
             confidence += 0.15
 
         # 取得期間
-        start, end, snip = _extract_period(text)
+        start, end, snip = _extract_period(primary_text)
         if start or end:
             event.start_date = start
             event.end_date = end
@@ -518,21 +516,21 @@ def extract_buyback_event(
             confidence += 0.10
 
         # 取得方法
-        method, snip = _extract_method(text)
+        method, snip = _extract_method(primary_text)
         if method:
             event.acquisition_method = method
             raw_snippets["raw_method_text"] = snip
             confidence += 0.05
 
         # 比率
-        ratio, snip = _extract_ratio(text)
+        ratio, snip = _extract_ratio(primary_text)
         if ratio:
             event.ratio_to_outstanding = ratio
             raw_snippets["raw_ratio_text"] = snip
 
     elif event_type == TREASURY_CANCEL:
         # 消却株数
-        shares, snip = _extract_shares(text, [
+        shares, snip = _extract_shares(primary_text, [
             "消却する株式の数", "消却株式数", "消却した株式",
             "消却に係る株式の数",
         ])
@@ -542,7 +540,7 @@ def extract_buyback_event(
             confidence += 0.15
 
         # 消却日
-        cancel_dt, snip = _extract_date(text, [
+        cancel_dt, snip = _extract_date(primary_text, [
             "消却予定日", "消却日", "消却を行う日",
         ])
         if cancel_dt:
@@ -551,7 +549,7 @@ def extract_buyback_event(
             confidence += 0.10
 
         # 比率
-        ratio, snip = _extract_ratio(text)
+        ratio, snip = _extract_ratio(primary_text)
         if ratio:
             event.ratio_to_outstanding = ratio
             raw_snippets["raw_ratio_text"] = snip
@@ -561,6 +559,37 @@ def extract_buyback_event(
             confidence -= 0.25  # key fields 両方欠落でペナルティ
             raw_snippets["cancel_penalty"] = "shares_cancelled and cancel_date both missing"
 
+    if event_type in (BUYBACK_DECISION, BUYBACK_STATUS, BUYBACK_RESULT):
+        if reference_text:
+            cumulative, _ = _extract_shares(reference_text, ["取得した株式の総数"])
+            event.shares_acquired_cumulative = cumulative
+        is_tostnet = "ToSTNeT" in title or "ＴｏＳＴＮｅＴ" in title or "立会外買付取引" in title
+        numerator = event.shares_limit if event_type == BUYBACK_DECISION else event.shares_acquired
+        event.ratio_numerator_shares = numerator
+        event.ratio_scope = (
+            "transaction_limit" if is_tostnet and event_type == BUYBACK_DECISION else
+            "program_limit" if event_type == BUYBACK_DECISION else
+            "transaction_acquired" if is_tostnet else "period_acquired"
+        )
+        if event.ratio_to_outstanding is not None and numerator:
+            event.ratio_source = "disclosed"
+        elif numerator:
+            from .buyback_ratio import resolve_denominator
+            denominator = resolve_denominator(
+                text, ticker=ticker, source_url=source_url or "",
+                disclosure_date=disclosure_date,
+                cumulative_acquired=event.shares_acquired_cumulative,
+            )
+            if denominator:
+                event.ratio_to_outstanding = round(numerator / denominator["shares"] * 100, 4)
+                event.ratio_source = "calculated"
+                event.ratio_denominator_shares = denominator["shares"]
+                event.ratio_denominator_as_of = denominator["as_of"]
+                event.ratio_denominator_base_as_of = denominator["base_as_of"]
+                event.ratio_denominator_source_url = denominator["source_url"]
+                event.ratio_denominator_source_title = denominator["source_title"]
+                event.ratio_denominator_adjustment_shares = denominator["adjustment_shares"]
+                event.ratio_denominator_adjustment_source_url = denominator["adjustment_source_url"]
     # + 必須キーワード確認
     required_kw = ["自己株式", "取得", "株式"]
     kw_count = sum(1 for kw in required_kw if kw in text)
