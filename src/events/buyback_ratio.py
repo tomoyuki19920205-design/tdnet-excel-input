@@ -23,15 +23,32 @@ _EX_TREASURY = re.compile(
 def resolve_denominator(
     text: str, *, ticker: str, source_url: str, disclosure_date: str,
     cumulative_acquired: Optional[int] = None,
+    current_acquired: Optional[int] = None,
+    acquisition_result: bool = False,
 ) -> Optional[dict]:
-    """Return auditable ex-treasury shares only when evidence is unambiguous."""
+    """Return ex-treasury shares immediately before the shares being compared."""
     date = disclosure_date[:10]
     for record in json.loads(_BASES.read_text(encoding="utf-8")):
         if record["ticker"] != ticker or record["applies_to_source_url"] != source_url:
             continue
         if date != record["adjustment_as_of"] or cumulative_acquired != record["cumulative_acquired_shares"]:
             return None
-        denominator = record["base_ex_treasury_shares"] - cumulative_acquired
+        adjustment = cumulative_acquired
+        adjustment_as_of = date
+        adjustment_source_url = record["adjustment_source_url"]
+        timing = None
+        if acquisition_result:
+            # The result disclosure's cumulative total includes this purchase.
+            # Its numerator must be compared with shares just before it.
+            prior = record.get("pre_acquisition_cumulative_shares")
+            if (not current_acquired or current_acquired > cumulative_acquired
+                    or prior is None or prior != cumulative_acquired - current_acquired):
+                return None
+            adjustment = prior
+            adjustment_as_of = record["pre_acquisition_cumulative_as_of"]
+            adjustment_source_url = record["pre_acquisition_source_url"]
+            timing = "before_acquisition"
+        denominator = record["base_ex_treasury_shares"] - adjustment
         if denominator <= 0:
             return None
         return {
@@ -40,8 +57,10 @@ def resolve_denominator(
             "base_as_of": record["base_as_of"],
             "source_url": record["base_source_url"],
             "source_title": record["base_source_title"],
-            "adjustment_shares": cumulative_acquired,
-            "adjustment_source_url": record["adjustment_source_url"],
+            "adjustment_shares": adjustment,
+            "adjustment_as_of": adjustment_as_of,
+            "adjustment_source_url": adjustment_source_url,
+            "timing": timing,
         }
 
     # A count stated in the same company disclosure is usable when no separate
@@ -59,6 +78,9 @@ def resolve_denominator(
     as_of = normalize_jp_date(dates[-1]) if dates else date
     if not as_of or as_of > date:
         return None
+    if acquisition_result and as_of == date and "取得前" not in text[max(0, match.start() - 120):match.end() + 30]:
+        # A same-day count without an explicit timing can be after the buyback.
+        return None
     return {
         "shares": shares,
         "as_of": as_of,
@@ -66,5 +88,7 @@ def resolve_denominator(
         "source_url": source_url,
         "source_title": "当該自己株式取得開示",
         "adjustment_shares": None,
+        "adjustment_as_of": None,
         "adjustment_source_url": None,
+        "timing": "before_acquisition" if acquisition_result else None,
     }
