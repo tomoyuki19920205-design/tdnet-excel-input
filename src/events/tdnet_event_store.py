@@ -18,6 +18,7 @@ import os
 import re
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
+from urllib.parse import unquote, urlparse, urlunparse
 
 from .common_models import EventRecord, EventType
 from .notify_rules import should_notify_event
@@ -27,6 +28,23 @@ from src.tdnet_disclosure_time import is_date_only, resolve_official_disclosure_
 logger = logging.getLogger("tdnet_event_store")
 
 JST = timezone(timedelta(hours=9))
+
+
+def _canonical_document_url(value: str) -> str:
+    """Use the disclosure URL without query parameters for identity checks."""
+    raw = unquote((value or "").strip())
+    if not raw:
+        return ""
+    marker = "rd.php?"
+    if marker in raw and "release.tdnet.info/" in raw:
+        raw = raw.split(marker, 1)[1]
+    try:
+        parsed = urlparse(raw)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return ""
+        return urlunparse((parsed.scheme.lower(), parsed.netloc.lower(), parsed.path, "", "", ""))
+    except ValueError:
+        return ""
 
 # ============================================================
 # 表示カテゴリ定数 (小文字統一)

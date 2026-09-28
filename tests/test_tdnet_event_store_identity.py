@@ -1,5 +1,4 @@
 """Disclosure identity regressions for direct and batched notification saves."""
-import copy
 import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -26,9 +25,7 @@ class DisclosureIdentityTests(unittest.TestCase):
 
     def decide(self, event, existing, direct=False, **kwargs):
         with patch.object(store, "_get_supabase", return_value=MagicMock()), \
-             patch.object(store, "_supabase_execute", return_value=SimpleNamespace(data=existing)), \
-             patch("src.security_eligibility.classify_security_eligibility",
-                   return_value=SimpleNamespace(is_etf_like=False, authoritative=True)):
+             patch.object(store, "_supabase_execute", return_value=SimpleNamespace(data=existing)):
             return store.save_event_to_supabase(event, _skip_db_write=True,
                     prefetched_existing_rows=None if direct else existing, **kwargs)
 
