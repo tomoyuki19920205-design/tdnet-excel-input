@@ -63,3 +63,16 @@ def test_market_cap_amount_ratio_is_not_share_ratio():
     )
     assert event.shares_limit == 100_000
     assert event.ratio_to_outstanding is None
+
+
+def test_status_uses_disclosed_period_ratio_not_reference_program_ratio():
+    event = extract_buyback_event(
+        "取得した株式の数 120,000株\n発行済株式総数（自己株式を除く）に対する割合 0.25％\n"
+        "（ご参考）\n取得しうる株式の総数 4,000,000株（8.5％）",
+        "buyback_status", ticker="4220", disclosure_date="2026-09-28",
+    )
+    assert event.shares_acquired == 120_000
+    assert event.ratio_numerator_shares == 120_000
+    assert event.ratio_scope == "period_acquired"
+    assert event.ratio_to_outstanding == 0.25
+    assert event.ratio_source == "disclosed"
