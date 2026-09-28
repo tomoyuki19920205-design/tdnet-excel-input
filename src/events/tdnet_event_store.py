@@ -976,10 +976,20 @@ def save_event_to_supabase(
             result["error"] = "supabase_not_available"
             return result
 
+        # Batch prefetch contains several companies. Scope every identity and
+        # metric-protection check to this event's company, just as direct reads do.
+        if prefetched_existing_rows is not None:
+            prefetched_existing_rows = [
+                existing for existing in prefetched_existing_rows
+                if existing.get("ticker") == (event.ticker or "")
+            ]
+
         row, raw_payload, dedupe_key, display_category, metric_yoy = build_supabase_row(event, client)
         result["dedupe_key"] = dedupe_key
         original_event_type = event.event_type or ""
         display_title = row.get("display_title", "")
+        if discord_sent_at is not None:
+            row["discord_sent_at"] = discord_sent_at
 
 
         # YOY protection: Prevent overwriting existing YOY data with null
@@ -1087,44 +1097,58 @@ def save_event_to_supabase(
                             # not merge recurring or sibling PDFs by title.
                             continue
                         if norm_title and _normalize_headline(r_headline) == norm_title:
-                            if display_category == "buyback":
-                                new_ids = set()
-                                if event.source_doc_id: new_ids.add(str(event.source_doc_id))
-                                if getattr(event, "doc_id", None): new_ids.add(str(event.doc_id))
-                                if getattr(event, "disclosure_id", None): new_ids.add(str(event.disclosure_id))
-                                if xbrl_doc_id: new_ids.add(str(xbrl_doc_id))
-                                
-                                old_ids = set()
-                                for k in ["source_doc_id", "doc_id", "disclosure_id"]:
-                                    v = r.get(k)
-                                    if v: old_ids.add(str(v))
-                                for k in ["source_doc_id", "doc_id", "disclosure_id", "xbrl_doc_id"]:
-                                    v1 = _nested_get(raw_p, "raw", k)
-                                    v2 = _nested_get(raw_p, "extracted", k)
-                                    if v1: old_ids.add(str(v1))
-                                    if v2: old_ids.add(str(v2))
-                                
-                                new_ids = {x for x in new_ids if x and x != "None"}
-                                old_ids = {x for x in old_ids if x and x != "None"}
-                                
-                                if new_ids and old_ids:
-                                    if not (new_ids & old_ids):
-                                        logger.info(f"[STORE] SEMANTIC_TITLE_MATCH_SKIPPED ticker={event.ticker} type=buyback reason=doc_id_mismatch")
-                                        continue
-                                else:
-                                    date_match = False
-                                    try:
-                                        from dateutil import parser as dt_parser
-                                        if event.disclosure_datetime and r.get("disclosed_at"):
-                                            dt_new = dt_parser.parse(event.disclosure_datetime).astimezone(JST)
-                                            dt_old = dt_parser.parse(str(r.get("disclosed_at"))).astimezone(JST)
-                                            if dt_new.date() == dt_old.date():
-                                                date_match = True
-                                    except Exception:
-                                        pass
-                                    if not date_match:
-                                        logger.info(f"[STORE] SEMANTIC_TITLE_MATCH_SKIPPED ticker={event.ticker} type=buyback reason=missing_id_and_date_mismatch")
-                                        continue
+                            # A recurring headline is not a disclosure identity.
+                            # Preserve history for forecast/dividend/etc., too.
+                            new_url = _canonical_document_url(event.doc_url)
+                            old_urls = {
+                                _canonical_document_url(r_source_url),
+                                _canonical_document_url(r_pdf_url),
+                            } - {""}
+                            if new_url and old_urls and new_url not in old_urls:
+                                continue
+                            new_ids = set()
+                            if event.source_doc_id: new_ids.add(str(event.source_doc_id))
+                            if getattr(event, "doc_id", None): new_ids.add(str(event.doc_id))
+                            if getattr(event, "disclosure_id", None): new_ids.add(str(event.disclosure_id))
+                            if xbrl_doc_id: new_ids.add(str(xbrl_doc_id))
+
+                            old_ids = set()
+                            for k in ["source_doc_id", "doc_id", "disclosure_id"]:
+                                v = r.get(k)
+                                if v: old_ids.add(str(v))
+                            for k in ["source_doc_id", "doc_id", "disclosure_id", "xbrl_doc_id"]:
+                                v1 = _nested_get(raw_p, "raw", k)
+                                v2 = _nested_get(raw_p, "extracted", k)
+                                if v1: old_ids.add(str(v1))
+                                if v2: old_ids.add(str(v2))
+
+                            new_ids = {x for x in new_ids if x and x != "None"}
+                            old_ids = {x for x in old_ids if x and x != "None"}
+
+                            if new_ids and old_ids:
+                                if not (new_ids & old_ids):
+                                    logger.info(f"[STORE] SEMANTIC_TITLE_MATCH_SKIPPED ticker={event.ticker} type={display_category} reason=doc_id_mismatch")
+                                    continue
+                            else:
+                                date_match = False
+                                try:
+                                    from dateutil import parser as dt_parser
+                                    if event.disclosure_datetime and r.get("disclosed_at"):
+                                        dt_new = dt_parser.parse(event.disclosure_datetime)
+                                        dt_old = dt_parser.parse(str(r.get("disclosed_at")))
+                                        if dt_new.tzinfo is None:
+                                            dt_new = dt_new.replace(tzinfo=JST)
+                                        if dt_old.tzinfo is None:
+                                            dt_old = dt_old.replace(tzinfo=JST)
+                                        dt_new = dt_new.astimezone(JST)
+                                        dt_old = dt_old.astimezone(JST)
+                                        if dt_new.date() == dt_old.date():
+                                            date_match = True
+                                except Exception:
+                                    pass
+                                if not date_match:
+                                    logger.info(f"[STORE] SEMANTIC_TITLE_MATCH_SKIPPED ticker={event.ticker} type={display_category} reason=missing_id_and_date_mismatch")
+                                    continue
 
                             matched_row = r
                             match_reason = "semantic_title_match"
