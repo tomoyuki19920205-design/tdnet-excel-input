@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 
 from .common_ticker import strip_tdnet_trailing_zero
 from .models import DisclosureItem, DisclosureType, FINANCIAL_STATEMENT_KEYWORDS
+from .ipo_listing_financials import IPO_LISTING_FINANCIALS, is_ipo_listing_financial_title
 from .pdf_only_materials import classify_pdf_only_material
 from .utils import sha256, today_yyyymmdd
 from lib.backfill.xbrl_url_inference import infer_xbrl_url_from_pdf
@@ -72,6 +73,9 @@ def classify_disclosure(title: str) -> str | None:
         | DisclosureType.DIVIDEND_REVISION | None
     """
     n = normalize_title(title)
+
+    if is_ipo_listing_financial_title(title):
+        return IPO_LISTING_FINANCIALS
 
     # ── forecast_revision 判定 ──
     # (1) 「業績」または「予想」を含む
@@ -181,6 +185,13 @@ def _matches_watchlist(ticker: str, watch_tickers: list[str]) -> bool:
     if not watch_tickers:
         return True
     return ticker in watch_tickers
+
+
+def _matches_watchlist_item(item: DisclosureItem, watch_tickers: list[str]) -> bool:
+    """Use issuer metadata for IPO financials before listing-day master sync."""
+    if item.disclosure_type == IPO_LISTING_FINANCIALS:
+        return True
+    return _matches_watchlist(item.ticker, watch_tickers)
 
 
 # ============================================================
@@ -529,7 +540,7 @@ def _fetch_via_jquants(
             doc_url=doc_url,
             published_at=jq.published_at,
             xbrl_url=jq.xbrl_url,  # Shadow Run と同様に None (lazy)
-            disclosure_type=jq.disclosure_type,
+            disclosure_type=classify_disclosure(jq.title) or jq.disclosure_type,
             source_doc_id=jq.disclosure_id,
         ))
 
@@ -608,7 +619,7 @@ def fetch_new_disclosures(
             # フィルタリング
             filtered_items = [
                 item for item in after_instrument
-                if _matches_filter(item.title) and _matches_watchlist(item.ticker, watch)
+                if _matches_filter(item.title) and _matches_watchlist_item(item, watch)
             ]
             filtered_count = len(filtered_items)
             forecast_count = sum(1 for i in filtered_items if i.disclosure_type == DisclosureType.FORECAST_REVISION)
@@ -801,7 +812,7 @@ def fetch_new_disclosures(
     # フィルタリング（分類 + 除外キーワード + ウォッチリスト）
     filtered_items = [
         item for item in after_instrument
-        if _matches_filter(item.title) and _matches_watchlist(item.ticker, watch)
+        if _matches_filter(item.title) and _matches_watchlist_item(item, watch)
     ]
     filtered_count = len(filtered_items)
 

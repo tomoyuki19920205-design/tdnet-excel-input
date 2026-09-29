@@ -28,6 +28,8 @@ SOURCE_PRIORITY: dict[str, int] = {
     "html_table": 3,
     "pdf_table": 4,
     "legacy_excel": 5,
+    "official_pdf": 3,
+    "tdnet_forecast": 10,
     # ── segment source (実データ値) ──
     # SegmentRawRow.source: 'xbrl' | 'html' | 'pdf' | 'tdnet'
     # xbrl は summary_xbrl 相当、html/pdf はそれぞれ html_table/pdf_table 相当
