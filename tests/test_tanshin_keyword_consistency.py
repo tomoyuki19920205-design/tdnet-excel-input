@@ -127,6 +127,21 @@ class TestRetryableSkip:
         assert db.is_processed("disc-002") is True
         db.close()
 
+    def test_ipo_multi_period_failure_is_retryable_until_success(self, tmp_path):
+        db = self._make_db(tmp_path)
+        db.record("ipo-disc", "646A", "", "MULTI", Status.PARSE_FAILED,
+                  error_detail="summary/detail mismatch")
+        assert db.is_processed("ipo-disc") is False
+        db.record("ipo-disc", "646A", "", "MULTI", Status.SUCCESS)
+        assert db.is_processed("ipo-disc") is True
+        db.close()
+
+    def test_ipo_download_failure_is_retryable(self, tmp_path):
+        db = self._make_db(tmp_path)
+        db.record("ipo-download", "646A", "", "MULTI", Status.DOWNLOAD_FAILED)
+        assert db.is_processed("ipo-download") is False
+        db.close()
+
     def test_skipped_not_tanshin_is_retryable(self, tmp_path):
         """SKIPPED_NOT_TANSHIN は未処理扱い（retryable）"""
         db = self._make_db(tmp_path)

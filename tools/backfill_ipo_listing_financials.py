@@ -20,6 +20,7 @@ from src.ipo_listing_financials import (
     IPO_LISTING_FINANCIALS,
     disclosure_identity,
     extract_ipo_listing_financials,
+    ensure_ipo_company,
     is_ipo_listing_financial_title,
     save_ipo_notification,
     write_ipo_financials,
@@ -73,6 +74,9 @@ def run(args: argparse.Namespace) -> dict:
     config = get_supabase_write_config()
     if not config:
         raise RuntimeError("SUPABASE service-role write configuration is missing")
+    output["company"] = ensure_ipo_company(
+        ticker, args.company_name or extraction.company_name, config=config,
+    )
     # The card write is first and independent: a subsequent PL error does not
     # make the listing itself disappear.
     output["notification"] = save_ipo_notification(item)

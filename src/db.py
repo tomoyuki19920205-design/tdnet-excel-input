@@ -88,14 +88,21 @@ class StateDB:
         retryable skip ステータスの場合は False を返す（再処理対象）。
         """
         cur = self._conn.execute(
-            "SELECT status FROM processing_log WHERE disclosure_id = ?",
+            "SELECT status, quarter FROM processing_log WHERE disclosure_id = ?",
             (disclosure_id,),
         )
         row = cur.fetchone()
         if row is None:
             return False
         # retryable skip は未処理扱い
-        return row[0] not in self._RETRYABLE_STATUSES
+        if row[0] in self._RETRYABLE_STATUSES:
+            return False
+        # IPO listing financials write several periods in one pass.  A parser
+        # failure must not permanently hide their PDF after a parser fix.
+        # Keep the ordinary earnings retry policy unchanged.
+        if row[1] == "MULTI" and row[0] in ("parse_failed", "download_failed"):
+            return False
+        return True
 
     def record(
         self,

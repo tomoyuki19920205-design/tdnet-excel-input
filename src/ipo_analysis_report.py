@@ -182,8 +182,12 @@ def collect_jpx_listing_sources(ticker: str, session: requests.Session) -> tuple
     if len(anchor_cells) >= 8:
         offering.update({"listing_date": anchor_cells[0].split()[0].replace("/", "-"),
                          "exchange_company_name": anchor_cells[1],
-                         "indicated_range": anchor_cells[-3],
-                         "public_offering_shares": to_base_units(anchor_cells[-2], "千株")})
+                         "indicated_range": anchor_cells[-3]})
+        # A direct listing or spin-off has no offering.  JPX denotes that
+        # field with "-"; leave it absent rather than inventing a share count.
+        public_offering = parse_number(anchor_cells[-2])
+        if public_offering is not None:
+            offering["public_offering_shares"] = to_base_units(public_offering, "千株")
     if len(detail_cells) >= 5:
         offering["market"] = detail_cells[0]
         offering["offering_price"] = parse_number(detail_cells[-3])

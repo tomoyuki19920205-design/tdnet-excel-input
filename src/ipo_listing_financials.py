@@ -136,6 +136,15 @@ _DETAIL_METRICS = {
     "中間純利益": "net_income",
     "中間利益": "net_income",
     "当期純利益": "net_income",
+    # Consolidated statements can show both group-wide profit and the amount
+    # attributable to owners.  The summary/forecast and Viewer net_income use
+    # the latter; its row follows the group-wide row in the statement.
+    "親会社株主に帰属する四半期純利益": "net_income",
+    "親会社株主に帰属する中間純利益": "net_income",
+    "親会社株主に帰属する当期純利益": "net_income",
+    "親会社の所有者に帰属する四半期利益": "net_income",
+    "親会社の所有者に帰属する中間利益": "net_income",
+    "親会社の所有者に帰属する当期利益": "net_income",
 }
 
 
@@ -708,6 +717,44 @@ def write_ipo_financials(
         config=config,
     )
     return {**result, "rows": len(rows), "periods": len(extraction.periods)}
+
+
+def ensure_ipo_company(
+    ticker: str,
+    company_name: str,
+    *,
+    config: dict[str, Any] | None = None,
+    session: Any = None,
+) -> dict[str, Any]:
+    """Add a listing-day issuer to Viewer search without changing existing rows."""
+    import requests
+    from lib.pipeline.db import get_supabase_write_config
+
+    normalized = normalize_ticker(ticker)
+    name = display_company_name(company_name)
+    if not is_valid_ticker(normalized) or not name:
+        raise ValueError("IPO company identity is incomplete")
+    cfg = config or get_supabase_write_config()
+    if not cfg:
+        raise RuntimeError("SUPABASE service-role write configuration is missing")
+    client = session or requests
+    endpoint = f"{cfg['rest_url']}/companies"
+    existing = client.get(
+        endpoint, params={"select": "ticker_code", "ticker_code": f"eq.{normalized}"},
+        headers=cfg["headers"], timeout=30,
+    )
+    existing.raise_for_status()
+    if existing.json():
+        return {"action": "existing", "ticker": normalized}
+    # An on-conflict no-op also preserves a row inserted by a concurrent sync.
+    created = client.post(
+        endpoint, params={"on_conflict": "ticker_code"},
+        json={"ticker_code": normalized, "name_ja": name, "is_active": True},
+        headers={**cfg["headers"], "Prefer": "resolution=ignore-duplicates,return=representation"},
+        timeout=30,
+    )
+    created.raise_for_status()
+    return {"action": "inserted" if created.json() else "existing", "ticker": normalized}
 
 
 def build_ipo_notification_event(item: Any):

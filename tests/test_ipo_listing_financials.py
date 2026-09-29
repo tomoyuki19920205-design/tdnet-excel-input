@@ -11,6 +11,7 @@ from src.ipo_listing_financials import (
     build_ipo_notification_event,
     disclosure_identity,
     display_company_name,
+    ensure_ipo_company,
     extract_ipo_listing_financials,
     is_ipo_listing_financial_title,
     normalize_disclosure_title,
@@ -21,6 +22,7 @@ from src.events.tdnet_event_store import build_dedupe_key
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "ipo_listing" / "140120260916537319.pdf"
+CRASUS_FIXTURE = FIXTURE.parent / "140120260928541337.pdf"
 URL = "https://www.release.tdnet.info/inbs/140120260916537319.pdf"
 TITLE = "東京証券取引所グロース市場への上場に伴う当社決算情報等のお知らせ"
 
@@ -242,6 +244,72 @@ def test_existing_tanshin_classification_regression():
     assert classify_disclosure("2026年3月期 第1四半期決算短信〔日本基準〕") == (
         DisclosureType.FINANCIAL_STATEMENT
     )
+
+
+def test_consolidated_profit_attributable_to_owners_matches_listing_summary():
+    pytest.importorskip("pdfplumber")
+    result = extract_ipo_listing_financials(CRASUS_FIXTURE)
+    assert result.ticker == "646A"
+    actual = _period(result, "2026-12-31", "2Q", "actual")
+    assert (actual.period_start, actual.period_end, actual.source_unit) == (
+        "2026-01-01", "2026-06-30", "百万円",
+    )
+    assert actual.source_page == 12
+    assert actual.metrics["sales"] == 132009
+    assert actual.metrics["gross_profit"] == 12204
+    assert actual.metrics["operating_profit"] == 3564
+    assert actual.metrics["ordinary_profit"] == 4134
+    assert actual.metrics["net_income"] == 2621  # Owners; consolidated total is 2531.
+    assert _period(result, "2025-12-31", "FY", "actual").metrics["sales"] == 303926
+    forecast = _period(result, "2026-12-31", "FY", "forecast")
+    assert (forecast.metrics["sales"], forecast.metrics["net_income"]) == (323400, 1700)
+    assert {p.kind for p in result.periods} == {"actual", "forecast"}
+
+
+def test_crasus_rows_never_use_parent_company_identity():
+    pytest.importorskip("pdfplumber")
+    result = extract_ipo_listing_financials(CRASUS_FIXTURE)
+    rows = build_canonical_rows(
+        result, ticker="646a0", filing_id="140120260928541337",
+        disclosed_at="2026-09-29 08:00",
+    )
+    assert {row["ticker"] for row in rows} == {"646A"}
+    assert {row["filing_id"] for row in rows} == {"140120260928541337"}
+
+
+def test_listing_day_company_is_inserted_once_without_changing_existing_master():
+    class Response:
+        def __init__(self, data):
+            self.data = data
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.data
+
+    class Session:
+        def __init__(self):
+            self.rows = {}
+            self.posts = []
+
+        def get(self, url, *, params, headers, timeout):
+            ticker = params["ticker_code"].removeprefix("eq.")
+            return Response([{"ticker_code": ticker}] if ticker in self.rows else [])
+
+        def post(self, url, *, params, json, headers, timeout):
+            self.posts.append(json)
+            self.rows.setdefault(json["ticker_code"], json)
+            assert params == {"on_conflict": "ticker_code"}
+            assert "ignore-duplicates" in headers["Prefer"]
+            return Response([json])
+
+    session = Session()
+    config = {"rest_url": "https://example.invalid/rest/v1", "headers": {}}
+    first = ensure_ipo_company("646a0", "株式会社クラサスケミカル", config=config, session=session)
+    second = ensure_ipo_company("646A", "変更してはいけない", config=config, session=session)
+    assert (first["action"], second["action"]) == ("inserted", "existing")
+    assert session.posts == [{"ticker_code": "646A", "name_ja": "クラサスケミカル", "is_active": True}]
 
 
 @pytest.mark.parametrize(

@@ -97,6 +97,30 @@ def test_missing_offering_inputs_generate_no_guesses():
     assert report.calculate_offering({"offering_price": 570}) == []
 
 
+def test_jpx_direct_listing_without_public_offering_is_supported():
+    class Response:
+        def __init__(self, text):
+            self.text = text
+            self.content = text.encode("utf-8")
+            self.apparent_encoding = "utf-8"
+
+        def raise_for_status(self):
+            pass
+
+    class Session:
+        def get(self, url, timeout=60):
+            return Response("""<table><tr>
+                <td>2026/09/29</td><td>クラサスケミカル</td><td>646A</td>
+                <td>確認</td><td>概要</td><td>-</td><td>-</td><td>100</td>
+                </tr></table>""")
+
+    sources, offering = report.collect_jpx_listing_sources("646A", Session())
+    assert sources[0]["document_id"] == "JPX-LIST-646A"
+    assert offering["listing_date"] == "2026-09-29"
+    assert "public_offering_shares" not in offering
+    assert report.calculate_offering(offering) == []
+
+
 def test_actual_cumulative_and_forecast_remain_distinct():
     periods = report.group_financials(financial_rows())
     assert {(row["period"], row["quarter"], row["kind"]) for row in periods} == {

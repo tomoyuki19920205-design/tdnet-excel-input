@@ -43,6 +43,7 @@ from src.ipo_listing_financials import (
     IPO_LISTING_FINANCIALS,
     disclosure_identity,
     extract_ipo_listing_financials,
+    ensure_ipo_company,
     is_ipo_listing_financial_title,
     save_ipo_notification,
     write_ipo_financials,
@@ -236,7 +237,7 @@ def _process_single(
         if not dry_run:
             state_db.record(
                 disclosure_id=disclosure_id, code=code,
-                year="", quarter="",
+                year="", quarter="MULTI" if is_ipo_financials else "",
                 status=Status.DOWNLOAD_FAILED,
                 error_detail="ダウンロード失敗",
             )
@@ -265,6 +266,7 @@ def _process_single(
                     "code": code,
                     "extraction": extraction.to_dict(),
                 }
+            ensure_ipo_company(code, item.company_name or extraction.company_name)
             write_result = write_ipo_financials(
                 extraction,
                 ticker=code,
