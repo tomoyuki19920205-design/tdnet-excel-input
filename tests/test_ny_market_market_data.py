@@ -8,10 +8,13 @@ from urllib.parse import parse_qs, unquote, urlparse
 import pytest
 
 from lib.ny_market_market_data import (
+    CapturedEndOfDayQuoteProvider,
     DailyBar,
     DailySeries,
+    LiveDiscrepancyArbitrator,
     MarketDataError,
     NasdaqOfficialCloseProvider,
+    StockAnalysisGainersProvider,
     YahooChartProvider,
     build_canonical_market_data_packet,
     build_index_sector_snapshot,
@@ -22,6 +25,7 @@ from lib.ny_market_market_data import (
     rank_top20,
     resolve_discrepancy,
     resolve_latest_completed_sessions,
+    screener_candidate_symbols,
 )
 
 
@@ -96,6 +100,224 @@ def test_yahoo_preserves_zero_volume_for_no_trade_detection():
     assert [bar.volume for bar in result.bars] == [123.0, 0.0]
 
 
+def captured_refr_state(pct: str) -> bytes:
+    return f"""0 AXWebArea REFR Stock Price | Research Frontiers Inc. Stock Quote (U.S.: Nasdaq) | MarketWatch
+1 text AFTER HOURS Last Updated: Sep 18, 2026 at 6:05 p.m. EDT
+2 table
+  3 row
+    4 cell
+      5 text CLOSE
+    6 cell
+      7 text CHG
+    8 cell
+      9 text CHG %
+  10 row
+    11 cell
+      12 text $0.6513
+    13 cell
+      14 text 0.2648
+    15 cell
+      16 text {pct}%
+17 text Historical and current end-of-day data provided by
+18 link Description: FACTSET
+""".encode()
+
+
+def test_captured_eod_quote_accepts_display_rounding_interval(monkeypatch):
+    monkeypatch.setattr(Path, "read_bytes", lambda _path: captured_refr_state("68.49"))
+    provider = CapturedEndOfDayQuoteProvider({
+        "REFR": {"path": "marketwatch_refr.ax.txt", "source_url": "https://www.marketwatch.com/investing/stock/refr"},
+    })
+    result = provider.fetch("REFR", date(2026, 9, 18))
+    assert result["target_close"] == pytest.approx(0.6513)
+    assert result["previous_close"] == pytest.approx(0.3865)
+
+
+def test_captured_historical_quote_uses_dated_close_and_rejects_wrong_session(monkeypatch):
+    raw = b'''<html><head><title>SOAR Historical Prices | ChartExchange</title>
+<link rel="canonical" href="https://chartexchange.com/symbol/nyseamerican-soar/historical/"/></head>
+<body><table><tr><td>Date<br>(EDT)</td><td>Open</td><td>High</td><td>Low</td>
+<td>Close</td><td>Change</td></tr>
+<tr><td>2026-09-29</td><td>0.31</td><td>0.43</td><td>0.29</td><td>0.390000</td><td>+22.334%</td></tr>
+<tr><td>2026-09-28</td><td>0.37</td><td>0.46</td><td>0.31</td><td>0.318800</td><td>+77.604%</td></tr>
+<tr><td>2026-09-25</td><td>0.18</td><td>0.18</td><td>0.17</td><td>0.179500</td><td>-2.233%</td></tr>
+</table></body></html>'''
+    monkeypatch.setattr(Path, "read_bytes", lambda _path: raw)
+    provider = CapturedEndOfDayQuoteProvider({
+        "SOAR": {"path": "captured.html", "source_url": "https://chartexchange.com/symbol/nyseamerican-soar/historical/"},
+    })
+    result = provider.fetch("SOAR", date(2026, 9, 28))
+    assert result["target_close"] == pytest.approx(0.3188)
+    assert result["previous_close"] == pytest.approx(0.1795)
+    assert result["primary_exchange"] == "NYSEAMERICAN"
+    with pytest.raises(MarketDataError, match="target/previous session missing"):
+        provider.fetch("SOAR", date(2026, 9, 25))
+
+
+def test_non_nasdaq_primary_exchange_eod_resolves_nasdaq_last_sale_difference():
+    resolved = resolve_discrepancy(
+        candidate={
+            "symbol": "GENR", "_close": 0.511, "_change_pct": 50.029,
+            "netchange": "0.1704", "volume": "193313853",
+        },
+        historical_provider="yahoo_chart_query1",
+        historical_previous_close=0.3406,
+        historical_target_close=0.511,
+        historical_change_pct=50.029,
+        official={
+            "provider": "nasdaq_official_historical_nls", "provider_family": "nasdaq",
+            "target_close_verified": True, "target_timestamp": "Closed at Sep 23, 2026 4:00 PM ET",
+            "target_close_source": "nasdaq_info", "target_session_date": "2026-09-23",
+            "previous_close": 0.3406, "target_close": 0.4943,
+            "source_identifiers": ["https://nasdaq.test/history"], "raw_response_sha256": ["a" * 64],
+        },
+        corporate_action={
+            "provider": "yahoo_corporate_actions", "provider_family": "yahoo", "status": "checked_none",
+            "source_identifier": "https://yahoo.test/actions", "raw_response_sha256": "b" * 64,
+        },
+        minute_close={
+            "provider": "yahoo_minute_close", "provider_family": "yahoo", "price_field": "boundary_open",
+            "previous_close": 0.3406, "target_close": 0.511,
+            "source_identifier": "https://yahoo.test/minute", "raw_response_sha256": "c" * 64,
+        },
+        independent_sources=[{
+            "provider": "captured_end_of_day_quote", "provider_family": "factset",
+            "session": "regular_close", "target_session_date": "2026-09-23",
+            "previous_close": 0.34, "target_close": 0.51,
+            "primary_exchange": "NYSE American", "raw_value": "0.51",
+            "source_identifier": "https://www.marketwatch.com/investing/stock/genr",
+            "raw_response_sha256": "d" * 64,
+        }],
+        tolerance_pct=0.2,
+        resolved_at="2026-09-23T22:00:00+00:00",
+    )
+    assert resolved["discrepancy_reason"] == "non_nasdaq_primary_exchange_eod"
+    assert resolved["basis_evidence"]["primary_exchange"] == "NYSE American"
+    assert resolved["basis_evidence"]["nasdaq_info_close"] == pytest.approx(0.4943)
+
+
+def test_captured_eod_quote_rejects_change_outside_display_rounding_interval(monkeypatch):
+    monkeypatch.setattr(Path, "read_bytes", lambda _path: captured_refr_state("68.60"))
+    provider = CapturedEndOfDayQuoteProvider({
+        "REFR": {"path": "marketwatch_refr.ax.txt", "source_url": "https://www.marketwatch.com/investing/stock/refr"},
+    })
+    with pytest.raises(MarketDataError, match="EOD quote arithmetic mismatch"):
+        provider.fetch("REFR", date(2026, 9, 18))
+
+
+def test_captured_eod_quote_accepts_negative_change(monkeypatch):
+    state = """0 AXWebArea BENF Stock Price | Beneficient Stock Quote (U.S.: Nasdaq) | MarketWatch
+1 text AFTER HOURS Last Updated: Sep 24, 2026
+2 table
+  3 row
+    4 cell
+      5 text CLOSE
+    6 cell
+      7 text CHG
+    8 cell
+      9 text CHG %
+  10 row
+    11 cell
+      12 text $1.4500
+    13 cell
+      14 text -1.4500
+    15 cell
+      16 text -50.00%
+17 text Historical and current end-of-day data provided by
+18 link Description: FACTSET
+""".encode()
+    monkeypatch.setattr(Path, "read_bytes", lambda _path: state)
+    provider = CapturedEndOfDayQuoteProvider({
+        "BENF": {"path": "marketwatch_benf.ax.txt", "source_url": "https://www.marketwatch.com/investing/stock/benf"},
+    })
+    result = provider.fetch("BENF", date(2026, 9, 24))
+    assert result["target_close"] == pytest.approx(1.45)
+    assert result["previous_close"] == pytest.approx(2.90)
+
+
+def test_captured_eod_display_rounding_supports_official_close_arbitration():
+    resolved = resolve_discrepancy(
+        candidate={
+            "symbol": "REFR", "_close": 0.6513, "_change_pct": 68.469,
+            "netchange": "0.2647", "volume": "91327476",
+        },
+        historical_provider="yahoo_chart_query1",
+        historical_previous_close=0.38999998569488525,
+        historical_target_close=0.6513000130653381,
+        historical_change_pct=67.00000947561054,
+        official={
+            "provider": "nasdaq_official_historical_nls", "provider_family": "nasdaq",
+            "target_close_verified": True, "target_timestamp": "Closed at Sep 18, 2026 4:00 PM ET",
+            "target_close_source": "nasdaq_info", "target_session_date": "2026-09-18",
+            "previous_close": 0.3866, "target_close": 0.6513,
+            "source_identifiers": ["https://nasdaq.test/history"], "raw_response_sha256": ["a" * 64],
+        },
+        corporate_action={
+            "provider": "yahoo_corporate_actions", "provider_family": "yahoo", "status": "checked_none",
+            "source_identifier": "https://yahoo.test/actions", "raw_response_sha256": "b" * 64,
+        },
+        minute_close={
+            "provider": "yahoo_minute_close", "provider_family": "yahoo", "price_field": "boundary_open",
+            "previous_close": 0.3802, "target_close": 0.6501,
+            "source_identifier": "https://yahoo.test/minute", "raw_response_sha256": "c" * 64,
+        },
+        independent_sources=[{
+            "provider": "captured_end_of_day_quote", "provider_family": "factset",
+            "session": "regular_close", "target_session_date": "2026-09-18",
+            "previous_close": 0.3865, "target_close": 0.6513,
+            "raw_value": "0.6513", "reported_change_raw": "0.2648",
+            "display_decimal_places": 4, "source_identifier": "https://www.marketwatch.com/investing/stock/refr",
+            "raw_response_sha256": "d" * 64,
+        }],
+        tolerance_pct=0.2,
+        resolved_at="2026-09-18T22:00:00+00:00",
+    )
+    assert resolved["discrepancy_reason"] == "official_closed_eod_with_secondary_boundary_difference"
+    assert resolved["official_target_close"] == pytest.approx(0.6513)
+
+
+def test_captured_eod_display_rounding_accepts_dated_nasdaq_historical_close():
+    resolved = resolve_discrepancy(
+        candidate={
+            "symbol": "REFR", "_close": 0.6513, "_change_pct": 68.469,
+            "netchange": "0.2647", "volume": "91327476",
+        },
+        historical_provider="yahoo_chart_query1",
+        historical_previous_close=0.38999998569488525,
+        historical_target_close=0.6499999761581421,
+        historical_change_pct=66.66666666666667,
+        official={
+            "provider": "nasdaq_official_historical_nls", "provider_family": "nasdaq",
+            "target_close_verified": True,
+            "target_timestamp": "Nasdaq historical close 09/18/2026",
+            "target_close_source": "nasdaq_historical", "target_session_date": "2026-09-18",
+            "previous_close": 0.3866, "target_close": 0.6513,
+            "source_identifiers": ["https://nasdaq.test/history"], "raw_response_sha256": ["a" * 64],
+        },
+        corporate_action={
+            "provider": "yahoo_corporate_actions", "provider_family": "yahoo", "status": "checked_none",
+            "source_identifier": "https://yahoo.test/actions", "raw_response_sha256": "b" * 64,
+        },
+        minute_close={
+            "provider": "yahoo_minute_close", "provider_family": "yahoo", "price_field": "boundary_open",
+            "previous_close": 0.3802, "target_close": 0.6501,
+            "source_identifier": "https://yahoo.test/minute", "raw_response_sha256": "c" * 64,
+        },
+        independent_sources=[{
+            "provider": "captured_end_of_day_quote", "provider_family": "factset",
+            "session": "regular_close", "target_session_date": "2026-09-18",
+            "previous_close": 0.3865, "target_close": 0.6513,
+            "raw_value": "0.6513", "reported_change_raw": "0.2648",
+            "display_decimal_places": 4, "source_identifier": "https://www.marketwatch.com/investing/stock/refr",
+            "raw_response_sha256": "d" * 64,
+        }],
+        tolerance_pct=0.2,
+        resolved_at="2026-09-19T22:00:00+00:00",
+    )
+    assert resolved["discrepancy_reason"] == "official_closed_eod_with_secondary_boundary_difference"
+    assert resolved["official_target_close"] == pytest.approx(0.6513)
+
+
 def test_nasdaq_official_close_uses_dated_historical_row_when_info_date_is_stale():
     def transport(url, _headers):
         if "/historical?" in url:
@@ -124,6 +346,49 @@ def test_nasdaq_official_close_uses_dated_historical_row_when_info_date_is_stale
     assert result["target_close"] == pytest.approx(1.04)
     assert result["target_close_source"] == "nasdaq_historical"
     assert result["target_timestamp"] == "Nasdaq historical close 09/04/2026"
+
+
+def test_nasdaq_official_close_does_not_compare_live_nls_with_backfill_session():
+    def transport(url, _headers):
+        if "/historical?" in url:
+            return json.dumps({
+                "status": {"rCode": 200},
+                "data": {"tradesTable": {"rows": [
+                    {"date": "09/29/2026", "close": "$0.40", "volume": "1000"},
+                    {"date": "09/28/2026", "close": "$0.32", "volume": "1000"},
+                    {"date": "09/25/2026", "close": "$0.18", "volume": "1000"},
+                ]}},
+            }).encode()
+        if "/realtime-trades?" in url:
+            return json.dumps({"data": {"topTable": {"rows": [
+                {"previousClose": "$0.32"},
+            ]}}}).encode()
+        return json.dumps({"data": {
+            "symbol": "SOAR", "assetClass": "STOCKS", "notifications": [],
+            "primaryData": None,
+            "secondaryData": {"lastSalePrice": "$0.40", "lastTradeTimestamp": "Closed at Sep 29, 2026 4:00 PM ET"},
+        }}).encode()
+
+    provider = NasdaqOfficialCloseProvider(
+        transport=transport, now=lambda: datetime(2026, 9, 29, 22, tzinfo=timezone.utc),
+    )
+    backfill = provider.fetch("SOAR", date(2026, 9, 28), 0.32)
+    assert backfill["previous_close"] == pytest.approx(0.18)
+    assert backfill["target_close"] == pytest.approx(0.32)
+
+    def conflicting_transport(url, headers):
+        if "/realtime-trades?" in url:
+            return json.dumps({"data": {"topTable": {"rows": [
+                {"previousClose": "$0.18"},
+            ]}}}).encode()
+        return transport(url, headers)
+
+    current_provider = NasdaqOfficialCloseProvider(
+        transport=conflicting_transport,
+        now=lambda: datetime(2026, 9, 29, 22, tzinfo=timezone.utc),
+    )
+    with pytest.raises(MarketDataError, match="official historical/NLS previous close mismatch"):
+        current_provider.fetch("SOAR", date(2026, 9, 29), 0.40)
 
 
 def test_nasdaq_official_close_rejects_info_historical_target_mismatch():
@@ -235,6 +500,33 @@ def test_instrument_filter_excludes_non_common_equity(name):
 ])
 def test_instrument_filter_allows_common_ordinary_and_ads(name):
     assert eligible_screener_row(row("OK", 10, name=name))
+
+
+def test_instrument_filter_does_not_exclude_community_name():
+    assert eligible_screener_row(row(
+        "CMCT", 25.0, name="Creative Media & Community Trust Corporation Common Shares",
+    ))
+
+
+def test_stockanalysis_scans_beyond_first_twenty_before_filtering():
+    entries = []
+    for index in range(21):
+        symbol = "UNT" if index == 0 else "CMCT" if index == 1 else f"T{index:02}"
+        name = (
+            "Acme Acquisition Corp Units" if index == 0 else
+            "Creative Media & Community Trust Corporation Common Shares" if index == 1 else
+            f"Example {index} Common Stock"
+        )
+        entries.append(
+            f'{{no:{index + 1},s:"{symbol}",n:"{name}",change:{100 - index},'
+            'priceDate:"2026-09-30",price:1.0,volume:100,marketCap:1000}'
+        )
+    provider = StockAnalysisGainersProvider(
+        transport=lambda *_: "".join(entries).encode(), now=lambda: NOW,
+    )
+    snapshot = provider.fetch(date(2026, 9, 30))
+    assert len(snapshot["rows"]) == 21
+    assert screener_candidate_symbols(snapshot) == ["CMCT", *[f"T{index:02}" for index in range(2, 21)]]
 
 
 def test_reverse_split_artifact_is_removed_and_next_candidate_fills_top20():
@@ -405,6 +697,65 @@ def test_generic_stale_daily_bar_discrepancy_is_resolved_without_ticker_special_
     assert "discrepancy_resolved" in item["review_flags"]
 
 
+def test_vendor_omitted_immediate_previous_session_uses_dated_official_pair():
+    class Provider:
+        def __init__(self, value):
+            self.value = value
+
+        def fetch(self, *_args):
+            return self.value
+
+    candidate = {
+        **row("GAP", 83.838, close=3.64, volume=15_619_424),
+        "_change_pct": 83.838,
+        "_close": 3.64,
+    }
+    arbitrator = LiveDiscrepancyArbitrator(
+        official_provider=Provider({
+            "provider": "nasdaq_official_fixture", "provider_family": "nasdaq",
+            "target_close_verified": True,
+            "target_timestamp": "Closed at Sep 23, 2026 4:00 PM ET",
+            "target_close_source": "nasdaq_info", "target_session_date": "2026-09-23",
+            "previous_session_date": "2026-09-22", "previous_close": 1.98,
+            "target_close": 3.64, "notifications": [],
+            "source_identifiers": ["https://nasdaq.test/history"],
+            "raw_response_sha256": ["a" * 64],
+        }),
+        action_provider=Provider({
+            "provider": "action_fixture", "provider_family": "yahoo",
+            "status": "checked_none", "events": {},
+            "source_identifier": "https://yahoo.test/events", "raw_response_sha256": "b" * 64,
+        }),
+        minute_provider=Provider({
+            "provider": "minute_fixture", "provider_family": "yahoo",
+            "price_field": "boundary_open", "previous_close": 1.98,
+            "target_close": 3.64, "previous_last_regular_bar_close": None,
+            "target_last_regular_bar_close": 3.66,
+            "source_identifier": "https://yahoo.test/minute", "raw_response_sha256": "c" * 64,
+        }),
+        independent_providers=(Provider({
+            "provider": "independent_fixture", "provider_family": "independent_fixture",
+            "previous_close": 1.98, "target_close": 3.64,
+            "source_identifier": "https://independent.test/quote", "raw_response_sha256": "d" * 64,
+        }),),
+        now=lambda: NOW,
+    )
+    resolved = arbitrator.resolve(
+        ticker="GAP", candidate=candidate,
+        historical_series=series(
+            "GAP", closes=(2.07, 3.64),
+            days=(date(2026, 9, 21), date(2026, 9, 23)),
+            provider="yahoo_chart_query1",
+        ),
+        previous=DailyBar(date(2026, 9, 21), 2.07),
+        target=DailyBar(date(2026, 9, 23), 3.64),
+        target_session_date=date(2026, 9, 23), tolerance_pct=0.20,
+    )
+    assert resolved["discrepancy_reason"] == "vendor_omitted_previous_session"
+    assert resolved["basis_evidence"]["official_previous_session_date"] == "2026-09-22"
+    assert resolved["official_previous_close"] == pytest.approx(1.98)
+
+
 def test_historical_rdib_stale_daily_incident_remains_a_permanent_regression_fixture():
     incident = json.loads((ROOT / "tests" / "fixtures" / "ny_market_rdib_stale_daily_incident.json").read_text(encoding="utf-8"))
     candidate = {
@@ -526,6 +877,37 @@ def test_canonical_packet_contains_full_provider_and_raw_hash_provenance():
     assert packet["providers"] == ["nasdaq_stock_screener", "packet_fixture"]
     assert packet["screener"]["raw_response_sha256"] == "b" * 64
     assert set(packet["raw_response_hashes"]) == {"a" * 64, "b" * 64}
+
+
+def test_canonical_packet_allows_stale_low_rank_screener_row_without_target_bar():
+    class PacketProvider:
+        name = "packet_fixture"
+
+        def fetch(self, symbol, _start_date, _end_date):
+            if symbol == "STALE":
+                original = series(symbol, (9.0, 10.0), provider=self.name)
+                return DailySeries(
+                    symbol=original.symbol,
+                    provider=original.provider,
+                    source_identifier=original.source_identifier,
+                    retrieved_at=original.retrieved_at,
+                    raw_response_sha256=original.raw_response_sha256,
+                    bars=(original.bars[0],),
+                )
+            closes = (100.0, 110.0) if symbol.startswith("^") or symbol.startswith("X") else (10.0, 11.0)
+            return series(symbol, closes, provider=self.name)
+
+    class PacketScreener:
+        def fetch(self):
+            rows = [row(f"T{i:02}", 10.0, close=11.0) for i in range(20)]
+            rows.append(row("STALE", 1.0, close=10.0))
+            return screener(rows)
+
+    packet = build_canonical_market_data_packet(
+        date(2026, 9, 1), historical_providers=[PacketProvider()],
+        screener_provider=PacketScreener(), discrepancy_arbitrator=GenericFixtureArbitrator(),
+    )
+    assert [item["ticker"] for item in packet["top_gainers_20"]] == [f"T{i:02}" for i in range(20)]
 
 
 def test_top20_excludes_zero_volume_target_bar_and_records_provenance():

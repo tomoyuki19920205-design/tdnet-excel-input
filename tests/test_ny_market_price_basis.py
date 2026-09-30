@@ -187,6 +187,31 @@ def test_small_cent_rounding_difference_can_change_percentage_materially():
     assert evidence["rounding_decimal_places"] == 2
 
 
+def test_half_cent_uses_financial_half_up_rounding():
+    args = {
+        "official": {
+            "target_close_verified": True,
+            "previous_close": 0.815,
+            "target_close": 1.09,
+            "target_session_date": "2026-09-17",
+        },
+        "history_previous": 0.8199999928474426,
+        "history_target": 1.090000033378601,
+        "minute": {
+            "price_field": "boundary_open",
+            "previous_close": 0.815,
+            "target_close": 1.09,
+            "previous_last_regular_bar_close": 0.8054999709129333,
+            "target_last_regular_bar_close": 1.0950000286102295,
+        },
+        "action": {"status": "checked_none"},
+    }
+    reason, evidence = classify_official_discrepancy(**args)
+    assert reason == "provider_rounding"
+    assert evidence["official_previous_close_rounded"] == pytest.approx(0.82)
+    assert evidence["rounding_decimal_places"] == 2
+
+
 def test_previous_daily_close_rounded_to_mills_is_classified_as_provider_rounding():
     args = {
         "official": {
@@ -210,6 +235,34 @@ def test_previous_daily_close_rounded_to_mills_is_classified_as_provider_roundin
     assert reason == "provider_rounding"
     assert evidence["official_previous_close_rounded"] == pytest.approx(0.083)
     assert evidence["rounding_decimal_places"] == 3
+
+
+def test_previous_and_target_daily_closes_rounded_at_different_precisions():
+    args = {
+        "official": {
+            "target_close_verified": True,
+            "previous_close": 0.4395,
+            "target_close": 0.7183,
+            "target_session_date": "2026-09-18",
+        },
+        "history_previous": 0.4399999976158142,
+        "history_target": 0.7179999947547913,
+        "minute": {
+            "price_field": "boundary_open",
+            "previous_close": 0.4395,
+            "target_close": 0.7183,
+            "previous_last_regular_bar_close": 0.4392,
+            "target_last_regular_bar_close": 0.7223,
+        },
+        "action": {"status": "checked_none"},
+    }
+    reason, evidence = classify_official_discrepancy(**args)
+    assert reason == "provider_rounding"
+    assert evidence["affected_session"] == "previous_and_target"
+    assert evidence["previous_rounding_decimal_places"] == 2
+    assert evidence["target_rounding_decimal_places"] == 3
+    assert evidence["official_previous_close_rounded"] == pytest.approx(0.44)
+    assert evidence["official_target_close_rounded"] == pytest.approx(0.718)
 
 
 def test_target_daily_close_differing_from_exchange_close_is_classified_as_provider_error():

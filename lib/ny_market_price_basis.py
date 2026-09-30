@@ -5,6 +5,7 @@ import hashlib
 import math
 import re
 from datetime import date, datetime
+from decimal import Decimal, ROUND_HALF_UP
 from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup
@@ -13,6 +14,12 @@ from bs4 import BeautifulSoup
 def close_matches(left: float, right: float) -> bool:
     # Float transport noise only; never the old two-cent penny-stock tolerance.
     return math.isclose(left, right, rel_tol=1e-6, abs_tol=1e-7)
+
+
+def round_market_display(value: float, decimal_places: int) -> float:
+    """Round a quoted market value the way decimal price displays do."""
+    quantum = Decimal(1).scaleb(-decimal_places)
+    return float(Decimal(str(value)).quantize(quantum, rounding=ROUND_HALF_UP))
 
 
 def official_regular_close(info: dict, symbol: str, session: date) -> tuple[float, str]:
@@ -116,14 +123,41 @@ def classify_official_discrepancy(*, official: dict, history_previous: float,
         (
             digits
             for digits in range(2, 5)
-            if close_matches(history_previous, round(previous, digits))
+            if close_matches(history_previous, round_market_display(previous, digits))
         ),
         None,
     )
+    target_rounding_decimal_places = next(
+        (
+            digits
+            for digits in range(2, 5)
+            if close_matches(history_target, round_market_display(target, digits))
+        ),
+        None,
+    )
+    if (basis_unchanged
+            and rounding_decimal_places is not None
+            and target_rounding_decimal_places is not None
+            and not close_matches(history_previous, previous)
+            and not close_matches(history_target, target)):
+        return "provider_rounding", {
+            "affected_session": "previous_and_target",
+            "vendor_daily_previous_close": history_previous,
+            "official_previous_close": previous,
+            "official_previous_close_rounded": round_market_display(previous, rounding_decimal_places),
+            "previous_rounding_decimal_places": rounding_decimal_places,
+            "vendor_daily_target_close": history_target,
+            "official_target_close": target,
+            "official_target_close_rounded": round_market_display(target, target_rounding_decimal_places),
+            "target_rounding_decimal_places": target_rounding_decimal_places,
+            "boundary_open_previous_close": minute["previous_close"],
+            "boundary_open_target_close": minute["target_close"],
+            "comparison_basis": "regular_close",
+        }
     if (basis_unchanged and close_matches(history_target, target)
             and abs(history_previous - previous) > max(1e-6, abs(previous) * 1e-6)
             and rounding_decimal_places is not None):
-        rounded_previous = round(previous, rounding_decimal_places)
+        rounded_previous = round_market_display(previous, rounding_decimal_places)
         return "provider_rounding", {
             "affected_session": "previous",
             "vendor_daily_previous_close": history_previous,

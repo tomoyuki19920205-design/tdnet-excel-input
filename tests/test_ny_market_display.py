@@ -259,8 +259,8 @@ def test_positive_negative_and_zero_signs_are_stable():
     for item, value in zip(data["index_moves"].values(), values):
         item["change_pct"] = value
     assert render_display_sections(data)["5指数"].splitlines() == [
-        "SOX　+1.00%", "S&P 500　-0.70%", "Dow　+0.00%",
-        "Nasdaq　+0.00%", "Russell 2000　+0.00%",
+        "SOX　+1.00%", "S&P 500　-0.70%", "Dow　0.00%",
+        "Nasdaq　0.00%", "Russell 2000　0.00%",
     ]
 
 

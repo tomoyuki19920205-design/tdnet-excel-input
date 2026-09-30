@@ -60,7 +60,7 @@ def format_change_pct(value: Any) -> str:
         raise NYMarketDisplayError("change_pct must be numeric")
     number = float(value)
     if round(number, 2) == 0:
-        number = 0.0
+        return "0.00%"
     return f"{number:+.2f}%"
 
 
