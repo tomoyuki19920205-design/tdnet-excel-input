@@ -94,7 +94,7 @@ def read_pdf_lines(pdf_path: str) -> list[dict]:
                 else: merged.append((bbox, text, size))
             previous = None
             for index, (bbox, text, size) in enumerate(merged, 1):
-                paragraph = previous and (bbox[1] - previous[0][3] > size * .65 or
+                paragraph = previous and (bbox[1] - previous[0][1] > size * 2.1 or
                     (previous[1].rstrip().endswith('。') and
                      (bbox[0] - previous[0][0] > size * .5 or text.startswith((' ', '　')))))
                 if paragraph and rows and rows[-1]['text']:

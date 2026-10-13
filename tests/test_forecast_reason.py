@@ -32,6 +32,7 @@ def test_long_buyback_issuer_reason_keeps_bullets_decimal_and_final_exchange_row
     assert '21.8％減' in s['text'] and '⚫' in s['text'] and '・ 米国関税の還付' in s['text']
     assert s['text'].endswith('人民元  23.13 円  22.30 円  21.20 円')
     assert '株主の皆様に対する利益配分' not in s['text']
+    assert 'こと等により、\n売上高' in s['text']  # continuous paragraph despite different glyph boxes
 
 def test_multiple_periods_and_bases_are_labeled_without_cross_contamination():
     sections=fixture('8247')
@@ -78,3 +79,8 @@ def test_reason_repair_preserves_numeric_payload_and_rejects_concurrent_or_forei
     assert raw['extracted'].get('revision_reason') is None
     for invalid in ({**plan,'source_url':'https://example.com/foreign.pdf'},{**plan,'raw_payload_before_sha256':'changed'}):
         with pytest.raises(AssertionError):build_patch(before,invalid)
+    filled={**before,'raw_payload':amended}
+    replacement={**plan,'raw_payload_before_sha256':digest(amended)}
+    with pytest.raises(AssertionError):build_patch(filled,replacement)
+    replacement['expected_existing_reason_sha256']=digest(reason)
+    assert build_patch(filled,replacement)['raw_payload']==amended

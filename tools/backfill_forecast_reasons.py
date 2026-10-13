@@ -20,8 +20,11 @@ def build_patch(before: dict, plan: dict) -> dict:
     assert digest(before['raw_payload'])==plan['raw_payload_before_sha256'], 'payload changed since review'
     raw=json.loads(before['raw_payload']) if isinstance(before['raw_payload'],str) else copy.deepcopy(before['raw_payload'])
     assert isinstance(raw.get('extracted'),dict)
-    assert not raw['extracted'].get('revision_reason'), 'existing reason must not be overwritten'
     reason=plan['reason']
+    existing=raw['extracted'].get('revision_reason')
+    if existing:
+        assert digest(existing)==plan.get('expected_existing_reason_sha256'), 'existing reason must not be overwritten without an exact reviewed hash'
+        assert existing['source_url']==reason['source_url'] and existing['pdf_sha256']==reason['pdf_sha256']
     assert reason['status']=='available' and reason['version']==1 and reason['sections']
     assert len(reason['pdf_sha256'])==64
     for section in reason['sections']:
