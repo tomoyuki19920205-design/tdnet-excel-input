@@ -25,7 +25,7 @@ import zipfile
 from dataclasses import dataclass, field
 from src.events.pipeline_context import EarningsExtractionEvidence
 from src.xbrl_context_scope import (
-    is_actual_consolidated_duration_context,
+    is_actual_reporting_duration_context,
     parse_context_metadata,
 )
 from pathlib import Path
@@ -99,21 +99,19 @@ class EarningsSummaryData:
     ticker: str = ""
     source_unit: str = ""  # "百万円" etc
 
-    # ---- YOY (累計ベース、単四半期ベース優先) ----
+    # ---- YOY (累計ベース優先。単独四半期とは混同しない) ----
     @property
     def sales_yoy(self) -> float | None:
-        # 単四半期ベース優先
-        r = _calc_ratio(self.sales_q_current, self.sales_q_prior)
-        if r is not None:
-            return r
-        return _calc_ratio(self.sales_current, self.sales_prior)
+        # 決算通知の期間は累計。単独四半期は累計がない場合だけ使用する。
+        if self.sales_current is not None or self.sales_prior is not None:
+            return _calc_ratio(self.sales_current, self.sales_prior)
+        return _calc_ratio(self.sales_q_current, self.sales_q_prior)
 
     @property
     def op_yoy(self) -> float | None:
-        r = _calc_ratio(self.op_q_current, self.op_q_prior)
-        if r is not None:
-            return r
-        return _calc_ratio(self.op_current, self.op_prior)
+        if self.op_current is not None or self.op_prior is not None:
+            return _calc_ratio(self.op_current, self.op_prior)
+        return _calc_ratio(self.op_q_current, self.op_q_prior)
 
     # ---- QoQ ----
     @property
@@ -449,7 +447,9 @@ def _apply_ixbrl_scale(raw_text: str, scale: str, sign: str) -> int | None:
 # XBRL パーサ（当期 + 前期同時抽出）
 # ============================================================
 
-def _parse_xbrl_multi_period(raw: bytes, include_evidence: bool = False) -> dict[str, PeriodFinancials]:
+def _parse_xbrl_multi_period(
+    raw: bytes, include_evidence: bool = False, *, reporting_scope: str = "consolidated"
+) -> dict[str, PeriodFinancials]:
     """XBRLバイト列から当期・前期・当四半期・前四半期の数値を同時抽出。
 
     Returns:
@@ -502,7 +502,7 @@ def _parse_xbrl_multi_period(raw: bytes, include_evidence: bool = False) -> dict
         period_type = _classify_context(ctx)
         if period_type == "unknown":
             continue
-        if field_name in ("operating_profit", "profit_before_tax") and not is_actual_consolidated_duration_context(ctx, contexts):
+        if field_name in ("operating_profit", "profit_before_tax") and not is_actual_reporting_duration_context(ctx, contexts, reporting_scope=reporting_scope):
             continue
 
         val_text = elem.text or ""
@@ -583,7 +583,7 @@ def _parse_xbrl_multi_period(raw: bytes, include_evidence: bool = False) -> dict
         period_type = _classify_context(ctx)
         if period_type == "unknown":
             continue
-        if field_name in ("operating_profit", "profit_before_tax") and not is_actual_consolidated_duration_context(ctx, contexts):
+        if field_name in ("operating_profit", "profit_before_tax") and not is_actual_reporting_duration_context(ctx, contexts, reporting_scope=reporting_scope):
             continue
 
         text = (elem.text or "").strip()
@@ -644,7 +644,9 @@ def _is_summary_file(name: str) -> bool:
     return "/summary/" in lower or "summary" in os.path.basename(lower)
 
 
-def _extract_multi_period_from_xbrl(xbrl_path: str, include_evidence: bool = False) -> dict[str, PeriodFinancials]:
+def _extract_multi_period_from_xbrl(
+    xbrl_path: str, include_evidence: bool = False, *, reporting_scope: str = "consolidated"
+) -> dict[str, PeriodFinancials]:
     """XBRLファイル（ZIPまたは単体）から複数期間の数値を抽出"""
     try:
         raw = Path(xbrl_path).read_bytes()
@@ -671,7 +673,10 @@ def _extract_multi_period_from_xbrl(xbrl_path: str, include_evidence: bool = Fal
         for entry in summary_candidates + other:
             try:
                 entry_bytes = zf.read(entry)
-                result = _parse_xbrl_multi_period(entry_bytes, include_evidence=include_evidence)
+                result = _parse_xbrl_multi_period(
+                    entry_bytes, include_evidence=include_evidence,
+                    reporting_scope=reporting_scope,
+                )
                 if not merged_result:
                     merged_result = result
                 else:
@@ -710,7 +715,9 @@ def _extract_multi_period_from_xbrl(xbrl_path: str, include_evidence: bool = Fal
         return merged_result if merged_result else {}
 
     # 単体ファイル
-    return _parse_xbrl_multi_period(raw, include_evidence=include_evidence)
+    return _parse_xbrl_multi_period(
+        raw, include_evidence=include_evidence, reporting_scope=reporting_scope,
+    )
 
 
 # ============================================================
@@ -784,7 +791,15 @@ def extract_earnings_data(
     # ---- XBRL から複数期間抽出 ----
     periods: dict[str, PeriodFinancials] = {}
     if xbrl_path and os.path.isfile(xbrl_path):
-        periods = _extract_multi_period_from_xbrl(xbrl_path, include_evidence=include_evidence)
+        reporting_scope = (
+            "nonconsolidated"
+            if re.search(r"[（(〔]\s*非連結\s*[）)〕]", title)
+            else "consolidated"
+        )
+        periods = _extract_multi_period_from_xbrl(
+            xbrl_path, include_evidence=include_evidence,
+            reporting_scope=reporting_scope,
+        )
 
     if periods.get("current_ytd") and periods["current_ytd"].sales is not None:
         cur_ytd = periods["current_ytd"]

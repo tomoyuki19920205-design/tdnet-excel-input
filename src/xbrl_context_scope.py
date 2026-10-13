@@ -10,9 +10,7 @@ _ACTUAL_SCOPE_REJECT_TOKENS = (
     "estimate",
     "lower",
     "upper",
-    "nonconsolidated",
 )
-_ALLOWED_ENTITY_TOTAL_MEMBERS = {"ConsolidatedMember", "ResultMember"}
 
 
 def local_name(name: str) -> str:
@@ -59,35 +57,47 @@ def parse_context_metadata(root: ET.Element) -> dict[str, dict[str, Any]]:
     return result
 
 
-def is_actual_consolidated_duration_context(
+def is_actual_reporting_duration_context(
     context_ref: str,
     contexts: dict[str, dict[str, Any]],
+    *,
+    reporting_scope: str = "consolidated",
 ) -> bool:
-    """Return true only for actual consolidated/entity-total durations.
+    """Accept actual entity-total durations for the filing's reporting scope.
 
-    Summary facts normally use ``ConsolidatedMember`` and ``ResultMember``.
-    Detailed consolidated statements commonly use a dimensionless duration.
-    Both forms are valid, while non-consolidated, forecast, instant, segment,
-    and other dimensioned contexts are rejected.
+    A non-consolidated fact is valid only when the filing itself is explicitly
+    non-consolidated. Forecast, segment and opposite-scope facts stay excluded.
     """
-    if not context_ref:
+    if not context_ref or reporting_scope not in {"consolidated", "nonconsolidated"}:
         return False
+    required_member = (
+        "NonConsolidatedMember" if reporting_scope == "nonconsolidated"
+        else "ConsolidatedMember"
+    )
+    opposite_member = (
+        "ConsolidatedMember" if reporting_scope == "nonconsolidated"
+        else "NonConsolidatedMember"
+    )
     lowered_ref = context_ref.lower()
     if any(token in lowered_ref for token in _ACTUAL_SCOPE_REJECT_TOKENS):
+        return False
+    if opposite_member in context_ref.split("_"):
         return False
 
     metadata = contexts.get(context_ref)
     if metadata is None:
         # Some synthetic/legacy iXBRL omits context definitions. Keep this
-        # fallback compatible with standard detailed-statement duration IDs,
-        # but never accept a member context unless it is explicitly
-        # consolidated actual/result scope.
+        # fallback compatible with standard detailed-statement duration IDs.
+        # Member contexts must match the filing scope exactly.
         if "Member" in context_ref:
             return (
-                "ConsolidatedMember" in context_ref
-                and "ResultMember" in context_ref
+                required_member in context_ref
                 and "Segment" not in context_ref
                 and "Axis" not in context_ref
+                and set(context_ref.split("_")[1:]).issubset(
+                    {required_member, "ResultMember"}
+                )
+                and (reporting_scope == "nonconsolidated" or "ResultMember" in context_ref)
             )
         return (
             ("Duration" in context_ref or "Interim" in context_ref)
@@ -108,6 +118,14 @@ def is_actual_consolidated_duration_context(
         return False
     if not members:
         return True
-    if not members.issubset(_ALLOWED_ENTITY_TOTAL_MEMBERS):
+    if opposite_member in members or not members.issubset({required_member, "ResultMember"}):
         return False
-    return "ConsolidatedMember" in members
+    return required_member in members
+
+
+def is_actual_consolidated_duration_context(
+    context_ref: str,
+    contexts: dict[str, dict[str, Any]],
+) -> bool:
+    """Preserve the consolidated-only guard used by existing ingestion paths."""
+    return is_actual_reporting_duration_context(context_ref, contexts)
