@@ -2995,7 +2995,7 @@ def _extract_fitz_only(
     return event
 
 
-def extract_forecast_revision(
+def _extract_forecast_revision_metrics(
     text: str,
     title: str = "",
     is_difference: bool = False,
@@ -3142,6 +3142,26 @@ def extract_forecast_revision(
             f"[forecast_ocr] OCR fallback failed (non-fatal): {e}"
         )
         return _return_with_eps_log(base)
+
+
+def extract_forecast_revision(
+    text: str, title: str = "", is_difference: bool = False,
+    pdf_path: str = "", doc_url: str = "", doc_id: str = "",
+) -> ForecastRevisionEvent:
+    event = _extract_forecast_revision_metrics(text, title, is_difference, pdf_path, doc_url, doc_id)
+    from .forecast_reason import extract_forecast_reason
+    reason_pdf = pdf_path if os.path.isfile(pdf_path) else ""
+    temporary = False
+    if not reason_pdf and doc_url:
+        reason_pdf = _download_pdf_for_ocr(doc_url)
+        temporary = bool(reason_pdf)
+    try:
+        event.revision_reason = extract_forecast_reason(reason_pdf, doc_url, doc_id, title)
+    finally:
+        if temporary:
+            try: os.unlink(reason_pdf)
+            except OSError: pass
+    return event
 
 
 def _download_pdf_for_ocr(url: str) -> str:

@@ -45,6 +45,7 @@ class ForecastRevisionEvent:
     extraction_source: str = "fallback"    # pdf_text / html_text / fallback
     extracted_metrics_count: int = 0
     raw_table_text: str = ""
+    revision_reason: Optional[dict] = None  # Native PDF wording + source/section provenance
 
     subtype: str = "undecided"      # upward/downward/difference/neutral/undecided
     importance: int = 50
