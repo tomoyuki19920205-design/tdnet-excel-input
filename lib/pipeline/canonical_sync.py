@@ -77,6 +77,7 @@ _FINANCIALS_METRIC_COLS = {
     "gross_profit": "gross_profit",
     "sga": "sga",
     "operating_profit": "operating_profit",
+    "ordinary_profit": "ordinary_profit",
     "profit_before_tax": "profit_before_tax",
     "net_income": "net_income",
 }

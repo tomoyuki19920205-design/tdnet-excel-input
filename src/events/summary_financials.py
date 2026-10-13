@@ -43,7 +43,9 @@ logger = logging.getLogger("summary_financials")
 class PeriodFinancials:
     """ある期間の財務数値"""
     sales: int | None = None
+    sales_tag: str | None = None
     operating_profit: int | None = None
+    operating_profit_tag: str | None = None
     profit_before_tax: int | None = None
     gross_profit: int | None = None
     selling_general_and_administrative_expenses: int | None = None
@@ -534,6 +536,8 @@ def _parse_xbrl_multi_period(raw: bytes, include_evidence: bool = False) -> dict
         "prior_q": {"sales": None, "operating_profit": None, "profit_before_tax": None, "gross_profit": None, "selling_general_and_administrative_expenses": None},
     }
     priority: dict[str, dict[str, tuple[bool, int]]] = {k: {} for k in values}
+    sales_tags: dict[str, str | None] = {k: None for k in values}
+    op_tags: dict[str, str | None] = {k: None for k in values}
     evidences = {k: [] for k in values}
 
     # --- パス1: 従来XBRLモード ---
@@ -576,6 +580,10 @@ def _parse_xbrl_multi_period(raw: bytes, include_evidence: bool = False) -> dict
         if values[period_type][field_name] is None or new_prio > current_prio:
             values[period_type][field_name] = val
             priority[period_type][field_name] = new_prio
+            if field_name == "operating_profit":
+                op_tags[period_type] = tag_local
+            if field_name == "sales":
+                sales_tags[period_type] = tag_local
             if include_evidence:
                 namespace = tag[1:].split("}", 1)[0] if tag.startswith("{") else None
                 prefix = namespace_prefix.get(namespace or "", "")
@@ -594,12 +602,14 @@ def _parse_xbrl_multi_period(raw: bytes, include_evidence: bool = False) -> dict
         or values["current_ytd"]["gross_profit"] is not None
         or values["current_ytd"]["profit_before_tax"] is not None
     ):
-        return {k: PeriodFinancials(sales=v["sales"], operating_profit=v["operating_profit"], profit_before_tax=v["profit_before_tax"], gross_profit=v["gross_profit"], selling_general_and_administrative_expenses=v["selling_general_and_administrative_expenses"], source="xbrl", sales_priority=priority[k].get("sales", (-1, False)), evidences=evidences[k])
+        return {k: PeriodFinancials(sales=v["sales"], sales_tag=sales_tags[k], operating_profit=v["operating_profit"], operating_profit_tag=op_tags[k], profit_before_tax=v["profit_before_tax"], gross_profit=v["gross_profit"], selling_general_and_administrative_expenses=v["selling_general_and_administrative_expenses"], source="xbrl", sales_priority=priority[k].get("sales", (-1, False)), evidences=evidences[k])
                 for k, v in values.items()}
 
     # --- パス2: iXBRLモード ---
     values = {k: {"sales": None, "operating_profit": None, "profit_before_tax": None, "gross_profit": None, "selling_general_and_administrative_expenses": None} for k in values}
     priority = {k: {} for k in values}
+    sales_tags = {k: None for k in values}
+    op_tags = {k: None for k in values}
     evidences = {k: [] for k in values}
 
     for elem in root.iter():
@@ -660,6 +670,10 @@ def _parse_xbrl_multi_period(raw: bytes, include_evidence: bool = False) -> dict
         if values[period_type][field_name] is None or new_prio > current_prio:
             values[period_type][field_name] = val
             priority[period_type][field_name] = new_prio
+            if field_name == "operating_profit":
+                op_tags[period_type] = concept_local
+            if field_name == "sales":
+                sales_tags[period_type] = concept_local
             if include_evidence:
                 sc = int(scale) if scale and scale.lstrip("-").isdigit() else None
                 prefix = concept_name.split(":", 1)[0] if ":" in concept_name else ""
@@ -671,7 +685,7 @@ def _parse_xbrl_multi_period(raw: bytes, include_evidence: bool = False) -> dict
                 ))
 
 
-    return {k: PeriodFinancials(sales=v["sales"], operating_profit=v["operating_profit"], profit_before_tax=v["profit_before_tax"], gross_profit=v["gross_profit"], selling_general_and_administrative_expenses=v["selling_general_and_administrative_expenses"], source="xbrl", sales_priority=priority[k].get("sales", (-1, False)), evidences=evidences[k])
+    return {k: PeriodFinancials(sales=v["sales"], sales_tag=sales_tags[k], operating_profit=v["operating_profit"], operating_profit_tag=op_tags[k], profit_before_tax=v["profit_before_tax"], gross_profit=v["gross_profit"], selling_general_and_administrative_expenses=v["selling_general_and_administrative_expenses"], source="xbrl", sales_priority=priority[k].get("sales", (-1, False)), evidences=evidences[k])
             for k, v in values.items()}
 
 
@@ -741,8 +755,11 @@ def _extract_multi_period_from_xbrl_bytes(raw: bytes, include_evidence: bool = F
                             new_sp = v.sales_priority or (-1, False)
                             if merged_result[k].sales is None or new_sp > curr_sp:
                                 merged_result[k].sales = v.sales
+                                merged_result[k].sales_tag = v.sales_tag
                                 merged_result[k].sales_priority = new_sp
-                            if merged_result[k].operating_profit is None: merged_result[k].operating_profit = v.operating_profit
+                            if merged_result[k].operating_profit is None:
+                                merged_result[k].operating_profit = v.operating_profit
+                                merged_result[k].operating_profit_tag = v.operating_profit_tag
                             if merged_result[k].profit_before_tax is None: merged_result[k].profit_before_tax = v.profit_before_tax
                             if merged_result[k].gross_profit is None: merged_result[k].gross_profit = v.gross_profit
                             if getattr(merged_result[k], "selling_general_and_administrative_expenses", None) is None: merged_result[k].selling_general_and_administrative_expenses = getattr(v, "selling_general_and_administrative_expenses", None)

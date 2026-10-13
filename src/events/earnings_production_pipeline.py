@@ -550,6 +550,18 @@ def _resolve_exact_fiscal_period(
     return title_period
 
 
+def _canonical_profit_metric(op_value: float, xbrl_path: str | None) -> str:
+    """Use the disclosed bank concept for canonical storage only."""
+    if xbrl_path:
+        from .summary_financials import _extract_multi_period_from_xbrl
+        current = _extract_multi_period_from_xbrl(xbrl_path).get("current_ytd")
+        if (current is not None and current.operating_profit == op_value
+                and current.sales_tag == "OrdinaryIncomeBNK"
+                and current.operating_profit_tag == "OrdinaryIncome"):
+            return "ordinary_profit"
+    return "operating_profit"
+
+
 def _sync_canonical_financials(
     ticker: str,
     period: str,
@@ -562,6 +574,7 @@ def _sync_canonical_financials(
     filing_id: str,
     dry_run: bool,
     route: str,
+    xbrl_path: str | None = None,
 ):
     import os
     if not period:
@@ -574,7 +587,10 @@ def _sync_canonical_financials(
 
         _metrics = {}
         if sales_value is not None: _metrics["sales"] = sales_value / 1_000_000
-        if op_value is not None: _metrics["operating_profit"] = op_value / 1_000_000
+        if op_value is not None:
+            # Earnings notifications keep their historical op_value. Only the
+            # canonical PL row follows the original accounting subject.
+            _metrics[_canonical_profit_metric(op_value, xbrl_path)] = op_value / 1_000_000
         if gross_value is not None: _metrics["gross_profit"] = gross_value / 1_000_000
         if sga_value is not None: _metrics["selling_general_and_administrative_expenses"] = sga_value / 1_000_000
 
@@ -782,7 +798,7 @@ def _retry_incomplete_canonical_for_duplicate(
         if sales is not None:
             expected_metrics.append("sales")
         if op is not None:
-            expected_metrics.append("operating_profit")
+            expected_metrics.append(_canonical_profit_metric(op, xbrl_path))
 
         if not expected_metrics:
             logger.info(
@@ -823,6 +839,7 @@ def _retry_incomplete_canonical_for_duplicate(
                         filing_id=filing_id,
                         dry_run=dry_run,
                         route="canonical_retry",
+                        xbrl_path=xbrl_path,
                     )
                     # 再確認
                     pl_post_complete = _check_canonical_financials_saved(
@@ -2181,6 +2198,7 @@ def run_earnings_production(
                             filing_id=canonical_filing_id,
                             dry_run=dry_run,
                             route="subprocess",
+                            xbrl_path=_resolved_zip,
                         )
 
                     # セグメント同期
@@ -2915,6 +2933,7 @@ def run_earnings_production(
                             filing_id=_seq_doc_id,
                             dry_run=dry_run,
                             route="sequential",
+                            xbrl_path=xbrl_path,
                         )
 
                     # セグメント同期

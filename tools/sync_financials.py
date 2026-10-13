@@ -260,7 +260,22 @@ field_best AS (
        AND s.type_of_current_period = latest.type_of_current_period
        AND s.type_of_document LIKE '%FinancialStatements%'
        AND s.operating_profit IS NOT NULL
+       AND (
+         (
+           NULLIF(json_extract(s.raw_json, '$.OdP'), '') IS NULL
+           AND NULLIF(json_extract(s.raw_json, '$.NCOP'), '') IS NULL
+         )
+         OR NULLIF(json_extract(s.raw_json, '$.OP'), '') IS NOT NULL
+         OR json_extract(s.raw_json, '$._operating_profit_proxy.reason') LIKE 'OperatingIncomeBNK:%'
+       )
      ORDER BY s.disclosed_date DESC, s.rn LIMIT 1) AS operating_profit
+    ,(SELECT CAST(NULLIF(json_extract(s.raw_json, '$.OdP'), '') AS INTEGER) FROM latest s
+     WHERE s.local_code = latest.local_code
+       AND s.current_fiscal_year_end_date = latest.current_fiscal_year_end_date
+       AND s.type_of_current_period = latest.type_of_current_period
+       AND s.type_of_document LIKE '%FinancialStatements_Consolidated_%'
+       AND NULLIF(json_extract(s.raw_json, '$.OdP'), '') IS NOT NULL
+     ORDER BY s.disclosed_date DESC, s.rn LIMIT 1) AS ordinary_profit
     ,(SELECT json_extract(s.raw_json, '$._operating_profit_proxy.reason') FROM latest s
      WHERE s.local_code = latest.local_code
        AND s.current_fiscal_year_end_date = latest.current_fiscal_year_end_date
@@ -283,6 +298,7 @@ SELECT
   net_sales                    AS sales,
   gross_profit,
   operating_profit,
+  ordinary_profit,
   profit_before_tax,
   operating_profit_proxy_reason
 FROM field_best
@@ -380,10 +396,11 @@ def read_sqlite(
         # 保持する。Sales/OP/PBTは既存の整数百万円変換契約を維持する。
         gp_m = _gross_profit_to_millions(r["gross_profit"])
         op_m = _to_millions(r["operating_profit"])
+        ordinary_m = _to_millions(r["ordinary_profit"])
         pbt_m = _to_millions(r["profit_before_tax"])
 
         # 正規化後のバリデーション: 百万円として異常に大きい値を検知
-        for label, val in [("sales", sales_m), ("gross_profit", gp_m), ("operating_profit", op_m), ("profit_before_tax", pbt_m)]:
+        for label, val in [("sales", sales_m), ("gross_profit", gp_m), ("operating_profit", op_m), ("ordinary_profit", ordinary_m), ("profit_before_tax", pbt_m)]:
             if val is not None and abs(val) > _ABNORMAL_MILLIONS_THRESHOLD:
                 abnormal_count += 1
                 if abnormal_count <= 5:  # 最初の5件だけログ
@@ -401,6 +418,7 @@ def read_sqlite(
                 "sales": sales_m,
                 "gross_profit": gp_m,
                 "operating_profit": op_m,
+                "ordinary_profit": ordinary_m,
                 "profit_before_tax": pbt_m,
                 "source": "jquants",
                 "updated_at": now_iso,
@@ -866,7 +884,7 @@ def sync(
     legacy_data = [
         {
             key: value for key, value in row.items()
-            if key not in {"profit_before_tax", "operating_profit_proxy_reason"}
+            if key not in {"ordinary_profit", "profit_before_tax", "operating_profit_proxy_reason"}
         }
         for row in data
     ]
@@ -970,11 +988,8 @@ def sync(
                     for d in data:
                         metrics_dict = {
                             k: d.get(k)
-                            for k in ("sales", "gross_profit", "operating_profit", "profit_before_tax")
+                            for k in ("sales", "gross_profit", "operating_profit", "ordinary_profit", "profit_before_tax")
                         }
-                        proxy_op = None
-                        if d.get("operating_profit_proxy_reason"):
-                            proxy_op = metrics_dict.pop("operating_profit", None)
                         expanded, skipped = expand_financials_rows(
                             ticker=d["ticker"],
                             period=d["period"],
@@ -985,17 +1000,6 @@ def sync(
                         )
                         all_canonical_rows.extend(expanded)
                         canonical_skipped += skipped
-                        if proxy_op is not None:
-                            proxy_rows, proxy_skipped = expand_financials_rows(
-                                ticker=d["ticker"],
-                                period=d["period"],
-                                quarter=d["quarter"],
-                                metrics_dict={"operating_profit": proxy_op},
-                                source="jquants_bank_proxy",
-                                unit="millions_jpy",
-                            )
-                            all_canonical_rows.extend(proxy_rows)
-                            canonical_skipped += proxy_skipped
 
                     if all_canonical_rows:
                         upsert_result = supabase_upsert(

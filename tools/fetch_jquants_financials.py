@@ -741,10 +741,6 @@ def _extract_details_actual_metrics(
         if preferred:
             bank_operating_profit = preferred[0][1]
             bank_reason = f"OperatingIncomeBNK:{preferred[0][0]}"
-        else:
-            bank_operating_profit = _safe_int(summary_item.get("OdP"))
-            if bank_operating_profit is not None:
-                bank_reason = "OrdinaryProfitBNK_proxy:summary.OdP"
 
     return {
         "gross_profit": _extract_gp_from_detail_item(item),

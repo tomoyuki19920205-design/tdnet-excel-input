@@ -169,9 +169,8 @@ def _apply_industry_operating_profit(
 ) -> tuple[str | None, str | None]:
     """Apply the bank-only OP policy and return (reason, concept tag).
 
-    OperatingIncomeBNK is a direct bank operating metric.  When it is absent,
-    ordinary profit is an explicit bank-only proxy.  No equivalent fallback is
-    performed for a general company.
+    OperatingIncomeBNK is a direct bank operating metric. Ordinary profit
+    remains a separate accounting metric when this fact is absent.
     """
     profiles = detect_industry_profile(fact_names)
     is_bank = bool(profiles and profiles[0].industry == IndustryType.BANK)
@@ -181,11 +180,6 @@ def _apply_industry_operating_profit(
     op_tag = value_tags.get("operating_profit")
     if values.get("operating_profit") is not None and op_tag == "OperatingIncomeBNK":
         return "bank_operating_income", op_tag
-    if values.get("operating_profit") is None and values.get("ordinary_profit") is not None:
-        proxy_tag = value_tags.get("ordinary_profit") or "OrdinaryIncome"
-        values["operating_profit"] = values["ordinary_profit"]
-        value_tags["operating_profit"] = proxy_tag
-        return "bank_ordinary_profit_proxy", proxy_tag
     return None, None
 
 
