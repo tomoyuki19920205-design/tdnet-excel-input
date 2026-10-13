@@ -29,6 +29,7 @@ from .notify_rules import should_notify_event
 
 # classifiers
 from .buyback_classifier import classify_buyback, classify_buyback_subtype
+from .buyback_models import BUYBACK_RESULT, BUYBACK_STATUS
 from .forecast_classifier import classify_forecast
 from .dividend_classifier import classify_dividend
 
@@ -529,7 +530,9 @@ def _process_single_document(
             cls_result = classify_buyback(title, text[:2000])
             # [C] 中間ガード: confidence < 0.50 は除外
             _cls_conf = getattr(cls_result, "confidence", 0.0) or 0.0
+            # タイトルが曖昧でも本文で結果・状況と判明したものはカード化しない。
             if cls_result.is_buyback_related and cls_result.event_type_candidate \
+                    not in (BUYBACK_STATUS, BUYBACK_RESULT) \
                     and _cls_conf >= 0.50:
                 event_type_raw = cls_result.event_type_candidate
                 # サブタイプは buyback_event_subtype (new_program/tostnet) を優先

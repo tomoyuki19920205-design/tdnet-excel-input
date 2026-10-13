@@ -4,7 +4,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from src.events.buyback_classifier import classify_buyback
+from src.events.buyback_classifier import classify_buyback, classify_buyback_subtype
 from src.events.buyback_models import (
     BUYBACK_DECISION, BUYBACK_STATUS, BUYBACK_RESULT, TREASURY_CANCEL,
 )
@@ -59,6 +59,41 @@ class TestBuybackResult:
         r = classify_buyback("自己株式の取得終了に関するお知らせ")
         assert r.is_buyback_related is True
         assert r.event_type_candidate == BUYBACK_RESULT
+
+
+@pytest.mark.parametrize("ticker,title", [
+    ("2735", "自己株式立会外買付取引（ToSTNeT-3）による自己株式の取得結果に関するお知らせ"),
+    ("6136", "自己株式立会外買付取引（ToSTNeT－3）による自己株式の取得結果に関するお知らせ"),
+])
+def test_october_13_result_disclosures_are_not_new_decisions(ticker, title):
+    # Production notification IDs: 2735=7ced180f-0ace-4018-a972-458c51c00dc9,
+    # 6136=17bcf838-7a87-4200-9557-81b35f258937.
+    body = "（ご参考）2026年10月9日開催の取締役会における自己株式の取得に関する決議内容"
+    assert classify_buyback_subtype(title) == "ignore", ticker
+    assert classify_buyback(title, body).event_type_candidate == BUYBACK_RESULT
+
+
+@pytest.mark.parametrize("title", [
+    "自己株式の取得状況に関するお知らせ（9月度）",
+    "自己株式の取得に関する月次進捗のお知らせ",
+    "自己株式の取得結果及び取得終了に関するお知らせ",
+    "自己株式の取得完了に関するお知らせ",
+    "自己株式立会外買付取引（ToSTNeT-3）による買付結果について",
+])
+def test_progress_reports_are_ignored_even_with_tostnet(title):
+    assert classify_buyback_subtype(title) == "ignore"
+
+
+@pytest.mark.parametrize("title,expected_subtype", [
+    ("自己株式の取得に係る事項の決定に関するお知らせ", "new_program"),
+    ("自己株式取得枠の拡大に関するお知らせ", "new_program"),
+    ("自己株式立会外買付取引（ToSTNeT-3）による自己株式の取得に関するお知らせ", "tostnet"),
+    ("自己株式の取得及び取得結果の公表に関するお知らせ", "new_program"),
+    ("自己株式の取得に係る事項の決定及び取得結果に関するお知らせ", "new_program"),
+])
+def test_fresh_decisions_remain_eligible(title, expected_subtype):
+    assert classify_buyback_subtype(title) == expected_subtype
+    assert classify_buyback(title).event_type_candidate == BUYBACK_DECISION
 
 
 # ============================================================

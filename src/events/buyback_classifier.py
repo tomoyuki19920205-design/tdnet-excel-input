@@ -7,6 +7,7 @@ event_type を推定する。
 from __future__ import annotations
 
 import re
+import unicodedata
 from .buyback_models import (
     ClassificationResult,
     BUYBACK_DECISION,
@@ -27,6 +28,20 @@ _TOSTNET_PATTERNS = [
     "立会外買付取引",
 ]
 
+# A fresh decision takes precedence when the same disclosure also mentions a
+# result. A past resolution quoted in a result report's body is not a decision.
+_FRESH_DECISION_TITLE_PATTERNS = [
+    "取得に係る事項の決定",
+    "取得枠設定", "取得枠の設定", "取得枠拡大", "取得枠の拡大", "取得枠増額",
+    "自己株式取得の決定", "自己株式の取得の決定", "取得実施の決定",
+    "自己株式の取得及び取得結果の公表",
+]
+
+
+def _has_fresh_decision_title(title: str) -> bool:
+    normalized = re.sub(r"\s+", "", unicodedata.normalize("NFKC", title))
+    return any(pat in normalized for pat in _FRESH_DECISION_TITLE_PATTERNS)
+
 # new_program 確定パターン（取得枠決議系）
 _NEW_PROGRAM_PATTERNS = [
     "取得に係る事項の決定",
@@ -40,11 +55,24 @@ _NEW_PROGRAM_PATTERNS = [
 ]
 
 # 強除外パターン（タイトルにあれば ignore）
-# ※ ToSTNeT が含まれる場合は除外しない（tostnet 判定優先）
+# ToSTNeT の結果・進捗も除外する。
 _IGNORE_TITLE_PATTERNS = [
     "取得状況",
+    "取得の状況",
+    "取得進捗",
+    "取得の進捗",
+    "月次進捗",
+    "月次報告",
     "取得結果",
+    "取得の結果",
     "取得終了",
+    "取得の終了",
+    "取得完了",
+    "取得の完了",
+    "取得が終了",
+    "取得が完了",
+    "買付結果",
+    "買付けの結果",
     "消却完了",
     "自己株式の処分",
     "自己株式処分",
@@ -76,27 +104,31 @@ def classify_buyback_subtype(title: str) -> str:
     if not title:
         return "ignore"
 
-    # 1. ToSTNeT 判定（最優先 — 取得状況/結果/終了でも ToSTNeT なら通知対象）
-    for pat in _TOSTNET_PATTERNS:
-        if pat.lower() in title.lower():
-            return "tostnet"
+    # 1. 新規決定を明示する複合開示は、結果にも言及していても通知する。
+    if _has_fresh_decision_title(title):
+        return "new_program"
 
-    # 2. 強除外パターン（ToSTNeT ではない場合）
+    # 2. 結果・状況・終了は ToSTNeT-3 による買付でも通知しない。
     for pat in _IGNORE_TITLE_PATTERNS:
         if pat in title:
             return "ignore"
 
-    # 3. new_program 判定
+    # 3. 取得実施の決定としての ToSTNeT 開示。
+    for pat in _TOSTNET_PATTERNS:
+        if pat.lower() in title.lower():
+            return "tostnet"
+
+    # 4. new_program 判定
     for pat in _NEW_PROGRAM_PATTERNS:
         if pat in title:
             return "new_program"
 
-    # 4. 「自己株式取得」を含む汎用パターン（取得方針決定等）
+    # 5. 「自己株式取得」を含む汎用パターン（取得方針決定等）
     #    ただし「取得状況/結果/終了」は既に除外済み
     if "自己株式取得" in title or "自己株式の取得" in title:
         return "new_program"
 
-    # 5. 判定できない場合は ignore
+    # 6. 判定できない場合は ignore
     return "ignore"
 
 # ============================================================
@@ -264,7 +296,7 @@ def classify_buyback(title: str, body_head: str = "") -> ClassificationResult:
             matched_keywords.append(kw)
 
     # 5. event_type 推定（タイトル優先）
-    event_type = _detect_event_type(title)
+    event_type = BUYBACK_DECISION if _has_fresh_decision_title(title) else _detect_event_type(title)
     # A ToSTNeT purchase notice may mention when the *result will be
     # published*.  That is a proposed purchase, not a result disclosure.
     if (not event_type and ("買付けに関する" in title or "買付に関する" in title)
