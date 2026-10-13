@@ -45,4 +45,6 @@ FROM canonical_news_scan_runs ORDER BY ticker, checked_at DESC;
 
 ALTER TABLE canonical_news_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE canonical_news_scan_runs ENABLE ROW LEVEL SECURITY;
-GRANT SELECT ON api_latest_news_events, api_latest_news_scan_runs TO authenticated;
+-- Raw views are owned by postgres and bypass base-table RLS. Keep browser roles
+-- on the allowlisted api_authorized_news_* views only.
+REVOKE ALL ON api_latest_news_events, api_latest_news_scan_runs FROM PUBLIC, anon, authenticated;

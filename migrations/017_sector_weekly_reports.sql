@@ -127,4 +127,5 @@ FROM canonical_sector_reports r;
 
 ALTER TABLE canonical_sector_reports ENABLE ROW LEVEL SECURITY;
 ALTER TABLE canonical_sector_report_runs ENABLE ROW LEVEL SECURITY;
-GRANT SELECT ON api_latest_news_stream TO authenticated;
+-- The allowlisted api_authorized_news_stream is the browser read model.
+REVOKE ALL ON api_latest_news_stream FROM PUBLIC, anon, authenticated;
