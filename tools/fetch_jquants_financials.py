@@ -59,6 +59,11 @@ if _PROJECT_ROOT not in sys.path:
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from src.jquants.financial_details import (
+    has_plausible_actual_period_metadata,
+    normalize_actual_consolidated_pbt,
+)
+
 # Windows cp932 対策
 if sys.stdout and hasattr(sys.stdout, "encoding"):
     if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
@@ -275,6 +280,7 @@ CREATE TABLE IF NOT EXISTS jquants_financials_normalized (
     net_sales                     INTEGER,
     gross_profit                  INTEGER,
     operating_profit              INTEGER,
+    profit_before_tax             INTEGER,
     raw_json                      TEXT,
     fetched_at                    TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -283,6 +289,9 @@ CREATE TABLE IF NOT EXISTS jquants_financials_normalized (
 def _ensure_table(conn: sqlite3.Connection) -> None:
     """テーブルが存在しない場合のみ作成する。UNIQUE INDEX は既存テーブルにすでに存在する可能性があるためスキップ。"""
     conn.execute(_CREATE_TABLE_SQL)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(jquants_financials_normalized)")}
+    if "profit_before_tax" not in columns:
+        conn.execute("ALTER TABLE jquants_financials_normalized ADD COLUMN profit_before_tax INTEGER")
     conn.commit()
 
 
@@ -326,13 +335,16 @@ def _row_to_db(item: dict) -> dict | None:
     # 必須フィールドチェック
     if not local_code or not disclosed_date or not fiscal_year_end or not period:
         return None
+    if not has_plausible_actual_period_metadata(item):
+        return None
 
     # 連結優先、なければ非連結を使用
     net_sales = _safe_int(item.get("Sales") or item.get("NCSales"))
-    operating_profit = _safe_int(item.get("OP") or item.get("NCOP"))
+    operating_profit = _safe_int(item.get("OP"))
     # V2 /fins/summary に GrossProfit フィールドは存在しない。
     # ただし旧スクリプトが raw_json に "_gross_profit" を追記していた場合はそれを採用する。
     gross_profit = _safe_int(item.get("_gross_profit"))
+    profit_before_tax = _safe_int(item.get("_profit_before_tax"))
 
     return {
         "local_code": local_code,
@@ -344,6 +356,7 @@ def _row_to_db(item: dict) -> dict | None:
         "net_sales": net_sales,
         "gross_profit": gross_profit,
         "operating_profit": operating_profit,
+        "profit_before_tax": profit_before_tax,
         "raw_json": json.dumps(item, ensure_ascii=False),
         "fetched_at": datetime.now(JST).isoformat(),
     }
@@ -361,12 +374,12 @@ _INSERT_SQL = """
 INSERT OR IGNORE INTO jquants_financials_normalized
     (local_code, disclosed_date, current_fiscal_year_end_date,
      type_of_current_period, type_of_document,
-     net_sales, gross_profit, operating_profit,
+     net_sales, gross_profit, operating_profit, profit_before_tax,
      raw_json, fetched_at)
 VALUES
     (:local_code, :disclosed_date, :current_fiscal_year_end_date,
      :type_of_current_period, :type_of_document,
-     :net_sales, :gross_profit, :operating_profit,
+     :net_sales, :gross_profit, :operating_profit, :profit_before_tax,
      :raw_json, :fetched_at)
 """
 
@@ -377,7 +390,19 @@ SET
     net_sales         = COALESCE(:net_sales,        net_sales),
     gross_profit      = COALESCE(:gross_profit,     gross_profit),
     operating_profit  = COALESCE(:operating_profit, operating_profit),
-    raw_json          = :raw_json,
+    profit_before_tax = COALESCE(:profit_before_tax, profit_before_tax),
+    raw_json          = CASE
+        WHEN :profit_before_tax IS NULL AND profit_before_tax IS NOT NULL
+        THEN json_set(:raw_json, '$._profit_before_tax', profit_before_tax,
+            '$._profit_before_tax_source', json_extract(raw_json, '$._profit_before_tax_source'),
+            '$._profit_before_tax_disclosure', json_extract(raw_json, '$._profit_before_tax_disclosure'),
+            '$._operating_profit_proxy', json_extract(raw_json, '$._operating_profit_proxy'))
+        WHEN :operating_profit IS NULL AND operating_profit IS NOT NULL
+             AND json_extract(raw_json, '$._operating_profit_proxy') IS NOT NULL
+        THEN json_set(:raw_json, '$._operating_profit_proxy',
+            json_extract(raw_json, '$._operating_profit_proxy'))
+        ELSE :raw_json
+    END,
     fetched_at        = :fetched_at
 WHERE
     local_code                   = :local_code
@@ -571,6 +596,121 @@ def _fetch_details_gross_profit(
     return None
 
 
+def _extract_details_actual_metrics(
+    item: dict, summary_item: dict
+) -> dict[str, int | str | None]:
+    """Extract strict actual metrics from one already-matched details item."""
+    local_code = str(summary_item.get("Code") or "")
+    pbt_record = normalize_actual_consolidated_pbt(
+        item, summary_item, expected_code=local_code
+    )
+    fs = item.get("FS") if isinstance(item.get("FS"), dict) else {}
+    bank_fact_present = any("bnk" in str(key).lower() for key in fs)
+    bank_operating_profit = None
+    bank_reason = None
+    if bank_fact_present:
+        preferred = [
+            (key, _safe_int(value))
+            for key, value in fs.items()
+            if "operating income" in str(key).lower() and "bnk" in str(key).lower()
+        ]
+        preferred = [(key, value) for key, value in preferred if value is not None]
+        if preferred:
+            bank_operating_profit = preferred[0][1]
+            bank_reason = f"OperatingIncomeBNK:{preferred[0][0]}"
+
+    return {
+        "gross_profit": _extract_gp_from_detail_item(item),
+        "profit_before_tax": (
+            pbt_record.raw_value_jpy if pbt_record is not None else None
+        ),
+        "operating_profit": bank_operating_profit,
+        "operating_profit_reason": bank_reason,
+    }
+
+
+def _fetch_details_for_date(
+    session: requests.Session,
+    auth_headers: dict,
+    disclosed_date: str,
+    *,
+    deadline_monotonic: float | None = None,
+) -> tuple[list[dict], int]:
+    """Fetch a whole disclosure day's details in one request (plus pagination)."""
+    params: dict[str, str] = {"date": disclosed_date}
+    items: list[dict] = []
+    api_calls = 0
+    while True:
+        response = _api_get(
+            session,
+            _DETAILS_ENDPOINT,
+            params,
+            auth_headers,
+        )
+        api_calls += 1
+        if response.status_code == 404:
+            return items, api_calls
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"[DETAILS] HTTP {response.status_code} date={disclosed_date}"
+            )
+        payload = response.json()
+        items.extend(payload.get("data") or [])
+        pagination_key = payload.get("pagination_key")
+        if not pagination_key:
+            return items, api_calls
+        params["pagination_key"] = str(pagination_key)
+
+
+def _fetch_details_actual_metrics(
+    session: requests.Session,
+    auth_headers: dict,
+    summary_item: dict,
+) -> dict[str, int | str | None]:
+    """Backward-compatible one-document helper for targeted repair tools."""
+    local_code = str(summary_item.get("Code") or "")
+    disclosed_date = str(summary_item.get("DiscDate") or "")
+    disclosure_number = str(summary_item.get("DiscNo") or "")
+    items, _api_calls = _fetch_details_for_date(
+        session, auth_headers, disclosed_date
+    )
+    matching = [
+        item
+        for item in items
+        if str(item.get("Code") or "") == local_code
+        and str(item.get("DiscNo") or "") == disclosure_number
+    ]
+    if len(matching) != 1:
+        logger.warning(
+            f"[DETAILS] exact disclosure match count={len(matching)} "
+            f"code={local_code} disc_no={disclosure_number}"
+        )
+        return {
+            "gross_profit": None,
+            "profit_before_tax": None,
+            "operating_profit": None,
+            "operating_profit_reason": None,
+        }
+    return _extract_details_actual_metrics(matching[0], summary_item)
+
+
+def _details_document_key(summary_item: dict, row: tuple) -> str:
+    disclosure_number = str(summary_item.get("DiscNo") or "").strip()
+    if disclosure_number:
+        return disclosure_number
+    # Defensive fallback for malformed historical summary rows. It remains
+    # deterministic, but cannot accidentally match a different disclosure.
+    return "missing:" + "|".join(str(value or "") for value in row[1:5])
+
+
+def _load_details_state(path: Path) -> dict:
+    state = safe_json_load(path, default={"version": 1, "documents": {}})
+    if not isinstance(state, dict) or not isinstance(state.get("documents"), dict):
+        return {"version": 1, "documents": {}}
+    state["version"] = 1
+    return state
+
+
 def _supplement_gross_profit_from_details(
     conn: sqlite3.Connection,
     session: requests.Session,
@@ -701,6 +841,106 @@ def _supplement_gross_profit_from_details(
     return stats
 
 
+def _supplement_profit_before_tax_from_details(
+    conn: sqlite3.Connection,
+    session: requests.Session,
+    auth_headers: dict,
+    target_local_code: str | None,
+    *,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> dict[str, int]:
+    """Fill missing actual PBT or direct bank OP from exact details disclosure.
+
+    The original summary JSON and the matched details field remain in raw_json;
+    OP is never changed here. One details request is shared by all rows on a date.
+    """
+    conditions = [
+        "(profit_before_tax IS NULL OR operating_profit IS NULL)",
+        "type_of_document LIKE '%FinancialStatements_Consolidated_%'",
+    ]
+    params: list[str] = []
+    if target_local_code:
+        conditions.append("local_code = ?")
+        params.append(target_local_code)
+    if date_from:
+        conditions.append("disclosed_date >= ?")
+        params.append(date_from)
+    if date_to:
+        conditions.append("disclosed_date <= ?")
+        params.append(date_to)
+    rows = conn.execute(
+        "SELECT rowid, local_code, disclosed_date, raw_json, "
+        "profit_before_tax, operating_profit "
+        "FROM jquants_financials_normalized WHERE " + " AND ".join(conditions) +
+        " ORDER BY disclosed_date DESC", params,
+    ).fetchall()
+    by_date: dict[str, list[tuple]] = {}
+    for row in rows:
+        by_date.setdefault(row[2], []).append(row)
+    stats = {"checked": len(rows), "supplemented": 0, "bank_op_supplemented": 0,
+             "details_api_calls": 0, "errors": 0}
+    for disclosed_date, dated_rows in by_date.items():
+        try:
+            details, api_calls = _fetch_details_for_date(session, auth_headers, disclosed_date)
+            stats["details_api_calls"] += api_calls
+        except Exception as exc:
+            logger.warning("[DETAILS] PBT fetch failed date=%s: %s", disclosed_date, exc)
+            stats["errors"] += len(dated_rows)
+            continue
+        by_disclosure: dict[tuple[str, str, str], list[dict]] = {}
+        for detail in details:
+            key = (str(detail.get("Code") or ""), str(detail.get("DiscNo") or ""),
+                   str(detail.get("DocType") or ""))
+            by_disclosure.setdefault(key, []).append(detail)
+        for rowid, local_code, _, raw_json, existing_pbt, existing_op in dated_rows:
+            try:
+                summary = json.loads(raw_json or "{}")
+                disclosure_number = str(summary.get("DiscNo") or "")
+                if not disclosure_number:
+                    continue
+                key = (local_code, disclosure_number, str(summary.get("DocType") or ""))
+                matches = by_disclosure.get(key, [])
+                if len(matches) != 1:
+                    continue
+                if not has_plausible_actual_period_metadata(summary):
+                    continue
+                metrics = _extract_details_actual_metrics(matches[0], summary)
+                pbt_value = metrics["profit_before_tax"] if existing_pbt is None else None
+                bank_op = metrics["operating_profit"] if existing_op is None else None
+                if pbt_value is None and bank_op is None:
+                    continue
+                if pbt_value is not None:
+                    pbt = normalize_actual_consolidated_pbt(
+                        matches[0], summary, expected_code=local_code,
+                    )
+                    if pbt is None:
+                        continue
+                    summary["_profit_before_tax"] = pbt.raw_value_jpy
+                    summary["_profit_before_tax_source"] = pbt.pbt_field
+                    summary["_profit_before_tax_disclosure"] = pbt.disclosure_number
+                if bank_op is not None:
+                    summary["_operating_profit_proxy"] = {
+                        "reason": metrics["operating_profit_reason"],
+                        "disclosure": disclosure_number,
+                    }
+                cursor = conn.execute(
+                    "UPDATE jquants_financials_normalized "
+                    "SET profit_before_tax = COALESCE(?, profit_before_tax), "
+                    "operating_profit = COALESCE(?, operating_profit), raw_json = ? "
+                    "WHERE rowid = ?",
+                    (pbt_value, bank_op, json.dumps(summary, ensure_ascii=False), rowid),
+                )
+                if cursor.rowcount:
+                    stats["supplemented"] += int(pbt_value is not None)
+                    stats["bank_op_supplemented"] += int(bank_op is not None)
+            except (ValueError, TypeError, sqlite3.Error) as exc:
+                logger.warning("[DETAILS] PBT rejected code=%s rowid=%s: %s", local_code, rowid, exc)
+                stats["errors"] += 1
+        conn.commit()
+    return stats
+
+
 # ============================================================
 # メイン処理
 # ============================================================
@@ -735,6 +975,7 @@ def fetch_and_save(
         "errors": 0,
         "dry_run": dry_run,
         "details_gp_supplemented": 0,
+        "details_pbt_supplemented": 0,
     }
 
     auth_headers = _get_auth_headers()
@@ -871,21 +1112,28 @@ def fetch_and_save(
             f"force={force_details_gp}"
         )
         conn2 = sqlite3.connect(db_path)
+        details_session = requests.Session()
         try:
             d_stats = _supplement_gross_profit_from_details(
-                conn2, session, auth_headers=_get_auth_headers(),
+                conn2, details_session, auth_headers=auth_headers,
                 target_local_code=target_lc,
                 force=force_details_gp,
                 date_from=from_date,
                 date_to=to_date,
             )
             stats["details_gp_supplemented"] = d_stats["supplemented"]
+            pbt_stats = _supplement_profit_before_tax_from_details(
+                conn2, details_session, auth_headers,
+                target_local_code=target_lc, date_from=from_date, date_to=to_date,
+            )
+            stats["details_pbt_supplemented"] = pbt_stats["supplemented"]
             logger.info(
                 f"[DETAILS] 補完完了: checked={d_stats['checked']} "
                 f"supplemented={d_stats['supplemented']} "
                 f"skipped={d_stats['skipped']} errors={d_stats['errors']}"
             )
         finally:
+            details_session.close()
             conn2.close()
     elif dry_run and enable_details_gp:
         logger.info(

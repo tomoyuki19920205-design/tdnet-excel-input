@@ -79,6 +79,8 @@ class EarningsExtractionEvidence:
     metric: str
     value: Optional[float]
     tag_name: Optional[str] = None
+    qname: Optional[str] = None
+    namespace: Optional[str] = None
     context_ref: Optional[str] = None
     unit: Optional[str] = None
     scale: Optional[int] = None

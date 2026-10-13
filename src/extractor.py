@@ -18,6 +18,10 @@ import pdfplumber
 from .models import ExtractedFinancials, ForecastTarget, OrderMetric, ExtractedOrderMetrics, FINANCIAL_STATEMENT_KEYWORDS
 from .utils import normalize_number, parse_scale_unit
 from .xbrl_clean import read_xbrl_bytes
+from .xbrl_context_scope import (
+    is_actual_consolidated_duration_context,
+    parse_context_metadata,
+)
 from .year_parser import (
     extract_fiscal_info,
     extract_fiscal_year_from_title,
@@ -27,6 +31,7 @@ from .year_parser import (
     parse_reiwa,
 )
 from .analysis.header_analysis import normalize_header
+from .extractors.xbrl_profiles import IndustryType, detect_industry_profile
 
 logger = logging.getLogger("tdnet")
 
@@ -93,7 +98,11 @@ _XBRL_TAG_MAP = {
     "OperatingProfit": "operating_profit",
     "OperatingIncomeIFRS": "operating_profit",
     "OperatingProfitLossIFRS": "operating_profit",
-    "OrdinaryIncome": "operating_profit",    # 経常利益（営業利益なし時のFB）
+    "OperatingIncomeBNK": "operating_profit",
+    "OrdinaryIncome": "ordinary_profit",
+    "OrdinaryProfitBNK": "ordinary_profit",
+    "ProfitLossBeforeTaxIFRS": "profit_before_tax",
+    "ProfitBeforeTaxIFRS": "profit_before_tax",
 }
 
 
@@ -116,6 +125,63 @@ _ZIP_SIGNATURE = b"PK\x03\x04"
 # contextRefで当期累計を判定するキーワード
 # InterimDuration: 中間期（2Q/半期決算）のAttachment PLで使用される
 _CURRENT_DURATION_KEYWORDS = ("CurrentYearDuration", "CurrentYTD", "CurrentAccumulatedQ", "InterimDuration")
+
+
+def _concept_names(root: ET.Element) -> set[str]:
+    """Return local XBRL concept names for industry-profile detection."""
+    names: set[str] = set()
+    for elem in root.iter():
+        tag = elem.tag
+        if not isinstance(tag, str):
+            continue
+        local = tag.split("}")[-1] if "}" in tag else tag
+        if local == "nonFraction":
+            concept = elem.get("name", "")
+            if concept:
+                names.add(concept.split(":")[-1])
+        else:
+            names.add(local)
+    return names
+
+
+def _apply_industry_operating_profit(
+    values: dict[str, int | None],
+    value_tags: dict[str, str],
+    fact_names: set[str],
+) -> tuple[str | None, str | None]:
+    """Apply the bank-only OP policy and return (reason, concept tag).
+
+    OperatingIncomeBNK is a direct bank operating metric. Ordinary profit
+    remains a separate accounting metric when this fact is absent.
+    """
+    profiles = detect_industry_profile(fact_names)
+    is_bank = bool(profiles and profiles[0].industry == IndustryType.BANK)
+    if not is_bank:
+        return None, None
+
+    op_tag = value_tags.get("operating_profit")
+    if values.get("operating_profit") is not None and op_tag == "OperatingIncomeBNK":
+        return "bank_operating_income", op_tag
+    return None, None
+
+
+def _field_sources_with_profile(
+    values: dict[str, int | None],
+    value_tags: dict[str, str],
+    fact_names: set[str],
+    source_label: str,
+) -> dict[str, str]:
+    reason, tag = _apply_industry_operating_profit(values, value_tags, fact_names)
+    sources = {
+        key: source_label
+        for key, value in values.items()
+        if value is not None and key != "cost_of_sales"
+    }
+    if reason and tag:
+        sources["operating_profit"] = f"{source_label}|{reason}|{tag}"
+    if values.get("cost_of_sales") is not None:
+        sources["cost_of_sales"] = source_label
+    return sources
 
 
 def _find_xbrl_in_zip(zf: zipfile.ZipFile) -> list[str]:
@@ -210,15 +276,20 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
     """
     xml_str = read_xbrl_bytes(raw)
     root = ET.fromstring(xml_str)
+    contexts = parse_context_metadata(root)
+    fact_names = _concept_names(root)
 
     values: dict[str, int | None] = {
         "sales": None,
         "gross_profit": None,
         "selling_general_and_administrative_expenses": None,
         "operating_profit": None,
+        "ordinary_profit": None,
+        "profit_before_tax": None,
         "cost_of_sales": None,
     }
     value_priority: dict[str, tuple[int, bool]] = {}
+    value_tags: dict[str, str] = {}
 
     # --- パス1: 従来XBRLモード（タグ名直接マッチ）---
     for elem in root.iter():
@@ -234,6 +305,8 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
             is_fallback = primary_metric is None and fallback_metric is not None
             context = elem.get("contextRef", "")
             if _is_current_duration(context):
+                if field_name in ("operating_profit", "ordinary_profit", "profit_before_tax") and not is_actual_consolidated_duration_context(context, contexts):
+                    continue
                 val = normalize_number(elem.text or "")
                 if val is not None:
                     is_consol = _is_consolidated_preferred(context)
@@ -243,16 +316,17 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
                     if values[field_name] is None or new_prio > current_prio:
                         values[field_name] = val
                         value_priority[field_name] = new_prio
+                        value_tags[field_name] = tag_local
 
     if values["sales"] is not None:
-        sources = {k: source_label for k, v in values.items() if v is not None and k != "cost_of_sales"}
-        if values["cost_of_sales"] is not None:
-            sources["cost_of_sales"] = source_label
+        sources = _field_sources_with_profile(values, value_tags, fact_names, source_label)
         result = ExtractedFinancials(
             sales=values["sales"],
             gross_profit=values["gross_profit"],
             selling_general_and_administrative_expenses=values["selling_general_and_administrative_expenses"],
             operating_profit=values["operating_profit"],
+            ordinary_profit=values["ordinary_profit"],
+            profit_before_tax=values["profit_before_tax"],
             source_unit="円",
             confidence="high",
             field_sources=sources,
@@ -261,8 +335,9 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
         return result
 
     # --- パス2: iXBRLモード（ix:nonFraction の name 属性）---
-    values = {"sales": None, "gross_profit": None, "selling_general_and_administrative_expenses": None, "operating_profit": None, "cost_of_sales": None}
+    values = {"sales": None, "gross_profit": None, "selling_general_and_administrative_expenses": None, "operating_profit": None, "ordinary_profit": None, "profit_before_tax": None, "cost_of_sales": None}
     value_priority = {}
+    value_tags = {}
     detected_unit = "円"
     unknown_tags: set[str] = set()
     sales_context = ""  # 売上のcontextRef（Q検出用）
@@ -302,6 +377,8 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
             continue
         if "ForecastMember" in context or "LowerMember" in context or "UpperMember" in context:
             continue
+        if field_name in ("operating_profit", "ordinary_profit", "profit_before_tax") and not is_actual_consolidated_duration_context(context, contexts):
+            continue
 
         text = (elem.text or "").strip()
         if not text:
@@ -330,6 +407,7 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
         if values[field_name] is None or new_prio > current_prio:
             values[field_name] = val
             value_priority[field_name] = new_prio
+            value_tags[field_name] = concept_local
             if field_name == "sales":
                 sales_context = context
 
@@ -342,13 +420,13 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
     # contextRefからQ情報を検出
     detected_quarter = _detect_quarter_from_context(sales_context)
 
-    sources = {k: source_label for k, v in values.items() if v is not None and k != "cost_of_sales"}
-    if values["cost_of_sales"] is not None:
-        sources["cost_of_sales"] = source_label
+    sources = _field_sources_with_profile(values, value_tags, fact_names, source_label)
     result = ExtractedFinancials(
         sales=values["sales"],
         gross_profit=values["gross_profit"],
         operating_profit=values["operating_profit"],
+        ordinary_profit=values["ordinary_profit"],
+        profit_before_tax=values["profit_before_tax"],
         source_unit=detected_unit,
         confidence="high",
         field_sources=sources,
@@ -447,6 +525,10 @@ def _extract_from_xbrl(xbrl_path: str) -> ExtractedFinancials | None:
                 missing_fields.append("sales")
             if summary_result.operating_profit is None:
                 missing_fields.append("operating_profit")
+            if summary_result.ordinary_profit is None:
+                missing_fields.append("ordinary_profit")
+            if summary_result.profit_before_tax is None:
+                missing_fields.append("profit_before_tax")
 
             if missing_fields:
                 pl_candidates = [c for c in candidates if _is_pl_attachment(c)]
@@ -487,6 +569,12 @@ def _extract_from_xbrl(xbrl_path: str) -> ExtractedFinancials | None:
                             summary_result.operating_profit = pl_result.operating_profit
                             summary_result.field_sources["operating_profit"] = "attachment_xbrl"
                             logger.info(f"[XBRL] Attachment補完: operating_profit={pl_result.operating_profit}")
+
+                        for profit_field in ("ordinary_profit", "profit_before_tax"):
+                            profit_value = getattr(pl_result, profit_field)
+                            if profit_field in missing_fields and profit_value is not None:
+                                setattr(summary_result, profit_field, profit_value)
+                                summary_result.field_sources[profit_field] = "attachment_xbrl"
 
                         break  # 最初に成功したPL Attachmentで補完完了
                     except Exception as e:
