@@ -1,4 +1,6 @@
 """The card numerator must describe the same purchase as the ratio."""
+import pytest
+
 from src.events.buyback_classifier import classify_buyback
 from src.events.buyback_extractor import extract_buyback_event
 
@@ -125,4 +127,92 @@ def test_result_with_ambiguous_same_day_count_keeps_ratio_empty():
         "buyback_result", ticker="9999", disclosure_date="2026-09-18",
     )
     assert event.shares_acquired == 100_000
+    assert event.ratio_to_outstanding is None
+
+
+@pytest.mark.parametrize("ratio_text", [
+    "（発行済み株式総数（自己株式を除く）に対する割合2.41％）",
+    "(発行済株式総数(自己株式数を除く)に対する割合：２．４１％)",
+    "発行 済み 株式 総数\n（自己株式を除く）に対する\n割合 2.41 %",
+    "発行済株式数（自己株式を除く）の割合 2.41%",
+    "発行済株式総数（自己株式を除く）に対する割合 約2.41％",
+])
+def test_disclosed_share_ratio_label_variations(ratio_text):
+    event = extract_buyback_event(
+        "取得する株式の総数 350,000株（上限）\n" + ratio_text,
+        "buyback_decision", ticker="9999",
+    )
+    assert event.ratio_to_outstanding == 2.41  # percentage points, not 0.0241
+    assert event.ratio_numerator_shares == 350_000
+    assert event.ratio_source == "disclosed"
+
+
+@pytest.mark.parametrize("shares,amount,ratio,title,reference", [
+    (350_000, "300,000,000", 2.41,
+     "自己株式取得に係る事項の決定に関するお知らせ", ""),
+    (300_000, "248,400,000", 2.06,
+     "自己株式立会外買付取引（ToSTNeT-3）による自己株式の買付けに関するお知らせ",
+     "（ご参考）自己株式取得に係る事項の決議内容\n"
+     "取得する株式の総数 350,000株（上限）\n"
+     "（発行済み株式総数（自己株式を除く）に対する割合2.41％）\n"
+     "株式の取得価額の総額 300,000,000円（上限）"),
+])
+def test_20261013_avantia_original_acquisition_rows(shares, amount, ratio, title, reference):
+    # Original row text from 140120261006546516.pdf / 140120261006546520.pdf.
+    text = (
+        "本日、自己株式取得に係る事項を決議し、その取得方法を決定しました。\n"
+        f"取得する株式の総数 {shares:,}株\n"
+        f"（発行済み株式総数（自己株式を除く）に対する割合{ratio}％）\n"
+        f"株式の取得価額の総額 {amount}円\n"
+        "取得結果の公表は2026年10月14日の取引終了後に行います。\n" + reference
+    )
+    kind = classify_buyback(title, text).event_type_candidate
+    assert kind == "buyback_decision"
+    event = extract_buyback_event(text, kind, ticker="8904", title=title)
+    assert event.shares_limit == event.ratio_numerator_shares == shares
+    assert event.amount_limit_million_yen == float(amount.replace(",", "")) / 1_000_000
+    assert event.ratio_to_outstanding == ratio
+    assert event.ratio_source == "disclosed"
+    assert event.ratio_scope == ("transaction_limit" if reference else "program_limit")
+    assert event.to_dict()["ratio_to_outstanding"] == ratio
+
+
+def test_selected_share_row_wins_over_other_percentage_contexts():
+    text = (
+        "過去の発行済株式総数に対する割合9.9％\n"
+        "発行済株式総数に対する持株比率8.0％\n"
+        "取得金額の時価総額比7.0％\n"
+        "取得する株式の総数350,000株\n"
+        "発行済み株式総数（自己株式を除く）に対する割合2.41％"
+    )
+    event = extract_buyback_event(text, "buyback_decision", ticker="9999")
+    assert event.ratio_to_outstanding == 2.41
+
+
+def test_missing_transaction_ratio_does_not_borrow_reference_program_ratio():
+    text = (
+        "取得する株式の総数300,000株\n取得価額の総額248,400,000円\n"
+        "（ご参考）\n取得する株式の総数350,000株\n"
+        "発行済み株式総数（自己株式を除く）に対する割合2.41％"
+    )
+    event = extract_buyback_event(text, "buyback_decision", ticker="9999", title="ToSTNeT-3による買付け")
+    assert event.ratio_to_outstanding is None
+
+
+def test_zero_disclosed_ratio_is_not_missing():
+    event = extract_buyback_event(
+        "取得する株式の総数100株\n発行済み株式総数に対する割合0.00％",
+        "buyback_decision", ticker="9999",
+    )
+    assert event.ratio_to_outstanding == 0.0
+    assert event.ratio_source == "disclosed"
+
+
+def test_ambiguous_share_ratios_are_not_paired_arbitrarily():
+    event = extract_buyback_event(
+        "取得する株式の総数100株\n"
+        "発行済株式総数に対する割合1.0％\n"
+        "発行済株式総数に対する割合2.0％",
+        "buyback_decision", ticker="9999",
+    )
     assert event.ratio_to_outstanding is None

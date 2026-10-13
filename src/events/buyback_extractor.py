@@ -16,6 +16,7 @@ import hashlib
 import json
 import logging
 import re
+import unicodedata
 from typing import Optional
 
 from .buyback_models import (
@@ -326,13 +327,30 @@ def _extract_date(text: str, anchors: list[str]) -> tuple[Optional[str], str]:
     return val, snippet
 
 
-def _extract_ratio(text: str) -> tuple[Optional[float], str]:
+def _extract_ratio(text: str, shares_snippet: str = "") -> tuple[Optional[float], str]:
     """発行済株式比だけを抽出（取得金額の時価総額比は対象外）。"""
-    match = re.search(r"発行済株式[^\n]{0,95}?[\d.]+\s*[%％]", text)
-    if not match:
-        return None, ""
-    snippet = match.group(0)
-    return normalize_percent(snippet), snippet
+    # PDF table cells may split any part of the label or percentage over lines.
+    # Keep the relation explicit so a nearby holding/market-cap ratio is not used.
+    pattern = re.compile(
+        r"発行済(?:み)?株式(?:総数|数)?(?:\([^()%]{0,50}\))?"
+        r"(?:に対する(?:割合|比率)|に占める(?:割合|比率)|の(?:割合|比率)?)"
+        r":?約?(\d+(?:\.\d+)?)%"
+    )
+    def compact(value: str) -> str:
+        return re.sub(r"\s+", "", unicodedata.normalize("NFKC", value))
+
+    # Prefer the selected share-count row when several percentages are present.
+    for candidate in (shares_snippet, text):
+        matches = list(pattern.finditer(compact(candidate)))
+        if not matches:
+            continue
+        if len(matches) != 1:
+            return None, ""  # ambiguous rows must not be paired arbitrarily
+        match = matches[0]
+        ratio = float(match.group(1))
+        if 0 <= ratio <= 100:
+            return round(ratio, 4), match.group(0)
+    return None, ""
 
 
 def _extract_method(text: str) -> tuple[Optional[str], str]:
@@ -451,8 +469,8 @@ def extract_buyback_event(
             event.board_resolution_date = res_date
 
         # 比率
-        ratio, snip = _extract_ratio(primary_text)
-        if ratio:
+        ratio, snip = _extract_ratio(primary_text, raw_snippets.get("raw_shares_text", ""))
+        if ratio is not None:
             event.ratio_to_outstanding = ratio
             raw_snippets["raw_ratio_text"] = snip
 
@@ -487,7 +505,7 @@ def extract_buyback_event(
         # ステータス期間ラベル
         event.status_period_label = _extract_status_period_label(primary_text)
 
-        ratio, snip = _extract_ratio(primary_text)
+        ratio, snip = _extract_ratio(primary_text, raw_snippets.get("raw_shares_text", ""))
         if ratio is not None:
             event.ratio_to_outstanding = ratio
             raw_snippets["raw_ratio_text"] = snip
@@ -528,8 +546,8 @@ def extract_buyback_event(
             confidence += 0.05
 
         # 比率
-        ratio, snip = _extract_ratio(primary_text)
-        if ratio:
+        ratio, snip = _extract_ratio(primary_text, raw_snippets.get("raw_shares_text", ""))
+        if ratio is not None:
             event.ratio_to_outstanding = ratio
             raw_snippets["raw_ratio_text"] = snip
 
@@ -554,8 +572,8 @@ def extract_buyback_event(
             confidence += 0.10
 
         # 比率
-        ratio, snip = _extract_ratio(primary_text)
-        if ratio:
+        ratio, snip = _extract_ratio(primary_text, raw_snippets.get("raw_shares_text", ""))
+        if ratio is not None:
             event.ratio_to_outstanding = ratio
             raw_snippets["raw_ratio_text"] = snip
 
