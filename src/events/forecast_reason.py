@@ -447,6 +447,60 @@ def _extract_bullet_difference_prose(lines: list[dict]) -> list[dict]:
     return candidates if len(candidates) == 1 else []
 
 
+def _extract_narrative_after_table_before_dividend(lines: list[dict], title: str) -> list[dict]:
+    """Read an unheaded reason only when a following dividend chapter bounds it."""
+    if '業績' not in _key(title):
+        return []
+    candidates = []
+    for index, row in enumerate(lines):
+        heading = _key(row['text'])
+        if (not _MAJOR.match(heading) or len(heading) > 120
+                or '配当' in heading or '理由' in heading
+                or not ('業績予想' in heading or '業績' in heading and '差異' in heading)):
+            continue
+        next_major = next((j for j in range(index + 1, len(lines))
+                           if _MAJOR.match(_key(lines[j]['text']))), None)
+        if next_major is None or '配当' not in _key(lines[next_major]['text']):
+            continue
+        table_end = max((j for j in range(index + 1, next_major)
+                         if any(term in _key(lines[j]['text']) for term in
+                                ('増減率', '増減額', '前期実績', '前年同期比増減率'))), default=None)
+        if table_end is None:
+            continue
+        start = next((j for j in range(table_end + 1, next_major)
+                      if len(_key(lines[j]['text'])) >= 35
+                      and not _SUB.match(_key(lines[j]['text']))
+                      and not _MAJOR.match(_key(lines[j]['text']))
+                      and any(term in _key(lines[j]['text']) for term in
+                              ('業績', '売上高', '営業利益', '連結', '好調'))
+                      and not re.match(r'^[\(（](?:ご参考|20\d{2}年)', _key(lines[j]['text']))), None)
+        if start is None:
+            continue
+        body = []
+        for following in lines[start:next_major]:
+            key = _key(following['text'])
+            if key and (_END.match(key) or _CAUTION_HEADING.match(key)
+                        or re.match(r'^[\(（]?注(?:記|\d)', key)):
+                break
+            body.append(following)
+        while body and not _key(body[-1]['text']):
+            body.pop()
+        prose = ''.join(_key(item['text']) for item in body)
+        if (not body or len(prose) < 70 or len(prose) > 2500
+                or not any(term in prose for term in ('により', 'ため', 'ことから', '好調', '上回', '下回', '見通し'))
+                or any(term in prose for term in ('増減率(%)', '今回修正予想(B)'))):
+            continue
+        scoped_heading = next((lines[j]['text'].strip() for j in range(start - 1, table_end, -1)
+                               if _SUB.match(_key(lines[j]['text']))
+                               and '業績予想' in _key(lines[j]['text'])), None)
+        candidates.append(dict(heading=scoped_heading or row['text'].strip(),
+                               context=[row['text'].strip()] + ([scoped_heading] if scoped_heading else []),
+                               text='\n'.join(item['text'] for item in body),
+                               page_start=body[0]['page'], line_start=body[0]['line'],
+                               page_end=body[-1]['page'], line_end=body[-1]['line']))
+    return candidates if len(candidates) == 1 else []
+
+
 def extract_forecast_reason(pdf_path: str, source_url: str, doc_id: str = '', title: str = '') -> dict:
     result = dict(version=1, status='source_unavailable', source_url=source_url, doc_id=doc_id,
                   method='native_pdf_lines_v1', sections=[])
@@ -473,6 +527,10 @@ def extract_forecast_reason(pdf_path: str, source_url: str, doc_id: str = '', ti
             result['sections'] = _extract_bullet_difference_prose(lines)
             if result['sections']:
                 result['method'] = 'native_pdf_difference_bullet_v1'
+        if not result['sections'] and not corrected_markers:
+            result['sections'] = _extract_narrative_after_table_before_dividend(lines, title)
+            if result['sections']:
+                result['method'] = 'native_pdf_narrative_after_table_v1'
         if result['sections']:
             result['status'] = 'available'
         else:

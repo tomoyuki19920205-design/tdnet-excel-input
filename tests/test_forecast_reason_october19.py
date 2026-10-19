@@ -22,6 +22,10 @@ def test_live_reason_formats_previously_left_for_manual_repair():
         ('6165', 445, '３．', '慎重な前提を置いております。', 'native_pdf_lines_v1'),
         ('4424', 59, '２．', '修正いたします。', 'native_pdf_narrative_before_table_v1'),
         ('6074', 481, '・2026', '予想を下回ることとなりました。', 'native_pdf_difference_bullet_v1'),
+        ('5451', 310, '１．', '関する説明」をご参照ください。', 'native_pdf_narrative_after_table_v1'),
+        ('3772', 273, '1.', '進捗を開示しております。', 'native_pdf_narrative_after_table_v1'),
+        ('8699', 273, '１．', '増収増益となっております。', 'native_pdf_narrative_after_table_v1'),
+        ('5036', 289, '（３）', '上方修正致しました。', 'native_pdf_narrative_after_table_v1'),
         ('3967', 263, '（差異の理由）', '純損失となりました。', 'native_pdf_corrected_after_marker_v1'),
     ]
     for ticker, length, heading_start, ending, method in cases:
