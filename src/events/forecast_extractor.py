@@ -3148,7 +3148,6 @@ def extract_forecast_revision(
     text: str, title: str = "", is_difference: bool = False,
     pdf_path: str = "", doc_url: str = "", doc_id: str = "", ticker: str = "",
 ) -> ForecastRevisionEvent:
-    event = _extract_forecast_revision_metrics(text, title, is_difference, pdf_path, doc_url, doc_id)
     from .forecast_reason import extract_forecast_reason
     from .forecast_source import exchange_pdf_url
     reason_pdf = pdf_path if os.path.isfile(pdf_path) else ""
@@ -3165,6 +3164,9 @@ def extract_forecast_revision(
                 if reason_pdf:
                     reason_source_url = mirror_url
     try:
+        event = _extract_forecast_revision_metrics(
+            text, title, is_difference, reason_pdf or pdf_path, reason_source_url, doc_id
+        )
         event.revision_reason = extract_forecast_reason(reason_pdf, reason_source_url, doc_id, title)
         if reason_source_url != doc_url and event.revision_reason.get("status") == "available":
             event.revision_reason["original_tdnet_url"] = doc_url

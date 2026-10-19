@@ -105,6 +105,33 @@ def test_normal_forecast_pipeline_uses_same_id_exchange_pdf_when_tdnet_is_missin
     assert reason["sections"][0]["text"].endswith("前回発表予想を大きく下回る見込みとなりました。")
 
 
+def test_pipeline_with_cached_text_links_to_exchange_pdf_for_reason():
+    import pymupdf
+    from src.events.common_models import DocumentMeta, EventType
+    from src.events.event_pipeline import _process_single_document
+
+    doc_id = "140120260317583161"
+    original = f"https://www.release.tdnet.info/inbs/{doc_id}.pdf"
+    mirror = f"https://www2.jpx.co.jp/disc/78220/{doc_id}.pdf"
+    path = FIXTURE_DIR / "live_7822_jpx.pdf"
+    with pymupdf.open(path) as pdf:
+        text = "\n".join(page.get_text() for page in pdf)
+    doc = DocumentMeta(doc_id=doc_id, ticker="7822",
+                       title="特別損失（連結子会社における減損損失）の計上、業績予想の修正及び財務制限条項抵触の見込みに関するお知らせ",
+                       doc_url=original, disclosure_datetime="2026-03-17T15:30:00+00:00",
+                       text_body=text)
+    with patch("src.events.forecast_extractor.os.unlink"):
+        with patch("src.events.forecast_extractor._download_pdf_for_ocr",
+                   side_effect=["", str(path)]) as downloader:
+            result = _process_single_document(doc, sqlite3.connect(":memory:"),
+                                              event_types={EventType.FORECAST_REVISION}, dry_run=True)
+    assert [call.args[0] for call in downloader.call_args_list] == [original, mirror]
+    assert doc.doc_url == mirror
+    assert result[0]["action"] == "dry_run"
+    reason = json.loads(result[0]["_event_record"].extracted_payload_json)["revision_reason"]
+    assert reason["source_url"] == mirror and reason["original_tdnet_url"] == original
+
+
 def test_numbered_periods_inside_reason_are_kept_through_final_sentence():
     result = sections("9478")
     assert len(result) == 1

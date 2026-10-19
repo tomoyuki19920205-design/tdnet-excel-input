@@ -583,6 +583,7 @@ def _process_single_document(
                 mirror_url = exchange_pdf_url(doc.doc_url, doc.ticker)
                 if mirror_url:
                     text, _fetched = _download_and_save_pdf(mirror_url)
+                    _text, _fetched_pdf_path = text, _fetched
                     if _fetched:
                         doc.pdf_path = _fetched
                         doc.doc_url = mirror_url
@@ -601,6 +602,10 @@ def _process_single_document(
                 pdf_path=doc.pdf_path, doc_url=doc.doc_url, doc_id=doc.doc_id,
                 ticker=doc.ticker,
             )
+            if (doc.doc_url == original_forecast_url and forecast_ev.revision_reason
+                    and forecast_ev.revision_reason.get("source_url") ==
+                    exchange_pdf_url(original_forecast_url, doc.ticker)):
+                doc.doc_url = forecast_ev.revision_reason["source_url"]
             if (original_forecast_url != doc.doc_url and forecast_ev.revision_reason
                     and forecast_ev.revision_reason.get("status") == "available"):
                 forecast_ev.revision_reason["original_tdnet_url"] = original_forecast_url
