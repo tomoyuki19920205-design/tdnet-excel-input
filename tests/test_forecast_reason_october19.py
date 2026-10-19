@@ -142,6 +142,35 @@ def test_numbered_periods_inside_reason_are_kept_through_final_sentence():
     assert "業績等の予想に関する注意事項" not in body
 
 
+def test_unnumbered_reason_stops_at_next_numbered_forecast_chapter():
+    texts = [
+        "１．2026年３月期連結業績予想と実績値との差異",
+        "差異の理由",
+        "売上高が前回予想を上回りました。",
+        "２．2026年３月期個別業績予想と実績値との差異",
+        "売上高 営業利益 経常利益",
+        "差異の理由",
+        "個別業績も前回予想を上回りました。",
+    ]
+    lines = [dict(text=text, page=1, line=index) for index, text in enumerate(texts, 1)]
+    result = extract_reason_sections(lines, title="業績予想と実績値との差異に関するお知らせ")
+    assert [section["text"] for section in result] == [
+        "売上高が前回予想を上回りました。",
+        "個別業績も前回予想を上回りました。",
+    ]
+
+
+def test_bullet_dividend_chapter_cannot_capture_forecast_reason():
+    texts = [
+        "・業績予想の修正について", "修正の理由", "売上高が前回発表予想を上回る見込みです。",
+        "・配当予想について", "修正の理由", "安定配当の方針を踏まえました。",
+    ]
+    lines = [dict(text=text, page=1, line=index) for index, text in enumerate(texts, 1)]
+    result = extract_reason_sections(lines, title="業績予想及び配当予想の修正")
+    assert len(result) == 1
+    assert result[0]["text"] == "売上高が前回発表予想を上回る見込みです。"
+
+
 def test_interim_full_year_and_bases_are_kept_but_following_dividend_is_excluded():
     body = sections("1814")[0]["text"]
     assert "（１）2027 年３月期第２四半期累計期間" in body

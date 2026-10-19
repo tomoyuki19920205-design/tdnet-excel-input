@@ -67,10 +67,10 @@ def _is_reason_heading(key: str) -> bool:
 
 def _bullet_scope(key: str) -> str | None:
     """Separate bullet-headed forecast and dividend chapters with generic reason headings."""
-    if len(key) > 50 or not key.startswith(('●', '■', '◆')):
+    if len(key) > 50 or not key.startswith(('●', '■', '◆', '・')):
         return None
     heading = key[1:]
-    if not heading.endswith(('修正について', '変更について', '修正', '変更')):
+    if not heading.endswith(('修正について', '変更について', '修正', '変更', '予想について')):
         return None
     if '配当' in heading and '業績' not in heading:
         return 'dividend'
@@ -168,6 +168,8 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
         # A later top-level heading or a dividend section ends the reason.
         current_number = _section_number(_key(current['heading'])) if current else None
         next_number = _section_number(key) if major else None
+        context_number = next((number for heading in reversed(current['context'] if current else [])
+                               if (number := _section_number(_key(heading))) is not None), None)
         current_sub_number = re.match(r'^\((\d+)\)', _key(current['heading'])) if current else None
         next_sub_number = re.match(r'^\((\d+)\)', key)
         next_subsection = bool(current_sub_number and next_sub_number
@@ -175,7 +177,9 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
                                and 'セグメント' in key and '見通し' in key)
         next_top_level = (next_number is not None and
                           (current['heading'].lstrip().startswith(('(', '（'))
-                           or (current_number is not None and next_number > current_number))) if current else False
+                           or (current_number is not None and next_number > current_number)
+                           or (current_number is None and context_number is not None
+                               and next_number > context_number))) if current else False
         roman_top_level = bool(major and re.match(r'^[ⅠⅡⅢⅣIVX]', key)
                                and any(word in key for word in ('連結', '個別', '業績')))
         # A blank line ends the current paragraph. Looking past it can treat
@@ -256,7 +260,7 @@ def read_pdf_lines(pdf_path: str) -> list[dict]:
                     spans = line['spans']
                     text = ''.join(span['text'] for span in spans).rstrip()
                     # Decode the dot in Wingdings' private-use encoding as a bullet.
-                    text = text.replace('\uf09e', '・')
+                    text = text.replace('\uf09e', '・').replace('\uf06c', '・')
                     if text.strip(): physical.append((line['bbox'], text, spans[0]['size']))
             physical.sort(key=lambda row: (round(row[0][1] / 3), row[0][0]))
             merged = []
