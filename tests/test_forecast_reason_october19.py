@@ -140,3 +140,29 @@ def test_attention_and_above_reason_sentence_are_not_mistaken_for_notes():
     for note_heading in ("【注記事項】", "【将来の見通しに関する記述等について】"):
         lines[3]["text"] = note_heading
         assert extract_reason_sections(lines, title="業績予想と実績との差異")[0]["text"] == result[0]["text"]
+
+
+def test_legacy_remix_reason_continues_after_wrapped_go_sankou_made_ni():
+    # Native lines from the live 2026-08-28 3825 PDF. Previously the
+    # continuation line "参考までに" matched a generic reference heading,
+    # leaving the saved reason ending with the single character "ご".
+    lines = json.loads((FIXTURE_DIR / "live_3825_lines.json").read_text(encoding="utf-8"))
+    sections = extract_reason_sections(lines, title="業績予想の修正に関するお知らせ")
+    assert len(sections) == 1
+    section = sections[0]
+    assert (section["page_start"], section["page_end"]) == (1, 3)
+    assert len(section["text"]) == 2836
+    assert "ご\n参考までに" in section["text"]
+    assert "3) 親会社株主に帰属する当期純利益" in section["text"]
+    assert section["text"].endswith("上に努めてまいります。")
+    assert "※ 上記は" not in section["text"]
+
+    # A real reference heading still ends a reason, including the bracketed
+    # 【参考情報】 heading seen in the 9330 disclosure.
+    reference = [
+        {"text": "２．修正の理由", "page": 1, "line": 1},
+        {"text": "売上高の未達により予想を修正いたします。", "page": 1, "line": 2},
+        {"text": "【参考情報】", "page": 1, "line": 3},
+        {"text": "2026年９月期 領域別売上高情報", "page": 1, "line": 4},
+    ]
+    assert extract_reason_sections(reference)[0]["text"] == "売上高の未達により予想を修正いたします。"

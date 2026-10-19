@@ -17,7 +17,8 @@ def _key(value: str) -> str:
 _LOG = logging.getLogger(__name__)
 _MAJOR = re.compile(r"^(?:\d+[.、](?=\D|\d{4}年)|[IVX]+(?:[.、]|(?=連結|個別|業績)))")
 _SUB = re.compile(r"^\(\d+\)")
-_END = re.compile(r"^(?:以上$|[\(\[〔【<]*(?:ご)?注意|[\(\[〔【<]*注(?:\d+|記)?(?:[\)\]〕】>:：]|$)|[\(\[〔【<]*注記事項|※|[\(\[〔【<]?ご?参考|[\(\[〔【<]?(?:業績|業績等の)?予想に関する注意事項|[\(\[〔【<]?将来予測に関する注意事項)")
+_END = re.compile(r"^(?:以上$|[\(\[〔【<]*(?:ご)?注意|[\(\[〔【<]*注(?:\d+|記)?(?:[\)\]〕】>:：]|$)|[\(\[〔【<]*注記事項|※|[\(\[〔【<]?(?:業績|業績等の)?予想に関する注意事項|[\(\[〔【<]?将来予測に関する注意事項)")
+_REFERENCE_HEADING = re.compile(r"^(?:[\(\[〔【<](?:ご)?参考(?:資料|情報)?[\)\]〕】>]|(?:ご)?参考(?:資料|情報)?(?:\(\d+\)|[:：]|$))")
 _CAUTION_HEADING = re.compile(r"^(?:[\(\[〔【<]?(?:業績|業績等の)?予想に関する留意事項|[\(\[〔【<]?将来の見通しに関する|[\(\[〔【<]?業績予想に関する注記事項)")
 
 
@@ -97,7 +98,7 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
                              and any(word in caution_text for word in ('入手可能', '予想数値と異なる',
                                                                          '実際の業績', '不確実', '合理的である',
                                                                          '責任を負いません')))
-        if current and (_END.match(key) or _CAUTION_HEADING.match(key) or caution_paragraph
+        if current and (_END.match(key) or _REFERENCE_HEADING.match(key) or _CAUTION_HEADING.match(key) or caution_paragraph
                         or ('配当' in key and (major or _SUB.match(key)))
                         or next_top_level or roman_top_level):
             finish()
