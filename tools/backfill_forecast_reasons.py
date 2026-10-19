@@ -24,7 +24,10 @@ def build_patch(before: dict, plan: dict) -> dict:
     existing=raw['extracted'].get('revision_reason')
     if existing:
         assert digest(existing)==plan.get('expected_existing_reason_sha256'), 'existing reason must not be overwritten without an exact reviewed hash'
-        assert existing['source_url']==reason['source_url'] and existing['pdf_sha256']==reason['pdf_sha256']
+        assert existing.get('status')=='unavailable', 'a usable or verified absent reason must not be replaced'
+        assert existing.get('source_url')==reason['source_url'], 'disclosure source changed'
+        if existing.get('pdf_sha256'):
+            assert existing['pdf_sha256']==reason['pdf_sha256'], 'original PDF changed'
     assert reason['status']=='available' and reason['version']==1 and reason['sections']
     assert len(reason['pdf_sha256'])==64
     for section in reason['sections']:

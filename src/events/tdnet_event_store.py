@@ -713,7 +713,18 @@ def _merge_compare_json(new_row_dict: dict, existing_payload_str: str) -> None:
                     new_comp = {}
                     new_payload["notification_compare_json"] = new_comp
                 new_comp["compare"] = old_comp["compare"]
-                new_row_dict["raw_payload"] = json.dumps(new_payload, ensure_ascii=False, default=str)
+        # Reconcile and bulk upsert can revisit an existing disclosure. A later
+        # parse failure must not erase a reason already tied to that PDF.
+        old_extracted = old_payload.get("extracted") if isinstance(old_payload, dict) else None
+        new_extracted = new_payload.get("extracted") if isinstance(new_payload, dict) else None
+        if isinstance(old_extracted, dict) and isinstance(new_extracted, dict):
+            old_reason = old_extracted.get("revision_reason")
+            new_reason = new_extracted.get("revision_reason")
+            if (isinstance(old_reason, dict) and old_reason.get("status") == "available"
+                    and old_reason.get("source_url") == new_row_dict.get("source_url")
+                    and (not isinstance(new_reason, dict) or new_reason.get("status") != "available")):
+                new_extracted["revision_reason"] = old_reason
+        new_row_dict["raw_payload"] = json.dumps(new_payload, ensure_ascii=False, default=str)
     except Exception:
         pass
 

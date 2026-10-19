@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import unicodedata
 from pathlib import Path
@@ -12,18 +13,32 @@ def _key(value: str) -> str:
     return re.sub(r"\s+", "", unicodedata.normalize("NFKC", value))
 
 
-_REASON = re.compile(r"^(?:(?:\d+[.、]|\(\d+\))|[()])*"
-                     r"(?:(?:連結|個別)?業績予想(?:の)?)?"
-                     r"(?:修正(?:の)?理由|差異(?:が生じた|の)理由)[)]?[:：]?$" )
+_LOG = logging.getLogger(__name__)
 _MAJOR = re.compile(r"^(?:\d+[.、](?=\D|\d{4}年)|[IVX]+(?:[.、]|(?=連結|個別|業績)))")
 _SUB = re.compile(r"^\(\d+\)")
-_END = re.compile(r"^(?:以上$|\(?注\)?|※|ご参考|\(?参考\)?)")
+_END = re.compile(r"^(?:以上$|\(?注\)?|※|\(?ご?参考\)?|\(?業績等の予想に関する注意事項\)?|\(?将来予測に関する注意事項\)?)")
+
+
+def _is_reason_heading(key: str) -> bool:
+    """Recognize a whole heading, not a sentence referring to another reason."""
+    key = key.strip("()[]〔〕:：")
+    if re.fullmatch(r"\d+[.、]理由", key):
+        return True
+    return (len(key) <= 55 and "「" not in key and "」" not in key
+            and key.endswith(("理由", "理由について"))
+            and any(term in key for term in ("修正", "差異")))
+
+
+def _section_number(key: str) -> int | None:
+    match = re.match(r"^(\d+)[.、]", key)
+    return int(match.group(1)) if match else None
 
 
 def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]:
     """Slice original lines, retaining each period/basis heading independently."""
     sections: list[dict] = []
     context: list[str] = []
+    forecast_context: list[str] = []
     dividend_scope = "配当" in _key(title) and "業績" not in _key(title)
     current = None
     body: list[dict] = []
@@ -37,20 +52,42 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
             sections.append(current)
         current, body = None, []
 
-    for row in lines:
+    for index, row in enumerate(lines):
         text, key = row['text'], _key(row['text'])
         if not key:
             if current and body and body[-1]['text']: body.append(row)
             continue
-        reason = _REASON.fullmatch(key)
-        if reason:
+        # Some difference disclosures label the explanatory paragraph
+        # "業績予想との差異について" rather than "理由". A table heading with the
+        # same wording is excluded by requiring prose immediately below.
+        next_text = ''.join(_key(v['text']) for v in lines[index + 1:index + 3])
+        unheaded_difference = (key.endswith('業績予想との差異について')
+                               and len(next_text) >= 50
+                               and any(word in next_text for word in ('前回', '公表', '集計', '精査'))
+                               and '売上高営業利益経常利益' not in next_text)
+        if _is_reason_heading(key) or unheaded_difference:
             finish()
+            if '配当' in key and not any(word in key for word in ('業績', '差異')):
+                dividend_scope = True
+            elif any(word in key for word in ('業績', '差異')) and '配当' not in key and dividend_scope:
+                dividend_scope = False
+                context = forecast_context.copy()
             if not dividend_scope:
                 current = dict(heading=text.strip(), context=context.copy(),
                                page_start=row['page'], line_start=row['line'])
             continue
         major = bool(_MAJOR.match(key))
-        if current and (major or _SUB.match(key) or _END.match(key)):
+        # Numbered period/basis paragraphs inside a reason are body text.
+        # A later top-level heading or a dividend section ends the reason.
+        current_number = _section_number(_key(current['heading'])) if current else None
+        next_number = _section_number(key) if major else None
+        next_top_level = (next_number is not None and
+                          (current['heading'].lstrip().startswith(('(', '（'))
+                           or (current_number is not None and next_number > current_number))) if current else False
+        roman_top_level = bool(major and re.match(r'^[ⅠⅡⅢⅣIVX]', key)
+                               and any(word in key for word in ('連結', '個別', '業績')))
+        if current and (_END.match(key) or ('配当' in key and (major or _SUB.match(key)))
+                        or next_top_level or roman_top_level):
             finish()
         if major:
             if '配当' in key:
@@ -61,10 +98,13 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
                 # Roman headings identify basis; numbered headings identify period.
                 if re.match(r'^[ⅠⅡⅢⅣIVX]', key): context = [text.strip()]
                 else: context = [h for h in context if re.match(r'^[ⅠⅡⅢⅣIVX]', _key(h))] + [text.strip()]
-        elif not current and ('年' in key and '月期' in key and any(w in key for w in ('予想', '差異'))):
+                forecast_context = context.copy()
+        elif not current and not dividend_scope and ('年' in key and '月期' in key and any(w in key for w in ('予想', '差異'))):
             context = [h for h in context if re.match(r'^[ⅠⅡⅢⅣIVX]', _key(h))] + [text.strip()]
-        elif not current and _SUB.match(key) and ('連結' in key or '個別' in key):
+            forecast_context = context.copy()
+        elif not current and not dividend_scope and _SUB.match(key) and ('連結' in key or '個別' in key):
             context = [h for h in context if not _SUB.match(_key(h)) or '年' in _key(h)] + [text.strip()]
+            forecast_context = context.copy()
         if current: body.append(row)
     finish()
     return sections
@@ -72,7 +112,7 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
 
 def read_pdf_lines(pdf_path: str) -> list[dict]:
     """Read all native PDF pages, preserving physical lines and paragraph gaps."""
-    import fitz
+    import pymupdf as fitz
     rows = []
     with fitz.open(pdf_path) as pdf:
         for page_no, page in enumerate(pdf, 1):
@@ -112,7 +152,9 @@ def extract_forecast_reason(pdf_path: str, source_url: str, doc_id: str = '', ti
         result['pdf_sha256'] = hashlib.sha256(Path(pdf_path).read_bytes()).hexdigest()
         result['sections'] = extract_reason_sections(read_pdf_lines(pdf_path), title=title)
         if result['sections']: result['status'] = 'available'
-    except Exception:
+    except Exception as exc:
         # Extraction failure must not block the existing numeric notification.
         result['status'] = 'unavailable'
+        result['failure_code'] = 'pdf_parse_failed'
+        _LOG.warning('Forecast reason extraction failed for %s: %s', doc_id, exc)
     return result

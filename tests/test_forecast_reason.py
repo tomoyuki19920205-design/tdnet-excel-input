@@ -83,4 +83,9 @@ def test_reason_repair_preserves_numeric_payload_and_rejects_concurrent_or_forei
     replacement={**plan,'raw_payload_before_sha256':digest(amended)}
     with pytest.raises(AssertionError):build_patch(filled,replacement)
     replacement['expected_existing_reason_sha256']=digest(reason)
-    assert build_patch(filled,replacement)['raw_payload']==amended
+    with pytest.raises(AssertionError):build_patch(filled,replacement)
+    unavailable={**reason,'status':'unavailable','sections':[]}
+    stale={**before,'raw_payload':{'extracted':{**raw['extracted'],'revision_reason':unavailable},'raw':raw['raw']}}
+    recovery={**plan,'raw_payload_before_sha256':digest(stale['raw_payload']),
+              'expected_existing_reason_sha256':digest(unavailable)}
+    assert build_patch(stale,recovery)['raw_payload']==amended
