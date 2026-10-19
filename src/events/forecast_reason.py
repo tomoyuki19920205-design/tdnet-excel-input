@@ -501,6 +501,164 @@ def _extract_narrative_after_table_before_dividend(lines: list[dict], title: str
     return candidates if len(candidates) == 1 else []
 
 
+def _extract_difference_after_table(lines: list[dict], title: str) -> list[dict]:
+    """Find prose immediately following each forecast-difference table.
+
+    Keep connected/individual and interim/full-year chapters separate. A
+    table without bounded sentence-form prose remains an extraction failure.
+    """
+    if '差異' not in _key(title) or '訂正' in _key(title):
+        return []
+    chapters = [(i, row) for i, row in enumerate(lines)
+                if _MAJOR.match(_key(row['text'])) and
+                '差異' in _key(row['text']) and
+                any(t in _key(row['text']) for t in ('業績', '実績値')) and
+                len(_key(row['text'])) < 125]
+    result = []
+    for i, heading in chapters:
+        end = next((j for j in range(i+1, len(lines))
+                    if _MAJOR.match(_key(lines[j]['text'])) or _END.match(_key(lines[j]['text']))), len(lines))
+        region = lines[i+1:end]
+        table = next((k for k, row in enumerate(region)
+                      if '増減率' in _key(row['text'])), None)
+        if table is None:
+            continue
+        start = next((k for k in range(table+1, len(region))
+                      if len(_key(region[k]['text'])) >= 42 and
+                      '。' in ''.join(r['text'] for r in region[k:k+5]) and
+                      any(term in _key(region[k]['text']) for term in
+                          ('業績', '事業', '売上高', '売上収益', '営業利益', '経常利益', '連結', '予想'))
+                      and not any(term in _key(region[k]['text']) for term in
+                                  ('前期実績', '今回修正予想', '増減額'))), None)
+        if start is None:
+            continue
+        body = region[start:]
+        while body and not _key(body[-1]['text']): body.pop()
+        prose = ''.join(_key(row['text']) for row in body)
+        if (not body or len(prose) < 80 or len(prose) > 3000 or
+                not any(word in prose for word in ('ました', '見込み', 'なりました'))):
+            continue
+        result.append(dict(heading=heading['text'].strip(), context=[heading['text'].strip()],
+                           text='\n'.join(row['text'] for row in body),
+                           page_start=body[0]['page'], line_start=body[0]['line'],
+                           page_end=body[-1]['page'], line_end=body[-1]['line']))
+    if len(result) == 1:
+        outlook = next((i for i, row in enumerate(lines)
+                        if re.fullmatch(r'\d+[.、]通期業績に与える影響', _key(row['text']))
+                        and (row['page'], row['line']) >
+                        (result[0]['page_end'], result[0]['line_end'])), None)
+        if outlook is not None:
+            end = next((j for j in range(outlook+1, len(lines))
+                        if _MAJOR.match(_key(lines[j]['text'])) or _END.match(_key(lines[j]['text']))), len(lines))
+            body = lines[outlook+1:end]
+            while body and not _key(body[-1]['text']): body.pop()
+            if body and len(''.join(_key(r['text']) for r in body)) >= 50:
+                result.append(dict(heading=lines[outlook]['text'].strip(),
+                                   context=[lines[outlook]['text'].strip()],
+                                   text='\n'.join(r['text'] for r in body),
+                                   page_start=body[0]['page'], line_start=body[0]['line'],
+                                   page_end=body[-1]['page'], line_end=body[-1]['line']))
+    return result
+
+
+def _extract_attached_subsidiary_individual_note(lines: list[dict], title: str) -> list[dict]:
+    """Parent disclosure attaching subsidiary results with an individual-results note."""
+    key = _key(title)
+    if '子会社' not in key or '個別業績' not in key or '差異' not in key:
+        return []
+    for i, row in enumerate(lines):
+        if _key(row['text']).lstrip('※') != '業績に関する注記':
+            continue
+        if not any('個別業績の概要' in _key(x['text']) for x in lines[max(0, i-45):i]):
+            continue
+        body=[]
+        for following in lines[i+1:i+8]:
+            following_key=_key(following['text'])
+            if following_key.startswith(('※','決算短信は','業績予想の適切な利用')):
+                break
+            if following_key:
+                body.append(following)
+        prose=''.join(_key(x['text']) for x in body)
+        if (not body or len(prose)>700 or
+                not any(t in prose for t in ('利益','売上高','売上収益')) or
+                not any(t in prose for t in ('により','ため','ことから'))):
+            continue
+        return [dict(heading=row['text'].strip(),
+                     context=['添付子会社決算短信・個別業績の概要'],
+                     text='\n'.join(x['text'] for x in body),
+                     page_start=body[0]['page'], line_start=body[0]['line'],
+                     page_end=body[-1]['page'], line_end=body[-1]['line'])]
+    return []
+
+
+def _correction_sections(lines: list[dict], title: str) -> tuple[list[dict], str] | None:
+    """Use each corrected reason location, never the document's final 訂正後.
+
+    A complete corrected republication takes precedence over change snippets.
+    Snippets are accepted only when their numbered correction label explicitly
+    names a forecast/difference reason. Other corrected financial tables remain
+    outside the reason field.
+    """
+    if not any(word in _key(title) for word in ('訂正', '再訂正')):
+        return None
+    complete = next((i for i, row in enumerate(lines)
+                     if '訂正後全文' in _key(row['text'])), None)
+    if complete is not None:
+        return extract_reason_sections(lines[complete + 1:], title=title), 'native_pdf_corrected_fulltext_v2'
+    markers = [i for i, row in enumerate(lines)
+               if re.fullmatch(r'[\[【(（]訂正後[\]】)）]', _key(row['text']))]
+    if not markers:
+        return None
+    sections = []
+    label = ''
+    active_label = ''
+    active = []
+
+    def finish():
+        nonlocal active
+        while active and not _key(active[-1]['text']):
+            active.pop()
+        if active and active_label:
+            sections.append(dict(heading=active_label, context=[active_label],
+                                 text='\n'.join(row['text'] for row in active).strip('\n'),
+                                 page_start=active[0]['page'], line_start=active[0]['line'],
+                                 page_end=active[-1]['page'], line_end=active[-1]['line']))
+        active = []
+
+    for row in lines:
+        key = _key(row['text'])
+        # NFKC in _key converts the circled correction numbers to digits.
+        numbered_label = bool(re.match(r'^\d+「', key))
+        if numbered_label:
+            finish()
+            label = row['text'].strip() if ('理由' in key and any(w in key for w in ('差異', '業績', 'セグメント'))) else ''
+            active_label = ''
+            continue
+        if re.fullmatch(r'[\[【(（]訂正前[\]】)）]', key):
+            finish()
+            active_label = ''
+            continue
+        if re.fullmatch(r'[\[【(（]訂正後[\]】)）]', key):
+            finish()
+            active_label = label
+            continue
+        if active_label and not _END.match(key):
+            active.append(row)
+        elif active_label and _END.match(key):
+            finish()
+            active_label = ''
+    finish()
+    if not sections:
+        for marker in markers:
+            next_boundary = next((i for i in range(marker + 1, len(lines))
+                                  if re.fullmatch(r'[\[【(（]訂正(?:前|後)[\]】)）]',
+                                                  _key(lines[i]['text']))), len(lines))
+            sections.extend(extract_reason_sections(lines[marker + 1:next_boundary], title=title))
+        if sections:
+            return sections, 'native_pdf_corrected_explicit_sections_v2'
+    return sections, 'native_pdf_corrected_locations_v2'
+
+
 def extract_forecast_reason(pdf_path: str, source_url: str, doc_id: str = '', title: str = '') -> dict:
     result = dict(version=1, status='source_unavailable', source_url=source_url, doc_id=doc_id,
                   method='native_pdf_lines_v1', sections=[])
@@ -510,33 +668,40 @@ def extract_forecast_reason(pdf_path: str, source_url: str, doc_id: str = '', ti
     try:
         result['pdf_sha256'] = hashlib.sha256(Path(pdf_path).read_bytes()).hexdigest()
         lines = read_pdf_lines(pdf_path)
-        result['sections'] = extract_reason_sections(lines, title=title)
-        corrected_markers = [(row['page'], row['line']) for row in lines
-                             if re.fullmatch(r'[\[【(（]訂正後[\]】)）]', _key(row['text']))]
-        if corrected_markers:
-            marker = corrected_markers[-1]
-            result['sections'] = [section for section in result['sections']
-                                  if (section['page_start'], section['line_start']) > marker]
-            if result['sections']:
-                result['method'] = 'native_pdf_corrected_after_marker_v1'
-        if not result['sections'] and not corrected_markers:
+        correction = _correction_sections(lines, title)
+        if correction is not None:
+            result['sections'], result['method'] = correction
+        else:
+            result['sections'] = extract_reason_sections(lines, title=title)
+        if not result['sections'] and correction is None:
             result['sections'] = _extract_narrative_before_table(lines, title)
             if result['sections']:
                 result['method'] = 'native_pdf_narrative_before_table_v1'
-        if not result['sections'] and not corrected_markers:
+        if not result['sections'] and correction is None:
             result['sections'] = _extract_bullet_difference_prose(lines)
             if result['sections']:
                 result['method'] = 'native_pdf_difference_bullet_v1'
-        if not result['sections'] and not corrected_markers:
+        if not result['sections'] and correction is None:
             result['sections'] = _extract_narrative_after_table_before_dividend(lines, title)
             if result['sections']:
                 result['method'] = 'native_pdf_narrative_after_table_v1'
+        if not result['sections'] and correction is None:
+            result['sections'] = _extract_difference_after_table(lines, title)
+            if result['sections']:
+                result['method'] = 'native_pdf_difference_after_table_v2'
+        if not result['sections'] and correction is None:
+            result['sections'] = _extract_attached_subsidiary_individual_note(lines, title)
+            if result['sections']:
+                result['method'] = 'native_pdf_attached_individual_note_v2'
         if result['sections']:
+            for section in result['sections']:
+                section['text_sha256'] = hashlib.sha256(section['text'].encode('utf-8')).hexdigest()
             result['status'] = 'available'
         else:
             result['status'] = 'extraction_failed'
             native = ''.join(_key(row['text']) for row in lines)
-            result['failure_code'] = ('native_text_unreadable' if
+            result['failure_code'] = ('correction_reason_scope_not_found' if correction is not None else
+                                      'native_text_unreadable' if
                                       sum('\u3040' <= ch <= '\u9fff' for ch in native) < 30
                                       else 'reason_scope_not_found')
     except ForecastReasonEnvironmentError:

@@ -26,7 +26,7 @@ def test_live_reason_formats_previously_left_for_manual_repair():
         ('3772', 273, '1.', '進捗を開示しております。', 'native_pdf_narrative_after_table_v1'),
         ('8699', 273, '１．', '増収増益となっております。', 'native_pdf_narrative_after_table_v1'),
         ('5036', 289, '（３）', '上方修正致しました。', 'native_pdf_narrative_after_table_v1'),
-        ('3967', 263, '（差異の理由）', '純損失となりました。', 'native_pdf_corrected_after_marker_v1'),
+        ('3967', 263, '（差異の理由）', '純損失となりました。', 'native_pdf_corrected_explicit_sections_v2'),
     ]
     for ticker, length, heading_start, ending, method in cases:
         path = FIXTURE_DIR / f'live_oct19_{ticker}.pdf'

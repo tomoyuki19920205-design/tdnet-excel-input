@@ -1,4 +1,5 @@
 import json
+import hashlib
 from pathlib import Path
 from unittest.mock import patch
 import pytest
@@ -201,6 +202,58 @@ def test_native_reason_is_saved_without_altering_fingerprint_or_summary():
     after=_forecast_to_event_record(doc,event)
     assert before.fingerprint==after.fingerprint and before.summary_text==after.summary_text
     assert json.loads(after.extracted_payload_json)['revision_reason']==event.revision_reason
+
+
+@pytest.mark.parametrize('name,title,expected_sha', [
+    ('live_4813_difference_1.pdf', '営業外収益、営業外費用及び特別損失の計上、並びに2026年１月期通期（連結・個別）業績の前期実績値との差異に関するお知らせ', '04b6006b9f82bf75f889d951ba82809369fb5ee490df7308d42405a214e9a8e5'),
+    ('live_4813_difference_2.pdf', '2027年１月期中間連結会計期間の業績予想値と実績値との差異に関するお知らせ', 'dcf5fc37ef94ad8ad278e85f7b99e8e58ccdd64cada1870b343530b46bdede3d'),
+])
+def test_after_table_difference_matches_reviewed_full_original(name,title,expected_sha):
+    pdf=Path(__file__).parent/'fixtures/forecast_reason'/name
+    result=extract_forecast_reason(str(pdf),'https://example.com/'+name,title=title)
+    assert result['status']=='available'
+    assert result['method']=='native_pdf_difference_after_table_v2'
+    full='\n\n'.join(section['text'] for section in result['sections'])
+    assert hashlib.sha256(full.encode()).hexdigest()==expected_sha
+    assert all(s['text_sha256']==hashlib.sha256(s['text'].encode()).hexdigest() for s in result['sections'])
+
+
+def test_multiple_corrections_are_matched_to_their_own_locations():
+    base=Path(__file__).parent/'fixtures/forecast_reason'
+    first=extract_forecast_reason(str(base/'live_6574_correction_1.pdf'),
+                                  'https://example.com/first.pdf',title='（訂正）業績予想と実績値との差異に関するお知らせ')
+    assert first['method']=='native_pdf_corrected_locations_v2'
+    assert len(first['sections'])==2
+    assert [s['page_start'] for s in first['sections']]==[8,8]
+    assert 'ネイル事業' in first['sections'][0]['heading']
+    assert 'コンサルティング事業' in first['sections'][1]['heading']
+    assert '前回発表予想2,390' not in '\n'.join(s['text'] for s in first['sections'])
+    assert '1,738 百万円' in first['sections'][1]['text']
+    individual=extract_forecast_reason(str(base/'live_6574_individual_correction.pdf'),
+                                       'https://example.com/individual.pdf',title='（訂正）個別業績の差異に関するお知らせ')
+    assert individual['method']=='native_pdf_corrected_locations_v2'
+    assert len(individual['sections'])==5
+    assert [s['page_start'] for s in individual['sections']]==[3,4,4,5,6]
+    assert '営業外費用' in individual['sections'][0]['text']
+    assert '3,990 百万円悪化' in individual['sections'][2]['text']
+    assert '訂正前' not in '\n'.join(s['text'] for s in individual['sections'])
+    full=extract_forecast_reason(str(base/'live_6574_correction_2.pdf'),
+                                 'https://example.com/full.pdf',title='（再訂正）業績予想と実績値との差異に関するお知らせ')
+    assert full['method']=='native_pdf_corrected_fulltext_v2'
+    assert len(full['sections'])==1 and full['sections'][0]['page_start']==6
+    assert full['sections'][0]['text'].endswith('水準で着地しております。')
+
+
+def test_attached_subsidiary_note_is_read_only_when_it_exists():
+    base=Path(__file__).parent/'fixtures/forecast_reason'
+    enex=extract_forecast_reason(str(base/'live_8001_enex_attached.pdf'),
+        'https://example.com/enex.pdf', title='当社子会社（伊藤忠エネクス株式会社）の個別業績の前期実績との差異に関するお知らせ')
+    assert enex['method']=='native_pdf_attached_individual_note_v2'
+    assert enex['sections'][0]['page_start']==3
+    assert enex['sections'][0]['text'].strip()=='子会社からの配当金増加により、当期純利益は前年度実績を上回りました。'
+    prima=extract_forecast_reason(str(base/'live_8001_prima_attached.pdf'),
+        'https://example.com/prima.pdf', title='当社子会社（プリマハム株式会社）の個別業績の前期実績との差異に関するお知らせ')
+    assert prima['status']=='extraction_failed' and prima['sections']==[]
 
 def test_reason_repair_preserves_numeric_payload_and_rejects_concurrent_or_foreign_data():
     raw={'extracted':{'previous_eps':70.09,'revised_eps':29.15},'raw':{'title':'原文'}}
