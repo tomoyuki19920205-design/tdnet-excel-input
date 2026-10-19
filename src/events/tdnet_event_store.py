@@ -724,7 +724,8 @@ def _merge_compare_json(new_row_dict: dict, existing_payload_str: str) -> None:
             if (isinstance(old_reason, dict) and old_reason.get("status") in (
                     "available", "not_present", "source_unavailable", "extraction_failed",
                     "scope_unverified", "environment_error")
-                    and old_reason.get("source_url") == new_row_dict.get("source_url")
+                    and (old_reason.get("source_url") == new_row_dict.get("source_url")
+                         or old_reason.get("original_tdnet_url") == new_row_dict.get("source_url"))
                     and (not isinstance(new_reason, dict) or new_reason.get("status") != "available")):
                 new_extracted["revision_reason"] = old_reason
         new_row_dict["raw_payload"] = json.dumps(new_payload, ensure_ascii=False, default=str)

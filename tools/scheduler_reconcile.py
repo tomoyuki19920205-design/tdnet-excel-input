@@ -188,11 +188,20 @@ def main() -> int:
         ], timeout_sec=180)
         steps.append(step)
 
+        # Processed notifications can have a missing reason after a PDF 404 or
+        # an unsupported original layout. Retry only the reason field, without
+        # re-registering or notifying the event.
+        reason_step = run_step("forecast-reason-retry", [
+            PYTHON, "tools/retry_forecast_reasons.py",
+            *([] if args.dry_run else ["--apply"]),
+        ], timeout_sec=180)
+        steps.append(reason_step)
+
         elapsed = time.monotonic() - t_start
         _print_summary(steps, elapsed)
 
         failed = [s for s in steps if s.status in ("error", "timeout")]
-        return 1 if failed else 0
+        return 1 if failed or reason_step.rc != 0 else 0
 
     finally:
         release_dual_lock(global_lock, job_lock)

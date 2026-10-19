@@ -203,6 +203,14 @@ def main() -> int:
         ], timeout_sec=600)
         steps.append(step)
 
+        # Reason-only retry is independent from financial sync and non-target
+        # PDF failures. The existing notification ID and all metrics remain.
+        step = run_step("forecast-reason-retry", [
+            PYTHON, "tools/retry_forecast_reasons.py",
+            *([] if args.dry_run else ["--apply"]),
+        ], timeout_sec=180)
+        steps.append(step)
+
         # ── Step 4: J-Quants 財務取得（直近30日分）+ details gross_profit 補完 ──
         step = run_step("fetch-jquants-fin", [
             PYTHON, "-X", "utf8",

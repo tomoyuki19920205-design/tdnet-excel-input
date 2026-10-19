@@ -108,7 +108,7 @@ def test_downward_and_interim_final_paragraphs():
 def test_dividend_only_and_missing_do_not_generate_text():
     rows=[dict(text=t,page=1,line=i) for i,t in enumerate(['1. 配当予想の修正','(2) 修正理由','配当だけの理由。','以上'])]
     assert extract_reason_sections(rows)==[]
-    assert extract_forecast_reason('', 'https://example.com/original.pdf')['status']=='unavailable'
+    assert extract_forecast_reason('', 'https://example.com/original.pdf')['status']=='source_unavailable'
 
 
 def test_numbered_reason_with_trailing_parenthetical_is_not_unwrapped():
@@ -190,7 +190,7 @@ def test_scheduled_jobs_fail_before_processing_when_pdf_reader_missing(monkeypat
 def test_text_source_does_not_substitute_for_the_original_pdf():
     with patch('src.events.forecast_extractor._extract_forecast_revision_metrics', return_value=ForecastRevisionEvent(revised_eps=0)):
         event=extract_forecast_revision('修正の理由\nHTMLの別文章。')
-    assert event.revised_eps==0 and event.revision_reason['status']=='unavailable'
+    assert event.revised_eps==0 and event.revision_reason['status']=='source_unavailable'
     assert event.to_dict()['revision_reason']['sections']==[]
 
 def test_native_reason_is_saved_without_altering_fingerprint_or_summary():

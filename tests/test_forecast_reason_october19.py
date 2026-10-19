@@ -8,10 +8,69 @@ from unittest.mock import patch
 from src.events.forecast_reason import extract_forecast_reason, extract_reason_sections
 from src.events.forecast_source import exchange_pdf_url
 from src.events.tdnet_event_store import _merge_compare_json
+from tools.retry_forecast_reasons import should_retry, source_candidates, VERSION
+from datetime import datetime, timedelta, timezone
 
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "forecast_reason"
 CASES = {row["ticker"]: row for row in json.loads((FIXTURE_DIR / "october19.json").read_text(encoding="utf-8"))}
+
+
+def test_live_reason_formats_previously_left_for_manual_repair():
+    cases = [
+        ('5076', 426, '（２）', '第１四半期実績を下回る見込みです。', 'native_pdf_lines_v1'),
+        ('6165', 445, '３．', '慎重な前提を置いております。', 'native_pdf_lines_v1'),
+        ('4424', 59, '２．', '修正いたします。', 'native_pdf_narrative_before_table_v1'),
+        ('6074', 481, '・2026', '予想を下回ることとなりました。', 'native_pdf_difference_bullet_v1'),
+        ('3967', 263, '（差異の理由）', '純損失となりました。', 'native_pdf_corrected_after_marker_v1'),
+    ]
+    for ticker, length, heading_start, ending, method in cases:
+        path = FIXTURE_DIR / f'live_oct19_{ticker}.pdf'
+        reason = extract_forecast_reason(str(path), 'https://example.com/original.pdf', path.stem,
+                                         '（訂正）業績の差異' if ticker == '3967' else '業績予想の修正に関するお知らせ')
+        assert reason['status'] == 'available', ticker
+        assert reason['method'] == method, ticker
+        assert len(reason['sections']) == 1, ticker
+        section = reason['sections'][0]
+        assert section['heading'].startswith(heading_start), ticker
+        assert len(section['text']) == length, ticker
+        assert section['text'].endswith(ending), ticker
+        assert '配当予想修正の理由' not in section['text'], ticker
+        if ticker == '3967':
+            assert '△30' in section['text'] and '△42' not in section['text']
+
+
+def test_reason_failure_is_explicit_and_retry_is_bounded(tmp_path):
+    missing = extract_forecast_reason('', 'https://example.com/original.pdf')
+    assert missing['status'] == 'source_unavailable'
+    assert missing['failure_code'] == 'original_pdf_unavailable'
+    now = datetime.now(timezone.utc)
+    row = {'raw_payload': {'extracted': {'revision_reason': {
+        'status': 'source_unavailable', 'last_retry_at': now.isoformat()}}}}
+    assert not should_retry(row, now=now, local_pdf=None)
+    assert should_retry(row, now=now + timedelta(hours=2), local_pdf=None)
+    row['raw_payload']['extracted']['revision_reason'] = {
+        'status': 'extraction_failed', 'retry_version': VERSION,
+        'pdf_sha256': 'x', 'failure_code': 'native_text_unreadable'}
+    assert not should_retry(row, now=now, local_pdf=None)
+    row['raw_payload']['extracted']['revision_reason']['status'] = 'scope_unverified'
+    assert not should_retry(row, now=now, local_pdf=None)
+    source = 'https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/140120260804509080.pdf'
+    assert source_candidates(source, '5076') == [
+        'https://www.release.tdnet.info/inbs/140120260804509080.pdf',
+        'https://www2.jpx.co.jp/disc/50760/140120260804509080.pdf']
+
+
+def test_later_reconcile_preserves_reason_recovered_from_original_mirror():
+    original = 'https://www.release.tdnet.info/inbs/140120260804509080.pdf'
+    mirror = 'https://www2.jpx.co.jp/disc/50760/140120260804509080.pdf'
+    reason = {'version': 1, 'status': 'available', 'source_url': mirror,
+              'original_tdnet_url': original, 'sections': [{'text': '原文'}]}
+    old = json.dumps({'extracted': {'revision_reason': reason}}, ensure_ascii=False)
+    new = {'source_url': original, 'raw_payload': json.dumps({'extracted': {
+        'revision_reason': {'status': 'source_unavailable', 'source_url': original}}}, ensure_ascii=False)}
+    _merge_compare_json(new, old)
+    assert json.loads(new['raw_payload'])['extracted']['revision_reason'] == reason
 
 
 def sections(ticker):
