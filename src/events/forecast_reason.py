@@ -33,19 +33,23 @@ def require_pdf_reader():
         ) from exc
 _MAJOR = re.compile(r"^(?:\d+[.、](?=\D|\d{4}年)|[IVX]+(?:[.、]|(?=連結|個別|業績)))")
 _SUB = re.compile(r"^\(\d+\)")
-_END = re.compile(r"^(?:以上$|[\(\[〔【<]*(?:ご)?注意|[\(\[〔【<]*注(?:\d+|記)?(?:[\)\]〕】>:：]|$)|[\(\[〔【<]*注記事項|※|[\(\[〔【<]?(?:業績|業績等の)?予想に関する注意事項|[\(\[〔【<]?将来予測に関する注意事項)")
+_END = re.compile(r"^(?:以上$|[\(\[〔【<]*(?:ご)?注意|[\(\[〔【<]*注(?:\d+|記)?(?:[\)\]〕】>:：]|$)|[\(\[〔【<]*注記事項|※|[\(\[〔【<]?(?:業績|業績の|業績等の)?予想に関する注意事項|[\(\[〔【<]?将来予測に関する注意事項)")
 _REFERENCE_HEADING = re.compile(r"^(?:[\(\[〔【<](?:ご)?参考(?:資料|情報)?[\)\]〕】>]|(?:ご)?参考(?:資料|情報)?(?:\(\d+\)|[:：]|$))")
 _CAUTION_HEADING = re.compile(r"^(?:[\(\[〔【<]?(?:業績|業績等の)?予想に関する留意事項|[\(\[〔【<]?将来の見通しに関する|[\(\[〔【<]?業績予想に関する注記事項)")
 
 
 def _is_reason_heading(key: str) -> bool:
     """Recognize a whole heading, not a sentence referring to another reason."""
-    key = key.strip("()[]〔〕【】<>:：")
+    key = key.strip(":：")
+    for left, right in (('(', ')'), ('[', ']'), ('〔', '〕'), ('【', '】'), ('《', '》'), ('<', '>')):
+        if key.startswith(left) and key.endswith(right):
+            key = key[1:-1]
+            break
     if re.fullmatch(r"\d+[.、]理由", key):
         return True
-    return (len(key) <= 55 and "「" not in key and "」" not in key
-            and key.endswith(("理由", "理由について"))
-            and any(term in key for term in ("修正", "差異")))
+    return (len(key) <= 110 and "「" not in key and "」" not in key
+            and re.search(r"理由(?:について|及び概要|ならびに今後の展開|及び今後の展開)?(?:\([^)]*\))?$", key)
+            and any(term in key for term in ("修正", "差異", "業績予想を未定")))
 
 
 def _bullet_scope(key: str) -> str | None:
@@ -106,7 +110,9 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
                                and len(next_text) >= 50
                                and any(word in next_text for word in ('前回', '公表', '集計', '精査'))
                                and '売上高営業利益経常利益' not in next_text)
-        if _is_reason_heading(key) or unheaded_difference:
+        scoped_generic_reason = (bool(re.fullmatch(r'\(\d+\)理由', key)) and not dividend_scope
+                                 and any(any(term in _key(h) for term in ('業績', '差異')) for h in context))
+        if _is_reason_heading(key) or scoped_generic_reason or unheaded_difference:
             finish()
             if '配当' in key and not any(word in key for word in ('業績', '差異')):
                 dividend_scope = True

@@ -53,6 +53,25 @@ def test_actual_9310_bullet_dividend_chapter_does_not_leak_into_forecast_reason(
     assert sections[0]['text'].endswith('以上の理由から通期の連結業績予想を上記のとおり修正いたします。')
     assert '配当性向40％' not in sections[0]['text']
 
+
+@pytest.mark.parametrize('ticker,tail', [
+    ('3710','第３四半期までの実績及び経常利益の予想数値等を踏まえて算定しております。'),
+    ('6522','投入を推進し、中長期的な企業価値の向上に努めてまいります。'),
+    ('4073','以上のことから、各利益に通期業績予想と実績値との差異が生じることとなりました。'),
+    ('6324','円、１中国元 22.52 円を前提としております。'),
+    ('5721','用の詳細につきましては、「Ⅰ．営業外費用の計上」に記載のとおりであります。'),
+    ('312A','今後、業績予想の算定が可能となった時点で速やかにお知らせいたします。'),
+])
+def test_actual_unrecognized_heading_variants_keep_the_complete_original(ticker,tail):
+    cases=json.loads((Path(__file__).parent/'fixtures/forecast_reason/unrecognized_headings_20261019.json').read_text(encoding='utf-8'))
+    actual=next(c for c in cases if c['ticker']==ticker)
+    sections=extract_reason_sections(actual['lines'],title=actual['title'])
+    assert len(sections)==1
+    assert sections[0]['text'].endswith(tail)
+    if ticker=='6324': assert '注意事項' not in sections[0]['text']
+    if ticker=='3710': assert '配当政策' not in sections[0]['text']
+    if ticker=='6522': assert sections[0]['page_end']==2
+
 def test_downward_and_interim_final_paragraphs():
     assert fixture('3536')[0]['text'].endswith('回業績予想と比較して親会社株主に帰属する当期純利益の減少が見込まれております。')
     assert '\n\n' in fixture('3536')[0]['text']
