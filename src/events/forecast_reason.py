@@ -41,7 +41,7 @@ _CAUTION_HEADING = re.compile(r"^(?:[\(\[〔【<]?(?:業績|業績等の)?予想
 def _is_reason_heading(key: str) -> bool:
     """Recognize a whole heading, not a sentence referring to another reason."""
     key = key.strip(":：")
-    for left, right in (('(', ')'), ('[', ']'), ('〔', '〕'), ('【', '】'), ('《', '》'), ('<', '>')):
+    for left, right in (('(', ')'), ('[', ']'), ('〔', '〕'), ('【', '】'), ('《', '》'), ('〈', '〉'), ('<', '>')):
         # "(2)修正の理由(補足)" begins and ends with parentheses but the
         # first pair is a section number, not a wrapper around the heading.
         if key.startswith(left) and key.endswith(right):
@@ -61,8 +61,8 @@ def _is_reason_heading(key: str) -> bool:
     if re.fullmatch(r"\d+[.、]理由", key):
         return True
     return (len(key) <= 110 and "「" not in key and "」" not in key
-            and re.search(r"理由(?:について|等|及び概要|ならびに今後の展開|及び今後の展開|及び.{1,50}について)?(?:\([^)]*\))?$", key)
-            and any(term in key for term in ("修正", "差異", "業績予想を未定")))
+            and re.search(r"理由(?:について|等|及び概要|ならびに今後の展開|及び今後の展開|および今後の対応|に関する補足|及び.{1,50}について)?(?:\([^)]*\))?$", key)
+            and any(term in key for term in ("修正", "差異", "業績予想を未定", "業績予想公表")))
 
 
 def _bullet_scope(key: str) -> str | None:

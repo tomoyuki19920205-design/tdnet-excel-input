@@ -29,6 +29,31 @@ def test_real_pdf_requires_available_native_reader_and_preserves_forecast_not_di
     assert "シライファン" not in reason["sections"][0]["text"]
 
 
+def test_exchange_mirror_disclosures_preserve_new_reason_headings_and_endings():
+    cases = (
+        ("3760", "140120260409500971", 469, "（２）業績予想公表の理由",
+         "来期以降の業績回復に向けた基盤を整備してまいります。", 2),
+        ("1786", "140120260317583100", 413, "２． 修正の理由および今後の対応",
+         "同社に対して厳格な損害賠償請求を行ってまいります。", 2),
+        ("6094", "140120260319585334", 201, "【業績予想修正の理由に関する補足】",
+         "公表すべき事項が生じた場合には速やかに開示いたします。", 4),
+        ("7725", "140120260409501162", 141, "〈修正の理由〉",
+         "通期個別業績予想を修正しております。", 1),
+    )
+    for ticker, doc_id, length, heading, ending, final_page in cases:
+        path = FIXTURE_DIR / f"live_{ticker}_jpx.pdf"
+        url = f"https://www2.jpx.co.jp/disc/{ticker}0/{doc_id}.pdf"
+        reason = extract_forecast_reason(str(path), url, doc_id, "業績予想の修正に関するお知らせ")
+        assert reason["status"] == "available", ticker
+        assert len(reason["sections"]) == 1, ticker
+        section = reason["sections"][0]
+        assert section["heading"] == heading, ticker
+        assert len(section["text"]) == length, ticker
+        assert "".join(section["text"].split()).endswith("".join(ending.split())), ticker
+        assert section["page_end"] == final_page, ticker
+        assert "配当予想修正の理由" not in section["text"], ticker
+
+
 def test_numbered_periods_inside_reason_are_kept_through_final_sentence():
     result = sections("9478")
     assert len(result) == 1
