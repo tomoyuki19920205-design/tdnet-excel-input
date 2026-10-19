@@ -97,3 +97,46 @@ def test_reconcile_preserves_saved_reason_when_later_parse_fails():
                "raw_payload": json.dumps({"extracted": {"revision_reason": {"status": "unavailable"}}})}
     _merge_compare_json(foreign, old)
     assert json.loads(foreign["raw_payload"])["extracted"]["revision_reason"]["status"] == "unavailable"
+
+
+def test_zero_width_and_bracketed_native_headings_end_before_disclosure_note():
+    lines = [
+        {"text": "１．2027年３月期連結業績予想の修正", "page": 1, "line": 1},
+        {"text": "\u200b２．修正の理由\u200b", "page": 1, "line": 2},
+        {"text": "売上高が計画を上回りました。", "page": 1, "line": 3},
+        {"text": "【業績予想に関する注意事項】", "page": 1, "line": 4},
+        {"text": "実際の業績は異なる可能性があります。", "page": 1, "line": 5},
+    ]
+    result = extract_reason_sections(lines, title="業績予想の修正")
+    assert len(result) == 1
+    assert result[0]["heading"] == "\u200b２．修正の理由\u200b"
+    assert result[0]["text"] == "売上高が計画を上回りました。"
+    lines[1]["text"] = "＜修正の理由＞"
+    assert extract_reason_sections(lines, title="業績予想の修正")[0]["text"] == "売上高が計画を上回りました。"
+
+
+def test_unheaded_future_projection_notice_is_not_part_of_forecast_reason():
+    lines = [
+        {"text": "２．修正の理由", "page": 1, "line": 1},
+        {"text": "増収により通期予想を修正いたします。", "page": 1, "line": 2},
+        {"text": "", "page": 1, "line": 3},
+        {"text": "上記の予想は、本資料の発表日現在において入手可能な情報に基づき作成したものです。", "page": 1, "line": 4},
+        {"text": "実際の業績は様々な要因により異なる場合があります。", "page": 1, "line": 5},
+    ]
+    result = extract_reason_sections(lines, title="業績予想修正")
+    assert result[0]["text"] == "増収により通期予想を修正いたします。"
+
+
+def test_attention_and_above_reason_sentence_are_not_mistaken_for_notes():
+    lines = [
+        {"text": "２．差異の理由", "page": 1, "line": 1},
+        {"text": "注力領域の売上高が減少しました。", "page": 1, "line": 2},
+        {"text": "上記の事由により、通期業績予想を修正いたします。", "page": 1, "line": 3},
+        {"text": "〔予想に関する留意事項〕", "page": 1, "line": 4},
+        {"text": "実際の業績は異なる場合があります。", "page": 1, "line": 5},
+    ]
+    result = extract_reason_sections(lines, title="業績予想と実績との差異")
+    assert result[0]["text"] == "注力領域の売上高が減少しました。\n上記の事由により、通期業績予想を修正いたします。"
+    for note_heading in ("【注記事項】", "【将来の見通しに関する記述等について】"):
+        lines[3]["text"] = note_heading
+        assert extract_reason_sections(lines, title="業績予想と実績との差異")[0]["text"] == result[0]["text"]

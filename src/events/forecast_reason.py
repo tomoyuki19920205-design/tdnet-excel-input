@@ -10,18 +10,20 @@ from pathlib import Path
 
 def _key(value: str) -> str:
     # Recognition only; never normalize the saved wording.
-    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", value))
+    normalized = unicodedata.normalize("NFKC", value)
+    return re.sub(r"\s+", "", "".join(ch for ch in normalized if unicodedata.category(ch) != "Cf"))
 
 
 _LOG = logging.getLogger(__name__)
 _MAJOR = re.compile(r"^(?:\d+[.、](?=\D|\d{4}年)|[IVX]+(?:[.、]|(?=連結|個別|業績)))")
 _SUB = re.compile(r"^\(\d+\)")
-_END = re.compile(r"^(?:以上$|\(?注\)?|※|\(?ご?参考\)?|\(?業績等の予想に関する注意事項\)?|\(?将来予測に関する注意事項\)?)")
+_END = re.compile(r"^(?:以上$|[\(\[〔【<]*(?:ご)?注意|[\(\[〔【<]*注(?:\d+|記)?(?:[\)\]〕】>:：]|$)|[\(\[〔【<]*注記事項|※|[\(\[〔【<]?ご?参考|[\(\[〔【<]?(?:業績|業績等の)?予想に関する注意事項|[\(\[〔【<]?将来予測に関する注意事項)")
+_CAUTION_HEADING = re.compile(r"^(?:[\(\[〔【<]?(?:業績|業績等の)?予想に関する留意事項|[\(\[〔【<]?将来の見通しに関する|[\(\[〔【<]?業績予想に関する注記事項)")
 
 
 def _is_reason_heading(key: str) -> bool:
     """Recognize a whole heading, not a sentence referring to another reason."""
-    key = key.strip("()[]〔〕:：")
+    key = key.strip("()[]〔〕【】<>:：")
     if re.fullmatch(r"\d+[.、]理由", key):
         return True
     return (len(key) <= 55 and "「" not in key and "」" not in key
@@ -86,7 +88,17 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
                            or (current_number is not None and next_number > current_number))) if current else False
         roman_top_level = bool(major and re.match(r'^[ⅠⅡⅢⅣIVX]', key)
                                and any(word in key for word in ('連結', '個別', '業績')))
-        if current and (_END.match(key) or ('配当' in key and (major or _SUB.match(key)))
+        caution_text = ''.join(_key(v['text']) for v in lines[index:index + 3])
+        caution_starts = (key.startswith(('なお', 'また', '本資料', '当資料', '実際', '将来', '業績予想'))
+                          or key.startswith(('上記の予想', '上記予想', '上記の業績予想',
+                                             '上記業績予想', '上記の通期連結業績予想')))
+        caution_paragraph = (caution_starts
+                             and any(word in key for word in ('予想', '見通し', '将来', '実際の業績'))
+                             and any(word in caution_text for word in ('入手可能', '予想数値と異なる',
+                                                                         '実際の業績', '不確実', '合理的である',
+                                                                         '責任を負いません')))
+        if current and (_END.match(key) or _CAUTION_HEADING.match(key) or caution_paragraph
+                        or ('配当' in key and (major or _SUB.match(key)))
                         or next_top_level or roman_top_level):
             finish()
         if major:
@@ -127,7 +139,8 @@ def read_pdf_lines(pdf_path: str) -> list[dict]:
             physical.sort(key=lambda row: (round(row[0][1] / 3), row[0][0]))
             merged = []
             for bbox, text, size in physical:
-                if bbox[1] > page.rect.height * .92 and re.fullmatch(r'\d+(?:\s*/\s*\d+)?', text.strip()): continue
+                if bbox[1] > page.rect.height * .92 and re.fullmatch(
+                        r'(?:\d+(?:\s*/\s*\d+)?|[―‐－-]\s*\d+\s*[―‐－-])', text.strip()): continue
                 if merged and abs(merged[-1][0][1] - bbox[1]) < 3:
                     old_box, old_text, old_size = merged[-1]
                     merged[-1] = ((old_box[0], old_box[1], bbox[2], max(old_box[3], bbox[3])), old_text + '  ' + text, old_size)
