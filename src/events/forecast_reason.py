@@ -136,12 +136,19 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
                 continue
         scope = _bullet_scope(key)
         if scope:
+            # A forecast bullet inside a reason is a period/basis subsection,
+            # not the end of that reason. Live 3766 and 1994 put their full
+            # forecast explanations directly below such bullets.
+            reason_context = current['context'].copy() if current and scope == 'forecast' else None
             finish()
             dividend_scope = scope == 'dividend'
             bullet_dividend_scope = dividend_scope
             context = [text.strip()]
             if not dividend_scope:
                 forecast_context = context.copy()
+                if reason_context is not None:
+                    current = dict(heading=text.strip(), context=reason_context,
+                                   page_start=row['page'], line_start=row['line'])
             continue
         # The next PDF page can start an unnumbered dividend chapter with no
         # blank line or numbered heading (live 7255). Its generic "（理由）"

@@ -527,3 +527,21 @@ def test_unlabeled_dividend_aside_does_not_cut_later_forecast_prose():
     ]
     reason = extract_reason_sections(lines)[0]['text']
     assert reason.endswith(lines[5]['text'])
+
+
+def test_live_forecast_bullets_nested_under_reason_keep_both_periods_and_stop_at_dividend():
+    # Native PDF lines of the live 3766 and 1994 disclosures. A generic
+    # reason heading is followed by bullet period headings, then the prose.
+    cases = json.loads((FIXTURE_DIR / 'live_nested_bullet_3766_1994.json').read_text(encoding='utf-8'))
+    for case in cases:
+        found = extract_reason_sections(case['lines'], title=case['title'])
+        assert len(found) == 2, case['ticker']
+        assert all(section['text'] and section['heading'].startswith('・') for section in found)
+        assert all(section['page_end'] == 1 for section in found)
+        if case['ticker'] == '3766':
+            assert found[0]['text'] == '2027年３月期の連結業績について変更はありません。'
+            assert found[1]['text'].endswith('経常利益及び当期純利益について修正しております。')
+        else:
+            assert found[0]['text'].endswith('中間純利益も予\n想を上回る見込みです。')
+            assert found[1]['text'].endswith('当期純利益も予想を上回る見込みです。')
+            assert '記念配当' not in '\n'.join(section['text'] for section in found)
