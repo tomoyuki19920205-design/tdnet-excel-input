@@ -231,6 +231,21 @@ def test_unheaded_unchanged_dividend_note_after_forecast_reason_is_excluded():
     assert result[0]["text"] == "中間期の増収を通期業績予想に反映します。"
 
 
+def test_dividend_note_before_next_page_reference_table_ends_reason():
+    texts = [
+        "２．修正の理由", "当期純利益は前回予想を下回る見込みです。", "",
+        "配当予想については変更ありません。", "（参考）セグメント別売上高", "",
+        "（単位：億円）", "項目 前回予想 今回予想", "以上",
+    ]
+    lines = [dict(text=value, page=1 if index < 5 else 2,
+                  line=index if index < 5 else index - 4)
+             for index, value in enumerate(texts, 1)]
+    result = extract_reason_sections(lines, title="業績予想の修正に関するお知らせ")
+    assert len(result) == 1
+    assert result[0]["text"] == "当期純利益は前回予想を下回る見込みです。"
+    assert result[0]["page_end"] == 1
+
+
 def test_separate_individual_publication_reason_after_forecast_table():
     texts = [
         "１．通期連結業績予想の修正", "＜修正の理由＞", "売上高は前回予想を下回ります。",

@@ -110,7 +110,9 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
     for index, row in enumerate(lines):
         text, key = row['text'], _key(row['text'])
         if skip_dividend_note:
-            if not key or _MAJOR.match(key) or _END.match(key) or _is_reason_heading(key):
+            if (not key or _MAJOR.match(key) or _END.match(key)
+                    or _REFERENCE_HEADING.match(key) or _CAUTION_HEADING.match(key)
+                    or _is_reason_heading(key)):
                 skip_dividend_note = False
             else:
                 continue
