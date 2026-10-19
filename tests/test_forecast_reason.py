@@ -158,6 +158,14 @@ def test_actual_numbered_and_extended_reason_headings(case):
         assert '（３）各セグメント' not in sections[0]['text']
 
 
+def test_actual_5563_publication_reason_is_forecast_only():
+    case=json.loads((Path(__file__).parent/'fixtures/forecast_reason/publication_reason_5563.json').read_text(encoding='utf-8'))
+    sections=extract_reason_sections(case['lines'],title=case['title'])
+    assert sections==case['expected']
+    assert sections[0]['text'].endswith('1 米ドル157 円を前提としています。')
+    assert '株主還元方針' not in sections[0]['text']
+
+
 def test_missing_pdf_reader_is_environment_failure_not_absent_reason(monkeypatch, tmp_path):
     import sys
     pdf = tmp_path / 'original.pdf'

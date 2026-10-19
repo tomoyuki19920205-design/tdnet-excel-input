@@ -139,7 +139,9 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
                                and '売上高営業利益経常利益' not in next_text)
         scoped_generic_reason = (bool(re.fullmatch(r'\(\d+\)理由', key)) and not dividend_scope
                                  and any(any(term in _key(h) for term in ('業績', '差異')) for h in context))
-        if _is_reason_heading(key) or scoped_generic_reason or unheaded_difference:
+        scoped_publication_reason = (bool(re.fullmatch(r'\(\d+\)公表の理由', key)) and not dividend_scope
+                                     and any(any(term in _key(h) for term in ('業績', '差異')) for h in context))
+        if _is_reason_heading(key) or scoped_generic_reason or scoped_publication_reason or unheaded_difference:
             finish()
             prior_dividend_scope = dividend_scope
             if '配当' in key and not any(word in key for word in ('業績', '差異')):
