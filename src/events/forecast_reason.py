@@ -534,6 +534,14 @@ def _extract_difference_after_table(lines: list[dict], title: str) -> list[dict]
             continue
         body = region[start:]
         while body and not _key(body[-1]['text']): body.pop()
+        # Two-column native text can resume in the middle of a sentence after
+        # the table (live 8616: "同じ。）し...").  That is a partial quotation.
+        if body:
+            prefix = _key(body[0]['text'])[:15]
+            close = min((prefix.find(c) for c in ('）', ')') if c in prefix), default=-1)
+            opens = [prefix.find(c) for c in ('（', '(') if c in prefix]
+            if close >= 0 and (not opens or close < min(opens)):
+                continue
         prose = ''.join(_key(row['text']) for row in body)
         if (not body or len(prose) < 80 or len(prose) > 3000 or
                 not any(word in prose for word in ('ました', '見込み', 'なりました'))):

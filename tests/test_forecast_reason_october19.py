@@ -627,3 +627,12 @@ def test_reason_continuation_on_scanned_page_is_not_reported_available(tmp_path,
     assert result['status'] == 'extraction_failed'
     assert result['failure_code'] == 'reason_continues_on_unreadable_page'
     assert result['sections'] == []
+
+
+def test_two_column_difference_does_not_start_in_middle_of_sentence():
+    from src.events.forecast_reason import _extract_difference_after_table
+
+    lines = json.loads((FIXTURE_DIR / 'live_8616_lines.json').read_text(encoding='utf-8'))
+    sections = _extract_difference_after_table(
+        lines, '2026年3月期通期連結業績と前期実績との差異に関するお知らせ')
+    assert sections == []
