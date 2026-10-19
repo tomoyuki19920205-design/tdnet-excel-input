@@ -54,6 +54,33 @@ def test_actual_9310_bullet_dividend_chapter_does_not_leak_into_forecast_reason(
     assert '配当性向40％' not in sections[0]['text']
 
 
+def test_actual_7132_reason_after_dividend_table_ends_before_dividend_rationale():
+    actual=json.loads((Path(__file__).parent/'fixtures/forecast_reason/combined_scope_7132.json').read_text(encoding='utf-8'))
+    sections=extract_reason_sections(actual['lines'],title=actual['title'])
+    assert len(sections)==1
+    assert sections[0]['text']==actual['expected'][0]['text']
+    assert sections[0]['page_start']==sections[0]['page_end']==2
+    assert '株主に対する利益還元' not in sections[0]['text']
+
+
+def test_actual_4246_dividend_reason_after_forecast_is_not_added():
+    actual=json.loads((Path(__file__).parent/'fixtures/forecast_reason/dividend_scope_4246.json').read_text(encoding='utf-8'))
+    sections=extract_reason_sections(actual['lines'],title=actual['title'])
+    assert len(sections)==1
+    assert sections[0]['text'].endswith('修正しております。')
+    assert '１株につき57円' not in sections[0]['text']
+
+
+def test_actual_6914_mixed_reason_stops_at_dividend_subheading():
+    actual=json.loads((Path(__file__).parent/'fixtures/forecast_reason/combined_scope_6914.json').read_text(encoding='utf-8'))
+    sections=extract_reason_sections(actual['lines'],title=actual['title'])
+    assert len(sections)==1
+    assert '【第2 四半期（中間期）連結業績予想数値の修正】' in sections[0]['text']
+    assert '【通期連結業績予想数値の修正】' in sections[0]['text']
+    assert sections[0]['text'].endswith('おります。')
+    assert '【配当予想の修正】' not in sections[0]['text']
+
+
 @pytest.mark.parametrize('ticker,tail', [
     ('3710','第３四半期までの実績及び経常利益の予想数値等を踏まえて算定しております。'),
     ('6522','投入を推進し、中長期的な企業価値の向上に努めてまいります。'),
@@ -142,3 +169,9 @@ def test_reason_repair_preserves_numeric_payload_and_rejects_concurrent_or_forei
     recovery={**plan,'raw_payload_before_sha256':digest(stale['raw_payload']),
               'expected_existing_reason_sha256':digest(unavailable)}
     assert build_patch(stale,recovery)['raw_payload']==amended
+    for status in ('extraction_failed','scope_unverified','source_unavailable'):
+        classified={**unavailable,'status':status}
+        classified_row={**before,'raw_payload':{'extracted':{**raw['extracted'],'revision_reason':classified},'raw':raw['raw']}}
+        classified_plan={**plan,'raw_payload_before_sha256':digest(classified_row['raw_payload']),
+                         'expected_existing_reason_sha256':digest(classified)}
+        assert build_patch(classified_row,classified_plan)['raw_payload']==amended

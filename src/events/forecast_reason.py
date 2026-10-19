@@ -77,17 +77,19 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
     context: list[str] = []
     forecast_context: list[str] = []
     dividend_scope = "配当" in _key(title) and "業績" not in _key(title)
+    bullet_dividend_scope = False
     current = None
+    current_reopened = False
     body: list[dict] = []
 
     def finish():
-        nonlocal current, body
+        nonlocal current, current_reopened, body
         if current and any(row['text'].strip() for row in body):
             while body and not body[-1]['text'].strip(): body.pop()
             current.update(text='\n'.join(row['text'] for row in body).strip('\n'),
                            page_end=body[-1]['page'], line_end=body[-1]['line'])
             sections.append(current)
-        current, body = None, []
+        current, current_reopened, body = None, False, []
 
     for index, row in enumerate(lines):
         text, key = row['text'], _key(row['text'])
@@ -98,6 +100,7 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
         if scope:
             finish()
             dividend_scope = scope == 'dividend'
+            bullet_dividend_scope = dividend_scope
             context = [text.strip()]
             if not dividend_scope:
                 forecast_context = context.copy()
@@ -106,6 +109,17 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
         # "業績予想との差異について" rather than "理由". A table heading with the
         # same wording is excluded by requiring prose immediately below.
         next_text = ''.join(_key(v['text']) for v in lines[index + 1:index + 3])
+        intro_rows = []
+        for following in lines[index + 1:index + 13]:
+            if not following['text'].strip() and intro_rows:
+                break
+            if following['text'].strip():
+                intro_rows.append(following['text'])
+        intro_text = ''.join(_key(value) for value in intro_rows)
+        first_intro = _key(intro_rows[0]) if intro_rows else ''
+        forecast_intro = ('配当' not in intro_text and '株' not in first_intro
+                          and ('業績予想' in first_intro or
+                               first_intro.startswith(('売上高', '営業利益', '経常利益', '特別利益'))))
         unheaded_difference = (key.endswith('業績予想との差異について')
                                and len(next_text) >= 50
                                and any(word in next_text for word in ('前回', '公表', '集計', '精査'))
@@ -114,14 +128,18 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
                                  and any(any(term in _key(h) for term in ('業績', '差異')) for h in context))
         if _is_reason_heading(key) or scoped_generic_reason or unheaded_difference:
             finish()
+            prior_dividend_scope = dividend_scope
             if '配当' in key and not any(word in key for word in ('業績', '差異')):
                 dividend_scope = True
-            elif any(word in key for word in ('業績', '差異')) and '配当' not in key and dividend_scope:
+            elif dividend_scope and not bullet_dividend_scope and (
+                    (any(word in key for word in ('業績', '差異')) and '配当' not in key)
+                    or (forecast_context and forecast_intro)):
                 dividend_scope = False
                 context = forecast_context.copy()
             if not dividend_scope:
                 current = dict(heading=text.strip(), context=context.copy(),
                                page_start=row['page'], line_start=row['line'])
+                current_reopened = prior_dividend_scope
             continue
         major = bool(_MAJOR.match(key))
         # Numbered period/basis paragraphs inside a reason are body text.
@@ -142,16 +160,23 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
                              and any(word in caution_text for word in ('入手可能', '予想数値と異なる',
                                                                          '実際の業績', '不確実', '合理的である',
                                                                          '責任を負いません')))
+        dividend_paragraph = (current and current_reopened and body and body[-1]['text'] == '' and
+                              (('株主' in key and '利益還元' in key) or
+                               key.lstrip('【〔（([〈《').startswith('配当予想')))
         if current and (_END.match(key) or _REFERENCE_HEADING.match(key) or _CAUTION_HEADING.match(key) or caution_paragraph
+                        or dividend_paragraph
                         or ('配当' in key and (major or _SUB.match(key)))
                         or next_top_level or roman_top_level):
             finish()
+            if dividend_paragraph:
+                dividend_scope = True
         if major:
             if '配当' in key:
                 dividend_scope = True
                 context = [text.strip()]
             elif any(word in key for word in ('業績', '連結', '個別')):
                 dividend_scope = False
+                bullet_dividend_scope = False
                 # Roman headings identify basis; numbered headings identify period.
                 if re.match(r'^[ⅠⅡⅢⅣIVX]', key): context = [text.strip()]
                 else: context = [h for h in context if re.match(r'^[ⅠⅡⅢⅣIVX]', _key(h))] + [text.strip()]

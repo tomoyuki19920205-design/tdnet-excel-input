@@ -24,7 +24,7 @@ def build_patch(before: dict, plan: dict) -> dict:
     existing=raw['extracted'].get('revision_reason')
     if existing:
         assert digest(existing)==plan.get('expected_existing_reason_sha256'), 'existing reason must not be overwritten without an exact reviewed hash'
-        assert (existing.get('status')=='unavailable'
+        assert (existing.get('status') in ('unavailable','extraction_failed','scope_unverified','source_unavailable')
                 or (existing.get('status')=='available' and plan.get('allow_replace_available') is True)), \
             'a usable or verified absent reason must not be replaced without reviewed correction'
         assert existing.get('source_url')==reason['source_url'], 'disclosure source changed'
