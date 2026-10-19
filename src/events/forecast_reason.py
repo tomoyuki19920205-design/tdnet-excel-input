@@ -48,6 +48,20 @@ def _is_reason_heading(key: str) -> bool:
             and any(term in key for term in ("修正", "差異")))
 
 
+def _bullet_scope(key: str) -> str | None:
+    """Separate bullet-headed forecast and dividend chapters with generic reason headings."""
+    if len(key) > 50 or not key.startswith(('●', '■', '◆')):
+        return None
+    heading = key[1:]
+    if not heading.endswith(('修正について', '変更について', '修正', '変更')):
+        return None
+    if '配当' in heading and '業績' not in heading:
+        return 'dividend'
+    if '業績' in heading and '配当' not in heading:
+        return 'forecast'
+    return None
+
+
 def _section_number(key: str) -> int | None:
     match = re.match(r"^(\d+)[.、]", key)
     return int(match.group(1)) if match else None
@@ -75,6 +89,14 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
         text, key = row['text'], _key(row['text'])
         if not key:
             if current and body and body[-1]['text']: body.append(row)
+            continue
+        scope = _bullet_scope(key)
+        if scope:
+            finish()
+            dividend_scope = scope == 'dividend'
+            context = [text.strip()]
+            if not dividend_scope:
+                forecast_context = context.copy()
             continue
         # Some difference disclosures label the explanatory paragraph
         # "業績予想との差異について" rather than "理由". A table heading with the

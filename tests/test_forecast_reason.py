@@ -44,6 +44,15 @@ def test_multiple_periods_and_bases_are_labeled_without_cross_contamination():
         assert '３．2027' not in s['text']
         assert s['text'].endswith('前回予想を下回りました。' if i%2==0 else '当初予想を修正いたします。')
 
+
+def test_actual_9310_bullet_dividend_chapter_does_not_leak_into_forecast_reason():
+    actual=json.loads((Path(__file__).parent/'fixtures/forecast_reason/bullet_dividend_9310.json').read_text(encoding='utf-8'))
+    sections=extract_reason_sections(actual['lines'],title=actual['title'])
+    assert len(sections)==1
+    assert sections[0]['heading']=='２．修正の理由'
+    assert sections[0]['text'].endswith('以上の理由から通期の連結業績予想を上記のとおり修正いたします。')
+    assert '配当性向40％' not in sections[0]['text']
+
 def test_downward_and_interim_final_paragraphs():
     assert fixture('3536')[0]['text'].endswith('回業績予想と比較して親会社株主に帰属する当期純利益の減少が見込まれております。')
     assert '\n\n' in fixture('3536')[0]['text']
