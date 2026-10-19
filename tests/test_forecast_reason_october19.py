@@ -171,6 +171,66 @@ def test_bullet_dividend_chapter_cannot_capture_forecast_reason():
     assert result[0]["text"] == "売上高が前回発表予想を上回る見込みです。"
 
 
+def test_unnumbered_dividend_chapter_on_next_page_stops_original_reason():
+    texts = [
+        "（差異の理由）", "売上高は前回予想を若干下回る結果となりました。",
+        "利益面は前回予想を上回りました。", "期末配当の内容",
+        "決定額 直近の配当予想 前期実績", "（理由）",
+        "前回の配当予想から増額します。",
+    ]
+    lines = [dict(text=value, page=1 if index < 4 else 2,
+                  line=index if index < 4 else index - 3)
+             for index, value in enumerate(texts, 1)]
+    result = extract_reason_sections(lines, title="業績予想と実績との差異及び剰余金の配当")
+    assert len(result) == 1
+    assert result[0]["text"] == "売上高は前回予想を若干下回る結果となりました。\n利益面は前回予想を上回りました。"
+    assert result[0]["page_end"] == 1
+
+
+def test_subsidiary_dividend_as_profit_cause_remains_in_forecast_reason():
+    texts = [
+        "２．差異の理由", "営業利益は前期を上回りました。", "",
+        "また、前期は一部の連結子会社からのみ配当金を受け取っていましたが、当期は前期より多くの",
+        "連結子会社から配当金を受け取ったことにより、経常利益、当期純利益が増加しました。",
+        "", "なお、期末配当予想は変更ありません。",
+    ]
+    lines = [dict(text=value, page=1, line=index) for index, value in enumerate(texts, 1)]
+    result = extract_reason_sections(lines, title="個別業績と前期実績との差異")
+    assert len(result) == 1
+    assert result[0]["text"].endswith("連結子会社から配当金を受け取ったことにより、経常利益、当期純利益が増加しました。")
+    assert "期末配当予想" not in result[0]["text"]
+
+
+def test_separate_individual_publication_reason_after_forecast_table():
+    texts = [
+        "１．通期連結業績予想の修正", "＜修正の理由＞", "売上高は前回予想を下回ります。",
+        "２．通期個別業績予想の公表", "売上高 営業利益 経常利益", "＜新たに公表することとなった理由＞",
+        "ロイヤリティーの減収により前期実績を下回る見通しです。",
+        "３．配当予想の修正", "＜修正の理由＞", "配当性向を踏まえて増配します。",
+    ]
+    lines = [dict(text=value, page=1, line=index) for index, value in enumerate(texts, 1)]
+    result = extract_reason_sections(lines, title="通期連結業績予想の修正、通期個別業績予想の公表及び配当予想の修正")
+    assert [section['text'] for section in result] == [
+        "売上高は前回予想を下回ります。", "ロイヤリティーの減収により前期実績を下回る見通しです。",
+    ]
+    assert '通期個別業績予想の公表' in result[1]['context'][0]
+
+
+def test_two_basis_tables_before_two_reasons_keep_matching_context_and_stop_at_next_subsection():
+    texts = [
+        '2027年４月期中間期連結業績予想数値の修正', '売上高 営業利益',
+        '2027年４月期中間期個別業績予想数値の修正', '売上高 営業利益',
+        '(１)中間期連結業績予想の修正理由', '連結売上高が上振れました。',
+        '(２)中間期個別業績予想の修正理由', '個別売上高も上振れました。',
+        '(３)通期の連結及び個別業績予想について', '通期予想は変更しておりません。',
+    ]
+    lines = [dict(text=value, page=1, line=index) for index, value in enumerate(texts, 1)]
+    result = extract_reason_sections(lines, title='業績予想の修正')
+    assert [s['text'] for s in result] == ['連結売上高が上振れました。', '個別売上高も上振れました。']
+    assert '連結' in result[0]['context'][0] and '個別' not in result[0]['context'][0]
+    assert '個別' in result[1]['context'][0] and '連結' not in result[1]['context'][0]
+
+
 def test_interim_full_year_and_bases_are_kept_but_following_dividend_is_excluded():
     body = sections("1814")[0]["text"]
     assert "（１）2027 年３月期第２四半期累計期間" in body
