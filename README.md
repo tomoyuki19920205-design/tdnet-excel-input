@@ -16,8 +16,8 @@ TDnetで公開される決算短信等から累計売上高・粗利益・営業
 ### 1. 依存パッケージのインストール
 
 ```bash
-cd playground/tdnet-excel-input
-.venv\Scripts\python.exe -m pip install -r requirements.txt
+# リポジトリのルートで実行（稼働先: C:\Users\takuy\tdnet-financial-runtime）
+uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 .venv\Scripts\python.exe -c "import pymupdf; print(pymupdf.VersionBind)"
 ```
 
