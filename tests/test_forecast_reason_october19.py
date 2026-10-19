@@ -99,6 +99,22 @@ def test_reconcile_preserves_saved_reason_when_later_parse_fails():
     assert json.loads(foreign["raw_payload"])["extracted"]["revision_reason"]["status"] == "unavailable"
 
 
+def test_reconcile_preserves_audited_unresolved_status_but_accepts_later_pdf_reason():
+    url = "https://www.release.tdnet.info/inbs/audited.pdf"
+    for status in ("source_unavailable", "extraction_failed", "scope_unverified", "not_present"):
+        old_reason = {"version": 1, "status": status, "source_url": url,
+                      "sections": [], "evidence": {"audit": "checked"}}
+        old = json.dumps({"extracted": {"revision_reason": old_reason}}, ensure_ascii=False)
+        new = {"source_url": url, "raw_payload": json.dumps({"extracted": {"revision_reason": None}})}
+        _merge_compare_json(new, old)
+        assert json.loads(new["raw_payload"])["extracted"]["revision_reason"] == old_reason
+        resolved = {"version": 1, "status": "available", "source_url": url,
+                    "sections": [{"text": "原文全文。"}]}
+        incoming = {"source_url": url, "raw_payload": json.dumps({"extracted": {"revision_reason": resolved}}, ensure_ascii=False)}
+        _merge_compare_json(incoming, old)
+        assert json.loads(incoming["raw_payload"])["extracted"]["revision_reason"] == resolved
+
+
 def test_zero_width_and_bracketed_native_headings_end_before_disclosure_note():
     lines = [
         {"text": "１．2027年３月期連結業績予想の修正", "page": 1, "line": 1},
