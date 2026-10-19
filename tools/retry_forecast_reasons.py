@@ -25,7 +25,7 @@ from src.events.forecast_extractor import _download_pdf_for_ocr
 from src.events.forecast_reason import extract_forecast_reason, require_pdf_reader
 from src.events.forecast_source import exchange_pdf_url
 
-VERSION = 'forecast-reason-20261019-v2'
+VERSION = 'forecast-reason-20261019-v3'
 DOC_ID = re.compile(r'1401\d{14}')
 UTC = timezone.utc
 
