@@ -201,6 +201,36 @@ def test_subsidiary_dividend_as_profit_cause_remains_in_forecast_reason():
     assert "期末配当予想" not in result[0]["text"]
 
 
+def test_dividend_aside_inside_reason_does_not_hide_later_forecast_prose():
+    texts = [
+        "2. 修正の理由", "売上高は検収の遅れにより前回予想を下回る見込みです。", "",
+        "配当予想につきましては、売上減少は一時的なものであり、", "期末配当を維持します。", "",
+        "なお、翌期の業績予想は改めて公表する予定です。", "以上",
+    ]
+    lines = [dict(text=value, page=1 if index < 6 else 2,
+                  line=index if index < 6 else index - 5)
+             for index, value in enumerate(texts, 1)]
+    result = extract_reason_sections(lines, title="通期業績予想の修正に関するお知らせ")
+    assert len(result) == 1
+    assert result[0]["text"] == (
+        "売上高は検収の遅れにより前回予想を下回る見込みです。\n\n"
+        "なお、翌期の業績予想は改めて公表する予定です。"
+    )
+    assert result[0]["page_end"] == 2
+
+
+def test_unheaded_unchanged_dividend_note_after_forecast_reason_is_excluded():
+    texts = [
+        "３. 差異及び修正等の理由", "中間期の増収を通期業績予想に反映します。", "",
+        "なお、この度の中間期業績予想と実績値との差異及び通期業績予想の修正に伴う",
+        "配当予想の変更はありません。", "以上",
+    ]
+    lines = [dict(text=value, page=2, line=index) for index, value in enumerate(texts, 1)]
+    result = extract_reason_sections(lines, title="中間期業績予想と実績値との差異及び通期業績予想の修正")
+    assert len(result) == 1
+    assert result[0]["text"] == "中間期の増収を通期業績予想に反映します。"
+
+
 def test_separate_individual_publication_reason_after_forecast_table():
     texts = [
         "１．通期連結業績予想の修正", "＜修正の理由＞", "売上高は前回予想を下回ります。",

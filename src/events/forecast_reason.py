@@ -96,6 +96,7 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
     current = None
     current_reopened = False
     body: list[dict] = []
+    skip_dividend_note = False
 
     def finish():
         nonlocal current, current_reopened, body
@@ -108,9 +109,29 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
 
     for index, row in enumerate(lines):
         text, key = row['text'], _key(row['text'])
+        if skip_dividend_note:
+            if not key or _MAJOR.match(key) or _END.match(key) or _is_reason_heading(key):
+                skip_dividend_note = False
+            else:
+                continue
         if not key:
             if current and body and body[-1]['text']: body.append(row)
             continue
+        # A dividend aside can sit inside an otherwise continuous forecast
+        # reason, followed by more forecast prose (live 6255). Skip only that
+        # original paragraph, then continue the same forecast section.
+        if current and body and not _key(body[-1]['text']):
+            paragraph = []
+            for following in lines[index:index + 4]:
+                if not _key(following['text']) and paragraph:
+                    break
+                paragraph.append(_key(following['text']))
+            joined = ''.join(paragraph)
+            dividend_aside = (key.startswith(('配当予想につきましては', '配当予想について'))
+                              or (key.startswith('なお') and '配当予想の変更はありません' in joined))
+            if dividend_aside and '受取配当' not in joined:
+                skip_dividend_note = True
+                continue
         scope = _bullet_scope(key)
         if scope:
             finish()
