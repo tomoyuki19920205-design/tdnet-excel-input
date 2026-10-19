@@ -137,6 +137,9 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="書き込みをスキップ")
     args = parser.parse_args()
 
+    from src.events.forecast_reason import require_pdf_reader
+    require_pdf_reader()
+
     # ── ログ設定 ──
     now = datetime.now(JST)
     log_dir = os.path.join(_PROJECT_ROOT, "logs")

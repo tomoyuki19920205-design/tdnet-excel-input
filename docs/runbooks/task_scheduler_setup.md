@@ -122,4 +122,5 @@ Python 側で `logs/` に自動出力:
 
 - Windows Task Scheduler
 - Python venv: `.venv\Scripts\python.exe`
+- 環境更新時は、定期タスクが参照する実稼働コードの `.venv\Scripts\python.exe -m pip install -r requirements.txt` を実行し、同じ Python で `-c "import pymupdf; print(pymupdf.VersionBind)"` を確認する。Reconcile・Nightly・Realtime は起動時に PDF 読み取り依存を検査し、欠落時は非ゼロ終了する。
 - プロジェクト: `C:\Users\takuy\OneDrive\tdnet-excel-input`

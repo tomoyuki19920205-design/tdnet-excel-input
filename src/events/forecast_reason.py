@@ -15,6 +15,22 @@ def _key(value: str) -> str:
 
 
 _LOG = logging.getLogger(__name__)
+
+
+class ForecastReasonEnvironmentError(RuntimeError):
+    """The scheduled Python cannot read PDF files for forecast reasons."""
+
+
+def require_pdf_reader():
+    """Fail the job visibly when its PDF dependency is missing or broken."""
+    try:
+        import pymupdf
+        return pymupdf
+    except (ImportError, OSError) as exc:
+        raise ForecastReasonEnvironmentError(
+            "forecast_reason_pdf_reader_unavailable: install requirements.txt "
+            "into the scheduled task's Python environment"
+        ) from exc
 _MAJOR = re.compile(r"^(?:\d+[.、](?=\D|\d{4}年)|[IVX]+(?:[.、]|(?=連結|個別|業績)))")
 _SUB = re.compile(r"^\(\d+\)")
 _END = re.compile(r"^(?:以上$|[\(\[〔【<]*(?:ご)?注意|[\(\[〔【<]*注(?:\d+|記)?(?:[\)\]〕】>:：]|$)|[\(\[〔【<]*注記事項|※|[\(\[〔【<]?(?:業績|業績等の)?予想に関する注意事項|[\(\[〔【<]?将来予測に関する注意事項)")
@@ -125,7 +141,7 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
 
 def read_pdf_lines(pdf_path: str) -> list[dict]:
     """Read all native PDF pages, preserving physical lines and paragraph gaps."""
-    import pymupdf as fitz
+    fitz = require_pdf_reader()
     rows = []
     with fitz.open(pdf_path) as pdf:
         for page_no, page in enumerate(pdf, 1):
@@ -166,6 +182,9 @@ def extract_forecast_reason(pdf_path: str, source_url: str, doc_id: str = '', ti
         result['pdf_sha256'] = hashlib.sha256(Path(pdf_path).read_bytes()).hexdigest()
         result['sections'] = extract_reason_sections(read_pdf_lines(pdf_path), title=title)
         if result['sections']: result['status'] = 'available'
+    except ForecastReasonEnvironmentError:
+        _LOG.exception('Forecast reason PDF reader environment error for %s', doc_id)
+        raise
     except Exception as exc:
         # Extraction failure must not block the existing numeric notification.
         result['status'] = 'unavailable'

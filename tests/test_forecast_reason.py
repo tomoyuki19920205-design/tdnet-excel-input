@@ -2,7 +2,8 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 import pytest
-from src.events.forecast_reason import extract_reason_sections, extract_forecast_reason
+from src.events.forecast_reason import (extract_reason_sections, extract_forecast_reason,
+                                        require_pdf_reader, ForecastReasonEnvironmentError)
 from src.events.forecast_models import ForecastRevisionEvent
 from src.events.forecast_extractor import extract_forecast_revision
 from src.events.event_pipeline import _forecast_to_event_record
@@ -53,6 +54,28 @@ def test_dividend_only_and_missing_do_not_generate_text():
     rows=[dict(text=t,page=1,line=i) for i,t in enumerate(['1. 配当予想の修正','(2) 修正理由','配当だけの理由。','以上'])]
     assert extract_reason_sections(rows)==[]
     assert extract_forecast_reason('', 'https://example.com/original.pdf')['status']=='unavailable'
+
+
+def test_missing_pdf_reader_is_environment_failure_not_absent_reason(monkeypatch, tmp_path):
+    import sys
+    pdf = tmp_path / 'original.pdf'
+    pdf.write_bytes(b'%PDF-1.4')
+    monkeypatch.setitem(sys.modules, 'pymupdf', None)
+    with pytest.raises(ForecastReasonEnvironmentError, match='forecast_reason_pdf_reader_unavailable'):
+        extract_forecast_reason(str(pdf), 'https://example.com/original.pdf')
+
+
+@pytest.mark.parametrize('module', ['scheduler_realtime', 'scheduler_reconcile', 'scheduler_nightly'])
+def test_scheduled_jobs_fail_before_processing_when_pdf_reader_missing(monkeypatch, module):
+    import importlib
+    import sys
+    scheduler = importlib.import_module('tools.' + module)
+    monkeypatch.setattr(sys, 'argv', [module + '.py', '--dry-run'])
+    def fail():
+        raise ForecastReasonEnvironmentError('forecast_reason_pdf_reader_unavailable')
+    monkeypatch.setattr('src.events.forecast_reason.require_pdf_reader', fail)
+    with pytest.raises(ForecastReasonEnvironmentError, match='forecast_reason_pdf_reader_unavailable'):
+        scheduler.main()
 
 def test_text_source_does_not_substitute_for_the_original_pdf():
     with patch('src.events.forecast_extractor._extract_forecast_revision_metrics', return_value=ForecastRevisionEvent(revised_eps=0)):

@@ -17,7 +17,8 @@ TDnetで公開される決算短信等から累計売上高・粗利益・営業
 
 ```bash
 cd playground/tdnet-excel-input
-pip install -r requirements.txt
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe -c "import pymupdf; print(pymupdf.VersionBind)"
 ```
 
 ### 2. 設定ファイルの作成
