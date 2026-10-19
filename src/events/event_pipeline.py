@@ -36,6 +36,7 @@ from .dividend_classifier import classify_dividend
 # extractors
 from .buyback_extractor import extract_buyback_event
 from .forecast_extractor import extract_forecast_revision
+from .forecast_source import exchange_pdf_url
 from .dividend_extractor import extract_dividend_revision
 from .price_service import get_last_close
 from src.pdf_only_materials import classify_pdf_only_material, is_after_pdf_only_material_activation
@@ -121,7 +122,7 @@ def _download_and_save_pdf(url: str, save_dir: str = "") -> tuple[str, str]:
         import pdfplumber
         import requests
 
-        if not any(h in url for h in ["tdnet.info", "disclosure.edinet"]):
+        if not any(h in url for h in ["tdnet.info", "disclosure.edinet", "www2.jpx.co.jp"]):
             return "", ""
 
         resp = requests.get(url, timeout=15, headers={
@@ -577,6 +578,16 @@ def _process_single_document(
         try:
             # 事前分類で is_target=True 確認済み。本文が必要なので取得。
             text, _fetched = _ensure_text()
+            original_forecast_url = doc.doc_url
+            if not text:
+                mirror_url = exchange_pdf_url(doc.doc_url, doc.ticker)
+                if mirror_url:
+                    text, _fetched = _download_and_save_pdf(mirror_url)
+                    if _fetched:
+                        doc.pdf_path = _fetched
+                        doc.doc_url = mirror_url
+                        logger.info("[EVENT] forecast_pdf_exchange_mirror ticker=%s doc_id=%s",
+                                    doc.ticker, doc.doc_id)
             cls_result = _pre_forecast  # タイトルのみ分類結果を再利用
             logger.info(
                 f"[EVENT] forecast_classify ticker={doc.ticker} "
@@ -588,7 +599,11 @@ def _process_single_document(
             forecast_ev = extract_forecast_revision(
                 text, title, is_difference=is_diff,
                 pdf_path=doc.pdf_path, doc_url=doc.doc_url, doc_id=doc.doc_id,
+                ticker=doc.ticker,
             )
+            if (original_forecast_url != doc.doc_url and forecast_ev.revision_reason
+                    and forecast_ev.revision_reason.get("status") == "available"):
+                forecast_ev.revision_reason["original_tdnet_url"] = original_forecast_url
             # 変化判定: 実際の数値変化がなければスキップ
             if not _has_forecast_change(forecast_ev):
                 logger.info(

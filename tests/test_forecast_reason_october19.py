@@ -1,9 +1,12 @@
 """Production disclosures that failed after the October 13 reason rollout."""
 import importlib.util
 import json
+import sqlite3
 from pathlib import Path
+from unittest.mock import patch
 
 from src.events.forecast_reason import extract_forecast_reason, extract_reason_sections
+from src.events.forecast_source import exchange_pdf_url
 from src.events.tdnet_event_store import _merge_compare_json
 
 
@@ -52,6 +55,54 @@ def test_exchange_mirror_disclosures_preserve_new_reason_headings_and_endings():
         assert "".join(section["text"].split()).endswith("".join(ending.split())), ticker
         assert section["page_end"] == final_page, ticker
         assert "配当予想修正の理由" not in section["text"], ticker
+
+
+def test_exact_id_exchange_fallback_records_both_pdf_sources():
+    from src.events.forecast_extractor import extract_forecast_revision
+
+    original = "https://www.release.tdnet.info/inbs/140120260409500971.pdf"
+    mirror = "https://www2.jpx.co.jp/disc/37600/140120260409500971.pdf"
+    assert exchange_pdf_url(original, "3760") == mirror
+    assert exchange_pdf_url(original, "376A") == ""
+    assert exchange_pdf_url("https://other.example/inbs/140120260409500971.pdf", "3760") == ""
+    with patch("src.events.forecast_extractor.os.unlink"):
+        with patch("src.events.forecast_extractor._download_pdf_for_ocr",
+                   side_effect=["", str(FIXTURE_DIR / "live_3760_jpx.pdf")]) as downloader:
+            event = extract_forecast_revision("", "通期業績予想の公表及び配当予想の修正（無配）に関するお知らせ",
+                                              doc_url=original, doc_id="140120260409500971", ticker="3760")
+        assert [call.args[0] for call in downloader.call_args_list] == [original, mirror]
+    reason = event.revision_reason
+    assert reason["status"] == "available"
+    assert reason["source_url"] == mirror
+    assert reason["original_tdnet_url"] == original
+    assert reason["sections"][0]["text"].endswith("来期以降の業績回復に向けた基盤を整備してまいります。")
+
+
+def test_normal_forecast_pipeline_uses_same_id_exchange_pdf_when_tdnet_is_missing():
+    import pymupdf
+    from src.events.common_models import DocumentMeta, EventType
+    from src.events.event_pipeline import _process_single_document
+
+    doc_id = "140120260317583161"
+    original = f"https://www.release.tdnet.info/inbs/{doc_id}.pdf"
+    mirror = f"https://www2.jpx.co.jp/disc/78220/{doc_id}.pdf"
+    path = FIXTURE_DIR / "live_7822_jpx.pdf"
+    with pymupdf.open(path) as pdf:
+        text = "\n".join(page.get_text() for page in pdf)
+    doc = DocumentMeta(doc_id=doc_id, ticker="7822",
+                       title="特別損失（連結子会社における減損損失）の計上、業績予想の修正及び財務制限条項抵触の見込みに関するお知らせ",
+                       doc_url=original, disclosure_datetime="2026-03-17T15:30:00+00:00")
+    with patch("src.events.event_pipeline._download_and_save_pdf",
+               side_effect=[("", ""), (text, str(path))]) as downloader:
+        result = _process_single_document(doc, sqlite3.connect(":memory:"),
+                                          event_types={EventType.FORECAST_REVISION}, dry_run=True)
+    assert [call.args[0] for call in downloader.call_args_list] == [original, mirror]
+    assert doc.doc_url == mirror
+    assert len(result) == 1 and result[0]["action"] == "dry_run"
+    reason = json.loads(result[0]["_event_record"].extracted_payload_json)["revision_reason"]
+    assert reason["status"] == "available"
+    assert reason["source_url"] == mirror and reason["original_tdnet_url"] == original
+    assert reason["sections"][0]["text"].endswith("前回発表予想を大きく下回る見込みとなりました。")
 
 
 def test_numbered_periods_inside_reason_are_kept_through_final_sentence():
