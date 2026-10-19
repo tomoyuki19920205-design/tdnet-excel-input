@@ -63,7 +63,8 @@ def test_exact_id_exchange_fallback_records_both_pdf_sources():
     original = "https://www.release.tdnet.info/inbs/140120260409500971.pdf"
     mirror = "https://www2.jpx.co.jp/disc/37600/140120260409500971.pdf"
     assert exchange_pdf_url(original, "3760") == mirror
-    assert exchange_pdf_url(original, "376A") == ""
+    assert exchange_pdf_url(original, "376A") == "https://www2.jpx.co.jp/disc/376A0/140120260409500971.pdf"
+    assert exchange_pdf_url(original, "376a") == ""
     assert exchange_pdf_url("https://other.example/inbs/140120260409500971.pdf", "3760") == ""
     with patch("src.events.forecast_extractor.os.unlink"):
         with patch("src.events.forecast_extractor._download_pdf_for_ocr",
@@ -246,6 +247,77 @@ def test_unheaded_future_projection_notice_is_not_part_of_forecast_reason():
     assert result[0]["text"] == "増収により通期予想を修正いたします。"
 
 
+def test_reason_final_line_before_blank_and_note_is_preserved():
+    # Native lines from the live 2737 PDF: a caution follows the forecast
+    # reason after a blank line, and an old lookahead removed its last line.
+    lines = [
+        {"text": "修正の理由", "page": 1, "line": 1},
+        {"text": "生成AI関連製品の需要拡大が業績を押し上げました。", "page": 1, "line": 2},
+        {"text": "業績予想を修正するものであります。", "page": 1, "line": 3},
+        {"text": "", "page": 1, "line": 4},
+        {"text": "（注）業績予想は現時点で入手可能な情報に基づきます。", "page": 1, "line": 5},
+        {"text": "実際の業績は異なる場合があります。", "page": 1, "line": 6},
+    ]
+    result = extract_reason_sections(lines, title="業績予想の修正")
+    assert result[0]["text"] == ("生成AI関連製品の需要拡大が業績を押し上げました。\n"
+                                 "業績予想を修正するものであります。")
+
+
+def test_centered_low_footer_and_unheaded_projection_note_are_excluded(tmp_path):
+    import pymupdf
+    from src.events.forecast_reason import read_pdf_lines
+
+    pdf = pymupdf.open()
+    page = pdf.new_page(width=595, height=842)
+    page.insert_text((80, 730), "2. Reason: revenue rose.")
+    page.insert_text((295, 775), "1")
+    path = tmp_path / "footer.pdf"
+    pdf.save(path)
+    pdf.close()
+    assert all(row["text"].strip() != "1" for row in read_pdf_lines(str(path)))
+
+    lines = [
+        {"text": "２．修正の理由", "page": 1, "line": 1},
+        {"text": "売上減少を織り込み修正しました。", "page": 1, "line": 2},
+        {"text": "", "page": 1, "line": 3},
+        {"text": "本業績予想については、現時点で入手可能な情報に基づきます。", "page": 1, "line": 4},
+        {"text": "実際の業績は異なる場合があります。", "page": 1, "line": 5},
+    ]
+    assert extract_reason_sections(lines)[0]["text"] == "売上減少を織り込み修正しました。"
+
+
+def test_forecast_overview_keeps_reason_across_pages_and_stops_at_note():
+    lines = [
+        {"text": "３．連結業績予想の概要について", "page": 1, "line": 1},
+        {"text": "連結対象の業績を織り込みました。", "page": 1, "line": 2},
+        {"text": "売上高は前回予想より減少しました。", "page": 2, "line": 1},
+        {"text": "※予想は現時点で入手可能な情報に基づきます。", "page": 2, "line": 2},
+    ]
+    result = extract_reason_sections(lines, title="連結業績予想の公表に関するお知らせ")
+    assert len(result) == 1
+    assert result[0]["text"] == "連結対象の業績を織り込みました。\n売上高は前回予想より減少しました。"
+    assert result[0]["page_end"] == 2
+
+
+def test_dividend_and_outlook_notes_after_reason_are_excluded():
+    lines = [
+        {"text": "（２）修正の理由", "page": 1, "line": 1},
+        {"text": "需要拡大により通期予想を上方修正しました。", "page": 1, "line": 2},
+        {"text": "", "page": 1, "line": 3},
+        {"text": "なお、配当予想については変更いたしません。", "page": 1, "line": 4},
+        {"text": "【見通しに関する留意事項】", "page": 1, "line": 5},
+    ]
+    for note in ("なお、配当予想については変更いたしません。",
+                 "なお、今回の業績予想修正に伴う配当予想の修正はありません。",
+                 "また、期末配当予想は据え置きます。"):
+        lines[3]["text"] = note
+        assert extract_reason_sections(lines, title="業績予想の修正と配当予想")[0]["text"] == lines[1]["text"]
+
+    lines[3]["text"] = "また、受取配当金の増加も経常利益を押し上げました。"
+    lines[4]["text"] = "以上の状況から業績予想を修正いたします。"
+    assert extract_reason_sections(lines, title="業績予想の修正")[0]["text"].endswith(lines[4]["text"])
+
+
 def test_attention_and_above_reason_sentence_are_not_mistaken_for_notes():
     lines = [
         {"text": "２．差異の理由", "page": 1, "line": 1},
@@ -285,3 +357,39 @@ def test_legacy_remix_reason_continues_after_wrapped_go_sankou_made_ni():
         {"text": "2026年９月期 領域別売上高情報", "page": 1, "line": 4},
     ]
     assert extract_reason_sections(reference)[0]["text"] == "売上高の未達により予想を修正いたします。"
+
+
+def test_alternate_reason_headings_require_forecast_context():
+    cases = [
+        ("２．運用状況及び１口当たり分配金の予想の修正について", "２. 開示の理由"),
+        ("１．2026年３月期通期の個別業績予想", "業績予想の理由"),
+        ("2026年３月期通期連結業績予想値と実績値との差異", "［予想との差異要因］"),
+        ("2026年12月期通期連結業績予想の修正", "（理由）"),
+        ("2026年３月期通期連結業績予想値と実績値との差異", "理由"),
+    ]
+    for parent, heading in cases:
+        lines = [
+            {"text": parent, "page": 1, "line": 1},
+            {"text": heading, "page": 1, "line": 2},
+            {"text": "需要の増加により予想との差異が生じました。", "page": 1, "line": 3},
+            {"text": "以上", "page": 1, "line": 4},
+        ]
+        sections = extract_reason_sections(lines, title="業績予想と実績の差異")
+        assert len(sections) == 1
+        assert sections[0]["text"] == lines[2]["text"]
+        lines[0]["text"] = "１．配当予想の修正について"
+        assert extract_reason_sections(lines, title="業績予想と配当予想の修正") == []
+
+
+def test_unlabeled_dividend_aside_does_not_cut_later_forecast_prose():
+    lines = [
+        {"text": "２．修正の理由", "page": 1, "line": 1},
+        {"text": "売上高の減少により通期予想を修正いたします。", "page": 1, "line": 2},
+        {"text": "", "page": 1, "line": 3},
+        {"text": "なお、配当予想は据え置きます。", "page": 1, "line": 4},
+        {"text": "", "page": 1, "line": 5},
+        {"text": "翌期の業績予想は精査して公表します。", "page": 1, "line": 6},
+        {"text": "以上", "page": 1, "line": 7},
+    ]
+    reason = extract_reason_sections(lines)[0]['text']
+    assert reason.endswith(lines[5]['text'])

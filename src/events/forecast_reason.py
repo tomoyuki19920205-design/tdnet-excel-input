@@ -35,7 +35,7 @@ _MAJOR = re.compile(r"^(?:\d+[.、](?=\D|\d{4}年)|[IVX]+(?:[.、]|(?=連結|個
 _SUB = re.compile(r"^\(\d+\)")
 _END = re.compile(r"^(?:以上$|[\(\[〔【<]*(?:ご)?注意|[\(\[〔【<]*注(?:\d+|記)?(?:[\)\]〕】>:：]|$)|[\(\[〔【<]*注記事項|※|[\(\[〔【<]?(?:業績|業績の|業績等の)?予想に関する注意事項|[\(\[〔【<]?将来予測に関する注意事項)")
 _REFERENCE_HEADING = re.compile(r"^(?:[\(\[〔【<](?:ご)?参考(?:資料|情報)?[\)\]〕】>]|(?:ご)?参考(?:資料|情報)?(?:\(\d+\)|[:：]|$))")
-_CAUTION_HEADING = re.compile(r"^(?:[\(\[〔【<]?(?:業績|業績等の)?予想に関する留意事項|[\(\[〔【<]?将来の見通しに関する|[\(\[〔【<]?業績予想に関する注記事項)")
+_CAUTION_HEADING = re.compile(r"^(?:[\(\[〔【<]?(?:業績|業績等の)?予想に関する留意事項|[\(\[〔【<]?見通しに関する留意事項|[\(\[〔【<]?将来の見通しに関する|[\(\[〔【<]?業績予想に関する注記事項)")
 
 
 def _is_reason_heading(key: str) -> bool:
@@ -97,8 +97,8 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
 
     def finish():
         nonlocal current, current_reopened, body
-        if current and any(row['text'].strip() for row in body):
-            while body and not body[-1]['text'].strip(): body.pop()
+        if current and any(_key(row['text']) for row in body):
+            while body and not _key(body[-1]['text']): body.pop()
             current.update(text='\n'.join(row['text'] for row in body).strip('\n'),
                            page_end=body[-1]['page'], line_end=body[-1]['line'])
             sections.append(current)
@@ -141,7 +141,14 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
                                  and any(any(term in _key(h) for term in ('業績', '差異')) for h in context))
         scoped_publication_reason = (bool(re.fullmatch(r'\(\d+\)公表の理由', key)) and not dividend_scope
                                      and any(any(term in _key(h) for term in ('業績', '差異')) for h in context))
-        if _is_reason_heading(key) or scoped_generic_reason or scoped_publication_reason or unheaded_difference:
+        forecast_overview = (bool(re.fullmatch(r'\d+[.、](?:連結)?業績予想の概要(?:について)?', key))
+                             and '業績予想' in _key(title) and not dividend_scope)
+        forecast_parent = (not dividend_scope and any(
+            any(term in _key(h) for term in ('業績', '差異', '運用状況')) for h in context))
+        alternate_reason = (forecast_parent and bool(re.fullmatch(
+            r'(?:\(理由\)|理由|業績予想の理由|\d+[.、]開示の理由|\[予想との差異要因\])', key)))
+        if (_is_reason_heading(key) or scoped_generic_reason or scoped_publication_reason
+                or unheaded_difference or forecast_overview or alternate_reason):
             finish()
             prior_dividend_scope = dividend_scope
             if '配当' in key and not any(word in key for word in ('業績', '差異')):
@@ -171,8 +178,16 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
                            or (current_number is not None and next_number > current_number))) if current else False
         roman_top_level = bool(major and re.match(r'^[ⅠⅡⅢⅣIVX]', key)
                                and any(word in key for word in ('連結', '個別', '業績')))
-        caution_text = ''.join(_key(v['text']) for v in lines[index:index + 3])
-        caution_starts = (key.startswith(('なお', 'また', '本資料', '当資料', '実際', '将来', '業績予想'))
+        # A blank line ends the current paragraph. Looking past it can treat
+        # the last line of a reason as a caution because the *next* paragraph
+        # contains "入手可能" (the live 2737 revision did exactly this).
+        caution_rows = []
+        for following in lines[index:index + 3]:
+            if not following['text'].strip():
+                break
+            caution_rows.append(following['text'])
+        caution_text = ''.join(_key(value) for value in caution_rows)
+        caution_starts = (key.startswith(('なお', 'また', '本資料', '当資料', '実際', '将来', '業績予想', '本業績予想'))
                           or key.startswith(('上記の予想', '上記予想', '上記の業績予想',
                                              '上記業績予想', '上記の通期連結業績予想')))
         caution_paragraph = (caution_starts
@@ -183,25 +198,42 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
         dividend_paragraph = (current and current_reopened and body and body[-1]['text'] == '' and
                               (('株主' in key and '利益還元' in key) or
                                key.lstrip('【〔（([〈《').startswith('配当予想')))
+        # Keep the original section intact when forecast prose resumes after
+        # an unlabeled dividend aside (the live 3948 and 6255 disclosures).
+        later_forecast_prose = False
+        for following in lines[index + 1:index + 13]:
+            following_key = _key(following['text'])
+            if _MAJOR.match(following_key) or _END.match(following_key):
+                break
+            if ('業績予想' in following_key and
+                    not _CAUTION_HEADING.match(following_key)):
+                later_forecast_prose = True
+                break
+        separate_dividend_note = (current and body and not _key(body[-1]['text'])
+                                  and '配当' in key and '受取配当' not in key
+                                  and not later_forecast_prose
+                                  and key.startswith(('なお', 'また', '配当', '期末配当')))
         if current and (_END.match(key) or _REFERENCE_HEADING.match(key) or _CAUTION_HEADING.match(key) or caution_paragraph
-                        or dividend_paragraph
+                        or dividend_paragraph or separate_dividend_note
                         or ('配当' in key and (major or _SUB.match(key)))
                         or next_top_level or next_subsection or roman_top_level):
             finish()
             if dividend_paragraph:
                 dividend_scope = True
         if major:
-            if '配当' in key:
+            if '配当' in key and not ('運用状況' in key and '予想' in key):
                 dividend_scope = True
                 context = [text.strip()]
-            elif any(word in key for word in ('業績', '連結', '個別')):
+            elif any(word in key for word in ('業績', '連結', '個別', '運用状況')):
                 dividend_scope = False
                 bullet_dividend_scope = False
                 # Roman headings identify basis; numbered headings identify period.
                 if re.match(r'^[ⅠⅡⅢⅣIVX]', key): context = [text.strip()]
                 else: context = [h for h in context if re.match(r'^[ⅠⅡⅢⅣIVX]', _key(h))] + [text.strip()]
                 forecast_context = context.copy()
-        elif not current and not dividend_scope and ('年' in key and '月期' in key and any(w in key for w in ('予想', '差異'))):
+        elif (not current and not dividend_scope and not _END.match(key)
+              and '予想期末' not in key and '年' in key and '月期' in key
+              and any(w in key for w in ('予想', '差異'))):
             context = [h for h in context if re.match(r'^[ⅠⅡⅢⅣIVX]', _key(h))] + [text.strip()]
             forecast_context = context.copy()
         elif not current and not dividend_scope and _SUB.match(key) and ('連結' in key or '個別' in key):
@@ -229,8 +261,12 @@ def read_pdf_lines(pdf_path: str) -> list[dict]:
             physical.sort(key=lambda row: (round(row[0][1] / 3), row[0][0]))
             merged = []
             for bbox, text, size in physical:
-                if bbox[1] > page.rect.height * .92 and re.fullmatch(
-                        r'(?:\d+(?:\s*/\s*\d+)?|[―‐－-]\s*\d+\s*[―‐－-])', text.strip()): continue
+                page_number = re.fullmatch(
+                    r'(?:\d+(?:\s*/\s*\d+)?|[―‐－-]\s*\d+\s*[―‐－-])', text.strip())
+                if page_number and (bbox[1] > page.rect.height * .92 or
+                                    (bbox[1] > page.rect.height * .90 and
+                                     page.rect.width * .35 < (bbox[0] + bbox[2]) / 2 < page.rect.width * .65)):
+                    continue
                 if merged and abs(merged[-1][0][1] - bbox[1]) < 3:
                     old_box, old_text, old_size = merged[-1]
                     merged[-1] = ((old_box[0], old_box[1], bbox[2], max(old_box[3], bbox[3])), old_text + '  ' + text, old_size)
