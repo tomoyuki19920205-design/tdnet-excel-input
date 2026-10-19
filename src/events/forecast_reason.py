@@ -694,6 +694,25 @@ def extract_forecast_reason(pdf_path: str, source_url: str, doc_id: str = '', ti
             if result['sections']:
                 result['method'] = 'native_pdf_attached_individual_note_v2'
         if result['sections']:
+            # Some PDFs have a corrupt native text layer, or switch to a
+            # scanned page in the middle of the reason.  A heading alone is
+            # not proof that the quoted body reached its end.
+            unreadable = any(section['text'].count('\ufffd') >= 3 for section in result['sections'])
+            if not unreadable:
+                with require_pdf_reader().open(pdf_path) as pdf:
+                    for section in result['sections']:
+                        last_page = section['page_end']
+                        if last_page >= len(pdf) or section['text'].rstrip().endswith(('。', '．', '.', '！', '!', '？', '?')):
+                            continue
+                        next_text = pdf[last_page].get_text().strip()
+                        if len(next_text) < 30:
+                            unreadable = True
+                            break
+            if unreadable:
+                result['status'] = 'extraction_failed'
+                result['failure_code'] = 'reason_continues_on_unreadable_page'
+                result['sections'] = []
+                return result
             for section in result['sections']:
                 section['text_sha256'] = hashlib.sha256(section['text'].encode('utf-8')).hexdigest()
             result['status'] = 'available'

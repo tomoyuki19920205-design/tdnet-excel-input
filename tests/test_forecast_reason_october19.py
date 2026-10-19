@@ -608,3 +608,22 @@ def test_live_forecast_bullets_nested_under_reason_keep_both_periods_and_stop_at
             assert found[0]['text'].endswith('中間純利益も予\n想を上回る見込みです。')
             assert found[1]['text'].endswith('当期純利益も予想を上回る見込みです。')
             assert '記念配当' not in '\n'.join(section['text'] for section in found)
+
+
+def test_reason_continuation_on_scanned_page_is_not_reported_available(tmp_path, monkeypatch):
+    import pymupdf
+    from src.events import forecast_reason
+
+    pdf_path = tmp_path / 'mixed.pdf'
+    with pymupdf.open() as pdf:
+        pdf.new_page()
+        pdf.new_page()
+        pdf.save(pdf_path)
+    monkeypatch.setattr(forecast_reason, 'read_pdf_lines', lambda _path: [
+        {'text': '２．修正の理由', 'page': 1, 'line': 1},
+        {'text': '需要の減少により、売上高は', 'page': 1, 'line': 2},
+    ])
+    result = forecast_reason.extract_forecast_reason(str(pdf_path), 'https://example.com/original.pdf')
+    assert result['status'] == 'extraction_failed'
+    assert result['failure_code'] == 'reason_continues_on_unreadable_page'
+    assert result['sections'] == []
