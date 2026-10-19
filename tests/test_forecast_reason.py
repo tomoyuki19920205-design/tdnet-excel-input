@@ -111,6 +111,53 @@ def test_dividend_only_and_missing_do_not_generate_text():
     assert extract_forecast_reason('', 'https://example.com/original.pdf')['status']=='unavailable'
 
 
+def test_numbered_reason_with_trailing_parenthetical_is_not_unwrapped():
+    rows=[dict(text=t,page=1,line=i) for i,t in enumerate([
+        '（2）連結業績予想修正の理由（のれん等の減損損失の計上）',
+        '事業計画を見直した結果、損失を計上する見込みとなりました。',
+        '以 上'], 1)]
+    sections=extract_reason_sections(rows)
+    assert len(sections)==1
+    assert sections[0]['text']=='事業計画を見直した結果、損失を計上する見込みとなりました。'
+
+
+def test_reason_etc_heading_keeps_prose_and_stops_at_next_section():
+    rows=[dict(text=t,page=1,line=i) for i,t in enumerate([
+        '（２）修正の理由等',
+        '繰延税金資産を計上する見込みとなりました。',
+        '３．配当予想の修正',
+        '配当を増額します。'], 1)]
+    sections=extract_reason_sections(rows)
+    assert len(sections)==1
+    assert sections[0]['text']=='繰延税金資産を計上する見込みとなりました。'
+
+
+def test_parenthesized_next_subsection_stops_before_forecast_table():
+    rows=[dict(text=t,page=1,line=i) for i,t in enumerate([
+        '（２）修正の理由等',
+        '各段階利益が公表数値を上回る見通しであります。',
+        '（３）各セグメントにおける営業収益及び営業利益の見通し',
+        '営業収益　営業利益　償却前営業利益'], 1)]
+    sections=extract_reason_sections(rows)
+    assert len(sections)==1
+    assert sections[0]['text']=='各段階利益が公表数値を上回る見通しであります。'
+
+
+@pytest.mark.parametrize('case', json.loads((Path(__file__).parent/'fixtures/forecast_reason/heading_variants_20261019.json').read_text(encoding='utf-8')),
+                         ids=lambda case: case['ticker'])
+def test_actual_numbered_and_extended_reason_headings(case):
+    sections=extract_reason_sections(case['lines'],title=case['title'])
+    assert sections==case['expected']
+    if case['ticker']=='4307':
+        assert sections[0]['page_end']==2
+        assert sections[0]['text'].endswith('の資金生成単位として減損テストを実施しています。')
+    elif case['ticker']=='7916':
+        assert sections[0]['text'].endswith('前回予想を上回りました。')
+    else:
+        assert sections[0]['text'].endswith('公表数値を上回る見通しであります。')
+        assert '（３）各セグメント' not in sections[0]['text']
+
+
 def test_missing_pdf_reader_is_environment_failure_not_absent_reason(monkeypatch, tmp_path):
     import sys
     pdf = tmp_path / 'original.pdf'

@@ -42,13 +42,26 @@ def _is_reason_heading(key: str) -> bool:
     """Recognize a whole heading, not a sentence referring to another reason."""
     key = key.strip(":：")
     for left, right in (('(', ')'), ('[', ']'), ('〔', '〕'), ('【', '】'), ('《', '》'), ('<', '>')):
+        # "(2)修正の理由(補足)" begins and ends with parentheses but the
+        # first pair is a section number, not a wrapper around the heading.
         if key.startswith(left) and key.endswith(right):
-            key = key[1:-1]
-            break
+            depth = 0
+            closing_index = None
+            for index, char in enumerate(key):
+                if char == left:
+                    depth += 1
+                elif char == right:
+                    depth -= 1
+                    if depth == 0:
+                        closing_index = index
+                        break
+            if closing_index == len(key) - 1:
+                key = key[1:-1]
+                break
     if re.fullmatch(r"\d+[.、]理由", key):
         return True
     return (len(key) <= 110 and "「" not in key and "」" not in key
-            and re.search(r"理由(?:について|及び概要|ならびに今後の展開|及び今後の展開)?(?:\([^)]*\))?$", key)
+            and re.search(r"理由(?:について|等|及び概要|ならびに今後の展開|及び今後の展開|及び.{1,50}について)?(?:\([^)]*\))?$", key)
             and any(term in key for term in ("修正", "差異", "業績予想を未定")))
 
 
@@ -146,6 +159,11 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
         # A later top-level heading or a dividend section ends the reason.
         current_number = _section_number(_key(current['heading'])) if current else None
         next_number = _section_number(key) if major else None
+        current_sub_number = re.match(r'^\((\d+)\)', _key(current['heading'])) if current else None
+        next_sub_number = re.match(r'^\((\d+)\)', key)
+        next_subsection = bool(current_sub_number and next_sub_number
+                               and int(next_sub_number.group(1)) > int(current_sub_number.group(1))
+                               and 'セグメント' in key and '見通し' in key)
         next_top_level = (next_number is not None and
                           (current['heading'].lstrip().startswith(('(', '（'))
                            or (current_number is not None and next_number > current_number))) if current else False
@@ -166,7 +184,7 @@ def extract_reason_sections(lines: list[dict], *, title: str = "") -> list[dict]
         if current and (_END.match(key) or _REFERENCE_HEADING.match(key) or _CAUTION_HEADING.match(key) or caution_paragraph
                         or dividend_paragraph
                         or ('配当' in key and (major or _SUB.match(key)))
-                        or next_top_level or roman_top_level):
+                        or next_top_level or next_subsection or roman_top_level):
             finish()
             if dividend_paragraph:
                 dividend_scope = True
