@@ -110,10 +110,15 @@ def classify_buyback_subtype(title: str) -> str:
     Returns
     -------
     str
-        "new_program" | "tostnet" | "ignore"
+        "new_program" | "tostnet" | "conditional_self_tender_plan" | "ignore"
     """
     if not title:
         return "ignore"
+
+    # A planned self-tender is a genuine company acquisition, but its start
+    # still depends on a later condition and decision.
+    if "自己株式" in title and "公開買付け" in title and "予定" in title:
+        return "conditional_self_tender_plan"
 
     # 1. 新規決定を明示する複合開示は、結果にも言及していても通知する。
     if _has_fresh_decision_title(title):

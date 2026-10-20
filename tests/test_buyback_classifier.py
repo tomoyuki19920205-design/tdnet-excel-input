@@ -108,6 +108,11 @@ def test_related_non_decisions_do_not_create_new_buyback_alerts(title):
     assert classify_buyback_subtype(title) == "ignore"
 
 
+def test_planned_self_tender_is_not_a_confirmed_new_program():
+    title = "自己株式の取得及び自己株式の公開買付けの予定に関するお知らせ"
+    assert classify_buyback_subtype(title) == "conditional_self_tender_plan"
+
+
 def test_new_frame_in_mixed_result_disclosure_still_creates_decision_alert():
     title = "自己株式の取得状況及び取得終了並びに自己株式の取得枠設定に関するお知らせ"
     assert classify_buyback_subtype(title) == "new_program"
