@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """test_buyback_extractor.py — 抽出ロジックと正規化ユーティリティのテスト"""
 import sys, os
+import json
+from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
@@ -480,4 +482,71 @@ class TestPeriodPriority:
         start, end = normalize_period(text)
         assert start == "2025-04-01"
         assert end == "2025-09-30"
+
+
+def test_daiken_20261020_real_pdf_table():
+    import pdfplumber
+
+    path = Path(__file__).parent / "fixtures" / "daiken_20261020_buyback.pdf"
+    with pdfplumber.open(path) as pdf:
+        text = "\n".join(page.extract_text() or "" for page in pdf.pages[:10])
+    # This is also the hash saved on the original production notification.
+    assert compute_text_hash(text) == "ba5c7f00160a1f7f"
+    event = extract_buyback_event(
+        text, BUYBACK_DECISION, ticker="5900", disclosure_date="2026-10-20 16:30",
+        title="自己株式立会外買付取引（ToSTNeT-3）による自己株式の買付け",
+    )
+    assert event.shares_limit == event.ratio_numerator_shares == 80_000
+    assert event.shares_acquired is None
+    assert event.amount_limit_million_yen == 67.92
+    assert event.ratio_to_outstanding == 1.46
+    assert event.ratio_scope == "transaction_limit"
+    assert event.ratio_source == "disclosed"
+    evidence = json.loads(event.extracted_json)
+    assert "80,000株（上限）" in evidence["raw_shares_text"]
+    assert "1.46" in evidence["raw_shares_text"]
+    assert "67,920,000円（上限）" in evidence["raw_amount_text"]
+    assert "5,483,389株" not in evidence["raw_shares_text"]
+    assert "487,091株" not in evidence["raw_shares_text"]
+
+
+def test_letter_spaced_row_stays_with_its_value_and_reference_is_excluded():
+    text = (
+        "３．取得の内容\n"
+        "（１）取得する株式の種類　当社普通株式\n"
+        "（２）取　得　す　る　80,000株（上限）\n"
+        "　　　株　式　の　総　数　（発行済株式総数（自己株式を除く）に対する割合1.46％）\n"
+        "（３）株式の取得価額の\n　　　67,920,000円（上限）\n　　　総　額\n"
+        "（参考）過去の取得枠\n"
+        "（１）取得する株式の総数　400,000株（上限）\n"
+        "（２）発行済株式総数（自己株式を除く）　5,483,389株\n"
+    )
+    event = extract_buyback_event(text, BUYBACK_DECISION, ticker="9999")
+    assert event.shares_limit == 80_000
+    assert event.amount_limit_million_yen == 67.92
+    assert event.ratio_to_outstanding == 1.46
+    assert event.ratio_source == "disclosed"
+
+
+def test_numbered_row_without_a_share_value_does_not_borrow_next_row():
+    text = (
+        "３．取得の内容\n"
+        "（２）取　得　す　る\n株　式　の　総　数\n"
+        "（３）取得済み株式の総数　120,000株\n"
+        "（参考）発行済株式総数　5,483,389株\n"
+    )
+    event = extract_buyback_event(text, BUYBACK_DECISION, ticker="9999")
+    assert event.shares_limit is None
+    assert event.ratio_numerator_shares is None
+
+
+def test_note_after_another_item_is_not_a_purchase_limit_row():
+    text = (
+        "３．取得の内容\n"
+        "（４）取得結果の公表　取引終了後に公表します\n"
+        "（注１）当該株数の変更は行いません。\n"
+        "（注３）取得する株式の総数の上限は1,200,000株で決議しております。\n"
+    )
+    event = extract_buyback_event(text, BUYBACK_DECISION, ticker="9999")
+    assert event.shares_limit is None
 

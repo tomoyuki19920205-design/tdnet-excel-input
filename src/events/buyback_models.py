@@ -17,7 +17,7 @@ TREASURY_CANCEL = "treasury_cancel"
 
 VALID_EVENT_TYPES = {BUYBACK_DECISION, BUYBACK_STATUS, BUYBACK_RESULT, TREASURY_CANCEL}
 
-EXTRACTOR_VERSION = "1.0.0"
+EXTRACTOR_VERSION = "1.0.1"
 
 
 # ============================================================

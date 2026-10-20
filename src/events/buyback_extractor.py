@@ -296,8 +296,59 @@ def _find_near_anchor(text: str, anchors: list[str], window: int = 200) -> str:
         if idx >= 0:
             start = idx
             end = min(len(text), idx + len(anchor) + window)
+            next_item = _NUMBERED_ITEM_RE.search(text, idx + len(anchor), end)
+            if next_item:
+                end = next_item.start()
             return text[start:end]
     return ""
+
+
+_NUMBERED_ITEM_RE = re.compile(
+    r"^\s*(?:[（(]\s*[0-9０-９]{1,2}\s*[）)]|[0-9０-９]{1,2}\s*[.．、])",
+    re.MULTILINE,
+)
+_ROW_VALUE_RE = re.compile(r"[\d０-９][\d０-９,，.．]*\s*(?:株|円)")
+
+
+def _decision_item_value(text: str, kind: str) -> tuple[Optional[int | float], str, bool]:
+    """Read a decision table by numbered item, keeping its label and value together.
+
+    PDF extraction can place the value between two lines of a letter-spaced
+    label. Whitespace is removed only inside one numbered item and only for
+    label recognition; numeric extraction still uses that item's original text.
+    """
+    starts = [m.start() for m in _NUMBERED_ITEM_RE.finditer(text)]
+    candidates: list[tuple[int | float, str]] = []
+    saw_target = False
+    for start, end in zip(starts, starts[1:] + [len(text)]):
+        row = text[start:end].strip()
+        # Notes below a table item can quote an earlier program's upper limit.
+        row = re.split(r"(?m)^\s*[（(]注\s*[0-9０-９]*\s*[）)]", row, maxsplit=1)[0].strip()
+        label = re.sub(r"\s+", "", unicodedata.normalize("NFKC", row))
+        label = _ROW_VALUE_RE.sub("", label)
+        if kind == "shares":
+            is_target = (
+                any(phrase in label for phrase in ("取得する", "取得し得る", "取得しうる"))
+                and any(phrase in label for phrase in ("株式の総数", "株式の数"))
+                and "取得した" not in label
+            )
+            value = normalize_share_count(row) if is_target else None
+        else:
+            is_target = (
+                "取得価額" in label and "総額" in label
+                and "取得した" not in label
+            )
+            value = normalize_amount_to_million_yen(row) if is_target else None
+        saw_target = saw_target or is_target
+        if value is not None:
+            # A row with several share counts or amounts has no proven pairing.
+            matches = _SHARE_RE.findall(normalize_jp_number(row)) if kind == "shares" else \
+                _AMOUNT_RE.findall(normalize_jp_number(row))
+            if len(matches) == 1:
+                candidates.append((value, row))
+    if len(candidates) == 1:
+        return candidates[0][0], candidates[0][1], True
+    return None, "", saw_target
 
 
 def _extract_shares(text: str, anchors: list[str]) -> tuple[Optional[int], str]:
@@ -327,7 +378,9 @@ def _extract_date(text: str, anchors: list[str]) -> tuple[Optional[str], str]:
     return val, snippet
 
 
-def _extract_ratio(text: str, shares_snippet: str = "") -> tuple[Optional[float], str]:
+def _extract_ratio(
+    text: str, shares_snippet: str = "", *, allow_document_fallback: bool = True,
+) -> tuple[Optional[float], str]:
     """発行済株式比だけを抽出（取得金額の時価総額比は対象外）。"""
     # PDF table cells may split any part of the label or percentage over lines.
     # Keep the relation explicit so a nearby holding/market-cap ratio is not used.
@@ -340,7 +393,8 @@ def _extract_ratio(text: str, shares_snippet: str = "") -> tuple[Optional[float]
         return re.sub(r"\s+", "", unicodedata.normalize("NFKC", value))
 
     # Prefer the selected share-count row when several percentages are present.
-    for candidate in (shares_snippet, text):
+    candidates = (shares_snippet, text) if allow_document_fallback else (shares_snippet,)
+    for candidate in candidates:
         matches = list(pattern.finditer(compact(candidate)))
         if not matches:
             continue
@@ -406,7 +460,9 @@ def extract_buyback_event(
     """
     raw_snippets: dict = {}
     confidence = 0.40  # event_type 確定済み
-    sections = re.split(r"[（(]\s*ご参考\s*[）)]", text, maxsplit=1)
+    sections = re.split(
+        r"(?m)^\s*[（(【]\s*(?:ご参考|参考)\s*[）)】]", text, maxsplit=1,
+    )
     primary_text = sections[0]
     reference_text = sections[1] if len(sections) > 1 else ""
 
@@ -425,22 +481,29 @@ def extract_buyback_event(
 
     # ------ event_type 別の抽出 ------
     if event_type == BUYBACK_DECISION:
+        decision_text = re.split(
+            r"(?m)^\s*[（(]注\s*[0-9０-９]*\s*[）)]", primary_text, maxsplit=1,
+        )[0]
         # 株数上限
-        shares, snip = _extract_shares(primary_text, [
-            "取得する株式の総数", "取得する株式の数",
-            "取得し得る株式の総数", "取得しうる株式の総数", "取得株式の種類及び数",
-            "株式の総数",
-        ])
+        shares, snip, shares_row_seen = _decision_item_value(decision_text, "shares")
+        if shares is None and not shares_row_seen:
+            shares, snip = _extract_shares(decision_text, [
+                "取得する株式の総数", "取得する株式の数",
+                "取得し得る株式の総数", "取得しうる株式の総数", "取得株式の種類及び数",
+                "株式の総数",
+            ])
         if shares:
             event.shares_limit = shares
             raw_snippets["raw_shares_text"] = snip
             confidence += 0.15
 
         # 金額上限
-        amt, snip = _extract_amount(primary_text, [
-            "取得価額の総額", "取得し得る株式の総額",
-            "取得に要する資金", "取得総額",
-        ])
+        amt, snip, amount_row_seen = _decision_item_value(decision_text, "amount")
+        if amt is None and not amount_row_seen:
+            amt, snip = _extract_amount(decision_text, [
+                "取得価額の総額", "取得し得る株式の総額",
+                "取得に要する資金", "取得総額",
+            ])
         if amt:
             event.amount_limit_million_yen = amt
             raw_snippets["raw_amount_text"] = snip
@@ -469,7 +532,10 @@ def extract_buyback_event(
             event.board_resolution_date = res_date
 
         # 比率
-        ratio, snip = _extract_ratio(primary_text, raw_snippets.get("raw_shares_text", ""))
+        ratio, snip = _extract_ratio(
+            decision_text, raw_snippets.get("raw_shares_text", ""),
+            allow_document_fallback=not shares_row_seen,
+        )
         if ratio is not None:
             event.ratio_to_outstanding = ratio
             raw_snippets["raw_ratio_text"] = snip
