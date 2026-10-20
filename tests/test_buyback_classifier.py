@@ -96,6 +96,23 @@ def test_fresh_decisions_remain_eligible(title, expected_subtype):
     assert classify_buyback(title).event_type_candidate == BUYBACK_DECISION
 
 
+@pytest.mark.parametrize("title", [
+    "（開示事項の経過）自己株式取得に係る事項の決定に関するお知らせ",
+    "自己株式取得に係る事項の決定について(取得期間の延長)",
+    "コミットメント型自己株式取得（FCSR）における事後調整のお知らせ",
+    "ファシリティ型自己株式取得における調整取引完了のお知らせ",
+    "ユーロ円CB発行及び自己株式取得に関する補足説明資料",
+    "自己株式立会外買付取引（ToSTNeT-3）への売付け及び投資有価証券売却益のお知らせ",
+])
+def test_related_non_decisions_do_not_create_new_buyback_alerts(title):
+    assert classify_buyback_subtype(title) == "ignore"
+
+
+def test_new_frame_in_mixed_result_disclosure_still_creates_decision_alert():
+    title = "自己株式の取得状況及び取得終了並びに自己株式の取得枠設定に関するお知らせ"
+    assert classify_buyback_subtype(title) == "new_program"
+
+
 # ============================================================
 # cancel 判定
 # ============================================================

@@ -308,6 +308,7 @@ _NUMBERED_ITEM_RE = re.compile(
     re.MULTILINE,
 )
 _ROW_VALUE_RE = re.compile(r"[\d０-９][\d０-９,，.．]*\s*(?:株|円)")
+_BORROWED_SHARE_LINE_RE = re.compile(r"(?:取得(?:する|し得る|しうる))?[\d,]+株(?:\(上限\))?")
 
 
 def _decision_item_value(text: str, kind: str) -> tuple[Optional[int | float], str, bool]:
@@ -320,8 +321,26 @@ def _decision_item_value(text: str, kind: str) -> tuple[Optional[int | float], s
     starts = [m.start() for m in _NUMBERED_ITEM_RE.finditer(text)]
     candidates: list[tuple[int | float, str]] = []
     saw_target = False
+    previous_row = ""
     for start, end in zip(starts, starts[1:] + [len(text)]):
         row = text[start:end].strip()
+        previous_label = re.sub(r"\s+", "", unicodedata.normalize("NFKC", previous_row))
+        previous_line = previous_row.splitlines()[-1].strip() if previous_row else ""
+        compact_previous_line = re.sub(r"\s+", "", unicodedata.normalize("NFKC", previous_line))
+        row_label = re.sub(r"\s+", "", unicodedata.normalize("NFKC", row))
+        # Some PDFs emit a table's right-hand value immediately before its
+        # left-hand item number. Borrow that one line only when the previous
+        # item names the share type and this item names the share total.
+        if (kind == "shares" and "株式の総数" in row_label
+                and not normalize_share_count(row)
+                and any(label in previous_label for label in
+                        ("取得対象株式の種類", "取得する株式の種類"))
+                and _BORROWED_SHARE_LINE_RE.fullmatch(compact_previous_line)):
+            row = previous_line + "\n" + row
+        # The amount label itself can also straddle the item number.
+        if (kind == "amount" and "総額" in row_label and "取得価額" not in row_label
+                and "取得価額" in compact_previous_line):
+            row = previous_line + "\n" + row
         # Notes below a table item can quote an earlier program's upper limit.
         row = re.split(r"(?m)^\s*[（(]注\s*[0-9０-９]*\s*[）)]", row, maxsplit=1)[0].strip()
         label = re.sub(r"\s+", "", unicodedata.normalize("NFKC", row))
@@ -346,9 +365,22 @@ def _decision_item_value(text: str, kind: str) -> tuple[Optional[int | float], s
                 _AMOUNT_RE.findall(normalize_jp_number(row))
             if len(matches) == 1:
                 candidates.append((value, row))
+        previous_row = text[start:end].strip()
     if len(candidates) == 1:
         return candidates[0][0], candidates[0][1], True
     return None, "", saw_target
+
+
+def _self_tender_limit(text: str) -> tuple[Optional[int], str]:
+    """Find the planned size of the company's own tender offer, not a bidder's."""
+    for match in re.finditer(r"本自社株公開買付けは", text):
+        passage = text[match.start():match.start() + 1200]
+        limits = list(re.finditer(r"買付予定数\s*([\d,]+)\s*株", passage))
+        values = {normalize_share_count(item.group(0)) for item in limits}
+        if len(values) == 1 and None not in values:
+            item = limits[0]
+            return values.pop(), passage[max(0, item.start() - 90):item.end() + 90]
+    return None, ""
 
 
 def _extract_shares(text: str, anchors: list[str]) -> tuple[Optional[int], str]:
@@ -385,7 +417,7 @@ def _extract_ratio(
     # PDF table cells may split any part of the label or percentage over lines.
     # Keep the relation explicit so a nearby holding/market-cap ratio is not used.
     pattern = re.compile(
-        r"発行済(?:み)?株式(?:総数|数)?(?:\([^()%]{0,50}\))?"
+        r"発行済(?:み)?(?:普通)?株式(?:総数|数)?(?:\([^()%]{0,50}\))?"
         r"(?:に対する(?:割合|比率)|に占める(?:割合|比率)|の(?:割合|比率)?)"
         r":?約?(\d+(?:\.\d+)?)%"
     )
@@ -481,8 +513,18 @@ def extract_buyback_event(
 
     # ------ event_type 別の抽出 ------
     if event_type == BUYBACK_DECISION:
+        decision_text = primary_text
+        current_section = re.search(r"(?m)^\s*Ⅱ[.．]\s*本件取得枠の設定", text)
+        if current_section and "前回決議による取得枠" in text[:current_section.start()]:
+            current_sections = re.split(
+                r"(?m)^\s*[（(【]\s*(?:ご参考|参考)\s*[）)】]",
+                text[current_section.start():], maxsplit=1,
+            )
+            primary_text = current_sections[0]
+            reference_text = current_sections[1] if len(current_sections) > 1 else ""
+            decision_text = primary_text
         decision_text = re.split(
-            r"(?m)^\s*[（(]注\s*[0-9０-９]*\s*[）)]", primary_text, maxsplit=1,
+            r"(?m)^\s*[（(]注\s*[0-9０-９]*\s*[）)]", decision_text, maxsplit=1,
         )[0]
         # 株数上限
         shares, snip, shares_row_seen = _decision_item_value(decision_text, "shares")
@@ -492,6 +534,10 @@ def extract_buyback_event(
                 "取得し得る株式の総数", "取得しうる株式の総数", "取得株式の種類及び数",
                 "株式の総数",
             ])
+        tender_limit = False
+        if shares is None and not shares_row_seen and "自己株式の公開買付け" in title:
+            shares, snip = _self_tender_limit(text)
+            tender_limit = shares is not None
         if shares:
             event.shares_limit = shares
             raw_snippets["raw_shares_text"] = snip
@@ -534,7 +580,7 @@ def extract_buyback_event(
         # 比率
         ratio, snip = _extract_ratio(
             decision_text, raw_snippets.get("raw_shares_text", ""),
-            allow_document_fallback=not shares_row_seen,
+            allow_document_fallback=not shares_row_seen and not tender_limit,
         )
         if ratio is not None:
             event.ratio_to_outstanding = ratio
@@ -653,16 +699,17 @@ def extract_buyback_event(
             cumulative, _ = _extract_shares(reference_text, ["取得した株式の総数"])
             event.shares_acquired_cumulative = cumulative
         is_tostnet = "ToSTNeT" in title or "ＴｏＳＴＮｅＴ" in title or "立会外買付取引" in title
+        is_self_tender = event_type == BUYBACK_DECISION and "自己株式の公開買付け" in title
         numerator = event.shares_limit if event_type == BUYBACK_DECISION else event.shares_acquired
         event.ratio_numerator_shares = numerator
         event.ratio_scope = (
-            "transaction_limit" if is_tostnet and event_type == BUYBACK_DECISION else
+            "transaction_limit" if (is_tostnet or is_self_tender) and event_type == BUYBACK_DECISION else
             "program_limit" if event_type == BUYBACK_DECISION else
             "transaction_acquired" if is_tostnet else "period_acquired"
         )
         if event.ratio_to_outstanding is not None and numerator:
             event.ratio_source = "disclosed"
-        elif numerator:
+        elif numerator and not is_self_tender:
             from .buyback_ratio import resolve_denominator
             denominator = resolve_denominator(
                 text, ticker=ticker, source_url=source_url or "",

@@ -40,6 +40,10 @@ _FRESH_DECISION_TITLE_PATTERNS = [
 
 def _has_fresh_decision_title(title: str) -> bool:
     normalized = re.sub(r"\s+", "", unicodedata.normalize("NFKC", title))
+    if any(marker in normalized for marker in ("開示事項の経過", "取得期間の延長")) and not any(
+        marker in normalized for marker in ("取得枠設定", "取得枠の設定", "取得枠拡大", "取得枠の拡大")
+    ):
+        return False
     return any(pat in normalized for pat in _FRESH_DECISION_TITLE_PATTERNS)
 
 # new_program 確定パターン（取得枠決議系）
@@ -57,6 +61,13 @@ _NEW_PROGRAM_PATTERNS = [
 # 強除外パターン（タイトルにあれば ignore）
 # ToSTNeT の結果・進捗も除外する。
 _IGNORE_TITLE_PATTERNS = [
+    "開示事項の経過",
+    "取得期間の延長",
+    "事後調整",
+    "調整取引完了",
+    "補足説明資料",
+    "への売付け",
+    "への売付",
     "取得状況",
     "取得の状況",
     "取得進捗",

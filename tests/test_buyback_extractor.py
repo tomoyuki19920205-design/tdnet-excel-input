@@ -550,3 +550,50 @@ def test_note_after_another_item_is_not_a_purchase_limit_row():
     event = extract_buyback_event(text, BUYBACK_DECISION, ticker="9999")
     assert event.shares_limit is None
 
+
+@pytest.mark.parametrize(
+    "filename,ticker,title,saved_hash,shares,ratio,amount",
+    [
+        ("metaplanet_20261013_new_program.pdf", "3350", "自己株式の取得状況及び取得終了並びに自己株式の取得枠設定に関するお知らせ", "49eeb864872b9d1b", 200_000_000, 14.7, 60_000.0),
+        ("opro_20261013_buyback.pdf", "228A", "自己株式取得に係る事項の決定に関するお知らせ", "e518d777a9057baf", 40_000, 1.73, 87.0),
+        ("hidaka_20261002_tostnet.pdf", "7611", "自己株式の取得および自己株式立会外買付取引（ToSTNeT-3）による自己株式の買付けに関するお知らせ", "07fbf8e60f77f03c", 1_178_000, 3.27, 3500.0),
+        ("hyuga_20260925_self_tender.pdf", "7133", "自己株式の取得及び自己株式の公開買付けの予定に関するお知らせ", "e0b77b02921b29f3", 711_621, None, None),
+        ("balnibarbi_20260909_buyback.pdf", "3418", "自己株式取得に係る事項の決定に関するお知らせ", "ebe7a9a564317dad", 100_000, 0.92, 110.0),
+        ("komori_20260904_tostnet.pdf", "6349", "自己株式の取得及び自己株式立会外買付取引（ToSTNeT-3）による自己株式の買付けに関するお知らせ", "fa75a6295bfc2df7", 1_200_000, 2.3, 2404.8),
+        ("unerry_20260903_tostnet.pdf", "5034", "自己株式の取得及び自己株式立会外買付取引（ToSTNeT-3）による自己株式の買付けに関するお知らせ", "f1872a995a5ec79a", 269_500, 7.2, 635.48),
+    ],
+)
+def test_remaining_missing_decisions_against_real_pdfs(filename, ticker, title, saved_hash, shares, ratio, amount):
+    import pdfplumber
+
+    with pdfplumber.open(Path(__file__).parent / "fixtures" / filename) as pdf:
+        text = "\n".join(page.extract_text() or "" for page in pdf.pages[:10])
+    assert compute_text_hash(text) == saved_hash
+    event = extract_buyback_event(text, BUYBACK_DECISION, ticker=ticker, title=title)
+    assert event.shares_limit == event.ratio_numerator_shares == shares
+    assert event.shares_acquired is None
+    assert event.ratio_to_outstanding == ratio
+    assert event.amount_limit_million_yen == amount
+    assert event.ratio_source == ("disclosed" if ratio is not None else None)
+    evidence = json.loads(event.extracted_json)
+    assert "株" in evidence["raw_shares_text"]
+    if ticker == "3350":
+        assert "150,000,000株" not in evidence["raw_shares_text"]
+    if ticker == "7611":
+        assert "1,200,000株" not in evidence["raw_shares_text"]
+    if ticker == "7133":
+        assert "1,518,400株" not in evidence["raw_shares_text"]
+        assert "646,928株" not in evidence["raw_shares_text"]
+        assert event.ratio_scope == "transaction_limit"
+
+
+def test_previous_line_with_issued_shares_is_not_borrowed_as_buyback_limit():
+    text = (
+        "（１）取得対象株式の種類 普通株式\n"
+        "発行済株式数 10,000,000株\n"
+        "（２）取得する株式の総数\n"
+        "（３）株式の取得価額の総額 100,000,000円（上限）\n"
+    )
+    event = extract_buyback_event(text, BUYBACK_DECISION, ticker="9999")
+    assert event.shares_limit is None
+
