@@ -6,7 +6,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from tools.sync_margin_interest import (  # noqa: E402
     SECTOR_INDEX_CODES, api_pages, last_days_of_weeks, normalize_snapshot,
-    official_nikkei_closes, sector_index_closes, subtract_months, trading_days,
+    official_nikkei_closes, sector_index_bars, sector_index_closes, subtract_months, trading_days,
 )
 
 
@@ -45,6 +45,16 @@ class MarginTests(unittest.TestCase):
             sector_index_closes([{**rows[0], "Date": "2026-10-20"}], day)
         with self.assertRaisesRegex(ValueError, "nonpositive"):
             sector_index_closes([{**rows[0], "C": "0"}], day)
+
+    def test_sector_index_ohlc_is_exact_and_never_inferred_from_close(self):
+        day = date(2026, 10, 21)
+        row = {"Date": day.isoformat(), "Code": "0040", "O": "10", "H": "12",
+               "L": "9", "C": "11"}
+        self.assertEqual(sector_index_bars([row], day)["0040"],
+                         {"open": "10", "high": "12", "low": "9", "close": "11"})
+        self.assertIsNone(sector_index_bars([{**row, "O": None}], day)["0040"]["open"])
+        with self.assertRaisesRegex(ValueError, "inconsistent"):
+            sector_index_bars([{**row, "H": "10"}], day)
 
     def test_pagination_reaches_last_page(self):
         session = Session([Response({"data": [{"Code": "12340"}], "pagination_key": "second"}),

@@ -221,33 +221,49 @@ def rpc(session: requests.Session, cfg: dict, name: str, payload: dict) -> objec
     return response.json()
 
 
-def sector_index_closes(raw: list[dict], target: date) -> dict[str, str]:
-    """Select the 33 price indices for the exact balance date, never a prior close."""
-    closes: dict[str, str] = {}
+def sector_index_bars(raw: list[dict], target: date) -> dict[str, dict[str, str | None]]:
+    """Select exact-date 33-sector price-index bars without inventing missing OHLC."""
+    bars: dict[str, dict[str, str | None]] = {}
     for row in raw:
         code = str(row.get("Code") or "")
         if code not in INDEX_CODES:
             continue
-        if row.get("Date") != target.isoformat() or code in closes:
+        if row.get("Date") != target.isoformat() or code in bars:
             raise ValueError(f"{target}: mixed date or duplicate sector index {code}")
-        value = row.get("C")
-        if value is None or value == "":
+        if row.get("C") is None or row.get("C") == "":
             continue
-        try:
-            close = Decimal(str(value))
-        except InvalidOperation as exc:
-            raise ValueError(f"{target}: invalid index close {code}") from exc
-        if not close.is_finite() or close <= 0:
-            raise ValueError(f"{target}: nonpositive index close {code}")
-        closes[code] = str(close)
-    return closes
+        values: dict[str, str | None] = {}
+        for source, dest in (("O", "open"), ("H", "high"), ("L", "low"), ("C", "close")):
+            value = row.get(source)
+            if value is None or value == "":
+                values[dest] = None
+                continue
+            try:
+                number = Decimal(str(value))
+            except InvalidOperation as exc:
+                raise ValueError(f"{target}: invalid index {dest} {code}") from exc
+            if not number.is_finite() or number <= 0:
+                raise ValueError(f"{target}: nonpositive index {dest} {code}")
+            values[dest] = str(number)
+        if all(values[name] is not None for name in ("open", "high", "low")):
+            if Decimal(values["high"]) < max(Decimal(values["open"]), Decimal(values["close"])) or \
+                    Decimal(values["low"]) > min(Decimal(values["open"]), Decimal(values["close"])):
+                raise ValueError(f"{target}: inconsistent index OHLC {code}")
+        bars[code] = values
+    return bars
 
 
-def upsert_sector_indices(session: requests.Session, cfg: dict, target: date, closes: dict[str, str]) -> None:
-    if not closes:
+def sector_index_closes(raw: list[dict], target: date) -> dict[str, str]:
+    """Compatibility helper for exact-date close checks."""
+    return {code: bar["close"] for code, bar in sector_index_bars(raw, target).items()}
+
+
+def upsert_sector_indices(session: requests.Session, cfg: dict, target: date,
+                          bars: dict[str, dict[str, str | None]]) -> None:
+    if not bars:
         return
-    rows = [{"date": target.isoformat(), "code": code, "close": close}
-            for code, close in sorted(closes.items())]
+    rows = [{"date": target.isoformat(), "code": code, **bar}
+            for code, bar in sorted(bars.items())]
     response = session.post(f"{cfg['rest_url']}/margin_index_daily", json=rows,
                             headers={**cfg["headers"], "Prefer": "resolution=merge-duplicates,return=minimal"},
                             params={"on_conflict": "date,code"}, timeout=90)
@@ -261,11 +277,12 @@ def sync_sector_indices(session: requests.Session, cfg: dict, headers: dict[str,
         "select": "date", "date": f"gte.{MONEY_START.isoformat()}", "order": "date.asc",
     })}
     saved_rows = supabase_get(session, cfg, "margin_index_daily", {
-        "select": "date,code", "date": f"gte.{MONEY_START.isoformat()}", "order": "date.asc",
+        "select": "date,code,open,high,low", "date": f"gte.{MONEY_START.isoformat()}", "order": "date.asc",
     })
     saved: dict[str, set[str]] = {}
     for row in saved_rows:
-        saved.setdefault(row["date"], set()).add(row["code"])
+        if all(row.get(field) is not None for field in ("open", "high", "low")):
+            saved.setdefault(row["date"], set()).add(row["code"])
     targets = sorted(date.fromisoformat(day) for day in aggregates
                      if (chosen is None or day == chosen.isoformat())
                      and (date.fromisoformat(day) in refresh or len(saved.get(day, set()) & INDEX_CODES) < 33))
@@ -273,20 +290,22 @@ def sync_sector_indices(session: requests.Session, cfg: dict, headers: dict[str,
     for day in targets:
         try:
             raw = api_pages(session, "/indices/bars/daily", {"date": day.isoformat()}, headers)
-            closes = sector_index_closes(raw, day)
+            bars = sector_index_bars(raw, day)
             if apply:
-                upsert_sector_indices(session, cfg, day, closes)
-            LOG.info("sector indices date=%s available=%s/33 apply=%s", day, len(closes), apply)
+                upsert_sector_indices(session, cfg, day, bars)
+            complete = sum(all(bar.get(field) is not None for field in ("open", "high", "low")) for bar in bars.values())
+            LOG.info("sector indices date=%s closes=%s/33 ohlc=%s/33 apply=%s", day, len(bars), complete, apply)
         except Exception as exc:
             errors += 1
             LOG.error("sector indices date=%s failed: %s", day, exc)
     if apply:
         saved_rows = supabase_get(session, cfg, "margin_index_daily", {
-            "select": "date,code", "date": f"gte.{MONEY_START.isoformat()}", "order": "date.asc",
+            "select": "date,code,open,high,low", "date": f"gte.{MONEY_START.isoformat()}", "order": "date.asc",
         })
         saved = {}
         for row in saved_rows:
-            saved.setdefault(row["date"], set()).add(row["code"])
+            if all(row.get(field) is not None for field in ("open", "high", "low")):
+                saved.setdefault(row["date"], set()).add(row["code"])
     missing = sum(33 - len(saved.get(day, set()) & INDEX_CODES) for day in aggregates)
     LOG.info("sector indices targets=%s saved_dates=%s missing=%s errors=%s",
              len(targets), len(aggregates), missing, errors)
@@ -440,7 +459,7 @@ def main() -> int:
     parser.add_argument("--apply", action="store_true", help="write verified snapshots and apply retention")
     parser.add_argument("--backfill", action="store_true", help="revisit every available date in the retention window")
     parser.add_argument("--date", help="re-fetch one application date (YYYY-MM-DD)")
-    parser.add_argument("--indices-only", action="store_true", help="backfill or refresh saved sector closes without re-fetching margin securities")
+    parser.add_argument("--indices-only", action="store_true", help="backfill or refresh saved sector OHLC without re-fetching margin securities")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
