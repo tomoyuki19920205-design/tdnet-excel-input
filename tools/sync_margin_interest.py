@@ -277,7 +277,7 @@ def sync_sector_indices(session: requests.Session, cfg: dict, headers: dict[str,
         "select": "date", "date": f"gte.{MONEY_START.isoformat()}", "order": "date.asc",
     })}
     saved_rows = supabase_get(session, cfg, "margin_index_daily", {
-        "select": "date,code,open,high,low", "date": f"gte.{MONEY_START.isoformat()}", "order": "date.asc",
+        "select": "date,code,open,high,low", "date": f"gte.{MONEY_START.isoformat()}", "order": "date.asc,code.asc",
     })
     saved: dict[str, set[str]] = {}
     for row in saved_rows:
@@ -300,7 +300,7 @@ def sync_sector_indices(session: requests.Session, cfg: dict, headers: dict[str,
             LOG.error("sector indices date=%s failed: %s", day, exc)
     if apply:
         saved_rows = supabase_get(session, cfg, "margin_index_daily", {
-            "select": "date,code,open,high,low", "date": f"gte.{MONEY_START.isoformat()}", "order": "date.asc",
+            "select": "date,code,open,high,low", "date": f"gte.{MONEY_START.isoformat()}", "order": "date.asc,code.asc",
         })
         saved = {}
         for row in saved_rows:
