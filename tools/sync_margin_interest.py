@@ -116,6 +116,16 @@ def trading_days(session: requests.Session, start: date, end: date, headers: dic
     return days
 
 
+def upsert_trading_days(session: requests.Session, cfg: dict, days: list[date]) -> None:
+    """Keep the official calendar for exact daily and weekly comparisons."""
+    for offset in range(0, len(days), 250):
+        rows = [{"date": day.isoformat()} for day in days[offset:offset + 250]]
+        response = session.post(f"{cfg['rest_url']}/margin_trading_day", json=rows,
+                                headers={**cfg["headers"], "Prefer": "resolution=merge-duplicates,return=minimal"},
+                                params={"on_conflict": "date"}, timeout=90)
+        response.raise_for_status()
+
+
 def last_days_of_weeks(days: list[date]) -> set[date]:
     by_week: dict[tuple[int, int], list[date]] = {}
     for day in days:
@@ -297,6 +307,15 @@ def run(args: argparse.Namespace, *, session: requests.Session | None = None) ->
     if args.date:
         calendar_start = min(calendar_start, date.fromisoformat(args.date) - timedelta(days=7))
     calendar_days = trading_days(session, calendar_start, today + timedelta(days=7), headers)
+    calendar_errors = 0
+    if args.apply:
+        try:
+            upsert_trading_days(session, cfg, calendar_days)
+            LOG.info("trading calendar stored days=%s from=%s to=%s",
+                     len(calendar_days), calendar_days[0], calendar_days[-1])
+        except Exception as exc:
+            calendar_errors = 1
+            LOG.error("trading calendar persistence failed: %s", exc)
     prior_days = [day for day in calendar_days if day < today]
     # Friday's application data is published on the next market day, not on
     # Saturday/Sunday/holiday. On a closed day, use the preceding two days.
@@ -329,6 +348,7 @@ def run(args: argparse.Namespace, *, session: requests.Session | None = None) ->
         target_count, missing_indices, errors = sync_sector_indices(
             session, cfg, headers, refresh, apply=args.apply,
             chosen=date.fromisoformat(args.date) if args.date else None)
+        errors += calendar_errors
         LOG.info("finished indices_only targets=%s missing=%s errors=%s", target_count, missing_indices, errors)
         return 1 if errors else 0
 
@@ -347,7 +367,7 @@ def run(args: argparse.Namespace, *, session: requests.Session | None = None) ->
         LOG.warning("TOPIX close unavailable: %s", exc)
         topix = {}
 
-    errors = 0
+    errors = calendar_errors
     for day in targets:
         try:
             raw = api_pages(session, "/markets/margin-interest", {"date": day.isoformat()}, headers)
