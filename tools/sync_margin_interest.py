@@ -39,6 +39,19 @@ SECTORS = (
     "3450", "3500", "3550", "3600", "3650", "3700", "3750", "3800", "4050", "5050", "5100",
     "5150", "5200", "5250", "6050", "6100", "7050", "7100", "7150", "7200", "8050", "9050",
 )
+# Credit balances use S33 codes; J-Quants sector price indices use separate
+# codes. The order follows the official 33-sector price-index list.
+SECTOR_INDEX_CODES = {
+    "0050": "0040", "1050": "0041", "2050": "0042", "3050": "0043", "3100": "0044",
+    "3150": "0045", "3200": "0046", "3250": "0047", "3300": "0048", "3350": "0049",
+    "3400": "004A", "3450": "004B", "3500": "004C", "3550": "004D", "3600": "004E",
+    "3650": "004F", "3700": "0050", "3750": "0051", "3800": "0052", "4050": "0053",
+    "5050": "0054", "5100": "0055", "5150": "0056", "5200": "0057", "5250": "0058",
+    "6050": "0059", "6100": "005A", "7050": "005B", "7100": "005C", "7150": "005D",
+    "7200": "005E", "8050": "005F", "9050": "0060",
+}
+INDEX_CODES = set(SECTOR_INDEX_CODES.values())
+assert tuple(SECTOR_INDEX_CODES) == SECTORS and len(INDEX_CODES) == 33
 
 
 def subtract_months(day: date, count: int) -> date:
@@ -198,6 +211,78 @@ def rpc(session: requests.Session, cfg: dict, name: str, payload: dict) -> objec
     return response.json()
 
 
+def sector_index_closes(raw: list[dict], target: date) -> dict[str, str]:
+    """Select the 33 price indices for the exact balance date, never a prior close."""
+    closes: dict[str, str] = {}
+    for row in raw:
+        code = str(row.get("Code") or "")
+        if code not in INDEX_CODES:
+            continue
+        if row.get("Date") != target.isoformat() or code in closes:
+            raise ValueError(f"{target}: mixed date or duplicate sector index {code}")
+        value = row.get("C")
+        if value is None or value == "":
+            continue
+        try:
+            close = Decimal(str(value))
+        except InvalidOperation as exc:
+            raise ValueError(f"{target}: invalid index close {code}") from exc
+        if not close.is_finite() or close <= 0:
+            raise ValueError(f"{target}: nonpositive index close {code}")
+        closes[code] = str(close)
+    return closes
+
+
+def upsert_sector_indices(session: requests.Session, cfg: dict, target: date, closes: dict[str, str]) -> None:
+    if not closes:
+        return
+    rows = [{"date": target.isoformat(), "code": code, "close": close}
+            for code, close in sorted(closes.items())]
+    response = session.post(f"{cfg['rest_url']}/margin_index_daily", json=rows,
+                            headers={**cfg["headers"], "Prefer": "resolution=merge-duplicates,return=minimal"},
+                            params={"on_conflict": "date,code"}, timeout=90)
+    response.raise_for_status()
+
+
+def sync_sector_indices(session: requests.Session, cfg: dict, headers: dict[str, str],
+                        refresh: set[date], *, apply: bool, chosen: date | None = None) -> tuple[int, int, int]:
+    """Backfill every saved aggregate date and refresh the last five trading days."""
+    aggregates = {row["date"] for row in supabase_get(session, cfg, "margin_daily", {
+        "select": "date", "date": f"gte.{MONEY_START.isoformat()}", "order": "date.asc",
+    })}
+    saved_rows = supabase_get(session, cfg, "margin_index_daily", {
+        "select": "date,code", "date": f"gte.{MONEY_START.isoformat()}", "order": "date.asc",
+    })
+    saved: dict[str, set[str]] = {}
+    for row in saved_rows:
+        saved.setdefault(row["date"], set()).add(row["code"])
+    targets = sorted(date.fromisoformat(day) for day in aggregates
+                     if (chosen is None or day == chosen.isoformat())
+                     and (date.fromisoformat(day) in refresh or len(saved.get(day, set()) & INDEX_CODES) < 33))
+    errors = 0
+    for day in targets:
+        try:
+            raw = api_pages(session, "/indices/bars/daily", {"date": day.isoformat()}, headers)
+            closes = sector_index_closes(raw, day)
+            if apply:
+                upsert_sector_indices(session, cfg, day, closes)
+            LOG.info("sector indices date=%s available=%s/33 apply=%s", day, len(closes), apply)
+        except Exception as exc:
+            errors += 1
+            LOG.error("sector indices date=%s failed: %s", day, exc)
+    if apply:
+        saved_rows = supabase_get(session, cfg, "margin_index_daily", {
+            "select": "date,code", "date": f"gte.{MONEY_START.isoformat()}", "order": "date.asc",
+        })
+        saved = {}
+        for row in saved_rows:
+            saved.setdefault(row["date"], set()).add(row["code"])
+    missing = sum(33 - len(saved.get(day, set()) & INDEX_CODES) for day in aggregates)
+    LOG.info("sector indices targets=%s saved_dates=%s missing=%s errors=%s",
+             len(targets), len(aggregates), missing, errors)
+    return len(targets), missing, errors
+
+
 def run(args: argparse.Namespace, *, session: requests.Session | None = None) -> int:
     load_env()
     cfg = get_supabase_write_config()
@@ -239,6 +324,13 @@ def run(args: argparse.Namespace, *, session: requests.Session | None = None) ->
         targets = {chosen}
     targets = sorted(targets)
     LOG.info("plan dates=%s daily_cutoff=%s weekly_cutoff=%s", len(targets), daily_cutoff, weekly_cutoff)
+
+    if args.indices_only:
+        target_count, missing_indices, errors = sync_sector_indices(
+            session, cfg, headers, refresh, apply=args.apply,
+            chosen=date.fromisoformat(args.date) if args.date else None)
+        LOG.info("finished indices_only targets=%s missing=%s errors=%s", target_count, missing_indices, errors)
+        return 1 if errors else 0
 
     try:
         nikkei = official_nikkei_closes(session)
@@ -314,8 +406,12 @@ def run(args: argparse.Namespace, *, session: requests.Session | None = None) ->
     else:
         missing_topix = sum(day not in topix for day in money_days)
         missing_nikkei = sum(day not in nikkei for day in money_days)
-    LOG.info("finished targets=%s errors=%s missing_topix=%s missing_nikkei=%s",
-             len(targets), errors, missing_topix, missing_nikkei)
+    index_targets, missing_indices, index_errors = sync_sector_indices(
+        session, cfg, headers, refresh, apply=args.apply,
+        chosen=date.fromisoformat(args.date) if args.date else None)
+    errors += index_errors
+    LOG.info("finished targets=%s errors=%s missing_topix=%s missing_nikkei=%s index_targets=%s missing_sector_indices=%s",
+             len(targets), errors, missing_topix, missing_nikkei, index_targets, missing_indices)
     return 1 if errors else 0
 
 
@@ -324,6 +420,7 @@ def main() -> int:
     parser.add_argument("--apply", action="store_true", help="write verified snapshots and apply retention")
     parser.add_argument("--backfill", action="store_true", help="revisit every available date in the retention window")
     parser.add_argument("--date", help="re-fetch one application date (YYYY-MM-DD)")
+    parser.add_argument("--indices-only", action="store_true", help="backfill or refresh saved sector closes without re-fetching margin securities")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:

@@ -5,7 +5,8 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from tools.sync_margin_interest import (  # noqa: E402
-    api_pages, last_days_of_weeks, normalize_snapshot, official_nikkei_closes, subtract_months, trading_days,
+    SECTOR_INDEX_CODES, api_pages, last_days_of_weeks, normalize_snapshot,
+    official_nikkei_closes, sector_index_closes, subtract_months, trading_days,
 )
 
 
@@ -28,6 +29,23 @@ class Session:
 
 
 class MarginTests(unittest.TestCase):
+    def test_official_sector_price_codes_are_explicit_and_complete(self):
+        self.assertEqual(len(SECTOR_INDEX_CODES), 33)
+        self.assertEqual(SECTOR_INDEX_CODES["0050"], "0040")
+        self.assertEqual(SECTOR_INDEX_CODES["9050"], "0060")
+        self.assertEqual(len(set(SECTOR_INDEX_CODES.values())), 33)
+
+    def test_sector_index_joins_exact_date_and_rejects_invalid_close(self):
+        day = date(2026, 10, 21)
+        rows = [{"Date": day.isoformat(), "Code": "0040", "C": "1234.56"},
+                {"Date": day.isoformat(), "Code": "0041", "C": None},
+                {"Date": day.isoformat(), "Code": "0000", "C": "999"}]
+        self.assertEqual(sector_index_closes(rows, day), {"0040": "1234.56"})
+        with self.assertRaisesRegex(ValueError, "mixed date"):
+            sector_index_closes([{**rows[0], "Date": "2026-10-20"}], day)
+        with self.assertRaisesRegex(ValueError, "nonpositive"):
+            sector_index_closes([{**rows[0], "C": "0"}], day)
+
     def test_pagination_reaches_last_page(self):
         session = Session([Response({"data": [{"Code": "12340"}], "pagination_key": "second"}),
                            Response({"data": [{"Code": "12341"}]})])
