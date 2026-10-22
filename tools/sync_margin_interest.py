@@ -335,6 +335,13 @@ def run(args: argparse.Namespace, *, session: requests.Session | None = None) ->
         except Exception as exc:
             calendar_errors = 1
             LOG.error("trading calendar persistence failed: %s", exc)
+    if args.weekly_history_only:
+        from tools.sync_margin_weekly_history import sync_weekly_history
+        aggregates, indices, weekly_errors = sync_weekly_history(
+            session, cfg, headers, calendar_days, apply=args.apply)
+        LOG.info("weekly history finished aggregates=%s index_weeks=%s errors=%s",
+                 aggregates, indices, weekly_errors + calendar_errors)
+        return 1 if weekly_errors or calendar_errors else 0
     prior_days = [day for day in calendar_days if day < today]
     # Friday's application data is published on the next market day, not on
     # Saturday/Sunday/holiday. On a closed day, use the preceding two days.
@@ -409,6 +416,11 @@ def run(args: argparse.Namespace, *, session: requests.Session | None = None) ->
             if args.apply:
                 result = rpc(session, cfg, "publish_margin_snapshot", payload)
                 LOG.info("published date=%s rows=%s result=%s", day, len(rows), result)
+                if store_weekly and day >= date(2026, 7, 17):
+                    weekly_result = rpc(session, cfg, "refresh_margin_weekly_aggregate", {
+                        "p_date": day.isoformat(),
+                    })
+                    LOG.info("weekly aggregate refreshed date=%s result=%s", day, weekly_result)
             else:
                 LOG.info("validated date=%s rows=%s daily=%s weekly=%s", day, len(rows), store_daily, store_weekly)
         except Exception as exc:
@@ -449,6 +461,16 @@ def run(args: argparse.Namespace, *, session: requests.Session | None = None) ->
         session, cfg, headers, refresh, apply=args.apply,
         chosen=date.fromisoformat(args.date) if args.date else None)
     errors += index_errors
+    try:
+        from tools.sync_margin_weekly_history import sync_weekly_history
+        weekly_aggregates, weekly_indices, weekly_errors = sync_weekly_history(
+            session, cfg, headers, calendar_days, apply=args.apply)
+        errors += weekly_errors
+        LOG.info("weekly history aggregates=%s index_weeks=%s errors=%s",
+                 weekly_aggregates, weekly_indices, weekly_errors)
+    except Exception as exc:
+        errors += 1
+        LOG.error("weekly history failed: %s", exc)
     LOG.info("finished targets=%s errors=%s missing_topix=%s missing_nikkei=%s index_targets=%s missing_sector_indices=%s",
              len(targets), errors, missing_topix, missing_nikkei, index_targets, missing_indices)
     return 1 if errors else 0
@@ -460,6 +482,7 @@ def main() -> int:
     parser.add_argument("--backfill", action="store_true", help="revisit every available date in the retention window")
     parser.add_argument("--date", help="re-fetch one application date (YYYY-MM-DD)")
     parser.add_argument("--indices-only", action="store_true", help="backfill or refresh saved sector OHLC without re-fetching margin securities")
+    parser.add_argument("--weekly-history-only", action="store_true", help="aggregate saved weekly securities and backfill weekly index candles")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:

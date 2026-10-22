@@ -8,6 +8,8 @@ from tools.sync_margin_interest import (  # noqa: E402
     SECTOR_INDEX_CODES, api_pages, last_days_of_weeks, normalize_snapshot,
     official_nikkei_closes, sector_index_bars, sector_index_closes, subtract_months, trading_days,
 )
+from tools.sync_margin_weekly_history import weekly_bar  # noqa: E402
+from tools.backfill_margin_weekly_jpx_market import source_rows  # noqa: E402
 
 
 class Response:
@@ -113,6 +115,28 @@ class MarginTests(unittest.TestCase):
 
     def test_old_two_day_week_has_no_weekly_publication(self):
         self.assertEqual(last_days_of_weeks([date(2026, 5, 7), date(2026, 5, 8)]), set())
+
+    def test_weekly_candle_uses_all_days_and_requires_complete_ohlc(self):
+        days = [date(2026, 7, 21), date(2026, 7, 22), date(2026, 7, 23), date(2026, 7, 24)]
+        bars = {
+            days[0]: {"open": "10", "high": "12", "low": "9", "close": "11"},
+            days[1]: {"open": "11", "high": "15", "low": "10", "close": "13"},
+            days[2]: {"open": "13", "high": "14", "low": "8", "close": "9"},
+            days[3]: {"open": "9", "high": "11", "low": "9", "close": "10"},
+        }
+        self.assertEqual(weekly_bar(days, bars, "sample"), {
+            "open": "10", "high": "15", "low": "8", "close": "10", "trading_days": 4,
+        })
+        self.assertIsNone(weekly_bar(days, {days[3]: bars[days[3]]}, "sample"))
+        self.assertIsNone(weekly_bar(days, {**bars, days[1]: {**bars[days[1]], "open": None}}, "sample"))
+
+    def test_official_old_market_sources_keep_tokyo_separate(self):
+        records = source_rows()
+        self.assertEqual(len(records), 10)
+        final = records[-1]
+        self.assertEqual(final["date"], "2026-09-18")
+        self.assertEqual(int(final["jpx_two_market_million_yen"]) -
+                         int(final["nse_nagoya_million_yen"]), 6452830)
 
     def test_calendar_month_cutoffs_are_inclusive(self):
         self.assertEqual(subtract_months(date(2026, 10, 22), 1), date(2026, 9, 22))
