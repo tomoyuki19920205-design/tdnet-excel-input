@@ -294,6 +294,16 @@ def main() -> int:
                     f"status={market_sync_step.status} (later steps unaffected)"
                 )
 
+        # One invocation inside the existing 19:00 Nightly lock. The worker
+        # recovers missing dates, refreshes five business days, then cleans up.
+        margin_step = run_step("margin-interest", [
+            PYTHON, "-X", "utf8", "tools/sync_margin_interest.py",
+            *([] if args.dry_run else ["--apply"]),
+        ], timeout_sec=7200)
+        steps.append(margin_step)
+        if margin_step.rc != 0:
+            logger.error("[MARGIN] synchronization incomplete rc=%s", margin_step.rc)
+
         # ── Step 5d: sync_per_share_data（per_share_data → Supabase） ──
         logger.info("[PER_SHARE] sync start")
         step = run_step("per-share-sync", [
