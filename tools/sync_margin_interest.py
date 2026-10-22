@@ -221,12 +221,13 @@ def rpc(session: requests.Session, cfg: dict, name: str, payload: dict) -> objec
     return response.json()
 
 
-def sector_index_bars(raw: list[dict], target: date) -> dict[str, dict[str, str | None]]:
-    """Select exact-date 33-sector price-index bars without inventing missing OHLC."""
+def sector_index_bars(raw: list[dict], target: date,
+                      allowed_codes: set[str] = INDEX_CODES) -> dict[str, dict[str, str | None]]:
+    """Select exact-date price-index bars without inventing missing OHLC."""
     bars: dict[str, dict[str, str | None]] = {}
     for row in raw:
         code = str(row.get("Code") or "")
-        if code not in INDEX_CODES:
+        if code not in allowed_codes:
             continue
         if row.get("Date") != target.isoformat() or code in bars:
             raise ValueError(f"{target}: mixed date or duplicate sector index {code}")
@@ -312,6 +313,52 @@ def sync_sector_indices(session: requests.Session, cfg: dict, headers: dict[str,
     return len(targets), missing, errors
 
 
+def sync_topix_indices(session: requests.Session, cfg: dict, raw: list[dict],
+                       refresh: set[date], *, apply: bool,
+                       chosen: date | None = None) -> tuple[int, int, int]:
+    """Save TOPIX daily OHLC for saved credit dates; refresh recent corrections."""
+    aggregates = {row["date"] for row in supabase_get(session, cfg, "margin_daily", {
+        "select": "date", "date": f"gte.{MONEY_START.isoformat()}", "order": "date.asc",
+    })}
+    saved_rows = supabase_get(session, cfg, "margin_index_daily", {
+        "select": "date,open,high,low,close", "code": "eq.TOPIX",
+        "date": f"gte.{MONEY_START.isoformat()}", "order": "date.asc",
+    })
+    saved = {row["date"] for row in saved_rows
+             if all(row.get(field) is not None for field in ("open", "high", "low", "close"))}
+    targets = sorted(date.fromisoformat(day) for day in aggregates
+                     if (chosen is None or day == chosen.isoformat())
+                     and (date.fromisoformat(day) in refresh or day not in saved))
+    by_date: dict[str, list[dict]] = {}
+    for row in raw:
+        day = row.get("Date")
+        if day in aggregates:
+            by_date.setdefault(day, []).append({**row, "Code": "TOPIX"})
+    errors = 0
+    for day in targets:
+        try:
+            bar = sector_index_bars(by_date.get(day.isoformat(), []), day, {"TOPIX"}).get("TOPIX")
+            if bar is None or any(bar.get(field) is None for field in ("open", "high", "low", "close")):
+                raise ValueError("complete TOPIX OHLC unavailable")
+            if apply:
+                upsert_sector_indices(session, cfg, day, {"TOPIX": bar})
+            LOG.info("TOPIX daily OHLC date=%s apply=%s", day, apply)
+        except Exception as exc:
+            errors += 1
+            LOG.error("TOPIX daily OHLC date=%s failed: %s", day, exc)
+    if apply:
+        saved_rows = supabase_get(session, cfg, "margin_index_daily", {
+            "select": "date,open,high,low,close", "code": "eq.TOPIX",
+            "date": f"gte.{MONEY_START.isoformat()}", "order": "date.asc",
+        })
+        saved = {row["date"] for row in saved_rows
+                 if all(row.get(field) is not None for field in ("open", "high", "low", "close"))}
+    missing = len(aggregates - saved)
+    LOG.info("TOPIX daily OHLC targets=%s saved_dates=%s missing=%s errors=%s",
+             len(targets), len(aggregates), missing, errors)
+    return len(targets), missing, errors
+
+
 def run(args: argparse.Namespace, *, session: requests.Session | None = None) -> int:
     load_env()
     cfg = get_supabase_write_config()
@@ -370,19 +417,6 @@ def run(args: argparse.Namespace, *, session: requests.Session | None = None) ->
     targets = sorted(targets)
     LOG.info("plan dates=%s daily_cutoff=%s weekly_cutoff=%s", len(targets), daily_cutoff, weekly_cutoff)
 
-    if args.indices_only:
-        target_count, missing_indices, errors = sync_sector_indices(
-            session, cfg, headers, refresh, apply=args.apply,
-            chosen=date.fromisoformat(args.date) if args.date else None)
-        errors += calendar_errors
-        LOG.info("finished indices_only targets=%s missing=%s errors=%s", target_count, missing_indices, errors)
-        return 1 if errors else 0
-
-    try:
-        nikkei = official_nikkei_closes(session)
-    except Exception as exc:
-        LOG.warning("Nikkei close unavailable: %s", exc)
-        nikkei = {}
     try:
         topix_raw = api_pages(session, "/indices/bars/daily/topix", {
             "from": MONEY_START.isoformat(), "to": final_day.isoformat(),
@@ -390,9 +424,27 @@ def run(args: argparse.Namespace, *, session: requests.Session | None = None) ->
         topix = {date.fromisoformat(row["Date"]): str(Decimal(str(row["C"])))
                  for row in topix_raw if row.get("C") is not None}
     except Exception as exc:
-        LOG.warning("TOPIX close unavailable: %s", exc)
-        topix = {}
+        LOG.warning("TOPIX bars unavailable: %s", exc)
+        topix_raw, topix = [], {}
 
+    if args.indices_only:
+        target_count, missing_indices, errors = sync_sector_indices(
+            session, cfg, headers, refresh, apply=args.apply,
+            chosen=date.fromisoformat(args.date) if args.date else None)
+        topix_targets, missing_topix_bars, topix_errors = sync_topix_indices(
+            session, cfg, topix_raw, refresh, apply=args.apply,
+            chosen=date.fromisoformat(args.date) if args.date else None)
+        errors += topix_errors
+        errors += calendar_errors
+        LOG.info("finished indices_only sector_targets=%s missing_sectors=%s TOPIX_targets=%s missing_TOPIX=%s errors=%s",
+                 target_count, missing_indices, topix_targets, missing_topix_bars, errors)
+        return 1 if errors else 0
+
+    try:
+        nikkei = official_nikkei_closes(session)
+    except Exception as exc:
+        LOG.warning("Nikkei close unavailable: %s", exc)
+        nikkei = {}
     errors = calendar_errors
     for day in targets:
         try:
@@ -461,6 +513,10 @@ def run(args: argparse.Namespace, *, session: requests.Session | None = None) ->
         session, cfg, headers, refresh, apply=args.apply,
         chosen=date.fromisoformat(args.date) if args.date else None)
     errors += index_errors
+    topix_targets, missing_topix_bars, topix_errors = sync_topix_indices(
+        session, cfg, topix_raw, refresh, apply=args.apply,
+        chosen=date.fromisoformat(args.date) if args.date else None)
+    errors += topix_errors
     try:
         from tools.sync_margin_weekly_history import sync_weekly_history
         weekly_aggregates, weekly_indices, weekly_errors = sync_weekly_history(
@@ -471,8 +527,9 @@ def run(args: argparse.Namespace, *, session: requests.Session | None = None) ->
     except Exception as exc:
         errors += 1
         LOG.error("weekly history failed: %s", exc)
-    LOG.info("finished targets=%s errors=%s missing_topix=%s missing_nikkei=%s index_targets=%s missing_sector_indices=%s",
-             len(targets), errors, missing_topix, missing_nikkei, index_targets, missing_indices)
+    LOG.info("finished targets=%s errors=%s missing_topix=%s missing_nikkei=%s sector_index_targets=%s missing_sector_indices=%s TOPIX_bar_targets=%s missing_TOPIX_bars=%s",
+             len(targets), errors, missing_topix, missing_nikkei, index_targets, missing_indices,
+             topix_targets, missing_topix_bars)
     return 1 if errors else 0
 
 

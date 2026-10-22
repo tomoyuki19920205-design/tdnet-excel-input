@@ -58,6 +58,17 @@ class MarginTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "inconsistent"):
             sector_index_bars([{**row, "H": "10"}], day)
 
+    def test_topix_uses_same_exact_date_ohlc_validation(self):
+        day = date(2026, 10, 21)
+        row = {"Date": day.isoformat(), "Code": "TOPIX", "O": "4000", "H": "4050",
+               "L": "3980", "C": "4025"}
+        self.assertEqual(sector_index_bars([row], day, {"TOPIX"})["TOPIX"],
+                         {"open": "4000", "high": "4050", "low": "3980", "close": "4025"})
+        with self.assertRaisesRegex(ValueError, "mixed date"):
+            sector_index_bars([{**row, "Date": "2026-10-20"}], day, {"TOPIX"})
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            sector_index_bars([row, row], day, {"TOPIX"})
+
     def test_pagination_reaches_last_page(self):
         session = Session([Response({"data": [{"Code": "12340"}], "pagination_key": "second"}),
                            Response({"data": [{"Code": "12341"}]})])
