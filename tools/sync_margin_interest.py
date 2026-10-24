@@ -272,11 +272,9 @@ def upsert_sector_indices(session: requests.Session, cfg: dict, target: date,
 
 
 def sync_sector_indices(session: requests.Session, cfg: dict, headers: dict[str, str],
-                        refresh: set[date], *, apply: bool, chosen: date | None = None) -> tuple[int, int, int]:
-    """Backfill every saved aggregate date and refresh the last five trading days."""
-    aggregates = {row["date"] for row in supabase_get(session, cfg, "margin_daily", {
-        "select": "date", "date": f"gte.{MONEY_START.isoformat()}", "order": "date.asc",
-    })}
+                        index_days: list[date], refresh: set[date], *, apply: bool,
+                        chosen: date | None = None) -> tuple[int, int, int]:
+    """Fetch sector bars on their own trading calendar, including unpublished credit days."""
     saved_rows = supabase_get(session, cfg, "margin_index_daily", {
         "select": "date,code,open,high,low", "date": f"gte.{MONEY_START.isoformat()}", "order": "date.asc,code.asc",
     })
@@ -284,9 +282,8 @@ def sync_sector_indices(session: requests.Session, cfg: dict, headers: dict[str,
     for row in saved_rows:
         if all(row.get(field) is not None for field in ("open", "high", "low")):
             saved.setdefault(row["date"], set()).add(row["code"])
-    targets = sorted(date.fromisoformat(day) for day in aggregates
-                     if (chosen is None or day == chosen.isoformat())
-                     and (date.fromisoformat(day) in refresh or len(saved.get(day, set()) & INDEX_CODES) < 33))
+    targets = [day for day in index_days if (chosen is None or day == chosen)
+               and (day in refresh or len(saved.get(day.isoformat(), set()) & INDEX_CODES) < 33)]
     errors = 0
     for day in targets:
         try:
@@ -307,38 +304,38 @@ def sync_sector_indices(session: requests.Session, cfg: dict, headers: dict[str,
         for row in saved_rows:
             if all(row.get(field) is not None for field in ("open", "high", "low")):
                 saved.setdefault(row["date"], set()).add(row["code"])
-    missing = sum(33 - len(saved.get(day, set()) & INDEX_CODES) for day in aggregates)
+    missing = sum(33 - len(saved.get(day.isoformat(), set()) & INDEX_CODES) for day in index_days)
     LOG.info("sector indices targets=%s saved_dates=%s missing=%s errors=%s",
-             len(targets), len(aggregates), missing, errors)
+             len(targets), len(index_days), missing, errors)
     return len(targets), missing, errors
 
 
 def sync_topix_indices(session: requests.Session, cfg: dict, raw: list[dict],
-                       refresh: set[date], *, apply: bool,
+                       index_days: list[date], refresh: set[date], *, apply: bool,
                        chosen: date | None = None) -> tuple[int, int, int]:
-    """Save TOPIX daily OHLC for saved credit dates; refresh recent corrections."""
-    aggregates = {row["date"] for row in supabase_get(session, cfg, "margin_daily", {
-        "select": "date", "date": f"gte.{MONEY_START.isoformat()}", "order": "date.asc",
-    })}
+    """Save TOPIX OHLC through the latest available index trading day."""
+    eligible = {day.isoformat() for day in index_days}
     saved_rows = supabase_get(session, cfg, "margin_index_daily", {
         "select": "date,open,high,low,close", "code": "eq.TOPIX",
         "date": f"gte.{MONEY_START.isoformat()}", "order": "date.asc",
     })
     saved = {row["date"] for row in saved_rows
              if all(row.get(field) is not None for field in ("open", "high", "low", "close"))}
-    targets = sorted(date.fromisoformat(day) for day in aggregates
-                     if (chosen is None or day == chosen.isoformat())
-                     and (date.fromisoformat(day) in refresh or day not in saved))
+    targets = [day for day in index_days if (chosen is None or day == chosen)
+               and (day in refresh or day.isoformat() not in saved)]
     by_date: dict[str, list[dict]] = {}
     for row in raw:
         day = row.get("Date")
-        if day in aggregates:
+        if day in eligible:
             by_date.setdefault(day, []).append({**row, "Code": "TOPIX"})
     errors = 0
     for day in targets:
         try:
             bar = sector_index_bars(by_date.get(day.isoformat(), []), day, {"TOPIX"}).get("TOPIX")
-            if bar is None or any(bar.get(field) is None for field in ("open", "high", "low", "close")):
+            if bar is None:
+                LOG.info("TOPIX daily OHLC date=%s pending publication", day)
+                continue
+            if any(bar.get(field) is None for field in ("open", "high", "low", "close")):
                 raise ValueError("complete TOPIX OHLC unavailable")
             if apply:
                 upsert_sector_indices(session, cfg, day, {"TOPIX": bar})
@@ -353,9 +350,9 @@ def sync_topix_indices(session: requests.Session, cfg: dict, raw: list[dict],
         })
         saved = {row["date"] for row in saved_rows
                  if all(row.get(field) is not None for field in ("open", "high", "low", "close"))}
-    missing = len(aggregates - saved)
+    missing = len(eligible - saved)
     LOG.info("TOPIX daily OHLC targets=%s saved_dates=%s missing=%s errors=%s",
-             len(targets), len(aggregates), missing, errors)
+             len(targets), len(index_days), missing, errors)
     return len(targets), missing, errors
 
 
@@ -404,6 +401,10 @@ def run(args: argparse.Namespace, *, session: requests.Session | None = None) ->
         "select": "date", "date": f"gte.{weekly_cutoff.isoformat()}", "order": "date.asc",
     })}
     money_days = [day for day in days if day >= MONEY_START]
+    # Credit balances are published later than prices. Keep the index refresh
+    # window independent so an unpublished balance never holds back a candle.
+    index_days = [day for day in calendar_days if MONEY_START <= day <= today]
+    index_refresh = set(index_days[-5:])
     refresh = set(money_days[-5:])
     targets = {day for day in money_days if day.isoformat() not in existing} | refresh
     targets |= {day for day in week_finals if weekly_cutoff <= day <= final_day and day.isoformat() not in weekly_existing}
@@ -411,15 +412,15 @@ def run(args: argparse.Namespace, *, session: requests.Session | None = None) ->
         targets |= set(money_days) | {day for day in week_finals if weekly_cutoff <= day <= final_day}
     if args.date:
         chosen = date.fromisoformat(args.date)
-        if chosen not in days:
+        if chosen not in (index_days if args.indices_only else days):
             raise ValueError("specified date is not a completed TSE trading date")
-        targets = {chosen}
+        targets = {chosen} if not args.indices_only else set()
     targets = sorted(targets)
     LOG.info("plan dates=%s daily_cutoff=%s weekly_cutoff=%s", len(targets), daily_cutoff, weekly_cutoff)
 
     try:
         topix_raw = api_pages(session, "/indices/bars/daily/topix", {
-            "from": MONEY_START.isoformat(), "to": final_day.isoformat(),
+            "from": MONEY_START.isoformat(), "to": index_days[-1].isoformat(),
         }, headers)
         topix = {date.fromisoformat(row["Date"]): str(Decimal(str(row["C"])))
                  for row in topix_raw if row.get("C") is not None}
@@ -429,10 +430,10 @@ def run(args: argparse.Namespace, *, session: requests.Session | None = None) ->
 
     if args.indices_only:
         target_count, missing_indices, errors = sync_sector_indices(
-            session, cfg, headers, refresh, apply=args.apply,
+            session, cfg, headers, index_days, index_refresh, apply=args.apply,
             chosen=date.fromisoformat(args.date) if args.date else None)
         topix_targets, missing_topix_bars, topix_errors = sync_topix_indices(
-            session, cfg, topix_raw, refresh, apply=args.apply,
+            session, cfg, topix_raw, index_days, index_refresh, apply=args.apply,
             chosen=date.fromisoformat(args.date) if args.date else None)
         errors += topix_errors
         errors += calendar_errors
@@ -510,11 +511,11 @@ def run(args: argparse.Namespace, *, session: requests.Session | None = None) ->
         missing_topix = sum(day not in topix for day in money_days)
         missing_nikkei = sum(day not in nikkei for day in money_days)
     index_targets, missing_indices, index_errors = sync_sector_indices(
-        session, cfg, headers, refresh, apply=args.apply,
+        session, cfg, headers, index_days, index_refresh, apply=args.apply,
         chosen=date.fromisoformat(args.date) if args.date else None)
     errors += index_errors
     topix_targets, missing_topix_bars, topix_errors = sync_topix_indices(
-        session, cfg, topix_raw, refresh, apply=args.apply,
+        session, cfg, topix_raw, index_days, index_refresh, apply=args.apply,
         chosen=date.fromisoformat(args.date) if args.date else None)
     errors += topix_errors
     try:

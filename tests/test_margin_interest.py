@@ -2,11 +2,13 @@ import sys
 from datetime import date
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from tools.sync_margin_interest import (  # noqa: E402
     SECTOR_INDEX_CODES, api_pages, last_days_of_weeks, normalize_snapshot,
     official_nikkei_closes, sector_index_bars, sector_index_closes, subtract_months, trading_days,
+    sync_sector_indices, sync_topix_indices,
 )
 from tools.sync_margin_weekly_history import weekly_bar  # noqa: E402
 from tools.backfill_margin_weekly_jpx_market import source_rows  # noqa: E402
@@ -31,6 +33,29 @@ class Session:
 
 
 class MarginTests(unittest.TestCase):
+    def test_indices_sync_uses_trading_dates_after_latest_credit_date(self):
+        days = [date(2026, 10, 22), date(2026, 10, 23)]
+        sector_calls = []
+        def sector_api(_session, _endpoint, params, _headers):
+            sector_calls.append(params["date"])
+            return [{"Date": params["date"], "Code": code,
+                     "O": "10", "H": "12", "L": "9", "C": "11"}
+                    for code in SECTOR_INDEX_CODES.values()]
+        with patch("tools.sync_margin_interest.supabase_get", return_value=[]) as saved, \
+                patch("tools.sync_margin_interest.api_pages", side_effect=sector_api):
+            targets, missing, errors = sync_sector_indices(
+                Session([]), {}, {}, days, {days[-1]}, apply=False)
+        self.assertEqual((targets, missing, errors), (2, 66, 0))
+        self.assertEqual(sector_calls, [day.isoformat() for day in days])
+        self.assertTrue(all(call.args[2] == "margin_index_daily" for call in saved.call_args_list))
+
+        topix_raw = [{"Date": days[-1].isoformat(), "O": "3985.7", "H": "3986.57",
+                      "L": "3907.33", "C": "3965.81"}]
+        with patch("tools.sync_margin_interest.supabase_get", return_value=[]):
+            targets, missing, errors = sync_topix_indices(
+                Session([]), {}, topix_raw, days, {days[-1]}, apply=False)
+        self.assertEqual((targets, missing, errors), (2, 2, 0))
+
     def test_official_sector_price_codes_are_explicit_and_complete(self):
         self.assertEqual(len(SECTOR_INDEX_CODES), 33)
         self.assertEqual(SECTOR_INDEX_CODES["0050"], "0040")
