@@ -51,8 +51,12 @@ def _extract_dividend_per_share(text: str, anchors: list[str], window: int = 200
     for anchor in anchors:
         idx = text.find(anchor)
         if idx >= 0:
-            snippet = text[idx:idx + len(anchor) + window]
+            # Never cross into the next table row or a prior-year actual.
+            snippet = text[idx:idx + len(anchor) + window].splitlines()[0]
             s = normalize_jp_number(snippet)
+            s = re.sub(r"[（(][^）)]*(?:普通配当|特別配当|記念配当|増配)[^）)]*[）)]", "", s)
+            if "未定" in s or "未決定" in s:
+                continue
             m = _DIVIDEND_AMOUNT_RE.search(s)
             if m:
                 try:
@@ -73,48 +77,49 @@ def _find_dividend_table_values(text: str) -> dict:
     result = {}
     lines = text.split("\n")
 
-    prev_line = None
-    revised_line = None
+    prev_keywords = ("前回発表予想", "前回公表予想", "前回予想", "修正前")
+    rev_keywords = ("今回修正予想", "今回公表予想", "今回予想", "公表予想", "修正予想", "修正後")
+
+    def amounts(line: str) -> list[float]:
+        # 内訳は総額の代用にならない。括弧内の普通/特別/記念/増配を除く。
+        s = normalize_jp_number(line)
+        s = re.sub(r"[（(][^）)]*(?:普通配当|特別配当|記念配当|増配)[^）)]*[）)]", "", s)
+        return [float(m.group(1).replace(",", "")) for m in
+                re.finditer(r"([\d,]+(?:\.\d+)?)\s*円(?:\s*\d{1,2}\s*銭)?", s)]
 
     for i, line in enumerate(lines):
-        clean = normalize_jp_number(line).strip()
-        if not clean:
+        compact = normalize_jp_number(line).replace(" ", "").replace("\u3000", "")
+        kind = ("previous_values" if any(k in compact for k in prev_keywords) else
+                "revised_values" if any(k in compact for k in rev_keywords) else None)
+        if kind is None or kind in result or "前期実績" in compact:
             continue
-
-        # スペース（半角・全角）を除去した比較用文字列でキーワード判定
-        # → 「前　回　予　想」「今　回　修　正　予　想」等に対応
-        compact = clean.replace(" ", "").replace("\u3000", "")
-
-        _PREV_KEYWORDS = ["前回発表予想", "前回公表予想", "前回予想", "修正前"]
-        _REV_KEYWORDS  = ["今回修正予想", "今回公表予想", "今回予想", "公表予想", "修正予想", "修正後"]
-
-        if any(kw in compact for kw in _PREV_KEYWORDS):
-            prev_line = clean
-        elif any(kw in compact for kw in _REV_KEYWORDS):
-            revised_line = clean
-
-    # 数値抽出
-    def _extract_yen_values(line: str) -> list[float]:
-        s = normalize_jp_number(line)
-        vals = []
-        for m in re.finditer(r"([\d,.]+)\s*(?:円|\.)", s):
-            try:
-                vals.append(float(m.group(1).replace(",", "")))
-            except ValueError:
-                pass
-        return vals
-
-    if prev_line:
-        prev_vals = _extract_yen_values(prev_line)
-        if prev_vals:
-            result["previous_values"] = prev_vals
-
-    if revised_line:
-        revised_vals = _extract_yen_values(revised_line)
-        if revised_vals:
-            result["revised_values"] = revised_vals
+        vals = amounts(line)
+        if not vals and i > 0:
+            # PDFで対象期の総額行の直下に「（修正前/後）」がある形式。
+            prior = normalize_jp_number(lines[i - 1])
+            if "期" in prior and "予想" in prior and "実績" not in prior:
+                vals = amounts(prior)
+        if vals:
+            result[kind] = vals
 
     return result
+
+
+def _revised_component_amount(text: str, label: str) -> Optional[float]:
+    """Find a component only in the revised forecast, excluding prior-year actuals."""
+    lines = [normalize_jp_number(line).replace(" ", "").replace("\u3000", "")
+             for line in text.splitlines()]
+    for i, line in enumerate(lines):
+        m = re.search(re.escape(label) + r"([\d,]+(?:\.\d+)?)円", line)
+        if not m:
+            continue
+        revision_rows = [j for j in range(i + 1)
+                         if any(k in lines[j] for k in ("修正後", "今回修正予想", "今回予想"))]
+        start = revision_rows[-1] if revision_rows else 0
+        if any("前期実績" in row or "期実績" in row for row in lines[start:i + 1]):
+            continue
+        return float(m.group(1).replace(",", ""))
+    return None
 
 
 # ============================================================
@@ -192,8 +197,10 @@ def extract_dividend_revision(
 ) -> DividendRevisionEvent:
     """テキストから配当予想修正イベントを抽出する。"""
     event = DividendRevisionEvent()
-    event.fiscal_period = _detect_fiscal_period(text) or _detect_fiscal_period(title)
-    event.dividend_basis = _detect_dividend_basis(text) or _detect_dividend_basis(title)
+    event.fiscal_period = _detect_fiscal_period(title) or _detect_fiscal_period(text)
+    # The title defines a specific comparison basis when stated. Otherwise
+    # the annual total is the default; narrative mentions of 期末/中間 are not a basis.
+    event.dividend_basis = _detect_dividend_basis(title) or "年間"
 
     confidence = 0.0
 
@@ -201,7 +208,6 @@ def extract_dividend_revision(
     table_vals = _find_dividend_table_values(text)
     prev_vals = table_vals.get("previous_values", [])
     revised_vals = table_vals.get("revised_values", [])
-    print(f"[DEBUG_TEXT_EXTRACT] prev_vals={prev_vals} revised_vals={revised_vals}")
 
     # 期末/年間を優先（配列の後ろの方）
     if prev_vals and revised_vals:
@@ -213,8 +219,9 @@ def extract_dividend_revision(
             event.revised_dividend_per_share = revised_vals[0] if revised_vals else None
         elif len(prev_vals) >= 2 and len(revised_vals) >= 2:
             # 期末 = 2番目, 年間 = 3番目（あれば）
-            event.previous_dividend_per_share = prev_vals[-2] if len(prev_vals) >= 2 else prev_vals[-1]
-            event.revised_dividend_per_share = revised_vals[-2] if len(revised_vals) >= 2 else revised_vals[-1]
+            chosen = -1 if event.dividend_basis == "年間" else -2
+            event.previous_dividend_per_share = prev_vals[chosen]
+            event.revised_dividend_per_share = revised_vals[chosen]
             if len(prev_vals) >= 3:
                 event.annual_total_previous = prev_vals[-1]
             if len(revised_vals) >= 3:
@@ -246,12 +253,12 @@ def extract_dividend_revision(
             confidence += 0.10
 
     # 特別配当/記念配当
-    special = _extract_dividend_per_share(text, ["特別配当"])
+    special = _revised_component_amount(text, "特別配当")
     if special:
         event.special_dividend_per_share = special
         confidence += 0.10
 
-    commemorative = _extract_dividend_per_share(text, ["記念配当"])
+    commemorative = _revised_component_amount(text, "記念配当")
     if commemorative:
         event.commemorative_dividend_per_share = commemorative
         confidence += 0.10
@@ -270,16 +277,23 @@ def extract_dividend_revision(
 
     # ---- FITZ 年間合計抽出 (pdf_path がある場合) ----
     if pdf_path and os.path.exists(pdf_path):
-        fitz_div = _extract_dividend_annual_total_via_fitz(pdf_path)
+        fitz_div = _extract_dividend_annual_total_via_fitz(
+            pdf_path, requested_basis=event.dividend_basis or "年間")
         if fitz_div:
             rev_a = fitz_div.get("annual_total_revised")
             prev_a = fitz_div.get("annual_total_previous")
             if rev_a is not None:
                 event.annual_total_revised = rev_a
-                event.revised_dividend_per_share = rev_a
             if prev_a is not None:
                 event.annual_total_previous = prev_a
-                event.previous_dividend_per_share = prev_a
+            comp_rev = fitz_div.get("comparison_revised")
+            comp_prev = fitz_div.get("comparison_previous")
+            if comp_rev is not None:
+                event.revised_dividend_per_share = comp_rev
+            if comp_prev is not None:
+                event.previous_dividend_per_share = comp_prev
+            event.dividend_basis = fitz_div.get("comparison_basis") or event.dividend_basis
+            event.confidence = max(event.confidence, 0.8 if prev_a is not None else 0.6)
             # delta / subtype / importance を年間合計ベースで再計算
             if event.previous_dividend_per_share is not None and event.revised_dividend_per_share is not None:
                 event.delta_dividend_per_share = round(
@@ -370,11 +384,21 @@ def _div_parse_cell_value(text: str) -> float | None:
         return None
 
 
+def _div_parse_total_cell(text: str) -> float | None:
+    """Read a whole table cell, never a yen amount embedded in a component note."""
+    s = _div_fitz_compact(text).replace(",", "")
+    if not re.fullmatch(r"\d+(?:\.\d+)?(?:円(?:\d{1,2}銭)?)?", s):
+        return None
+    return _div_parse_cell_value(s)
+
+
 # ============================================================
 # FITZ 年間合計抽出
 # ============================================================
 
-def _extract_dividend_annual_total_via_fitz(pdf_path: str) -> dict | None:
+def _extract_dividend_annual_total_via_fitz(
+    pdf_path: str, requested_basis: str = "年間"
+) -> dict | None:
     """pdfplumber 座標ベースで年間合計配当額（前回/今回）を抽出する。
 
     業績予想修正PDFに同居する配当予想修正テーブルも対象。
@@ -431,6 +455,10 @@ def _extract_dividend_annual_total_via_fitz(pdf_path: str) -> dict | None:
 
     best_prev: float | None = None
     best_rev:  float | None = None
+    best_basis = ""
+    best_comp_prev: float | None = None
+    best_comp_rev: float | None = None
+    best_comp_basis = ""
 
     try:
         import pdfplumber
@@ -493,6 +521,7 @@ def _extract_dividend_annual_total_via_fitz(pdf_path: str) -> dict | None:
                 total_x:    float | None = None  # 合計列
                 annual_x:   float | None = None  # 年間列
                 term_end_x: float | None = None  # 期末列
+                interim_x:  float | None = None  # 中間列
 
                 below_tokens: list = []
                 if hdr_idx + 1 < len(grouped_rows):
@@ -522,85 +551,92 @@ def _extract_dividend_annual_total_via_fitz(pdf_path: str) -> dict | None:
                     elif annual_x is None and any(_fitz_compact(lbl) in combined for lbl in _DIV_ANNUAL_LABELS):
                         annual_x = tok_cx
                         print(f"[dividend_fitz_colmap] annual_x={tok_cx:.1f} header_text={tok['text']!r}")
+                    elif interim_x is None and ("中間" in combined or "第2四半期末" in combined):
+                        interim_x = tok_cx
                     # 優先順位3: 期末列
-                    elif term_end_x is None and any(_fitz_compact(lbl) in combined for lbl in _DIV_TERM_END_LABELS):
+                    elif (term_end_x is None and "四半期" not in combined
+                          and any(_fitz_compact(lbl) in combined for lbl in _DIV_TERM_END_LABELS)):
                         term_end_x = tok_cx
                         print(f"[dividend_fitz_colmap] term_end_x={tok_cx:.1f} header_text={tok['text']!r}")
+
+                # Some PDFs split 合計 and 期末 into individual glyph tokens.
+                for left, right in zip(hdr_tokens, hdr_tokens[1:]):
+                    if right["cx"] - left["cx"] > 35:
+                        continue
+                    pair = _fitz_compact(left["text"] + right["text"])
+                    center = (left["cx"] + right["cx"]) / 2
+                    if total_x is None and any(_fitz_compact(lbl) in pair for lbl in _DIV_TOTAL_LABELS):
+                        total_x = center
+                    if term_end_x is None and any(_fitz_compact(lbl) in pair for lbl in _DIV_TERM_END_LABELS):
+                        term_end_x = center
 
                 # 列もなければ次ページへ（合計 > 年間 > 期末 優先）
                 target_x: float | None = total_x or annual_x or term_end_x
                 if target_x is None:
                     continue
+                page_basis = "年間" if total_x or annual_x else "期末"
+                comparison_x = (term_end_x if requested_basis == "期末" else
+                                interim_x if requested_basis == "中間" else target_x)
+                comparison_basis = (page_basis if requested_basis == "年間" and page_basis != "年間"
+                                    else requested_basis if comparison_x is not None else page_basis)
+                if comparison_x is None:
+                    comparison_x = target_x
 
-                # Step 4: 前回行 / 今回行を検出
+                # Step 4: 前回行 / 今回行を検出。修正ラベルが総額行の直下に
+                # 単独で置かれる場合、括弧内訳ではなく直上の対象期行に結ぶ。
                 prev_tokens: list | None = None
                 rev_tokens:  list | None = None
-                prev_row_idx = -1
-                rev_row_idx  = -1
+
+                def _has_total_cell(rw: list) -> bool:
+                    return any(
+                        _div_parse_total_cell(t["text"]) is not None
+                        and abs((t["x0"] + t["x1"]) / 2 - target_x) <= 65
+                        for t in rw
+                    )
+
+                def _data_row(label_idx: int) -> list | None:
+                    row = grouped_rows[label_idx]
+                    if _has_total_cell(row):
+                        return row
+                    for candidate_idx in (label_idx - 1, label_idx + 1):
+                        if candidate_idx <= hdr_idx or candidate_idx >= len(grouped_rows):
+                            continue
+                        candidate = grouped_rows[candidate_idx]
+                        cmp_candidate = _fitz_compact("".join(t["text"] for t in candidate))
+                        is_other_role = any(_fitz_compact(lbl) in cmp_candidate
+                                            for lbl in _DIV_PREV_LABELS + _DIV_REV_LABELS)
+                        if ("実績" not in cmp_candidate and not is_other_role
+                                and _has_total_cell(candidate)):
+                            return candidate
+                    return None
 
                 for ri in range(hdr_idx + 1, len(grouped_rows)):
                     rw       = grouped_rows[ri]
                     row_text = "".join(w["text"] for w in rw)
                     cmp      = _fitz_compact(row_text)
                     if rev_tokens is None and any(_fitz_compact(lbl) in cmp for lbl in _DIV_REV_LABELS):
-                        rev_tokens  = _row_to_tokens(rw)
-                        rev_row_idx = ri
-                        print(f"[dividend_fitz_row] rev_row_found=True  rev_row_text={row_text[:60]!r}")
+                        data = _data_row(ri)
+                        if data is not None:
+                            rev_tokens = _row_to_tokens(data)
                     elif prev_tokens is None and any(_fitz_compact(lbl) in cmp for lbl in _DIV_PREV_LABELS):
-                        prev_tokens  = _row_to_tokens(rw)
-                        prev_row_idx = ri
-                        print(f"[dividend_fitz_row] prev_row_found=True prev_row_text={row_text[:60]!r}")
+                        data = _data_row(ri)
+                        if data is not None:
+                            prev_tokens = _row_to_tokens(data)
                     if prev_tokens is not None and rev_tokens is not None:
                         break
-
-                print(
-                    f"[dividend_fitz_row] "
-                    f"prev_row_found={prev_tokens is not None} "
-                    f"rev_row_found={rev_tokens is not None}"
-                )
                 if rev_tokens is None:
                     continue
 
-                # Step 5: continuation フォールバック（有効数値が少ない行は次行を探す）
-                def _div_count_nums(tokens: list) -> int:
-                    return sum(
-                        1 for t in tokens
-                        if (v := _parse_cell_value(t["text"])) is not None
-                        and abs(v) not in {0.0, 1.0, 2.0}
-                    )
-
-                def _div_continuation(tokens: list, row_idx: int, kind: str) -> list:
-                    if row_idx < 0 or _div_count_nums(tokens) >= 1:
-                        return tokens
-                    for offset in range(1, 4):
-                        nri = row_idx + offset
-                        if nri >= len(grouped_rows):
-                            break
-                        cand = _row_to_tokens(grouped_rows[nri])
-                        if _div_count_nums(cand) >= 1:
-                            nums = [
-                                v for t in cand
-                                if (v := _parse_cell_value(t["text"])) is not None
-                                and abs(v) not in {0.0, 1.0, 2.0}
-                            ]
-                            print(f"[dividend_fitz_row_continuation] kind={kind} adopted_row={nri} nums={nums}")
-                            return cand
-                    return tokens
-
-                if prev_tokens is not None:
-                    prev_tokens = _div_continuation(prev_tokens, prev_row_idx, "prev")
-                rev_tokens = _div_continuation(rev_tokens, rev_row_idx, "rev")
-
-                # Step 6: 年間合計額の割り当て
-                def _pick_annual(tokens: list, kind: str) -> float | None:
+                # Step 5: 明示された合計列のみを採用。内訳の加算・右端値の
+                # 推測採用は行わず、未定・抽出不能は None のまま残す。
+                def _pick_annual(tokens: list, kind: str, column_x: float) -> float | None:
                     if not tokens:
                         return None
                     nums_cx = sorted(
                         [
                             (t["cx"], v)
                             for t in tokens
-                            if (v := _parse_cell_value(t["text"])) is not None
-                            and abs(v) not in {0.0, 1.0, 2.0}
+                            if (v := _div_parse_total_cell(t["text"])) is not None
                         ],
                         key=lambda x: x[0],
                     )
@@ -611,41 +647,34 @@ def _extract_dividend_annual_total_via_fitz(pdf_path: str) -> dict | None:
                     )
                     if not nums_cx:
                         return None
-                    col_tol = 40.0
-                    if target_x is not None:
-                        closest = min(nums_cx, key=lambda x: abs(x[0] - target_x))
-                        dist    = abs(closest[0] - target_x)
+                    col_tol = 65.0
+                    if column_x is not None:
+                        closest = min(nums_cx, key=lambda x: abs(x[0] - column_x))
+                        dist    = abs(closest[0] - column_x)
                         print(
                             f"[dividend_fitz_assign] kind={kind} "
                             f"value={closest[1]} num_x={closest[0]:.1f} "
-                            f"annual_x={target_x:.1f} dist={dist:.1f} "
+                            f"column_x={column_x:.1f} dist={dist:.1f} "
                             f"accepted={dist <= col_tol} "
                             f"reason={'within_tolerance' if dist <= col_tol else 'out_of_tolerance'}"
                         )
                         if dist <= col_tol:
                             return closest[1]
-                        print(f"[dividend_fitz_assign] kind={kind} → rightmost_fallback")
-                    # フォールバック: ゼロ値(abs<0.5)を除外した最右値
-                    # （「00銭」が最右になるのを防ぐ）
-                    non_zero = [(cx, v) for cx, v in nums_cx if abs(v) > 0.5]
-                    if not non_zero:
-                        return None
-                    rightmost = non_zero[-1]
-                    target_str = f"{target_x:.1f}" if target_x is not None else "N/A"
-                    print(
-                        f"[dividend_fitz_assign] kind={kind} "
-                        f"value={rightmost[1]} num_x={rightmost[0]:.1f} "
-                        f"target_x={target_str} "
-                        f"reason=rightmost_fallback"
-                    )
-                    return rightmost[1]
+                    return None
 
-                rev_val  = _pick_annual(rev_tokens,  "rev")
-                prev_val = _pick_annual(prev_tokens, "prev") if prev_tokens else None
+                rev_val  = _pick_annual(rev_tokens,  "rev", target_x)
+                prev_val = _pick_annual(prev_tokens, "prev", target_x) if prev_tokens else None
+                comp_rev = _pick_annual(rev_tokens, "comp_rev", comparison_x)
+                comp_prev = (_pick_annual(prev_tokens, "comp_prev", comparison_x)
+                             if prev_tokens else None)
 
                 if rev_val is not None:
-                    best_rev  = rev_val
-                    best_prev = prev_val
+                    best_rev  = rev_val if page_basis == "年間" else None
+                    best_prev = prev_val if page_basis == "年間" else None
+                    best_basis = page_basis
+                    best_comp_rev = comp_rev
+                    best_comp_prev = comp_prev
+                    best_comp_basis = comparison_basis
                     break  # 最初に取れたページで確定
 
     except Exception as e:
@@ -653,11 +682,15 @@ def _extract_dividend_annual_total_via_fitz(pdf_path: str) -> dict | None:
         logger.debug(f"[dividend_fitz] pdfplumber extract failed: {e}")
         print(f"[DEBUG_FITZ_ERROR] pdfplumber extract failed: {traceback.format_exc()}")
 
-    if best_rev is None:
+    if best_comp_rev is None:
         return None
 
     return {
         "annual_total_previous": best_prev,
         "annual_total_revised":  best_rev,
+        "dividend_basis":       best_basis,
+        "comparison_previous": best_comp_prev,
+        "comparison_revised":  best_comp_rev,
+        "comparison_basis":    best_comp_basis,
         "extraction_source":     "fitz_annual_total",
     }
