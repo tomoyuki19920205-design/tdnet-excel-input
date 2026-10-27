@@ -6,7 +6,9 @@ ALLOWED_SOURCES = {
     'jquants_earnings_summary',
     'jquants_forecast_fy',
     'jquants_nxf',
-    'legacy_excel'
+    'legacy_excel',
+    'tdnet_xbrl',
+    'tdnet_forecast',
 }
 
 ALLOWED_METRICS = {
@@ -118,13 +120,9 @@ def build_normalized_canonical_write_plan(
     if ticker == "2408" and period_raw and period_raw.endswith("-31"):
         normalized_period = period_raw[:8] + "20"
         
-    # 2. Actuals (source="jquants")
+    # 2. Actuals from the TDnet filing.
     for m_name, m_val in metrics_raw.items():
         if m_val is None:
-            continue
-            
-        # Exclude SGA/販管費 from canonical_financials writes
-        if m_name == "selling_general_and_administrative_expenses":
             continue
             
         plan = CanonicalWritePlan(
@@ -134,32 +132,39 @@ def build_normalized_canonical_write_plan(
             metric=m_name,
             value=m_val, # Assume already scaled to millions_jpy
             unit="millions_jpy",
-            source="jquants",
+            source="tdnet_xbrl",
             filing_id=filing_id
         )
         plan.validate_and_prepare()
         plans.append(plan)
         
-    # 3. Guidance (source="jquants_forecast_fy", quarter="FY")
-    for g_name, g_val in guidance_raw.items():
-        if g_val is None:
-            continue
-            
-        metric_name = None
-        if g_name == "sales_forecast":
-            metric_name = "sales"
-        elif g_name == "op_forecast":
-            metric_name = "operating_profit"
-            
-        if metric_name:
+    # 3. TDnet guidance is a separate FY row with its own evidenced period.
+    from datetime import date
+    forecast_period = str(guidance_raw.get("forecast_period") or "")
+    try:
+        actual_date = date.fromisoformat(normalized_period)
+        forecast_date = date.fromisoformat(forecast_period)
+        valid_period = forecast_date > actual_date if quarter_raw in ("FY", "4Q") else forecast_date >= actual_date
+    except (TypeError, ValueError):
+        valid_period = False
+    guidance_fields = {
+        "sales_forecast": "sales", "op_forecast": "operating_profit",
+        "ordinary_forecast": "ordinary_profit", "net_income_forecast": "net_income",
+        "eps_forecast": "eps",
+    }
+    if valid_period:
+        for g_name, metric_name in guidance_fields.items():
+            g_val = guidance_raw.get(g_name)
+            if g_val is None:
+                continue
             plan = CanonicalWritePlan(
                 ticker=ticker,
-                period=normalized_period or "unknown",
+                period=forecast_period,
                 quarter="FY",
                 metric=metric_name,
-                value=round(g_val / 1_000_000), # Guidance is raw JPY, scale to millions
+                value=g_val if metric_name == "eps" else g_val / 1_000_000,
                 unit="millions_jpy",
-                source="jquants_forecast_fy",
+                source="tdnet_forecast",
                 filing_id=filing_id
             )
             plan.validate_and_prepare()

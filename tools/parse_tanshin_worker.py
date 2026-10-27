@@ -322,6 +322,7 @@ def _run_production_parse(
     disclosed_at: str = "",
     source_url_override: str = "",
     pdf_url_override: str = "",
+    pdf_path_override: str = "",
     source_doc_id_override: str = "",
     archive_date_override: str = "",
     xbrl_doc_id_override: str = "",
@@ -400,7 +401,14 @@ def _run_production_parse(
             extract_narrative_from_xbrl_zip,
         )
         t0 = time.perf_counter()
-        earnings = extract_earnings_data(xbrl_path=zip_path_str, title=doc_title, ticker=ticker)
+        trusted_pdf = (
+            pdf_path_override if source_doc_id and
+            Path(pdf_path_override).name == f"{source_doc_id}.pdf" and
+            Path(pdf_path_override).is_file() else None
+        )
+        earnings = extract_earnings_data(
+            xbrl_path=zip_path_str, pdf_path=trusted_pdf, title=doc_title, ticker=ticker,
+        )
         t_sections["extract_earnings_data_ms"] = round((time.perf_counter() - t0) * 1000, 1)
 
         if earnings is None:
@@ -566,7 +574,10 @@ def _run_production_parse(
             "op_forecast": guidance.op_forecast,
             "op_forecast_low": guidance.op_forecast_low,
             "op_forecast_high": guidance.op_forecast_high,
+            "ordinary_forecast": guidance.ordinary_forecast,
+            "net_income_forecast": guidance.net_income_forecast,
             "eps_forecast": getattr(guidance, "eps_forecast", None),
+            "forecast_period": guidance.forecast_period,
             "sales_yoy": getattr(guidance, "sales_yoy", None),
             "op_yoy": getattr(guidance, "op_yoy", None),
         }
@@ -766,6 +777,7 @@ def _run_input_json_mode() -> None:
             disclosed_at=params.get("disclosed_at", ""),
             source_url_override=params.get("source_url", ""),
             pdf_url_override=params.get("pdf_url", ""),
+            pdf_path_override=params.get("pdf_path", ""),
             source_doc_id_override=params.get("source_doc_id", ""),
             archive_date_override=params.get("archive_date", ""),
             xbrl_doc_id_override=params.get("xbrl_doc_id", ""),

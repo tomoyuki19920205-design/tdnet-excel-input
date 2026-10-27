@@ -355,9 +355,13 @@ def build_worker_input(doc: dict, archive_root: Path | None = None) -> dict:
     zip_path, zip_reason = find_zip_for_doc(
         doc, source_doc_id, xbrl_doc_id, archive_date, archive_root=archive_root
     )
+    pdf_root = Path(archive_root) if archive_root is not None else _PROJECT_ROOT / "data" / "xbrl_archive"
+    pdf_candidate = pdf_root / f"{source_doc_id}.pdf"
+    pdf_path = str(pdf_candidate) if source_doc_id.startswith("1401") and pdf_candidate.is_file() else ""
 
     return {
         "zip_path":      zip_path,
+        "pdf_path":      pdf_path,
         "ticker":        str(doc.get("ticker") or ""),
         "company_name":  str(doc.get("company_name") or ""),
         "title":         title,

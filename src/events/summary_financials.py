@@ -32,6 +32,13 @@ from pathlib import Path
 from typing import Optional
 from xml.etree import ElementTree as ET
 
+from src.events.pipeline_context import EarningsExtractionEvidence
+from src.xbrl_context_scope import (
+    is_actual_consolidated_duration_context,
+    is_actual_reporting_duration_context,
+    parse_context_metadata,
+)
+
 logger = logging.getLogger("summary_financials")
 
 # ============================================================
@@ -502,7 +509,7 @@ def _parse_xbrl_multi_period(
         period_type = _classify_context(ctx)
         if period_type == "unknown":
             continue
-        if field_name in ("operating_profit", "profit_before_tax") and not is_actual_reporting_duration_context(ctx, contexts, reporting_scope=reporting_scope):
+        if not is_actual_reporting_duration_context(ctx, contexts, reporting_scope=reporting_scope):
             continue
 
         val_text = elem.text or ""
@@ -583,7 +590,7 @@ def _parse_xbrl_multi_period(
         period_type = _classify_context(ctx)
         if period_type == "unknown":
             continue
-        if field_name in ("operating_profit", "profit_before_tax") and not is_actual_reporting_duration_context(ctx, contexts, reporting_scope=reporting_scope):
+        if not is_actual_reporting_duration_context(ctx, contexts, reporting_scope=reporting_scope):
             continue
 
         text = (elem.text or "").strip()
@@ -654,6 +661,16 @@ def _extract_multi_period_from_xbrl(
         logger.warning(f"[FINANCIALS] file read failed: {e}")
         return {}
 
+    return _extract_multi_period_from_xbrl_bytes(
+        raw, include_evidence=include_evidence, reporting_scope=reporting_scope,
+    )
+
+
+def _extract_multi_period_from_xbrl_bytes(
+    raw: bytes, include_evidence: bool = False, *, reporting_scope: str = "consolidated"
+) -> dict[str, PeriodFinancials]:
+    """Extract from an in-memory official package without creating temp files."""
+
     if raw[:4] == _ZIP_SIGNATURE:
         try:
             zf = zipfile.ZipFile(io.BytesIO(raw), "r")
@@ -674,8 +691,7 @@ def _extract_multi_period_from_xbrl(
             try:
                 entry_bytes = zf.read(entry)
                 result = _parse_xbrl_multi_period(
-                    entry_bytes, include_evidence=include_evidence,
-                    reporting_scope=reporting_scope,
+                    entry_bytes, include_evidence=include_evidence, reporting_scope=reporting_scope,
                 )
                 if not merged_result:
                     merged_result = result
@@ -686,11 +702,18 @@ def _extract_multi_period_from_xbrl(
                         else:
                             curr_sp = merged_result[k].sales_priority or (-1, False)
                             new_sp = v.sales_priority or (-1, False)
-                            if merged_result[k].sales is None or new_sp > curr_sp:
+                            if v.sales is not None and (merged_result[k].sales is None or new_sp > curr_sp):
                                 merged_result[k].sales = v.sales
                                 merged_result[k].sales_tag = v.sales_tag
                                 merged_result[k].sales_priority = new_sp
-                            if merged_result[k].operating_profit is None:
+                            # Summary values are often truncated to millions; a matching
+                            # attachment statement supplies the exact thousand-yen amount.
+                            if (v.sales is not None and merged_result[k].sales is not None
+                                    and abs(v.sales - merged_result[k].sales) < 1_000_000):
+                                merged_result[k].sales = v.sales
+                            if (v.operating_profit is not None and
+                                    (merged_result[k].operating_profit is None or
+                                     abs(v.operating_profit - merged_result[k].operating_profit) < 1_000_000)):
                                 merged_result[k].operating_profit = v.operating_profit
                                 merged_result[k].operating_profit_tag = v.operating_profit_tag
                             if merged_result[k].profit_before_tax is None: merged_result[k].profit_before_tax = v.profit_before_tax
@@ -835,18 +858,57 @@ def extract_earnings_data(
             f"q_sales_cur={cur_q.sales} q_sales_pri={pri_q.sales}"
         )
 
-    # ---- PDF フォールバック（XBRL で取れなかった場合） ----
-    if result.sales_current is None and pdf_path and os.path.isfile(pdf_path):
+    # ---- PDF フォールバック（項目ごとの欠損のみ補完） ----
+    missing_pl = any(v is None for v in (
+        result.sales_current, result.op_current, result.gross_profit_current,
+        result.selling_general_and_administrative_expenses_current,
+    ))
+    if missing_pl and pdf_path and os.path.isfile(pdf_path):
         try:
             from src.extractor import _extract_from_pdf
+            from src.pdf_financial_table import extract_actual_statement_pdf
+            from src.utils import parse_scale_unit
+
+            statement, statement_unit = extract_actual_statement_pdf(pdf_path, title or "")
+            statement_multiplier = parse_scale_unit(statement_unit) if statement_unit else 0
+            statement_jpy = {
+                field: value * statement_multiplier for field, value in statement.items()
+            }
+            # The statement must describe the same current reporting period as XBRL.
+            statement_mismatch = any(
+                known is not None and statement_jpy.get(field) is not None
+                and abs(known - statement_jpy[field]) >= 1_000_000
+                for field, known in (("sales", result.sales_current),
+                                     ("operating_profit", result.op_current))
+            )
+            if statement_mismatch:
+                statement_jpy = {}
+
             pdf_result, _ = _extract_from_pdf(pdf_path)
-            if pdf_result and pdf_result.sales is not None:
-                result.sales_current = pdf_result.sales
-                result.op_current = pdf_result.operating_profit
-                result.source = "pdf"
-                result.source_unit = pdf_result.source_unit
-                logger.info(f"[FINANCIALS] PDF fallback: sales={pdf_result.sales} op={pdf_result.operating_profit}")
-                # PDF からは前期値が取れないことが多い → YOY 計算不可の可能性
+            pdf_multiplier = (
+                parse_scale_unit(pdf_result.source_unit)
+                if pdf_result and pdf_result.source_unit else 0
+            )
+            for field, attribute in (
+                ("sales", "sales_current"),
+                ("operating_profit", "op_current"),
+                ("gross_profit", "gross_profit_current"),
+                ("selling_general_and_administrative_expenses",
+                 "selling_general_and_administrative_expenses_current"),
+            ):
+                if getattr(result, attribute) is not None:
+                    continue
+                value = statement_jpy.get(field)
+                if (value is None and not statement_mismatch
+                        and field in ("sales", "operating_profit")
+                        and pdf_result is not None and pdf_multiplier):
+                    raw = getattr(pdf_result, field, None)
+                    value = raw * pdf_multiplier if raw is not None else None
+                if value is not None:
+                    setattr(result, attribute, value)
+                    if result.source != "xbrl":
+                        result.source = "pdf"
+                        result.source_unit = "円"
         except Exception as e:
             logger.warning(f"[FINANCIALS] PDF extraction failed: {e}")
 

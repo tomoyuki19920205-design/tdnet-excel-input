@@ -493,6 +493,7 @@ def _sync_canonical_financials(
     dry_run: bool,
     route: str,
     xbrl_path: str | None = None,
+    disclosure_datetime: str | None = None,
 ):
     import os
     if not period:
@@ -521,6 +522,10 @@ def _sync_canonical_financials(
         is_apply = os.getenv("EARNINGS_CANONICAL_WRITE_REPLACE_APPLY") == "1"
         is_dryrun = os.getenv("EARNINGS_CANONICAL_WRITE_REPLACE_DRYRUN") == "1"
 
+        forecast_metrics = _canonical_forecast_metrics(guidance)
+        forecast_period = str(guidance.get("forecast_period") or "")
+        forecast_valid = _valid_forecast_period(period, quarter, forecast_period)
+
         if is_apply or is_dryrun or dry_run:
             logger.info("[EARNINGS][CANONICAL] %s canonical同期(REPLACE %s) 開始 route=%s", ticker, "APPLY" if is_apply and not dry_run else "DRY-RUN", route)
             from src.events.canonical_write_gateway import build_normalized_canonical_write_plan, validate_canonical_write_plan
@@ -547,14 +552,70 @@ def _sync_canonical_financials(
                 period=period,
                 quarter=quarter,
                 metrics_dict=_metrics,
-                source="jquants_earnings_summary",
+                source="tdnet_xbrl",
                 filing_id=filing_id,
+                disclosure_datetime=disclosure_datetime,
                 unit="millions_jpy",
                 config=_config
             )
+            if forecast_metrics and forecast_valid:
+                write_financials_canonical(
+                    ticker=ticker,
+                    period=forecast_period,
+                    quarter="FY",
+                    metrics_dict=forecast_metrics,
+                    source="tdnet_forecast",
+                    filing_id=filing_id,
+                    disclosure_datetime=disclosure_datetime,
+                    unit="millions_jpy",
+                    config=_config,
+                )
+            elif forecast_metrics:
+                logger.warning(
+                    "[EARNINGS][CANONICAL] %s forecast period unverified: actual=%s forecast=%s",
+                    ticker, period, forecast_period,
+                )
             logger.info("[EARNINGS][CANONICAL] %s canonical同期完了 route=%s", ticker, route)
     except Exception as e:
         logger.error("[EARNINGS][CANONICAL] %s canonical同期中にエラー: %s route=%s", ticker, e, route)
+
+
+def _canonical_forecast_metrics(guidance: dict | None) -> dict[str, float]:
+    guidance = guidance or {}
+    fields = {
+        "sales_forecast": "sales", "op_forecast": "operating_profit",
+        "ordinary_forecast": "ordinary_profit", "net_income_forecast": "net_income",
+        "eps_forecast": "eps",
+    }
+    return {
+        metric: value if metric == "eps" else value / 1_000_000
+        for field, metric in fields.items()
+        if (value := guidance.get(field)) is not None
+    }
+
+
+def _valid_forecast_period(actual_period: str, actual_quarter: str, forecast_period: str) -> bool:
+    from datetime import date
+    try:
+        actual = date.fromisoformat(actual_period)
+        forecast = date.fromisoformat(forecast_period)
+    except (TypeError, ValueError):
+        return False
+    return forecast > actual if actual_quarter in ("FY", "4Q") else forecast >= actual
+
+
+def _check_forecast_saved(client, ticker: str, period: str, quarter: str,
+                          filing_id: str, guidance: dict | None) -> bool:
+    metrics = _canonical_forecast_metrics(guidance)
+    if not metrics:
+        return True
+    forecast_period = str((guidance or {}).get("forecast_period") or "")
+    if not _valid_forecast_period(period, quarter, forecast_period):
+        return False
+    return _check_canonical_financials_saved(
+        client, ticker, forecast_period, "FY", filing_id,
+        expected_metrics=list(metrics), source="tdnet_forecast",
+    )
 
 
 def _check_canonical_financials_saved(
@@ -564,6 +625,7 @@ def _check_canonical_financials_saved(
     quarter: str,
     filing_id: str | None = None,
     expected_metrics: list[str] | None = None,
+    source: str | None = None,
 ) -> bool:
     if not filing_id:
         return False
@@ -580,13 +642,15 @@ def _check_canonical_financials_saved(
         )
         return False
     try:
-        res = client.table("canonical_financials") \
+        query = client.table("canonical_financials") \
             .select("metric") \
             .eq("ticker", ticker) \
             .eq("period", period) \
             .eq("quarter", quarter) \
-            .eq("filing_id", filing_id) \
-            .execute()
+            .eq("filing_id", filing_id)
+        if source:
+            query = query.eq("source", source)
+        res = query.execute()
         if res.data:
             metrics = {row.get("metric") for row in res.data}
             missing = [m for m in expected_metrics if m not in metrics]
@@ -675,6 +739,8 @@ def _retry_incomplete_canonical_for_duplicate(
     pl_values: dict,
     dry_run: bool,
     target_segs: list[dict] | None = None,
+    title: str = "",
+    pdf_path: str | None = None,
 ) -> None:
     """重複スキップされたドキュメントの canonical 不足分限定再同期を試みる。
     本番コードへの最終判定名伝播は行わず、警告ログ出力のうえで fail-closed ガードを徹底する。
@@ -708,6 +774,38 @@ def _retry_incomplete_canonical_for_duplicate(
         logger.warning("[EARNINGS][CANONICAL_RETRY] Supabase client not available — skipping retry")
         return
 
+    # Old saved payloads can be incomplete. Reparse the same disclosure ZIP
+    # before checking canonical completeness, without changing its event state.
+    pl_values = dict(pl_values or {})
+    if (title and ((xbrl_path and os.path.isfile(xbrl_path))
+                   or (pdf_path and os.path.isfile(pdf_path)))
+            and (pl_values.get("gross") is None or pl_values.get("sga") is None
+                 or not (pl_values.get("guidance") or {}).get("forecast_period"))):
+        try:
+            from .earnings_guidance_extractor import extract_guidance_from_zip
+            verified_pdf = (
+                pdf_path if pdf_path and os.path.isfile(pdf_path)
+                and disclosure_no and Path(pdf_path).stem.startswith("1401")
+                and Path(pdf_path).stem[-14:] == disclosure_no else None
+            )
+            refreshed = extract_earnings_data(
+                xbrl_path=xbrl_path, pdf_path=verified_pdf, title=title, ticker=ticker,
+            )
+            for key, field in (("sales", "sales_current"), ("op", "op_current"),
+                               ("gross", "gross_profit_current"),
+                               ("sga", "selling_general_and_administrative_expenses_current")):
+                value = getattr(refreshed, field, None)
+                if value is not None:
+                    pl_values[key] = value
+            refreshed_guidance = extract_guidance_from_zip(
+                xbrl_path, actual_sales=refreshed.sales_current,
+                actual_op=refreshed.op_current, pdf_path=verified_pdf,
+            )
+            if refreshed_guidance.forecast_period:
+                pl_values["guidance"] = dataclasses.asdict(refreshed_guidance)
+        except Exception as exc:
+            logger.warning("[EARNINGS][CANONICAL_RETRY] %s reparse failed: %s", ticker, exc)
+
     # ------------------ PL 再同期 ------------------
     try:
         sales = pl_values.get("sales")
@@ -717,6 +815,10 @@ def _retry_incomplete_canonical_for_duplicate(
             expected_metrics.append("sales")
         if op is not None:
             expected_metrics.append(_canonical_profit_metric(op, xbrl_path))
+        if pl_values.get("gross") is not None:
+            expected_metrics.append("gross_profit")
+        if pl_values.get("sga") is not None:
+            expected_metrics.append("selling_general_and_administrative_expenses")
 
         if not expected_metrics:
             logger.info(
@@ -733,7 +835,10 @@ def _retry_incomplete_canonical_for_duplicate(
                 filing_id=filing_id,
                 expected_metrics=expected_metrics,
             )
-            if pl_complete:
+            forecast_complete = _check_forecast_saved(
+                client, ticker, period, quarter, filing_id, pl_values.get("guidance")
+            )
+            if pl_complete and forecast_complete:
                 logger.info(
                     "[EARNINGS][CANONICAL_RETRY] ticker=%s kind=financials status=already_complete",
                     ticker,
@@ -758,6 +863,7 @@ def _retry_incomplete_canonical_for_duplicate(
                         dry_run=dry_run,
                         route="canonical_retry",
                         xbrl_path=xbrl_path,
+                        disclosure_datetime=pl_values.get("disclosure_datetime"),
                     )
                     # 再確認
                     pl_post_complete = _check_canonical_financials_saved(
@@ -810,7 +916,6 @@ def _retry_incomplete_canonical_for_duplicate(
             return
 
         from src.events.env_loader import get_project_root
-        import os
         xbrl_dir = str(get_project_root() / "data" / "xbrl_archive")
 
         if not disclosure_no or len(disclosure_no) != 14 or not disclosure_no.isdigit():
@@ -1613,6 +1718,13 @@ def run_earnings_production(
                 if _xbrl_url:
                     _zip_path = download_document(_xbrl_url, xbrl_dir, session=session, alternate_paths=[docs_dir]) or ""
 
+                if getattr(d, "doc_url", None):
+                    try:
+                        download_document(d.doc_url, xbrl_dir, session=session,
+                                          alternate_paths=[docs_dir])
+                    except Exception as pdf_error:
+                        logger.warning("[EARNINGS] %s PDF fetch failed: %s", _t, pdf_error)
+
                 target_docs_j.append({
                     "ticker":        _t,
                     "company_name":  getattr(d, "company_name", ""),
@@ -1633,7 +1745,10 @@ def run_earnings_production(
                 return result
 
             # ── worker 実行 ────────────────────────────────────────────────
-            runner_summary_j = run_earnings_subprocess_dry_run(target_docs_j, worker_count=4, timeout_sec=60)
+            runner_summary_j = run_earnings_subprocess_dry_run(
+                target_docs_j, worker_count=4, timeout_sec=60,
+                archive_root=Path(xbrl_dir),
+            )
             results_by_ticker_j = {r.get("ticker"): r for r in runner_summary_j.get("results", [])}
 
             for doc_j in target_docs_j:
@@ -1767,6 +1882,7 @@ def run_earnings_production(
                                     "gross": _cp_gross,
                                     "sga": _cp_sga,
                                     "guidance": _cp_payload_ext.get("guidance", {}),
+                                    "disclosure_datetime": doc_j.get("disclosed_at") or doc_j.get("published_at"),
                                 }
 
                                 _retry_incomplete_canonical_for_duplicate(
@@ -1779,6 +1895,8 @@ def run_earnings_production(
                                     pl_values=_cp_pl_vals,
                                     dry_run=dry_run,
                                     target_segs=None,
+                                    title=_cp_title,
+                                    pdf_path=str(Path(xbrl_dir) / f"{_cp_doc_id}.pdf"),
                                 )
                             except Exception as _retry_e:
                                 logger.error("[EARNINGS][CANONICAL_RETRY] Subprocess retry error: %s", _retry_e)
@@ -2012,8 +2130,13 @@ def run_earnings_production(
                         _expected_metrics.append("sales")
                     if _op is not None:
                         _expected_metrics.append(_canonical_profit_metric(_op, _resolved_zip))
+                    if _gross is not None:
+                        _expected_metrics.append("gross_profit")
+                    if _sga is not None:
+                        _expected_metrics.append("selling_general_and_administrative_expenses")
 
                     _pl_saved = False
+                    _forecast_saved = False
                     _seg_saved = False
                     if _client:
                         _pl_saved = _check_canonical_financials_saved(
@@ -2023,6 +2146,9 @@ def run_earnings_production(
                             quarter=_q,
                             filing_id=canonical_filing_id,
                             expected_metrics=_expected_metrics,
+                        )
+                        _forecast_saved = _check_forecast_saved(
+                            _client, _ticker, _period, _q, canonical_filing_id, _guidance,
                         )
                         _seg_saved = _check_canonical_segments_saved(
                             client=_client,
@@ -2034,7 +2160,7 @@ def run_earnings_production(
                         )
 
                     # PL同期
-                    if not _pl_saved:
+                    if not _pl_saved or not _forecast_saved:
                         _sync_canonical_financials(
                             ticker=_ticker,
                             period=_period,
@@ -2048,6 +2174,7 @@ def run_earnings_production(
                             dry_run=dry_run,
                             route="subprocess",
                             xbrl_path=_resolved_zip,
+                            disclosure_datetime=doc_j.get("disclosed_at") or doc_j.get("published_at"),
                         )
 
                     # セグメント同期
@@ -2169,23 +2296,46 @@ def run_earnings_production(
             )
             xbrl_path = resolved.zip_path
             _seq_provenance = resolved.trusted_provenance
+            pdf_only_earnings = None
+            pdf_fallback_path = None
+            _resolver_title_period = _resolver_expected_period
 
             if xbrl_path:
                 logger.info(f"[EARNINGS] {ticker} resolved ZIP: {Path(xbrl_path).name}")
             else:
                 logger.info(f"[EARNINGS] {ticker} ZIP resolution failed")
             if not xbrl_path:
-                result.errors.append(f"{ticker}: XBRL ZIP not found")
-                parse_failed += 1
-                continue
+                doc_url = getattr(doc, "doc_url", "") or ""
+                if doc_url:
+                    pdf_fallback_path = download_document(
+                        doc_url, xbrl_dir, session=session,
+                        alternate_paths=[docs_dir],
+                    )
+                if pdf_fallback_path and Path(pdf_fallback_path).exists():
+                    pdf_only_earnings = extract_earnings_data(
+                        pdf_path=pdf_fallback_path, title=doc.title, ticker=ticker,
+                    )
+                if not pdf_only_earnings or pdf_only_earnings.sales_current is None:
+                    result.errors.append(f"{ticker}: XBRL ZIP not found and PDF actual parse failed")
+                    parse_failed += 1
+                    continue
+                from src.pdf_financial_table import extract_fy_actual_period_pdf
+                pdf_actual_period = extract_fy_actual_period_pdf(pdf_fallback_path)
+                if (not pdf_actual_period or not _resolver_title_period
+                        or pdf_actual_period[:7] != _resolver_title_period[:7]):
+                    result.errors.append(f"{ticker}: PDF actual fiscal period unverified")
+                    parse_failed += 1
+                    continue
+                _resolver_expected_period = pdf_actual_period
 
             # ---- キャッシュ確認 (parsed) ----
-            parser_version = "v4_2c_001"
+            parser_version = "v4_2c_003_pdf_forecast"
             tdnet_id_str = str(getattr(doc, "tdnet_id", "")) or str(getattr(doc, "doc_id", ""))
             doc_url_str = str(getattr(doc, "doc_url", "")) or str(getattr(doc, "xbrl_url", ""))
 
             parsed_key = make_cache_key(f"tdnet_parsed:{parser_version}", doc_id=tdnet_id_str, url=doc_url_str)
             cached_parsed = load_json(parsed_key, conn) if conn else load_json(parsed_key)
+            pdf_path_downloaded = pdf_fallback_path
 
             if cached_parsed:
                 earnings_dict = cached_parsed.get("earnings")
@@ -2224,14 +2374,20 @@ def run_earnings_production(
                 logger.info(f"[EARNINGS] {ticker} parsed cache hit! Bypassing heavy extraction.")
 
             else:
-                if not xbrl_path:
-                    logger.warning(f"[EARNINGS] {ticker} No XBRL found. skip.")
-                    continue
+                if pdf_only_earnings is not None:
+                    earnings = pdf_only_earnings
+                    parse_success += 1
+                    result.validated_count += 1
                 else:
                     # ---- 数値抽出 ----
+                    if getattr(doc, "doc_url", None):
+                        pdf_path_downloaded = download_document(
+                            doc.doc_url, xbrl_dir, session=session, alternate_paths=[docs_dir],
+                        )
                     try:
                         earnings = extract_earnings_data(
-                            xbrl_path=xbrl_path, title=doc.title, ticker=ticker,
+                            xbrl_path=xbrl_path, pdf_path=pdf_path_downloaded,
+                            title=doc.title, ticker=ticker,
                         )
                     except Exception as e:
                         logger.error(f"[EARNINGS] {ticker} parse error: {e}")
@@ -2255,7 +2411,7 @@ def run_earnings_production(
 
                 # ---- 企業名フォールバック ----
                 company_name = doc.company_name
-                if not company_name:
+                if not company_name and xbrl_path:
                     extracted_name, _ = extract_company_info_from_zip(xbrl_path)
                     if extracted_name:
                         company_name = extracted_name
@@ -2314,7 +2470,7 @@ def run_earnings_production(
                 company_reasons: list[str] = []
                 segment_reasons: list[dict] = []
 
-                if not dry_run:
+                if not dry_run and xbrl_path:
                     narrative_text = extract_narrative_from_xbrl_zip(xbrl_path)
                     if narrative_text:
                         narrative = extract_narrative(narrative_text, title=doc.title)
@@ -2348,9 +2504,7 @@ def run_earnings_production(
 
                 # ---- PDF取得・テキスト抽出 (フォールバック用) ----
                 pdf_text = ""
-                pdf_path_downloaded = None
                 if getattr(doc, 'doc_url', None):
-                    pdf_path_downloaded = download_document(doc.doc_url, xbrl_dir, session=session, alternate_paths=[docs_dir])
                     if pdf_path_downloaded and Path(pdf_path_downloaded).exists():
                         try:
                             import pdfplumber
@@ -2548,9 +2702,6 @@ def run_earnings_production(
                 if xbrl_fy and fiscal_year and xbrl_fy != fiscal_year:
                     period_mismatch = True
 
-                if not xbrl_path:
-                    period_mismatch = True # Force mismatch treatment for missing XBRL
-
                 if period_mismatch:
                     logger.warning(f"[EARNINGS] {ticker} Period mismatch guard triggered! event={fiscal_year}/{quarter} xbrl={xbrl_fy}/{xbrl_q}")
                     action = "skipped_period_mismatch"
@@ -2696,8 +2847,13 @@ def run_earnings_production(
                         _expected_metrics.append("sales")
                     if earnings.op_current is not None:
                         _expected_metrics.append(_canonical_profit_metric(earnings.op_current, xbrl_path))
+                    if earnings.gross_profit_current is not None:
+                        _expected_metrics.append("gross_profit")
+                    if earnings.selling_general_and_administrative_expenses_current is not None:
+                        _expected_metrics.append("selling_general_and_administrative_expenses")
 
                     _pl_saved = False
+                    _forecast_saved = False
                     _seg_saved = False
                     if _client:
                         _pl_saved = _check_canonical_financials_saved(
@@ -2707,6 +2863,10 @@ def run_earnings_production(
                             quarter=quarter,
                             filing_id=_seq_doc_id,
                             expected_metrics=_expected_metrics,
+                        )
+                        _forecast_saved = _check_forecast_saved(
+                            _client, ticker, _seq_period, quarter, _seq_doc_id,
+                            dataclasses.asdict(guidance) if guidance and guidance.has_guidance else {},
                         )
                         _seg_saved = _check_canonical_segments_saved(
                             client=_client,
@@ -2718,7 +2878,7 @@ def run_earnings_production(
                         )
 
                     # PL同期
-                    if not _pl_saved:
+                    if not _pl_saved or not _forecast_saved:
                         _seq_guidance_dict = {}
                         if guidance and guidance.has_guidance:
                             _seq_guidance_dict = dataclasses.asdict(guidance)
@@ -2736,6 +2896,10 @@ def run_earnings_production(
                             dry_run=dry_run,
                             route="sequential",
                             xbrl_path=xbrl_path,
+                            disclosure_datetime=(
+                                getattr(doc, "disclosure_datetime", "")
+                                or getattr(doc, "published_at", "") or None
+                            ),
                         )
 
                     # セグメント同期
@@ -2783,6 +2947,10 @@ def run_earnings_production(
                             "gross": getattr(earnings, "gross_profit_current", None),
                             "sga": getattr(earnings, "selling_general_and_administrative_expenses_current", None),
                             "guidance": dataclasses.asdict(guidance) if (guidance and guidance.has_guidance) else {},
+                            "disclosure_datetime": (
+                                getattr(doc, "disclosure_datetime", "")
+                                or getattr(doc, "published_at", "") or None
+                            ),
                         }
 
                         _retry_incomplete_canonical_for_duplicate(
@@ -2795,6 +2963,8 @@ def run_earnings_production(
                             pl_values=_seq_pl_vals,
                             dry_run=dry_run,
                             target_segs=None,
+                            title=doc.title,
+                            pdf_path=pdf_path_downloaded,
                         )
                     except Exception as _seq_retry_e:
                         logger.error("[EARNINGS][CANONICAL_RETRY] Sequential retry error: %s", _seq_retry_e)
@@ -2926,7 +3096,10 @@ def _build_earnings_event_record(
             "op_forecast": guidance.op_forecast,
             "op_forecast_low": guidance.op_forecast_low,
             "op_forecast_high": guidance.op_forecast_high,
+            "ordinary_forecast": guidance.ordinary_forecast,
+            "net_income_forecast": guidance.net_income_forecast,
             "eps_forecast": guidance.eps_forecast,
+            "forecast_period": guidance.forecast_period,
             "sales_yoy": guidance.sales_yoy,
             "op_yoy": guidance.op_yoy,
             "eps_yoy": guidance.eps_yoy,

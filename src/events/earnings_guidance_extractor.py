@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import io
+from datetime import date
+from decimal import Decimal, InvalidOperation
 import logging
 import os
 import re
@@ -16,6 +18,7 @@ from src.events.pipeline_context import EarningsExtractionEvidence
 from pathlib import Path
 from typing import Optional
 from xml.etree import ElementTree as ET
+from src.xbrl_context_scope import parse_context_metadata
 
 logger = logging.getLogger("guidance_extractor")
 
@@ -131,6 +134,92 @@ _XBRL_EXTS = (".xbrl",)
 _ZIP_SIG = b"PK\x03\x04"
 
 
+def _extract_guidance_from_pdf(pdf_path: str | None) -> GuidanceData | None:
+    """Read one FY forecast table under its explicit PDF period heading.
+
+    A heading and a complete, unit-labelled table must occur on the same page.
+    Ambiguous or contradictory pages are left unresolved rather than assigned
+    to a title-derived fiscal year.
+    """
+    if not pdf_path or not Path(pdf_path).is_file():
+        return None
+    try:
+        import pdfplumber
+        with pdfplumber.open(pdf_path) as pdf:
+            matches = []
+            for page in pdf.pages:
+                text = unicodedata.normalize("NFKC", page.extract_text() or "")
+                headings = re.findall(
+                    r"(\d{4})年\s*(\d{1,2})月期の(?:連結|個別)?業績予想\s*[（(]\s*"
+                    r"(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日\s*[~〜～-]\s*"
+                    r"(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日\s*[）)]",
+                    text,
+                )
+                if len(headings) != 1:
+                    continue
+                fy, month, sy, sm, sd, ey, em, ed = map(int, headings[0])
+                try:
+                    start, end = date(sy, sm, sd), date(ey, em, ed)
+                except ValueError:
+                    continue
+                if (fy, month) != (end.year, end.month) or not 330 <= (end - start).days <= 400:
+                    continue
+                for table in page.extract_tables() or []:
+                    if len(table or []) < 2:
+                        continue
+                    header = [re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(c or "")))
+                              for c in table[0]]
+                    columns = {}
+                    for metric, labels in (("sales_forecast", ("売上高", "売上収益", "営業収益")),
+                                           ("op_forecast", ("営業利益", "営業損失")),
+                                           ("ordinary_forecast", ("経常利益", "税引前利益")),
+                                           ("net_income_forecast", ("当期純利益", "当期利益")),
+                                           ("eps_forecast", ("1株当たり",))):
+                        indices = [i for i, cell in enumerate(header)
+                                   if any(label in cell for label in labels) and
+                                   (metric != "net_income_forecast" or "株当たり" not in cell)]
+                        if len(indices) == 1:
+                            columns[metric] = indices[0]
+                        elif len(indices) > 1:
+                            columns = {}
+                            break
+                    if not {"sales_forecast", "op_forecast"}.issubset(columns) or len(set(columns.values())) != len(columns):
+                        continue
+                    for row in table[1:]:
+                        if not row or re.sub(r"\s+", "", str(row[0] or "")) != "通期":
+                            continue
+                        parsed = {}
+                        for metric, index in columns.items():
+                            if index >= len(row):
+                                break
+                            cell = unicodedata.normalize("NFKC", str(row[index] or ""))
+                            pattern = (r"^\s*円\s*銭\s*([△▲−-]?\s*[\d,]+(?:\.\d+)?)\s*$"
+                                       if metric == "eps_forecast" else
+                                       r"^\s*(千円|百万円)\s*([△▲−-]?\s*[\d,]+(?:\.\d+)?)\s*$")
+                            number = re.fullmatch(pattern, cell)
+                            if number is None:
+                                break
+                            raw = number.group(number.lastindex).replace(",", "").replace(" ", "")
+                            negative = raw.startswith(("△", "▲", "−", "-"))
+                            raw = raw.lstrip("△▲−-")
+                            try:
+                                value = Decimal(raw) * (-1 if negative else 1)
+                            except InvalidOperation:
+                                break
+                            if metric != "eps_forecast":
+                                value *= 1_000 if number.group(1) == "千円" else 1_000_000
+                            parsed[metric] = float(value)
+                        if len(parsed) == len(columns):
+                            matches.append((end.isoformat(), parsed))
+            if len(matches) != 1:
+                return None
+            period, values = matches[0]
+            return GuidanceData(forecast_period=period, **values)
+    except Exception as exc:
+        logger.warning("[GUIDANCE] PDF forecast extraction failed: %s", exc)
+        return None
+
+
 # ============================================================
 # GuidanceData
 # ============================================================
@@ -146,6 +235,7 @@ class GuidanceData:
     ordinary_forecast: Optional[float] = None
     net_income_forecast: Optional[float] = None
     eps_forecast: Optional[float] = None
+    forecast_period: Optional[str] = None  # XBRL duration end or PDF forecast heading
     evidences: list = field(default_factory=list)
 
     sales_actual: Optional[float] = None
@@ -164,7 +254,8 @@ class GuidanceData:
     @property
     def has_guidance(self) -> bool:
         return any(v is not None for v in [
-            self.sales_forecast, self.op_forecast, self.eps_forecast,
+            self.sales_forecast, self.op_forecast, self.ordinary_forecast,
+            self.net_income_forecast, self.eps_forecast,
             self.sales_yoy_extracted, self.op_yoy_extracted
         ])
 
@@ -554,8 +645,8 @@ def _extract_eps_from_forecast_table(plain_text: str) -> list[dict]:
         is_suspicious = abs(eps_val) > _EPS_SUSPICIOUS_THRESHOLD
 
         candidates.append({
-                "tag_name": elem.get("name", "").split(":")[-1] if elem.get("name") else elem.tag.split("}")[-1],
-                "context_ref": ctx if 'ctx' in locals() else '',
+            "tag_name": "text_eps",
+            "context_ref": "",
             "metric": "eps",
             "value": eps_val,
             "period_type": period_type,
@@ -1257,6 +1348,9 @@ def _collect_forecast_candidates_from_bytes(raw: bytes) -> list[dict]:
                 "source": "ixbrl",
             })
 
+    contexts = parse_context_metadata(root)
+    for candidate in candidates:
+        candidate["period_end"] = (contexts.get(candidate.get("context_ref", "")) or {}).get("end") or None
     return candidates
 
 
@@ -1287,7 +1381,7 @@ def _extract_plain_text_from_zip(zf: zipfile.ZipFile) -> str:
 # ============================================================
 
 def extract_guidance_from_zip(
-    xbrl_path: str,
+    xbrl_path: str | None,
     actual_sales: int | None = None,
     actual_op: int | None = None,
     pdf_path: str | None = None,
@@ -1300,21 +1394,27 @@ def extract_guidance_from_zip(
         op_actual=actual_op,
     )
 
+    pdf_guidance = _extract_guidance_from_pdf(pdf_path)
+    if not xbrl_path:
+        if pdf_guidance:
+            pdf_guidance.sales_actual = actual_sales
+            pdf_guidance.op_actual = actual_op
+        return pdf_guidance or guidance
     try:
         raw = Path(xbrl_path).read_bytes()
     except Exception as e:
         logger.warning(f"[GUIDANCE] file read failed: {e}")
-        return guidance
+        return pdf_guidance or guidance
 
     if raw[:4] != _ZIP_SIG:
         logger.warning("[GUIDANCE] not a ZIP file")
-        return guidance
+        return pdf_guidance or guidance
 
     try:
         zf = zipfile.ZipFile(io.BytesIO(raw), "r")
     except zipfile.BadZipFile:
         logger.warning("[GUIDANCE] bad ZIP file")
-        return guidance
+        return pdf_guidance or guidance
 
     # ---- XBRL/iXBRL 候補収集 ----
     all_candidates: list[dict] = []
@@ -1371,6 +1471,16 @@ def extract_guidance_from_zip(
         guidance.ordinary_forecast = best.get("ordinary_profit")
         guidance.net_income_forecast = best.get("net_income")
         guidance.eps_forecast = best.get("eps")
+        selected_candidates = [
+            best.get(f"{metric}_exact_candidate")
+            or best.get(f"{metric}_upper_candidate")
+            or best.get(f"{metric}_lower_candidate")
+            for metric in ("sales", "operating_profit", "ordinary_profit", "net_income", "eps")
+            if best.get(metric) is not None
+        ]
+        selected_periods = {candidate.get("period_end") for candidate in selected_candidates if candidate}
+        if selected_candidates and len(selected_periods) == 1 and None not in selected_periods:
+            guidance.forecast_period = selected_periods.pop()
 
         if include_evidence and best:
             for metric in ["sales", "operating_profit", "ordinary_profit", "net_income", "eps"]:
@@ -1390,6 +1500,7 @@ def extract_guidance_from_zip(
             guidance.op_yoy_extracted = best["op_yoy_extracted"]
         
     combined_text = ""
+    non_xbrl_forecast_value = False
     # ---- プレーンテキスト/PDFからのフル抽出フォールバック ----
     # もしXBRLから売上や営利の予想が取れなかった場合、PDFやテキストから直接抽出を試みる
     if (guidance.sales_forecast is None or guidance.op_forecast is None) and (plain_text or pdf_text):
@@ -1398,12 +1509,15 @@ def extract_guidance_from_zip(
         if text_guidance:
             if guidance.sales_forecast is None:
                 guidance.sales_forecast = text_guidance.get("sales_forecast")
+                non_xbrl_forecast_value |= guidance.sales_forecast is not None
                 guidance.sales_yoy_extracted = text_guidance.get("sales_yoy_extracted")
             if guidance.op_forecast is None:
                 guidance.op_forecast = text_guidance.get("op_forecast")
+                non_xbrl_forecast_value |= guidance.op_forecast is not None
                 guidance.op_yoy_extracted = text_guidance.get("op_yoy_extracted")
             if guidance.eps_forecast is None:
                 guidance.eps_forecast = text_guidance.get("eps_forecast")
+                non_xbrl_forecast_value |= guidance.eps_forecast is not None
             logger.info(f"[GUIDANCE] text/PDF regex fallback used: sales={guidance.sales_forecast}, op={guidance.op_forecast}")
 
     # ---- LLMフォールバック ----
@@ -1425,12 +1539,14 @@ def extract_guidance_from_zip(
                         val = float(llm_result["sales_forecast"])
                         if val > 0:
                             guidance.sales_forecast = val
+                            non_xbrl_forecast_value = True
                     if guidance.sales_yoy_extracted is None and llm_result.get("sales_yoy") is not None:
                         val = float(llm_result["sales_yoy"]) / 100.0  # % -> 割合
                         guidance.sales_yoy_extracted = val
                     if guidance.op_forecast is None and llm_result.get("op_forecast") is not None:
                         val = float(llm_result["op_forecast"])
                         guidance.op_forecast = val
+                        non_xbrl_forecast_value = True
                     if guidance.op_yoy_extracted is None and llm_result.get("op_yoy") is not None:
                         val = float(llm_result["op_yoy"]) / 100.0
                         guidance.op_yoy_extracted = val
@@ -1445,6 +1561,23 @@ def extract_guidance_from_zip(
         clean_text_eps = [c for c in text_eps if not c.get("suspicious")]
         if clean_text_eps:
             guidance.eps_forecast = clean_text_eps[-1].get("value")
+            non_xbrl_forecast_value |= guidance.eps_forecast is not None
+
+    if non_xbrl_forecast_value:
+        # Text fallback has no per-value XBRL period evidence. Keep the guidance
+        # for the notification, but do not assign it to another period in canonical.
+        guidance.forecast_period = None
+
+    if pdf_guidance and not guidance.forecast_period:
+        forecast_fields = ("sales_forecast", "op_forecast", "ordinary_forecast",
+                           "net_income_forecast", "eps_forecast")
+        if all(getattr(guidance, field) is None or
+               getattr(guidance, field) == getattr(pdf_guidance, field)
+               for field in forecast_fields):
+            for field in forecast_fields:
+                if getattr(guidance, field) is None:
+                    setattr(guidance, field, getattr(pdf_guidance, field))
+            guidance.forecast_period = pdf_guidance.forecast_period
 
     # ---- Outlook 抽出は無効化済み ----
     # outlook_text / outlook_summary / outlook_factors は互換用に空値を維持
