@@ -73,6 +73,15 @@ def test_shared_heading_does_not_guess_an_unlabelled_table():
     assert forecast_eps_revisions(text)[0]["period"] == "UNKNOWN"
 
 
+def test_shared_fiscal_heading_ends_at_next_top_level_topic():
+    text = ("1.2027年3月期業績予想の修正\n"
+            + table("(1)第2四半期(中間期)連結業績予想の修正")
+            + "2.別の事項\n"
+            + table("(1)通期連結業績予想の修正"))
+    rows = forecast_eps_revisions(text)
+    assert [r["fiscal_period"] for r in rows] == ["2027年3月期", None]
+
+
 def test_both_periods_and_reversed_table_order():
     half, full = table(HALF), table(FULL, "59.92", "81.06", "4,100", "5,700")
     for text in (half + full, full + half):

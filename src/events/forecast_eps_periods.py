@@ -122,6 +122,9 @@ def forecast_eps_revisions(text: str) -> list[dict]:
         table = _TABLE_HEADING.match(line)
         if table:
             headings.append((index, year, month, table[1]))
+        elif re.match(r"^\s*\d+[.、]", line):
+            # A new top-level topic ends the preceding fiscal heading's scope.
+            year = month = None
     sections: list[tuple[int | None, int | None, str, str]] = []
     if headings:
         for index, (start, year, month, heading) in enumerate(headings):
