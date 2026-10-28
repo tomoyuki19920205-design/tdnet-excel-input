@@ -2,7 +2,7 @@
 """forecast_models.py — 業績予想修正イベントのデータモデル"""
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Optional
 import json
 
@@ -37,6 +37,7 @@ class ForecastRevisionEvent:
     revised_eps: Optional[float] = None
     delta_eps: Optional[float] = None
     change_eps_pct: Optional[float] = None
+    eps_revisions: list[dict] = field(default_factory=list)
 
     # 専用抽出器が返す「今回の通期EPS予想」（補助フィールド、None は取得不能を意味する）
     latest_full_year_eps: Optional[float] = None

@@ -2374,11 +2374,40 @@ _FY_SKIP_KEYWORDS = [
 ]
 
 
+def _attach_eps_revisions(event: ForecastRevisionEvent, text: str) -> ForecastRevisionEvent:
+    """Keep each revised EPS pair tied to its own table and fiscal period."""
+    from .forecast_eps_periods import forecast_eps_revisions
+
+    revisions = forecast_eps_revisions(text)
+    if not revisions:
+        return event
+    priority = {"2Q_CUMULATIVE": 0, "2Q_STANDALONE": 1, "FULL_YEAR": 2, "UNKNOWN": 3}
+    event.eps_revisions = sorted(
+        revisions,
+        key=lambda row: (row["fiscal_period"] or "", priority.get(row["period"], 3), row["basis"] or ""),
+    )
+    primary = next(
+        (row for row in event.eps_revisions
+         if row["previous_eps"] == event.previous_eps and row["revised_eps"] == event.revised_eps),
+        event.eps_revisions[0],
+    )
+    event.previous_eps = primary["previous_eps"]
+    event.revised_eps = primary["revised_eps"]
+    event.delta_eps = _calc_delta(event.previous_eps, event.revised_eps)
+    event.change_eps_pct = _calc_pct(event.previous_eps, event.revised_eps)
+    event.eps_validated = True
+    # period_label is part of the existing event fingerprint; keep it stable.
+    full_year = next((row for row in event.eps_revisions if row["period"] == "FULL_YEAR"), None)
+    event.latest_full_year_eps = full_year["revised_eps"] if full_year else None
+    return event
+
+
 def _return_with_eps_log(
     event: ForecastRevisionEvent,
     text: str = "",
 ) -> ForecastRevisionEvent:
     """EPS を INFO ログに出力し、補助経路による latest_full_year_eps を設定してから event を返す。"""
+    event = _attach_eps_revisions(event, text)
     event = _sanitize_event_amount_metrics(event)
     if event.previous_eps is not None or event.revised_eps is not None:
         logger.info(
@@ -2386,7 +2415,7 @@ def _return_with_eps_log(
         )
 
     # --- 補助経路: extract_latest_full_year_eps ---
-    if text and event.latest_full_year_eps is None:
+    if text and event.latest_full_year_eps is None and not event.eps_revisions:
         text_n = text[:2000]  # 最先頭 2000 文字で卷屋判定
         has_trigger = any(kw in text_n for kw in _FY_TRIGGER_KEYWORDS)
         has_skip = any(kw in text_n for kw in _FY_SKIP_KEYWORDS)
@@ -3194,7 +3223,7 @@ def _extract_forecast_revision_metrics(
                     f"[forecast_ocr] selected=ocr "
                     f"reason=ocr_fallback_used"
                 )
-                return _return_with_eps_log(ocr_event)
+                return _return_with_eps_log(ocr_event, normalized_ocr)
             elif final_ocr_score == 0:
                 logger.info(
                     f"[forecast_ocr] selected=base "
@@ -3241,6 +3270,8 @@ def extract_forecast_revision(
         event = _extract_forecast_revision_metrics(
             text, title, is_difference, reason_pdf or pdf_path, reason_source_url, doc_id
         )
+        if not event.eps_revisions:
+            event = _attach_eps_revisions(event, text)
         event.revision_reason = extract_forecast_reason(reason_pdf, reason_source_url, doc_id, title)
         if reason_source_url != doc_url and event.revision_reason.get("status") == "available":
             event.revision_reason["original_tdnet_url"] = doc_url
