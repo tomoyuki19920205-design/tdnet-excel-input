@@ -14,7 +14,7 @@ _DATE_RANGE = re.compile(
 )
 _PREVIOUS = re.compile(r"^\s*(?:前回(?:発表|公表|修正)?予想|修正前|従来予想|当初予想)")
 _REVISED = re.compile(r"^\s*(?:今回(?:修正|発表|公表)?予想|修正後|新予想)")
-_NUMBER = re.compile(r"(?<![\d.])[-−]?\d[\d,]*(?:\.\d+)?(?![\d.])")
+_NUMBER = re.compile(r"(?<![\d.])[-−△▲]?\d[\d,]*(?:\.\d+)?(?![\d.])")
 
 
 def _period(heading: str, fiscal_year: int | None, fiscal_month: int | None) -> str:
@@ -55,9 +55,42 @@ def _row_values(lines: list[str], start: int) -> list[float]:
         row += " " + lines[start + 1]
     values = _NUMBER.findall(row)
     try:
-        return [float(value.replace(",", "").replace("−", "-")) for value in values]
+        return [float(value.replace(",", "").replace("−", "-").replace("△", "-").replace("▲", "-")) for value in values]
     except ValueError:
         return []
+
+
+def _operating_column(header: str) -> int | None:
+    """Locate operating profit by the table's own metric header, before EPS."""
+    without_eps = re.sub(
+        r"1株当たり(?:当期|中間|四半期)?純利益|1株当り(?:当期|中間|四半期)?純利益|EPS",
+        "", header, flags=re.I,
+    )
+    markers = sorted(
+        (match.start(), name)
+        for name, pattern in (
+            ("sales", r"売上高|売上収益"),
+            ("op", r"営業利益|営業損益|営業損失"),
+            ("ordinary", r"経常利益|経常損益"),
+            ("net", r"純利益|純損益"),
+        )
+        for match in re.finditer(pattern, without_eps)
+    )
+    positions = [name for _, name in markers]
+    return positions.index("op") if positions.count("op") == 1 else None
+
+
+def _operating_unit_multiplier(header: str) -> float | None:
+    """Return the conversion to millions of yen only when the amount unit is clear."""
+    if "百万円" in header and "千円" not in header:
+        return 1.0
+    if "千円" in header and "百万円" not in header:
+        return 0.001
+    if "百万円" in header or "千円" in header:
+        return None
+    if re.search(r"(?:単位|金額)[:：]?円(?:\b|$)", header) or len(re.findall(r"円(?:銭)?", header)) >= 2:
+        return 0.000001
+    return None
 
 
 def forecast_eps_revisions(text: str) -> list[dict]:
@@ -106,7 +139,18 @@ def forecast_eps_revisions(text: str) -> list[dict]:
         if len(prev_values) != len(revised_values) or len(prev_values) < expected_columns:
             continue
         prev_eps, revised_eps = prev_values[-1], revised_values[-1]
-        if abs(prev_eps) > 10000 or abs(revised_eps) > 10000 or prev_eps == revised_eps:
+        if abs(prev_eps) > 10000 or abs(revised_eps) > 10000:
+            continue
+        op_index = _operating_column(header)
+        op_multiplier = _operating_unit_multiplier(header)
+        previous_op = revised_op = None
+        # The rows must match the complete header. A short/extra row can shift
+        # columns, so do not infer operating profit from its position.
+        if (op_index is not None and op_multiplier is not None
+                and len(prev_values) == len(revised_values) == expected_columns):
+            previous_op = prev_values[op_index] * op_multiplier
+            revised_op = revised_values[op_index] * op_multiplier
+        if prev_eps == revised_eps and (previous_op is None or previous_op == revised_op):
             continue
         fiscal = f"{year}年{month}月期" if year and month else None
         context = heading + " " + " ".join(lines[:previous])
@@ -117,6 +161,9 @@ def forecast_eps_revisions(text: str) -> list[dict]:
             "basis": basis,
             "previous_eps": prev_eps,
             "revised_eps": revised_eps,
+            "previous_op": previous_op,
+            "revised_op": revised_op,
+            "op_unit": "millions_jpy" if previous_op is not None else None,
         }
         if item not in revisions:
             revisions.append(item)
