@@ -4,7 +4,13 @@ from src.events.forecast_models import ForecastRevisionEvent
 from src.events.common_models import DocumentMeta
 from src.events.event_pipeline import _forecast_to_event_record
 from src.events.tdnet_event_store import build_supabase_row
+from src.events.common_storage import ensure_events_table, upsert_event
 import json
+import hashlib
+from pathlib import Path
+import sqlite3
+
+import pdfplumber
 
 
 def table(heading: str, previous: str = "12.34", revised: str = "27.32",
@@ -21,6 +27,50 @@ def table(heading: str, previous: str = "12.34", revised: str = "27.32",
 
 HALF = "2027年3月期第2四半期（中間期）連結業績予想数値の修正（2026年4月1日～2026年9月30日）"
 FULL = "2027年3月期通期連結業績予想数値の修正（2026年4月1日～2027年3月31日）"
+
+
+def test_sekisui_original_pdf_shared_fiscal_heading_and_two_tables():
+    pdf_path = Path(__file__).parent / "fixtures" / "sekisui_4228_20261028.pdf"
+    assert hashlib.sha256(pdf_path.read_bytes()).hexdigest() == "7fef6c6f0ec4624c33ff109461a712d13bdfdd6f52941b79fbd14dbaebf0e7fc"
+    with pdfplumber.open(pdf_path) as pdf:
+        text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+    assert "１．2027年３月期業績予想の修正" in text
+    assert "（１）第２四半期（中間期）連結業績予想の修正" in text
+    assert "（２）通期連結業績予想の修正" in text
+    rows = forecast_eps_revisions(text)
+    assert [(row["fiscal_period"], row["period"], row["basis"], row["previous_op"],
+             row["revised_op"], row["previous_eps"], row["revised_eps"])
+            for row in rows] == [
+        ("2027年3月期", "2Q_CUMULATIVE", "連結", 1600, 3000, 43.86, 54.79),
+        ("2027年3月期", "FULL_YEAR", "連結", 3100, 5300, 54.83, 81.0),
+    ]
+    assert [(row["previous_eps_text"], row["revised_eps_text"]) for row in rows] == [
+        ("43.86", "54.79"), ("54.83", "81.00"),
+    ]
+    extracted = _return_with_eps_log(ForecastRevisionEvent(period_label="2027年3月期"), text)
+    doc = DocumentMeta(
+        doc_id="sekisui-20261028", ticker="4228", company_name="積水化成",
+        title="連結業績予想および配当予想の修正に関するお知らせ",
+        disclosure_datetime="2026-10-28T16:00:00+09:00",
+        doc_url="https://www.release.tdnet.info/inbs/140120261027557141.pdf",
+    )
+    record = _forecast_to_event_record(doc, extracted)
+    stored = json.loads(record.extracted_payload_json)
+    assert stored["eps_revisions"] == rows
+    assert stored["latest_full_year_eps"] == 81.0
+    row, raw, *_ = build_supabase_row(record)
+    assert json.loads(row["raw_payload"])["extracted"]["eps_revisions"] == rows
+    assert raw["extracted"]["eps_revisions"] == rows
+    with sqlite3.connect(":memory:") as conn:
+        ensure_events_table(conn)
+        assert upsert_event(conn, record)[0] == "inserted"
+        assert upsert_event(conn, record)[0] == "no_change"
+        assert conn.execute("SELECT count(*) FROM events").fetchone()[0] == 1
+
+
+def test_shared_heading_does_not_guess_an_unlabelled_table():
+    text = "2027年3月期業績予想の修正\n" + table("業績予想の修正")
+    assert forecast_eps_revisions(text)[0]["period"] == "UNKNOWN"
 
 
 def test_both_periods_and_reversed_table_order():

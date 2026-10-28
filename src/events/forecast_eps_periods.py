@@ -7,7 +7,8 @@ import re
 import unicodedata
 
 
-_HEADING = re.compile(r"(?m)^\s*(20\d{2})\s*年\s*(\d{1,2})\s*月\s*期([^\n]*)")
+_HEADING = re.compile(r"^\s*(?:(?:\d+[.、]|\(\d+\))\s*)?(20\d{2})\s*年\s*(\d{1,2})\s*月\s*期(.*)$")
+_TABLE_HEADING = re.compile(r"^\s*(?:\(\d+\)\s*)?((?:第\s*2\s*四半期|中間期|上期|上半期|通期|2Q).*業績予想.*(?:修正|変更).*)$")
 _DATE_RANGE = re.compile(
     r"(20\d{2})年(\d{1,2})月(\d{1,2})日\s*[～〜~\-]\s*"
     r"(20\d{2})年(\d{1,2})月(\d{1,2})日"
@@ -47,13 +48,18 @@ def _period(heading: str, fiscal_year: int | None, fiscal_month: int | None) -> 
     return explicit[0] if explicit else "UNKNOWN"
 
 
-def _row_values(lines: list[str], start: int) -> list[float]:
-    """Read numeric cells of a labelled forecast row, never a reference row."""
+def _row_tokens(lines: list[str], start: int) -> list[str]:
+    """Read numeric cells of a labelled forecast row, preserving decimal places."""
     row = lines[start]
     # Some PDF text orders put the label and the numeric cells on adjacent lines.
     if not _NUMBER.search(row) and start + 1 < len(lines):
         row += " " + lines[start + 1]
-    values = _NUMBER.findall(row)
+    return _NUMBER.findall(row)
+
+
+def _row_values(lines: list[str], start: int) -> list[float]:
+    """Read numeric cells of a labelled forecast row, never a reference row."""
+    values = _row_tokens(lines, start)
     try:
         return [float(value.replace(",", "").replace("−", "-").replace("△", "-").replace("▲", "-")) for value in values]
     except ValueError:
@@ -101,12 +107,26 @@ def forecast_eps_revisions(text: str) -> list[dict]:
     table and both labelled forecast rows before returning an item.
     """
     normalized = unicodedata.normalize("NFKC", text or "")
-    headings = list(_HEADING.finditer(normalized))
+    lines_all = normalized.splitlines()
+    headings: list[tuple[int, int | None, int | None, str]] = []
+    year = month = None
+    for index, line in enumerate(lines_all):
+        fiscal = _HEADING.match(line)
+        if fiscal:
+            year, month = int(fiscal[1]), int(fiscal[2])
+            # A shared fiscal heading gives context to following table headings;
+            # it is not itself a forecast table.
+            if _TABLE_HEADING.match(fiscal[3].strip()):
+                headings.append((index, year, month, fiscal[3]))
+            continue
+        table = _TABLE_HEADING.match(line)
+        if table:
+            headings.append((index, year, month, table[1]))
     sections: list[tuple[int | None, int | None, str, str]] = []
     if headings:
-        for index, match in enumerate(headings):
-            end = headings[index + 1].start() if index + 1 < len(headings) else len(normalized)
-            sections.append((int(match[1]), int(match[2]), match[3], normalized[match.end():end]))
+        for index, (start, year, month, heading) in enumerate(headings):
+            end = headings[index + 1][0] if index + 1 < len(headings) else len(lines_all)
+            sections.append((year, month, heading, "\n".join(lines_all[start + 1:end])))
     else:
         sections.append((None, None, "", normalized))
 
@@ -161,6 +181,8 @@ def forecast_eps_revisions(text: str) -> list[dict]:
             "basis": basis,
             "previous_eps": prev_eps,
             "revised_eps": revised_eps,
+            "previous_eps_text": _row_tokens(lines, previous)[-1].replace(",", ""),
+            "revised_eps_text": _row_tokens(lines, revised)[-1].replace(",", ""),
             "previous_op": previous_op,
             "revised_op": revised_op,
             "op_unit": "millions_jpy" if previous_op is not None else None,
