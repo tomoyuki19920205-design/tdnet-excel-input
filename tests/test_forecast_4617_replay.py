@@ -23,7 +23,7 @@ def event_payload() -> dict:
     with pdfplumber.open(FIXTURE) as pdf:
         text = pdf.pages[0].extract_text() or ""
     return extract_forecast_revision(
-        text, "業績予想の修正に関するお知らせ", pdf_path=str(FIXTURE)
+        text, "業績予想の修正に関するお知らせ", pdf_path=str(FIXTURE), doc_id=FILING
     ).to_dict()
 
 
@@ -57,7 +57,8 @@ class TestForecastReplay(unittest.TestCase):
 
     def test_correct_replay_has_five_stable_rows_and_newer_wins(self):
         self.insert(event_payload())
-        candidates, quarantine = load_revision_forecasts(self.conn, disclosure_ids=[FILING])
+        candidates, quarantine = load_revision_forecasts(
+            self.conn, disclosure_ids=[FILING], source_pdfs={FILING: str(FIXTURE)})
         self.assertEqual(quarantine, [])
         self.assertEqual(len(candidates), 5)
         first = expand_forecast_rows(candidates)

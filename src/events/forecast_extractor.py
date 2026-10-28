@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 import unicodedata
@@ -186,8 +187,17 @@ def _detect_period(text: str) -> str:
     m = _PERIOD_RE.search(text)
     if m:
         return f"{m.group(1)}年{m.group(2)}月期 {m.group(3)}"
-    m = _FY_RE.search(text)
-    if m:
+    matches = list(_FY_RE.finditer(text))
+    # A revision notice often cites last year's earnings release before naming
+    # the forecast being revised. Keep each candidate's own local context so
+    # the earlier reference cannot borrow the later "業績予想の修正" heading.
+    for index, candidate in enumerate(matches):
+        next_start = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        context = text[candidate.end():min(next_start, candidate.end() + 120)]
+        if "業績予想" in context and "修正" in context:
+            return f"{candidate.group(1)}年{candidate.group(2)}月期"
+    if matches:
+        m = matches[0]
         return f"{m.group(1)}年{m.group(2)}月期"
     return ""
 
@@ -199,8 +209,12 @@ def _detect_basis(text: str) -> str:
 
 def _detect_unit(text: str) -> str:
     """テキストから金額単位を検出"""
-    m = _UNIT_RE.search(text)
-    return m.group(1) if m else ""
+    explicit = re.search(r"単位\s*[：:]\s*(百万円|千円|億円|円)", text)
+    if explicit:
+        return explicit.group(1)
+    # An EPS header contains 円/銭, but this is not the amount-table unit.
+    amount = re.search(r"百万円|千円|億円", text)
+    return amount.group(0) if amount else ""
 
 
 # ============================================================
@@ -1211,6 +1225,10 @@ def _is_reliable_eps(prev: float | None, rev: float | None) -> bool:
     """
     if prev is None and rev is None:
         return False
+    # A concatenated table row can be misread as an EPS prose value.  Reject
+    # it before an early return prevents the explicit PDF table fallback.
+    if any(not math.isfinite(v) or abs(v) > 10_000 for v in (prev, rev) if v is not None):
+        return False
 
     # 配当として誤認されやすい「切りの良い整数」をガード
     OBVIOUS_DIVIDENDS = {
@@ -1282,6 +1300,38 @@ def _extract_from_text(
     # ---- Phase 1: Native/Regex (横型テーブル抽出) ----
     table_result = _extract_from_horizontal_table(target_lines, is_difference, unit)
     metrics_count = table_result.get("metrics_count", 0)
+
+    # Wrapped PDF headers can hide net income and EPS from the text parser.
+    # Compare explicit PDF cells before prose/notes so a later dividend amount
+    # cannot be accepted as EPS.  Match sales and operating profit to the same
+    # native row before preferring the more complete table result.  A damaged
+    # standalone header can shift every native column one place to the left;
+    # require two adjacent values to match the explicit PDF cells in that case.
+    if pdf_path and os.path.isfile(pdf_path):
+        pdf_cells = _extract_via_pdfplumber_table(pdf_path)
+        same_columns = (
+            pdf_cells
+            and pdf_cells.get("revised_sales") == table_result.get("revised_sales")
+            and pdf_cells.get("revised_op") == table_result.get("revised_op")
+        )
+        shifted_columns = (
+            pdf_cells
+            and table_result.get("revised_sales") is None
+            and pdf_cells.get("revised_sales") == table_result.get("revised_op")
+            and pdf_cells.get("revised_op") == table_result.get("revised_ordinary")
+        )
+        strong_pdf_row = (
+            pdf_cells and pdf_cells.get("metrics_count", 0) >= 4
+            and pdf_cells.get("eps_validated")
+            and pdf_cells.get("revised_sales") is not None
+            and pdf_cells.get("revised_op") is not None
+        )
+        if (strong_pdf_row or
+                (pdf_cells and pdf_cells.get("metrics_count", 0) > metrics_count
+                 and pdf_cells.get("revised_eps") is not None
+                 and (same_columns or shifted_columns))):
+            table_result = pdf_cells
+            metrics_count = pdf_cells["metrics_count"]
 
     # フィールド設定
     for metric in ["sales", "op", "ordinary", "net_income", "eps"]:
@@ -1440,7 +1490,7 @@ def _extract_from_text(
         use_fitz = (
             fitz_result is not None
             and fitz_score[0] > 0          # fitz に prev/rev ペアが1つ以上
-            and fitz_score >= base_score   # fitz が勝ちまたは同点
+            and fitz_score > base_score    # explicit PDF cells win an equal score
         )
 
         chosen = fitz_result if use_fitz else pdf_table_result
@@ -1517,10 +1567,10 @@ def _extract_via_pdfplumber_table(pdf_path: str) -> dict | None:
                     
                     # ヘッダー行を特定 (スコアベース: 最多カテゴリ一致行を採用)
                     _TBL_HDR_SCORE: dict[str, list[str]] = {
-                        "sales":      ["売上高", "営業収益", "売上収益"],
-                        "op":         ["営業利益", "営業損益"],
-                        "ordinary":   ["経常利益", "経常損益"],
-                        "net_income": ["当期純利益", "四半期純利益", "純利益", "親会社株主"],
+                        "sales":      ["売上高", "営業収益", "売上収益", "売上"],
+                        "op":         ["営業利益", "営業損益", "営利"],
+                        "ordinary":   ["経常利益", "経常損益", "経常"],
+                        "net_income": ["当期純利益", "四半期純利益", "純利益", "親会社株主", "純利"],
                         "eps_hint":   ["EPS", "1株当たり", "1株利益", "円銭"],
                     }
                     header_row = -1
@@ -1539,12 +1589,38 @@ def _extract_via_pdfplumber_table(pdf_path: str) -> dict | None:
                             f"[forecast_table_header] row={header_row} score={_tbl_best_score}"
                         )
 
+                        # A wrapped header may put the metric name in the next
+                        # row and one cell to the right of its numeric column.
+                        # Join only the immediately adjacent header row; never
+                        # borrow a label from a previous/revised data row.
+                        header_cells = list(clean_table[header_row])
+                        if header_row + 1 < len(clean_table):
+                            next_row = clean_table[header_row + 1]
+                            next_text = "".join(str(c) for c in next_row if c)
+                            if not any(lbl in next_text for lbl in _PREVIOUS_LABELS + _REVISED_LABELS):
+                                for j, cell in enumerate(next_row):
+                                    if j < len(header_cells):
+                                        header_cells[j] = f"{header_cells[j]}{cell}"
+
                         # カラムマップの構築
                         col_map = {}
-                        for j, cell in enumerate(clean_table[header_row]):
-                            m_cells = _match_label_in_line(str(cell))
+                        for j, cell in enumerate(header_cells):
+                            compact = re.sub(r"\s+", "", str(cell))
+                            if re.search(r"(?:1|１)株当たり|EPS", compact, re.IGNORECASE):
+                                col_map["eps"] = j
+                                continue
+                            m_cells = _match_label_in_line(compact)
                             if m_cells:
                                 col_map[m_cells[0][0]] = j
+                            else:
+                                # CMap damage can preserve only short fragments.
+                                # Accept them inside an explicit table header,
+                                # never as free-text forecast evidence.
+                                for metric, fragment in (("sales", "売上"), ("op", "営利"),
+                                                         ("ordinary", "経常"), ("net_income", "純利")):
+                                    if fragment in compact and metric not in col_map:
+                                        col_map[metric] = j
+                                        break
                         
                         # 前回/修正行を探す
                         prev_row = None; rev_row = None
@@ -1558,20 +1634,64 @@ def _extract_via_pdfplumber_table(pdf_path: str) -> dict | None:
                         
                         if not rev_row: continue
                     
+                    def parse_table_cell(cell: str, field: str, column_unit: str) -> float | None:
+                        clean = _normalize_text(str(cell or "")).strip()
+                        clean = re.sub(r"\s*※\s*\d+\s*$", "", clean)
+                        if not clean or clean in {"未定", "-", "－", "―", "–", "—"} or "～" in clean or "~" in clean:
+                            return None
+                        if field == "eps":
+                            yen_sen = re.fullmatch(r"([△▲−-]?\s*[\d,]+)\s*円\s*(\d{1,2})\s*銭", clean)
+                            if yen_sen:
+                                whole = _parse_cell_value(yen_sen.group(1))
+                                return None if whole is None else (-1 if whole < 0 else 1) * (abs(whole) + int(yen_sen.group(2)) / 100)
+                        match = re.fullmatch(
+                            r"(?:(千円|百万円|億円|円\s*銭)\s*)?([△▲−-]?\s*[\d,]+(?:\.\d+)?)",
+                            clean,
+                        )
+                        if not match:
+                            return None
+                        value = _parse_cell_value(match.group(2))
+                        if value is None or field == "eps":
+                            return value
+                        return _apply_unit(value, match.group(1) or column_unit)
+
                     res = {"metrics_count": 0}
+                    used_columns: set[int] = set()
                     for field, c_idx in col_map.items():
-                        prev_val = _parse_cell_value(prev_row[c_idx]) if prev_row and c_idx < len(prev_row) else None
-                        rev_val = _parse_cell_value(rev_row[c_idx]) if rev_row and c_idx < len(rev_row) else None
-                        
-                        # ノイズ除去: 1桁の整数などは EPS としても他メトリクスとしても怪しい
-                        if rev_val is not None and abs(rev_val) in [0.0, 1.0, 2.0, 3.0, 4.0]:
-                            rev_val = None
-                        if prev_val is not None and abs(prev_val) in [0.0, 1.0, 2.0, 3.0, 4.0]:
-                            prev_val = None
+                        # pdfplumber sometimes assigns a spanning header to
+                        # the empty cell after the value cell. Move left only
+                        # when the chosen data cell is empty in both rows and
+                        # the nearest value cell is not another metric's.
+                        if (c_idx < len(rev_row) and not rev_row[c_idx]
+                                and (not prev_row or c_idx >= len(prev_row) or not prev_row[c_idx])):
+                            for candidate_idx in range(c_idx - 1, max(-1, c_idx - 3), -1):
+                                if (candidate_idx not in used_columns
+                                        and candidate_idx < len(rev_row) and rev_row[candidate_idx]
+                                        and (not prev_row or candidate_idx < len(prev_row)
+                                             and prev_row[candidate_idx])):
+                                    c_idx = candidate_idx
+                                    break
+                        used_columns.add(c_idx)
+                        prev_cell = prev_row[c_idx] if prev_row and c_idx < len(prev_row) else ""
+                        rev_cell = rev_row[c_idx] if rev_row and c_idx < len(rev_row) else ""
+                        if not rev_cell and c_idx + 1 < len(rev_row):
+                            # A split data row may put the revised value one
+                            # cell right of its header and previous value.
+                            right = c_idx + 1
+                            if (right not in used_columns
+                                    and right < len(header_cells) and not header_cells[right]
+                                    and rev_row[right]):
+                                rev_cell = rev_row[right]
+                        unit_match = re.match(r"\s*(千円|百万円|億円)", str(prev_cell or ""))
+                        column_unit = unit_match.group(1) if unit_match else (_detect_unit(str(page.extract_text() or "")) or "百万円")
+                        prev_val = parse_table_cell(prev_cell, field, column_unit)
+                        rev_val = parse_table_cell(rev_cell, field, column_unit)
                             
                         if rev_val is not None: res["metrics_count"] += 1
                         res[f"previous_{field}"] = prev_val
                         res[f"revised_{field}"] = rev_val
+
+                    res["eps_validated"] = "eps" in col_map and res.get("revised_eps") is not None
                     
                     # より多くのメトリクスを持つ結果を優先
                     if best_res is None or res["metrics_count"] > best_res["metrics_count"]:
@@ -1686,16 +1806,16 @@ def _extract_eps_from_notes(text: str) -> tuple[float | None, float | None]:
     
     if note_start == -1: return None, None
     
-    note_text = "\n".join(lines[note_start:])
-    # 注記内の EPS 表現
-    # 例: 「1株当たり当期純利益は 156.78円であります」
-    # 例: 「修正後 156.78円」
-    m = re.search(r"1株当たり[^\d\n]*?(\d[\d,]*\.?\d*)円", note_text)
-    if m:
-        val = _parse_number(m.group(1))
-        if val is not None and abs(val) > 4.0:
-            # Note は low priority なのでこれだけ返す
-            return None, val
+    # An arbitrary "per share" amount in notes can be a dividend or BPS.
+    # Require the EPS concept on the same line and reject dividend context.
+    for line in lines[note_start:]:
+        if "配当" in line or not re.search(r"(?:当期|四半期|中間)?純利益|EPS", line):
+            continue
+        m = re.search(r"1株当たり[^\d\n]*?(\d[\d,]*\.?\d*)円", line)
+        if m:
+            val = _parse_number(m.group(1))
+            if val is not None:
+                return None, val
             
     return None, None
 

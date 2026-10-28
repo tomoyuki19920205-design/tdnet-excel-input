@@ -5,13 +5,16 @@ Forecast revisions and earnings guidance share disclosure-based ordering.
 from __future__ import annotations
 
 import calendar
+import hashlib
 import json
 import logging
+import math
 import re
 import sqlite3
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Iterable
 
 from src.common_ticker import normalize_ticker
@@ -242,6 +245,7 @@ def load_revision_forecasts(
     conn: sqlite3.Connection,
     *,
     disclosure_ids: Iterable[str] | None = None,
+    source_pdfs: dict[str, str] | None = None,
 ) -> tuple[list[ForecastDTO], list[dict]]:
     ids = {str(item) for item in (disclosure_ids or []) if str(item)}
     if not _table_columns(conn, "events"):
@@ -279,6 +283,13 @@ def load_revision_forecasts(
                 "reason": "revision_amount_row_malformed", "event_id": row.get("event_id"),
             })
             continue
+        source_ok, source_reason = _verify_revision_source(row, payload, (source_pdfs or {}).get(str(row.get("source_doc_id") or "")))
+        if not source_ok:
+            quarantine.append({
+                "ticker": row.get("ticker"), "disclosure_id": row.get("source_doc_id"),
+                "reason": source_reason, "event_id": row.get("event_id"),
+            })
+            continue
         period_label = unicodedata.normalize("NFKC", str(payload.get("period_label") or ""))
         if payload.get("is_difference_disclosure"):
             continue
@@ -311,10 +322,11 @@ def load_revision_forecasts(
                     "metric": canonical_metric,
                 })
                 continue
-            if canonical_metric == "eps" and abs(numeric_value) > 10_000:
+            if not math.isfinite(numeric_value):
                 quarantine.append({
                     "ticker": row.get("ticker"), "disclosure_id": row.get("source_doc_id"),
-                    "reason": "revision_eps_out_of_range", "event_id": row.get("event_id"),
+                    "reason": "revision_metric_invalid_number", "event_id": row.get("event_id"),
+                    "metric": canonical_metric,
                 })
                 continue
             candidates.append(ForecastDTO(
@@ -335,6 +347,65 @@ def load_revision_forecasts(
                 revision_sequence=int(payload.get("revision_sequence") or 0),
             ))
     return candidates, quarantine
+
+
+def _verify_revision_source(row: dict, payload: dict, pdf_path: str | None) -> tuple[bool, str]:
+    """Re-read the exact PDF before replaying any revision JSON to canonical rows.
+
+    The caller supplies a filing-keyed local PDF archive. A payload alone is
+    never evidence: old JSON without its source is quarantined.
+    """
+    if not pdf_path or not Path(pdf_path).is_file():
+        return False, "revision_source_pdf_missing"
+    provenance = payload.get("revision_reason") or {}
+    filing_id = str(row.get("source_doc_id") or "")
+    if provenance.get("doc_id") != filing_id:
+        return False, "revision_source_filing_mismatch"
+    try:
+        digest = hashlib.sha256(Path(pdf_path).read_bytes()).hexdigest()
+        if provenance.get("pdf_sha256") != digest:
+            return False, "revision_source_hash_mismatch"
+        import pdfplumber
+        from src.events.forecast_extractor import extract_forecast_revision, _detect_basis, _detect_period
+        with pdfplumber.open(pdf_path) as pdf:
+            source_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+        source = extract_forecast_revision(
+            source_text, str(row.get("title") or ""), pdf_path=pdf_path,
+            doc_id=filing_id, ticker=str(row.get("ticker") or ""),
+        )
+        if source.extracted_metrics_count < 1:
+            return False, "revision_source_table_unresolved"
+        source_label = _detect_period(source_text) or source.period_label
+        source_period = parse_forecast_period_end(source_label)
+        payload_period = parse_forecast_period_end(str(payload.get("period_label") or ""))
+        if (not source_period or source_period != payload_period
+                or re.search(r"第?[123]四半期|中間期", source_label)
+                or re.search(r"第?[123]四半期|中間期", str(payload.get("period_label") or ""))):
+            return False, "revision_source_period_mismatch"
+        source_basis = _detect_basis(source_text)
+        if not ((source_basis and source_basis == payload.get("basis"))
+                or (source.basis and source.basis == payload.get("basis"))
+                or (not source_basis and not source.basis and not payload.get("basis"))):
+            return False, "revision_source_basis_mismatch"
+        for side in ("previous", "revised"):
+            for metric in ("sales", "op", "ordinary", "net_income", "eps"):
+                field = f"{side}_{metric}"
+                raw_expected, raw_actual = getattr(source, field), payload.get(field)
+                if raw_expected is None and raw_actual is None:
+                    continue
+                if raw_expected is None or raw_actual is None:
+                    return False, "revision_source_metric_missing_or_extra"
+                try:
+                    expected, actual = float(raw_expected), float(raw_actual)
+                except (TypeError, ValueError, OverflowError):
+                    return False, "revision_source_value_mismatch"
+                tolerance = 0.005 if metric == "eps" else 0.000001
+                if not math.isfinite(actual) or abs(expected - actual) > tolerance:
+                    return False, "revision_source_value_mismatch"
+        return True, ""
+    except Exception as exc:
+        logger.warning("[FORECAST_SOURCE] filing=%s pdf validation failed: %s", filing_id, exc)
+        return False, "revision_source_validation_error"
 
 
 def select_latest_forecasts(candidates: Iterable[ForecastDTO]) -> list[ForecastDTO]:
@@ -372,8 +443,6 @@ def expand_forecast_rows(candidates: Iterable[ForecastDTO]) -> list[dict]:
     for dto in candidates:
         normalized_disclosure = _as_utc_key(dto.disclosure_datetime)
         rows.append({
-            "revision_sequence": dto.revision_sequence,
-            "document_type": dto.document_type,
             "ticker": dto.ticker,
             "period": dto.forecast_period_end,
             "quarter": "FY",
@@ -396,13 +465,13 @@ def expand_forecast_rows(candidates: Iterable[ForecastDTO]) -> list[dict]:
     return rows
 
 
-def _sync_document_forecasts(conn, disclosure_ids):
+def _sync_document_forecasts(conn, disclosure_ids, *, source_pdfs: dict[str, str] | None = None):
     """Idempotent realtime sync; each document has its own key, so order is immaterial."""
     from .db import load_env, get_supabase_write_config, supabase_upsert
     ids = list(disclosure_ids)
     if not ids:
         return {"written": 0, "errors": 0}
-    revisions, quarantine = load_revision_forecasts(conn, disclosure_ids=ids)
+    revisions, quarantine = load_revision_forecasts(conn, disclosure_ids=ids, source_pdfs=source_pdfs)
     earnings, more = [], []
     marks = ",".join("?" for _ in ids)
     if "source_doc_id" in _table_columns(conn, "earnings_summaries") and conn.execute(
@@ -419,10 +488,10 @@ def _sync_document_forecasts(conn, disclosure_ids):
     return supabase_upsert("canonical_financials", rows, on_conflict="source_row_key", config=config)
 
 
-def sync_document_forecasts(conn, disclosure_ids):
+def sync_document_forecasts(conn, disclosure_ids, *, source_pdfs: dict[str, str] | None = None):
     previous_factory = conn.row_factory
     conn.row_factory = sqlite3.Row
     try:
-        return _sync_document_forecasts(conn, disclosure_ids)
+        return _sync_document_forecasts(conn, disclosure_ids, source_pdfs=source_pdfs)
     finally:
         conn.row_factory = previous_factory

@@ -62,6 +62,7 @@ _FORECAST_TAG_MAP = {
     "NetIncome": "net_income",
     "ProfitLoss": "net_income",
     "ProfitLossAttributableToOwnersOfParent": "net_income",
+    "ProfitAttributableToOwnersOfParent": "net_income",
     "ProfitAttributableToOwnersOfParentIFRS": "net_income",
     "ProfitLossAttributableToOwnersOfParentIFRS": "net_income",
     "NetIncomeUS": "net_income",

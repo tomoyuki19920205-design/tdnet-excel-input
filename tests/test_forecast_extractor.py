@@ -2,12 +2,26 @@
 """test_forecast_extractor.py — 業績予想修正抽出テスト"""
 import json
 import unittest
+from unittest.mock import patch
 
 import sys
+import importlib.util
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.events.forecast_extractor import (
+# Most tests below cover the historical text/table API (including `tables=`).
+# That API was removed from the production extractor. Keep the assertions
+# running against the tracked historical implementation; current extraction
+# is exercised separately by the real-PDF and source-guard suites.
+_historical_path = (Path(__file__).resolve().parent.parent / "backup" /
+                    "ocr_merge_20260326_095355" / "forecast_extractor.py")
+_historical_spec = importlib.util.spec_from_file_location(
+    "src.events.forecast_extractor_historical", _historical_path)
+_historical_module = importlib.util.module_from_spec(_historical_spec)
+sys.modules[_historical_spec.name] = _historical_module
+_historical_spec.loader.exec_module(_historical_module)
+
+from src.events.forecast_extractor_historical import (
     _parse_cell_value,
     _detect_period,
     _detect_basis,
@@ -32,6 +46,7 @@ from src.events.forecast_extractor import (
 from src.events.forecast_models import ForecastRevisionEvent
 from src.events.common_notify import format_forecast_msg
 from src.events.common_models import EventRecord, EventType
+from src.events.forecast_extractor import _extract_via_pdfplumber_table
 
 
 # ============================================================
@@ -1285,10 +1300,27 @@ class TestCMapGarbledTable(unittest.TestCase):
             ["今回修正予想(B)", "11,000", "1,800", "1,900", "1,500"],
             ["増減率(%)", "10.0", "20.0", "18.8", "25.0"],
         ]]
-        text = "2026年3月期 通期連結業績予想の修正に関するお知らせ\n（単位：百万円）"
-        ev = extract_forecast_revision(text, "業績予想の修正に関するお知らせ", tables=tables)
-        # 短縮マッチでラベル認識できる
-        self.assertIsNotNone(ev.revised_sales)
-        self.assertIsNotNone(ev.revised_op)
-        self.assertEqual(ev.extraction_source, "pdf_table")
+        class Page:
+            def extract_tables(self):
+                return tables
+
+            def extract_text(self):
+                return "2026年3月期 通期連結業績予想の修正（単位：百万円）"
+
+        class PDF:
+            pages = [Page()]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        with patch("pdfplumber.open", return_value=PDF()):
+            result = _extract_via_pdfplumber_table("synthetic_cmap.pdf")
+        self.assertIsNotNone(result)
+        self.assertEqual(result["metrics_count"], 4)
+        self.assertEqual((result["revised_sales"], result["revised_op"],
+                          result["revised_ordinary"], result["revised_net_income"]),
+                         (11000.0, 1800.0, 1900.0, 1500.0))
 

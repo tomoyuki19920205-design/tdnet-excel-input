@@ -494,6 +494,7 @@ def _sync_canonical_financials(
     route: str,
     xbrl_path: str | None = None,
     disclosure_datetime: str | None = None,
+    source_pdf_path: str | None = None,
 ):
     import os
     if not period:
@@ -525,6 +526,7 @@ def _sync_canonical_financials(
         forecast_metrics = _canonical_forecast_metrics(guidance)
         forecast_period = str(guidance.get("forecast_period") or "")
         forecast_valid = _valid_forecast_period(period, quarter, forecast_period)
+        source_verified = _forecast_matches_source_pdf(guidance, source_pdf_path) if forecast_metrics else False
 
         if is_apply or is_dryrun or dry_run:
             logger.info("[EARNINGS][CANONICAL] %s canonical同期(REPLACE %s) 開始 route=%s", ticker, "APPLY" if is_apply and not dry_run else "DRY-RUN", route)
@@ -558,7 +560,7 @@ def _sync_canonical_financials(
                 unit="millions_jpy",
                 config=_config
             )
-            if forecast_metrics and forecast_valid:
+            if forecast_metrics and forecast_valid and source_verified:
                 for metrics, unit in (
                     ({name: value for name, value in forecast_metrics.items() if name != "eps"}, "millions_jpy"),
                     ({"eps": forecast_metrics["eps"]} if "eps" in forecast_metrics else {}, "yen_per_share"),
@@ -572,8 +574,8 @@ def _sync_canonical_financials(
                         )
             elif forecast_metrics:
                 logger.warning(
-                    "[EARNINGS][CANONICAL] %s forecast period unverified: actual=%s forecast=%s",
-                    ticker, period, forecast_period,
+                    "[EARNINGS][CANONICAL] %s forecast blocked before write: actual=%s forecast=%s source_verified=%s",
+                    ticker, period, forecast_period, source_verified,
                 )
             logger.info("[EARNINGS][CANONICAL] %s canonical同期完了 route=%s", ticker, route)
     except Exception as e:
@@ -599,7 +601,6 @@ def _canonical_forecast_metrics(guidance: dict | None) -> dict[str, float]:
             logger.warning("[EARNINGS][CANONICAL] forecast metric blocked: %s invalid_number", metric)
             continue
         if (not math.isfinite(value) or
-                (metric == "eps" and abs(value) > 10_000) or
                 (metric != "eps" and (abs(value) > 100_000_000 or
                                       0 < abs(value) < 0.01))):
             logger.warning("[EARNINGS][CANONICAL] forecast metric blocked: %s abnormal_value", metric)
@@ -618,17 +619,49 @@ def _valid_forecast_period(actual_period: str, actual_quarter: str, forecast_per
     return forecast > actual if actual_quarter in ("FY", "4Q") else forecast >= actual
 
 
+def _forecast_matches_source_pdf(guidance: dict | None, source_pdf_path: str | None) -> bool:
+    """Require an independently parsed, complete source table before forecast writes."""
+    if not source_pdf_path or not os.path.isfile(source_pdf_path):
+        logger.warning("[EARNINGS][FORECAST_SOURCE] status=missing_pdf path=%s", source_pdf_path)
+        return False
+    from .earnings_guidance_extractor import _extract_guidance_from_pdf
+    source = _extract_guidance_from_pdf(source_pdf_path)
+    if source is None:
+        logger.warning("[EARNINGS][FORECAST_SOURCE] status=unparseable path=%s", source_pdf_path)
+        return False
+    source_metrics = _canonical_forecast_metrics(dataclasses.asdict(source))
+    proposed = _canonical_forecast_metrics(guidance)
+    if (not source_metrics or set(source_metrics) != set(proposed)
+            or source.forecast_period != (guidance or {}).get("forecast_period")):
+        logger.warning("[EARNINGS][FORECAST_SOURCE] status=metric_or_period_mismatch path=%s", source_pdf_path)
+        return False
+    if any(abs(source_metrics[name] - proposed[name]) > (0.005 if name == "eps" else 0.000001)
+           for name in proposed):
+        logger.warning("[EARNINGS][FORECAST_SOURCE] status=value_mismatch path=%s", source_pdf_path)
+        return False
+    return True
+
+
 def _check_forecast_saved(client, ticker: str, period: str, quarter: str,
-                          filing_id: str, guidance: dict | None) -> bool:
+                          filing_id: str, guidance: dict | None,
+                          source_forecast_status: str = "unverified",
+                          source_pdf_path: str | None = None) -> bool:
     metrics = _canonical_forecast_metrics(guidance)
     if not metrics:
-        return True
+        if source_forecast_status == "confirmed_not_disclosed":
+            logger.info("[EARNINGS][FORECAST_COMPLETION] %s status=not_disclosed filing_id=%s", ticker, filing_id)
+            return True
+        logger.warning("[EARNINGS][FORECAST_COMPLETION] %s status=unverified_empty filing_id=%s", ticker, filing_id)
+        return False
+    if not _forecast_matches_source_pdf(guidance, source_pdf_path):
+        logger.warning("[EARNINGS][FORECAST_COMPLETION] %s status=source_unverified filing_id=%s", ticker, filing_id)
+        return False
     forecast_period = str((guidance or {}).get("forecast_period") or "")
     if not _valid_forecast_period(period, quarter, forecast_period):
         return False
     return _check_canonical_financials_saved(
         client, ticker, forecast_period, "FY", filing_id,
-        expected_metrics=list(metrics), source="tdnet_forecast",
+        expected_metrics=list(metrics), source="tdnet_forecast", expected_values=metrics,
     )
 
 
@@ -640,6 +673,7 @@ def _check_canonical_financials_saved(
     filing_id: str | None = None,
     expected_metrics: list[str] | None = None,
     source: str | None = None,
+    expected_values: dict[str, float] | None = None,
 ) -> bool:
     if not filing_id:
         return False
@@ -657,7 +691,7 @@ def _check_canonical_financials_saved(
         return False
     try:
         query = client.table("canonical_financials") \
-            .select("metric") \
+            .select("ticker,period,quarter,filing_id,source,metric,value,unit") \
             .eq("ticker", ticker) \
             .eq("period", period) \
             .eq("quarter", quarter) \
@@ -669,6 +703,30 @@ def _check_canonical_financials_saved(
             metrics = {row.get("metric") for row in res.data}
             missing = [m for m in expected_metrics if m not in metrics]
             if not missing:
+                if expected_values is not None:
+                    from decimal import Decimal, InvalidOperation
+                    for metric in expected_metrics:
+                        candidates = [row for row in res.data if row.get("metric") == metric]
+                        if len(candidates) != 1:
+                            logger.warning("[EARNINGS][CANONICAL_COMPLETION] %s status=ambiguous metric=%s filing_id=%s", ticker, metric, filing_id)
+                            return False
+                        row = candidates[0]
+                        expected_unit = "yen_per_share" if metric == "eps" else "millions_jpy"
+                        if (row.get("ticker") != ticker or row.get("period") != period
+                                or row.get("quarter") != quarter or row.get("filing_id") != filing_id
+                                or (source and row.get("source") != source)
+                                or row.get("unit") != expected_unit):
+                            logger.warning("[EARNINGS][CANONICAL_COMPLETION] %s status=identity_or_unit_mismatch metric=%s filing_id=%s", ticker, metric, filing_id)
+                            return False
+                        try:
+                            actual = Decimal(str(row.get("value")))
+                            expected = Decimal(str(expected_values[metric]))
+                        except (InvalidOperation, KeyError, TypeError, ValueError):
+                            return False
+                        tolerance = Decimal("0.005") if metric == "eps" else Decimal("0.000001")
+                        if not actual.is_finite() or not expected.is_finite() or abs(actual - expected) > tolerance:
+                            logger.warning("[EARNINGS][CANONICAL_COMPLETION] %s status=value_mismatch metric=%s filing_id=%s expected=%s actual=%s", ticker, metric, filing_id, expected, actual)
+                            return False
                 logger.info(
                     "[EARNINGS][CANONICAL_COMPLETION] %s kind=financials filing_id=%s status=complete expected=%s found=%s",
                     ticker, filing_id, expected_metrics, list(metrics)
@@ -833,6 +891,12 @@ def _retry_incomplete_canonical_for_duplicate(
             expected_metrics.append("gross_profit")
         if pl_values.get("sga") is not None:
             expected_metrics.append("selling_general_and_administrative_expenses")
+        expected_values = {}
+        for metric, raw in (("sales", sales), (_canonical_profit_metric(op, xbrl_path), op),
+                            ("gross_profit", pl_values.get("gross")),
+                            ("selling_general_and_administrative_expenses", pl_values.get("sga"))):
+            if raw is not None:
+                expected_values[metric] = float(raw) / 1_000_000
 
         if not expected_metrics:
             logger.info(
@@ -848,15 +912,20 @@ def _retry_incomplete_canonical_for_duplicate(
                 quarter=quarter,
                 filing_id=filing_id,
                 expected_metrics=expected_metrics,
+                expected_values=expected_values,
+                source="tdnet_xbrl",
             )
             forecast_complete = _check_forecast_saved(
-                client, ticker, period, quarter, filing_id, pl_values.get("guidance")
+                client, ticker, period, quarter, filing_id, pl_values.get("guidance"),
+                source_pdf_path=pdf_path,
             )
             if pl_complete and forecast_complete:
                 logger.info(
                     "[EARNINGS][CANONICAL_RETRY] ticker=%s kind=financials status=already_complete",
                     ticker,
                 )
+            elif pl_complete and not _canonical_forecast_metrics(pl_values.get("guidance")):
+                logger.warning("[EARNINGS][CANONICAL_RETRY] ticker=%s kind=forecast status=unverified_empty no_write", ticker)
             else:
                 logger.info(
                     "[EARNINGS][CANONICAL_RETRY] ticker=%s kind=financials status=retrying missing=%s",
@@ -878,6 +947,7 @@ def _retry_incomplete_canonical_for_duplicate(
                         route="canonical_retry",
                         xbrl_path=xbrl_path,
                         disclosure_datetime=pl_values.get("disclosure_datetime"),
+                        source_pdf_path=pdf_path,
                     )
                     # 再確認
                     pl_post_complete = _check_canonical_financials_saved(
@@ -887,6 +957,8 @@ def _retry_incomplete_canonical_for_duplicate(
                         quarter=quarter,
                         filing_id=filing_id,
                         expected_metrics=expected_metrics,
+                        expected_values=expected_values,
+                        source="tdnet_xbrl",
                     )
                     if pl_post_complete:
                         logger.info(
@@ -2148,6 +2220,12 @@ def run_earnings_production(
                         _expected_metrics.append("gross_profit")
                     if _sga is not None:
                         _expected_metrics.append("selling_general_and_administrative_expenses")
+                    _expected_values = {}
+                    for _metric, _raw in (("sales", _sales), (_canonical_profit_metric(_op, _resolved_zip), _op),
+                                          ("gross_profit", _gross),
+                                          ("selling_general_and_administrative_expenses", _sga)):
+                        if _raw is not None:
+                            _expected_values[_metric] = float(_raw) / 1_000_000
 
                     _pl_saved = False
                     _forecast_saved = False
@@ -2160,9 +2238,12 @@ def run_earnings_production(
                             quarter=_q,
                             filing_id=canonical_filing_id,
                             expected_metrics=_expected_metrics,
+                            expected_values=_expected_values,
+                            source="tdnet_xbrl",
                         )
                         _forecast_saved = _check_forecast_saved(
                             _client, _ticker, _period, _q, canonical_filing_id, _guidance,
+                            source_pdf_path=str(Path(xbrl_dir) / f"1401{_disclosure_no}.pdf") if _disclosure_no else None,
                         )
                         _seg_saved = _check_canonical_segments_saved(
                             client=_client,
@@ -2174,7 +2255,7 @@ def run_earnings_production(
                         )
 
                     # PL同期
-                    if not _pl_saved or not _forecast_saved:
+                    if not _pl_saved or (not _forecast_saved and _canonical_forecast_metrics(_guidance)):
                         _sync_canonical_financials(
                             ticker=_ticker,
                             period=_period,
@@ -2189,6 +2270,7 @@ def run_earnings_production(
                             route="subprocess",
                             xbrl_path=_resolved_zip,
                             disclosure_datetime=doc_j.get("disclosed_at") or doc_j.get("published_at"),
+                            source_pdf_path=str(Path(xbrl_dir) / f"1401{_disclosure_no}.pdf") if _disclosure_no else None,
                         )
 
                     # セグメント同期
@@ -2544,7 +2626,7 @@ def run_earnings_production(
                     f"quarter={quarter!r} title={doc.title[:40]!r} fiscal_year={fiscal_year!r}"
                 )
 
-                if is_4q or quarter == "1Q":
+                if is_4q or quarter in ("1Q", "2Q", "3Q"):
                     try:
                         actual_sales = earnings.sales_current if is_4q else None
                         actual_op = earnings.op_current if is_4q else None
@@ -2865,6 +2947,13 @@ def run_earnings_production(
                         _expected_metrics.append("gross_profit")
                     if earnings.selling_general_and_administrative_expenses_current is not None:
                         _expected_metrics.append("selling_general_and_administrative_expenses")
+                    _expected_values = {}
+                    for _metric, _raw in (("sales", earnings.sales_current),
+                                          (_canonical_profit_metric(earnings.op_current, xbrl_path), earnings.op_current),
+                                          ("gross_profit", earnings.gross_profit_current),
+                                          ("selling_general_and_administrative_expenses", earnings.selling_general_and_administrative_expenses_current)):
+                        if _raw is not None:
+                            _expected_values[_metric] = float(_raw) / 1_000_000
 
                     _pl_saved = False
                     _forecast_saved = False
@@ -2877,10 +2966,13 @@ def run_earnings_production(
                             quarter=quarter,
                             filing_id=_seq_doc_id,
                             expected_metrics=_expected_metrics,
+                            expected_values=_expected_values,
+                            source="tdnet_xbrl",
                         )
                         _forecast_saved = _check_forecast_saved(
                             _client, ticker, _seq_period, quarter, _seq_doc_id,
                             dataclasses.asdict(guidance) if guidance and guidance.has_guidance else {},
+                            source_pdf_path=pdf_path_downloaded,
                         )
                         _seg_saved = _check_canonical_segments_saved(
                             client=_client,
@@ -2892,7 +2984,8 @@ def run_earnings_production(
                         )
 
                     # PL同期
-                    if not _pl_saved or not _forecast_saved:
+                    if not _pl_saved or (not _forecast_saved and _canonical_forecast_metrics(
+                            dataclasses.asdict(guidance) if guidance and guidance.has_guidance else {})):
                         _seq_guidance_dict = {}
                         if guidance and guidance.has_guidance:
                             _seq_guidance_dict = dataclasses.asdict(guidance)
@@ -2914,6 +3007,7 @@ def run_earnings_production(
                                 getattr(doc, "disclosure_datetime", "")
                                 or getattr(doc, "published_at", "") or None
                             ),
+                            source_pdf_path=pdf_path_downloaded,
                         )
 
                     # セグメント同期

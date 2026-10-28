@@ -115,6 +115,7 @@ class TestChinaMarinePaintsForecast(unittest.TestCase):
                 sales_value=None, op_value=None, gross_value=None, sga_value=None,
                 guidance=vars(guidance), filing_id="a" * 64,
                 dry_run=False, route="regression", disclosure_datetime="2026-07-31T06:30:00Z",
+                source_pdf_path=str(FIXTURES / "jul31.pdf"),
             )
         forecast = [call.kwargs for call in write.call_args_list
                     if call.kwargs["source"] == "tdnet_forecast"]

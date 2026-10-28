@@ -485,6 +485,7 @@ def _run_production_parse(
             xbrl_path=zip_path_str,
             actual_sales=earnings.sales_current,
             actual_op=earnings.op_current,
+            pdf_path=trusted_pdf,
         )
         t_sections["extract_guidance_ms"] = round((time.perf_counter() - t0) * 1000, 1)
     except Exception:

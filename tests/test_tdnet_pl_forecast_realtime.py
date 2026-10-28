@@ -214,18 +214,24 @@ def test_mixed_forecast_context_periods_are_not_canonicalized(tmp_path):
     assert extract_guidance_from_zip(str(path)).forecast_period is None
 
 
-def test_canonical_actual_and_forecast_are_distinct_idempotent_rows(monkeypatch):
+def test_canonical_actual_and_forecast_are_distinct_idempotent_rows(monkeypatch, tmp_path):
     monkeypatch.delenv("EARNINGS_CANONICAL_WRITE_REPLACE_APPLY", raising=False)
     monkeypatch.delenv("EARNINGS_CANONICAL_WRITE_REPLACE_DRYRUN", raising=False)
     guidance = {"forecast_period": "2027-09-30", "sales_forecast": 13_500_000_000,
                 "op_forecast": 2_160_000_000, "ordinary_forecast": 1_460_000_000,
                 "net_income_forecast": 1_000_000_000, "eps_forecast": 154.04}
-    with patch("lib.pipeline.canonical_writer.write_financials_canonical") as write:
+    pdf = tmp_path / "filing.pdf"
+    pdf.touch()
+    opened = MagicMock()
+    opened.__enter__.return_value.pages = [_pdf_forecast_page()]
+    with patch("pdfplumber.open", return_value=opened), \
+         patch("lib.pipeline.canonical_writer.write_financials_canonical") as write:
         for _ in range(2):
             _sync_canonical_financials(
                 "1234", "2026-09-30", "FY", 10_877_756_000, 1_536_547_000,
                 2_311_624_000, 775_077_000, guidance, FILING_ID, False, "test",
                 disclosure_datetime="2026-10-27T15:30:00+09:00",
+                source_pdf_path=str(pdf),
             )
     assert write.call_count == 6
     actual, forecast, eps = write.call_args_list[:3]
@@ -285,10 +291,12 @@ def test_pdf_only_forecast_period_and_values_are_saved_separately(tmp_path, monk
     with patch("pdfplumber.open", return_value=opened):
         guidance = extract_guidance_from_zip(None, pdf_path=str(pdf))
     assert guidance.forecast_period == "2027-09-30"
-    with patch("lib.pipeline.canonical_writer.write_financials_canonical") as write:
+    with patch("pdfplumber.open", return_value=opened), \
+         patch("lib.pipeline.canonical_writer.write_financials_canonical") as write:
         _sync_canonical_financials(
             "1234", "2026-09-30", "FY", 10_877_756_000, 1_536_547_000,
             2_311_624_000, 775_077_000, vars(guidance), FILING_ID, False, "pdf_only",
+            source_pdf_path=str(pdf),
         )
     assert len(write.call_args_list) == 3
     actual, forecast, eps = write.call_args_list
