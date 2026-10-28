@@ -227,8 +227,8 @@ def test_canonical_actual_and_forecast_are_distinct_idempotent_rows(monkeypatch)
                 2_311_624_000, 775_077_000, guidance, FILING_ID, False, "test",
                 disclosure_datetime="2026-10-27T15:30:00+09:00",
             )
-    assert write.call_count == 4
-    actual, forecast = write.call_args_list[:2]
+    assert write.call_count == 6
+    actual, forecast, eps = write.call_args_list[:3]
     assert (actual.kwargs["period"], actual.kwargs["source"], actual.kwargs["quarter"]) == (
         "2026-09-30", "tdnet_xbrl", "FY")
     assert actual.kwargs["metrics_dict"]["gross_profit"] == 2311.624
@@ -236,15 +236,21 @@ def test_canonical_actual_and_forecast_are_distinct_idempotent_rows(monkeypatch)
         "2027-09-30", "tdnet_forecast", "FY")
     assert forecast.kwargs["metrics_dict"] == {
         "sales": 13500, "operating_profit": 2160, "ordinary_profit": 1460,
-        "net_income": 1000, "eps": 154.04,
+        "net_income": 1000,
     }
+    assert forecast.kwargs["unit"] == "millions_jpy"
+    assert eps.kwargs["metrics_dict"] == {"eps": 154.04}
+    assert eps.kwargs["unit"] == "yen_per_share"
     rows1, _ = expand_financials_rows(**{k: actual.kwargs[k] for k in (
         "ticker", "period", "quarter", "metrics_dict", "source", "filing_id",
         "disclosure_datetime", "unit")})
-    rows2, _ = expand_financials_rows(**{k: write.call_args_list[2].kwargs[k] for k in (
+    rows2, _ = expand_financials_rows(**{k: write.call_args_list[3].kwargs[k] for k in (
         "ticker", "period", "quarter", "metrics_dict", "source", "filing_id",
         "disclosure_datetime", "unit")})
     assert {r["source_row_key"] for r in rows1} == {r["source_row_key"] for r in rows2}
+    assert [c.kwargs["metrics_dict"] for c in write.call_args_list[:3]] == [
+        c.kwargs["metrics_dict"] for c in write.call_args_list[3:]
+    ]
 
 
 def test_missing_forecast_period_never_writes_to_actual_year(monkeypatch):
@@ -284,16 +290,19 @@ def test_pdf_only_forecast_period_and_values_are_saved_separately(tmp_path, monk
             "1234", "2026-09-30", "FY", 10_877_756_000, 1_536_547_000,
             2_311_624_000, 775_077_000, vars(guidance), FILING_ID, False, "pdf_only",
         )
-    assert len(write.call_args_list) == 2
-    actual, forecast = write.call_args_list
+    assert len(write.call_args_list) == 3
+    actual, forecast, eps = write.call_args_list
     assert actual.kwargs["metrics_dict"]["gross_profit"] == 2311.624
     assert actual.kwargs["metrics_dict"]["selling_general_and_administrative_expenses"] == 775.077
     assert (forecast.kwargs["period"], forecast.kwargs["quarter"], forecast.kwargs["source"]) == (
         "2027-09-30", "FY", "tdnet_forecast")
     assert forecast.kwargs["metrics_dict"] == {
         "sales": 13500, "operating_profit": 2160, "ordinary_profit": 1460,
-        "net_income": 1000, "eps": 154.04,
+        "net_income": 1000,
     }
+    assert forecast.kwargs["unit"] == "millions_jpy"
+    assert eps.kwargs["metrics_dict"] == {"eps": 154.04}
+    assert eps.kwargs["unit"] == "yen_per_share"
 
 
 def test_pdf_only_actual_statement_keeps_precise_current_column(tmp_path):

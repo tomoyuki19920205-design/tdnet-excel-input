@@ -76,6 +76,22 @@ class TestEventsTable(unittest.TestCase):
         self.assertEqual(self.conn.execute("SELECT count(*) FROM events").fetchone()[0], 1)
         self.assertEqual(self.conn.execute("SELECT status FROM events").fetchone()[0], "skipped")
 
+    def test_corrected_forecast_keeps_identity_and_notification_status(self):
+        original = self._make_event(
+            event_type="forecast_revision", source_doc_id="filing-4617",
+            fingerprint="merged-values", extracted_payload_json='{"revised_op":71}',
+        )
+        _, original_id = upsert_event(self.conn, original)
+        self.conn.execute("UPDATE events SET status='skipped' WHERE event_id=?", (original_id,))
+        corrected = self._make_event(
+            event_type="forecast_revision", source_doc_id="filing-4617",
+            fingerprint="five-cells", extracted_payload_json='{"revised_op":17500}',
+        )
+        action, corrected_id = upsert_event(self.conn, corrected)
+        self.assertEqual((action, corrected_id), ("updated", original_id))
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM events").fetchone()[0], 1)
+        self.assertEqual(self.conn.execute("SELECT status FROM events").fetchone()[0], "skipped")
+
     def test_get_unnotified_events(self):
         ev = self._make_event()
         upsert_event(self.conn, ev)

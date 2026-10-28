@@ -559,17 +559,17 @@ def _sync_canonical_financials(
                 config=_config
             )
             if forecast_metrics and forecast_valid:
-                write_financials_canonical(
-                    ticker=ticker,
-                    period=forecast_period,
-                    quarter="FY",
-                    metrics_dict=forecast_metrics,
-                    source="tdnet_forecast",
-                    filing_id=filing_id,
-                    disclosure_datetime=disclosure_datetime,
-                    unit="millions_jpy",
-                    config=_config,
-                )
+                for metrics, unit in (
+                    ({name: value for name, value in forecast_metrics.items() if name != "eps"}, "millions_jpy"),
+                    ({"eps": forecast_metrics["eps"]} if "eps" in forecast_metrics else {}, "yen_per_share"),
+                ):
+                    if metrics:
+                        write_financials_canonical(
+                            ticker=ticker, period=forecast_period, quarter="FY",
+                            metrics_dict=metrics, source="tdnet_forecast",
+                            filing_id=filing_id, disclosure_datetime=disclosure_datetime,
+                            unit=unit, config=_config,
+                        )
             elif forecast_metrics:
                 logger.warning(
                     "[EARNINGS][CANONICAL] %s forecast period unverified: actual=%s forecast=%s",
@@ -581,17 +581,31 @@ def _sync_canonical_financials(
 
 
 def _canonical_forecast_metrics(guidance: dict | None) -> dict[str, float]:
+    import math
     guidance = guidance or {}
     fields = {
         "sales_forecast": "sales", "op_forecast": "operating_profit",
         "ordinary_forecast": "ordinary_profit", "net_income_forecast": "net_income",
         "eps_forecast": "eps",
     }
-    return {
-        metric: value if metric == "eps" else value / 1_000_000
-        for field, metric in fields.items()
-        if (value := guidance.get(field)) is not None
-    }
+    result: dict[str, float] = {}
+    for field, metric in fields.items():
+        raw = guidance.get(field)
+        if raw is None:
+            continue
+        try:
+            value = float(raw) if metric == "eps" else float(raw) / 1_000_000
+        except (TypeError, ValueError, OverflowError):
+            logger.warning("[EARNINGS][CANONICAL] forecast metric blocked: %s invalid_number", metric)
+            continue
+        if (not math.isfinite(value) or
+                (metric == "eps" and abs(value) > 10_000) or
+                (metric != "eps" and (abs(value) > 100_000_000 or
+                                      0 < abs(value) < 0.01))):
+            logger.warning("[EARNINGS][CANONICAL] forecast metric blocked: %s abnormal_value", metric)
+            continue
+        result[metric] = value
+    return result
 
 
 def _valid_forecast_period(actual_period: str, actual_quarter: str, forecast_period: str) -> bool:

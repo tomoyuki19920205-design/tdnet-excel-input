@@ -207,18 +207,15 @@ def _detect_unit(text: str) -> str:
 # テキスト正規化
 # ============================================================
 def _normalize_text(text: str) -> str:
-    """全角→半角、NFKC正規化、および数値の分断修復"""
+    """Normalize native text while preserving spaces between PDF columns."""
     if not text: return ""
     # CID表記 (cid:数字) を完全に除去して、誤数値抽出を防止する
     text = re.sub(r"\(cid:\d+\)", " ", text)
     s = unicodedata.normalize("NFKC", text)
     s = s.replace("\u3000", " ")  # 全角スペース
     
-    # 1. 数字間の「単一」スペースのみ結合。2つ以上のスペース(タブ等)は区切りとして維持。
-    for _ in range(5):
-        s = re.sub(r"(\d) (\d)", r"\1\2", s)
-    
-    # 2. 小数点・カンマ前後のスペースを結合 (分断対応)
+    # A single space may be a column boundary in native PDF text.  Only
+    # punctuation within one number is joined here; OCR has its own path.
     # 複数スペース(2つ以上)は数値の区切りである可能性が高いため、単一スペースのみ結合
     s = re.sub(r"(\d+)\s?\.\s?(\d+)", r"\1.\2", s)
     s = re.sub(r"(\d+)\s?,\s?(\d+)", r"\1,\2", s)
@@ -339,19 +336,10 @@ def _normalize_ocr_text(text: str) -> str:
     for broken, fixed in _OCR_LABEL_JOINS:
         s = s.replace(broken, fixed)
 
-    # Step 6: 数字列途中の空白を縮約（タブ区切り = 列境界は超えない）
-    # "1 0 , 0 0 0" → "10,000" / "1 0 0 . 5 0" → "100.50"
-    # △/▲ + 空白 + 数字もつなぐ (単一スペースのみ)
+    # Step 6: 明示的な句読点の周辺だけ補修する。数字間の空白は
+    # OCR であっても別セルの境界になり得るため結合しない。
     s = re.sub(r"([△▲]) ?(\d)", r"\1\2", s)
-    # 数字・カンマ・ピリオドが空白で分断されているもの（タブは含まない）
-    def _collapse_numeric_spaces(m: re.Match) -> str:
-        return m.group(0).replace(" ", "")
-    s = re.sub(
-        r"[△▲]?\d(?: [\d,.]){2,}",
-        _collapse_numeric_spaces,
-        s,
-    )
-    # 残りのカンマ前後空白: "1 ,234" → "1,234"
+    # カンマ・小数点は同じ数値セル内の明示的な記号として扱う。
     s = re.sub(r"(\d) ?, ?(\d)", r"\1,\2", s)
     # 残りのピリオド前後空白: "12 .34" → "12.34"
     s = re.sub(r"(\d) ?\. ?(\d)", r"\1.\2", s)
@@ -498,6 +486,39 @@ def _parse_cell_value(raw: str) -> float | None:
         return None
 
 
+def _split_row_into_columns(line: str) -> list[str]:
+    """Split a forecast row without joining adjacent numeric cells."""
+    clean = _normalize_text(line).strip()
+    # PDF text can use one space between numeric cells; OCR/table text may
+    # retain wider spaces or tabs.  Keep all three forms as boundaries.
+    return [part for part in re.split(
+        r"\t+| {2,}|(?<=\S) (?=(?:[+\-−△▲]?\d|未定|―|–|—))",
+        clean,
+    ) if part]
+
+
+def _extract_numbers_from_columns(columns: list[str]) -> list[float | None]:
+    """Parse explicit cells, preserving undetermined and range cells as null."""
+    values: list[float | None] = []
+    for column in columns:
+        cell = _normalize_text(column).strip()
+        if cell in {"未定", "－", "―", "–", "—", "-", ""}:
+            values.append(None)
+            continue
+        if "～" in cell or "~" in cell:
+            values.append(None)
+            continue
+        yen_sen = re.fullmatch(r"([△▲\-−]?\d[\d,]*)\s*円\s*(\d{1,2})\s*銭", cell)
+        if yen_sen:
+            whole = _parse_cell_value(yen_sen.group(1))
+            values.append(None if whole is None else
+                          (-1 if whole < 0 else 1) * (abs(whole) + int(yen_sen.group(2)) / 100))
+            continue
+        if re.fullmatch(r"[△▲\-−]?\d[\d,]*(?:\.\d+)?%?", cell):
+            values.append(_parse_cell_value(cell))
+    return values
+
+
 def _extract_numbers_from_line(line: str) -> list[float | None]:
     """行からすべての数値を抽出。
 
@@ -505,6 +526,14 @@ def _extract_numbers_from_line(line: str) -> list[float | None]:
     行内から直接見つけて抽出する。スペース区切りに依存しない。
     """
     clean = _normalize_text(line)
+    if re.search(r"(?:前回|今回).{0,10}予想", clean):
+        columns = _split_row_into_columns(clean)
+        if len(columns) > 1:
+            return _extract_numbers_from_columns(columns[1:])
+    clean = re.sub(
+        r"(\d{1,5})\s*円\s*(\d{1,2})\s*銭",
+        lambda m: f"{m.group(1)}.{int(m.group(2)):02d}", clean,
+    )
     # 数値パターン: △/▲付き、カンマ付き整数、小数、ダッシュ(None値)
     # 年号(2025年, 4月)などを除外するため、数値の後に「年」「月」「日」が
     # 続くものは除外
@@ -610,7 +639,8 @@ def _find_labeled_line(lines: list[str], labels: list[str], search_start: int = 
                     has_financial_number = bool(re.search(r"[\d,]{2,}", after_label)) # 4桁 -> 2桁に緩和
                     has_triangle_number = bool(re.search(r"[△▲]\s*[\d,]+", after_label))
                     num_tokens = len(re.findall(r"[\d,.]+", after_label))
-                    if has_financial_number or has_triangle_number or num_tokens >= 1:
+                    if (has_financial_number or has_triangle_number or num_tokens >= 1
+                            or after_label.count("未定") >= 2):
                         return i
                 else:
                     return i
@@ -652,6 +682,7 @@ def _detect_column_order(lines: list[str], ref_idx: int) -> dict[str, int]:
     if search_start >= search_end:
         return default_map
 
+    header_text = "\n".join(lines[search_start:search_end])
     for i in range(search_start, search_end):
         line = lines[i] if i < len(lines) else ""
         label_matches = _match_label_in_line(line)
@@ -663,6 +694,8 @@ def _detect_column_order(lines: list[str], ref_idx: int) -> dict[str, int]:
                 col_map[field_key] = col_idx
             return col_map
 
+    if "1株当たり" in header_text and "純利益" in header_text:
+        default_map["eps"] = 4
     return default_map
 
 
@@ -769,6 +802,9 @@ def _extract_from_horizontal_table(
         result[f"revised_{field_key}"] = rev_val
         result[f"delta_{field_key}"] = delta_val
         result[f"change_{field_key}_pct"] = pct_val
+
+    result["eps_validated"] = ("eps" in col_map and
+                               result.get("revised_eps") is not None)
 
     result["metrics_count"] = metrics_count
     result["raw_table_text"] = "\n".join(
@@ -885,6 +921,20 @@ def _sanitize_metrics(table_result: dict) -> dict:
     - prev/revの絶対値比率が100倍超 → 行ずれ・単位ずれ
     """
     FINANCIAL_METRICS = ["sales", "op", "ordinary", "net_income"]
+    # A concatenated column can leave neighbouring cells looking plausible.
+    # Reject the amount row together and retain the reason for diagnostics.
+    if any(
+        value is not None and abs(value) > 100_000_000
+        for metric in FINANCIAL_METRICS
+        for side in ("previous", "revised")
+        if (value := table_result.get(f"{side}_{metric}")) is not None
+    ):
+        logger.warning("[forecast_amount_sanitize] reason=impossible_million_yen_amount")
+        for metric in FINANCIAL_METRICS:
+            for key in (f"previous_{metric}", f"revised_{metric}",
+                        f"delta_{metric}", f"change_{metric}_pct"):
+                table_result[key] = None
+        table_result["amount_block_reason"] = "impossible_million_yen_amount"
     valid_count = 0
 
     for metric in FINANCIAL_METRICS:
@@ -930,7 +980,7 @@ def _sanitize_metrics(table_result: dict) -> dict:
 
     # EPSは別チェック: 極端に小さい値（百万円変換された疑い）
     eps_rev = table_result.get("revised_eps")
-    if eps_rev is not None and 0 < abs(eps_rev) < 0.001:
+    if eps_rev is not None and (0 < abs(eps_rev) < 0.001 or abs(eps_rev) > 10_000):
         table_result["previous_eps"] = None
         table_result["revised_eps"] = None
         table_result["delta_eps"] = None
@@ -940,6 +990,28 @@ def _sanitize_metrics(table_result: dict) -> dict:
 
     table_result["metrics_count"] = valid_count
     return table_result
+
+
+def _sanitize_event_amount_metrics(event: ForecastRevisionEvent) -> ForecastRevisionEvent:
+    """Block an implausible amount row after any native, OCR or PDF fallback."""
+    metrics = ("sales", "op", "ordinary", "net_income")
+    values = [getattr(event, f"{side}_{metric}", None)
+              for metric in metrics for side in ("previous", "revised")]
+    if not any(value is not None and
+               (0 < abs(value) < 0.01 or abs(value) > 100_000_000)
+               for value in values):
+        return event
+    logger.warning("[forecast_amount_sanitize] reason=impossible_million_yen_amount values=%s", values)
+    for metric in metrics:
+        for field in (f"previous_{metric}", f"revised_{metric}",
+                      f"delta_{metric}", f"change_{metric}_pct"):
+            setattr(event, field, None)
+    event.amount_block_reason = "impossible_million_yen_amount"
+    event.extracted_metrics_count = int(event.revised_eps is not None)
+    event.subtype = "undecided"
+    event.importance = 0
+    event.confidence = 0.0
+    return event
 
 
 # ============================================================
@@ -1232,6 +1304,7 @@ def _extract_from_text(
         elif metric == "eps":
             event.previous_eps = prev; event.revised_eps = rev
             event.delta_eps = delta; event.change_eps_pct = pct
+            event.eps_validated = bool(table_result.get("eps_validated"))
 
     if metrics_count > 0:
         confidence += 0.40
@@ -2306,6 +2379,7 @@ def _return_with_eps_log(
     text: str = "",
 ) -> ForecastRevisionEvent:
     """EPS を INFO ログに出力し、補助経路による latest_full_year_eps を設定してから event を返す。"""
+    event = _sanitize_event_amount_metrics(event)
     if event.previous_eps is not None or event.revised_eps is not None:
         logger.info(
             f"[forecast_ocr] EPS prev={event.previous_eps} rev={event.revised_eps}"

@@ -104,15 +104,16 @@ def upsert_event(
         "SELECT id, event_id, extracted_payload_json FROM events WHERE fingerprint = ?",
         (event.fingerprint,),
     ).fetchone()
-    # Corrected buyback extraction changes the fingerprint. Keep the original
-    # notification identity for the same issuer and disclosure document.
+    # Corrected extraction changes the fingerprint. Keep the original
+    # notification identity for the same issuer, document, and event type.
     matched_by_source = False
-    if row is None and event.event_type == "buyback":
+    if (row is None and event.source_doc_id and
+            event.event_type in ("buyback", "forecast_revision")):
         row = conn.execute(
             """SELECT id, event_id, extracted_payload_json FROM events
-               WHERE source_doc_id=? AND ticker=? AND event_type='buyback'
+               WHERE source_doc_id=? AND ticker=? AND event_type=?
                ORDER BY id LIMIT 1""",
-            (event.source_doc_id, event.ticker),
+            (event.source_doc_id, event.ticker, event.event_type),
         ).fetchone()
         matched_by_source = row is not None
 

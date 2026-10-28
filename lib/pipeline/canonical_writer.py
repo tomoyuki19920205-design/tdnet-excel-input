@@ -220,7 +220,7 @@ def expand_financials_rows(
             "quarter": quarter,
             "metric": metric,
             "value": value,
-            "unit": unit,
+            "unit": "yen_per_share" if metric == "eps" else unit,
             "source": source,
             "source_priority": priority,
             "filing_id": filing_id,

@@ -1568,7 +1568,8 @@ def extract_guidance_from_zip(
         # for the notification, but do not assign it to another period in canonical.
         guidance.forecast_period = None
 
-    if pdf_guidance and not guidance.forecast_period:
+    if pdf_guidance and (not guidance.forecast_period or
+                         guidance.forecast_period == pdf_guidance.forecast_period):
         forecast_fields = ("sales_forecast", "op_forecast", "ordinary_forecast",
                            "net_income_forecast", "eps_forecast")
         if all(getattr(guidance, field) is None or
@@ -1578,6 +1579,8 @@ def extract_guidance_from_zip(
                 if getattr(guidance, field) is None:
                     setattr(guidance, field, getattr(pdf_guidance, field))
             guidance.forecast_period = pdf_guidance.forecast_period
+        else:
+            logger.warning("[GUIDANCE] PDF and XBRL forecast values disagree; missing metrics not filled")
 
     # ---- Outlook 抽出は無効化済み ----
     # outlook_text / outlook_summary / outlook_factors は互換用に空値を維持
