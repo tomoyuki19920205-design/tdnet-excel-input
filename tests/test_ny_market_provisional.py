@@ -8,6 +8,7 @@ import pytest
 from lib.ny_market import NYMarketValidationError, validate_payload
 from tests.ny_market_quality_fixture import payload as full_payload
 from tools.build_ny_market_provisional_payload import build
+from tools import build_ny_market_market_data_packet as packet_builder
 from tools.ny_market_inbox_worker import WorkerPaths, run_once
 
 
@@ -45,6 +46,46 @@ def _synthetic_packet() -> dict:
             "market_data_generated_at": stamp, "providers": ["fixture"],
             "raw_response_hashes": ["a" * 64], "discrepancy_count": 0,
             "top_gainers_20": [], "unresolved_items": [{"field": "Top20", "reason": "share basis unresolved"}]}
+
+
+def test_builder_emits_provisional_packet_and_keeps_verified_checkpoint(tmp_path, monkeypatch, capsys):
+    snapshot = _synthetic_packet()
+    snapshot.pop("excluded_corporate_action_count", None)
+    calls = {"snapshot": 0, "top20": 0}
+
+    def fetch_snapshot(*_):
+        calls["snapshot"] += 1
+        return snapshot
+
+    def fail_top20(*_, **__):
+        calls["top20"] += 1
+        raise packet_builder.MarketDataError("NUWE price basis unresolved")
+
+    monkeypatch.setattr(packet_builder, "build_index_sector_snapshot", fetch_snapshot)
+    monkeypatch.setattr(packet_builder, "build_canonical_market_data_packet", fail_top20)
+    checkpoint = tmp_path / "session-checkpoint.json"
+    for number in (1, 2, 3, 4):
+        output = tmp_path / f"packet-{number}.json"
+        monkeypatch.setattr("sys.argv", ["packet_builder", "--market-session-date", "2026-09-01",
+                                        "--output", str(output), "--checkpoint", str(checkpoint),
+                                        "--allow-provisional"])
+        assert packet_builder.main() == 0
+        result = json.loads(capsys.readouterr().out)
+        assert result["status"] == "provisional"
+        assert result["excluded_corporate_action_count"] == 0
+        assert json.loads(output.read_text(encoding="utf-8"))["ranking_status"] == "unconfirmed"
+    assert calls == {"snapshot": 1, "top20": 3}
+    state = json.loads(checkpoint.read_text(encoding="utf-8"))
+    assert state["stage"] == "provisional" and state["last_error"] == "NUWE price basis unresolved"
+    assert state["data_failure_count"] == 3
+    notice = tmp_path / "new-notice.json"
+    notice.write_text(json.dumps({"NUWE": "https://www.nasdaqtrader.com/TraderNews.aspx?id=eca2026-764"}))
+    monkeypatch.setattr("sys.argv", ["packet_builder", "--market-session-date", "2026-09-01",
+                                    "--output", str(tmp_path / "packet-5.json"), "--checkpoint", str(checkpoint),
+                                    "--corporate-action-notices", str(notice), "--allow-provisional"])
+    assert packet_builder.main() == 0
+    assert calls["top20"] == 4
+    assert json.loads(checkpoint.read_text(encoding="utf-8"))["data_failure_count"] == 1
 
 
 def test_provisional_upgrades_one_row_to_complete_and_duplicate_is_skipped(tmp_path):

@@ -41,14 +41,21 @@ def _single_builder(lock_path: Path):
 
 
 def _checkpoint(path: Path, *, session: str, stage: str, snapshot: dict | None,
-                error: str | None = None) -> None:
+                evidence_input_sha256: str, error: str | None = None,
+                data_failure: bool = False) -> None:
     current = json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}
     if current and current.get("market_session_date") != session:
         raise ValueError("checkpoint belongs to a different NY session")
+    same_evidence = current.get("evidence_input_sha256") == evidence_input_sha256
+    failures = (int(current.get("data_failure_count", 0)) if same_evidence else 0) + int(data_failure)
+    if stage == "complete":
+        failures = 0
     state = {"market_session_date": session, "stage": stage,
              "updated_at_utc": datetime.now(timezone.utc).isoformat(),
              "snapshot": snapshot,
              "snapshot_sha256": market_data_packet_sha256(snapshot) if snapshot else None,
+             "evidence_input_sha256": evidence_input_sha256,
+             "data_failure_count": failures,
              "attempts": int(current.get("attempts", 0)) + int(stage in {"complete", "provisional", "blocked"}),
              "last_error": error}
     atomic_write_json(path, state)
@@ -96,6 +103,14 @@ def main() -> int:
         raise ValueError("corporate-action-notices must map tickers to official URLs")
     if not isinstance(actions, dict) or not all(isinstance(k, str) and isinstance(v, dict) for k, v in actions.items()):
         raise ValueError("corporate-action-evidence must map tickers to evidence objects")
+    evidence_input_sha256 = market_data_packet_sha256({
+        "issuer_components": issuer_components, "notices": notices,
+        "actions": actions, "independent_snapshots": snapshots,
+        "independent_snapshot_file_hashes": {
+            ticker: hashlib.sha256(Path(entry["path"]).read_bytes()).hexdigest()
+            for ticker, entry in snapshots.items()
+        },
+    })
     if args.output.exists():
         raise ValueError(f"refusing to overwrite existing packet: {args.output}")
     checkpoint_path = args.checkpoint or args.output.with_suffix(".checkpoint.json")
@@ -111,22 +126,36 @@ def main() -> int:
             )
             verified_snapshot = build_index_sector_snapshot(providers, args.market_session_date)
             _checkpoint(checkpoint_path, session=args.market_session_date.isoformat(),
-                        stage="verified_index_sector", snapshot=verified_snapshot)
-        try:
-            packet = build_canonical_market_data_packet(
-                args.market_session_date, issuer_components=issuer_components,
-                discrepancy_arbitrator=LiveDiscrepancyArbitrator(
-                    corporate_action_notices=notices, corporate_action_evidence=actions,
-                    independent_snapshots=snapshots,
-                ), verified_snapshot=verified_snapshot,
-            )
-        except MarketDataError as exc:
-            reason = str(exc)
+                        stage="verified_index_sector", snapshot=verified_snapshot,
+                        evidence_input_sha256=evidence_input_sha256)
+        current = json.loads(checkpoint_path.read_text(encoding="utf-8-sig"))
+        prior_exhausted = (current.get("evidence_input_sha256") == evidence_input_sha256
+                           and current.get("stage") in {"blocked", "provisional"}
+                           and int(current.get("data_failure_count", 0)) >= 3)
+        unresolved = prior_exhausted
+        if prior_exhausted:
+            reason = str(current.get("last_error") or "unresolved market data")
+            if not args.allow_provisional:
+                raise MarketDataError(f"same unresolved evidence reached retry limit: {reason}")
+        else:
+            try:
+                packet = build_canonical_market_data_packet(
+                    args.market_session_date, issuer_components=issuer_components,
+                    discrepancy_arbitrator=LiveDiscrepancyArbitrator(
+                        corporate_action_notices=notices, corporate_action_evidence=actions,
+                        independent_snapshots=snapshots,
+                    ), verified_snapshot=verified_snapshot,
+                )
+            except MarketDataError as exc:
+                reason = str(exc)
+                unresolved = True
+        if unresolved:
             _checkpoint(checkpoint_path, session=args.market_session_date.isoformat(),
                         stage="provisional" if args.allow_provisional else "blocked",
-                        snapshot=verified_snapshot, error=reason)
+                        snapshot=verified_snapshot, evidence_input_sha256=evidence_input_sha256,
+                        error=reason, data_failure=not prior_exhausted)
             if not args.allow_provisional:
-                raise
+                raise MarketDataError(reason)
             packet = {**verified_snapshot, "market_data_contract_version": "ny_market_data_provisional_v1",
                       "market_data_generated_at": verified_snapshot["source"]["retrieved_at"],
                       "providers": [verified_snapshot["source"]["name"]],
@@ -138,7 +167,8 @@ def main() -> int:
                       "ranking_status": "unconfirmed"}
         else:
             _checkpoint(checkpoint_path, session=args.market_session_date.isoformat(),
-                        stage="complete", snapshot=verified_snapshot)
+                        stage="complete", snapshot=verified_snapshot,
+                        evidence_input_sha256=evidence_input_sha256)
     atomic_write_json(args.output, packet)
     print(json.dumps({
         "status": "provisional" if packet.get("quality_status") == "provisional" else "created", "output": str(args.output),
@@ -146,7 +176,7 @@ def main() -> int:
         "indices": len(packet["indexes"]), "sectors": len(packet["sectors"]),
         "top20": len(packet["top_gainers_20"]),
         "discrepancy_count": packet["discrepancy_count"],
-        "excluded_corporate_action_count": packet["excluded_corporate_action_count"],
+        "excluded_corporate_action_count": packet.get("excluded_corporate_action_count", 0),
     }, ensure_ascii=False, sort_keys=True))
     return 0
 
