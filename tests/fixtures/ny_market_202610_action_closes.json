@@ -1,0 +1,29 @@
+{
+  "NSTR": {
+    "target_session_date": "2026-10-02",
+    "prior_symbol": "VACI",
+    "prior_session_date": "2026-10-01",
+    "prior_regular_close": 7.72,
+    "target_regular_close": 4.45,
+    "source_url": "https://www.sec.gov/Archives/edgar/data/2080023/000121390026104119/ea030690601ex99-1.htm"
+  },
+  "VJET": {
+    "target_session_date": "2026-10-05",
+    "prior_symbol": "VTAK",
+    "prior_session_date": "2026-10-02",
+    "prior_regular_close": 0.15,
+    "target_regular_close": 1.62,
+    "independent_split_normalized_prior_close": 1.51,
+    "screener_change_pct": 153.09,
+    "source_top20_floor_pct": 25.81,
+    "source_url": "https://www.sec.gov/Archives/edgar/data/1716621/000143774926031895/vtak20261002_8k.htm"
+  },
+  "PSKY": {
+    "target_session_date": "2026-10-05",
+    "prior_session_date": "2026-10-02",
+    "prior_regular_close": 9.5,
+    "target_regular_close": 9.775,
+    "screener_change_pct": 105.79,
+    "independent_prior_close": 9.5
+  }
+}

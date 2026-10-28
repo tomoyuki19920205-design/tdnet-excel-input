@@ -1,0 +1,71 @@
+毎日、NY市場モーニングレポートを日本語で完成させ、同じ `report_markdown` をユーザー最終回答とCompany Viewer保存の唯一の本文入力にしてください。市場休場日、土日、米国祝日も必ず実行し、スキップ・調査のみ・通知なしで終了してはいけません。
+
+## 絶対条件
+
+- `schema_version=ny_market_daily_v1`、`stable_key=ny_market_daily:{report_date_jst}` を維持する。
+- 休場日は `market_status=holiday_or_weekend` とし、`market_session_date` は直近NY営業日とする。
+- `quality_contract_version=ny_market_quality_v2` を必ず付ける。
+- レポート作成より先に `python C:/Users/takuy/tdnet-ny-market-runtime/tools/build_ny_market_market_data_packet.py --market-session-date <NY営業日> --output <未公開候補packet.json>` を実行しTop20を確定する。候補packetの時価総額は未検証なので本文・公開に使わない。Top20全社のissuer evidenceを調べ、`status=verified`なら全経済的株式クラス、発行済株数、株数基準日、SEC/IR等の出典、ADS換算比率、全クラス網羅の根拠をJSONに保存する。取得不能の場合だけ`status=unavailable`と実際に試したURL・結果を記録する。その後 `python C:/Users/takuy/tdnet-ny-market-runtime/tools/rebuild_ny_market_packet_issuer_caps.py --source-packet <未公開候補packet.json> --issuer-evidence <証拠JSON> --output <新しい版のpacket.json>` を実行し、`ny_market_data_v2`の新しい版だけを検証・本文・保管に使う。指数、セクター、Top20順位・騰落率・provenance・discrepancy arbitrationは元の機械取得snapshotから引き継ぎ、LLMによる再計算・上書き・手入力を禁止する。
+- builderには対象NY営業日ごとの固定 `--checkpoint C:/Users/takuy/tdnet-production/state/data/ny_market_work/ny-<NY営業日>-checkpoint.json` と `--allow-provisional` を付ける。checkpointには取得済み指数・業種snapshotとraw response hashを残し、同日再実行では検証済み部分から再開する。通信失敗はbuilder内の上限付き再試行とし、データ不整合を通信障害として無限に再試行しない。builderの結果が `status=provisional` の場合、そのpacketの検証済み指数・業種だけから `tools/build_ny_market_provisional_payload.py --packet <暫定packet> --report-date-jst <JST日付> --market-status <open|holiday_or_weekend> --output <暫定payload>` を実行し、同じ `write_ny_market_payload.py` validator・専用NY workerを通して保存する。本文と保存データの `unresolved_items` に項目と理由を示し、Top20確定と書かない。暫定版のrun statusは `provisional` とし、完全版PASSと報告しない。原因が解消したら別名の完全版packet/payloadを生成し、同じstable_keyの1件を完全版へ更新してAPIを再読戻しする。暫定版の公開後も完全版作成を継続する。
+- 株式併合の通知やprovider間の価格差でpacket生成が止まった場合は、Nasdaq Traderの公式通知で銘柄・比率・市場での効力発生日を確認し、tickerから公式通知URLへのJSONを `--corporate-action-notices <一時JSON>` で同じbuilderへ渡す。通常終値は米国営業日が一致するNasdaq公式値で検証し、16:00分足のcloseを通常終値に流用しない。公式通知と別のcorporate actionが衝突する場合、または価格差を説明できない場合は停止する。packetを手編集してresolvedにしない。
+- payloadには検証に合格したv2 packetを無変更で `canonical_market_data` として入れ、`market_data_contract_version`、`market_data_packet_sha256`、`market_data_generated_at`、`providers`、`raw_response_hashes`、`discrepancy_count` をpacketから投影する。packet hash欠落・不一致時はpublish禁止。
+- 市場数値を推測・LLM補完しない。指数、11 Sector SPDR、Top20は同一の機械取得snapshotを正本にする。
+- 騰落率は全て「当日通常取引終値 / 前営業日の通常取引終値 - 1」。時間外、取引中、adjusted closeを混ぜない。`price_basis=regular_close`、`adjusted=false`。
+- SOX、S&P500、Dow、Nasdaq、Russell 2000を必ず含める。
+- 11セクターは XLB/XLC/XLE/XLF/XLI/XLK/XLP/XLRE/XLU/XLV/XLY の全件を同じ式で計算し、騰落率降順にrankする。
+- Top20は時価総額や流動性で除外しない純粋上昇率順。機械取得した20社の順序と騰落率を文章作成時に変更しない。終値・時価総額はcanonical payloadに保持するが、完成Markdownには表示しない。
+
+## 一度だけ作るresearch cache
+
+調査開始時に `canonical_market_data` と `ticker_research` を作り、その後は話題の上昇/下落、Top20、決算、最終考察の全セクションで同じ銘柄結果を再利用する。tickerごとに次を保持する:
+
+`ticker, company_name, close, change_pct, market_cap, market_cap_method, catalyst, catalyst_type, source_url, source_type, search_status, searched_at, share_class_components, market_cap_evidence, search_attempt_count, search_queries, searched_sources`。加えて、話題の値上がり10社だけは `company_description` を必須fieldとして保持する。
+
+- 話題の値上がり10社の `company_description` は確認済みの会社情報に基づく事業内容だけを書く。確認できない場合は空欄や一般論を補完せず、renderer/publishを停止する。`notable_gainers` へresearch cacheと同じ値を投影する。Top20だけに含まれる銘柄には `company_description` を要求しない。
+- 具体的な材料を書くときは必ずその材料を裏付けるURLを持たせ、`search_status=verified_catalyst` にする。
+- 適時資料、IR、SEC、主要報道を検索して当日材料を確認できなかった場合だけ `search_status=searched_not_found`、`catalyst_type=not_found`、`source_url=null`、`source_type=null` とし、catalystに必ず「当日材料を検索したが確認できず」を含める。「材料なし」「特に材料なし」は禁止。
+- `python C:/Users/takuy/tdnet-ny-market-runtime/tools/build_ny_market_research_plan.py <一時packet.json>` のgeneric query planを全Top20へ使う。初回検索で材料を確認できない銘柄は必ずsecond pass（ticker、会社名、日付、press release、investor relations、SEC、主要event語）を全て実行してからだけ `searched_not_found` にできる。provider名や特定tickerのif分岐は禁止。実行した全query、検索回数、確認したURLを上記search provenanceへ保存する。
+- 時価総額はissuer-total。`market_cap_evidence`に全経済的株式クラスの網羅根拠・URL・基準日を保存し、各`share_class_components`にはクラス名、出典付き発行済株数と基準日、対象NY営業日の通常終値からの換算根拠を保存する。dual-classは全クラス、ADSは原株換算比率を検証する。vendor時価総額から株数を逆算しない。取得先を実際に調べても確定できない場合だけ`market_cap=null, market_cap_method=unavailable, share_class_components=[]`とし、試したURL・不足項目・結果を`market_cap_evidence.attempted_sources`に残して報告する。
+
+## 完成レポートの内容
+
+1. 5〜8個の要点。
+2. `5指数` はSOX、S&P 500、Dow、Nasdaq、Russell 2000の順に「指数名＋符号付き騰落率」だけを1行ずつ示す。終値、前営業日終値、その他の絶対値を表示しない。
+3. `11業種別騰落` は騰落率降順を維持し、日本語業種名と符号付き騰落率だけを1行ずつ示す。順位、ETFコード、英語名、終値、前営業日終値、その他の絶対値を表示しない。対応は XLB=素材、XLC=コミュニケーション・サービス、XLF=金融、XLV=ヘルスケア、XLE=エネルギー、XLP=生活必需品、XLU=公益、XLY=一般消費財、XLI=資本財、XLK=情報技術、XLRE=不動産。要点を含む他の文章でもETFコードや英語名ではなく、この日本語名を使う。
+4. 話題の値上がり10社は、各社を1つのordered-list itemとし、第1段落を「順位. 会社名（ティッカー）　符号付き騰落率 — 事業内容」だけにする。空行後の上昇理由・材料と材料確認結果は4スペース継続インデントして同じlist item内へ入れる。終値、時価総額、market_cap_method、その他の株価絶対値を表示しない。話題の値下がり10社は従来内容を維持する。
+5. `純粋上昇率ランキング` はcanonical rankどおり20件を示し、各行を「順位. 会社名（ティッカー） 符号付き騰落率」だけにする。事業内容、上昇理由、材料確認結果、終値、時価総額、market_cap_method、その他の株価絶対値を表示しない。
+6. 主要決算。数字より前に事業内容、主力製品・サービス、主要顧客・収益源、重要な事業構造を1〜2文で説明し、売上、EPS、ガイダンス、重要KPI、一過性要因、株価反応、なぜ動いたか、今後への含意を書く。一次情報はcompany IRまたはSECを必須とする。
+7. 引け後・アフター決算の注目株。最初に `python C:/Users/takuy/tdnet-ny-market-runtime/tools/build_ny_market_after_hours_plan.py --market-session-date <NY営業日>` のbroad queryを全て実行し、決算カレンダー、時間外mover、SEC 8-K、臨床試験・FDA等の重要発表からcandidateを広く集める。JSTレポート日ではなく、対象NY市場営業日を検索日に使う。candidate JSONを作った後、同toolへ `--candidates <一時candidate.json>` を付け、全candidateについてIRニュース一覧、SEC 8-Kの全Exhibit、決算資料・説明会資料、ガイダンス変更、同日発表の契約・提携・買収・自社株買い・製品発表、市場予想、信頼できる時間外株価を同じ手順で検証する。`after_hours_candidate_review` には対象NY営業日、探索開始・完了時刻、4探索範囲それぞれのquery・source URL・source種別・完了状態、発見candidate件数、重要度順位、発見経路、採否と構造化した除外理由を必ず保存する。通常日は重要度順5〜10社、選定結果が0〜4社の場合だけ `coverage_status=quiet_day` とし、この値は件数から決定する。探索記録の欠落や未完了をquiet-dayの根拠にしてはならない。件数合わせはしない。candidate discoveryに使う二次情報または公式レジストリ、数値・契約等を確定するIR/SEC、予想比較と時間外株価を補う市場情報をcanonical上で区別する。`after_hours_research` を正本、`after_hours_earnings` を完全同値projectionとする。決算型は `company_description, reported_results, consensus_comparison, guidance, guidance_comparison, key_kpis, background_context, same_day_developments, after_hours_reaction, why_moved, investment_readthrough, watch_items, fact_sources, market_context_sources` を構造化して保存する。`background_context` は発表日と`prior_period`を持つ過去材料、`same_day_developments`は対象NY営業日と`same_day`を持つ同日材料に限定し、混同しない。臨床試験等は `event_type=material_event` とし、決算fieldを強制せず `event_details` に固有の結果を保存する。表示は各社原則3段落、約250〜450字（重要企業は最大600字）で、会社説明、株価反応に必要な数値・材料、会社固有の評価理由・同業へのread-through・次の確認点を記載する。会社発表・市場情報・それらから導く分析を区別し、市場予想比較には予想値とsource、大型契約等には直接sourceを必須とし、「好決算が評価された」等の汎用文だけでpublishしない。`after_hours_change_pct, after_hours_price_source_url, after_hours_price_provider, as_of_utc, as_of_jst, session=post_market` はcanonical payloadだけに保持し、通常本文へprovider名、観測時刻、検索状態、内部provenance、通常取引終値・通常取引騰落率を出さない。
+8. 昨日夕方以降または休場中の主要ニュース10件。全件にURLを付け、同一event clusterは最大2件。決算・個別値上がりで扱った話題は、市場全体への重大な波及がある場合以外は重複させない。
+9. 大きく動いたコモディティと重要マクロ。価格・騰落率・理由の全てに対応するsourceを持たせる。
+10. 最終考察。考察時間に一切の制約を置かず、指数、セクター、個別、決算、金利・為替・コモディティを接続し、確認済み事実と推論を区別する。数値・時価総額・材料はresearch cacheからのみ引用し、別表現で再調査・再計算しない。
+
+## 専用runtimeからProductionへ届ける実行契約
+
+- 実行cwdは `C:/Users/takuy/tdnet-ny-market-runtime`、NY専用コードは読み取り専用の `C:/Users/takuy/tdnet-ny-market-runtime`、Production root（認証設定の読込元）は `C:/Users/takuy/tdnet-excel-input`、Production DBは `C:/Users/takuy/tdnet-production/state/decision_db.db` とする。code checkoutとProduction rootは別物であり、暗黙のcwdから保存先を決めない。
+- 調査開始時にAsia/Tokyoでreport_date_jstを一度だけ確定し、全工程で同じ値と `ny_market_daily:{report_date_jst}` を使う。market_session_dateやUTCの日付をreport dateとして流用しない。
+- 生成前に `python C:/Users/takuy/tdnet-ny-market-runtime/tools/preflight_ny_market_runtime.py --production-root C:/Users/takuy/tdnet-excel-input --db C:/Users/takuy/tdnet-production/state/decision_db.db --stable-key ny_market_daily:{report_date_jst}` を実行し、Productionのreport/run/Viewerを確認する。同toolはDNS・接続タイムアウトだけ最大4回の限定再試行を行い、HTTP失敗は空件数に変えない。status=ready以外は停止する。`complete_readback_verified=true` かつ完成payload/provenance/本文hashとrun successが一致する日付だけ再生成をskipする。`quality_status=provisional` は同日完全版への再開対象であり、PASSにしない。不完全行やAPI不一致は成功扱いしない。
+- NY専用inboxは `C:/Users/takuy/tdnet-production/state/data/ny_market_inbox`。通常の `data/news_inbox` へ書いただけで保存成功としない。既存CompanyNewsInboxWorkerは別ルートを監視しているため、処理を待つだけではProductionに届かない。
+- atomic publish後に専用runtimeのコードで `python C:/Users/takuy/tdnet-ny-market-runtime/tools/ny_market_inbox_worker.py --once --root "C:/Users/takuy/tdnet-excel-input" --inbox "C:/Users/takuy/tdnet-production/state/data/ny_market_inbox" --work-dir "C:/Users/takuy/tdnet-production/state/data/ny_market_worker" --db "C:/Users/takuy/tdnet-production/state/decision_db.db"` を実行する。専用inboxだけを処理し、会社ニュースの共有queueを処理・変更しない。workerの非zero exit、failed、quarantineは失敗である。
+- worker成功後もread-backが必須。`bootstrap_production_write_environment` に上記Production rootを渡し、`get_supabase_read_config` の認証情報を値として出力せず使用する。HTTP 200を確認してProduction report/runをstable keyで、Viewer用 `api_latest_news_stream` を `report_type=ny_market_daily` と同じreport_date_jstで取得する。report/run/API各1件、run success、report identity・日付・本文の完全一致、完成payloadと保存payloadの一致、Markdown SHA-256と `report_delivery.sha256` の一致を確認する。HTTP失敗・0件・重複・本文hash不一致ならpublish成功と報告せずBLOCKEDにする。
+- 成功判定はinbox作成ではなくProduction API read-backまでとする。失敗時は原因・stable key・停止工程を残し、完成本文がある場合の最終回答末尾にも保存失敗を明記する。Scheduled TaskはACTIVEのまま維持する。
+
+## payloadとpublish前validator
+
+payloadは従来field全てに加え `quality_contract_version, report_display_contract_version, market_data_contract_version, market_data_packet_sha256, market_data_generated_at, providers, raw_response_hashes, discrepancy_count, canonical_market_data, ticker_research, after_hours_research, after_hours_candidate_review, final_analysis_references, report_delivery` を持つ。`canonical_market_data` は決定論的toolが生成したpacketそのものとし、source、market_session_date、price_basis、adjusted、indexes(5)、sectors(11)、top_gainers_20(20)、provider attempts、raw response hashes、discrepancy provenanceを保持する。notable、Top20、earnings、after-hours、final analysis referenceの各銘柄objectには共通research fieldを同値で投影し、`company_description` のresearch同値投影は話題の値上がり10社だけ必須とする。アフター決算の事業内容と表示数値は別途 `after_hours_research` と完全同値にする。
+
+`report_markdown` の全セクションを完成させた後、publish前に `python C:/Users/takuy/tdnet-ny-market-runtime/tools/render_ny_market_report.py <下書きpayload.json> --output <整形済みpayload.json>` を必ず実行する。この決定的rendererが5指数、11業種別騰落、話題の値上がり10社、純粋上昇率ランキング、引け後・アフター決算の注目株を構造化データから再生成し、`report_display_contract_version=ny_market_display_v3` と本文SHA-256を設定する。`--migrate-legacy-projection-descriptions` は既存の旧contractレポートを明示的に移行するときだけ使用し、今後の新規生成では使用禁止。renderer後の `report_markdown` を唯一の完成本文とし、手作業で再編集しない。ユーザー最終回答は、この同じpayloadに対する `python C:/Users/takuy/tdnet-ny-market-runtime/tools/write_ny_market_payload.py <整形済みpayload.json> --market-data-packet <一時packet.json> --validate-only --emit-report` の本文をそのまま使い、別途要約・書き直しをしない。
+
+整形済みpayloadを一時ファイルへ完全に書き、まず `python C:/Users/takuy/tdnet-ny-market-runtime/tools/write_ny_market_payload.py <整形済みpayload.json> --market-data-packet <一時packet.json> --validate-only` を実行する。validatorは保存済みpacketとpayloadの`canonical_market_data`を完全一致で比較し、5指数、11セクター、Top20のrank/値、同一tickerの騰落率・時価総額・材料、具体的材料のsource、IR/SEC決算source、ニュースcluster、コモディティsource、本文hashを横断照合する。さらに5表示セクションが決定的rendererの出力と完全一致し、新規レポートでは要点内の業種名が指定日本語名であること、話題の値上がり10社の `company_description` がresearch dataと同値であることを検証する。アフター決算は表示対象と `after_hours_research` の完全一致、短い会社名、ticker、時間外騰落率、事業内容、表示した実績・予想比較・ガイダンス変更・KPI・同日材料、一次／二次source分離、session、二段階candidate監査をfail closedで検証する。`vs 市場予想`には予想値と市場source、契約・提携等にはfact sourceを必須とし、会社固有の`why_moved`、`investment_readthrough`、`watch_items`が欠損または汎用文だけなら拒否する。通常本文への終値・内部状態・観測時刻・provider露出も拒否する。Top20だけに含まれる銘柄のdescription欠損はエラーにしない。失敗したら修正するまでpublish禁止。
+
+validation成功後だけ `python C:/Users/takuy/tdnet-ny-market-runtime/tools/write_ny_market_payload.py <整形済みpayload.json> --market-data-packet <一時packet.json> --inbox "C:/Users/takuy/tdnet-production/state/data/ny_market_inbox"` を1回実行する。helperは検証済みpayloadをfsync済みtempから `data/news_inbox/*.json` へatomic renameする。inboxへ直接partial JSONを書かない。同日成功rowが既にある場合は通常再実行しない。その直後に `python C:/Users/takuy/tdnet-ny-market-runtime/tools/write_ny_market_payload.py <整形済みpayload.json> --market-data-packet <一時packet.json> --validate-only --emit-report` を実行し、標準出力の非空本文と `report_delivery.sha256` の一致を確認する。
+
+保存に失敗しても、検証済み `report_markdown` の完成レポート全文は必ずユーザー最終回答として出し、末尾にだけ `Company Viewer保存に失敗: <短い理由>` を付ける。成功時はemitした完成本文だけを最終回答にし、保存処理・検証結果などの運用説明で本文を置き換えることを禁止する。
+
+Scheduled Task自身を停止、無効化、削除、完了扱いにする操作は禁止。Company News Task01〜08、CompanyNewsInboxWorker、SectorWeeklySchedulerのschedule/prompt/assignment/queueを変更しない。
+
+実行は登録済みプロジェクトの許可された保存先だけで行い、DBや認証設定にアクセスできない場合はBLOCKEDと報告する。権限制限を迂回するリンクや内部設定の直接変更はしない。
+
+現在の登録済みプロジェクトで許可された保存先は `C:/Users/takuy/tdnet-production` と `C:/Users/takuy/tdnet-excel-input`。一時packet・payload・evidence・NY専用inbox・worker状態は `C:/Users/takuy/tdnet-production/state/data/ny_market_work` または明示したNY専用inbox/workerへ作る。NYコードは絶対パスで読み取り実行し、コード側へ書かない。対象NY営業日が2026-10-23なら確認済みの新規上場資料 `C:/Users/takuy/tdnet-production/state/data/ny_market_work/ny-2026-10-23-actions.json` をbuilderの `--corporate-action-evidence` に渡す。他の日付には流用しない。マウス・キーボード・画面・ウィンドウ・クリップボード操作は一切しない。
+
+未公開候補packetが検証に失敗した場合は、元packet、停止記録、取得済みのraw証拠を保持し、生成側の取得・算定処理を修正して別名の新版を生成・再検証する。本文生成側は検証済みpacketを変更しない。Productionのreport/run/Viewerと検証済み本文が完全一致する成功日付は再生成・重複登録しない。

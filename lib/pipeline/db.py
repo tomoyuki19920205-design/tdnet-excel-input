@@ -1,6 +1,6 @@
 """lib/pipeline/db.py -- Supabase REST API ヘルパー
 
-read / write で config を分離し、write 系は SUPABASE_SERVICE_ROLE_KEY を必須にする。
+read / write で config を分離し、write 系はサーバー専用鍵を必須にする。
 anon key での write は RLS violation になるため禁止。
 """
 from __future__ import annotations
@@ -50,10 +50,11 @@ def load_env(project_root: str | None = None) -> None:
     _env_loaded = True
 
     # 起動ログ (秘匿情報なし)
+    secret_key = os.environ.get("SUPABASE_SECRET_KEY", "")
     sr_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
     anon_key = os.environ.get("SUPABASE_ANON_KEY", "")
-    write_type = "service_role" if sr_key else "missing"
-    read_type = "service_role" if sr_key else ("anon" if anon_key else "missing")
+    write_type = "secret" if secret_key else ("service_role" if sr_key else "missing")
+    read_type = write_type if write_type != "missing" else ("anon" if anon_key else "missing")
     logger.info(
         f"[db] config: write_key_type={write_type} read_key_type={read_type}"
     )
@@ -61,23 +62,33 @@ def load_env(project_root: str | None = None) -> None:
 
 def _make_config(url: str, key: str) -> dict[str, str]:
     """共通 config dict を生成。"""
+    headers = {"apikey": key, "Content-Type": "application/json"}
+    # Supabase の新 API key は JWT ではないため Authorization に入れない。
+    if not key.startswith(("sb_secret_", "sb_publishable_")):
+        headers["Authorization"] = f"Bearer {key}"
     return {
         "url": url,
         "key": key,
         "rest_url": f"{url}/rest/v1",
-        "headers": {
-            "apikey": key,
-            "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json",
-        },
+        "headers": headers,
     }
 
 
+def _server_key() -> str:
+    """新しい secret key を優先し、移行中のみ legacy service_role を使う。"""
+    secret_key = os.environ.get("SUPABASE_SECRET_KEY", "")
+    if secret_key:
+        if not secret_key.startswith("sb_secret_"):
+            raise ValueError("SUPABASE_SECRET_KEY must be a Supabase secret API key")
+        return secret_key
+    return os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+
+
 def get_supabase_config() -> dict[str, str]:
-    """後方互換: 既存コードが使っている config。write 可能なら service role を返す。"""
+    """後方互換: 既存コードが使っている config。サーバー鍵を優先する。"""
     url = os.environ.get("SUPABASE_URL", "").rstrip("/")
     key = (
-        os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+        _server_key()
         or os.environ.get("SUPABASE_ANON_KEY", "")
     )
     if not url or not key:
@@ -89,7 +100,7 @@ def get_supabase_read_config() -> dict[str, str]:
     """読み取り用 config。anon key でも OK。"""
     url = os.environ.get("SUPABASE_URL", "").rstrip("/")
     key = (
-        os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+        _server_key()
         or os.environ.get("SUPABASE_ANON_KEY", "")
     )
     if not url or not key:
@@ -98,19 +109,19 @@ def get_supabase_read_config() -> dict[str, str]:
 
 
 def get_supabase_write_config() -> dict[str, str] | None:
-    """書き込み用 config。SUPABASE_SERVICE_ROLE_KEY 必須。
+    """書き込み用 config。secret または legacy service_role 鍵が必須。
 
     Returns:
         config dict, or None if service role key is missing.
     """
     url = os.environ.get("SUPABASE_URL", "").rstrip("/")
-    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    key = _server_key()
     if not url:
         logger.warning("[db] SUPABASE_URL not set for write")
         return None
     if not key:
         logger.warning(
-            "[db] SUPABASE_SERVICE_ROLE_KEY not set — "
+            "[db] SUPABASE_SECRET_KEY / SUPABASE_SERVICE_ROLE_KEY not set — "
             "write operations will be rejected. "
             "anon key fallback is disabled for write safety."
         )
@@ -254,7 +265,7 @@ def supabase_upsert(
     last_error: str | None = None
     last_status = 200
 
-    _RETRYABLE_STATUSES = {502, 503, 504}
+    _RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
 
     for batch_idx, batch in enumerate(batches, 1):
         batch_t0 = _time.monotonic()
@@ -284,6 +295,17 @@ def supabase_upsert(
                     _time.sleep(2 ** attempt)
                     continue
                 last_error = f"timeout: {e}"
+                last_status = 0
+                break
+            except _requests_mod.exceptions.RequestException as e:
+                logger.warning(
+                    f"[db] UPSERT {table} batch {batch_idx}/{total_batches} "
+                    f"network error (attempt {attempt}/{max_retries}): {e}"
+                )
+                if attempt < max_retries:
+                    _time.sleep(2 ** attempt)
+                    continue
+                last_error = f"network error: {e}"
                 last_status = 0
                 break
             except Exception as e:

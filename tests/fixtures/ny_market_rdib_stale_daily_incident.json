@@ -1,0 +1,48 @@
+{
+  "ticker": "RDIB",
+  "screener": {
+    "pctchange": "17.219",
+    "lastsale": "$17.70",
+    "netchange": "2.60",
+    "volume": "123972"
+  },
+  "historical": {
+    "provider": "yahoo_chart_query1",
+    "previous_close": 15.305,
+    "target_close": 17.70,
+    "change_pct": 15.648
+  },
+  "official": {
+    "provider": "nasdaq_official_fixture",
+    "provider_family": "nasdaq",
+    "previous_close": 15.10,
+    "target_close": 17.70,
+    "source_identifiers": ["https://www.nasdaq.com/market-activity/stocks/rdib/historical"],
+    "raw_response_sha256": ["eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"]
+  },
+  "corporate_action": {
+    "provider": "yahoo_events_fixture",
+    "provider_family": "yahoo",
+    "status": "checked_none",
+    "source_identifier": "https://query1.finance.yahoo.com/events",
+    "raw_response_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  },
+  "minute_close": {
+    "provider": "yahoo_minute_fixture",
+    "provider_family": "yahoo",
+    "previous_close": 15.10,
+    "target_close": 17.70,
+    "source_identifier": "https://query1.finance.yahoo.com/minute",
+    "raw_response_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "independent": [{
+    "provider": "independent_fixture",
+    "provider_family": "independent_fixture",
+    "previous_close": 15.10,
+    "target_close": 17.70,
+    "source_identifier": "https://independent.example/rdib/history",
+    "raw_response_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "raw_value": "$15.10.",
+    "parsed_value": 15.10
+  }]
+}
