@@ -128,6 +128,47 @@ def test_yahoo_preserves_zero_volume_for_no_trade_detection():
     assert [bar.volume for bar in result.bars] == [123.0, 0.0]
 
 
+def test_captured_class_share_alias_requires_matching_issuer_identity():
+    raw = (ROOT / "tests/fixtures/ny_market_gtn_a_yahoo_20261029.json").read_bytes()
+    requests = []
+
+    def transport(url, _headers):
+        requests.append(url)
+        if "/GTN.A?" in url:
+            raise HTTPError(url, 404, "Not Found", None, None)
+        return raw
+
+    provider = YahooChartProvider(transport=transport, expected_names={"GTN.A": "Gray Media, Inc."})
+    result = provider.fetch("GTN.A", date(2026, 10, 19), date(2026, 10, 29))
+    assert [bar.session_date for bar in result.bars][-1] == date(2026, 10, 29)
+    assert ["/GTN.A?" in url for url in requests] == [True, False]
+    assert "/GTN-A?" in result.source_identifier
+    assert result.symbol == "GTN.A"
+    assert result.symbol_mapping_evidence == {
+        "canonical_symbol": "GTN.A", "provider_symbol": "GTN-A",
+        "screener_company_name": "Gray Media, Inc.",
+        "provider_company_name": "Gray Media, Inc.",
+        "provider_instrument_type": "EQUITY", "provider_currency": "USD",
+        "source_identifier": result.source_identifier,
+        "raw_response_sha256": hashlib.sha256(raw).hexdigest(),
+        "rule": "single_class_suffix_dot_to_hyphen_after_404",
+    }
+
+
+@pytest.mark.parametrize("expected_name", ["Different Company, Inc.", ""])
+def test_class_share_alias_rejects_unverified_issuer_identity(expected_name):
+    raw = (ROOT / "tests/fixtures/ny_market_gtn_a_yahoo_20261029.json").read_bytes()
+
+    def transport(url, _headers):
+        if "/GTN.A?" in url:
+            raise HTTPError(url, 404, "Not Found", None, None)
+        return raw
+
+    provider = YahooChartProvider(transport=transport, expected_names={"GTN.A": expected_name})
+    with pytest.raises((MarketDataError, HTTPError)):
+        provider.fetch("GTN.A", date(2026, 10, 19), date(2026, 10, 29))
+
+
 def captured_refr_state(pct: str) -> bytes:
     return f"""0 AXWebArea REFR Stock Price | Research Frontiers Inc. Stock Quote (U.S.: Nasdaq) | MarketWatch
 1 text AFTER HOURS Last Updated: Sep 18, 2026 at 6:05 p.m. EDT

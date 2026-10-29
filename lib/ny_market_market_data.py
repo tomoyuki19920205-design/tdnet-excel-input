@@ -129,6 +129,7 @@ class DailySeries:
     retrieved_at: str
     raw_response_sha256: str
     bars: tuple[DailyBar, ...]
+    symbol_mapping_evidence: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -175,6 +176,7 @@ class YahooChartProvider:
         transport: Transport = default_transport,
         now: Callable[[], datetime] | None = None,
         closed_meta_fallback: bool = False,
+        expected_names: dict[str, str] | None = None,
     ) -> None:
         if host not in {"query1.finance.yahoo.com", "query2.finance.yahoo.com"}:
             raise ValueError("unsupported Yahoo chart host")
@@ -183,6 +185,7 @@ class YahooChartProvider:
         self.transport = transport
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.closed_meta_fallback = closed_meta_fallback
+        self.expected_names = expected_names or {}
 
     @staticmethod
     def _unix(day: date) -> int:
@@ -201,7 +204,17 @@ class YahooChartProvider:
 
     def fetch(self, symbol: str, start_date: date, end_date: date) -> DailySeries:
         url = self.build_url(symbol, start_date, end_date)
-        raw = self.transport(url, {"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
+        headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+        provider_symbol = symbol
+        try:
+            raw = self.transport(url, headers)
+        except HTTPError as exc:
+            expected_name = self.expected_names.get(symbol)
+            if exc.code != 404 or not re.fullmatch(r"[A-Z][A-Z0-9]{0,9}\.[A-Z]", symbol) or not expected_name:
+                raise
+            provider_symbol = symbol.replace(".", "-")
+            url = self.build_url(provider_symbol, start_date, end_date)
+            raw = self.transport(url, headers)
         raw_hash = hashlib.sha256(raw).hexdigest()
         try:
             payload = json.loads(raw)
@@ -271,9 +284,28 @@ class YahooChartProvider:
         ordered = tuple(deduplicated[day] for day in sorted(deduplicated))
         if not ordered:
             raise MarketDataError(f"{self.name}:{symbol}: no completed daily bars in requested window")
-        returned_symbol = str(meta.get("symbol") or symbol)
-        if returned_symbol.upper() != symbol.upper():
+        returned_symbol = str(meta.get("symbol") or provider_symbol)
+        if provider_symbol != symbol and not meta.get("symbol"):
+            raise MarketDataError(f"{self.name}:{symbol}: class-symbol alias response lacks symbol identity")
+        if returned_symbol.upper() != provider_symbol.upper():
             raise MarketDataError(f"{self.name}:{symbol}: response symbol mismatch {returned_symbol}")
+        symbol_mapping_evidence = None
+        if provider_symbol != symbol:
+            expected_name = self.expected_names[symbol]
+            actual_names = [str(meta.get(key) or "") for key in ("longName", "shortName")]
+            normalize = lambda name: re.sub(r"[^a-z0-9]", "", name.casefold())
+            if (normalize(expected_name) not in {normalize(name) for name in actual_names}
+                    or meta.get("instrumentType") != "EQUITY" or meta.get("currency") != "USD"):
+                raise MarketDataError(f"{self.name}:{symbol}: class-symbol alias identity mismatch")
+            symbol_mapping_evidence = {
+                "canonical_symbol": symbol, "provider_symbol": provider_symbol,
+                "screener_company_name": expected_name,
+                "provider_company_name": next(name for name in actual_names if normalize(name) == normalize(expected_name)),
+                "provider_instrument_type": meta["instrumentType"],
+                "provider_currency": meta["currency"],
+                "source_identifier": url, "raw_response_sha256": raw_hash,
+                "rule": "single_class_suffix_dot_to_hyphen_after_404",
+            }
         return DailySeries(
             symbol=symbol,
             provider=self.name,
@@ -281,6 +313,7 @@ class YahooChartProvider:
             retrieved_at=self.now().astimezone(timezone.utc).isoformat(timespec="seconds"),
             raw_response_sha256=raw_hash,
             bars=ordered,
+            symbol_mapping_evidence=symbol_mapping_evidence,
         )
 
 
@@ -2070,6 +2103,7 @@ def rank_top20(
     ranked: list[dict[str, Any]] = []
     for candidate in candidates:
         ticker = str(candidate["symbol"]).upper()
+        series = None
         review_flags: list[str] = []
         historical_change: float | None = None
         discrepancy: dict[str, Any] = {
@@ -2211,6 +2245,8 @@ def rank_top20(
             "price_basis": "regular_close",
             "adjusted": False,
             "review_flags": review_flags,
+            **({"symbol_mapping_evidence": series.symbol_mapping_evidence}
+               if series is not None and series.symbol_mapping_evidence else {}),
             **discrepancy,
         })
         if len(ranked) == 20:
@@ -2289,6 +2325,11 @@ def build_canonical_market_data_packet(
         except Exception:
             screener = NasdaqScreenerProvider().fetch()
     symbols = screener_candidate_symbols(screener, limit=candidate_limit)
+    expected_names = {str(row.get("symbol", "")).upper(): str(row.get("name", ""))
+                      for row in screener.get("rows", [])}
+    for provider in providers:
+        if isinstance(provider, YahooChartProvider):
+            provider.expected_names = expected_names
     historical = fetch_all_or_fallback(
         providers, symbols, target_session_date - timedelta(days=10), target_session_date,
         required_session_date=target_session_date,
@@ -2328,6 +2369,9 @@ def build_canonical_market_data_packet(
             date_confirmation_hash = source.get("date_confirmation_sha256")
             if isinstance(date_confirmation_hash, str):
                 raw_hashes.add(date_confirmation_hash)
+        mapping = item.get("symbol_mapping_evidence")
+        if isinstance(mapping, dict) and isinstance(mapping.get("raw_response_sha256"), str):
+            raw_hashes.add(mapping["raw_response_sha256"])
     generated_at = max(
         snapshot["source"]["retrieved_at"], screener["retrieved_at"],
         *(item.retrieved_at for item in historical.series.values()),
