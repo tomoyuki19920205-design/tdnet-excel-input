@@ -262,11 +262,18 @@ def main() -> int:
                 f"status={market_fetch_step.status}"
             )
 
+        # 名証普通株は公式日報から別経路で取得する。
+        nse_fetch_step = run_step("nse-price-fetch", [
+            PYTHON, "-X", "utf8", "tools/fetch_nse_prices.py",
+            *([] if args.dry_run else ["--apply"]),
+        ], timeout_sec=120)
+        steps.append(nse_fetch_step)
+
         # ── Step 5c: sync_market_data（jquants.db prices → Supabase market_data） ──
-        if market_fetch_step.rc != 0:
+        if market_fetch_step.rc != 0 and nse_fetch_step.rc != 0:
             logger.warning(
                 "[MARKET_DATA] step=market-data-sync SKIP "
-                f"reason=market-price-fetch-failed rc={market_fetch_step.rc}"
+                f"reason=all-price-fetches-failed jquants={market_fetch_step.rc} nse={nse_fetch_step.rc}"
             )
             market_sync_step = StepResult("market-data-sync")
             market_sync_step.rc = -1

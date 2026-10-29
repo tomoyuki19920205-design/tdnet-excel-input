@@ -9,6 +9,7 @@ ALLOWED_SOURCES = {
     'legacy_excel',
     'tdnet_xbrl',
     'tdnet_forecast',
+    'official_pdf',
 }
 
 ALLOWED_METRICS = {

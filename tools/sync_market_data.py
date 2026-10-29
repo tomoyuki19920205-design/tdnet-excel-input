@@ -105,13 +105,18 @@ def _chunks(lst, n):
         yield lst[i:i + n]
 
 
-def read_sqlite(db_path: str, recent_days: int = 0, limit: int = 0):
+def read_sqlite(db_path: str, recent_days: int = 0, limit: int = 0, ticker: str | None = None):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
 
     has_universe = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='market_data_universe'"
     ).fetchone() is not None
+    has_provider_universe = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='market_data_provider_universe'"
+    ).fetchone() is not None
+    market_columns = {row[1] for row in conn.execute("PRAGMA table_info(market_data)")}
+    source_expr = "m.source" if "source" in market_columns else "'jquants'"
     where_parts = []
     params = []
     where_parts.append("m.date >= ?")
@@ -120,17 +125,30 @@ def read_sqlite(db_path: str, recent_days: int = 0, limit: int = 0):
         since = (datetime.now(JST) - timedelta(days=recent_days)).strftime("%Y-%m-%d")
         where_parts.append("m.date >= ?")
         params.append(since)
+    if ticker:
+        where_parts.append("m.ticker = ?")
+        params.append(ticker)
     # Once the qualified universe table exists, only records proven to be
     # common stocks by the dated J-Quants master are allowed upstream.
+    jquants_eligibility = f"{source_expr}='jquants'"
     if has_universe:
-        where_parts.append("EXISTS (SELECT 1 FROM market_data_universe u "
-                           "WHERE u.date=m.date AND u.ticker=m.ticker "
-                           "AND u.is_common_stock=1)")
+        jquants_eligibility += (" AND EXISTS (SELECT 1 FROM market_data_universe u "
+                               "WHERE u.date=m.date AND u.ticker=m.ticker "
+                               "AND u.is_common_stock=1)")
+    source_clauses = [f"({jquants_eligibility})"]
+    if has_provider_universe:
+        source_clauses.append(f"({source_expr}='nse_daily_report' AND EXISTS ("
+                              "SELECT 1 FROM market_data_provider_universe u "
+                              f"WHERE u.ticker=m.ticker AND u.source={source_expr} "
+                              "AND u.market='NSE_MAIN' AND u.security_type='common_stock' "
+                              "AND u.code=m.ticker||'0'))")
+    where_parts.append("(" + " OR ".join(source_clauses) + ")")
     where = "WHERE " + " AND ".join(where_parts) if where_parts else ""
 
     query = f"""
         SELECT m.ticker, m.date, m.open, m.high, m.low, m.close, m.volume,
-               m.turnover, m.adj_factor, m.adj_close, m.adj_volume, m.market_cap
+               m.turnover, m.adj_factor, m.adj_close, m.adj_volume, m.market_cap,
+               {source_expr} AS source
         FROM market_data m
         {where}
         ORDER BY m.date DESC, m.ticker
@@ -158,7 +176,7 @@ def read_sqlite(db_path: str, recent_days: int = 0, limit: int = 0):
             "adj_close": r["adj_close"],
             "adj_volume": r["adj_volume"],
             "market_cap": r["market_cap"],
-            "source": "jquants",
+            "source": r["source"],
             "fetched_at": now_iso,
         })
     return data
@@ -223,8 +241,8 @@ def _record_synced(ledger: sqlite3.Connection, rows: list[dict]) -> None:
 
 
 def sync(db_path, supabase_url, supabase_key, dry_run=True,
-         recent_days=_DEFAULT_RECENT_DAYS, limit=0):
-    data = read_sqlite(db_path, recent_days=recent_days, limit=limit)
+         recent_days=_DEFAULT_RECENT_DAYS, limit=0, ticker: str | None = None):
+    data = read_sqlite(db_path, recent_days=recent_days, limit=limit, ticker=ticker)
     logger.info(f"[SYNC] {len(data):,} rows from SQLite")
 
     if not data:
@@ -268,7 +286,10 @@ def main():
     parser.add_argument("--full", action="store_true")
     parser.add_argument("--recent", type=int, default=_DEFAULT_RECENT_DAYS)
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--ticker", help="対象銘柄だけを同期（例: 1777）")
     args = parser.parse_args()
+    if args.ticker and not (len(args.ticker) in (4, 5) and args.ticker.isalnum()):
+        parser.error("--ticker must be a four/five-character security code")
 
     is_dry_run = not args.apply
     recent_days = 0 if args.full else args.recent
@@ -295,7 +316,7 @@ def main():
         sys.exit(1)
 
     stats = sync(args.sqlite, url, key, dry_run=is_dry_run,
-                 recent_days=recent_days, limit=args.limit)
+                 recent_days=recent_days, limit=args.limit, ticker=args.ticker)
     sys.exit(1 if stats["errors"] > 0 else 0)
 
 

@@ -1,0 +1,9 @@
+{
+  "1777": {
+    "code": "17770",
+    "name_fragment": "川崎設備",
+    "market": "NSE_MAIN",
+    "security_type": "common_stock",
+    "identity_source": "https://www.nse.or.jp/listing/search/list.html?schList_Count=50&schOrder_Rule=ASC&schOrder_Target=stock_cd"
+  }
+}

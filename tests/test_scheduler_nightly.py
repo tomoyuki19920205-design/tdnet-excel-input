@@ -67,6 +67,8 @@ def test_market_steps_run_in_required_order():
     assert return_code == 0
     assert names.index("per-share-extract") < names.index("market-price-fetch")
     assert names.index("market-price-fetch") < names.index("market-data-sync")
+    assert names.index("market-price-fetch") < names.index("nse-price-fetch")
+    assert names.index("nse-price-fetch") < names.index("market-data-sync")
     assert names.index("market-data-sync") < names.index("per-share-sync")
 
 
@@ -76,19 +78,29 @@ def test_successful_price_fetch_invokes_market_data_sync():
     assert "market-data-sync" in _names(calls)
 
 
-def test_failed_price_fetch_skips_sync_and_later_steps_continue():
+def test_failed_jquants_fetch_keeps_nse_sync_and_later_steps_running():
     return_code, calls, summary = _run_nightly(
         failures={"market-price-fetch": 1}
     )
 
     names = _names(calls)
+    assert return_code == 1
+    assert "nse-price-fetch" in names
+    assert "market-data-sync" in names
+    assert "per-share-sync" in names
+    assert "edinet-order-extract-nightly" in names
+
+
+def test_both_price_fetches_failed_skip_sync_and_later_steps_continue():
+    return_code, calls, summary = _run_nightly(
+        failures={"market-price-fetch": 1, "nse-price-fetch": 1}
+    )
+    names = _names(calls)
     sync_result = next(step for step in summary if step.name == "market-data-sync")
     assert return_code == 1
     assert "market-data-sync" not in names
     assert sync_result.status == "warning"
-    assert sync_result.stdout_tail == "SKIPPED: market-price-fetch failed rc=1"
     assert "per-share-sync" in names
-    assert "edinet-order-extract-nightly" in names
 
 
 def test_failed_market_data_sync_does_not_stop_later_steps():
@@ -113,6 +125,9 @@ def test_market_commands_match_existing_cli_contracts():
         "tools/fetch_jquants_prices.py",
         "--recent",
     ]
+    assert commands["nse-price-fetch"] == [
+        scheduler.PYTHON, "-X", "utf8", "tools/fetch_nse_prices.py", "--apply"
+    ]
     assert commands["market-data-sync"] == [
         scheduler.PYTHON,
         "-X",
@@ -124,6 +139,9 @@ def test_market_commands_match_existing_cli_contracts():
     _return_code, dry_run_calls, _summary = _run_nightly(dry_run=True)
     dry_run_commands = dict(dry_run_calls)
     assert dry_run_commands["market-price-fetch"] == commands["market-price-fetch"]
+    assert dry_run_commands["nse-price-fetch"] == [
+        scheduler.PYTHON, "-X", "utf8", "tools/fetch_nse_prices.py"
+    ]
     assert dry_run_commands["market-data-sync"] == [
         scheduler.PYTHON,
         "-X",
