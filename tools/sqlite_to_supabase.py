@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import argparse
+import calendar
 import collections
 import io
 import json
@@ -23,7 +24,7 @@ import sqlite3
 import sys
 import time
 import traceback
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 
 import requests
@@ -759,6 +760,48 @@ def _normalize_to_millions(
             return int(fv)
 
 
+def _quarterly_row_is_completed_actual(period: str, quarter: str, updated_at: str | None) -> bool:
+    """Reject imported forecast/template values dated before their quarter end."""
+    try:
+        fiscal_end = date.fromisoformat(period[:10])
+        q = 4 if quarter == "FY" else int(quarter[0])
+        month_index = fiscal_end.year * 12 + fiscal_end.month - 1 - (4 - q) * 3
+        year, month_zero = divmod(month_index, 12)
+        month = month_zero + 1
+        quarter_end = date(year, month, calendar.monthrange(year, month)[1])
+        evidence_date = date.fromisoformat(str(updated_at)[:10])
+        return quarter_end <= evidence_date <= datetime.now(JST).date()
+    except (TypeError, ValueError, IndexError):
+        return False
+
+
+def _exclude_verified_financials(api, chunk: list[dict]) -> list[dict]:
+    """Preserve audited official-IR wide rows during legacy SQLite sync."""
+    tickers = sorted({row["ticker"] for row in chunk})
+    protected: set[tuple[str, str, str]] = set()
+    for ticker_chunk in _chunks(tickers, 25):
+        offset = 0
+        while True:
+            response = api._request(
+                "GET", f"{api.rest_url}/financials",
+                headers={**api.headers, "Prefer": "", "Range": f"{offset}-{offset+999}"},
+                params={
+                    "select": "ticker,period,quarter",
+                    "ticker": f"in.({','.join(ticker_chunk)})",
+                    "source": "eq.official_ir_verified",
+                },
+            )
+            rows = response.json()
+            protected.update((r["ticker"], r["period"], r["quarter"]) for r in rows)
+            if len(rows) < 1000:
+                break
+            offset += 1000
+    result = [row for row in chunk if (row["ticker"], row["period"], row["quarter"]) not in protected]
+    if len(result) != len(chunk):
+        logger.info("[FINANCIALS] preserved %d audited official-IR rows", len(chunk) - len(result))
+    return result
+
+
 def _build_financials_rows_from_tdnet(
     sqlite_rows: list,
 ) -> list[dict]:
@@ -867,6 +910,19 @@ def _build_financials_rows_from_tdnet(
         quarter = _normalize_financials_quarter(raw_quarter)
 
         if not ticker or not period or quarter is None:
+            continue
+
+        # Imported forecast/template rows can have a fiscal period and actual
+        # metric columns before that quarter has ended. The row's last update
+        # must be on or after the relevant quarter end to count as an actual.
+        if not _quarterly_row_is_completed_actual(
+            period, quarter,
+            _get_row_field(r, "updated_at") or _get_row_field(r, "created_at"),
+        ):
+            logger.warning(
+                "[FINANCIALS] skipping pre-period actual candidate %s %s %s",
+                ticker, period, quarter,
+            )
             continue
 
         origin = _detect_source_origin(r)
@@ -1729,6 +1785,9 @@ def push_sqlite_to_supabase(
 
             for chunk in _chunks(fin_rows, batch_size):
                 try:
+                    chunk = _exclude_verified_financials(api, chunk)
+                    if not chunk:
+                        continue
                     api.upsert_batch_fast(
                         "financials", chunk,
                         on_conflict="ticker,period,quarter",
@@ -2193,6 +2252,9 @@ def push_sqlite_to_supabase_targeted(
         if fin_rows:
             for chunk in _chunks(fin_rows, _BATCH_SIZE):
                 try:
+                    chunk = _exclude_verified_financials(api, chunk)
+                    if not chunk:
+                        continue
                     api.upsert_batch_fast(
                         "financials", chunk, on_conflict="ticker,period,quarter",
                     )

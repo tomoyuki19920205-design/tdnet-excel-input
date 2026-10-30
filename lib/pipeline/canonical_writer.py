@@ -311,7 +311,9 @@ def expand_segments_rows(
         seg_name = normalize_segment_name(raw_name)
         seg_key = normalize_segment_display_key(ticker, raw_name)
 
-        for metric in ("sales", "profit"):
+        # Keep external-customer sales in `sales`; intersegment-inclusive
+        # turnover is a separate metric so the Viewer never mixes bases.
+        for metric in ("sales", "sales_with_internal", "profit"):
             value = seg.get(metric)
             if value is None:
                 skipped += 1
