@@ -4,7 +4,7 @@ from pathlib import Path
 
 from lib.pipeline.source_priority import get_priority
 from tools.repair_company_viewer_6623 import MANIFEST, build_rows
-from tools.sqlite_to_supabase import _exclude_verified_financials, _quarterly_row_is_completed_actual
+from tools.sqlite_to_supabase import _quarterly_row_is_completed_actual
 
 
 def test_forecast_template_cannot_become_actual():
@@ -42,24 +42,3 @@ def test_existing_view_columns_are_preserved():
     assert "CREATE OR REPLACE VIEW public.api_latest_segments" in sql
     assert "sales_with_internal" in sql
     assert "cost_of_sales" in sql and "income_taxes" in sql
-
-
-def test_legacy_sync_preserves_verified_wide_rows():
-    class Response:
-        def json(self):
-            return [{"ticker": "6623", "period": "2026-03-31", "quarter": "FY"}]
-
-    class API:
-        rest_url = "https://example.invalid/rest/v1"
-        headers = {}
-
-        def _request(self, method, url, **kwargs):
-            assert method == "GET"
-            assert kwargs["params"]["source"] == "eq.official_ir_verified"
-            return Response()
-
-    rows = [
-        {"ticker": "6623", "period": "2026-03-31", "quarter": "FY", "sales": 128000},
-        {"ticker": "6623", "period": "2026-03-31", "quarter": "3Q", "sales": 92756},
-    ]
-    assert _exclude_verified_financials(API(), rows) == rows[1:]

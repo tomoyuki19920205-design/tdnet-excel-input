@@ -276,7 +276,14 @@ def _select_financials_rows(
         )
 
     conn.close()
-    return rows, fallback_used
+    from .financial_integrity import stored_quarter_is_completed_actual
+    eligible = [r for r in rows if stored_quarter_is_completed_actual(
+        r.get("period") or r.get("fiscal_year_end"), r.get("quarter"),
+        r.get("disclosure_datetime") or r.get("updated_at") or r.get("created_at"),
+    )]
+    if len(eligible) != len(rows):
+        logger.warning("[canonical] excluded %d pre-period actual rows", len(rows) - len(eligible))
+    return eligible, fallback_used
 
 
 def _select_segments_rows(

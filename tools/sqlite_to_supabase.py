@@ -33,6 +33,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _PROJECT_ROOT)
 
 from src.common_ticker import normalize_ticker
+from lib.pipeline.financial_update_policy import guarded_wide_upsert, plan_wide_updates
 
 logger = logging.getLogger("sqlite2supa")
 
@@ -762,44 +763,8 @@ def _normalize_to_millions(
 
 def _quarterly_row_is_completed_actual(period: str, quarter: str, updated_at: str | None) -> bool:
     """Reject imported forecast/template values dated before their quarter end."""
-    try:
-        fiscal_end = date.fromisoformat(period[:10])
-        q = 4 if quarter == "FY" else int(quarter[0])
-        month_index = fiscal_end.year * 12 + fiscal_end.month - 1 - (4 - q) * 3
-        year, month_zero = divmod(month_index, 12)
-        month = month_zero + 1
-        quarter_end = date(year, month, calendar.monthrange(year, month)[1])
-        evidence_date = date.fromisoformat(str(updated_at)[:10])
-        return quarter_end <= evidence_date <= datetime.now(JST).date()
-    except (TypeError, ValueError, IndexError):
-        return False
-
-
-def _exclude_verified_financials(api, chunk: list[dict]) -> list[dict]:
-    """Preserve audited official-IR wide rows during legacy SQLite sync."""
-    tickers = sorted({row["ticker"] for row in chunk})
-    protected: set[tuple[str, str, str]] = set()
-    for ticker_chunk in _chunks(tickers, 25):
-        offset = 0
-        while True:
-            response = api._request(
-                "GET", f"{api.rest_url}/financials",
-                headers={**api.headers, "Prefer": "", "Range": f"{offset}-{offset+999}"},
-                params={
-                    "select": "ticker,period,quarter",
-                    "ticker": f"in.({','.join(ticker_chunk)})",
-                    "source": "eq.official_ir_verified",
-                },
-            )
-            rows = response.json()
-            protected.update((r["ticker"], r["period"], r["quarter"]) for r in rows)
-            if len(rows) < 1000:
-                break
-            offset += 1000
-    result = [row for row in chunk if (row["ticker"], row["period"], row["quarter"]) not in protected]
-    if len(result) != len(chunk):
-        logger.info("[FINANCIALS] preserved %d audited official-IR rows", len(chunk) - len(result))
-    return result
+    from lib.pipeline.financial_integrity import stored_quarter_is_completed_actual
+    return stored_quarter_is_completed_actual(period, quarter, updated_at)
 
 
 def _build_financials_rows_from_tdnet(
@@ -1251,6 +1216,12 @@ def push_sqlite_to_supabase(
     }
 
     if dry_run:
+        if target_tickers:
+            financial_candidates = _build_financials_rows_from_tdnet(rows)
+            _, decision_counts = plan_wide_updates(api, financial_candidates)
+            stats["financials_scanned"] = len(rows)
+            stats["financials_built"] = len(financial_candidates)
+            stats["financials_plan"] = decision_counts
         logger.info(
             "[PUSH] dry-run モード: Supabase への書き込みは"
             "スキップ"
@@ -1606,6 +1577,13 @@ def push_sqlite_to_supabase(
                 processed = idx + 1
                 continue
 
+            if not _quarterly_row_is_completed_actual(
+                fye, _normalize_financials_quarter(q_str),
+                r["updated_at"] or r["created_at"],
+            ):
+                processed = idx + 1
+                continue
+
             cid = ticker_to_cid.get(ticker)
             if cid is None:
                 processed = idx + 1
@@ -1785,14 +1763,14 @@ def push_sqlite_to_supabase(
 
             for chunk in _chunks(fin_rows, batch_size):
                 try:
-                    chunk = _exclude_verified_financials(api, chunk)
-                    if not chunk:
-                        continue
-                    api.upsert_batch_fast(
-                        "financials", chunk,
-                        on_conflict="ticker,period,quarter",
+                    decision_counts = guarded_wide_upsert(
+                        api, chunk,
+                        lambda payload: api.upsert_batch_fast("financials", payload, on_conflict="ticker,period,quarter"),
                     )
-                    financials_upserted += len(chunk)
+                    stats["financials_skipped_existing"] += decision_counts["candidates"] - decision_counts["write_rows"]
+                    if not decision_counts["write_rows"]:
+                        continue
+                    financials_upserted += decision_counts["write_rows"]
                 except requests.HTTPError as he:
                     resp_body = ""
                     status = 0
@@ -2036,6 +2014,10 @@ def push_sqlite_to_supabase_targeted(
     )
 
     if dry_run:
+        financial_candidates = _build_financials_rows_from_tdnet(rows)
+        api = _SupabaseAPI(supabase_url, supabase_key)
+        _, decision_counts = plan_wide_updates(api, financial_candidates)
+        stats["financials_plan"] = decision_counts
         stats["complete"] = True
         logger.info("[TARGETED_PUSH] dry-run mode, skipping Supabase writes")
         return stats
@@ -2197,6 +2179,11 @@ def push_sqlite_to_supabase_targeted(
             q = _parse_quarter(q_str)
             if q is None:
                 continue
+            if not _quarterly_row_is_completed_actual(
+                fye, _normalize_financials_quarter(q_str),
+                r["updated_at"] or r["created_at"],
+            ):
+                continue
             cid = ticker_to_cid.get(ticker)
             if cid is None:
                 continue
@@ -2252,13 +2239,11 @@ def push_sqlite_to_supabase_targeted(
         if fin_rows:
             for chunk in _chunks(fin_rows, _BATCH_SIZE):
                 try:
-                    chunk = _exclude_verified_financials(api, chunk)
-                    if not chunk:
-                        continue
-                    api.upsert_batch_fast(
-                        "financials", chunk, on_conflict="ticker,period,quarter",
+                    decision_counts = guarded_wide_upsert(
+                        api, chunk,
+                        lambda payload: api.upsert_batch_fast("financials", payload, on_conflict="ticker,period,quarter"),
                     )
-                    stats["push_rows"]["financials"] += len(chunk)
+                    stats["push_rows"]["financials"] += decision_counts["write_rows"]
                 except Exception as e:
                     logger.error(f"[TARGETED_PUSH] financials batch error: {e}")
                     stats["errors"] += len(chunk)

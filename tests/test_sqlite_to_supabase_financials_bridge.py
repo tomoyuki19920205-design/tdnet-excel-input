@@ -175,6 +175,14 @@ def test_fy_row_reaches_legacy_period_disclosure_and_facts(tmp_path, monkeypatch
     class FakeAPI:
         def __init__(self, *_args, **_kwargs):
             self.session = MagicMock()
+            self.rest_url = "https://example.invalid/rest/v1"
+            self.headers = {}
+
+        def _request(self, method, url, **kwargs):
+            assert method == "GET"
+            response = MagicMock()
+            response.json.return_value = []
+            return response
 
         def upsert_batch(self, table, rows, *, on_conflict):
             payloads = [dict(row) for row in rows]
@@ -311,7 +319,7 @@ def _make_sqlite_row(**kwargs):
         "sales": 49_169_000_000.0,       # 円建て
         "gross_profit": 4_880_000_000.0,  # 円建て
         "operating_profit": 2_799_000_000.0,  # 円建て
-        "unit": "百万円",
+        "unit": "円",
         "created_at": "2026-03-01",
         "updated_at": "2026-03-01",
         "source_doc_id": "test",
@@ -356,7 +364,7 @@ class TestBuildFinancialsFromTdnet:
 
     def test_4Q_becomes_FY(self):
         """4Q は FY に変換される"""
-        rows = [_make_sqlite_row(quarter="4Q")]
+        rows = [_make_sqlite_row(quarter="4Q", updated_at="2026-04-01")]
         result = _build_financials_rows_from_tdnet(rows)
         assert result[0]["quarter"] == "FY"
 

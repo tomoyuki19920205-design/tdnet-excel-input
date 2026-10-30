@@ -61,6 +61,10 @@ JST = timezone(timedelta(hours=9))
 # J-Quants API は円単位で数値を返す。
 # Viewer / canonical の基準単位は百万円なので、push 前に変換する。
 from lib.pipeline.unit_convert import to_millions as _to_millions  # noqa: E402
+from lib.pipeline.financial_update_policy import (
+    guarded_wide_upsert, plan_canonical_actual_updates,
+    plan_canonical_forecast_updates, plan_wide_updates,
+)
 
 # 百万円単位としては異常に大きい閾値 (= 元が円単位のまま混入した可能性)
 _ABNORMAL_MILLIONS_THRESHOLD = 1_000_000_000  # 百万円で10億 = 円で1000兆
@@ -436,7 +440,7 @@ def _add_one_year(period: str) -> str:
 # J-Quants raw_json から予想行を生成
 # ============================================================
 def read_forecast_rows(
-    db_path: str, recent_days: int = 0
+    db_path: str, recent_days: int = 0, ticker: str = ""
 ) -> list[dict]:
     """
     jquants_financials_normalized の raw_json から予想行を生成する。
@@ -455,6 +459,7 @@ def read_forecast_rows(
     conn.row_factory = sqlite3.Row
 
     from src.common_ticker import normalize_ticker as _norm_ticker  # noqa: E402
+    target_ticker = _norm_ticker(ticker) if ticker else ""
 
     # 全 FY 実績の (ticker, period) を取得（奈期フィルタなし）
     fy_rows = conn.execute(
@@ -510,6 +515,8 @@ def read_forecast_rows(
 
     for r in rows:
         ticker_4 = _norm_ticker(r["ticker"])
+        if target_ticker and ticker_4 != target_ticker:
+            continue
         period   = r["period"]
         quarter  = r["quarter"]
         key      = (ticker_4, period)
@@ -549,6 +556,7 @@ def read_forecast_rows(
                 "gross_profit":     None,
                 "operating_profit": nxf_op_m,
                 "source":           "jquants_nxf",
+                "disclosure_datetime": r["disclosed_date"],
                 "updated_at":       now_iso,
             })
 
@@ -591,6 +599,7 @@ def read_forecast_rows(
             "gross_profit":     None,
             "operating_profit": f_op_m,
             "source":           "jquants_forecast_fy",
+            "disclosure_datetime": r["disclosed_date"],
             "updated_at":       now_iso,
         })
 
@@ -847,8 +856,7 @@ def sync(
     ]
 
     if not data:
-        logger.warning("[SYNC] 0 件。同期対象がありません。")
-        return stats
+        logger.info("[SYNC] 実績0件。予想候補は別途評価します")
 
     # ---- 分布ログ ----
     quarters: dict[str, int] = {}
@@ -859,6 +867,15 @@ def sync(
 
     # ---- ドライランチェック ----
     if dry_run:
+        api = _SupabaseAPI(supabase_url, supabase_key)
+        try:
+            _, actual_plan = plan_wide_updates(api, legacy_data) if table == "financials" else (legacy_data, {})
+            forecast_data = read_forecast_rows(db_path, recent_days=recent_days, ticker=ticker)
+            _, forecast_plan = plan_wide_updates(api, forecast_data) if table == "financials" else (forecast_data, {})
+            stats["actual_plan"] = actual_plan
+            stats["forecast_plan"] = forecast_plan
+        finally:
+            api.close()
         logger.info(
             f"\n{'='*60}\n"
             f"  DRY-RUN: Supabase への送信はスキップ\n"
@@ -883,9 +900,16 @@ def sync(
     )
 
     try:
-        for i, chunk in enumerate(_chunks(data, batch_size), 1):
+        for i, chunk in enumerate(_chunks(legacy_data, batch_size), 1):
             try:
-                n = api.upsert_batch(table, chunk, on_conflict="ticker,period,quarter")
+                if table == "financials":
+                    decision_counts = guarded_wide_upsert(
+                        api, chunk,
+                        lambda payload: api.upsert_batch(table, payload, on_conflict="ticker,period,quarter"),
+                    )
+                    n = decision_counts["write_rows"]
+                else:
+                    n = api.upsert_batch(table, chunk, on_conflict="ticker,period,quarter")
                 stats["upserted"] += n
                 stats["batches"] += 1
                 elapsed = time.time() - t0
@@ -905,12 +929,15 @@ def sync(
         stats["elapsed_sec"] = round(time.time() - t0, 1)
 
         # ---- 同期後の検証 ----
-        logger.info("[VERIFY] Supabase 側の検証中...")
-        try:
-            verify = api.select_count(table)
-            logger.info(f"[VERIFY] public.{table}: {verify['total_rows']:,} rows")
-        except Exception as e:
-            logger.warning(f"[VERIFY] 検証スキップ: {e}")
+        if stats["upserted"]:
+            logger.info("[VERIFY] Supabase 側の件数確認中...")
+            try:
+                verify = api.select_count(table)
+                logger.info(f"[VERIFY] public.{table}: {verify['total_rows']:,} rows (件数確認のみ)")
+            except Exception as e:
+                logger.warning(f"[VERIFY] 件数確認スキップ: {e}")
+        else:
+            logger.info("[VERIFY] 保存対象0件。保存処理の検証成功とは扱わない")
 
         logger.info(
             f"\n{'='*60}\n"
@@ -933,7 +960,7 @@ def sync(
                     f"[COMPANIES] name_ja 補完失敗 (best-effort, 検索に影響): {_cn_err}"
                 )
         # ── Phase 2-A: canonical dual-write (best-effort, batched) ──
-        if not dry_run and stats["upserted"] > 0:
+        if not dry_run and data:
             try:
                 from lib.pipeline.canonical_writer import expand_financials_rows
                 from lib.pipeline.db import load_env, get_supabase_write_config, supabase_upsert
@@ -958,6 +985,8 @@ def sync(
                         all_canonical_rows.extend(expanded)
                         canonical_skipped += skipped
 
+                    all_canonical_rows, canonical_plan = plan_canonical_actual_updates(api, all_canonical_rows)
+                    logger.info(f"[CANONICAL] financials plan={canonical_plan}")
                     if all_canonical_rows:
                         upsert_result = supabase_upsert(
                             "canonical_financials",
@@ -995,7 +1024,7 @@ def sync(
         # 当期予想行は FY 実績が存在しない period のみ生成されるため衝突しない。
         try:
             forecast_data = read_forecast_rows(
-                db_path, recent_days=recent_days
+                db_path, recent_days=recent_days, ticker=ticker
             )
             if forecast_data:
                 forecast_total = len(forecast_data)
@@ -1007,9 +1036,18 @@ def sync(
                 f_upserted = 0
                 for i, chunk in enumerate(_chunks(forecast_data, batch_size), 1):
                     try:
-                        n = api.upsert_batch(
-                            table, chunk, on_conflict="ticker,period,quarter"
-                        )
+                        if table == "financials":
+                            decision_counts = guarded_wide_upsert(
+                                api, chunk,
+                                lambda payload: api.upsert_batch(table, payload, on_conflict="ticker,period,quarter"),
+                            )
+                            n = decision_counts["write_rows"]
+                        else:
+                            n = api.upsert_batch(
+                                table,
+                                [{key: value for key, value in row.items() if key != "disclosure_datetime"} for row in chunk],
+                                on_conflict="ticker,period,quarter",
+                            )
                         f_upserted += n
                         logger.info(
                             f"  [FORECAST] batch {i}/{forecast_batches}: "
@@ -1043,10 +1081,13 @@ def sync(
                                 quarter=d["quarter"],
                                 metrics_dict=metrics_dict,
                                 source=d["source"],
+                                disclosure_datetime=d.get("disclosure_datetime"),
                                 unit="millions_jpy",
                             )
                             fc_rows.extend(expanded)
                             fc_skipped += skipped
+                        fc_rows, canonical_plan = plan_canonical_forecast_updates(api, fc_rows)
+                        logger.info(f"[FORECAST][CANONICAL] plan={canonical_plan}")
                         if fc_rows:
                             fc_result = supabase_upsert(
                                 "canonical_financials",

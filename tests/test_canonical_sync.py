@@ -671,7 +671,7 @@ class TestSegmentSchemaCompat:
             assert tk == "6750"
             assert pd == "2025-03-31"
 
-    def test_no_invalid_ticker_with_production_schema(self, tmp_path):
+    def test_no_invalid_ticker_with_production_schema(self, tmp_path, caplog):
         """本番スキーマの segment row が INVALID ticker にならないこと。"""
         db_path = str(tmp_path / "test.db")
         conn = sqlite3.connect(db_path)
@@ -716,11 +716,8 @@ class TestSegmentSchemaCompat:
             from lib.pipeline.canonical_sync import sync_canonical
             result = sync_canonical(db_path=db_path, dry_run=False)
 
-            # skipped が 0 = INVALID ticker でスキップされていない
-            assert result["segments"]["skipped"] == 0, (
-                f"No segments should be skipped due to INVALID ticker, "
-                f"got skipped={result['segments']['skipped']}"
-            )
+            # Missing optional sales_with_internal counts as skipped metrics.
+            assert "INVALID ticker" not in caplog.text
             assert result["segments"]["written"] > 0
 
 
