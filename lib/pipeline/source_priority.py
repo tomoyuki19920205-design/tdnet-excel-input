@@ -26,6 +26,9 @@ from __future__ import annotations
 
 SOURCE_PRIORITY: dict[str, int] = {
     # ── financials source ──
+    # PDF cells checked against the named official filing and page. This is
+    # reserved for audited repairs; ordinary PDF extraction keeps priority 4.
+    "official_ir_verified": 0,
     "summary_xbrl": 1,
     "tdnet_xbrl": 1,
     "attachment_xbrl": 2,

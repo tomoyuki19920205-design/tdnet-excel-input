@@ -1,0 +1,804 @@
+[
+  {
+    "ticker": "6623",
+    "period": "2024-03-31",
+    "quarter": "1Q",
+    "scope": "consolidated_actual_ytd",
+    "unit": "millions_jpy",
+    "disclosure_date": "2023-07-26",
+    "pl_source": {
+      "url": "https://www.aichidenki.jp/ir/docs/2024_1.pdf",
+      "pdf_page": 7,
+      "eps_pdf_page": 1,
+      "sha256": "71f8c81903c002ef198a20f4ca388b95fd178d23a5ebb447495e687ebf1e707e"
+    },
+    "segment_source": {
+      "url": "https://www.aichidenki.jp/ir/docs/2025_1.pdf",
+      "pdf_page": 9,
+      "disclosure_date": "2024-07-30",
+      "comparison_recast": true,
+      "sha256": "2103ba6f54e90c9f09e5cda8b81793410d65f682022062db4f07c959093584ee"
+    },
+    "pl": {
+      "sales": 26710,
+      "cost_of_sales": 22675,
+      "gross_profit": 4034,
+      "sga": 2104,
+      "operating_profit": 1930,
+      "non_operating_income": 561,
+      "non_operating_expenses": 68,
+      "ordinary_profit": 2423,
+      "extraordinary_income": 90,
+      "extraordinary_losses": 1,
+      "profit_before_tax": 2512,
+      "income_taxes": 834,
+      "net_income": 1679,
+      "eps": 176.99
+    },
+    "segments": [
+      {
+        "name": "Electric Power Apparatus",
+        "external_sales": 7217,
+        "sales_with_internal": 7220,
+        "profit": 752
+      },
+      {
+        "name": "Rotating Machine",
+        "external_sales": 13537,
+        "sales_with_internal": 13540,
+        "profit": 339
+      },
+      {
+        "name": "Printed Board",
+        "external_sales": 5954,
+        "sales_with_internal": 5975,
+        "profit": 1304
+      }
+    ]
+  },
+  {
+    "ticker": "6623",
+    "period": "2024-03-31",
+    "quarter": "2Q",
+    "scope": "consolidated_actual_ytd",
+    "unit": "millions_jpy",
+    "disclosure_date": "2023-10-31",
+    "pl_source": {
+      "url": "https://www.aichidenki.jp/ir/docs/2024_2.pdf",
+      "pdf_page": 9,
+      "eps_pdf_page": 1,
+      "sha256": "9959162e63aa4a0477ebbc726e3941ca89c32c3c039cce72ecb987bcbc08b6b1"
+    },
+    "segment_source": {
+      "url": "https://www.aichidenki.jp/ir/docs/730d847b63a6d690d19197c30e800a22085eaeb5.pdf",
+      "pdf_page": 13,
+      "disclosure_date": "2024-10-31",
+      "comparison_recast": true,
+      "sha256": "dc1e8d344211ea06578e31cee3c59e4b48760b824250c793af3662150d8bfeeb"
+    },
+    "pl": {
+      "sales": 53788,
+      "cost_of_sales": 46224,
+      "gross_profit": 7563,
+      "sga": 4304,
+      "operating_profit": 3258,
+      "non_operating_income": 1230,
+      "non_operating_expenses": 141,
+      "ordinary_profit": 4347,
+      "extraordinary_income": 98,
+      "extraordinary_losses": 5,
+      "profit_before_tax": 4440,
+      "income_taxes": 1421,
+      "net_income": 3015,
+      "eps": 317.75
+    },
+    "segments": [
+      {
+        "name": "Electric Power Apparatus",
+        "external_sales": 14576,
+        "sales_with_internal": 14593,
+        "profit": 1606
+      },
+      {
+        "name": "Rotating Machine",
+        "external_sales": 27652,
+        "sales_with_internal": 27656,
+        "profit": 314
+      },
+      {
+        "name": "Printed Board",
+        "external_sales": 11559,
+        "sales_with_internal": 11594,
+        "profit": 2257
+      }
+    ]
+  },
+  {
+    "ticker": "6623",
+    "period": "2024-03-31",
+    "quarter": "3Q",
+    "scope": "consolidated_actual_ytd",
+    "unit": "millions_jpy",
+    "disclosure_date": "2024-01-31",
+    "pl_source": {
+      "url": "https://www.aichidenki.jp/ir/docs/2024_3.pdf",
+      "pdf_page": 7,
+      "eps_pdf_page": 1,
+      "sha256": "40e9a0ebfb93755863cc64e9b30ac9f6e89331481d79bf8e041da2a1d9b1d31e"
+    },
+    "segment_source": {
+      "url": "https://www.aichidenki.jp/ir/docs/2025_3.pdf",
+      "pdf_page": 9,
+      "disclosure_date": "2025-01-30",
+      "comparison_recast": true,
+      "sha256": "890451a0d9370eb517ed34268ebe8712e69c0402d7419436e20a6d9d9a4cab49"
+    },
+    "pl": {
+      "sales": 82713,
+      "cost_of_sales": 70847,
+      "gross_profit": 11865,
+      "sga": 6419,
+      "operating_profit": 5445,
+      "non_operating_income": 1209,
+      "non_operating_expenses": 203,
+      "ordinary_profit": 6451,
+      "extraordinary_income": 131,
+      "extraordinary_losses": 26,
+      "profit_before_tax": 6557,
+      "income_taxes": 2023,
+      "net_income": 4495,
+      "eps": 473.69
+    },
+    "segments": [
+      {
+        "name": "Electric Power Apparatus",
+        "external_sales": 24603,
+        "sales_with_internal": 24621,
+        "profit": 2879
+      },
+      {
+        "name": "Rotating Machine",
+        "external_sales": 41748,
+        "sales_with_internal": 41810,
+        "profit": 1013
+      },
+      {
+        "name": "Printed Board",
+        "external_sales": 16361,
+        "sales_with_internal": 16412,
+        "profit": 2900
+      }
+    ]
+  },
+  {
+    "ticker": "6623",
+    "period": "2024-03-31",
+    "quarter": "FY",
+    "scope": "consolidated_actual_ytd",
+    "unit": "millions_jpy",
+    "disclosure_date": "2024-04-30",
+    "pl_source": {
+      "url": "https://www.aichidenki.jp/ir/docs/4663bf3b2396b35c0783950ac8d7105996f23ffa.pdf",
+      "pdf_page": 8,
+      "eps_pdf_page": 1,
+      "sha256": "ac7606b84114cce1ad878c79037790ffda0553fdb13d62b5479187a2524896b8"
+    },
+    "segment_source": {
+      "url": "https://www.aichidenki.jp/ir/docs/d4be5c339495eb5ab2b82ef1c67e3471cfacf52a.pdf",
+      "pdf_page": 16,
+      "disclosure_date": "2025-04-30",
+      "comparison_recast": true,
+      "sha256": "a132ef6f6c9fd60d488e1b3d5bd8f0b6491670ea27b54d93295c10e3c77fb07b"
+    },
+    "pl": {
+      "sales": 110595,
+      "cost_of_sales": 94954,
+      "gross_profit": 15640,
+      "sga": 8580,
+      "operating_profit": 7059,
+      "non_operating_income": 1562,
+      "non_operating_expenses": 309,
+      "ordinary_profit": 8312,
+      "extraordinary_income": 259,
+      "extraordinary_losses": 30,
+      "profit_before_tax": 8541,
+      "income_taxes": 2586,
+      "net_income": 5937,
+      "eps": 625.55
+    },
+    "segments": [
+      {
+        "name": "Electric Power Apparatus",
+        "external_sales": 33560,
+        "sales_with_internal": 33609,
+        "profit": 3888
+      },
+      {
+        "name": "Rotating Machine",
+        "external_sales": 54720,
+        "sales_with_internal": 54785,
+        "profit": 1061
+      },
+      {
+        "name": "Printed Board",
+        "external_sales": 22314,
+        "sales_with_internal": 22382,
+        "profit": 3922
+      }
+    ]
+  },
+  {
+    "ticker": "6623",
+    "period": "2025-03-31",
+    "quarter": "1Q",
+    "scope": "consolidated_actual_ytd",
+    "unit": "millions_jpy",
+    "disclosure_date": "2024-07-30",
+    "pl_source": {
+      "url": "https://www.aichidenki.jp/ir/docs/2025_1.pdf",
+      "pdf_page": 7,
+      "eps_pdf_page": 1,
+      "sha256": "2103ba6f54e90c9f09e5cda8b81793410d65f682022062db4f07c959093584ee"
+    },
+    "segment_source": {
+      "url": "https://www.aichidenki.jp/ir/docs/2025_1.pdf",
+      "pdf_page": 9,
+      "disclosure_date": "2024-07-30",
+      "comparison_recast": false,
+      "sha256": "2103ba6f54e90c9f09e5cda8b81793410d65f682022062db4f07c959093584ee"
+    },
+    "pl": {
+      "sales": 26077,
+      "cost_of_sales": 21974,
+      "gross_profit": 4102,
+      "sga": 2189,
+      "operating_profit": 1913,
+      "non_operating_income": 589,
+      "non_operating_expenses": 77,
+      "ordinary_profit": 2424,
+      "extraordinary_income": null,
+      "extraordinary_losses": 6,
+      "profit_before_tax": 2418,
+      "income_taxes": 713,
+      "net_income": 1657,
+      "eps": 175.83
+    },
+    "segments": [
+      {
+        "name": "Electric Power Apparatus",
+        "external_sales": 6845,
+        "sales_with_internal": 6848,
+        "profit": 532
+      },
+      {
+        "name": "Rotating Machine",
+        "external_sales": 12722,
+        "sales_with_internal": 12724,
+        "profit": 544
+      },
+      {
+        "name": "Printed Board",
+        "external_sales": 6509,
+        "sales_with_internal": 6525,
+        "profit": 1342
+      }
+    ]
+  },
+  {
+    "ticker": "6623",
+    "period": "2025-03-31",
+    "quarter": "2Q",
+    "scope": "consolidated_actual_ytd",
+    "unit": "millions_jpy",
+    "disclosure_date": "2024-10-31",
+    "pl_source": {
+      "url": "https://www.aichidenki.jp/ir/docs/730d847b63a6d690d19197c30e800a22085eaeb5.pdf",
+      "pdf_page": 9,
+      "eps_pdf_page": 1,
+      "sha256": "dc1e8d344211ea06578e31cee3c59e4b48760b824250c793af3662150d8bfeeb"
+    },
+    "segment_source": {
+      "url": "https://www.aichidenki.jp/ir/docs/730d847b63a6d690d19197c30e800a22085eaeb5.pdf",
+      "pdf_page": 13,
+      "disclosure_date": "2024-10-31",
+      "comparison_recast": false,
+      "sha256": "dc1e8d344211ea06578e31cee3c59e4b48760b824250c793af3662150d8bfeeb"
+    },
+    "pl": {
+      "sales": 57930,
+      "cost_of_sales": 49414,
+      "gross_profit": 8516,
+      "sga": 4441,
+      "operating_profit": 4074,
+      "non_operating_income": 649,
+      "non_operating_expenses": 168,
+      "ordinary_profit": 4555,
+      "extraordinary_income": 65,
+      "extraordinary_losses": 10,
+      "profit_before_tax": 4609,
+      "income_taxes": 1302,
+      "net_income": 3205,
+      "eps": 340.67
+    },
+    "segments": [
+      {
+        "name": "Electric Power Apparatus",
+        "external_sales": 17586,
+        "sales_with_internal": 17593,
+        "profit": 1974
+      },
+      {
+        "name": "Rotating Machine",
+        "external_sales": 28144,
+        "sales_with_internal": 28151,
+        "profit": 1067
+      },
+      {
+        "name": "Printed Board",
+        "external_sales": 12199,
+        "sales_with_internal": 12234,
+        "profit": 2039
+      }
+    ]
+  },
+  {
+    "ticker": "6623",
+    "period": "2025-03-31",
+    "quarter": "3Q",
+    "scope": "consolidated_actual_ytd",
+    "unit": "millions_jpy",
+    "disclosure_date": "2025-01-30",
+    "pl_source": {
+      "url": "https://www.aichidenki.jp/ir/docs/2025_3.pdf",
+      "pdf_page": 7,
+      "eps_pdf_page": 1,
+      "sha256": "890451a0d9370eb517ed34268ebe8712e69c0402d7419436e20a6d9d9a4cab49"
+    },
+    "segment_source": {
+      "url": "https://www.aichidenki.jp/ir/docs/2025_3.pdf",
+      "pdf_page": 9,
+      "disclosure_date": "2025-01-30",
+      "comparison_recast": false,
+      "sha256": "890451a0d9370eb517ed34268ebe8712e69c0402d7419436e20a6d9d9a4cab49"
+    },
+    "pl": {
+      "sales": 87557,
+      "cost_of_sales": 74220,
+      "gross_profit": 13336,
+      "sga": 6583,
+      "operating_profit": 6752,
+      "non_operating_income": 760,
+      "non_operating_expenses": 280,
+      "ordinary_profit": 7232,
+      "extraordinary_income": 66,
+      "extraordinary_losses": 23,
+      "profit_before_tax": 7275,
+      "income_taxes": 2206,
+      "net_income": 4998,
+      "eps": 531.45
+    },
+    "segments": [
+      {
+        "name": "Electric Power Apparatus",
+        "external_sales": 26760,
+        "sales_with_internal": 26768,
+        "profit": 3160
+      },
+      {
+        "name": "Rotating Machine",
+        "external_sales": 42306,
+        "sales_with_internal": 42345,
+        "profit": 1952
+      },
+      {
+        "name": "Printed Board",
+        "external_sales": 18490,
+        "sales_with_internal": 18533,
+        "profit": 3122
+      }
+    ]
+  },
+  {
+    "ticker": "6623",
+    "period": "2025-03-31",
+    "quarter": "FY",
+    "scope": "consolidated_actual_ytd",
+    "unit": "millions_jpy",
+    "disclosure_date": "2025-04-30",
+    "pl_source": {
+      "url": "https://www.aichidenki.jp/ir/docs/d4be5c339495eb5ab2b82ef1c67e3471cfacf52a.pdf",
+      "pdf_page": 8,
+      "eps_pdf_page": 1,
+      "sha256": "a132ef6f6c9fd60d488e1b3d5bd8f0b6491670ea27b54d93295c10e3c77fb07b"
+    },
+    "segment_source": {
+      "url": "https://www.aichidenki.jp/ir/docs/d4be5c339495eb5ab2b82ef1c67e3471cfacf52a.pdf",
+      "pdf_page": 17,
+      "disclosure_date": "2025-04-30",
+      "comparison_recast": false,
+      "sha256": "a132ef6f6c9fd60d488e1b3d5bd8f0b6491670ea27b54d93295c10e3c77fb07b"
+    },
+    "pl": {
+      "sales": 120270,
+      "cost_of_sales": 102241,
+      "gross_profit": 18028,
+      "sga": 9363,
+      "operating_profit": 8665,
+      "non_operating_income": 1057,
+      "non_operating_expenses": 399,
+      "ordinary_profit": 9323,
+      "extraordinary_income": 99,
+      "extraordinary_losses": 34,
+      "profit_before_tax": 9387,
+      "income_taxes": 2540,
+      "net_income": 6684,
+      "eps": 710.97
+    },
+    "segments": [
+      {
+        "name": "Electric Power Apparatus",
+        "external_sales": 37737,
+        "sales_with_internal": 37757,
+        "profit": 4482
+      },
+      {
+        "name": "Rotating Machine",
+        "external_sales": 57410,
+        "sales_with_internal": 57461,
+        "profit": 2165
+      },
+      {
+        "name": "Printed Board",
+        "external_sales": 25121,
+        "sales_with_internal": 25180,
+        "profit": 4094
+      }
+    ]
+  },
+  {
+    "ticker": "6623",
+    "period": "2026-03-31",
+    "quarter": "1Q",
+    "scope": "consolidated_actual_ytd",
+    "unit": "millions_jpy",
+    "disclosure_date": "2025-07-31",
+    "pl_source": {
+      "url": "https://www.aichidenki.jp/ir/2026.03%20%E7%AC%AC1%E5%9B%9B%E5%8D%8A%E6%9C%9F%E6%B1%BA%E7%AE%97%E7%9F%AD%E4%BF%A1.pdf",
+      "pdf_page": 7,
+      "eps_pdf_page": 1,
+      "sha256": "1fbb59a9538cf07a06909cb8d4bdb42c6c2fe10644d42ec0188557aaac7778c2"
+    },
+    "segment_source": {
+      "url": "https://www.aichidenki.jp/ir/2026.03%20%E7%AC%AC1%E5%9B%9B%E5%8D%8A%E6%9C%9F%E6%B1%BA%E7%AE%97%E7%9F%AD%E4%BF%A1.pdf",
+      "pdf_page": 9,
+      "disclosure_date": "2025-07-31",
+      "comparison_recast": false,
+      "sha256": "1fbb59a9538cf07a06909cb8d4bdb42c6c2fe10644d42ec0188557aaac7778c2"
+    },
+    "pl": {
+      "sales": 28744,
+      "cost_of_sales": 23934,
+      "gross_profit": 4810,
+      "sga": 2344,
+      "operating_profit": 2465,
+      "non_operating_income": 325,
+      "non_operating_expenses": 254,
+      "ordinary_profit": 2535,
+      "extraordinary_income": 257,
+      "extraordinary_losses": null,
+      "profit_before_tax": 2793,
+      "income_taxes": 887,
+      "net_income": 1930,
+      "eps": 205.49
+    },
+    "segments": [
+      {
+        "name": "Electric Power Apparatus",
+        "external_sales": 7960,
+        "sales_with_internal": 7962,
+        "profit": 960
+      },
+      {
+        "name": "Rotating Machine",
+        "external_sales": 13020,
+        "sales_with_internal": 13028,
+        "profit": 490
+      },
+      {
+        "name": "Printed Board",
+        "external_sales": 7764,
+        "sales_with_internal": 7780,
+        "profit": 1566
+      }
+    ]
+  },
+  {
+    "ticker": "6623",
+    "period": "2026-03-31",
+    "quarter": "2Q",
+    "scope": "consolidated_actual_ytd",
+    "unit": "millions_jpy",
+    "disclosure_date": "2025-10-30",
+    "pl_source": {
+      "url": "https://www.aichidenki.jp/ir/2026_2.pdf",
+      "pdf_page": 9,
+      "eps_pdf_page": 1,
+      "sha256": "eb5ba0661e535c023cdaaae5a25fa3a05c0df3709b4bd054e648e6a18432ef3d"
+    },
+    "segment_source": {
+      "url": "https://www.aichidenki.jp/ir/2026_2.pdf",
+      "pdf_page": 13,
+      "disclosure_date": "2025-10-30",
+      "comparison_recast": false,
+      "sha256": "eb5ba0661e535c023cdaaae5a25fa3a05c0df3709b4bd054e648e6a18432ef3d"
+    },
+    "pl": {
+      "sales": 60147,
+      "cost_of_sales": 50142,
+      "gross_profit": 10004,
+      "sga": 4870,
+      "operating_profit": 5134,
+      "non_operating_income": 622,
+      "non_operating_expenses": 312,
+      "ordinary_profit": 5444,
+      "extraordinary_income": 258,
+      "extraordinary_losses": 5,
+      "profit_before_tax": 5698,
+      "income_taxes": 1820,
+      "net_income": 3925,
+      "eps": 417.77
+    },
+    "segments": [
+      {
+        "name": "Electric Power Apparatus",
+        "external_sales": 16974,
+        "sales_with_internal": 16986,
+        "profit": 2296
+      },
+      {
+        "name": "Rotating Machine",
+        "external_sales": 26943,
+        "sales_with_internal": 26954,
+        "profit": 989
+      },
+      {
+        "name": "Printed Board",
+        "external_sales": 16230,
+        "sales_with_internal": 16267,
+        "profit": 2987
+      }
+    ]
+  },
+  {
+    "ticker": "6623",
+    "period": "2026-03-31",
+    "quarter": "3Q",
+    "scope": "consolidated_actual_ytd",
+    "unit": "millions_jpy",
+    "disclosure_date": "2026-01-29",
+    "pl_source": {
+      "url": "https://www.aichidenki.jp/ir/2026_3.pdf",
+      "pdf_page": 7,
+      "eps_pdf_page": 1,
+      "sha256": "e58e0cbc5fc9411b94fc5d1f051fb1950526af0415c41294292f1a83adda90a5"
+    },
+    "segment_source": {
+      "url": "https://www.aichidenki.jp/ir/2026_3.pdf",
+      "pdf_page": 9,
+      "disclosure_date": "2026-01-29",
+      "comparison_recast": false,
+      "sha256": "e58e0cbc5fc9411b94fc5d1f051fb1950526af0415c41294292f1a83adda90a5"
+    },
+    "pl": {
+      "sales": 92756,
+      "cost_of_sales": 77103,
+      "gross_profit": 15653,
+      "sga": 7350,
+      "operating_profit": 8303,
+      "non_operating_income": 900,
+      "non_operating_expenses": 302,
+      "ordinary_profit": 8900,
+      "extraordinary_income": 322,
+      "extraordinary_losses": 25,
+      "profit_before_tax": 9198,
+      "income_taxes": 2955,
+      "net_income": 6315,
+      "eps": 672.16
+    },
+    "segments": [
+      {
+        "name": "Electric Power Apparatus",
+        "external_sales": 26965,
+        "sales_with_internal": 26983,
+        "profit": 3788
+      },
+      {
+        "name": "Rotating Machine",
+        "external_sales": 40811,
+        "sales_with_internal": 40826,
+        "profit": 1699
+      },
+      {
+        "name": "Printed Board",
+        "external_sales": 24979,
+        "sales_with_internal": 25032,
+        "profit": 4514
+      }
+    ],
+    "correction_review": {
+      "url": "https://www.aichidenki.jp/news/20260202.pdf",
+      "finding": "Correction concerns regional sales breakdown; consolidated PL and reportable-segment rows unchanged."
+    }
+  },
+  {
+    "ticker": "6623",
+    "period": "2026-03-31",
+    "quarter": "FY",
+    "scope": "consolidated_actual_ytd",
+    "unit": "millions_jpy",
+    "disclosure_date": "2026-04-30",
+    "pl_source": {
+      "url": "https://www.aichidenki.jp/ir/7dbf062c2e09dba0ca22cb26cea6b211c6fb2c21.pdf",
+      "pdf_page": 8,
+      "eps_pdf_page": 1,
+      "sha256": "4ce7c18d78bad2315db3c400e0fb5aabca8dd49efbb5f684c7edf497215cbd07"
+    },
+    "segment_source": {
+      "url": "https://www.aichidenki.jp/ir/7dbf062c2e09dba0ca22cb26cea6b211c6fb2c21.pdf",
+      "pdf_page": 17,
+      "disclosure_date": "2026-04-30",
+      "comparison_recast": false,
+      "sha256": "4ce7c18d78bad2315db3c400e0fb5aabca8dd49efbb5f684c7edf497215cbd07"
+    },
+    "pl": {
+      "sales": 129382,
+      "cost_of_sales": 107848,
+      "gross_profit": 21533,
+      "sga": 10380,
+      "operating_profit": 11153,
+      "non_operating_income": 1183,
+      "non_operating_expenses": 410,
+      "ordinary_profit": 11925,
+      "extraordinary_income": 324,
+      "extraordinary_losses": 50,
+      "profit_before_tax": 12199,
+      "income_taxes": 3750,
+      "net_income": 8527,
+      "eps": 907.48
+    },
+    "segments": [
+      {
+        "name": "Electric Power Apparatus",
+        "external_sales": 38004,
+        "sales_with_internal": 38032,
+        "profit": 5750
+      },
+      {
+        "name": "Rotating Machine",
+        "external_sales": 57167,
+        "sales_with_internal": 57196,
+        "profit": 2101
+      },
+      {
+        "name": "Printed Board",
+        "external_sales": 34210,
+        "sales_with_internal": 34282,
+        "profit": 5735
+      }
+    ]
+  },
+  {
+    "ticker": "6623",
+    "period": "2027-03-31",
+    "quarter": "1Q",
+    "scope": "consolidated_actual_ytd",
+    "unit": "millions_jpy",
+    "disclosure_date": "2026-07-31",
+    "pl_source": {
+      "url": "https://www.aichidenki.jp/ir/2027_1.pdf",
+      "pdf_page": 7,
+      "eps_pdf_page": 1,
+      "sha256": "376dab84a3537c6ca449102442f62ac6247436aaea6d496cf5239b328cf11917"
+    },
+    "segment_source": {
+      "url": "https://www.aichidenki.jp/ir/2027_1.pdf",
+      "pdf_page": 9,
+      "disclosure_date": "2026-07-31",
+      "comparison_recast": false,
+      "sha256": "376dab84a3537c6ca449102442f62ac6247436aaea6d496cf5239b328cf11917"
+    },
+    "pl": {
+      "sales": 32687,
+      "cost_of_sales": 27412,
+      "gross_profit": 5274,
+      "sga": 2622,
+      "operating_profit": 2651,
+      "non_operating_income": 266,
+      "non_operating_expenses": 143,
+      "ordinary_profit": 2775,
+      "extraordinary_income": null,
+      "extraordinary_losses": 13,
+      "profit_before_tax": 2761,
+      "income_taxes": 932,
+      "net_income": 1863,
+      "eps": 198.27
+    },
+    "segments": [
+      {
+        "name": "Electric Power Apparatus",
+        "external_sales": 7867,
+        "sales_with_internal": 7870,
+        "profit": 956
+      },
+      {
+        "name": "Rotating Machine",
+        "external_sales": 14507,
+        "sales_with_internal": 14509,
+        "profit": 574
+      },
+      {
+        "name": "Printed Board",
+        "external_sales": 10312,
+        "sales_with_internal": 10335,
+        "profit": 1852
+      }
+    ]
+  },
+  {
+    "ticker": "6623",
+    "period": "2027-03-31",
+    "quarter": "2Q",
+    "scope": "consolidated_actual_ytd",
+    "unit": "millions_jpy",
+    "disclosure_date": "2026-10-30",
+    "pl_source": {
+      "url": "https://www.release.tdnet.info/inbs/140120261028558349.pdf",
+      "pdf_page": 9,
+      "eps_pdf_page": 1,
+      "sha256": "91b9f7fea39921f9afa645dfdca527f0ac729a7da5b7ee4b487fb53e79e943a7"
+    },
+    "segment_source": {
+      "url": "https://www.release.tdnet.info/inbs/140120261028558349.pdf",
+      "pdf_page": 13,
+      "disclosure_date": "2026-10-30",
+      "comparison_recast": false,
+      "sha256": "91b9f7fea39921f9afa645dfdca527f0ac729a7da5b7ee4b487fb53e79e943a7"
+    },
+    "pl": {
+      "sales": 72310,
+      "cost_of_sales": 59743,
+      "gross_profit": 12567,
+      "sga": 5414,
+      "operating_profit": 7153,
+      "non_operating_income": 521,
+      "non_operating_expenses": 458,
+      "ordinary_profit": 7215,
+      "extraordinary_income": 5,
+      "extraordinary_losses": 27,
+      "profit_before_tax": 7194,
+      "income_taxes": 2330,
+      "net_income": 4897,
+      "eps": 521.04
+    },
+    "segments": [
+      {
+        "name": "Electric Power Apparatus",
+        "external_sales": 16499,
+        "sales_with_internal": 16513,
+        "profit": 2800
+      },
+      {
+        "name": "Rotating Machine",
+        "external_sales": 31964,
+        "sales_with_internal": 32014,
+        "profit": 1354
+      },
+      {
+        "name": "Printed Board",
+        "external_sales": 23847,
+        "sales_with_internal": 23897,
+        "profit": 4440
+      }
+    ]
+  }
+]
