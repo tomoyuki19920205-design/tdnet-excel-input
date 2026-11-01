@@ -1,0 +1,211 @@
+"""Reconcile official J-Quants 2Q cumulative guidance with original PDFs.
+
+The job is bounded to recent disclosures and can be rerun after a failed batch.
+It never writes actuals or legacy ``financials`` rows. A filing-specific key and
+disclosure ordering prevent an older delivery from replacing newer guidance.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import sqlite3
+import sys
+import unicodedata
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import fitz
+import requests
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from lib.pipeline.forecast_sync import ForecastDTO, expand_forecast_rows, select_latest_forecasts
+from lib.pipeline.db import get_supabase_write_config, load_env, supabase_upsert
+
+JST = timezone(timedelta(hours=9))
+STEMS = {"sales": "Sales", "operating_profit": "OP", "ordinary_profit": "OdP", "net_income": "NP"}
+
+
+def state_root() -> Path:
+    return Path(os.environ.get("TDNET_RUNTIME_STATE_ROOT") or ROOT)
+
+
+def amount(raw):
+    try:
+        return float(raw) / 1_000_000 if raw not in (None, "", "-", "—") else None
+    except (ValueError, TypeError):
+        return None
+
+
+def pdf_has_amounts(data: bytes, values: dict[str, float]) -> bool:
+    if not data.startswith(b"%PDF"):
+        return False
+    pdf = fitz.open(stream=data, filetype="pdf")
+    raw = "\n".join(page.get_text() for page in list(pdf)[:3])
+    compact = re.sub(r"[\s,，]", "", unicodedata.normalize("NFKC", raw))
+    if len(raw) < 100:
+        return False  # image PDF needs separate OCR/visual review
+    for value in values.values():
+        if value == 0:
+            return False
+        token = str(int(abs(value))) if value.is_integer() else str(abs(value))
+        hits = [m.start() for m in re.finditer(re.escape(token), compact)]
+        if not hits:
+            return False
+        if value < 0 and not any(
+            any(mark in compact[max(0, pos - 4):pos] for mark in ("△", "▲", "-", "−", "▼"))
+            for pos in hits
+        ):
+            return False
+    return True
+
+
+def select_recent(db: Path, since: str):
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    universe_date = conn.execute("SELECT MAX(date) FROM market_data_universe").fetchone()[0]
+    official = {str(r["code"]): str(r["ticker"]) for r in conn.execute(
+        "SELECT code,ticker FROM market_data_universe WHERE date=? AND is_ordinary_stock=1", (universe_date,)
+    )}
+    actual_fy = {}
+    actual_2q = set()
+    latest_scope = {}
+    for row in conn.execute("""SELECT local_code,current_fiscal_year_end_date,type_of_current_period,
+        type_of_document,disclosed_date
+        FROM jquants_financials_normalized WHERE type_of_document LIKE '%FinancialStatements%'"""):
+        ticker = official.get(str(row["local_code"]))
+        if not ticker:
+            continue
+        key = (ticker, row["current_fiscal_year_end_date"])
+        doc_type = str(row["type_of_document"])
+        scope = ("nonconsolidated" if "NonConsolidated" in doc_type else
+                 "consolidated" if "Consolidated" in doc_type else "unknown")
+        if scope != "unknown" and row["disclosed_date"] >= latest_scope.get(key, ("", ""))[0]:
+            latest_scope[key] = (row["disclosed_date"], scope)
+        if row["type_of_current_period"] == "FY":
+            actual_fy[ticker] = max(actual_fy.get(ticker, ""), key[1])
+        elif row["type_of_current_period"] == "2Q":
+            actual_2q.add(key)
+    disclosures = []
+    blank_revisions = defaultdict(list)
+    for row in conn.execute("""SELECT local_code,current_fiscal_year_end_date,
+        type_of_document,disclosed_date,raw_json FROM jquants_financials_normalized
+        WHERE disclosed_date>=? AND raw_json IS NOT NULL ORDER BY disclosed_date""", (since,)):
+        ticker = official.get(str(row["local_code"]))
+        if not ticker:
+            continue
+        raw = json.loads(row["raw_json"] or "{}")
+        doc_type = str(row["type_of_document"] or "")
+        filing = str(raw.get("DiscNo") or "")
+        if not filing:
+            continue
+        for prefix, period in (("F", raw.get("CurFYEn") or row["current_fiscal_year_end_date"]),
+                               ("NxF", raw.get("NxtFYEn"))):
+            if not period or period <= actual_fy.get(ticker, "") or (ticker, period) in actual_2q:
+                continue
+            values = {metric: amount(raw.get(prefix + stem + "2Q")) for metric, stem in STEMS.items()}
+            if not any(v is not None for v in values.values()):
+                if "ForecastRevision" in doc_type:
+                    blank_revisions[(ticker, period)].append(row["disclosed_date"])
+                continue
+            scope = ("nonconsolidated" if "NonConsolidated" in doc_type else
+                     "consolidated" if "Consolidated" in doc_type else "unknown")
+            if scope != "unknown" and row["disclosed_date"] >= latest_scope.get((ticker, period), ("", ""))[0]:
+                latest_scope[(ticker, period)] = (row["disclosed_date"], scope)
+            disclosed = row["disclosed_date"] + "T" + str(raw.get("DiscTime") or "00:00:00")
+            url = f"https://www2.jpx.co.jp/disc/{row['local_code']}/1401{filing}.pdf"
+            disclosures.append((ticker, period, scope, disclosed, filing, url, doc_type,
+                                {m: v for m, v in values.items() if v is not None}))
+    conn.close()
+    return disclosures, {key: value[1] for key, value in latest_scope.items()}, blank_revisions, universe_date
+
+
+def run(days: int, apply: bool, limit: int):
+    state = state_root()
+    db = state / "data/jquants.db"
+    if not db.is_file():
+        raise FileNotFoundError(db)
+    since = (datetime.now(JST) - timedelta(days=days)).date().isoformat()
+    disclosures, scopes, blanks, universe_date = select_recent(db, since)
+    cache = state / "2q-pdf-cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    session = requests.Session()
+    candidates = []
+    rejected = []
+    for ticker, period, scope, disclosed, filing, url, doc_type, values in disclosures[:limit or None]:
+        if any(date > disclosed[:10] for date in blanks.get((ticker, period), [])):
+            rejected.append((ticker, filing, "later_blank_revision"))
+            continue
+        scope = scope if scope != "unknown" else scopes.get((ticker, period), "unknown")
+        if scope == "unknown":
+            rejected.append((ticker, filing, "scope_unknown"))
+            continue
+        path = cache / (hashlib.sha256(url.encode()).hexdigest() + ".pdf")
+        try:
+            if path.is_file() and path.stat().st_size > 1000:
+                data = path.read_bytes()
+            else:
+                response = session.get(url, timeout=30)
+                response.raise_for_status()
+                data = response.content
+                if data.startswith(b"%PDF"):
+                    path.write_bytes(data)
+            if not pdf_has_amounts(data, values):
+                rejected.append((ticker, filing, "pdf_value_or_table_unverified"))
+                continue
+        except Exception as exc:
+            rejected.append((ticker, filing, type(exc).__name__))
+            continue
+        sha = hashlib.sha256(data).hexdigest()
+        for metric, value in values.items():
+            candidates.append(ForecastDTO(ticker=ticker, forecast_period_end=period,
+                quarter="2Q", metric=metric, value=value,
+                disclosure_datetime=disclosed, filing_id=filing,
+                source="jquants_forecast", correction_flag=False,
+                forecast_horizon="current_fy", accounting_standard="UNKNOWN",
+                document_type="forecast_revision" if "ForecastRevision" in doc_type else "earnings_guidance",
+                accounting_scope=scope, source_url=url, source_sha256=sha))
+    rows = expand_forecast_rows(select_latest_forecasts(candidates))
+    print(json.dumps({"since": since, "universe_date": universe_date,
+        "disclosures": len(disclosures), "verified_metrics": len(rows),
+        "rejected": len(rejected), "rejection_examples": rejected[:10], "apply": apply},
+        ensure_ascii=False), flush=True)
+    if apply and rows:
+        load_env()
+        config = get_supabase_write_config()
+        if not config:
+            raise RuntimeError("Supabase write config unavailable")
+        tickers = sorted({row["ticker"] for row in rows})
+        published = set()
+        for offset in range(0, len(tickers), 80):
+            response = session.get(
+                config["rest_url"] + "/api_latest_financials_canonical",
+                params={"select": "ticker,period", "quarter": "eq.2Q",
+                        "ticker": "in.(" + ",".join(tickers[offset:offset+80]) + ")"},
+                headers=config["headers"], timeout=30,
+            )
+            response.raise_for_status()
+            published.update((str(item["ticker"]), str(item["period"])) for item in response.json())
+        rows = [row for row in rows if (row["ticker"], row["period"]) not in published]
+        print(json.dumps({"actual_published_keys": len(published),
+            "eligible_after_actual_guard": len(rows)}), flush=True)
+        for offset in range(0, len(rows), 100):
+            result = supabase_upsert("canonical_financials", rows[offset:offset+100],
+                on_conflict="source_row_key", config=config)
+            if result.get("errors"):
+                raise RuntimeError(f"2Q forecast batch {offset//100+1} failed: {result}")
+            print(json.dumps({"batch": offset//100+1, "written": len(rows[offset:offset+100])}), flush=True)
+    session.close()
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--days", type=int, default=45)
+    parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--apply", action="store_true")
+    args = parser.parse_args()
+    run(args.days, args.apply, args.limit)

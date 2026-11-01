@@ -1177,6 +1177,28 @@ def process_documents(
             except Exception as _sb_e:
                 logger.warning(f"[EVENT_SUPABASE] sync block failed (non-fatal): {_sb_e}")
 
+            # Re-read each named disclosure PDF before publishing revised
+            # forecast metrics. The sync is idempotent and keeps FY and 2Q
+            # rows separate in canonical_financials.
+            try:
+                from lib.pipeline.forecast_sync import sync_document_forecasts
+                source_pdfs = {
+                    doc.doc_id: str(doc.pdf_path)
+                    for doc in docs if doc.pdf_path
+                }
+                forecast_sync = sync_document_forecasts(
+                    conn, [doc.doc_id for doc in docs], source_pdfs=source_pdfs,
+                )
+                result.supabase_errors += forecast_sync.get("errors", 0)
+                if forecast_sync.get("quarantine"):
+                    logger.warning(
+                        "[FORECAST_CANONICAL] unresolved disclosures=%s",
+                        len(forecast_sync["quarantine"]),
+                    )
+            except Exception as exc:
+                logger.error("[FORECAST_CANONICAL] sync failed: %s", exc)
+                result.supabase_errors += 1
+
     finally:
         if conn:
             conn.close()

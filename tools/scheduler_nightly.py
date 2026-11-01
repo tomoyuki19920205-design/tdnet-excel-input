@@ -231,6 +231,13 @@ def main() -> int:
         steps.append(step)
 
         # ── Step 5a: extract_per_share_from_raw（jquants.db raw_json → per_share_data） ──
+        step = run_step("sync-2q-forecasts", [
+            PYTHON, "-X", "utf8", "tools/sync_2q_forecasts.py",
+            "--days", "45", *([] if args.dry_run else ["--apply"]),
+        ], timeout_sec=1800)
+        steps.append(step)
+
+        # ── Step 5a: extract_per_share_from_raw（jquants.db raw_json → per_share_data） ──
         logger.info("[PER_SHARE] extract start")
         step = run_step("per-share-extract", [
             PYTHON, "-X", "utf8",

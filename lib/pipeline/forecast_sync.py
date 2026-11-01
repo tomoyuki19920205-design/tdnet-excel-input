@@ -50,6 +50,28 @@ class ForecastDTO:
     accounting_standard: str
     document_type: str
     revision_sequence: int = 0
+    quarter: str = "FY"
+    accounting_scope: str = "unknown"
+    source_url: str = ""
+    source_sha256: str = ""
+
+
+def forecast_quarter_from_label(period_label: str) -> str | None:
+    """Classify a company forecast as FY or cumulative first half.
+
+    A second-quarter standalone forecast and a label covering both FY and 2Q
+    must be resolved from the source table rather than guessed here.
+    """
+    label = unicodedata.normalize("NFKC", str(period_label or ""))
+    half = bool(re.search(r"第?2四半期|中間期|上期|第?2Q", label, re.IGNORECASE))
+    full = bool(re.search(r"通期|年間|年度", label))
+    if half and (full or re.search(r"単独|会計期間|3か月|3ヶ月", label)):
+        return None
+    if half:
+        return "2Q"
+    if re.search(r"第?[13]四半期|第?[13]Q", label, re.IGNORECASE):
+        return None
+    return "FY"
 
 
 def _as_utc_key(value: str) -> str:
@@ -293,10 +315,11 @@ def load_revision_forecasts(
         period_label = unicodedata.normalize("NFKC", str(payload.get("period_label") or ""))
         if payload.get("is_difference_disclosure"):
             continue
-        if re.search(r"第?[123]四半期|中間期", period_label) and "通期" not in period_label:
+        forecast_quarter = forecast_quarter_from_label(period_label)
+        if forecast_quarter is None:
             quarantine.append({
                 "ticker": row.get("ticker"), "disclosure_id": row.get("source_doc_id"),
-                "reason": "revision_not_full_year", "event_id": row.get("event_id"),
+                "reason": "revision_period_ambiguous_or_unsupported", "event_id": row.get("event_id"),
             })
             continue
         period = parse_forecast_period_end(period_label)
@@ -345,6 +368,15 @@ def load_revision_forecasts(
                 accounting_standard=_accounting_standard(title),
                 document_type="forecast_revision",
                 revision_sequence=int(payload.get("revision_sequence") or 0),
+                quarter=forecast_quarter,
+                accounting_scope=(
+                    "consolidated" if "連結" in str(payload.get("basis") or "")
+                    and "非連結" not in str(payload.get("basis") or "")
+                    else "nonconsolidated" if any(x in str(payload.get("basis") or "")
+                    for x in ("非連結", "個別", "単体")) else "unknown"
+                ),
+                source_url=str(row.get("doc_url") or ""),
+                source_sha256=str((payload.get("revision_reason") or {}).get("pdf_sha256") or ""),
             ))
     return candidates, quarantine
 
@@ -375,12 +407,20 @@ def _verify_revision_source(row: dict, payload: dict, pdf_path: str | None) -> t
         )
         if source.extracted_metrics_count < 1:
             return False, "revision_source_table_unresolved"
-        source_label = _detect_period(source_text) or source.period_label
+        payload_label = str(payload.get("period_label") or "")
+        # A filing can contain an upper-half table followed by a FY table.
+        # The global period detector then sees the FY heading even when the
+        # extractor's adopted amount row is the upper-half table.
+        source_label = (
+            source.period_label if forecast_quarter_from_label(payload_label) == "2Q"
+            else _detect_period(source_text) or source.period_label
+        )
         source_period = parse_forecast_period_end(source_label)
-        payload_period = parse_forecast_period_end(str(payload.get("period_label") or ""))
+        payload_period = parse_forecast_period_end(payload_label)
         if (not source_period or source_period != payload_period
-                or re.search(r"第?[123]四半期|中間期", source_label)
-                or re.search(r"第?[123]四半期|中間期", str(payload.get("period_label") or ""))):
+                or forecast_quarter_from_label(source_label)
+                    != forecast_quarter_from_label(payload_label)
+                or forecast_quarter_from_label(source_label) is None):
             return False, "revision_source_period_mismatch"
         source_basis = _detect_basis(source_text)
         if not ((source_basis and source_basis == payload.get("basis"))
@@ -409,9 +449,9 @@ def _verify_revision_source(row: dict, payload: dict, pdf_path: str | None) -> t
 
 
 def select_latest_forecasts(candidates: Iterable[ForecastDTO]) -> list[ForecastDTO]:
-    winners: dict[tuple[str, str, str], ForecastDTO] = {}
+    winners: dict[tuple[str, str, str, str], ForecastDTO] = {}
     for dto in candidates:
-        key = (dto.ticker, dto.forecast_period_end, dto.metric)
+        key = (dto.ticker, dto.forecast_period_end, dto.quarter, dto.metric)
         current = winners.get(key)
         score = (
             _as_utc_key(dto.disclosure_datetime),
@@ -434,7 +474,7 @@ def select_latest_forecasts(candidates: Iterable[ForecastDTO]) -> list[ForecastD
         )
         if score > current_score:
             winners[key] = dto
-    return sorted(winners.values(), key=lambda d: (d.ticker, d.forecast_period_end, d.metric))
+    return sorted(winners.values(), key=lambda d: (d.ticker, d.forecast_period_end, d.quarter, d.metric))
 
 
 def expand_forecast_rows(candidates: Iterable[ForecastDTO]) -> list[dict]:
@@ -442,10 +482,10 @@ def expand_forecast_rows(candidates: Iterable[ForecastDTO]) -> list[dict]:
     rows: list[dict] = []
     for dto in candidates:
         normalized_disclosure = _as_utc_key(dto.disclosure_datetime)
-        rows.append({
+        row = {
             "ticker": dto.ticker,
             "period": dto.forecast_period_end,
-            "quarter": "FY",
+            "quarter": dto.quarter,
             "metric": dto.metric,
             "value": dto.value,
             "unit": "yen_per_share" if dto.metric == "eps" else "millions_jpy",
@@ -453,7 +493,7 @@ def expand_forecast_rows(candidates: Iterable[ForecastDTO]) -> list[dict]:
             "source_priority": get_priority(dto.source),
             "filing_id": dto.filing_id,
             "source_row_key": _make_financials_row_key(
-                dto.ticker, dto.forecast_period_end, "FY", dto.metric, dto.source, dto.filing_id
+                dto.ticker, dto.forecast_period_end, dto.quarter, dto.metric, dto.source, dto.filing_id
             ),
             "disclosure_datetime": (
                 None if normalized_disclosure.startswith("0000-") else normalized_disclosure
@@ -461,7 +501,16 @@ def expand_forecast_rows(candidates: Iterable[ForecastDTO]) -> list[dict]:
             "correction_flag": dto.correction_flag,
             "recency_key": make_forecast_recency_key(dto, updated_at=now_iso),
             "updated_at": now_iso,
-        })
+        }
+        if dto.quarter == "2Q":
+            row.update({
+                "accounting_scope": dto.accounting_scope,
+                "source_url": dto.source_url,
+                "source_sha256": dto.source_sha256,
+                "document_type": dto.document_type,
+                "revision_sequence": dto.revision_sequence,
+            })
+        rows.append(row)
     return rows
 
 

@@ -197,6 +197,12 @@ def main() -> int:
         ], timeout_sec=180)
         steps.append(reason_step)
 
+        step = run_step("sync-2q-forecasts", [
+            PYTHON, "-X", "utf8", "tools/sync_2q_forecasts.py",
+            "--days", "7", *([] if args.dry_run else ["--apply"]),
+        ], timeout_sec=900)
+        steps.append(step)
+
         elapsed = time.monotonic() - t_start
         _print_summary(steps, elapsed)
 
