@@ -71,6 +71,9 @@ def select_recent(db: Path, since: str):
     official = {str(r["code"]): str(r["ticker"]) for r in conn.execute(
         "SELECT code,ticker FROM market_data_universe WHERE date=? AND is_ordinary_stock=1", (universe_date,)
     )}
+    metadata = {str(r["disclosure_id"]): str(r["title"] or "") for r in conn.execute(
+        "SELECT disclosure_id,title FROM jquants_tdnet_metadata WHERE disclosed_date>=?", (since,)
+    )}
     actual_fy = {}
     actual_2q = set()
     latest_scope = {}
@@ -92,6 +95,7 @@ def select_recent(db: Path, since: str):
             actual_2q.add(key)
     disclosures = []
     blank_revisions = defaultdict(list)
+    status_updates = []
     for row in conn.execute("""SELECT local_code,current_fiscal_year_end_date,
         type_of_document,disclosed_date,raw_json FROM jquants_financials_normalized
         WHERE disclosed_date>=? AND raw_json IS NOT NULL ORDER BY disclosed_date""", (since,)):
@@ -111,6 +115,15 @@ def select_recent(db: Path, since: str):
             if not any(v is not None for v in values.values()):
                 if "ForecastRevision" in doc_type:
                     blank_revisions[(ticker, period)].append(row["disclosed_date"])
+                    title = metadata.get(filing, "")
+                    if re.search(r"第?[２2]四半期|中間|上期", title):
+                        status_updates.append({
+                            "ticker": ticker, "period": period,
+                            "status": "withdrawn" if re.search(r"撤回|取り下げ", title) else "unresolved",
+                            "disclosure_datetime": row["disclosed_date"] + "T" + str(raw.get("DiscTime") or "00:00:00") + "+09:00",
+                            "source_url": f"https://www2.jpx.co.jp/disc/{row['local_code']}/1401{filing}.pdf",
+                            "reason": "later upper-half revision has no structured 2Q values; original review pending",
+                        })
                 continue
             scope = ("nonconsolidated" if "NonConsolidated" in doc_type else
                      "consolidated" if "Consolidated" in doc_type else "unknown")
@@ -121,7 +134,7 @@ def select_recent(db: Path, since: str):
             disclosures.append((ticker, period, scope, disclosed, filing, url, doc_type,
                                 {m: v for m, v in values.items() if v is not None}))
     conn.close()
-    return disclosures, {key: value[1] for key, value in latest_scope.items()}, blank_revisions, universe_date
+    return disclosures, {key: value[1] for key, value in latest_scope.items()}, blank_revisions, status_updates, universe_date
 
 
 def run(days: int, apply: bool, limit: int):
@@ -130,7 +143,7 @@ def run(days: int, apply: bool, limit: int):
     if not db.is_file():
         raise FileNotFoundError(db)
     since = (datetime.now(JST) - timedelta(days=days)).date().isoformat()
-    disclosures, scopes, blanks, universe_date = select_recent(db, since)
+    disclosures, scopes, blanks, status_updates, universe_date = select_recent(db, since)
     cache = state / "2q-pdf-cache"
     cache.mkdir(parents=True, exist_ok=True)
     session = requests.Session()
@@ -170,11 +183,18 @@ def run(days: int, apply: bool, limit: int):
                 document_type="forecast_revision" if "ForecastRevision" in doc_type else "earnings_guidance",
                 accounting_scope=scope, source_url=url, source_sha256=sha))
     rows = expand_forecast_rows(select_latest_forecasts(candidates))
+    latest_status = {}
+    for item in status_updates:
+        key = item["ticker"], item["period"]
+        if key not in latest_status or item["disclosure_datetime"] > latest_status[key]["disclosure_datetime"]:
+            latest_status[key] = item
+    status_updates = list(latest_status.values())
     print(json.dumps({"since": since, "universe_date": universe_date,
         "disclosures": len(disclosures), "verified_metrics": len(rows),
-        "rejected": len(rejected), "rejection_examples": rejected[:10], "apply": apply},
+        "rejected": len(rejected), "rejection_examples": rejected[:10],
+        "status_updates": len(status_updates), "apply": apply},
         ensure_ascii=False), flush=True)
-    if apply and rows:
+    if apply and (rows or status_updates):
         load_env()
         config = get_supabase_write_config()
         if not config:
@@ -191,6 +211,8 @@ def run(days: int, apply: bool, limit: int):
             response.raise_for_status()
             published.update((str(item["ticker"]), str(item["period"])) for item in response.json())
         rows = [row for row in rows if (row["ticker"], row["period"]) not in published]
+        status_updates = [item for item in status_updates
+                          if (item["ticker"], item["period"]) not in published]
         print(json.dumps({"actual_published_keys": len(published),
             "eligible_after_actual_guard": len(rows)}), flush=True)
         for offset in range(0, len(rows), 100):
@@ -199,6 +221,32 @@ def run(days: int, apply: bool, limit: int):
             if result.get("errors"):
                 raise RuntimeError(f"2Q forecast batch {offset//100+1} failed: {result}")
             print(json.dumps({"batch": offset//100+1, "written": len(rows[offset:offset+100])}), flush=True)
+        if status_updates:
+            current_status = {}
+            status_tickers = sorted({item["ticker"] for item in status_updates})
+            for offset in range(0, len(status_tickers), 80):
+                response = session.get(
+                    config["rest_url"] + "/company_2q_forecast_status",
+                    params={"select": "ticker,period,disclosure_datetime",
+                            "ticker": "in.(" + ",".join(status_tickers[offset:offset+80]) + ")"},
+                    headers=config["headers"], timeout=30,
+                )
+                response.raise_for_status()
+                current_status.update({(item["ticker"], item["period"]): item["disclosure_datetime"]
+                    for item in response.json()})
+            status_updates = [item for item in status_updates if
+                not current_status.get((item["ticker"], item["period"])) or
+                datetime.fromisoformat(item["disclosure_datetime"]) >=
+                datetime.fromisoformat(current_status[(item["ticker"], item["period"])].replace("Z", "+00:00"))]
+        if status_updates:
+            response = session.post(
+                config["rest_url"] + "/company_2q_forecast_status",
+                params={"on_conflict": "ticker,period"},
+                headers={**config["headers"], "Prefer": "resolution=merge-duplicates,return=minimal"},
+                json=status_updates, timeout=30,
+            )
+            response.raise_for_status()
+            print(json.dumps({"status_rows": len(status_updates)}), flush=True)
     session.close()
 
 
