@@ -27,16 +27,16 @@ from lib.pipeline.forecast_sync import ForecastDTO, expand_forecast_rows, select
 from lib.pipeline.db import get_supabase_write_config, load_env, supabase_upsert
 
 JST = timezone(timedelta(hours=9))
-STEMS = {"sales": "Sales", "operating_profit": "OP", "ordinary_profit": "OdP", "net_income": "NP"}
+STEMS = {"sales": "Sales", "operating_profit": "OP", "ordinary_profit": "OdP", "net_income": "NP", "eps": "EPS"}
 
 
 def state_root() -> Path:
     return Path(os.environ.get("TDNET_RUNTIME_STATE_ROOT") or ROOT)
 
 
-def amount(raw):
+def amount(raw, metric):
     try:
-        return float(raw) / 1_000_000 if raw not in (None, "", "-", "—") else None
+        return (float(raw) if metric == "eps" else float(raw) / 1_000_000) if raw not in (None, "", "-", "—") else None
     except (ValueError, TypeError):
         return None
 
@@ -111,7 +111,7 @@ def select_recent(db: Path, since: str):
                                ("NxF", raw.get("NxtFYEn"))):
             if not period or period <= actual_fy.get(ticker, "") or (ticker, period) in actual_2q:
                 continue
-            values = {metric: amount(raw.get(prefix + stem + "2Q")) for metric, stem in STEMS.items()}
+            values = {metric: amount(raw.get(prefix + stem + "2Q"), metric) for metric, stem in STEMS.items()}
             if not any(v is not None for v in values.values()):
                 if "ForecastRevision" in doc_type:
                     blank_revisions[(ticker, period)].append(row["disclosed_date"])
@@ -167,7 +167,12 @@ def run(days: int, apply: bool, limit: int):
                 data = response.content
                 if data.startswith(b"%PDF"):
                     path.write_bytes(data)
-            if not pdf_has_amounts(data, values):
+            # J-Quants supplies 2Q EPS and exact zeros as typed source fields.
+            # A PDF-wide match for "0" is ambiguous; verify at least one other
+            # nonzero amount in the same official PDF before carrying them.
+            evidence_values = {metric: value for metric, value in values.items()
+                               if metric != "eps" and value != 0}
+            if not evidence_values or not pdf_has_amounts(data, evidence_values):
                 rejected.append((ticker, filing, "pdf_value_or_table_unverified"))
                 continue
         except Exception as exc:
