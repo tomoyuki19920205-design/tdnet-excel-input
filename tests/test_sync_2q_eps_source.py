@@ -25,14 +25,25 @@ class SourceFieldTest(unittest.TestCase):
                     "CurFYEn": "2027-03-31", "FSales2Q": "12000000000",
                     "FOP2Q": "0", "FOdP2Q": "-100000000", "FEPS2Q": "12.34"}),
             ))
+            conn.execute("INSERT INTO jquants_financials_normalized VALUES (?,?,?,?,?,?)", (
+                "99990", "2026-03-31", "FY", "FYFinancialStatements_Consolidated_JP", "2026-08-01",
+                json.dumps({"DiscNo": "20260801510000", "DiscTime": "15:30:00",
+                    "CurFYEn": "2026-03-31", "NxtFYEn": "2027-03-31",
+                    "NxFSales2Q": "9000000000", "NxFOP2Q": "500000000",
+                    "NxFNp2Q": "300000000", "NxFEPS2Q": "8.76"}),
+            ))
             conn.commit()
             conn.close()
-            disclosures, scopes, blanks, statuses, _ = select_recent(path, "2026-10-29")
-            self.assertEqual(len(disclosures), 1)
-            self.assertEqual(disclosures[0][0:3], ("9999", "2027-03-31", "consolidated"))
-            self.assertEqual(disclosures[0][-1], {
+            disclosures, scopes, blanks, statuses, _ = select_recent(path, "2026-07-01")
+            self.assertEqual(len(disclosures), 2)
+            self.assertEqual(disclosures[1][0:3], ("9999", "2027-03-31", "consolidated"))
+            self.assertEqual(disclosures[1][-1], {
                 "sales": 12000.0, "operating_profit": 0.0,
                 "ordinary_profit": -100.0, "eps": 12.34,
+            })
+            self.assertEqual(disclosures[0][-1], {
+                "sales": 9000.0, "operating_profit": 500.0,
+                "net_income": 300.0, "eps": 8.76,
             })
             self.assertEqual(scopes[("9999", "2027-03-31")], "consolidated")
             self.assertEqual(blanks, {})

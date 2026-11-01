@@ -111,7 +111,8 @@ def select_recent(db: Path, since: str):
                                ("NxF", raw.get("NxtFYEn"))):
             if not period or period <= actual_fy.get(ticker, "") or (ticker, period) in actual_2q:
                 continue
-            values = {metric: amount(raw.get(prefix + stem + "2Q"), metric) for metric, stem in STEMS.items()}
+            values = {metric: amount(raw.get(prefix + ("Np" if prefix == "NxF" and metric == "net_income" else stem) + "2Q"), metric)
+                      for metric, stem in STEMS.items()}
             if not any(v is not None for v in values.values()):
                 if "ForecastRevision" in doc_type:
                     blank_revisions[(ticker, period)].append(row["disclosed_date"])
