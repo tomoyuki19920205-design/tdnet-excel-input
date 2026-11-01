@@ -30,7 +30,13 @@ from lib.pipeline.db import get_supabase_write_config, load_env, supabase_upsert
 JST = timezone(timedelta(hours=9))
 STEMS = {"sales": "Sales", "operating_profit": "OP", "ordinary_profit": "OdP", "net_income": "NP", "eps": "EPS"}
 REGIONAL_CACHE_TTL_SECONDS = 24 * 60 * 60
-REGIONAL_CACHE_VERSION = 2
+REGIONAL_CACHE_VERSION = 3
+NSE_OFFICIAL_DELISTED_CODES = {
+    # The detail API still returns a stock object with watchInfo1=False after
+    # this 2025-06-27 delisting. NSE's own notice takes precedence.
+    # https://www.nse.or.jp/news/2025/0602_10783.html
+    "58360",
+}
 
 
 def state_root() -> Path:
@@ -106,8 +112,9 @@ def regional_source_url(exchange: str, local_code: str, filing: str, disclosed_d
 
 
 def nse_current_stock(stock: dict | None) -> bool:
-    """The NSE detail API retains delisted securities; its watch flag marks them."""
-    return bool(stock) and stock.get("watchInfo1") is not True
+    """Reject known delisted records retained by the NSE detail API."""
+    return (bool(stock) and stock.get("watchInfo1") is not True
+            and stock.get("stockCode") not in NSE_OFFICIAL_DELISTED_CODES)
 
 
 def discover_regional_codes(db: Path, since: str, state: Path, session: requests.Session):
