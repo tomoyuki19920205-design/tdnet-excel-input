@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from tools.sync_2q_forecasts import (
+    nse_current_stock,
     regional_scope_from_text,
     regional_source_url,
     select_recent,
@@ -14,6 +15,11 @@ from tools.sync_2q_forecasts import (
 
 
 class RegionalSourceTest(unittest.TestCase):
+    def test_nse_historical_delisting_record_is_not_current(self):
+        self.assertFalse(nse_current_stock({"watchInfo1": True, "stockCode": "25400"}))
+        self.assertTrue(nse_current_stock({"watchInfo1": False, "stockCode": "59790"}))
+        self.assertFalse(nse_current_stock(None))
+
     def test_exchange_urls_and_partial_bank_values(self):
         with tempfile.TemporaryDirectory() as folder:
             db = Path(folder) / "jquants.db"

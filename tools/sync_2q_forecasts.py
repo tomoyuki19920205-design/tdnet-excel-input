@@ -30,6 +30,7 @@ from lib.pipeline.db import get_supabase_write_config, load_env, supabase_upsert
 JST = timezone(timedelta(hours=9))
 STEMS = {"sales": "Sales", "operating_profit": "OP", "ordinary_profit": "OdP", "net_income": "NP", "eps": "EPS"}
 REGIONAL_CACHE_TTL_SECONDS = 24 * 60 * 60
+REGIONAL_CACHE_VERSION = 2
 
 
 def state_root() -> Path:
@@ -104,6 +105,11 @@ def regional_source_url(exchange: str, local_code: str, filing: str, disclosed_d
     return f"https://www2.jpx.co.jp/disc/{local_code}/1401{filing}.pdf"
 
 
+def nse_current_stock(stock: dict | None) -> bool:
+    """The NSE detail API retains delisted securities; its watch flag marks them."""
+    return bool(stock) and stock.get("watchInfo1") is not True
+
+
 def discover_regional_codes(db: Path, since: str, state: Path, session: requests.Session):
     """Resolve only recent, typed 2Q candidates missing from the TSE roster."""
     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
@@ -126,6 +132,8 @@ def discover_regional_codes(db: Path, since: str, state: Path, session: requests
         cache = json.loads(cache_path.read_text(encoding="utf-8"))
     except (FileNotFoundError, ValueError):
         cache = {}
+    if cache.get("_version") != REGIONAL_CACHE_VERSION:
+        cache = {"_version": REGIONAL_CACHE_VERSION}
     now = time.time()
     fse_codes = {}
     try:
@@ -159,8 +167,8 @@ def discover_regional_codes(db: Path, since: str, state: Path, session: requests
                     f"https://www.nse.or.jp/api/stock/view.json?stockCode={local_code}", timeout=15)
                 response.raise_for_status()
                 stock = (response.json().get("stock") or [None])[0]
-                exchange = "nse" if stock else ""
-                bank = bool(stock and stock.get("industryName_j") == "銀行業")
+                exchange = "nse" if nse_current_stock(stock) else ""
+                bank = bool(exchange and stock.get("industryName_j") == "銀行業")
                 time.sleep(0.15)
             except Exception as exc:
                 print(json.dumps({"regional_nse_lookup_error": local_code,
