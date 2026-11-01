@@ -13,6 +13,7 @@ import os
 import re
 import sqlite3
 import sys
+import time
 import unicodedata
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -28,6 +29,7 @@ from lib.pipeline.db import get_supabase_write_config, load_env, supabase_upsert
 
 JST = timezone(timedelta(hours=9))
 STEMS = {"sales": "Sales", "operating_profit": "OP", "ordinary_profit": "OdP", "net_income": "NP", "eps": "EPS"}
+REGIONAL_CACHE_TTL_SECONDS = 24 * 60 * 60
 
 
 def state_root() -> Path:
@@ -64,13 +66,125 @@ def pdf_has_amounts(data: bytes, values: dict[str, float]) -> bool:
     return True
 
 
-def select_recent(db: Path, since: str):
+def supplement_regional_current_revision(text: str, values: dict[str, float]) -> dict[str, float]:
+    """Recover a missing operating-profit field only from a matching B row."""
+    if values.get("operating_profit") is not None or values.get("sales") is None:
+        return values
+    normalized = unicodedata.normalize("NFKC", text)
+    pattern = (r"今回修正予想\s*\(?B\)?\s*"
+               r"([△▲−-]?[\d,]+)\s+([△▲−-]?[\d,]+)\s+"
+               r"([△▲−-]?[\d,]+)\s+([△▲−-]?[\d,]+)\s+([△▲−-]?[\d,.]+)")
+    def number(token: str) -> float:
+        return float(token.replace(",", "").replace("△", "-").replace("▲", "-").replace("−", "-"))
+    for match in re.finditer(pattern, normalized):
+        sales, operating, ordinary, net, eps = map(number, match.groups())
+        expected = {"sales": sales, "ordinary_profit": ordinary,
+                    "net_income": net, "eps": eps}
+        if all(values.get(metric) is None or values[metric] == value
+               for metric, value in expected.items()):
+            return {**values, "operating_profit": operating}
+    return values
+
+
+def regional_scope_from_text(compact: str) -> str:
+    consolidated = re.search(r"(?<!非)連結業績予想", compact)
+    standalone = re.search(r"個別業績予想|非連結業績予想", compact)
+    if consolidated and (not standalone or consolidated.start() < standalone.start()):
+        return "consolidated"
+    if standalone:
+        return "nonconsolidated"
+    return "unknown"
+
+
+def regional_source_url(exchange: str, local_code: str, filing: str, disclosed_date: str) -> str:
+    if exchange == "nse":
+        return f"https://www.nse.or.jp/listing/search/files/1401{filing}.pdf"
+    if exchange == "fse":
+        return f"https://www.fse.or.jp/files/lis_tkj/{disclosed_date.replace('-', '')[2:]}{local_code}.pdf"
+    return f"https://www2.jpx.co.jp/disc/{local_code}/1401{filing}.pdf"
+
+
+def discover_regional_codes(db: Path, since: str, state: Path, session: requests.Session):
+    """Resolve only recent, typed 2Q candidates missing from the TSE roster."""
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    roster_date = conn.execute("SELECT MAX(date) FROM market_data_universe").fetchone()[0]
+    tse_codes = {str(row[0]) for row in conn.execute(
+        "SELECT code FROM market_data_universe WHERE date=? AND is_ordinary_stock=1", (roster_date,))}
+    unknown = set()
+    for local_code, payload in conn.execute("""SELECT local_code,raw_json
+        FROM jquants_financials_normalized WHERE disclosed_date>=? AND raw_json IS NOT NULL""", (since,)):
+        if local_code in tse_codes:
+            continue
+        raw = json.loads(payload or "{}")
+        if any(raw.get(prefix + stem + "2Q") not in (None, "", "-", "—")
+               for prefix in ("F", "FNC", "NxF", "NxFNC")
+               for stem in ("Sales", "OP", "OdP", "NP", "Np", "EPS")):
+            unknown.add(str(local_code))
+    conn.close()
+    cache_path = state / "2q-regional-market-cache.json"
+    try:
+        cache = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError):
+        cache = {}
+    now = time.time()
+    fse_codes = {}
+    try:
+        response = session.get("https://www.fse.or.jp/market-info/listed-companies/", timeout=20)
+        response.raise_for_status()
+        html = response.content.decode("utf-8")
+        fse_codes = dict(re.findall(r'detail\.php\?copid=(\d+)[^>]*>.*?コード[：:]\s*([0-9A-Z]{4})', html, re.S))
+        fse_codes = {code + "0": copid for copid, code in fse_codes.items()}
+    except Exception as exc:
+        print(json.dumps({"regional_fse_registry_error": type(exc).__name__}), flush=True)
+    resolved = {}
+    for local_code in sorted(unknown):
+        cached = cache.get(local_code, {})
+        if local_code in fse_codes:
+            exchange = "fse"
+            bank = bool(cached.get("bank"))
+            if not bank:
+                try:
+                    detail = session.get(
+                        "https://www.fse.or.jp/market-info/listed-companies/detail.php?copid=" + fse_codes[local_code],
+                        timeout=15)
+                    detail.raise_for_status()
+                    bank = "銀行業" in detail.content.decode("utf-8")
+                except Exception:
+                    pass
+        elif now - float(cached.get("checked_at", 0)) < REGIONAL_CACHE_TTL_SECONDS:
+            exchange, bank = cached.get("exchange", ""), bool(cached.get("bank"))
+        else:
+            try:
+                response = session.get(
+                    f"https://www.nse.or.jp/api/stock/view.json?stockCode={local_code}", timeout=15)
+                response.raise_for_status()
+                stock = (response.json().get("stock") or [None])[0]
+                exchange = "nse" if stock else ""
+                bank = bool(stock and stock.get("industryName_j") == "銀行業")
+                time.sleep(0.15)
+            except Exception as exc:
+                print(json.dumps({"regional_nse_lookup_error": local_code,
+                    "reason": type(exc).__name__}), flush=True)
+                continue
+        cache[local_code] = {"checked_at": now, "exchange": exchange, "bank": bank}
+        if exchange:
+            resolved[local_code] = (local_code[:-1], exchange, bank)
+    cache_path.write_text(json.dumps(cache, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    print(json.dumps({"regional_candidates": len(unknown), "regional_verified": len(resolved),
+        "nse": sum(item[1] == "nse" for item in resolved.values()),
+        "fse": sum(item[1] == "fse" for item in resolved.values())}), flush=True)
+    return resolved
+
+
+def select_recent(db: Path, since: str, regional_map=None):
     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     universe_date = conn.execute("SELECT MAX(date) FROM market_data_universe").fetchone()[0]
     official = {str(r["code"]): str(r["ticker"]) for r in conn.execute(
         "SELECT code,ticker FROM market_data_universe WHERE date=? AND is_ordinary_stock=1", (universe_date,)
     )}
+    regional_map = regional_map or {}
+    official.update({code: item[0] for code, item in regional_map.items()})
     metadata = {str(r["disclosure_id"]): str(r["title"] or "") for r in conn.execute(
         "SELECT disclosure_id,title FROM jquants_tdnet_metadata WHERE disclosed_date>=?", (since,)
     )}
@@ -113,6 +227,13 @@ def select_recent(db: Path, since: str):
                 continue
             values = {metric: amount(raw.get(prefix + ("Np" if prefix == "NxF" and metric == "net_income" else stem) + "2Q"), metric)
                       for metric, stem in STEMS.items()}
+            exchange, bank = regional_map.get(str(row["local_code"]), (None, "", False))[1:]
+            if exchange and not any(v is not None for v in values.values()):
+                nc_prefix = "FNC" if prefix == "F" else "NxFNC"
+                values = {metric: amount(raw.get(nc_prefix + stem + "2Q"), metric)
+                          for metric, stem in STEMS.items()}
+            if bank:
+                values["sales"] = None  # 銀行の経常収益は売上高として表示しない。
             if not any(v is not None for v in values.values()):
                 if "ForecastRevision" in doc_type:
                     blank_revisions[(ticker, period)].append(row["disclosed_date"])
@@ -122,7 +243,7 @@ def select_recent(db: Path, since: str):
                             "ticker": ticker, "period": period,
                             "status": "withdrawn" if re.search(r"撤回|取り下げ", title) else "unresolved",
                             "disclosure_datetime": row["disclosed_date"] + "T" + str(raw.get("DiscTime") or "00:00:00") + "+09:00",
-                            "source_url": f"https://www2.jpx.co.jp/disc/{row['local_code']}/1401{filing}.pdf",
+                            "source_url": regional_source_url(exchange, row["local_code"], filing, row["disclosed_date"]),
                             "reason": "later upper-half revision has no structured 2Q values; original review pending",
                         })
                 continue
@@ -131,8 +252,8 @@ def select_recent(db: Path, since: str):
             if scope != "unknown" and row["disclosed_date"] >= latest_scope.get((ticker, period), ("", ""))[0]:
                 latest_scope[(ticker, period)] = (row["disclosed_date"], scope)
             disclosed = row["disclosed_date"] + "T" + str(raw.get("DiscTime") or "00:00:00")
-            url = f"https://www2.jpx.co.jp/disc/{row['local_code']}/1401{filing}.pdf"
-            disclosures.append((ticker, period, scope, disclosed, filing, url, doc_type,
+            url = regional_source_url(exchange, row["local_code"], filing, row["disclosed_date"])
+            disclosures.append((ticker, period, scope, disclosed, filing, url, doc_type, exchange,
                                 {m: v for m, v in values.items() if v is not None}))
     conn.close()
     return disclosures, {key: value[1] for key, value in latest_scope.items()}, blank_revisions, status_updates, universe_date
@@ -144,20 +265,18 @@ def run(days: int, apply: bool, limit: int):
     if not db.is_file():
         raise FileNotFoundError(db)
     since = (datetime.now(JST) - timedelta(days=days)).date().isoformat()
-    disclosures, scopes, blanks, status_updates, universe_date = select_recent(db, since)
+    session = requests.Session()
+    regional_map = discover_regional_codes(db, since, state, session)
+    disclosures, scopes, blanks, status_updates, universe_date = select_recent(db, since, regional_map)
     cache = state / "2q-pdf-cache"
     cache.mkdir(parents=True, exist_ok=True)
-    session = requests.Session()
     candidates = []
     rejected = []
-    for ticker, period, scope, disclosed, filing, url, doc_type, values in disclosures[:limit or None]:
+    for ticker, period, scope, disclosed, filing, url, doc_type, exchange, values in disclosures[:limit or None]:
         if any(date > disclosed[:10] for date in blanks.get((ticker, period), [])):
             rejected.append((ticker, filing, "later_blank_revision"))
             continue
         scope = scope if scope != "unknown" else scopes.get((ticker, period), "unknown")
-        if scope == "unknown":
-            rejected.append((ticker, filing, "scope_unknown"))
-            continue
         path = cache / (hashlib.sha256(url.encode()).hexdigest() + ".pdf")
         try:
             if path.is_file() and path.stat().st_size > 1000:
@@ -176,8 +295,22 @@ def run(days: int, apply: bool, limit: int):
             if not evidence_values or not pdf_has_amounts(data, evidence_values):
                 rejected.append((ticker, filing, "pdf_value_or_table_unverified"))
                 continue
+            if exchange:
+                first_page = unicodedata.normalize("NFKC", fitz.open(stream=data, filetype="pdf")[0].get_text())
+                compact = re.sub(r"\s+", "", first_page)
+                fy = f"{period[:4]}年{int(period[5:7])}月期"
+                if fy not in compact or not re.search(r"第?2四半期|中間期|上期", compact):
+                    rejected.append((ticker, filing, "regional_period_unverified"))
+                    continue
+                if scope == "unknown":
+                    scope = regional_scope_from_text(compact)
+                if not regional_map.get(ticker + "0", (None, None, False))[2]:
+                    values = supplement_regional_current_revision(first_page, values)
         except Exception as exc:
             rejected.append((ticker, filing, type(exc).__name__))
+            continue
+        if scope == "unknown":
+            rejected.append((ticker, filing, "scope_unknown"))
             continue
         sha = hashlib.sha256(data).hexdigest()
         for metric, value in values.items():
