@@ -1451,3 +1451,89 @@ def test_effective_split_requires_dated_independent_pair_and_keeps_exchange_clos
     assert result["official_target_close"]==5.41
     args["independent_sources"][0]["target_close"]=5.37
     with pytest.raises(MarketDataError):resolve_discrepancy(**args)
+
+
+def test_effective_split_unadjusted_vendor_previous_uses_official_share_basis():
+    # Captured VCIG 2026-11-02 values: Nasdaq 10/30 raw 0.1689,
+    # NLS normalized previous 3.0402, Yahoo daily 0.169 and target 8.16.
+    notice = {"symbol": "VCIG", "effective_session_date": "2026-11-02",
+              "old_shares": 18, "new_shares": 1}
+    args = dict(
+        candidate={"_close": 8.16, "_change_pct": 168.4,
+                   "netchange": 5.1198, "volume": 1000000},
+        historical_provider="yahoo_chart_query1",
+        historical_previous_close=0.169, historical_target_close=8.16,
+        historical_change_pct=(8.16 / 0.169 - 1) * 100,
+        official={"provider": "nasdaq_official", "previous_close": 3.0402,
+                  "previous_close_raw": 0.1689, "previous_price_basis": "unadjusted",
+                  "previous_close_on_target_basis": True, "target_close": 8.16,
+                  "target_close_verified": True, "previous_session_date": "2026-10-30",
+                  "target_session_date": "2026-11-02"},
+        corporate_action={"provider": "yahoo_actions", "status": "corporate_action_adjusted",
+                          "official_action": notice},
+        minute_close=None,
+        independent_sources=[{"provider": "public_com_previous_close",
+                              "provider_family": "public_com", "previous_close": 3.04,
+                              "target_close": None, "source_identifier": "https://public.com/stocks/vcig/pre-market",
+                              "raw_response_sha256": "a" * 64}],
+        tolerance_pct=0.2, resolved_at="2026-11-02T22:01:45Z",
+    )
+    resolved = resolve_discrepancy(**args)
+    assert resolved["discrepancy_reason"] == "official_split_unadjusted_vendor_previous"
+    assert resolved["official_previous_close"] == pytest.approx(3.0402)
+    assert resolved["historical_previous_close"] == pytest.approx(0.169)
+    assert resolved["basis_evidence"]["applied_split_factor"] == 18
+    assert resolved["basis_evidence"]["vendor_daily_previous_rounding_decimal_places"] == 3
+    assert (resolved["official_target_close"] / resolved["official_previous_close"] - 1) * 100 == pytest.approx(168.4033945)
+
+    # A split notice alone, an already normalized vendor bar, or a price
+    # mismatch cannot authorize a second adjustment or an invented ranking.
+    for changed in (
+        {"corporate_action": {"provider": "yahoo_actions", "status": "corporate_action_adjusted"}},
+        {"historical_previous_close": 3.0402},
+        {"historical_previous_close": 0.25},
+        {"historical_target_close": 8.15},
+        {"independent_sources": []},
+    ):
+        with pytest.raises(MarketDataError):
+            resolve_discrepancy(**{**args, **changed})
+    with pytest.raises(MarketDataError):
+        resolve_discrepancy(**{**args, "corporate_action": {
+            **args["corporate_action"], "official_action": {**notice, "effective_session_date": "2026-11-03"}}})
+
+
+def test_missing_minute_observation_needs_independent_display_rounding_evidence():
+    # LITB 2026-11-02 had no 16:00 minute observation. Nasdaq's dated
+    # 2.185 prior close, Yahoo's 2.19 daily display, and an independent
+    # 2.19 display explain the mismatch without widening a price tolerance.
+    args = dict(
+        candidate={"_close": 2.72, "_change_pct": 24.49,
+                   "netchange": 0.535, "volume": 47069},
+        historical_provider="yahoo_chart_query1",
+        historical_previous_close=2.19, historical_target_close=2.72,
+        historical_change_pct=(2.72 / 2.19 - 1) * 100,
+        official={"provider": "nasdaq_official", "previous_close": 2.185,
+                  "target_close": 2.72, "target_close_verified": True,
+                  "previous_session_date": "2026-10-30", "target_session_date": "2026-11-02"},
+        corporate_action={"provider": "yahoo_actions", "status": "checked_none"},
+        minute_close=None,
+        independent_sources=[{"provider": "public_com_previous_close",
+                              "provider_family": "public_com", "previous_close": 2.19,
+                              "target_close": None,
+                              "source_identifier": "https://public.com/stocks/litb/pre-market",
+                              "raw_response_sha256": "b" * 64}],
+        tolerance_pct=0.2, resolved_at="2026-11-02T22:00:00Z",
+    )
+    resolved = resolve_discrepancy(**args)
+    assert resolved["discrepancy_reason"] == "provider_rounding_independently_corroborated"
+    assert resolved["basis_evidence"]["vendor_daily_previous_decimal_places"] == 2
+    assert resolved["official_previous_close"] == 2.185
+    for changed in (
+        {"independent_sources": []},
+        {"independent_sources": [{**args["independent_sources"][0], "previous_close": 2.3}]},
+        {"historical_previous_close": 2.2},
+        {"historical_target_close": 2.70},
+        {"corporate_action": {"provider": "yahoo_actions", "status": "corporate_action_found"}},
+    ):
+        with pytest.raises(MarketDataError):
+            resolve_discrepancy(**{**args, **changed})

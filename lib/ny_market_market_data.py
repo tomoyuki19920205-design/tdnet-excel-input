@@ -1272,6 +1272,43 @@ def resolve_discrepancy(
         official=official, history_previous=historical_previous_close,
         history_target=historical_target_close, minute=minute_close, action=corporate_action,
     )
+    # An exchange-confirmed split can leave the vendor's previous daily bar on
+    # the old share basis even when the target bar is already on the new basis.
+    # The official provider established the old basis from the dated Nasdaq
+    # history row, its volume marker, the live NLS previous close and the notice.
+    notice = corporate_action.get("official_action")
+    if reason is None and notice and official.get("previous_price_basis") == "unadjusted":
+        effective = date.fromisoformat(notice["effective_session_date"])
+        previous_session = date.fromisoformat(official["previous_session_date"])
+        target_session = date.fromisoformat(official["target_session_date"])
+        factor = notice["old_shares"] / notice["new_shares"]
+        raw_previous = official.get("previous_close_raw")
+        vendor_rounding = next((digits for digits in range(2, 5) if raw_previous is not None
+                                and close_matches(historical_previous_close,
+                                                  round_market_display(float(raw_previous), digits))), None)
+        vendor_matches_raw = raw_previous is not None and close_matches(historical_previous_close, float(raw_previous))
+        if (previous_session < effective <= target_session
+                and official.get("previous_close_on_target_basis") is True
+                and official.get("target_close_verified") is True
+                and raw_previous is not None
+                and close_matches(float(raw_previous) * factor, official_previous)
+                and (vendor_matches_raw or vendor_rounding is not None)
+                and close_matches(historical_target_close, official_target)
+                and official_supports and independent_support):
+            reason = "official_split_unadjusted_vendor_previous"
+            basis_evidence = {
+                "official_action": notice,
+                "official_previous_close_raw": float(raw_previous),
+                "official_previous_price_basis": "unadjusted",
+                "applied_split_factor": factor,
+                "official_previous_close": official_previous,
+                "official_target_close": official_target,
+                "vendor_daily_previous_close_raw": historical_previous_close,
+                "vendor_daily_previous_rounding_decimal_places": vendor_rounding,
+                "vendor_daily_target_close": historical_target_close,
+                "independent_previous_close_support": independent_support,
+                "comparison_basis": "dated_regular_closes_on_target_share_basis",
+            }
     if reason is None and minute_close is not None and not corporate_action.get("official_action"):
         minute_previous = float(minute_close["previous_close"])
         minute_target = float(minute_close["target_close"])
@@ -1286,7 +1323,6 @@ def resolve_discrepancy(
     # Same-day exchange splits: official daily history and NLS must first be
     # on one share basis. Diagnose vendor last-trade/rounding differences only
     # with a separate dated EOD pair, never with the 16:00 bar close.
-    notice = corporate_action.get("official_action")
     if reason is None and notice and official.get("previous_close_on_target_basis"):
         effective = date.fromisoformat(notice["effective_session_date"])
         previous_session = date.fromisoformat(official["previous_session_date"])
@@ -1311,6 +1347,32 @@ def resolve_discrepancy(
                 "vendor_daily_previous_close":historical_previous_close,
                 "vendor_daily_basis":"already_split_normalized_last_regular_trade" if daily_matches_previous_trade else "already_split_normalized_rounded_close",
                 "independent_eod":dated_support,"comparison_basis":"dated_regular_closes_on_target_share_basis"}
+
+    # Some thinly traded symbols have no 16:00 minute observation. A vendor
+    # daily close rounded from the exchange's dated close can still be
+    # diagnosed when an independent publisher displays that same rounded
+    # previous close and the exchange verifies the target regular close.
+    if (reason is None and minute_close is None and action_status == "checked_none"
+            and official.get("target_close_verified") is True and official_supports):
+        rounded_places = next((digits for digits in range(2, 5)
+                               if close_matches(historical_previous_close,
+                                                round_market_display(official_previous, digits))
+                               and not close_matches(historical_previous_close, official_previous)), None)
+        rounded_support = [source for source in independent_support
+                           if source.get("previous_close") is not None
+                           and close_matches(float(source["previous_close"]), historical_previous_close)]
+        if (rounded_places is not None and rounded_support
+                and close_matches(historical_target_close, official_target)):
+            reason = "provider_rounding_independently_corroborated"
+            basis_evidence = {
+                "official_previous_close": official_previous,
+                "vendor_daily_previous_close": historical_previous_close,
+                "vendor_daily_previous_decimal_places": rounded_places,
+                "official_target_close": official_target,
+                "vendor_daily_target_close": historical_target_close,
+                "independent_rounded_previous_close_support": rounded_support,
+                "comparison_basis": "dated_regular_closes_with_display_rounding",
+            }
 
     if reason is None and vendor_previous_session_omitted and action_status == "checked_none":
         dated_eod_support = [source for source in independent_support if (
@@ -1653,7 +1715,14 @@ class LiveDiscrepancyArbitrator:
         minute_previous_session = (
             official_previous_session if vendor_previous_session_omitted else previous.session_date
         )
-        minute = self.minute_provider.fetch(ticker, minute_previous_session, target_session_date)
+        minute_error: str | None = None
+        try:
+            minute = self.minute_provider.fetch(ticker, minute_previous_session, target_session_date)
+        except MarketDataError as exc:
+            if "16:00 close evidence missing" not in str(exc):
+                raise
+            minute = None
+            minute_error = str(exc)
         independent: list[dict[str, Any]] = []
         errors: list[str] = []
         for provider in self.independent_providers:
@@ -1741,6 +1810,10 @@ class LiveDiscrepancyArbitrator:
                     "official_previous_close": float(official["previous_close"]),
                     "vendor_previous_close": previous.regular_close,
                     "comparison_basis": "dated_regular_close",
+                }
+            if minute_error:
+                resolved["basis_evidence"] = {
+                    **resolved.get("basis_evidence", {}), "minute_evidence_error": minute_error,
                 }
             return resolved
         except MarketDataError as exc:
@@ -2189,7 +2262,9 @@ def rank_top20(
                                 "basis_evidence": discrepancy["basis_evidence"],
                         })
                         continue
-                    if discrepancy.get("discrepancy_reason") == "official_split_normalized_eod":
+                    if discrepancy.get("discrepancy_reason") in {
+                        "official_split_normalized_eod", "official_split_unadjusted_vendor_previous",
+                    }:
                         corrected_change = (float(discrepancy["official_target_close"]) / float(discrepancy["official_previous_close"]) - 1.0) * 100.0
                         candidate = {**candidate, "_change_pct":corrected_change}
                         historical_change = corrected_change
