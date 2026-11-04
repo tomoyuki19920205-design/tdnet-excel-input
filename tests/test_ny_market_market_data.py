@@ -223,6 +223,25 @@ def test_captured_historical_quote_uses_dated_close_and_rejects_wrong_session(mo
         provider.fetch("SOAR", date(2026, 9, 25))
 
 
+def test_captured_historical_quote_accepts_issuer_title_with_exact_symbol_and_canonical(monkeypatch):
+    raw = b'''<html><head><title>OMH Historical Prices - Ohmyhome | ChartExchange</title>
+<link rel="canonical" href="https://chartexchange.com/symbol/nasdaq-omh/historical/"/></head>
+<body><table><tr><td>Date ( EST )</td><td>Open</td><td>High</td><td>Low</td>
+<td>Close</td><td>Change</td></tr>
+<tr><td>2026-11-04</td><td>3.25</td><td>18.12</td><td>3.20</td><td>15.5300</td><td>+431.849%</td></tr>
+<tr><td>2026-11-03</td><td>2.89</td><td>3.00</td><td>2.89</td><td>2.9200</td><td>0.000%</td></tr>
+</table></body></html>'''
+    monkeypatch.setattr(Path, "read_bytes", lambda _path: raw)
+    url = "https://chartexchange.com/symbol/nasdaq-omh/historical/"
+    provider = CapturedEndOfDayQuoteProvider({"OMH": {"path": "captured.html", "source_url": url}})
+    result = provider.fetch("OMH", date(2026, 11, 4))
+    assert (result["previous_close"], result["target_close"]) == (2.92, 15.53)
+    assert result["primary_exchange"] == "NASDAQ"
+    monkeypatch.setattr(Path, "read_bytes", lambda _path: raw.replace(b"nasdaq-omh", b"nasdaq-other"))
+    with pytest.raises(MarketDataError, match="page identity mismatch"):
+        provider.fetch("OMH", date(2026, 11, 4))
+
+
 def test_non_nasdaq_primary_exchange_eod_resolves_nasdaq_last_sale_difference():
     resolved = resolve_discrepancy(
         candidate={

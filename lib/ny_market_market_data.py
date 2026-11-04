@@ -1151,7 +1151,8 @@ class CapturedEndOfDayQuoteProvider:
         page = BeautifulSoup(raw, "html.parser")
         title = page.title.get_text(" ", strip=True) if page.title else ""
         canonical = page.find("link", rel="canonical")
-        if title != f"{symbol} Historical Prices | ChartExchange" or not canonical or canonical.get("href") != url:
+        if (not re.fullmatch(rf"{re.escape(symbol)} Historical Prices(?: - [^|]+)? \| ChartExchange", title)
+                or not canonical or canonical.get("href") != url):
             raise MarketDataError(f"{self.name}:{symbol}: captured page identity mismatch")
         tables = []
         for table in page.find_all("table"):
