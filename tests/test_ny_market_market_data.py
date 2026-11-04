@@ -237,6 +237,11 @@ def test_captured_historical_quote_accepts_issuer_title_with_exact_symbol_and_ca
     result = provider.fetch("OMH", date(2026, 11, 4))
     assert (result["previous_close"], result["target_close"]) == (2.92, 15.53)
     assert result["primary_exchange"] == "NASDAQ"
+    metadata = rb'regDate\":\"2026-11-04 15:59:03\",\"priceChannel\":\"reg\",\"priceKey\":\"reg\",\"initialPrice\":15.53'
+    monkeypatch.setattr(Path, "read_bytes", lambda _path: raw.replace(b"</body>", b"<script>" + metadata + b"</script></body>"))
+    timed = provider.fetch("OMH", date(2026, 11, 4))
+    assert timed["last_regular_quote_timestamp"] == "2026-11-04 15:59:03"
+    assert timed["last_regular_quote_price"] == 15.53
     monkeypatch.setattr(Path, "read_bytes", lambda _path: raw.replace(b"nasdaq-omh", b"nasdaq-other"))
     with pytest.raises(MarketDataError, match="page identity mismatch"):
         provider.fetch("OMH", date(2026, 11, 4))
@@ -346,6 +351,48 @@ def test_movers_conflict_accepts_only_independently_verified_previous_display_ro
     with pytest.raises(MarketDataError):
         resolve_discrepancy(**{**args, "independent_sources": [
             {**args["independent_sources"][0], "previous_close": 0.71}]})
+
+
+def test_preclose_independent_quote_is_timed_before_official_four_pm_close():
+    quote = {"provider": "captured_end_of_day_quote", "provider_family": "chartexchange",
+             "session": "regular_close", "target_session_date": "2026-11-04",
+             "previous_close": 10.77, "target_close": 15.47,
+             "last_regular_quote_timestamp": "2026-11-04 15:59:02",
+             "last_regular_quote_price": 15.47,
+             "primary_exchange": "NASDAQ",
+             "source_identifier": "https://chartexchange.com/symbol/nasdaq-lyel/historical/",
+             "raw_response_sha256": "c" * 64}
+    args = dict(
+        candidate={"_close": 15.47, "_change_pct": (15.47 / 10.77 - 1) * 100,
+                   "netchange": None, "volume": 1_000_000},
+        historical_provider="yahoo_chart_query1",
+        historical_previous_close=10.77, historical_target_close=15.43,
+        historical_change_pct=(15.43 / 10.77 - 1) * 100,
+        official={"provider": "nasdaq_official_historical_nls", "provider_family": "nasdaq",
+                  "target_close_verified": True, "target_close_source": "nasdaq_info",
+                  "target_timestamp": "Closed at Nov 4, 2026 4:00 PM ET",
+                  "target_session_date": "2026-11-04", "previous_session_date": "2026-11-03",
+                  "previous_close": 10.77, "target_close": 15.43,
+                  "source_identifiers": ["https://api.nasdaq.com/lyel"],
+                  "raw_response_sha256": ["a" * 64]},
+        corporate_action={"provider": "yahoo_corporate_actions", "provider_family": "yahoo",
+                          "status": "checked_none", "source_identifier": "https://yahoo.test/actions",
+                          "raw_response_sha256": "b" * 64},
+        minute_close=None, independent_sources=[quote],
+        tolerance_pct=0.20, resolved_at="2026-11-05T00:00:00+00:00",
+    )
+    result = resolve_discrepancy(**args)
+    assert result["discrepancy_reason"] == "movers_quote_differs_from_verified_regular_close"
+    assert result["basis_evidence"]["independent_preclose_quotes"][0]["last_regular_quote_price"] == 15.47
+    assert any(source["role"] == "independent_preclose_quote" for source in result["supporting_sources"])
+    for changed in (
+        {"last_regular_quote_timestamp": "2026-11-04 15:58:02"},
+        {"last_regular_quote_timestamp": "2026-11-03 15:59:02"},
+        {"last_regular_quote_price": 15.45},
+        {"previous_close": 10.70},
+    ):
+        with pytest.raises(MarketDataError):
+            resolve_discrepancy(**{**args, "independent_sources": [{**quote, **changed}]})
 
 
 def test_non_nasdaq_primary_exchange_eod_resolves_nasdaq_last_sale_difference():

@@ -1187,6 +1187,16 @@ class CapturedEndOfDayQuoteProvider:
         pct = float(pct_raw.removesuffix("%"))
         if previous_close <= 0 or abs((close / previous_close - 1) * 100 - pct) > 0.006:
             raise MarketDataError(f"{self.name}:{symbol}: EOD quote arithmetic mismatch")
+        # The page embeds its last regular quote alongside the historical
+        # table. Keep its clock and price so an earlier quote is never
+        # mistaken for the exchange's final 4 PM close.
+        quote_metadata = re.findall(
+            r'regDate\\":\\"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\\".{0,120}?initialPrice\\":(\d+(?:\.\d+)?)',
+            raw.decode("utf-8"),
+        )
+        if len(set(quote_metadata)) > 1:
+            raise MarketDataError(f"{self.name}:{symbol}: embedded regular quote ambiguous")
+        quote_stamp, quote_price = quote_metadata[0] if quote_metadata else (None, None)
         return {
             "provider": self.name, "provider_family": "chartexchange",
             "session": "regular_close", "target_session_date": target_session_date.isoformat(),
@@ -1196,6 +1206,8 @@ class CapturedEndOfDayQuoteProvider:
             "display_decimal_places": len(close_raw.partition(".")[2]),
             "primary_exchange": urlsplit(url).path.split("/")[2].rsplit("-", 1)[0].upper(),
             "capture_type": "captured_historical_html",
+            "last_regular_quote_timestamp": quote_stamp,
+            "last_regular_quote_price": float(quote_price) if quote_price is not None else None,
             "source_identifier": url, "raw_response_sha256": hashlib.sha256(raw).hexdigest(),
         }
 
@@ -1522,7 +1534,22 @@ def resolve_discrepancy(
             and source.get("previous_close") is not None
             and close_matches(float(source["previous_close"]), official_previous)
         )]
-        if dated_eod:
+        preclose_quotes = [source for source in independent_sources if (
+            source.get("session") == "regular_close"
+            and source.get("target_session_date") == official.get("target_session_date")
+            and re.fullmatch(rf"{re.escape(str(official['target_session_date']))} 15:59:[0-5]\d",
+                             str(source.get("last_regular_quote_timestamp", "")))
+            and source.get("target_close") is not None
+            and source.get("last_regular_quote_price") is not None
+            and close_matches(float(source["target_close"]), float(source["last_regular_quote_price"]))
+            and source.get("previous_close") is not None
+            and close_matches(float(source["previous_close"]), official_previous)
+        )]
+        if dated_eod or preclose_quotes:
+            known_hashes = {source.get("raw_response_sha256") for source in independent_support}
+            independent_support.extend({**source, "support_role": "independent_preclose_quote"}
+                                       for source in preclose_quotes
+                                       if source.get("raw_response_sha256") not in known_hashes)
             reason = "movers_quote_differs_from_verified_regular_close"
             official_supports = True
             basis_evidence = {
@@ -1535,6 +1562,7 @@ def resolve_discrepancy(
                 "movers_quote_close": screener_last,
                 "movers_quote_change_pct": screener_change,
                 "independent_dated_eod": dated_eod,
+                "independent_preclose_quotes": preclose_quotes,
                 "comparison_basis": "dated_regular_close_with_conflicting_movers_quote",
             }
 
@@ -1597,7 +1625,8 @@ def resolve_discrepancy(
     sources.extend({
         "provider": item["provider"], "provider_family": item.get("provider_family"),
         "source_identifier": item.get("source_identifier"),
-        "raw_response_sha256": item.get("raw_response_sha256"), "role": "independent_support",
+        "raw_response_sha256": item.get("raw_response_sha256"),
+        "role": item.get("support_role", "independent_support"),
         "raw_value": item.get("raw_value"), "parsed_value": item.get("parsed_value"),
     } for item in independent_support)
     compared = sorted({
