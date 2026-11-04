@@ -905,12 +905,11 @@ class NasdaqOfficialCloseProvider:
         # NLS is a live quote. Its previousClose belongs to the current New York
         # trading day, so it cannot corroborate a historical session's prior close.
         nls_session_date = self.now().astimezone(NY_TZ).date()
-        if (
+        nls_previous_mismatch = (
             target_session_date == nls_session_date
             and nls_previous is not None
             and abs(nls_previous - previous_close) > max(0.02, previous_close * 0.002)
-        ):
-            raise MarketDataError(f"{self.name}:{symbol}: official historical/NLS previous close mismatch")
+        )
         info_url = f"https://api.nasdaq.com/api/quote/{quote(symbol, safe='')}/info?assetclass=stocks"
         info_raw = self.transport(info_url, self._headers(symbol))
         info = _raw_json(info_raw, self.name).get("data") or {}
@@ -935,6 +934,8 @@ class NasdaqOfficialCloseProvider:
             "notifications": info.get("notifications", []),
             "previous_session_date": previous_day.isoformat(),
             "previous_close": previous_close, "target_close": target_close,
+            "nls_previous_close": nls_previous,
+            "nls_previous_mismatch": nls_previous_mismatch,
             **normalization,
             "previous_volume": _numeric(previous_row.get("volume"), "official previous volume", nullable=True),
             "source_identifiers": [historical_url, nls_url, info_url],
@@ -1545,7 +1546,10 @@ def resolve_discrepancy(
             and source.get("previous_close") is not None
             and close_matches(float(source["previous_close"]), official_previous)
         )]
-        if dated_eod or preclose_quotes:
+        nls_conflict_verified = (not official.get("nls_previous_mismatch")
+                                 or any(close_matches(float(source["target_close"]), official_target)
+                                        for source in dated_eod))
+        if (dated_eod or preclose_quotes) and nls_conflict_verified:
             known_hashes = {source.get("raw_response_sha256") for source in independent_support}
             independent_support.extend({**source, "support_role": "independent_preclose_quote"}
                                        for source in preclose_quotes
@@ -1554,6 +1558,8 @@ def resolve_discrepancy(
             official_supports = True
             basis_evidence = {
                 "official_previous_close": official_previous,
+                "nls_previous_close": official.get("nls_previous_close"),
+                "nls_previous_mismatch": official.get("nls_previous_mismatch", False),
                 "official_target_close": official_target,
                 "official_target_timestamp": official["target_timestamp"],
                 "vendor_daily_previous_close": historical_previous_close,
@@ -1566,7 +1572,8 @@ def resolve_discrepancy(
                 "comparison_basis": "dated_regular_close_with_conflicting_movers_quote",
             }
 
-    if not official_supports or not action_checked or not independent_support or reason is None:
+    if (not official_supports or not action_checked or not independent_support or reason is None
+            or (official.get("nls_previous_mismatch") and reason != "movers_quote_differs_from_verified_regular_close")):
         problems = []
         if not official_supports:
             problems.append(
@@ -1580,6 +1587,8 @@ def resolve_discrepancy(
             problems.append("no independent supporting source")
         if reason is None:
             problems.append("provider discrepancy reason is unresolved")
+        if official.get("nls_previous_mismatch") and reason != "movers_quote_differs_from_verified_regular_close":
+            problems.append("official historical/NLS previous close mismatch is unresolved")
         raise MarketDataError("unresolved Top20 discrepancy: " + "; ".join(problems))
 
     conflicting_eod = [
@@ -1721,8 +1730,7 @@ class LiveDiscrepancyArbitrator:
                     and official["target_session_date"] == target_session_date.isoformat()
                     and action.get("status") == "checked_none"
                     and abs(float(official["previous_close"]) - previous.regular_close) <= max(0.02, previous.regular_close * 0.002)
-                    and abs(float(official["target_close"]) - target.regular_close) <= max(0.02, target.regular_close * 0.002)
-                    and abs(float(official["target_close"]) - float(candidate["_close"])) <= max(0.02, float(candidate["_close"]) * 0.002)):
+                    and abs(float(official["target_close"]) - target.regular_close) <= max(0.02, target.regular_close * 0.002)):
                 independent = []
                 for provider in self.independent_providers:
                     try:
@@ -1736,7 +1744,17 @@ class LiveDiscrepancyArbitrator:
                     and abs(float(source["previous_close"]) - float(official["previous_close"]))
                     <= max(0.02, float(official["previous_close"]) * 0.002)
                 )]
-                if independent_previous:
+                dated_pair = next((source for source in independent_previous if (
+                    source.get("session") == "regular_close"
+                    and source.get("target_session_date") == target_session_date.isoformat()
+                    and source.get("target_close") is not None
+                    and close_matches(float(source["target_close"]), float(official["target_close"]))
+                )), None)
+                quote_near_official = (abs(float(official["target_close"]) - float(candidate["_close"]))
+                                       <= max(0.02, float(candidate["_close"]) * 0.002))
+                if (independent_previous and (quote_near_official or dated_pair)
+                        and (not official.get("nls_previous_mismatch") or dated_pair)):
+                    independent_evidence = dated_pair if official.get("nls_previous_mismatch") else independent_previous[0]
                     return {
                         "ranking_disposition": "exclude_below_top20_floor",
                         "exclusion_reason": "screener_change_conflicts_with_verified_regular_closes",
@@ -1749,13 +1767,16 @@ class LiveDiscrepancyArbitrator:
                              "source_identifier": historical_series.source_identifier,
                              "raw_response_sha256": historical_series.raw_response_sha256, "role": "vendor_daily_regular_closes"},
                             {**action, "role": "corporate_action_check"},
-                            {**independent_previous[0], "role": "independent_previous_close"},
+                            {**independent_evidence, "role": "independent_dated_regular_close_pair"
+                             if dated_pair else "independent_previous_close"},
                         ],
                         "basis_evidence": {
                             "previous_session_date": expected_previous_session_date.isoformat(),
                             "target_session_date": target_session_date.isoformat(),
                             "official_previous_close": official["previous_close"],
                             "official_target_close": official["target_close"],
+                            "nls_previous_close": official.get("nls_previous_close"),
+                            "nls_previous_mismatch": official.get("nls_previous_mismatch", False),
                             "vendor_previous_close": previous.regular_close,
                             "vendor_target_close": target.regular_close,
                             "comparison_basis": "unadjusted_dated_regular_closes",

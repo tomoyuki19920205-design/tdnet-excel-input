@@ -395,6 +395,81 @@ def test_preclose_independent_quote_is_timed_before_official_four_pm_close():
             resolve_discrepancy(**{**args, "independent_sources": [{**quote, **changed}]})
 
 
+def test_nls_previous_conflict_requires_exact_independent_dated_pair():
+    # ATPC 2026-11-04: Nasdaq historical, Yahoo and a dated independent
+    # publisher agree on 1.30 -> 1.49, while Nasdaq NLS says 1.24 prior.
+    independent = {"provider": "captured_end_of_day_quote", "provider_family": "chartexchange",
+                   "session": "regular_close", "target_session_date": "2026-11-04",
+                   "previous_close": 1.30, "target_close": 1.49,
+                   "source_identifier": "https://chartexchange.com/symbol/nasdaq-atpc/historical/",
+                   "raw_response_sha256": "c" * 64}
+    args = dict(
+        candidate={"_close": 1.62, "_change_pct": (1.62 / 1.30 - 1) * 100,
+                   "netchange": None, "volume": 130_534},
+        historical_provider="yahoo_chart_query1",
+        historical_previous_close=1.30, historical_target_close=1.49,
+        historical_change_pct=(1.49 / 1.30 - 1) * 100,
+        official={"provider": "nasdaq_official_historical_nls", "provider_family": "nasdaq",
+                  "target_close_verified": True, "target_close_source": "nasdaq_info",
+                  "target_timestamp": "Closed at Nov 4, 2026 4:00 PM ET",
+                  "target_session_date": "2026-11-04", "previous_session_date": "2026-11-03",
+                  "previous_close": 1.30, "target_close": 1.49,
+                  "nls_previous_close": 1.24, "nls_previous_mismatch": True,
+                  "source_identifiers": ["https://api.nasdaq.com/atpc"],
+                  "raw_response_sha256": ["a" * 64]},
+        corporate_action={"provider": "yahoo_corporate_actions", "provider_family": "yahoo",
+                          "status": "checked_none", "source_identifier": "https://yahoo.test/actions",
+                          "raw_response_sha256": "b" * 64},
+        minute_close=None, independent_sources=[independent],
+        tolerance_pct=0.20, resolved_at="2026-11-05T00:00:00+00:00",
+    )
+    result = resolve_discrepancy(**args)
+    assert result["discrepancy_reason"] == "movers_quote_differs_from_verified_regular_close"
+    assert result["basis_evidence"]["nls_previous_close"] == 1.24
+    with pytest.raises(MarketDataError, match="historical/NLS previous close mismatch"):
+        resolve_discrepancy(**{**args, "independent_sources": [{**independent, "target_close": 1.48}]})
+
+
+def test_verified_nls_conflict_below_top20_floor_excludes_moving_quote_candidate():
+    class Official:
+        def fetch(self, *_):
+            return {"provider": "nasdaq_official_historical_nls", "provider_family": "nasdaq",
+                    "previous_session_date": "2026-08-31", "target_session_date": "2026-09-01",
+                    "previous_close": 1.30, "target_close": 1.49,
+                    "nls_previous_close": 1.24, "nls_previous_mismatch": True,
+                    "source_identifiers": ["https://nasdaq.test/history"],
+                    "raw_response_sha256": ["a" * 64]}
+
+    class Actions:
+        def fetch(self, *_):
+            return {"provider": "yahoo_corporate_actions", "provider_family": "yahoo",
+                    "status": "checked_none", "source_identifier": "https://yahoo.test/actions",
+                    "raw_response_sha256": "b" * 64}
+
+    class Independent:
+        name = "captured_end_of_day_quote"
+
+        def fetch(self, *_):
+            return {"provider": self.name, "provider_family": "chartexchange",
+                    "session": "regular_close", "target_session_date": "2026-09-01",
+                    "previous_close": 1.30, "target_close": 1.49,
+                    "source_identifier": "https://chartexchange.test/atpc",
+                    "raw_response_sha256": "c" * 64}
+
+    history = series("ATPC", (1.30, 1.49), provider="yahoo_chart_query1")
+    previous, target = history.bars
+    arbitrator = LiveDiscrepancyArbitrator(
+        official_provider=Official(), action_provider=Actions(), independent_providers=[Independent()])
+    result = arbitrator.resolve(ticker="ATPC",
+        candidate={"symbol": "ATPC", "_close": 1.62, "_change_pct": (1.62 / 1.30 - 1) * 100},
+        historical_series=history, previous=previous, target=target,
+        target_session_date=date(2026, 9, 1), expected_previous_session_date=date(2026, 8, 31),
+        source_top20_floor_pct=22.88, tolerance_pct=0.20)
+    assert result["ranking_disposition"] == "exclude_below_top20_floor"
+    assert result["canonical_change_pct"] == pytest.approx((1.49 / 1.30 - 1) * 100)
+    assert result["supporting_sources"][-1]["role"] == "independent_dated_regular_close_pair"
+
+
 def test_non_nasdaq_primary_exchange_eod_resolves_nasdaq_last_sale_difference():
     resolved = resolve_discrepancy(
         candidate={
@@ -762,8 +837,10 @@ def test_nasdaq_official_close_does_not_compare_live_nls_with_backfill_session()
         transport=conflicting_transport,
         now=lambda: datetime(2026, 9, 29, 22, tzinfo=timezone.utc),
     )
-    with pytest.raises(MarketDataError, match="official historical/NLS previous close mismatch"):
-        current_provider.fetch("SOAR", date(2026, 9, 29), 0.40)
+    current = current_provider.fetch("SOAR", date(2026, 9, 29), 0.40)
+    assert current["nls_previous_mismatch"] is True
+    assert current["previous_close"] == pytest.approx(0.32)
+    assert current["nls_previous_close"] == pytest.approx(0.18)
 
 
 def test_nasdaq_official_close_rejects_info_historical_target_mismatch():
@@ -1598,10 +1675,19 @@ def test_effective_split_precedes_nls_comparison_without_double_application(hist
     assert result["applied_split_factor"]==factor
     assert result["historical_volume_basis_marker"] == ("N/A" if factor == 1 else "100")
     assert (result["target_close"]/result["previous_close"]-1)*100==pytest.approx(74.6908224353)
-    # Without exchange notice the original mismatch check must still reject.
+    # Without exchange notice, a matching target price alone cannot clear the
+    # conflicting share basis at final discrepancy arbitration.
     if factor==9:
-        with pytest.raises(MarketDataError,match="official historical/NLS previous close mismatch"):
-            NasdaqOfficialCloseProvider(transport=transport,now=lambda:datetime(2026,10,27,22,tzinfo=timezone.utc)).fetch("TEST",date(2026,10,27),5.41)
+        unnotified = NasdaqOfficialCloseProvider(transport=transport,now=lambda:datetime(2026,10,27,22,tzinfo=timezone.utc)).fetch("TEST",date(2026,10,27),5.41)
+        assert unnotified["nls_previous_mismatch"] is True
+        with pytest.raises(MarketDataError, match="official historical/NLS previous close mismatch is unresolved"):
+            resolve_discrepancy(candidate={"_close":5.41,"_change_pct":74.69,"volume":1000},
+                historical_provider="yahoo_chart_query1",historical_previous_close=3.0654,
+                historical_target_close=5.41,historical_change_pct=76.48,
+                official=unnotified,corporate_action={"provider":"yahoo_actions","status":"checked_none"},
+                minute_close=None,independent_sources=[{"provider":"public_com_previous_close",
+                    "provider_family":"public_com","previous_close":3.0969,"target_close":None}],
+                tolerance_pct=.2,resolved_at="2026-10-27T22:00:00Z")
 
 
 def test_effective_split_requires_dated_independent_pair_and_keeps_exchange_close():
