@@ -1505,11 +1505,14 @@ def resolve_discrepancy(
     # the dated vendor daily pair and the exchange's 4 PM close agree exactly,
     # and a separate dated publisher corroborates the regular-close pair.
     # This diagnoses a source conflict; it does not widen the price tolerance.
+    vendor_previous_rounding_places = next((digits for digits in range(2, 5)
+                                            if close_matches(historical_previous_close,
+                                                             round_market_display(official_previous, digits))), None)
     if (reason is None and action_status == "checked_none"
             and official.get("target_close_verified") is True
             and official.get("target_close_source") == "nasdaq_info"
             and re.fullmatch(r"Closed at .* 4:00 PM ET", str(official.get("target_timestamp", "")))
-            and close_matches(historical_previous_close, official_previous)
+            and vendor_previous_rounding_places is not None
             and close_matches(historical_target_close, official_target)
             and not close_matches(screener_last, official_target)):
         dated_eod = [source for source in independent_support if (
@@ -1527,6 +1530,7 @@ def resolve_discrepancy(
                 "official_target_close": official_target,
                 "official_target_timestamp": official["target_timestamp"],
                 "vendor_daily_previous_close": historical_previous_close,
+                "vendor_daily_previous_rounding_places": vendor_previous_rounding_places,
                 "vendor_daily_target_close": historical_target_close,
                 "movers_quote_close": screener_last,
                 "movers_quote_change_pct": screener_change,
