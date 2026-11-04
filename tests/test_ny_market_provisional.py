@@ -78,13 +78,21 @@ def test_builder_emits_provisional_packet_and_keeps_verified_checkpoint(tmp_path
     state = json.loads(checkpoint.read_text(encoding="utf-8"))
     assert state["stage"] == "provisional" and state["last_error"] == "NUWE price basis unresolved"
     assert state["data_failure_count"] == 3
+    monkeypatch.setattr(packet_builder, "_implementation_hashes", lambda: {"market_data": "repaired"})
+    monkeypatch.setattr("sys.argv", ["packet_builder", "--market-session-date", "2026-09-01",
+                                    "--output", str(tmp_path / "packet-repaired.json"),
+                                    "--checkpoint", str(checkpoint), "--allow-provisional"])
+    assert packet_builder.main() == 0
+    capsys.readouterr()
+    assert calls["top20"] == 4
+    assert json.loads(checkpoint.read_text(encoding="utf-8"))["data_failure_count"] == 1
     notice = tmp_path / "new-notice.json"
     notice.write_text(json.dumps({"NUWE": "https://www.nasdaqtrader.com/TraderNews.aspx?id=eca2026-764"}))
     monkeypatch.setattr("sys.argv", ["packet_builder", "--market-session-date", "2026-09-01",
                                     "--output", str(tmp_path / "packet-5.json"), "--checkpoint", str(checkpoint),
                                     "--corporate-action-notices", str(notice), "--allow-provisional"])
     assert packet_builder.main() == 0
-    assert calls["top20"] == 4
+    assert calls["top20"] == 5
     assert json.loads(checkpoint.read_text(encoding="utf-8"))["data_failure_count"] == 1
 
 

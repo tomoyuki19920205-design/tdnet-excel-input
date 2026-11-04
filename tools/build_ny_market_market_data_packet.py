@@ -22,6 +22,18 @@ from lib.ny_market_research import market_data_packet_sha256
 from tools.company_news_atomic import atomic_write_json
 
 
+def _implementation_hashes() -> dict[str, str]:
+    """A repaired validator must be allowed one new bounded evidence attempt."""
+    return {
+        path: hashlib.sha256((ROOT / path).read_bytes()).hexdigest()
+        for path in (
+            "tools/build_ny_market_market_data_packet.py",
+            "lib/ny_market_market_data.py",
+            "lib/ny_market_price_basis.py",
+        )
+    }
+
+
 @contextmanager
 def _single_builder(lock_path: Path):
     """Keep one writer per report date without changing scheduled tasks."""
@@ -106,6 +118,7 @@ def main() -> int:
     evidence_input_sha256 = market_data_packet_sha256({
         "issuer_components": issuer_components, "notices": notices,
         "actions": actions, "independent_snapshots": snapshots,
+        "implementation_hashes": _implementation_hashes(),
         "independent_snapshot_file_hashes": {
             ticker: hashlib.sha256(Path(entry["path"]).read_bytes()).hexdigest()
             for ticker, entry in snapshots.items()
