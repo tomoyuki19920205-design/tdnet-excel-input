@@ -1500,6 +1500,40 @@ def resolve_discrepancy(
                 "nasdaq_info_role": "nasdaq_reported_last_sale_not_primary_exchange_close",
             }
 
+    # A live movers table can keep updating after the regular close while its
+    # priceDate still names the finished session. Correct that quote only when
+    # the dated vendor daily pair and the exchange's 4 PM close agree exactly,
+    # and a separate dated publisher corroborates the regular-close pair.
+    # This diagnoses a source conflict; it does not widen the price tolerance.
+    if (reason is None and action_status == "checked_none"
+            and official.get("target_close_verified") is True
+            and official.get("target_close_source") == "nasdaq_info"
+            and re.fullmatch(r"Closed at .* 4:00 PM ET", str(official.get("target_timestamp", "")))
+            and close_matches(historical_previous_close, official_previous)
+            and close_matches(historical_target_close, official_target)
+            and not close_matches(screener_last, official_target)):
+        dated_eod = [source for source in independent_support if (
+            source.get("session") == "regular_close"
+            and source.get("target_session_date") == official.get("target_session_date")
+            and source.get("target_close") is not None
+            and source.get("previous_close") is not None
+            and close_matches(float(source["previous_close"]), official_previous)
+        )]
+        if dated_eod:
+            reason = "movers_quote_differs_from_verified_regular_close"
+            official_supports = True
+            basis_evidence = {
+                "official_previous_close": official_previous,
+                "official_target_close": official_target,
+                "official_target_timestamp": official["target_timestamp"],
+                "vendor_daily_previous_close": historical_previous_close,
+                "vendor_daily_target_close": historical_target_close,
+                "movers_quote_close": screener_last,
+                "movers_quote_change_pct": screener_change,
+                "independent_dated_eod": dated_eod,
+                "comparison_basis": "dated_regular_close_with_conflicting_movers_quote",
+            }
+
     if not official_supports or not action_checked or not independent_support or reason is None:
         problems = []
         if not official_supports:
@@ -1816,6 +1850,14 @@ class LiveDiscrepancyArbitrator:
                 resolved["basis_evidence"] = {
                     **resolved.get("basis_evidence", {}), "minute_evidence_error": minute_error,
                 }
+            if resolved.get("discrepancy_reason") == "movers_quote_differs_from_verified_regular_close":
+                resolved["supporting_sources"].append({
+                    "provider": historical_series.provider,
+                    "provider_family": provider_family(historical_series.provider),
+                    "source_identifier": historical_series.source_identifier,
+                    "raw_response_sha256": historical_series.raw_response_sha256,
+                    "role": "dated_vendor_daily_regular_closes",
+                })
             return resolved
         except MarketDataError as exc:
             detail = f"; independent errors: {', '.join(errors)}" if errors else ""
@@ -2265,9 +2307,13 @@ def rank_top20(
                         continue
                     if discrepancy.get("discrepancy_reason") in {
                         "official_split_normalized_eod", "official_split_unadjusted_vendor_previous",
+                        "movers_quote_differs_from_verified_regular_close",
                     }:
                         corrected_change = (float(discrepancy["official_target_close"]) / float(discrepancy["official_previous_close"]) - 1.0) * 100.0
-                        candidate = {**candidate, "_change_pct":corrected_change}
+                        if corrected_change < source_top20_floor_pct:
+                            raise MarketDataError(f"Top20 {ticker}: corrected move falls below candidate floor")
+                        candidate = {**candidate, "_change_pct": corrected_change,
+                                     "_close": float(discrepancy["official_target_close"])}
                         historical_change = corrected_change
                     review_flags.extend(["discrepancy_resolved", str(discrepancy["discrepancy_reason"])])
                     if discrepancy.get("liquidity_flag") == "low_liquidity":

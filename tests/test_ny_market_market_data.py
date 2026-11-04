@@ -242,6 +242,76 @@ def test_captured_historical_quote_accepts_issuer_title_with_exact_symbol_and_ca
         provider.fetch("OMH", date(2026, 11, 4))
 
 
+def test_movers_quote_conflict_uses_verified_regular_close_without_widening_tolerance():
+    # The dated movers quote and a second publisher show $15.53, while the
+    # exchange's 4 PM close and the vendor daily bar both show $15.55.
+    args = dict(
+        candidate={"_close": 15.53, "_change_pct": (15.53 / 2.92 - 1) * 100,
+                   "netchange": None, "volume": 91_220_247},
+        historical_provider="yahoo_chart_query1",
+        historical_previous_close=2.92, historical_target_close=15.55,
+        historical_change_pct=(15.55 / 2.92 - 1) * 100,
+        official={"provider": "nasdaq_official_historical_nls", "provider_family": "nasdaq",
+                  "target_close_verified": True, "target_close_source": "nasdaq_info",
+                  "target_timestamp": "Closed at Nov 4, 2026 4:00 PM ET",
+                  "target_session_date": "2026-11-04", "previous_session_date": "2026-11-03",
+                  "previous_close": 2.92, "target_close": 15.55,
+                  "source_identifiers": ["https://api.nasdaq.com/omh"],
+                  "raw_response_sha256": ["a" * 64]},
+        corporate_action={"provider": "yahoo_corporate_actions", "provider_family": "yahoo",
+                          "status": "checked_none", "source_identifier": "https://yahoo.test/actions",
+                          "raw_response_sha256": "b" * 64},
+        minute_close=None,
+        independent_sources=[{"provider": "captured_end_of_day_quote", "provider_family": "chartexchange",
+                              "session": "regular_close", "target_session_date": "2026-11-04",
+                              "previous_close": 2.92, "target_close": 15.53,
+                              "source_identifier": "https://chartexchange.com/symbol/nasdaq-omh/historical/",
+                              "raw_response_sha256": "c" * 64}],
+        tolerance_pct=0.20, resolved_at="2026-11-04T23:30:00+00:00",
+    )
+    resolved = resolve_discrepancy(**args)
+    assert resolved["discrepancy_reason"] == "movers_quote_differs_from_verified_regular_close"
+    assert resolved["basis_evidence"]["movers_quote_close"] == 15.53
+    assert resolved["official_target_close"] == 15.55
+    later_quote = {**args["candidate"], "_close": 15.25,
+                   "_change_pct": (15.25 / 2.92 - 1) * 100}
+    later = resolve_discrepancy(**{**args, "candidate": later_quote})
+    assert later["discrepancy_reason"] == resolved["discrepancy_reason"]
+    assert later["basis_evidence"]["movers_quote_close"] == 15.25
+    for changed in (
+        {"historical_target_close": 15.53},
+        {"historical_previous_close": 2.91},
+        {"official": {**args["official"], "target_timestamp": "Nov 4, 2026 4:59 PM ET"}},
+        {"corporate_action": {**args["corporate_action"], "status": "corporate_action_found"}},
+        {"independent_sources": []},
+        {"independent_sources": [{**args["independent_sources"][0], "target_close": 15.40}]},
+    ):
+        with pytest.raises(MarketDataError):
+            resolve_discrepancy(**{**args, **changed})
+
+
+def test_verified_movers_conflict_corrects_ranked_close_and_percentage_together():
+    source = screener([row("OMH", (15.53 / 2.92 - 1) * 100, close=15.53)]
+                      + [row(f"T{i:02}", 100 - i, close=10) for i in range(19)])
+    history = {"OMH": series("OMH", (2.92, 15.55), provider="yahoo_chart_query1")}
+    history.update({f"T{i:02}": series(f"T{i:02}", (10 / (2 - i / 100), 10),
+                                        provider="yahoo_chart_query1") for i in range(19)})
+
+    class VerifiedConflict:
+        def resolve(self, **_kwargs):
+            return {"discrepancy_status": "resolved",
+                    "discrepancy_reason": "movers_quote_differs_from_verified_regular_close",
+                    "official_previous_close": 2.92, "official_target_close": 15.55,
+                    "historical_change_pct": (15.55 / 2.92 - 1) * 100,
+                    "basis_evidence": {"comparison_basis": "dated_regular_close_with_conflicting_movers_quote"}}
+
+    ranked = rank_top20(source, target_session_date=date(2026, 9, 1),
+                        historical_series=history, discrepancy_arbitrator=VerifiedConflict())
+    assert ranked[0]["ticker"] == "OMH"
+    assert ranked[0]["close"] == 15.55
+    assert ranked[0]["change_pct"] == pytest.approx((15.55 / 2.92 - 1) * 100)
+
+
 def test_non_nasdaq_primary_exchange_eod_resolves_nasdaq_last_sale_difference():
     resolved = resolve_discrepancy(
         candidate={
