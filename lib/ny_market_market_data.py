@@ -2488,6 +2488,45 @@ def reject_stale_undated_screener(
         )
 
 
+def audit_unranked_movers_against_regular_closes(
+    screener: dict[str, Any], historical: dict[str, DailySeries],
+    ranked: list[dict[str, Any]], target_session_date: date,
+    excluded_actions: list[dict[str, Any]], excluded_no_trade: list[dict[str, Any]],
+    symbols: list[str],
+) -> list[dict[str, Any]]:
+    """Fail closed when a moving quote table hides a regular-session Top20 name."""
+    if screener.get("provider") != StockAnalysisGainersProvider.name:
+        return []
+    if len(symbols) < 50:
+        raise MarketDataError("moving gainers source has fewer than 50 eligible candidates")
+    floor = min(float(item["change_pct"]) for item in ranked)
+    reviewed = {item["ticker"] for item in ranked}
+    reviewed.update(item["ticker"] for item in excluded_actions)
+    reviewed.update(item["ticker"] for item in excluded_no_trade)
+    audit: list[dict[str, Any]] = []
+    hidden: list[dict[str, Any]] = []
+    for symbol in symbols:
+        if symbol in reviewed:
+            continue
+        series = historical.get(symbol)
+        if series is None:
+            raise MarketDataError(f"unranked mover {symbol} lacks dated daily evidence")
+        previous, target = completed_session_pair(series, target_session_date)
+        change_pct = (target.regular_close / previous.regular_close - 1.0) * 100.0
+        record = {"symbol": symbol, "regular_change_pct": change_pct,
+                  "previous_close": previous.regular_close, "target_close": target.regular_close,
+                  "source_identifier": series.source_identifier,
+                  "raw_response_sha256": series.raw_response_sha256}
+        audit.append(record)
+        if target.volume and change_pct > floor:
+            hidden.append(record)
+    if hidden:
+        summary = ", ".join(f"{item['symbol']} {item['regular_change_pct']:.3f}%" for item in hidden)
+        raise MarketDataError(f"moving gainers source omitted higher regular-session candidates: {summary}; "
+                              f"verified Top20 floor {floor:.3f}%")
+    return audit
+
+
 def build_canonical_market_data_packet(
     target_session_date: date,
     *,
@@ -2495,7 +2534,7 @@ def build_canonical_market_data_packet(
     issuer_components: dict[str, Any] | None = None,
     screener_provider: NasdaqScreenerProvider | None = None,
     discrepancy_arbitrator: DiscrepancyArbitrator | None = None,
-    candidate_limit: int = 25,
+    candidate_limit: int = 50,
     verified_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the sole deterministic market-data input consumed by report generation."""
@@ -2539,11 +2578,16 @@ def build_canonical_market_data_packet(
         excluded_action_candidates=excluded_action_candidates,
         expected_previous_session_date=date.fromisoformat(snapshot["indexes"][0]["previous_session_date"]),
     )
+    candidate_floor_audit = audit_unranked_movers_against_regular_closes(
+        screener, historical.series, top20, target_session_date,
+        excluded_action_candidates, excluded_candidates, symbols,
+    )
     provider_names = {
         snapshot["source"]["name"], screener["provider"], historical.provider,
     }
     raw_hashes = {screener["raw_response_sha256"]}
-    for item in (*snapshot["indexes"], *snapshot["sectors"], *top20, *excluded_action_candidates):
+    for item in (*snapshot["indexes"], *snapshot["sectors"], *top20,
+                 *excluded_action_candidates, *candidate_floor_audit):
         provider = item.get("provider")
         if provider:
             provider_names.add(str(provider))
@@ -2577,6 +2621,7 @@ def build_canonical_market_data_packet(
         "excluded_no_trade_candidates": excluded_candidates,
         "excluded_corporate_action_candidates": excluded_action_candidates,
         "excluded_corporate_action_count": len(excluded_action_candidates),
+        "candidate_floor_audit": candidate_floor_audit,
         "screener": {key: screener[key] for key in (
             "provider", "source_identifier", "retrieved_at", "raw_response_sha256",
         )},

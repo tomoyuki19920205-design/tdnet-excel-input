@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import pytest
 
 from lib.ny_market_market_data import (
+    audit_unranked_movers_against_regular_closes,
     CapturedEndOfDayQuoteProvider,
     DailyBar,
     DailySeries,
@@ -62,6 +63,35 @@ def test_undated_nasdaq_screener_rejects_prior_session_bulk_prices():
     reject_stale_undated_screener(
         {"provider": "nasdaq_stock_screener", "rows": rows}, series, target, symbols,
     )
+
+
+def test_moving_movers_cannot_hide_regular_session_top20_candidate():
+    previous, target = date(2026, 11, 3), date(2026, 11, 4)
+    symbols = [f"SYM{i:02d}" for i in range(50)]
+    historical = {
+        symbol: DailySeries(symbol, "yahoo_chart_query1", f"https://example.test/{symbol}",
+                            "2026-11-05T00:00:00Z", "a" * 64,
+                            (DailyBar(previous, 10.0, volume=1000),
+                             DailyBar(target, 12.0 if i == 25 else 10.0, volume=1000)))
+        for i, symbol in enumerate(symbols)
+    }
+    ranked = [{"ticker": symbol, "change_pct": 15.0} for symbol in symbols[:20]]
+    with pytest.raises(MarketDataError, match="SYM25 20.000%"):
+        audit_unranked_movers_against_regular_closes(
+            {"provider": StockAnalysisGainersProvider.name}, historical, ranked,
+            target, [], [], symbols,
+        )
+    historical["SYM25"] = DailySeries(
+        "SYM25", "yahoo_chart_query1", "https://example.test/SYM25",
+        "2026-11-05T00:00:00Z", "b" * 64,
+        (DailyBar(previous, 10.0, volume=1000), DailyBar(target, 11.0, volume=1000)),
+    )
+    audit = audit_unranked_movers_against_regular_closes(
+        {"provider": StockAnalysisGainersProvider.name}, historical, ranked,
+        target, [], [], symbols,
+    )
+    assert len(audit) == 30
+    assert next(item for item in audit if item["symbol"] == "SYM25")["regular_change_pct"] == pytest.approx(10.0)
 
 
 def yahoo_bytes(symbol="^SOX", timestamps=None, closes=None, adjusted=None):
