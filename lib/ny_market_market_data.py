@@ -8,8 +8,10 @@ from __future__ import annotations
 import hashlib
 import html
 import json
+import math
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
@@ -609,6 +611,241 @@ class StockAnalysisGainersProvider:
             "rows": rows,
             "excluded_stale_rows": stale_rows,
         }
+
+
+class NasdaqYahooRegularUniverseProvider:
+    """Discover candidates from a full listing and dated regular-session closes."""
+
+    name = "nasdaq_listing_yahoo_regular_universe"
+    SPARK_URL = "https://query1.finance.yahoo.com/v7/finance/spark"
+
+    def __init__(self, *, listing_provider: NasdaqScreenerProvider | None = None,
+                 transport: Transport = default_transport,
+                 now: Callable[[], datetime] | None = None,
+                 max_workers: int = 8) -> None:
+        self.listing_provider = listing_provider or NasdaqScreenerProvider(transport=transport, now=now)
+        self.transport = transport
+        self.now = now or (lambda: datetime.now(timezone.utc))
+        self.max_workers = max_workers
+
+    def _spark_batch(self, batch: list[str], target: date) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        url = self.SPARK_URL + "?" + urlencode({
+            "symbols": ",".join(batch), "range": "5d", "interval": "1d",
+        })
+        raw = self.transport(url, {"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
+        data = _raw_json(raw, self.name)
+        results = (data.get("spark") or {}).get("result")
+        if not isinstance(results, list):
+            raise MarketDataError("regular-universe Spark batch is missing results")
+        evidence = {"source_identifier": url, "raw_response_sha256": hashlib.sha256(raw).hexdigest(),
+                    "requested_symbols": batch}
+        parsed: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in results:
+            symbol = str(item.get("symbol") or "").upper() if isinstance(item, dict) else ""
+            if symbol not in batch or symbol in seen:
+                raise MarketDataError("regular-universe Spark returned an unexpected or duplicate symbol")
+            seen.add(symbol)
+            responses = item.get("response")
+            if not isinstance(responses, list) or len(responses) != 1:
+                continue
+            chart = responses[0]
+            meta = chart.get("meta") or {}
+            stamps = chart.get("timestamp") or []
+            quotes = ((chart.get("indicators") or {}).get("quote") or [{}])[0]
+            closes = quotes.get("close") or []
+            volumes = quotes.get("volume") or []
+            regular_price = meta.get("regularMarketPrice")
+            if len(stamps) < 2 or len(stamps) != len(closes) or not isinstance(regular_price, (int, float)):
+                continue
+            if not isinstance(closes[-1], (int, float)) or not isinstance(closes[-2], (int, float)):
+                continue
+            if not all(math.isfinite(float(value)) and value > 0 for value in
+                       (regular_price, closes[-1], closes[-2])):
+                continue
+            if (datetime.fromtimestamp(stamps[-1], NY_TZ).date() != target
+                    or datetime.fromtimestamp(meta.get("regularMarketTime", 0), NY_TZ).date() != target):
+                continue
+            if abs(float(closes[-1]) - float(regular_price)) > max(1e-6, float(regular_price) * 1e-6):
+                continue
+            change = meta.get("regularMarketChangePercent")
+            if not isinstance(change, (int, float)) or not math.isfinite(float(change)):
+                continue
+            parsed.append({"symbol": symbol, "close": float(closes[-1]), "change_pct": change,
+                           "volume": volumes[-1] if len(volumes) == len(stamps) else None,
+                           "quote_source_identifier": url,
+                           "quote_raw_response_sha256": evidence["raw_response_sha256"],
+                           "previous_session_date": datetime.fromtimestamp(stamps[-2], NY_TZ).date().isoformat()})
+        return parsed, evidence
+
+    def _verify_missing(self, symbol: str, name: str, target: date) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        url = f"https://api.nasdaq.com/api/quote/{quote(symbol, safe='')}/info?assetclass=stocks"
+        raw = self.transport(url, {"User-Agent": "Mozilla/5.0", "Accept": "application/json",
+                                   "Origin": "https://www.nasdaq.com"})
+        payload = _raw_json(raw, self.name)
+        if payload.get("status", {}).get("rCode") != 200:
+            raise MarketDataError(f"regular-universe {symbol}: official quote unavailable")
+        data = payload.get("data") or {}
+        if str(data.get("symbol") or "").upper() != symbol:
+            raise MarketDataError(f"regular-universe {symbol}: official response symbol mismatch")
+        secondary = data.get("secondaryData") or {}
+        stamp = str(secondary.get("lastTradeTimestamp") or "")
+        observed_day = None
+        match = re.fullmatch(r"Closed at ([A-Z][a-z]{2} \d{1,2}, \d{4}) 4:00 PM ET", stamp)
+        if match:
+            observed_day = datetime.strptime(match.group(1), "%b %d, %Y").date()
+        evidence = {"symbol": symbol, "official_source_identifier": url,
+                    "official_raw_response_sha256": hashlib.sha256(raw).hexdigest(),
+                    "official_regular_timestamp": stamp,
+                    "primary_exchange": str(data.get("exchange") or "")}
+        if observed_day == target:
+            close = _numeric(secondary.get("lastSalePrice"), "official regular last sale")
+            pct_text = str(secondary.get("percentageChange") or "").strip()
+            if not pct_text and secondary.get("deltaIndicator") == "unch":
+                evidence["disposition"] = "official_unchanged_regular_session"
+                return None, evidence
+            if not re.fullmatch(r"[+-]?\d+(?:\.\d+)?%", pct_text):
+                raise MarketDataError(f"regular-universe {symbol}: official regular change is unavailable")
+            pct = float(pct_text[:-1])
+            if not math.isfinite(pct) or close is None or close <= 0:
+                raise MarketDataError(f"regular-universe {symbol}: invalid official regular quote")
+            evidence["disposition"] = "official_dated_regular_quote"
+            return {"symbol": symbol, "name": name, "close": close, "change_pct": pct,
+                    "volume": None, "quote_source_identifier": url,
+                    "quote_raw_response_sha256": evidence["official_raw_response_sha256"]}, evidence
+        if observed_day is not None and observed_day > target:
+            raise MarketDataError(f"regular-universe {symbol}: official quote moved beyond target session")
+        # A second dated provider must also have no target bar before this
+        # listing is classified as having no observed target-session trade.
+        chart = YahooChartProvider(transport=self.transport, now=self.now,
+                                   expected_names={symbol: name})
+        series = chart.fetch(symbol, target - timedelta(days=10), target)
+        evidence.update({"chart_source_identifier": series.source_identifier,
+                         "chart_raw_response_sha256": series.raw_response_sha256})
+        target_bar = next((bar for bar in series.bars if bar.session_date == target), None)
+        if target_bar is not None:
+            previous, target_bar = completed_session_pair(series, target)
+            pct = (target_bar.regular_close / previous.regular_close - 1.0) * 100.0
+            evidence["disposition"] = "dated_chart_regular_quote_missing_from_batch"
+            return {"symbol": symbol, "name": name, "close": target_bar.regular_close,
+                    "change_pct": pct, "volume": target_bar.volume,
+                    "quote_source_identifier": series.source_identifier,
+                    "quote_raw_response_sha256": series.raw_response_sha256}, evidence
+        evidence["disposition"] = "no_target_session_quote_in_two_independent_sources"
+        return None, evidence
+
+    def _official_previous(self, symbol: str, target: date) -> tuple[date, float, dict[str, str]]:
+        url = (f"https://api.nasdaq.com/api/quote/{quote(symbol, safe='')}/historical?"
+               + urlencode({"assetclass": "stocks", "fromdate": (target - timedelta(days=35)).isoformat(),
+                            "todate": (target + timedelta(days=1)).isoformat(), "limit": 5000}))
+        raw = self.transport(url, {"User-Agent": "Mozilla/5.0", "Accept": "application/json",
+                                   "Origin": "https://www.nasdaq.com"})
+        payload = _raw_json(raw, self.name)
+        if payload.get("status", {}).get("rCode") != 200:
+            raise MarketDataError(f"regular-universe {symbol}: dated official history unavailable")
+        rows = (((payload.get("data") or {}).get("tradesTable") or {}).get("rows"))
+        if not isinstance(rows, list):
+            raise MarketDataError(f"regular-universe {symbol}: dated official history rows missing")
+        previous = []
+        for row in rows:
+            try:
+                day = datetime.strptime(str(row.get("date")), "%m/%d/%Y").date()
+            except ValueError:
+                continue
+            if day < target:
+                previous.append((day, _numeric(row.get("close"), "official prior close")))
+        if not previous:
+            raise MarketDataError(f"regular-universe {symbol}: official prior close unavailable")
+        day, close = max(previous, key=lambda item: item[0])
+        return day, close, {"source_identifier": url, "raw_response_sha256": hashlib.sha256(raw).hexdigest()}
+
+    def fetch(self, target_session_date: date,
+              expected_previous_session_date: date | None = None) -> dict[str, Any]:
+        listing = self.listing_provider.fetch()
+        eligible = {str(row["symbol"]).strip().upper(): row for row in listing["rows"]
+                    if isinstance(row, dict) and eligible_screener_row(row)}
+        if len(eligible) < 100:
+            raise MarketDataError("regular-universe listing has too few eligible stocks")
+        symbols = sorted(eligible)
+        batches = [symbols[index:index + 20] for index in range(0, len(symbols), 20)]
+        with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
+            results = list(pool.map(lambda batch: self._spark_batch(batch, target_session_date), batches))
+        quotes = [quote for batch_quotes, _ in results for quote in batch_quotes]
+        quote_symbols = {quote["symbol"] for quote in quotes}
+        if len(quote_symbols) != len(quotes):
+            raise MarketDataError("regular-universe has duplicate dated symbol quotes")
+        missing = sorted(set(symbols) - quote_symbols)
+        with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
+            verified_missing = list(pool.map(
+                lambda symbol: self._verify_missing(symbol, str(eligible[symbol]["name"]), target_session_date),
+                missing,
+            ))
+        quotes.extend(quote for quote, _ in verified_missing if quote is not None)
+        if len({quote["symbol"] for quote in quotes}) != len(quotes):
+            raise MarketDataError("regular-universe official recovery duplicated a symbol")
+        discovery_top = sorted(quotes, key=lambda item: item["change_pct"], reverse=True)[:50]
+        with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
+            top_official = list(pool.map(
+                lambda item: self._verify_missing(item["symbol"], str(eligible[item["symbol"]]["name"]),
+                                                  target_session_date),
+                discovery_top,
+            ))
+        nasdaq_top = [item for item, (_, evidence) in zip(discovery_top, top_official)
+                      if evidence["primary_exchange"].upper().startswith("NASDAQ")]
+        with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
+            official_prior = dict(zip(
+                (item["symbol"] for item in nasdaq_top),
+                pool.map(lambda item: self._official_previous(item["symbol"], target_session_date), nasdaq_top),
+            ))
+        official_by_symbol = {}
+        for discovered, (official, evidence) in zip(discovery_top, top_official):
+            if official is None:
+                raise MarketDataError(f"regular-universe top candidate {discovered['symbol']} lacks a dated close")
+            if discovered["symbol"] in official_prior:
+                previous_day, previous_close, prior_evidence = official_prior[discovered["symbol"]]
+                if expected_previous_session_date is not None and previous_day != expected_previous_session_date:
+                    raise MarketDataError(
+                        f"regular-universe {discovered['symbol']} official previous session "
+                        f"{previous_day} differs from {expected_previous_session_date}"
+                    )
+                official["change_pct"] = (official["close"] / previous_close - 1.0) * 100.0
+                evidence["official_previous_session_date"] = previous_day.isoformat()
+                evidence["official_previous_close"] = previous_close
+                evidence["official_previous_source_identifier"] = prior_evidence["source_identifier"]
+                evidence["official_previous_raw_response_sha256"] = prior_evidence["raw_response_sha256"]
+            official_by_symbol[discovered["symbol"]] = {
+                **official,
+                "discovery_close": discovered["close"],
+                "discovery_change_pct": discovered["change_pct"],
+                "discovery_source_identifier": discovered["quote_source_identifier"],
+                "discovery_raw_response_sha256": discovered["quote_raw_response_sha256"],
+            }
+            evidence["discovery_change_pct"] = discovered["change_pct"]
+            evidence["discovery_raw_response_sha256"] = discovered["quote_raw_response_sha256"]
+            evidence["discovery_target_close"] = discovered["close"]
+            evidence["official_target_close"] = official["close"]
+        rows = []
+        for quote_row in quotes:
+            quote_row = official_by_symbol.get(quote_row["symbol"], quote_row)
+            row = eligible[quote_row["symbol"]]
+            rows.append({"symbol": quote_row["symbol"], "name": row["name"],
+                         "instrument_type": "common_stock", "lastsale": quote_row["close"],
+                         "pctchange": quote_row["change_pct"], "volume": quote_row["volume"],
+                         "marketCap": row.get("marketCap"),
+                         "quote_source_identifier": quote_row["quote_source_identifier"],
+                         "quote_raw_response_sha256": quote_row["quote_raw_response_sha256"],
+                         **({"discovery_change_pct": quote_row["discovery_change_pct"],
+                             "discovery_raw_response_sha256": quote_row["discovery_raw_response_sha256"]}
+                            if "discovery_change_pct" in quote_row else {}),
+                         **({"previous_session_date": quote_row["previous_session_date"]}
+                            if "previous_session_date" in quote_row else {})})
+        return {"provider": self.name, "source_identifier": listing["source_identifier"],
+                "retrieved_at": self.now().astimezone(timezone.utc).isoformat(timespec="seconds"),
+                "raw_response_sha256": listing["raw_response_sha256"], "rows": rows,
+                "universe_evidence": {"eligible_count": len(symbols), "quoted_count": len(quotes),
+                                      "spark_batches": [item for _, item in results],
+                                      "missing_quote_audit": [item for _, item in verified_missing],
+                                      "top_candidate_official_audit": [item for _, item in top_official]}}
 
 
 class StockAnalysisHistoricalCloseProvider:
@@ -1582,6 +1819,28 @@ def resolve_discrepancy(
                 "comparison_basis": "dated_regular_close_with_conflicting_movers_quote",
             }
 
+    # A dated exchange discovery quote can use a precise prior close while
+    # the daily vendor rounds that same prior close. Require independent
+    # corroboration of the precise prior and the exchange's dated 4 PM close.
+    if (reason is None and action_status == "checked_none" and official_supports
+            and official.get("target_close_verified") is True
+            and official.get("target_close_source") == "nasdaq_info"
+            and re.fullmatch(r"Closed at .* 4:00 PM ET", str(official.get("target_timestamp", "")))
+            and vendor_previous_rounding_places is not None
+            and not close_matches(historical_previous_close, official_previous)
+            and close_matches(historical_target_close, official_target)
+            and independent_support):
+        reason = "official_regular_pair_over_vendor_previous_rounding"
+        basis_evidence = {
+            "official_previous_close": official_previous,
+            "official_target_close": official_target,
+            "vendor_daily_previous_close": historical_previous_close,
+            "vendor_daily_previous_rounding_places": vendor_previous_rounding_places,
+            "vendor_daily_target_close": historical_target_close,
+            "independent_previous_close_support": independent_support,
+            "comparison_basis": "dated_official_regular_close_and_independent_precise_previous",
+        }
+
     if (not official_supports or not action_checked or not independent_support or reason is None
             or (official.get("nls_previous_mismatch") and reason != "movers_quote_differs_from_verified_regular_close")):
         problems = []
@@ -2374,6 +2633,7 @@ def rank_top20(
                     if discrepancy.get("discrepancy_reason") in {
                         "official_split_normalized_eod", "official_split_unadjusted_vendor_previous",
                         "movers_quote_differs_from_verified_regular_close",
+                        "official_regular_pair_over_vendor_previous_rounding",
                     } or (discrepancy.get("discrepancy_reason") == "non_nasdaq_primary_exchange_eod"
                           and "canonical_target_close" in discrepancy):
                         canonical_target = float(discrepancy.get("canonical_target_close", discrepancy["official_target_close"]))
@@ -2429,9 +2689,9 @@ def rank_top20(
             "share_class_components": components,
             **({"market_cap_evidence": cap_evidence} if strict_issuer_total else {}),
             "provider": screener["provider"],
-            "source_identifier": f"{screener['source_identifier']}#{ticker}",
+            "source_identifier": f"{candidate.get('quote_source_identifier', screener['source_identifier'])}#{ticker}",
             "retrieved_at": screener["retrieved_at"],
-            "raw_response_sha256": screener["raw_response_sha256"],
+            "raw_response_sha256": candidate.get("quote_raw_response_sha256", screener["raw_response_sha256"]),
             "session_date": target_session_date.isoformat(),
             "price_basis": "regular_close",
             "adjusted": False,
@@ -2495,7 +2755,9 @@ def audit_unranked_movers_against_regular_closes(
     symbols: list[str],
 ) -> list[dict[str, Any]]:
     """Fail closed when a moving quote table hides a regular-session Top20 name."""
-    if screener.get("provider") != StockAnalysisGainersProvider.name:
+    if screener.get("provider") not in {
+        StockAnalysisGainersProvider.name, NasdaqYahooRegularUniverseProvider.name,
+    }:
         return []
     if len(symbols) < 50:
         raise MarketDataError("moving gainers source has fewer than 50 eligible candidates")
@@ -2503,6 +2765,7 @@ def audit_unranked_movers_against_regular_closes(
     reviewed = {item["ticker"] for item in ranked}
     reviewed.update(item["ticker"] for item in excluded_actions)
     reviewed.update(item["ticker"] for item in excluded_no_trade)
+    screener_rows = {str(item["symbol"]).upper(): item for item in screener.get("rows", [])}
     audit: list[dict[str, Any]] = []
     hidden: list[dict[str, Any]] = []
     for symbol in symbols:
@@ -2512,14 +2775,27 @@ def audit_unranked_movers_against_regular_closes(
         if series is None:
             raise MarketDataError(f"unranked mover {symbol} lacks dated daily evidence")
         previous, target = completed_session_pair(series, target_session_date)
-        change_pct = (target.regular_close / previous.regular_close - 1.0) * 100.0
+        historical_pct = (target.regular_close / previous.regular_close - 1.0) * 100.0
+        official_source = (screener.get("provider") == NasdaqYahooRegularUniverseProvider.name
+                           and str(screener_rows[symbol].get("quote_source_identifier", "")).startswith(
+                               "https://api.nasdaq.com/api/quote/"))
+        change_pct = float(screener_rows[symbol]["pctchange"]) if official_source else historical_pct
         record = {"symbol": symbol, "regular_change_pct": change_pct,
+                  "historical_change_pct": historical_pct,
+                  "ranking_basis": "dated_exchange_regular_quote" if official_source else "dated_daily_close_pair",
                   "previous_close": previous.regular_close, "target_close": target.regular_close,
                   "source_identifier": series.source_identifier,
                   "raw_response_sha256": series.raw_response_sha256}
         audit.append(record)
         if target.volume and change_pct > floor:
             hidden.append(record)
+    if screener.get("provider") == NasdaqYahooRegularUniverseProvider.name:
+        outside = set(str(row["symbol"]).upper() for row in screener["rows"]) - set(symbols)
+        for row in screener["rows"]:
+            if str(row["symbol"]).upper() not in outside:
+                continue
+            if float(row["pctchange"]) > floor:
+                hidden.append({"symbol": row["symbol"], "regular_change_pct": float(row["pctchange"])})
     if hidden:
         summary = ", ".join(f"{item['symbol']} {item['regular_change_pct']:.3f}%" for item in hidden)
         raise MarketDataError(f"moving gainers source omitted higher regular-session candidates: {summary}; "
@@ -2550,10 +2826,10 @@ def build_canonical_market_data_packet(
     if screener_provider is not None:
         screener = screener_provider.fetch()
     else:
-        try:
-            screener = StockAnalysisGainersProvider().fetch(target_session_date)
-        except Exception:
-            screener = NasdaqScreenerProvider().fetch()
+        screener = NasdaqYahooRegularUniverseProvider().fetch(
+            target_session_date,
+            expected_previous_session_date=date.fromisoformat(snapshot["indexes"][0]["previous_session_date"]),
+        )
     symbols = screener_candidate_symbols(screener, limit=candidate_limit)
     expected_names = {str(row.get("symbol", "")).upper(): str(row.get("name", ""))
                       for row in screener.get("rows", [])}
@@ -2586,6 +2862,17 @@ def build_canonical_market_data_packet(
         snapshot["source"]["name"], screener["provider"], historical.provider,
     }
     raw_hashes = {screener["raw_response_sha256"]}
+    for batch in screener.get("universe_evidence", {}).get("spark_batches", []):
+        raw_hashes.add(batch["raw_response_sha256"])
+    for item in screener.get("universe_evidence", {}).get("missing_quote_audit", []):
+        for key in ("official_raw_response_sha256", "chart_raw_response_sha256"):
+            if key in item:
+                raw_hashes.add(item[key])
+    for item in screener.get("universe_evidence", {}).get("top_candidate_official_audit", []):
+        for key in ("official_raw_response_sha256", "chart_raw_response_sha256",
+                    "official_previous_raw_response_sha256"):
+            if key in item:
+                raw_hashes.add(item[key])
     for item in (*snapshot["indexes"], *snapshot["sectors"], *top20,
                  *excluded_action_candidates, *candidate_floor_audit):
         provider = item.get("provider")
@@ -2622,6 +2909,8 @@ def build_canonical_market_data_packet(
         "excluded_corporate_action_candidates": excluded_action_candidates,
         "excluded_corporate_action_count": len(excluded_action_candidates),
         "candidate_floor_audit": candidate_floor_audit,
+        **({"universe_evidence": screener["universe_evidence"]}
+           if "universe_evidence" in screener else {}),
         "screener": {key: screener[key] for key in (
             "provider", "source_identifier", "retrieved_at", "raw_response_sha256",
         )},

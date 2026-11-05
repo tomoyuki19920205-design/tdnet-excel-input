@@ -18,6 +18,7 @@ from lib.ny_market_market_data import (
     LiveDiscrepancyArbitrator,
     MarketDataError,
     NasdaqOfficialCloseProvider,
+    NasdaqYahooRegularUniverseProvider,
     StockAnalysisGainersProvider,
     StockAnalysisHistoricalCloseProvider,
     YahooChartProvider,
@@ -92,6 +93,54 @@ def test_moving_movers_cannot_hide_regular_session_top20_candidate():
     )
     assert len(audit) == 30
     assert next(item for item in audit if item["symbol"] == "SYM25")["regular_change_pct"] == pytest.approx(10.0)
+
+
+def test_full_listing_regular_universe_uses_dated_quotes_and_official_top_candidates():
+    symbols = [f"SYM{i:03d}" for i in range(100)]
+    target = date(2026, 11, 4)
+    previous_stamp = int(datetime(2026, 11, 3, 14, 30, tzinfo=timezone.utc).timestamp())
+    target_stamp = int(datetime(2026, 11, 4, 14, 30, tzinfo=timezone.utc).timestamp())
+    closing_stamp = int(datetime(2026, 11, 4, 21, 0, tzinfo=timezone.utc).timestamp())
+
+    class Listing:
+        def fetch(self):
+            return {"source_identifier": "https://api.nasdaq.com/listing", "raw_response_sha256": "a" * 64,
+                    "rows": [{"symbol": symbol, "name": f"{symbol} Common Stock", "marketCap": "1000000"}
+                             for symbol in symbols]}
+
+    def transport(url, _headers):
+        if "/spark?" in url:
+            batch = parse_qs(urlparse(url).query)["symbols"][0].split(",")
+            return json.dumps({"spark": {"result": [{
+                "symbol": symbol, "response": [{
+                    "meta": {"regularMarketPrice": 10.0, "regularMarketChangePercent": 50 - int(symbol[3:]) / 10,
+                             "regularMarketTime": closing_stamp},
+                    "timestamp": [previous_stamp, target_stamp],
+                    "indicators": {"quote": [{"close": [8.0, 10.0], "volume": [1000, 2000]}]},
+                }]} for symbol in batch]}}).encode()
+        if "/historical?" in url:
+            return json.dumps({"status": {"rCode": 200}, "data": {
+                "tradesTable": {"rows": [{"date": "11/03/2026", "close": "$8.10"}]}}}).encode()
+        symbol = urlparse(url).path.split("/")[3]
+        official_pct = 49.5 if symbol == "SYM000" else 50 - int(symbol[3:]) / 10
+        return json.dumps({"status": {"rCode": 200}, "data": {
+            "symbol": symbol, "exchange": "NASDAQ-CM", "secondaryData": {
+                "lastTradeTimestamp": "Closed at Nov 4, 2026 4:00 PM ET",
+                "lastSalePrice": "$10.00", "percentageChange": f"+{official_pct:.2f}%",
+            }}}).encode()
+
+    provider = NasdaqYahooRegularUniverseProvider(listing_provider=Listing(), transport=transport,
+                                                  now=lambda: NOW, max_workers=2)
+    result = provider.fetch(target, expected_previous_session_date=date(2026, 11, 3))
+    assert len(result["rows"]) == 100
+    assert result["universe_evidence"]["eligible_count"] == 100
+    assert len(result["universe_evidence"]["top_candidate_official_audit"]) == 50
+    assert result["rows"][0]["pctchange"] == pytest.approx((10 / 8.1 - 1) * 100)
+    assert result["rows"][0]["discovery_change_pct"] == pytest.approx(50.0)
+    assert result["rows"][0]["quote_source_identifier"].endswith("/info?assetclass=stocks")
+    assert result["universe_evidence"]["top_candidate_official_audit"][0]["official_previous_close"] == 8.1
+    with pytest.raises(MarketDataError, match="official previous session"):
+        provider.fetch(target, expected_previous_session_date=date(2026, 11, 2))
 
 
 def yahoo_bytes(symbol="^SOX", timestamps=None, closes=None, adjusted=None):
@@ -381,6 +430,40 @@ def test_movers_conflict_accepts_only_independently_verified_previous_display_ro
     with pytest.raises(MarketDataError):
         resolve_discrepancy(**{**args, "independent_sources": [
             {**args["independent_sources"][0], "previous_close": 0.71}]})
+
+
+def test_exchange_regular_quote_uses_independently_verified_precise_previous():
+    args = dict(
+        candidate={"_close": 1.11, "_change_pct": (1.11 / 0.7139 - 1) * 100,
+                   "netchange": None, "volume": 163_095_356},
+        historical_provider="yahoo_chart_query1",
+        historical_previous_close=0.71, historical_target_close=1.11,
+        historical_change_pct=(1.11 / 0.71 - 1) * 100,
+        official={"provider": "nasdaq_official_historical_nls", "provider_family": "nasdaq",
+                  "target_close_verified": True, "target_close_source": "nasdaq_info",
+                  "target_timestamp": "Closed at Nov 4, 2026 4:00 PM ET",
+                  "target_session_date": "2026-11-04", "previous_session_date": "2026-11-03",
+                  "previous_close": 0.7139, "target_close": 1.11,
+                  "source_identifiers": ["https://api.nasdaq.com/cris"],
+                  "raw_response_sha256": ["a" * 64]},
+        corporate_action={"provider": "yahoo_corporate_actions", "provider_family": "yahoo",
+                          "status": "checked_none", "source_identifier": "https://yahoo.test/actions",
+                          "raw_response_sha256": "b" * 64},
+        minute_close=None,
+        independent_sources=[{"provider": "public_com_previous_close", "provider_family": "public_com",
+                              "previous_close": 0.7139, "target_close": None,
+                              "source_identifier": "https://public.com/stocks/cris/pre-market",
+                              "raw_response_sha256": "c" * 64}],
+        tolerance_pct=0.20, resolved_at="2026-11-05T00:00:00+00:00",
+    )
+    resolved = resolve_discrepancy(**args)
+    assert resolved["discrepancy_reason"] == "official_regular_pair_over_vendor_previous_rounding"
+    assert resolved["official_previous_close"] == 0.7139
+    with pytest.raises(MarketDataError):
+        resolve_discrepancy(**{**args, "independent_sources": []})
+    with pytest.raises(MarketDataError):
+        resolve_discrepancy(**{**args, "corporate_action": {**args["corporate_action"],
+                                                   "status": "corporate_action_found"}})
 
 
 def test_preclose_independent_quote_is_timed_before_official_four_pm_close():
