@@ -1538,7 +1538,8 @@ def resolve_discrepancy(
         preclose_quotes = [source for source in independent_sources if (
             source.get("session") == "regular_close"
             and source.get("target_session_date") == official.get("target_session_date")
-            and re.fullmatch(rf"{re.escape(str(official['target_session_date']))} 15:59:[0-5]\d",
+            and re.fullmatch(rf"{re.escape(str(official['target_session_date']))} "
+                             r"(?:09:(?:3\d|[4-5]\d)|1[0-5]:[0-5]\d):[0-5]\d",
                              str(source.get("last_regular_quote_timestamp", "")))
             and source.get("target_close") is not None
             and source.get("last_regular_quote_price") is not None

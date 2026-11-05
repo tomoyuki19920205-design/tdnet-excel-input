@@ -385,8 +385,12 @@ def test_preclose_independent_quote_is_timed_before_official_four_pm_close():
     assert result["discrepancy_reason"] == "movers_quote_differs_from_verified_regular_close"
     assert result["basis_evidence"]["independent_preclose_quotes"][0]["last_regular_quote_price"] == 15.47
     assert any(source["role"] == "independent_preclose_quote" for source in result["supporting_sources"])
+    earlier = resolve_discrepancy(**{**args, "independent_sources": [
+        {**quote, "last_regular_quote_timestamp": "2026-11-04 15:58:58"}]})
+    assert earlier["discrepancy_reason"] == result["discrepancy_reason"]
     for changed in (
-        {"last_regular_quote_timestamp": "2026-11-04 15:58:02"},
+        {"last_regular_quote_timestamp": "2026-11-04 09:29:59"},
+        {"last_regular_quote_timestamp": "2026-11-04 16:00:00"},
         {"last_regular_quote_timestamp": "2026-11-03 15:59:02"},
         {"last_regular_quote_price": 15.45},
         {"previous_close": 10.70},
