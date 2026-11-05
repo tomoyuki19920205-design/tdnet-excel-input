@@ -1286,6 +1286,7 @@ def resolve_discrepancy(
         official=official, history_previous=historical_previous_close,
         history_target=historical_target_close, minute=minute_close, action=corporate_action,
     )
+    canonical_primary_pair: tuple[float, float] | None = None
     # An exchange-confirmed split can leave the vendor's previous daily bar on
     # the old share basis even when the target bar is already on the new basis.
     # The official provider established the old basis from the dated Nasdaq
@@ -1503,8 +1504,16 @@ def resolve_discrepancy(
         if non_nasdaq_eod:
             reason = "non_nasdaq_primary_exchange_eod"
             official_supports = True
+            primary_previous = float(non_nasdaq_eod[0]["previous_close"])
+            primary_target = float(non_nasdaq_eod[0]["target_close"])
+            # A two-decimal display may only corroborate a more precise
+            # vendor close; never replace that precise value with rounding.
+            if (close_matches(primary_previous, historical_previous_close)
+                    and close_matches(primary_target, historical_target_close)):
+                canonical_primary_pair = (primary_previous, primary_target)
             basis_evidence = {
                 "primary_exchange": non_nasdaq_eod[0]["primary_exchange"],
+                "primary_exchange_previous_close": primary_previous,
                 "primary_exchange_eod_close": float(non_nasdaq_eod[0]["target_close"]),
                 "nasdaq_info_close": official_target,
                 "screener_close": screener_last,
@@ -1653,6 +1662,8 @@ def resolve_discrepancy(
         "historical_target_close": historical_target_close,
         "historical_change_pct": historical_change_pct,
         "official_previous_close": official_previous, "official_target_close": official_target,
+        **({"canonical_previous_close": canonical_primary_pair[0],
+            "canonical_target_close": canonical_primary_pair[1]} if canonical_primary_pair else {}),
         "corporate_action_status": action_status, "liquidity_flag": liquidity_flag,
         "compared_providers": compared, "supporting_sources": sources, "resolved_at": resolved_at,
     }
@@ -2363,12 +2374,15 @@ def rank_top20(
                     if discrepancy.get("discrepancy_reason") in {
                         "official_split_normalized_eod", "official_split_unadjusted_vendor_previous",
                         "movers_quote_differs_from_verified_regular_close",
-                    }:
-                        corrected_change = (float(discrepancy["official_target_close"]) / float(discrepancy["official_previous_close"]) - 1.0) * 100.0
+                    } or (discrepancy.get("discrepancy_reason") == "non_nasdaq_primary_exchange_eod"
+                          and "canonical_target_close" in discrepancy):
+                        canonical_target = float(discrepancy.get("canonical_target_close", discrepancy["official_target_close"]))
+                        canonical_previous = float(discrepancy.get("canonical_previous_close", discrepancy["official_previous_close"]))
+                        corrected_change = (canonical_target / canonical_previous - 1.0) * 100.0
                         if corrected_change < source_top20_floor_pct:
                             raise MarketDataError(f"Top20 {ticker}: corrected move falls below candidate floor")
                         candidate = {**candidate, "_change_pct": corrected_change,
-                                     "_close": float(discrepancy["official_target_close"])}
+                                     "_close": canonical_target}
                         historical_change = corrected_change
                     review_flags.extend(["discrepancy_resolved", str(discrepancy["discrepancy_reason"])])
                     if discrepancy.get("liquidity_flag") == "low_liquidity":

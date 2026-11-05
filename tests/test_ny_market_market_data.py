@@ -514,6 +514,38 @@ def test_non_nasdaq_primary_exchange_eod_resolves_nasdaq_last_sale_difference():
     assert resolved["discrepancy_reason"] == "non_nasdaq_primary_exchange_eod"
     assert resolved["basis_evidence"]["primary_exchange"] == "NYSE American"
     assert resolved["basis_evidence"]["nasdaq_info_close"] == pytest.approx(0.4943)
+    assert "canonical_target_close" not in resolved  # two-decimal publisher display
+
+
+def test_non_nasdaq_exact_primary_pair_supersedes_moving_quote():
+    resolved = resolve_discrepancy(
+        candidate={"_close": 1.86, "_change_pct": (1.86 / 1.11 - 1) * 100,
+                   "netchange": None, "volume": 21_900_043},
+        historical_provider="yahoo_chart_query1",
+        historical_previous_close=1.11, historical_target_close=1.85,
+        historical_change_pct=(1.85 / 1.11 - 1) * 100,
+        official={"provider": "nasdaq_official_historical_nls", "provider_family": "nasdaq",
+                  "target_close_verified": True, "target_close_source": "nasdaq_info",
+                  "target_timestamp": "Closed at Nov 4, 2026 4:00 PM ET",
+                  "target_session_date": "2026-11-04", "previous_session_date": "2026-11-03",
+                  "previous_close": 1.11, "target_close": 1.85,
+                  "source_identifiers": ["https://nasdaq.test/cmtg"],
+                  "raw_response_sha256": ["a" * 64]},
+        corporate_action={"provider": "yahoo_corporate_actions", "provider_family": "yahoo",
+                          "status": "checked_none", "source_identifier": "https://yahoo.test/actions",
+                          "raw_response_sha256": "b" * 64},
+        minute_close=None,
+        independent_sources=[{"provider": "captured_end_of_day_quote", "provider_family": "chartexchange",
+                              "session": "regular_close", "target_session_date": "2026-11-04",
+                              "previous_close": 1.11, "target_close": 1.85,
+                              "primary_exchange": "NYSE", "display_decimal_places": 4,
+                              "source_identifier": "https://chartexchange.com/symbol/nyse-cmtg/historical/",
+                              "raw_response_sha256": "c" * 64}],
+        tolerance_pct=0.20, resolved_at="2026-11-05T00:00:00+00:00",
+    )
+    assert resolved["discrepancy_reason"] == "non_nasdaq_primary_exchange_eod"
+    assert resolved["canonical_previous_close"] == 1.11
+    assert resolved["canonical_target_close"] == 1.85
 
 
 def test_captured_eod_quote_rejects_change_outside_display_rounding_interval(monkeypatch):
