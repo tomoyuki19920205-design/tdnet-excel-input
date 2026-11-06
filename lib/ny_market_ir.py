@@ -9,10 +9,11 @@ import re
 import time
 import uuid
 from datetime import date, datetime, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Callable
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urljoin, urlsplit
+from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 from urllib.request import Request, urlopen
 
 
@@ -25,6 +26,47 @@ _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
 
 class IRFeedError(ValueError):
     """An official feed could not be identified or verified."""
+
+
+class _PageIdentity(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.visible: list[str] = []
+        self.links: list[str] = []
+        self._hidden = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in ("script", "style"):
+            self._hidden += 1
+        if tag == "a":
+            self.links.extend(value for key, value in attrs if key == "href" and value)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("script", "style") and self._hidden:
+            self._hidden -= 1
+
+    def handle_data(self, data: str) -> None:
+        if not self._hidden:
+            self.visible.append(data)
+
+
+def _identity_evidence(page: str, title: str, issuer_name: str, ticker: str) -> str:
+    if not issuer_name.strip() or not ticker.strip():
+        raise IRFeedError("issuer name and ticker are required for official page identity")
+    if issuer_name.casefold() in title.casefold() and ticker.casefold() in title.casefold():
+        return "page_title_name_and_ticker"
+    parsed = _PageIdentity()
+    parsed.feed(page)
+    visible = " ".join(parsed.visible)
+    if issuer_name.casefold() not in visible.casefold():
+        raise IRFeedError(f"issuer identity not found in official page title or visible text: {title!r}")
+    for link in parsed.links:
+        query = {key.casefold(): values for key, values in parse_qs(urlsplit(link).query).items()}
+        if any(value.casefold() == ticker.casefold() for value in query.get("ticker", [])) and any(
+            value.casefold() in ("nasdaq", "nyse", "amex") for value in query.get("exchange", [])
+        ):
+            return "visible_corporate_name_and_stock_link"
+    raise IRFeedError(f"ticker identity not found in official page title or stock link: {title!r}")
 
 
 def _default_fetch(url: str) -> tuple[bytes, str]:
@@ -107,10 +149,7 @@ def fetch_q4_ir_news(
     page = page_raw.decode("utf-8", errors="replace")
     title_match = _TITLE_RE.search(page)
     title = html.unescape(re.sub(r"<[^>]+>", " ", title_match.group(1))).strip() if title_match else ""
-    if not issuer_name.strip() or issuer_name.casefold() not in title.casefold():
-        raise IRFeedError(f"issuer identity not found in official page title: {title!r}")
-    if ticker and ticker.casefold() not in title.casefold():
-        raise IRFeedError(f"ticker identity not found in official page title: {title!r}")
+    identity_evidence = _identity_evidence(page, title, issuer_name, ticker)
     widget_start = page.find(".q4News(")
     if widget_start < 0:
         raise IRFeedError("official page has no Q4 investor-news widget")
@@ -165,6 +204,7 @@ def fetch_q4_ir_news(
         "retrieved_at_utc": datetime.now(timezone.utc).isoformat(),
         "official_page_url": ir_url,
         "official_page_title": title,
+        "official_page_identity_evidence": identity_evidence,
         "official_widget_script_url": script_url,
         "official_feed_url": feed_url,
         "year_record_count": len(releases),

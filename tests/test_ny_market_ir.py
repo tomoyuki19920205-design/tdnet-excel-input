@@ -24,10 +24,10 @@ RELEASES = [
 ]
 
 
-def make_fetch(releases=RELEASES):
+def make_fetch(releases=RELEASES, page=PAGE):
     def fetch(url):
         if url == PAGE_URL:
-            return PAGE, url
+            return page, url
         if url == SCRIPT_URL:
             return SCRIPT, url
         if url.startswith("https://investors.example.test/feed/PressRelease.svc/GetPressReleaseList?"):
@@ -67,3 +67,37 @@ def test_q4_feed_rejects_empty_or_wrong_year_result(tmp_path):
     with pytest.raises(IRFeedError, match="ignored the requested year"):
         fetch_q4_ir_news(PAGE_URL, "Block, Inc.", "XYZ", "2026-11-03", tmp_path,
                          fetch=make_fetch(stale))
+
+
+def test_q4_brand_title_with_corporate_footer_and_stock_link(tmp_path):
+    page = (
+        '<title>Investor Relations | Airbnb | Press Releases</title>'
+        '<script src="/js/evergreen.q4Api.min.js"></script>'
+        f"<script>$('.news').q4News({{category: '{CATEGORY}'}});</script>"
+        '<a href="https://quotes.example.test/?Ticker=ABNB&amp;Exchange=NASDAQ">Stock</a>'
+        '<footer>© Airbnb, Inc.</footer>'
+    ).encode()
+    result = fetch_q4_ir_news(PAGE_URL, "Airbnb, Inc.", "ABNB", "2026-11-05", tmp_path,
+                              prefix="brand", fetch=make_fetch(page=page))
+    assert result["official_page_identity_evidence"] == "visible_corporate_name_and_stock_link"
+    assert result["target_day_count"] == 0
+    assert hashlib.sha256((tmp_path / result["page_raw"]["file"]).read_bytes()).hexdigest() == result["page_raw"]["sha256"]
+
+
+@pytest.mark.parametrize("corporate,ticker,link", [
+    ("Other, Inc.", "ABNB", "Ticker=ABNB&amp;Exchange=NASDAQ"),
+    ("Airbnb, Inc.", "OTHER", "Ticker=ABNB&amp;Exchange=NASDAQ"),
+    ("Airbnb, Inc.", "ABNB", "Ticker=ABNB"),
+])
+def test_q4_brand_page_rejects_unverified_identity(tmp_path, corporate, ticker, link):
+    page = (
+        '<title>Investor Relations | Airbnb | Press Releases</title>'
+        '<script src="/js/evergreen.q4Api.min.js"></script>'
+        f"<script>$('.news').q4News({{category: '{CATEGORY}'}});</script>"
+        f'<a href="https://quotes.example.test/?{link}">Stock</a>'
+        '<footer>© Airbnb, Inc.</footer>'
+    ).encode()
+    with pytest.raises(IRFeedError, match="identity"):
+        fetch_q4_ir_news(PAGE_URL, corporate, ticker, "2026-11-05", tmp_path,
+                         fetch=make_fetch(page=page))
+    assert not list(tmp_path.iterdir())
