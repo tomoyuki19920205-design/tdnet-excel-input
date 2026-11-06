@@ -1855,6 +1855,117 @@ def test_vjet_captured_reverse_split_is_normalized_once_and_removed_below_floor(
     assert excluded[0]["basis_evidence"]["applied_factor"] == expected_factor
 
 
+@pytest.mark.parametrize("already_adjusted,expected_factor", [(False, 20.0), (True, 1.0)])
+def test_same_symbol_split_history_gap_uses_dated_exchange_and_vendor_basis(already_adjusted, expected_factor):
+    target = date(2026, 11, 6)
+    prior = date(2026, 11, 5)
+    notice_url = "https://www.nasdaqtrader.com/TraderNews.aspx?id=ECA2026-793"
+    sec_url = "https://www.sec.gov/Archives/edgar/data/1896212/000149315226049889/form8-k.htm"
+    notice = ("(CDT) will effect a one-for-twenty (1-20) reverse stock split. "
+              "The reverse stock split will become effective on Friday, November 6, 2026.").encode()
+    sec = b"CDT Equity Inc. Nasdaq November 6, 2026 1-for-20 reverse stock split"
+    raw_previous = 0.846 if already_adjusted else 0.0423
+    class Official:
+        def fetch(self, symbol, day, last):
+            assert (symbol, day, last) == ("CDT", target, 1.31)
+            return {
+                "provider": "nasdaq_official_historical_nls", "provider_family": "nasdaq",
+                "previous_session_date": prior.isoformat(), "target_session_date": target.isoformat(),
+                "previous_close_raw": raw_previous, "previous_close": 0.846,
+                "previous_price_basis": "already_split_normalized" if already_adjusted else "unadjusted",
+                "applied_split_factor": expected_factor, "target_close": 1.31,
+                "target_close_verified": True, "target_close_source": "nasdaq_info",
+                "source_identifiers": ["https://api.nasdaq.com/dated-history"],
+                "raw_response_sha256": ["a" * 64],
+            }
+    class Vendor:
+        def fetch(self, symbol, day):
+            assert (symbol, day) == ("CDT", target)
+            return {
+                "provider": "yahoo_corporate_actions", "provider_family": "yahoo",
+                "source_identifier": "https://query1.finance.yahoo.com/chart/CDT",
+                "raw_response_sha256": "b" * 64,
+                "events": {"splits": {"x": {
+                    "date": int(datetime(2026, 11, 6, 14, 30, tzinfo=timezone.utc).timestamp()),
+                    "numerator": 1.0, "denominator": 20.0,
+                }}},
+                "meta_symbol": "CDT", "chart_previous_close": 0.846,
+                "regular_market_price": 1.31,
+                "regular_market_time": int(datetime(2026, 11, 6, 21, 0, tzinfo=timezone.utc).timestamp()),
+                "exchange_timezone_name": "America/New_York",
+            }
+    action = {"CDT": {"event_type": "reverse_split", "prior_ticker": "CDT",
+                       "effective_session_date": target.isoformat(), "exchange": "Nasdaq",
+                       "new_shares": 1, "old_shares": 20, "source_url": sec_url}}
+    def primary(url, _headers):
+        return notice if url == notice_url else sec if url == sec_url else None
+    arbitrator = LiveDiscrepancyArbitrator(
+        official_provider=Official(), action_provider=Vendor(), notice_transport=primary,
+        corporate_action_notices={"CDT": notice_url}, corporate_action_evidence=action,
+    )
+    daily = series("CDT", (1.31,), days=(target,), provider="yahoo_chart_query1")
+    arguments = dict(ticker="CDT", candidate={"_close": 1.31, "_change_pct": 54.846,
+                                               "netchange": "+0.464", "volume": "26786132"},
+                     historical_series=daily, target=daily.bars[0], target_session_date=target,
+                     tolerance_pct=0.20, expected_previous_session_date=prior,
+                     source_top20_floor_pct=20.0)
+    resolved = arbitrator.resolve_missing_previous(**arguments)
+    assert resolved["historical_change_pct"] == pytest.approx((1.31 / 0.846 - 1) * 100)
+    assert resolved["basis_evidence"]["applied_split_factor"] == expected_factor
+    assert resolved["discrepancy_reason"] == "same_symbol_split_missing_vendor_previous_bar"
+    assert {source["provider_family"] for source in resolved["supporting_sources"]} == {"sec", "nasdaq", "yahoo"}
+    arbitrator.corporate_action_notices = {}
+    with pytest.raises(MarketDataError, match="requires exchange notice"):
+        arbitrator.resolve_missing_previous(**arguments)
+    arbitrator.corporate_action_notices = {"CDT": notice_url}
+    bad_vendor = Vendor()
+    def wrong_basis(symbol, day):
+        return {**Vendor().fetch(symbol, day), "chart_previous_close": 0.0423}
+    bad_vendor.fetch = wrong_basis
+    arbitrator.action_provider = bad_vendor
+    with pytest.raises(MarketDataError, match="vendor dated split-adjusted prices disagree"):
+        arbitrator.resolve_missing_previous(**arguments)
+
+
+def test_regular_universe_split_candidate_uses_normalized_official_previous():
+    target = date(2026, 11, 6)
+    notice_url = "https://www.nasdaqtrader.com/TraderNews.aspx?id=ECA2026-793"
+    notice = ("(CDT) will effect a one-for-twenty (1-20) reverse stock split. "
+              "The reverse stock split will become effective on Friday, November 6, 2026.").encode()
+    history = json.dumps({"status": {"rCode": 200}, "data": {"tradesTable": {"rows": [
+        {"date": "11/05/2026", "close": "$0.0423", "volume": "97,285,220"},
+    ]}}}).encode()
+    trades = json.dumps({"data": {"topTable": {"rows": [
+        {"previousClose": "$0.846"},
+    ]}}}).encode()
+    info = json.dumps({"data": {
+        "symbol": "CDT", "assetClass": "STOCKS", "secondaryData": {
+            "lastSalePrice": "$1.31", "lastTradeTimestamp": "Closed at Nov 6, 2026 4:00 PM ET",
+        },
+    }}).encode()
+    def transport(url, _headers):
+        if "/historical?" in url:
+            return history
+        if "/realtime-trades?" in url:
+            return trades
+        if "/info?" in url:
+            return info
+        raise AssertionError(url)
+    provider = NasdaqYahooRegularUniverseProvider(
+        transport=transport, corporate_action_notices={"CDT": notice_url},
+        notice_transport=lambda *_: notice,
+        now=lambda: datetime(2026, 11, 6, 22, 30, tzinfo=timezone.utc),
+    )
+    previous_day, previous_close, evidence = provider._official_previous("CDT", target, 1.31)
+    assert previous_day == date(2026, 11, 5)
+    assert previous_close == pytest.approx(0.846)
+    assert evidence["previous_price_basis"] == "unadjusted"
+    assert evidence["applied_split_factor"] == 20
+    assert (1.31 / previous_close - 1) * 100 == pytest.approx(54.8463356974)
+    with pytest.raises(MarketDataError, match="official split target differs"):
+        provider._official_previous("CDT", target, 1.30)
+
+
 def test_new_listing_requires_primary_document_and_missing_vendor_history_without_it_stops():
     day = date(2026, 10, 5)
     prior = date(2026, 10, 2)

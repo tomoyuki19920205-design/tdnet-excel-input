@@ -830,7 +830,23 @@ class NasdaqYahooRegularUniverseProvider:
         evidence["disposition"] = "no_target_session_quote_in_two_independent_sources"
         return None, evidence
 
-    def _official_previous(self, symbol: str, target: date) -> tuple[date, float, dict[str, str]]:
+    def _official_previous(self, symbol: str, target: date,
+                           target_close: float | None = None) -> tuple[date, float, dict[str, Any]]:
+        if symbol in self.corporate_action_notices:
+            pair = NasdaqOfficialCloseProvider(
+                transport=self.transport, now=self.now,
+                corporate_action_notices=self.corporate_action_notices,
+                notice_transport=self.notice_transport,
+            ).fetch(symbol, target, target_close or 0.0)
+            if target_close is None or not close_matches(float(pair["target_close"]), target_close):
+                raise MarketDataError(f"regular-universe {symbol}: official split target differs from dated quote")
+            return date.fromisoformat(pair["previous_session_date"]), float(pair["previous_close"]), {
+                "source_identifier": pair["source_identifiers"],
+                "raw_response_sha256": pair["raw_response_sha256"],
+                "previous_price_basis": pair.get("previous_price_basis"),
+                "applied_split_factor": pair.get("applied_split_factor"),
+                "official_action": pair.get("official_action"),
+            }
         url = (f"https://api.nasdaq.com/api/quote/{quote(symbol, safe='')}/historical?"
                + urlencode({"assetclass": "stocks", "fromdate": (target - timedelta(days=35)).isoformat(),
                             "todate": (target + timedelta(days=1)).isoformat(), "limit": 5000}))
@@ -891,7 +907,8 @@ class NasdaqYahooRegularUniverseProvider:
         with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
             official_prior = dict(zip(
                 (item["symbol"] for item in nasdaq_top),
-                pool.map(lambda item: self._official_previous(item["symbol"], target_session_date), nasdaq_top),
+                pool.map(lambda item: self._official_previous(item["symbol"], target_session_date,
+                                                              item["close"]), nasdaq_top),
             ))
         official_by_symbol = {}
         for discovered, (official, evidence) in zip(discovery_top, top_official):
@@ -909,6 +926,10 @@ class NasdaqYahooRegularUniverseProvider:
                 evidence["official_previous_close"] = previous_close
                 evidence["official_previous_source_identifier"] = prior_evidence["source_identifier"]
                 evidence["official_previous_raw_response_sha256"] = prior_evidence["raw_response_sha256"]
+                if prior_evidence.get("official_action"):
+                    evidence["official_action"] = prior_evidence["official_action"]
+                    evidence["official_previous_price_basis"] = prior_evidence["previous_price_basis"]
+                    evidence["applied_split_factor"] = prior_evidence["applied_split_factor"]
             official_by_symbol[discovered["symbol"]] = {
                 **official,
                 "discovery_close": discovered["close"],
@@ -1300,12 +1321,18 @@ class YahooCorporateActionProvider:
         if not isinstance(results, list) or len(results) != 1:
             raise MarketDataError(f"{self.name}:{symbol}: action response missing")
         events = results[0].get("events")
+        meta = results[0].get("meta") or {}
         found = bool(events)
         return {
             "provider": self.name, "provider_family": self.family,
             "status": "corporate_action_found" if found else "checked_none",
             "events": events or {}, "source_identifier": url,
             "raw_response_sha256": hashlib.sha256(raw).hexdigest(),
+            "meta_symbol": meta.get("symbol"),
+            "chart_previous_close": meta.get("chartPreviousClose"),
+            "regular_market_price": meta.get("regularMarketPrice"),
+            "regular_market_time": meta.get("regularMarketTime"),
+            "exchange_timezone_name": meta.get("exchangeTimezoneName"),
         }
 
 
@@ -2590,6 +2617,14 @@ class LiveDiscrepancyArbitrator:
                 expected_previous_session_date < effective <= target_session_date):
             raise MarketDataError(f"Top20 {ticker}: action does not bridge the two market sessions")
         prior_symbol = action["prior_ticker"]
+        if action["event_type"] in {"reverse_split", "forward_split"} and prior_symbol == ticker:
+            return self._resolve_same_symbol_split_history_gap(
+                ticker=ticker, candidate=candidate, historical_series=historical_series,
+                target=target, target_session_date=target_session_date,
+                expected_previous_session_date=expected_previous_session_date,
+                source_top20_floor_pct=source_top20_floor_pct, tolerance_pct=tolerance_pct,
+                action=action, action_source=action_source,
+            )
         prior_series = self.predecessor_provider.fetch(
             prior_symbol, expected_previous_session_date - timedelta(days=10),
             expected_previous_session_date,
@@ -2658,6 +2693,106 @@ class LiveDiscrepancyArbitrator:
             f"Top20 {ticker}: corrected action change {canonical_change:.3f}% may qualify "
             "for Top20, but official exchange close corroboration is unavailable"
         )
+
+    def _resolve_same_symbol_split_history_gap(
+        self, *, ticker: str, candidate: dict[str, Any], historical_series: DailySeries,
+        target: DailyBar, target_session_date: date, expected_previous_session_date: date,
+        source_top20_floor_pct: float, tolerance_pct: float, action: dict[str, Any],
+        action_source: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Use the exchange split basis and dated vendor metadata when prior bars vanish."""
+        notice_url = self.corporate_action_notices.get(ticker)
+        if not notice_url:
+            raise MarketDataError(f"Top20 {ticker}: same-symbol split requires exchange notice")
+        try:
+            validate_notice_url(notice_url)
+            notice = parse_exchange_split_notice(
+                self.notice_transport(notice_url, {"User-Agent": "Mozilla/5.0"}),
+                notice_url, ticker,
+            )
+        except ValueError as exc:
+            raise MarketDataError(f"Top20 {ticker}: invalid exchange split notice: {exc}") from exc
+        if (notice["effective_session_date"] != action["effective_session_date"]
+                or notice["new_shares"] != action["new_shares"]
+                or notice["old_shares"] != action["old_shares"]
+                or notice["action_type"] != action["event_type"]):
+            raise MarketDataError(f"Top20 {ticker}: exchange and SEC split evidence disagree")
+        official = self.official_provider.fetch(ticker, target_session_date, float(candidate["_close"]))
+        if (official.get("previous_session_date") != expected_previous_session_date.isoformat()
+                or official.get("target_session_date") != target_session_date.isoformat()
+                or not official.get("target_close_verified")
+                or official.get("previous_price_basis") not in {"unadjusted", "already_split_normalized"}):
+            raise MarketDataError(f"Top20 {ticker}: dated official split basis is incomplete")
+        factor = action["old_shares"] / action["new_shares"]
+        applied_factor = factor if official["previous_price_basis"] == "unadjusted" else 1.0
+        official_previous = float(official["previous_close"])
+        official_target = float(official["target_close"])
+        if (not close_matches(float(official["previous_close_raw"]) * applied_factor, official_previous)
+                or not close_matches(float(official["applied_split_factor"]), applied_factor)
+                or not close_matches(target.regular_close, official_target)
+                or not close_matches(float(candidate["_close"]), official_target)):
+            raise MarketDataError(f"Top20 {ticker}: official split-normalized prices disagree")
+        vendor = self.action_provider.fetch(ticker, target_session_date)
+        if not vendor.get("events"):
+            raise MarketDataError(f"Top20 {ticker}: vendor split event missing")
+        try:
+            validate_vendor_actions(vendor.get("events") or {}, notice)
+        except ValueError as exc:
+            raise MarketDataError(f"Top20 {ticker}: vendor split conflicts with official action: {exc}") from exc
+        vendor_stamp = vendor.get("regular_market_time")
+        vendor_day = (
+            datetime.fromtimestamp(vendor_stamp, timezone.utc).astimezone(NY_TZ).date()
+            if isinstance(vendor_stamp, int) else None
+        )
+        if (vendor.get("meta_symbol") != ticker
+                or vendor.get("exchange_timezone_name") != "America/New_York"
+                or vendor_day != target_session_date
+                or not close_matches(_numeric(vendor.get("chart_previous_close"), "vendor split-adjusted previous"), official_previous)
+                or not close_matches(_numeric(vendor.get("regular_market_price"), "vendor regular close"), official_target)):
+            raise MarketDataError(f"Top20 {ticker}: vendor dated split-adjusted prices disagree")
+        corrected_change = (official_target / official_previous - 1.0) * 100.0
+        if (abs(corrected_change - float(candidate["_change_pct"])) > tolerance_pct
+                or corrected_change < source_top20_floor_pct - tolerance_pct):
+            raise MarketDataError(f"Top20 {ticker}: official split return disagrees with ranking")
+        screener_net = _numeric(candidate.get("netchange"), "screener net change", nullable=True)
+        if screener_net is not None and abs(screener_net - (official_target - official_previous)) > 0.02:
+            raise MarketDataError(f"Top20 {ticker}: screener net change disagrees with split basis")
+        volume = _numeric(candidate.get("volume"), "screener volume", nullable=True)
+        return {
+            "discrepancy_status": "resolved",
+            "discrepancy_reason": "same_symbol_split_missing_vendor_previous_bar",
+            "historical_change_pct": corrected_change,
+            "official_previous_close": official_previous,
+            "official_target_close": official_target,
+            "corporate_action_status": "official_action_verified",
+            "liquidity_flag": "low_liquidity" if volume is not None and volume < 250_000 else "normal_liquidity",
+            "compared_providers": ["nasdaq", "sec", "yahoo"],
+            "basis_evidence": {
+                "previous_session_date": expected_previous_session_date.isoformat(),
+                "target_session_date": target_session_date.isoformat(),
+                "previous_close_raw": float(official["previous_close_raw"]),
+                "previous_price_basis": official["previous_price_basis"],
+                "applied_split_factor": applied_factor,
+                "previous_close_on_target_basis": official_previous,
+                "target_regular_close": official_target,
+                "vendor_chart_previous_close": vendor["chart_previous_close"],
+                "vendor_regular_market_price": vendor["regular_market_price"],
+                "official_action": notice,
+            },
+            "supporting_sources": [
+                action_source,
+                {**notice, "provider": "nasdaq_corporate_action_notice", "provider_family": "nasdaq",
+                 "role": "official_corporate_action"},
+                {**official, "role": "official_split_normalized_pair"},
+                {**vendor, "role": "dated_vendor_split_metadata"},
+                {"provider": historical_series.provider,
+                 "provider_family": provider_family(historical_series.provider),
+                 "source_identifier": historical_series.source_identifier,
+                 "raw_response_sha256": historical_series.raw_response_sha256,
+                 "role": "target_regular_close_and_missing_previous_bar"},
+            ],
+            "resolved_at": self.now().astimezone(timezone.utc).isoformat(timespec="seconds"),
+        }
 
 def eligible_screener_row(row: dict[str, Any]) -> bool:
     symbol = str(row.get("symbol") or "").strip().upper()
