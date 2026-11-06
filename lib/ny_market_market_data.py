@@ -622,11 +622,100 @@ class NasdaqYahooRegularUniverseProvider:
     def __init__(self, *, listing_provider: NasdaqScreenerProvider | None = None,
                  transport: Transport = default_transport,
                  now: Callable[[], datetime] | None = None,
-                 max_workers: int = 8) -> None:
+                 max_workers: int = 8,
+                 corporate_action_notices: dict[str, str] | None = None,
+                 notice_transport: Transport = default_transport,
+                 action_provider: YahooCorporateActionProvider | None = None,
+                 split_history_provider: StockAnalysisHistoricalCloseProvider | None = None) -> None:
         self.listing_provider = listing_provider or NasdaqScreenerProvider(transport=transport, now=now)
         self.transport = transport
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.max_workers = max_workers
+        self.corporate_action_notices = corporate_action_notices or {}
+        self.notice_transport = notice_transport
+        self.action_provider = action_provider or YahooCorporateActionProvider(transport=transport)
+        self.split_history_provider = split_history_provider or StockAnalysisHistoricalCloseProvider(transport=transport)
+
+    def _recover_split_missing_previous(
+        self, symbol: str, target: date, target_bar: DailyBar,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Recover a Yahoo history gap only from a verified, already normalized pair."""
+        notice_url = self.corporate_action_notices.get(symbol)
+        if not notice_url:
+            raise MarketDataError(f"regular-universe {symbol}: missing prior bar needs an official split notice")
+        try:
+            validate_notice_url(notice_url)
+            notice_raw = self.notice_transport(notice_url, {"User-Agent": "Mozilla/5.0"})
+            notice = parse_exchange_split_notice(notice_raw, notice_url, symbol)
+        except ValueError as exc:
+            raise MarketDataError(f"regular-universe {symbol}: invalid split notice: {exc}") from exc
+        if date.fromisoformat(notice["effective_session_date"]) != target:
+            raise MarketDataError(f"regular-universe {symbol}: split effective date differs from target")
+        action = self.action_provider.fetch(symbol, target)
+        try:
+            validate_vendor_actions(action.get("events") or {}, notice)
+        except ValueError as exc:
+            raise MarketDataError(f"regular-universe {symbol}: vendor split conflicts with notice: {exc}") from exc
+        url = (f"https://api.nasdaq.com/api/quote/{quote(symbol, safe='')}/historical?"
+               + urlencode({"assetclass": "stocks", "fromdate": (target - timedelta(days=10)).isoformat(),
+                            "todate": (target + timedelta(days=1)).isoformat(), "limit": 5000}))
+        raw = self.transport(url, {"User-Agent": "Mozilla/5.0", "Accept": "application/json",
+                                   "Origin": "https://www.nasdaq.com"})
+        payload = _raw_json(raw, self.name)
+        if payload.get("status", {}).get("rCode") != 200 or (payload.get("data") or {}).get("symbol") != symbol:
+            raise MarketDataError(f"regular-universe {symbol}: official split history unavailable or wrong symbol")
+        rows = (((payload.get("data") or {}).get("tradesTable") or {}).get("rows"))
+        if not isinstance(rows, list):
+            raise MarketDataError(f"regular-universe {symbol}: official split history rows missing")
+        dated = []
+        for row in rows:
+            try:
+                day = datetime.strptime(str(row.get("date")), "%m/%d/%Y").date()
+            except ValueError:
+                continue
+            dated.append((day, row))
+        targets = [row for day, row in dated if day == target]
+        previous = [(day, row) for day, row in dated if day < target]
+        if len(targets) != 1 or not previous:
+            raise MarketDataError(f"regular-universe {symbol}: dated official split pair missing")
+        previous_day, previous_row = max(previous, key=lambda item: item[0])
+        official_previous = _numeric(previous_row.get("close"), "official prior split close")
+        official_target = _numeric(targets[0].get("close"), "official target split close")
+        if not close_matches(target_bar.regular_close, official_target):
+            raise MarketDataError(f"regular-universe {symbol}: Yahoo target differs from official split close")
+        independent = self.split_history_provider.fetch_pair(symbol, previous_day, target)
+        if (independent.get("previous_session_date") != previous_day.isoformat()
+                or independent.get("target_session_date") != target.isoformat()
+                or independent.get("price_basis") != "regular_close_normalized_for_split"
+                or provider_family(str(independent.get("provider_family") or independent.get("provider")))
+                in {"nasdaq", "yahoo"}):
+            raise MarketDataError(f"regular-universe {symbol}: independent split basis or dates disagree")
+        previous_digits = int(independent["previous_display_decimal_places"])
+        target_digits = int(independent["target_display_decimal_places"])
+        if (not close_matches(float(independent["previous_split_normalized_close"]),
+                              round_market_display(official_previous, previous_digits))
+                or not close_matches(float(independent["target_regular_close"]),
+                                     round_market_display(official_target, target_digits))):
+            raise MarketDataError(f"regular-universe {symbol}: normalized independent split pair disagrees")
+        change = (official_target / official_previous - 1.0) * 100.0
+        evidence = {
+            "disposition": "official_split_normalized_pair_recovers_missing_yahoo_previous",
+            "official_previous_session_date": previous_day.isoformat(),
+            "official_previous_close": official_previous,
+            "official_target_close": official_target,
+            "official_previous_price_basis": "already_split_normalized",
+            "applied_split_factor": 1.0,
+            "official_source_identifier": url,
+            "official_raw_response_sha256": hashlib.sha256(raw).hexdigest(),
+            "official_action": notice,
+            "vendor_action_source_identifier": action.get("source_identifier"),
+            "vendor_action_raw_response_sha256": action.get("raw_response_sha256"),
+            "independent_split_pair": independent,
+        }
+        recovered = {"symbol": symbol, "close": official_target, "change_pct": change,
+                     "volume": target_bar.volume, "quote_source_identifier": url,
+                     "quote_raw_response_sha256": evidence["official_raw_response_sha256"]}
+        return recovered, evidence
 
     def _spark_batch(self, batch: list[str], target: date) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         url = self.SPARK_URL + "?" + urlencode({
@@ -724,7 +813,14 @@ class NasdaqYahooRegularUniverseProvider:
                          "chart_raw_response_sha256": series.raw_response_sha256})
         target_bar = next((bar for bar in series.bars if bar.session_date == target), None)
         if target_bar is not None:
-            previous, target_bar = completed_session_pair(series, target)
+            try:
+                previous, target_bar = completed_session_pair(series, target)
+            except MarketDataError as exc:
+                if "previous completed session is missing" not in str(exc):
+                    raise
+                recovered, recovery_evidence = self._recover_split_missing_previous(symbol, target, target_bar)
+                evidence.update(recovery_evidence)
+                return {**recovered, "name": name}, evidence
             pct = (target_bar.regular_close / previous.regular_close - 1.0) * 100.0
             evidence["disposition"] = "dated_chart_regular_quote_missing_from_batch"
             return {"symbol": symbol, "name": name, "close": target_bar.regular_close,
@@ -1841,6 +1937,83 @@ def resolve_discrepancy(
             "comparison_basis": "dated_official_regular_close_and_independent_precise_previous",
         }
 
+    # The exchange's live info close can disagree with its subsequently
+    # published, date-specific historical close. Use the historical pair only
+    # when the vendor daily target is identical and an independent publisher
+    # confirms the precise previous close. A publisher's last pre-close quote
+    # may support identity, but is never substituted for the final close.
+    quote_source = str(candidate.get("quote_source_identifier") or "")
+    expected_info = f"https://api.nasdaq.com/api/quote/{quote(str(candidate.get('symbol') or ''), safe='')}/info?assetclass=stocks"
+    quote_parts = urlsplit(quote_source)
+    yahoo_dated_quote = (quote_parts.hostname in {"query1.finance.yahoo.com", "query2.finance.yahoo.com"}
+                         and quote_parts.path == f"/v8/finance/chart/{quote(str(candidate.get('symbol') or ''), safe='')}")
+    yahoo_target_rounding_places = next((digits for digits in range(2, 5)
+                                         if close_matches(historical_target_close,
+                                                          round_market_display(official_target, digits))), None)
+    yahoo_previous_rounding = (yahoo_dated_quote
+                               and vendor_previous_rounding_places is not None
+                               and yahoo_target_rounding_places is not None
+                               and close_matches(screener_last, historical_target_close)
+                               and (abs(screener_change - historical_change_pct) <= tolerance_pct
+                                    or abs(screener_change - (screener_last / official_previous - 1.0) * 100.0)
+                                    <= tolerance_pct))
+    if (not official_supports and action_status == "checked_none"
+            and official.get("target_close_verified") is True
+            and official.get("target_close_source") == "nasdaq_historical"
+            and str(official.get("target_timestamp", "")).startswith("Nasdaq historical close ")
+            and (quote_source == expected_info or yahoo_previous_rounding)
+            and (close_matches(historical_target_close, official_target)
+                 or yahoo_previous_rounding)):
+        dated_previous = [source for source in independent_sources if (
+            provider_family(str(source.get("provider_family") or source.get("provider") or ""))
+            not in {"nasdaq", provider_family(historical_provider)}
+            and source.get("session") == "regular_close"
+            and source.get("target_session_date") == official.get("target_session_date")
+            and source.get("previous_close") is not None
+            and abs(float(source["previous_close"]) - official_previous)
+            <= 0.5 * 10 ** -int(source.get("display_decimal_places", 8)) + 1e-12
+            and source.get("target_close") is not None
+            and (close_matches(float(source["target_close"]), official_target)
+                 or (source.get("last_regular_quote_price") is not None
+                     and close_matches(float(source["target_close"]),
+                                       float(source["last_regular_quote_price"]))
+                     and re.fullmatch(
+                         rf"{re.escape(str(official['target_session_date']))} "
+                         r"(?:09:(?:3\d|[4-5]\d)|1[0-5]:[0-5]\d):[0-5]\d",
+                         str(source.get("last_regular_quote_timestamp", "")),
+                     )))
+        )]
+        if dated_previous:
+            known_hashes = {source.get("raw_response_sha256") for source in independent_support}
+            independent_support.extend({**source, "support_role": "independent_precise_previous_preclose_quote"}
+                                       for source in dated_previous
+                                       if source.get("raw_response_sha256") not in known_hashes)
+            prior_classification = reason
+            reason = ("dated_exchange_history_over_vendor_previous_rounding" if yahoo_previous_rounding
+                      else "dated_exchange_history_over_conflicting_info_quote")
+            official_supports = True
+            canonical_primary_pair = (official_previous, official_target)
+            basis_evidence = {
+                "official_previous_close": official_previous,
+                "official_historical_target_close": official_target,
+                "official_historical_target_timestamp": official["target_timestamp"],
+                "conflicting_info_quote_close": screener_last,
+                "conflicting_info_quote_change_pct": screener_change,
+                "conflicting_info_quote_source_identifier": quote_source,
+                "vendor_daily_previous_close": historical_previous_close,
+                "vendor_daily_target_close": historical_target_close,
+                "vendor_previous_rounding_places": vendor_previous_rounding_places,
+                "vendor_target_rounding_places": yahoo_target_rounding_places,
+                "previous_discrepancy_classification": prior_classification,
+                "independent_previous_close_support": [
+                    {**source, "support_role": ("independent_precise_previous_preclose_quote"
+                                               if source.get("last_regular_quote_timestamp")
+                                               else "independent_dated_regular_pair")}
+                    for source in dated_previous
+                ],
+                "comparison_basis": "dated_exchange_historical_regular_closes",
+            }
+
     if (not official_supports or not action_checked or not independent_support or reason is None
             or (official.get("nls_previous_mismatch") and reason != "movers_quote_differs_from_verified_regular_close")):
         problems = []
@@ -2634,6 +2807,8 @@ def rank_top20(
                         "official_split_normalized_eod", "official_split_unadjusted_vendor_previous",
                         "movers_quote_differs_from_verified_regular_close",
                         "official_regular_pair_over_vendor_previous_rounding",
+                        "dated_exchange_history_over_conflicting_info_quote",
+                        "dated_exchange_history_over_vendor_previous_rounding",
                     } or (discrepancy.get("discrepancy_reason") == "non_nasdaq_primary_exchange_eod"
                           and "canonical_target_close" in discrepancy):
                         canonical_target = float(discrepancy.get("canonical_target_close", discrepancy["official_target_close"]))
@@ -2823,10 +2998,16 @@ def build_canonical_market_data_packet(
     snapshot = verified_snapshot if verified_snapshot is not None else build_index_sector_snapshot(providers, target_session_date)
     if snapshot.get("market_session_date") != target_session_date.isoformat():
         raise MarketDataError("checkpoint market session differs from requested session")
+    arbitrator = discrepancy_arbitrator or LiveDiscrepancyArbitrator()
     if screener_provider is not None:
         screener = screener_provider.fetch()
     else:
-        screener = NasdaqYahooRegularUniverseProvider().fetch(
+        screener = NasdaqYahooRegularUniverseProvider(
+            corporate_action_notices=getattr(arbitrator, "corporate_action_notices", {}),
+            notice_transport=getattr(arbitrator, "notice_transport", default_transport),
+            action_provider=getattr(arbitrator, "action_provider", None),
+            split_history_provider=getattr(arbitrator, "split_history_provider", None),
+        ).fetch(
             target_session_date,
             expected_previous_session_date=date.fromisoformat(snapshot["indexes"][0]["previous_session_date"]),
         )
@@ -2849,7 +3030,7 @@ def build_canonical_market_data_packet(
         historical_series=historical.series,
         issuer_components=issuer_components,
         strict_issuer_total=issuer_components is not None,
-        discrepancy_arbitrator=discrepancy_arbitrator or LiveDiscrepancyArbitrator(),
+        discrepancy_arbitrator=arbitrator,
         excluded_candidates=excluded_candidates,
         excluded_action_candidates=excluded_action_candidates,
         expected_previous_session_date=date.fromisoformat(snapshot["indexes"][0]["previous_session_date"]),

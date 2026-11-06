@@ -143,6 +143,162 @@ def test_full_listing_regular_universe_uses_dated_quotes_and_official_top_candid
         provider.fetch(target, expected_previous_session_date=date(2026, 11, 2))
 
 
+def test_regular_universe_recovers_split_day_with_missing_yahoo_previous():
+    target = date(2026, 11, 5)
+    stamp = int(datetime(2026, 11, 5, 21, 0, tzinfo=timezone.utc).timestamp())
+    notice_url = "https://www.nasdaqtrader.com/TraderNews.aspx?id=ECA2026-784"
+    yahoo_daily = json.dumps({"chart": {"result": [{
+        "meta": {"symbol": "EZGO", "dataGranularity": "1d", "exchangeTimezoneName": "America/New_York"},
+        "timestamp": [stamp], "indicators": {"quote": [{"close": [1.7101], "volume": [138517]}]},
+    }], "error": None}}).encode()
+    action = json.dumps({"chart": {"result": [{"events": {"splits": {
+        str(int(datetime(2026, 11, 5, 14, 30, tzinfo=timezone.utc).timestamp())): {
+            "date": int(datetime(2026, 11, 5, 14, 30, tzinfo=timezone.utc).timestamp()),
+            "numerator": 1.0, "denominator": 3.0,
+        },
+    }}}]}}).encode()
+    official_history = json.dumps({"status": {"rCode": 200}, "data": {
+        "symbol": "EZGO", "tradesTable": {"rows": [
+            {"date": "11/05/2026", "close": "$1.7101"},
+            {"date": "11/04/2026", "close": "$1.7565"},
+        ]},
+    }}).encode()
+    official_info = json.dumps({"status": {"rCode": 200}, "data": {
+        "symbol": "EZGO", "exchange": "NASDAQ-CM", "primaryData": {
+            "lastTradeTimestamp": "Nov 5, 2026", "lastSalePrice": "$1.7101",
+        },
+    }}).encode()
+    independent = ("<html><body>Past prices are adjusted for stock splits"
+                   "<table><tr><th>Date</th><th>Close</th><th>Change</th></tr>"
+                   "<tr><td>Nov 5, 2026</td><td>1.71</td><td>-2.65%</td></tr>"
+                   "<tr><td>Nov 4, 2026</td><td>1.76</td><td>+1.00%</td></tr>"
+                   "</table></body></html>").encode()
+    notice = ("(EZGO) will effect a one-for-three (1-3) reverse stock split. "
+              "The reverse stock split will become effective on Thursday, November 5, 2026.").encode()
+
+    def transport(url, _headers):
+        if "stockanalysis.com" in url:
+            return independent
+        if "/historical?" in url:
+            return official_history
+        if "/info?" in url:
+            return official_info
+        if "div%2Csplits" in url:
+            return action
+        if "/v8/finance/chart/" in url:
+            return yahoo_daily
+        raise AssertionError(url)
+
+    provider = NasdaqYahooRegularUniverseProvider(
+        transport=transport, corporate_action_notices={"EZGO": notice_url},
+        notice_transport=lambda *_: notice,
+    )
+    recovered, evidence = provider._verify_missing("EZGO", "EZGO Technologies Ordinary Shares", target)
+    assert recovered["close"] == 1.7101
+    assert recovered["change_pct"] == pytest.approx((1.7101 / 1.7565 - 1) * 100)
+    assert evidence["disposition"] == "official_split_normalized_pair_recovers_missing_yahoo_previous"
+    assert evidence["official_previous_price_basis"] == "already_split_normalized"
+    assert evidence["applied_split_factor"] == 1.0
+    assert evidence["official_action"]["effective_session_date"] == target.isoformat()
+
+    without_notice = NasdaqYahooRegularUniverseProvider(transport=transport)
+    with pytest.raises(MarketDataError, match="official split notice"):
+        without_notice._verify_missing("EZGO", "EZGO Technologies Ordinary Shares", target)
+
+    wrong_independent = independent.replace(b"1.76", b"1.20")
+    def conflicting_transport(url, headers):
+        return wrong_independent if "stockanalysis.com" in url else transport(url, headers)
+    conflict = NasdaqYahooRegularUniverseProvider(
+        transport=conflicting_transport, corporate_action_notices={"EZGO": notice_url},
+        notice_transport=lambda *_: notice,
+    )
+    with pytest.raises(MarketDataError, match="independent split pair disagrees"):
+        conflict._verify_missing("EZGO", "EZGO Technologies Ordinary Shares", target)
+
+
+def test_dated_exchange_history_replaces_conflicting_info_quote_only_with_support():
+    target = date(2026, 11, 5)
+    candidate = {
+        "symbol": "LABT", "_close": 0.60,
+        "_change_pct": (0.60 / 0.1914 - 1) * 100,
+        "quote_source_identifier": "https://api.nasdaq.com/api/quote/LABT/info?assetclass=stocks",
+        "volume": 700_000_000,
+    }
+    official = {
+        "provider": "nasdaq_official_historical_nls", "provider_family": "nasdaq",
+        "target_close_verified": True, "target_close_source": "nasdaq_historical",
+        "target_timestamp": "Nasdaq historical close 11/05/2026",
+        "target_session_date": target.isoformat(), "previous_session_date": "2026-11-04",
+        "previous_close": 0.1914, "target_close": 0.5406,
+        "source_identifiers": ["https://api.nasdaq.com/dated-history"],
+        "raw_response_sha256": ["a" * 64],
+    }
+    action = {"provider": "yahoo_corporate_actions", "provider_family": "yahoo",
+              "status": "checked_none", "source_identifier": "https://query1.finance.yahoo.com/action",
+              "raw_response_sha256": "b" * 64}
+    independent = [{
+        "provider": "captured_end_of_day_quote", "provider_family": "chartexchange",
+        "session": "regular_close", "target_session_date": target.isoformat(),
+        "previous_close": 0.1914, "target_close": 0.55,
+        "last_regular_quote_timestamp": "2026-11-05 15:58:42",
+        "last_regular_quote_price": 0.55, "display_decimal_places": 4,
+        "source_identifier": "https://chartexchange.com/symbol/nasdaq-labt/historical/",
+        "raw_response_sha256": "c" * 64,
+    }]
+    args = dict(candidate=candidate, historical_provider="yahoo_chart_query1",
+                historical_previous_close=0.19, historical_target_close=0.5406,
+                historical_change_pct=(0.5406 / 0.19 - 1) * 100,
+                official=official, corporate_action=action, minute_close=None,
+                independent_sources=independent, tolerance_pct=0.2,
+                resolved_at="2026-11-06T03:00:00+00:00")
+    result = resolve_discrepancy(**args)
+    assert result["discrepancy_reason"] == "dated_exchange_history_over_conflicting_info_quote"
+    assert result["canonical_previous_close"] == 0.1914
+    assert result["canonical_target_close"] == 0.5406
+    assert result["basis_evidence"]["conflicting_info_quote_close"] == 0.60
+    assert result["basis_evidence"]["independent_previous_close_support"][0]["last_regular_quote_timestamp"] == "2026-11-05 15:58:42"
+    yahoo_candidate = {
+        **candidate, "_close": 0.54,
+        "_change_pct": (0.54 / 0.1914 - 1) * 100,
+        "quote_source_identifier": "https://query1.finance.yahoo.com/v8/finance/chart/LABT?interval=1d",
+    }
+    rounded = resolve_discrepancy(**{
+        **args, "candidate": yahoo_candidate, "historical_target_close": 0.54,
+        "historical_change_pct": (0.54 / 0.19 - 1) * 100,
+    })
+    assert rounded["discrepancy_reason"] == "dated_exchange_history_over_vendor_previous_rounding"
+    assert rounded["canonical_previous_close"] == 0.1914
+    assert rounded["canonical_target_close"] == 0.5406
+    assert rounded["basis_evidence"]["vendor_target_rounding_places"] == 2
+    other_official = {**official, "previous_close": 0.4835, "target_close": 0.621}
+    other_previous = {**independent[0], "previous_close": 0.4835,
+                      "target_close": 0.60, "last_regular_quote_price": 0.60,
+                      "last_regular_quote_timestamp": "2026-11-05 15:58:38"}
+    other_candidate = {**yahoo_candidate, "symbol": "INTZ", "_close": 0.62,
+                       "_change_pct": (0.62 / 0.4835 - 1) * 100,
+                       "quote_source_identifier": "https://query1.finance.yahoo.com/v8/finance/chart/INTZ?interval=1d"}
+    other_args = {**args, "candidate": other_candidate,
+                  "official": other_official,
+                  "historical_previous_close": 0.48,
+                  "historical_target_close": 0.62,
+                  "historical_change_pct": (0.62 / 0.48 - 1) * 100,
+                  "independent_sources": [other_previous]}
+    other_result = resolve_discrepancy(**other_args)
+    assert other_result["canonical_target_close"] == 0.621
+    assert any(item.get("support_role") == "independent_precise_previous_preclose_quote"
+               for item in other_result["basis_evidence"]["independent_previous_close_support"])
+    with pytest.raises(MarketDataError, match="no independent supporting source"):
+        resolve_discrepancy(**{**other_args, "independent_sources": [
+            {**other_previous, "last_regular_quote_timestamp": "2026-11-05 16:01:00"},
+        ]})
+    with pytest.raises(MarketDataError, match="official market source does not support Screener"):
+        resolve_discrepancy(**{**args, "historical_target_close": 0.57})
+    with pytest.raises(MarketDataError, match="official market source does not support Screener"):
+        resolve_discrepancy(**{**args, "independent_sources": [
+            {**independent[0], "previous_close": 0.18},
+        ]})
+
+
 def yahoo_bytes(symbol="^SOX", timestamps=None, closes=None, adjusted=None):
     timestamps = timestamps or [STAMP_AUG_31, STAMP_SEP_1]
     closes = closes or [100.0, 110.0]
