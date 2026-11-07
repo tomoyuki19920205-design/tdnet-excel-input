@@ -64,6 +64,44 @@ def _prefix(soup,table):
     return ' '.join(chunks)
 
 
+def literal_metric_completions(primary, tables):
+    """Prove missing metrics against an exact business table in the same filing.
+
+    Existing values, explicit nils and differing measurement bases are preserved.
+    Callers supply only period-bound records from their currently opened ZIP.
+    """
+    def identity(label):
+        text=compact(label)
+        return re.sub(r'\(注[^)]*\)[0-9一二三四五六七八九十、,.・]*$','',text)
+    old={};new={}
+    for row in primary:
+        key=identity(row.get('raw_segment_label'))
+        if not key or key in old:return {}
+        old[key]=row
+    for row in tables:
+        key=identity(row.get('raw_segment_label'))
+        if not key:continue
+        if key in new and any(row.get(m)!=new[key].get(m) for m in ('sales','profit')):return {}
+        new.setdefault(key,row)
+    if not set(old).issubset(new):return {}
+    out={}
+    for key,row in old.items():
+        candidate=new[key]
+        if any(row.get(k) is None or row[k]!=candidate.get(k) for k in ('period_start','period_end','is_consolidated','currency')):continue
+        # Both records must describe the same business and disclosed peer amount.
+        if any(row.get(m) is not None and (candidate.get(m) is None or Decimal(str(row[m]))!=Decimal(str(candidate[m]))) for m in ('sales','profit')):continue
+        if any(row.get(m) is not None and row.get(m+'_basis') not in (None,candidate.get(m+'_basis')) and not (candidate.get(m+'_basis')=='company_defined_unknown' and compact(row.get('raw_'+m+'_label'))==compact(candidate.get(m+'_label'))) for m in ('sales','profit')):continue
+        additions={}
+        for metric in ('sales','profit'):
+            if row.get(metric) is not None or candidate.get(metric) is None or row.get('_'+metric+'_fact_explicit_nil'):continue
+            if row.get(metric+'_basis') not in (None,'company_defined_unknown',candidate.get(metric+'_basis')):continue
+            fact=candidate.get('facts',{}).get(metric)
+            if not fact or fact.get('status')!='disclosed_numeric':continue
+            additions[metric]={'value':candidate[metric],'fact':fact,'basis':candidate.get(metric+'_basis'),'label':candidate.get(metric+'_label')}
+        if additions:out[key]=additions
+    return out
+
+
 def extract_textblock_tables(html, *, period_start, period_end, is_consolidated, textblock_tag='', context_ref=''):
     """Return only explicit business tables whose printed date range matches.
 

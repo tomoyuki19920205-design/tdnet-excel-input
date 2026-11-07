@@ -969,7 +969,7 @@ def extract_segments_from_xbrl_zip_detailed(
                 # a generic CurrentYear TextBlock may also contain prior data.
                 if len(dei_scopes)==1 and len(dei_tickers)==1 and expected_end:
                     import html as html_module
-                    from src.segment.xhtml_segment_tables import extract_textblock_tables
+                    from src.segment.xhtml_segment_tables import extract_textblock_tables,literal_metric_completions
                     periods=[]
                     if len(dei_start_dates)==1:
                         periods.append(('current',loop_period,str(next(iter(dei_start_dates))),str(expected_end)))
@@ -977,12 +977,32 @@ def extract_segments_from_xbrl_zip_detailed(
                         prior_period=_prev_period
                         if prior_period:periods.append(('previous',prior_period,str(next(iter(dei_previous_start_dates))),str(next(iter(dei_previous_end_dates)))))
                     for role,target_period,start,end in periods:
-                        if any(r.period==target_period and r.quarter==estimated_quarter for r in results):continue
+                        existing=[r for r in results if r.period==target_period and r.quarter==estimated_quarter]
+                        if existing and all(r.sales is not None and r.profit is not None for r in existing):continue
                         table_rows=[]
                         for block in soup.find_all('ix:nonnumeric'):
                             name=str(block.get('name') or '')
                             if 'segment' not in name.lower() or 'textblock' not in name.lower():continue
-                            table_rows.extend(extract_textblock_tables(html_module.unescape(block.decode_contents()),period_start=start,period_end=end,is_consolidated=next(iter(dei_scopes))=='true',textblock_tag=name,context_ref=block.get('contextref','')))
+                            parsed=extract_textblock_tables(html_module.unescape(block.decode_contents()),period_start=start,period_end=end,is_consolidated=next(iter(dei_scopes))=='true',textblock_tag=name,context_ref=block.get('contextref',''))
+                            for value in parsed:
+                                value['facts']={m:{**f,'file':seg_file} for m,f in value['facts'].items()}
+                            table_rows.extend(parsed)
+                        if existing:
+                            primary=[]
+                            for row in existing:
+                                raw=row.raw_json or {};context=raw.get('_context_evidence') or {}
+                                primary.append({**raw,'sales':row.sales,'profit':row.profit,'sales_basis':raw.get('sales_basis') if row.sales is not None else None,'period_start':context.get('context_start'),'period_end':context.get('context_end')})
+                            additions=literal_metric_completions(primary,table_rows)
+                            from src.segment.semantic_facts import compact
+                            for row in existing:
+                                raw=row.raw_json or {};key=re.sub(r'\(注[^)]*\)[0-9一二三四五六七八九十、,.・]*$','',compact(raw.get('raw_segment_label')))
+                                for metric,completion in additions.get(key,{}).items():
+                                    setattr(row,metric,completion['value'])
+                                    raw.setdefault('table_facts',{})[metric]=completion['fact']
+                                    raw[metric+'_basis']=completion['basis'];raw['raw_'+metric+'_label']=completion['label']
+                                    raw.setdefault('metric_sources',{})[metric]={'extraction_method':'xhtml_textblock','source_table_cell':completion['fact']}
+                                row.raw_json=raw
+                            continue
                         for value in table_rows:
                             facts={m:{**f,'file':seg_file} for m,f in value['facts'].items()}
                             raw={'_segment_period_role':role,'raw_segment_label':value['raw_segment_label'],'raw_sales_label':value['sales_label'],'raw_profit_label':value['profit_label'],'sales_basis':value['sales_basis'],'profit_basis':value['profit_basis'],'is_consolidated':value['is_consolidated'],'currency':'JPY','table_facts':facts,'extraction_method':'xhtml_textblock','_context_evidence':{'context_ref':next(iter(facts.values()))['textblock_context'],'context_start':start,'context_end':end,'current_or_previous':role,'quarter':estimated_quarter,'date_guard_status':'PASS','context_period_type':role,'selection_reason':'printed_table_dates_match_filing_dei'}}
