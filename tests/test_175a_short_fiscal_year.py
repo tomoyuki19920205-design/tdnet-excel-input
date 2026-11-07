@@ -102,5 +102,5 @@ def test_dei_fiscal_year_mismatch_does_not_override_date_guard(tmp_path: Path) -
     )
 
     assert result.status == "date_guard_skip"
-    assert result.reason == "all_candidate_files_skipped_by_date_guard"
+    assert result.reason == "requested_fiscal_year_end_differs_from_original_dei"
     assert result.segments == []

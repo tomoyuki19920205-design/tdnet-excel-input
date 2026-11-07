@@ -571,6 +571,7 @@ def extract_segments_from_xbrl_zip_detailed(
     title_quarter = None
     dei_current_period_ends: set[datetime.date] = set()
     dei_fiscal_year_ends: set[datetime.date] = set()
+    dei_previous_fiscal_year_ends: set[datetime.date] = set()
     dei_start_dates = set()
     dei_previous_start_dates = set()
     dei_previous_end_dates = set()
@@ -598,6 +599,7 @@ def extract_segments_from_xbrl_zip_detailed(
                             dei_fiscal_year_ends.update(
                                 _extract_dei_date_values(s, "CurrentFiscalYearEndDateDEI")
                             )
+                            dei_previous_fiscal_year_ends.update(_extract_dei_date_values(s, "PreviousFiscalYearEndDateDEI"))
                             dei_start_dates.update(_extract_dei_date_values(s, "CurrentFiscalYearStartDateDEI"))
                             dei_previous_start_dates.update(_extract_dei_date_values(s, "PreviousFiscalYearStartDateDEI"))
                             dei_previous_end_dates.update(_extract_dei_date_values(s, "ComparativePeriodEndDateDEI"))
@@ -679,11 +681,22 @@ def extract_segments_from_xbrl_zip_detailed(
                 # current-period end only when both DEI date fields are singular,
                 # the fiscal-year end matches the caller-bound identity, and the
                 # current-period end does not exceed that fiscal-year end.
-                if len(dei_current_period_ends) > 1 or len(dei_fiscal_year_ends) > 1:
+                if len(dei_current_period_ends) > 1 or len(dei_fiscal_year_ends) > 1 or len(dei_previous_fiscal_year_ends) > 1:
                     return SegmentExtractionResult(
                         status="context_unresolved",
                         segments=[],
                         reason="dei_period_date_conflict",
+                        title_quarter=estimated_quarter,
+                        candidate_file_count=candidate_file_count,
+                    )
+                if expected_fiscal_year_end is not None and dei_fiscal_year_ends and dei_fiscal_year_ends != {expected_fiscal_year_end}:
+                    # A title's YYYY/MM month-end inference is not the filing's
+                    # exact fiscal identity. Reject that key instead of writing
+                    # the same original facts into a second fiscal period.
+                    return SegmentExtractionResult(
+                        status="date_guard_skip", segments=[],
+                        reason="requested_fiscal_year_end_differs_from_original_dei",
+                        date_guard_status="SKIP",
                         title_quarter=estimated_quarter,
                         candidate_file_count=candidate_file_count,
                     )
@@ -824,8 +837,8 @@ def extract_segments_from_xbrl_zip_detailed(
                             ticker = context_ticker
                             break
 
-                _prev_period = None
-                if loop_period and len(loop_period) >= 4:
+                _prev_period = str(next(iter(dei_previous_fiscal_year_ends))) if len(dei_previous_fiscal_year_ends) == 1 else None
+                if _prev_period is None and loop_period and len(loop_period) >= 4:
                     try:
                         _prev_year = int(loop_period[:4]) - 1
                         _month_day = loop_period[5:]

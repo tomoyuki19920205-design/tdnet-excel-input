@@ -1,0 +1,203 @@
+[
+  {
+    "ticker": "2551",
+    "doc": "20261102562230",
+    "zip_sha256": "b28a2f4b917614f94f305c110d6a2956673e23e6f715cf67dc2b241af66430b3",
+    "source_url": "https://www.release.tdnet.info/inbs/140120261102562230.pdf",
+    "dei": {
+      "EDINETCodeDEI": [
+        "E00422"
+      ],
+      "FundCodeDEI": [
+        "25510"
+      ],
+      "FilerNameInJapaneseDEI": [
+        "マルサンアイ株式会社"
+      ],
+      "FilerNameInEnglishDEI": [
+        "MARUSAN-AI CO., LTD."
+      ],
+      "FundNameInJapaneseDEI": [
+        "通期第１号参考様式　[日本基準]（連結）"
+      ],
+      "AccountingStandardsDEI": [
+        "Japan GAAP"
+      ],
+      "WhetherConsolidatedFinancialStatementsArePreparedDEI": [
+        "true"
+      ],
+      "IndustryCodeWhenConsolidatedFinancialStatementsArePreparedInAccordanceWithIndustrySpecificRegulationsDEI": [
+        "cte"
+      ],
+      "IndustryCodeWhenFinancialStatementsArePreparedInAccordanceWithIndustrySpecificRegulationsDEI": [
+        "cte"
+      ],
+      "CurrentFiscalYearStartDateDEI": [
+        "2025-09-21"
+      ],
+      "CurrentPeriodEndDateDEI": [
+        "2026-09-20"
+      ],
+      "TypeOfCurrentPeriodDEI": [
+        "FY"
+      ],
+      "CurrentFiscalYearEndDateDEI": [
+        "2026-09-20"
+      ],
+      "PreviousFiscalYearStartDateDEI": [
+        "2024-09-21"
+      ],
+      "ComparativePeriodEndDateDEI": [
+        "2025-09-20"
+      ],
+      "PreviousFiscalYearEndDateDEI": [
+        "2025-09-20"
+      ],
+      "NextFiscalYearStartDateDEI": [
+        "1"
+      ],
+      "AmendmentFlagDEI": [
+        "false"
+      ],
+      "IdentificationOfDocumentSubjectToAmendmentDEI": [
+        "false"
+      ],
+      "XBRLAmendmentFlagDEI": [
+        "false"
+      ]
+    }
+  },
+  {
+    "ticker": "3909",
+    "doc": "20260513529754",
+    "zip_sha256": "1d604260cc203c499e3688d4207df6d789225b17d060fbd38f274941d9f9dec6",
+    "source_url": "https://www.release.tdnet.info/inbs/140120260513529754.pdf",
+    "dei": {
+      "EDINETCodeDEI": [
+        "E27894"
+      ],
+      "FundCodeDEI": [
+        "39090"
+      ],
+      "FilerNameInJapaneseDEI": [
+        "株式会社ショーケース"
+      ],
+      "FilerNameInEnglishDEI": [
+        "Showcase Inc."
+      ],
+      "FundNameInJapaneseDEI": [
+        "通期第１号参考様式　[日本基準]（連結）"
+      ],
+      "AccountingStandardsDEI": [
+        "Japan GAAP"
+      ],
+      "WhetherConsolidatedFinancialStatementsArePreparedDEI": [
+        "true"
+      ],
+      "IndustryCodeWhenConsolidatedFinancialStatementsArePreparedInAccordanceWithIndustrySpecificRegulationsDEI": [
+        "CTE"
+      ],
+      "IndustryCodeWhenFinancialStatementsArePreparedInAccordanceWithIndustrySpecificRegulationsDEI": [
+        "CTE"
+      ],
+      "CurrentFiscalYearStartDateDEI": [
+        "2025-01-01"
+      ],
+      "CurrentPeriodEndDateDEI": [
+        "2026-03-31"
+      ],
+      "TypeOfCurrentPeriodDEI": [
+        "FY"
+      ],
+      "CurrentFiscalYearEndDateDEI": [
+        "2026-03-31"
+      ],
+      "PreviousFiscalYearStartDateDEI": [
+        "2024-01-01"
+      ],
+      "ComparativePeriodEndDateDEI": [
+        "2024-12-31"
+      ],
+      "PreviousFiscalYearEndDateDEI": [
+        "2024-12-31"
+      ],
+      "NextFiscalYearStartDateDEI": [
+        "1"
+      ],
+      "AmendmentFlagDEI": [
+        "false"
+      ],
+      "IdentificationOfDocumentSubjectToAmendmentDEI": [
+        "false"
+      ],
+      "XBRLAmendmentFlagDEI": [
+        "false"
+      ]
+    }
+  },
+  {
+    "ticker": "6142",
+    "doc": "20250109548183",
+    "zip_sha256": "de0486e9f4d2779ba524d60a07ae50ed51a59e2b39be4f8217af79336cf3d207",
+    "source_url": "https://www.release.tdnet.info/inbs/140120250109548183.pdf",
+    "dei": {
+      "EDINETCodeDEI": [
+        "E01503"
+      ],
+      "FundCodeDEI": [
+        "61420"
+      ],
+      "FilerNameInJapaneseDEI": [
+        "富士精工株式会社"
+      ],
+      "FilerNameInEnglishDEI": [
+        "FUJI SEIKO LIMITED"
+      ],
+      "FundNameInJapaneseDEI": [
+        "四半期第１号参考様式　[日本基準]（連結）"
+      ],
+      "AccountingStandardsDEI": [
+        "Japan GAAP"
+      ],
+      "WhetherConsolidatedFinancialStatementsArePreparedDEI": [
+        "true"
+      ],
+      "IndustryCodeWhenConsolidatedFinancialStatementsArePreparedInAccordanceWithIndustrySpecificRegulationsDEI": [
+        "CTE"
+      ],
+      "IndustryCodeWhenFinancialStatementsArePreparedInAccordanceWithIndustrySpecificRegulationsDEI": [
+        "2024-03-01"
+      ],
+      "CurrentPeriodEndDateDEI": [
+        "2024-11-30"
+      ],
+      "TypeOfCurrentPeriodDEI": [
+        "Q3"
+      ],
+      "CurrentFiscalYearEndDateDEI": [
+        "2025-02-28"
+      ],
+      "PreviousFiscalYearStartDateDEI": [
+        "2023-03-01"
+      ],
+      "ComparativePeriodEndDateDEI": [
+        "2023-11-30"
+      ],
+      "PreviousFiscalYearEndDateDEI": [
+        "2024-02-29"
+      ],
+      "NextFiscalYearStartDateDEI": [
+        "1"
+      ],
+      "AmendmentFlagDEI": [
+        "false"
+      ],
+      "IdentificationOfDocumentSubjectToAmendmentDEI": [
+        "false"
+      ],
+      "XBRLAmendmentFlagDEI": [
+        "false"
+      ]
+    }
+  }
+]
