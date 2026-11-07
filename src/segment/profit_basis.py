@@ -6,11 +6,26 @@ LABELS = {
     'operating_profit': 'セグメント利益（営業利益ベース）',
     'ordinary_profit': 'セグメント利益（経常利益ベース）',
     'profit_before_tax': 'セグメント利益（税引前利益ベース）',
+    'adjusted_operating_profit': 'セグメント利益（調整後営業利益ベース）',
+    'core_operating_profit': 'セグメント利益（コア営業利益ベース）',
+    'business_profit': 'セグメント利益（事業利益ベース）',
+    'before_goodwill_amortization': 'セグメント利益（のれん等償却前）',
+    'company_defined_unknown': 'セグメント利益（基準未確定）',
 }
 
 
 def profit_basis(value):
+    if value in LABELS:
+        return value
     text = re.sub(r'\s+', '', str(value or '')).lower()
+    if 'adjustedoperating' in text or '調整後営業' in text:
+        return 'adjusted_operating_profit'
+    if 'coreoperating' in text or 'コア営業' in text:
+        return 'core_operating_profit'
+    if 'beforeamortizationofgoodwill' in text or 'のれん等償却前' in text:
+        return 'before_goodwill_amortization'
+    if 'businessprofit' in text or '事業利益' in text or '事業損益' in text:
+        return 'business_profit'
     if 'grossprofit' in text or '売上総利益' in text:
         return 'gross_profit'
     if 'extraordinary' in text:
@@ -21,6 +36,8 @@ def profit_basis(value):
         return 'profit_before_tax'
     if 'operatingincome' in text or 'operatingprofit' in text or '営業利益' in text:
         return 'operating_profit'
+    if '基準未確定' in text:
+        return 'company_defined_unknown'
     return None
 
 
@@ -34,8 +51,35 @@ def segment_flags(raw):
     return {k: v for k, v in {
         'profit_basis': raw.get('profit_basis') or profit_basis(raw.get('profit_tag')),
         'profit_tag': raw.get('profit_tag'),
+        'profit_label': raw.get('raw_profit_label'),
+        'sales_basis': raw.get('sales_basis'),
+        'sales_label': raw.get('raw_sales_label'),
+        'sales_tag': raw.get('_sales_fact_selected_name'),
         'period_start': evidence.get('context_start'),
         'period_end': evidence.get('context_end'),
-        'is_consolidated': True,
+        'is_consolidated': raw.get('is_consolidated', True),
+        'currency': raw.get('currency'),
         'period_type': 'ytd',
     }.items() if v is not None and v != '?'}
+
+
+def persisted_flags(value):
+    """Read metadata from the existing SQLite segment record, including old rows."""
+    import json
+    raw = value.get('segment_metadata') or value.get('flags') or {}
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (ValueError, TypeError):
+            raw = {}
+    flags = dict(raw)
+    if not flags.get('profit_basis') and value.get('raw_profit_label'):
+        flags['profit_basis'] = profit_basis(value['raw_profit_label']) or 'company_defined_unknown'
+    if value.get('raw_profit_label') and not flags.get('profit_label'):
+        flags['profit_label'] = value['raw_profit_label']
+    return {k: v for k, v in flags.items() if v is not None}
+
+
+def raw_profit_label(raw):
+    raw = raw or {}
+    return raw.get('raw_profit_label') or profit_label(raw.get('profit_basis') or raw.get('profit_tag'))

@@ -497,6 +497,7 @@ def batch_upsert_segments(
                     unit_raw=rec.get("unit_raw"),
                     unit_multiplier=rec.get("unit_multiplier"),
                     raw_profit_label=rec.get("raw_profit_label", ""),
+                    segment_metadata=rec.get("segment_metadata"),
                     data_source=rec.get("source", source),
                     actor=actor,
                     source=source,

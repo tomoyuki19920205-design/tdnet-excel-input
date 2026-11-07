@@ -537,7 +537,7 @@ def _process_single(
         if xbrl_path and os.path.isfile(xbrl_path):
             try:
                 from src.segment.xbrl_segment_extractor import extract_segments_from_xbrl_zip
-                from src.segment.profit_basis import profit_label
+                from src.segment.profit_basis import raw_profit_label, segment_flags
                 xbrl_raw_rows = extract_segments_from_xbrl_zip(
                     zip_path=xbrl_path,
                     period=fiscal_year_end,
@@ -552,9 +552,12 @@ def _process_single(
                             "segment_order": i + 1,
                             "segment_sales": r.sales,
                             "segment_profit": r.profit,
+                            "segment_metadata": segment_flags(r.raw_json),
+                            "_sales_fact_explicit_nil": (r.raw_json or {}).get("_sales_fact_explicit_nil", False),
+                            "_profit_fact_explicit_nil": (r.raw_json or {}).get("_profit_fact_explicit_nil", False),
                             "unit_raw": None,       # 既に百万円単位化済み
                             "unit_multiplier": None,
-                            "raw_profit_label": profit_label((r.raw_json or {}).get("profit_tag")),
+                            "raw_profit_label": raw_profit_label(r.raw_json),
                         })
                     if _v4_segs_list:
                         _v4_ok = True
@@ -564,7 +567,7 @@ def _process_single(
                 logger.warning(f"[SEGMENT_XBRL] {code} exception: {e}")
 
         # 2. XBRL抽出が0件または失敗した場合はPDFフォールバック
-        if not _v4_segs_list or any(s.get("segment_profit") is None for s in _v4_segs_list):
+        if not _v4_segs_list or any((s.get("segment_profit") is None and not s.get("_profit_fact_explicit_nil")) or (s.get("segment_sales") is None and not s.get("_sales_fact_explicit_nil")) for s in _v4_segs_list):
             from src.analysis.segment_detection_v4 import run_segment_detection_v4
             _v4r = run_segment_detection_v4(doc_path, ticker=code)
             from dataclasses import asdict
@@ -595,6 +598,7 @@ def _process_single(
                     unit_raw=seg.get("unit_raw") if isinstance(seg, dict) else getattr(seg, "unit_raw", None),
                     unit_multiplier=seg.get("unit_multiplier") if isinstance(seg, dict) else getattr(seg, "unit_multiplier", None),
                     raw_profit_label=seg.get("raw_profit_label", "") if isinstance(seg, dict) else getattr(seg, "raw_profit_label", ""),
+                    segment_metadata=seg.get("segment_metadata") if isinstance(seg, dict) else None,
                     data_source="tdnet",
                     actor="tdnet_ingest_v4",
                     source="v4",

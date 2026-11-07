@@ -12,7 +12,7 @@ PIPELINE_SPEC §11
 """
 from __future__ import annotations
 
-from src.segment.profit_basis import profit_label
+from src.segment.profit_basis import raw_profit_label, segment_flags
 
 import json
 import logging
@@ -576,7 +576,8 @@ def _try_xbrl_source(
             "segment_order": idx + 1,
             "segment_sales": row.sales,
             "segment_profit": row.profit,
-            "raw_profit_label": profit_label((row.raw_json or {}).get('profit_tag')),
+            "raw_profit_label": raw_profit_label(row.raw_json),
+            "segment_metadata": segment_flags(row.raw_json),
             "source": "backfill_xbrl",
             "segment_name_norm": _normalize_segment_name_conservative(seg_name),
             "extractor_route": "xbrl",
@@ -591,6 +592,7 @@ def _try_xbrl_source(
         row_evidence = getattr(row, "raw_json", None) or {}
         for evidence_key in (
             "_sales_fact_explicit_nil",
+            "_profit_fact_explicit_nil",
             "_sales_fact_names",
             "_sales_fact_numeric_present",
             "_sales_fact_selected_name",

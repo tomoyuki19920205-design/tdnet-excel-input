@@ -688,26 +688,26 @@ class TestSegmentExtractionDetailed:
         current_segs = {s.normalized_segment_name: s for s in res.segments if s.period == "2027-02-28"}
         assert len(current_segs) == 3
         assert "Smartstore" in current_segs
-        assert current_segs["Smartstore"].sales == 1242325
-        assert current_segs["Smartstore"].profit == -89191
+        assert current_segs["Smartstore"].sales == 1242.325
+        assert current_segs["Smartstore"].profit == -89.191
 
         assert "Lawson Poplar" in current_segs
-        assert current_segs["Lawson Poplar"].sales == 1529912
-        assert current_segs["Lawson Poplar"].profit == 248684
+        assert current_segs["Lawson Poplar"].sales == 1529.912
+        assert current_segs["Lawson Poplar"].profit == 248.684
 
         assert "Other" in current_segs
-        assert current_segs["Other"].sales == 167612
-        assert current_segs["Other"].profit == -4651
+        assert current_segs["Other"].sales == 167.612
+        assert current_segs["Other"].profit == -4.651
 
         # 前期 (period=2026-02-28) の検証
         prior_segs = {s.normalized_segment_name: s for s in res.segments if s.period == "2026-02-28"}
         assert len(prior_segs) == 3
-        assert prior_segs["Smartstore"].sales == 1299000
-        assert prior_segs["Smartstore"].profit == -63000
-        assert prior_segs["Lawson Poplar"].sales == 1494000
-        assert prior_segs["Lawson Poplar"].profit == 234000
-        assert prior_segs["Other"].sales == 176000
-        assert prior_segs["Other"].profit == 2000
+        assert prior_segs["Smartstore"].sales == 1299
+        assert prior_segs["Smartstore"].profit == -63
+        assert prior_segs["Lawson Poplar"].sales == 1494
+        assert prior_segs["Lawson Poplar"].profit == 234
+        assert prior_segs["Other"].sales == 176
+        assert prior_segs["Other"].profit == 2
 
     def test_expected_end_propagation(self):
         # B. expected_end伝播テスト
@@ -770,7 +770,7 @@ class TestSegmentExtractionDetailed:
         assert result.status == "success_with_rows"
         assert len(result.segments) == 1
         row = result.segments[0]
-        assert row.sales == 1242325
+        assert row.sales == 1.242325
         assert row.raw_segment_name == "Smartstore"
         assert row.raw_json["_context_evidence"]["context_end"] == "2026-05-31"
         assert row.raw_json["_context_evidence"]["expected_context_end"] == "2026-05-28"
@@ -802,20 +802,20 @@ class TestSegmentExtractionDetailed:
             soup, "JP", "1Q", global_context_map, expected_end=datetime.date(2026, 5, 28)
         )
 
-        # Smartstore: raw 89191, sign '-', 最終 -90 百万円
+        # Preserve the disclosed 89,191 thousand yen without flooring the loss.
         cand_smart = res[("Smartstore", "current")]
         val_smart = _to_million_yen(cand_smart["profit"], "thousand_yen")
-        assert val_smart == -90
+        assert val_smart == -89.191
 
         # Other: raw 4651, sign '-', 最終 -5 百万円
         cand_other = res[("Other", "current")]
         val_other = _to_million_yen(cand_other["profit"], "thousand_yen")
-        assert val_other == -5
+        assert val_other == -4.651
 
         # Lawson Poplar: raw 248684, signなし, 最終 248 百万円
         cand_lawson = res[("LawsonPoplar", "current")]
         val_lawson = _to_million_yen(cand_lawson["profit"], "thousand_yen")
-        assert val_lawson == 248
+        assert val_lawson == 248.684
 
     def test_expected_end_fallback(self):
         # D. フォールバック回帰テスト

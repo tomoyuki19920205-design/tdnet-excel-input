@@ -1,0 +1,258 @@
+[
+  {
+    "ticker": "4443",
+    "doc": "20261008548227",
+    "zip_sha256": "e2a29d9f07bf05e27a4590f2a893bca35bffc45854f9cab13225255e85e9c132",
+    "status": "success_with_rows",
+    "rows": [
+      {
+        "name": "Sansan Bill One Business",
+        "period": "2026-05-31",
+        "sales": 10935,
+        "profit": 673,
+        "is_consolidated": true,
+        "flags": {
+          "profit_basis": "adjusted_operating_profit",
+          "profit_tag": "tse-qcedjpfr-44430:adjustedoperatingprofitlosssegmentinformation",
+          "profit_label": "セグメント利益または 損失(△)　(注)2",
+          "sales_basis": "including_intersegment",
+          "sales_label": "計",
+          "sales_tag": "jppfs_cor:netsales",
+          "period_start": "2025-06-01",
+          "period_end": "2025-08-31",
+          "is_consolidated": true,
+          "currency": "JPY",
+          "period_type": "ytd"
+        }
+      },
+      {
+        "name": "Eight Business",
+        "period": "2026-05-31",
+        "sales": 1296,
+        "profit": -57,
+        "is_consolidated": true,
+        "flags": {
+          "profit_basis": "adjusted_operating_profit",
+          "profit_tag": "tse-qcedjpfr-44430:adjustedoperatingprofitlosssegmentinformation",
+          "profit_label": "セグメント利益または 損失(△)　(注)2",
+          "sales_basis": "including_intersegment",
+          "sales_label": "計",
+          "sales_tag": "jppfs_cor:netsales",
+          "period_start": "2025-06-01",
+          "period_end": "2025-08-31",
+          "is_consolidated": true,
+          "currency": "JPY",
+          "period_type": "ytd"
+        }
+      },
+      {
+        "name": "Other",
+        "period": "2026-05-31",
+        "sales": 109,
+        "profit": -37,
+        "is_consolidated": true,
+        "flags": {
+          "profit_basis": "adjusted_operating_profit",
+          "profit_tag": "tse-qcedjpfr-44430:adjustedoperatingprofitlosssegmentinformation",
+          "profit_label": "セグメント利益または 損失(△)　(注)2",
+          "sales_basis": "including_intersegment",
+          "sales_label": "計",
+          "sales_tag": "jppfs_cor:netsales",
+          "period_start": "2025-06-01",
+          "period_end": "2025-08-31",
+          "is_consolidated": true,
+          "currency": "JPY",
+          "period_type": "ytd"
+        }
+      },
+      {
+        "name": "Sansan Bill One Business",
+        "period": "2027-05-31",
+        "sales": 12953,
+        "profit": 2734,
+        "is_consolidated": true,
+        "flags": {
+          "profit_basis": "adjusted_operating_profit",
+          "profit_tag": "tse-qcedjpfr-44430:adjustedoperatingprofitlosssegmentinformation",
+          "profit_label": "セグメント利益または 損失(△)　(注)2",
+          "sales_basis": "including_intersegment",
+          "sales_label": "計",
+          "sales_tag": "jppfs_cor:netsales",
+          "period_start": "2026-06-01",
+          "period_end": "2026-08-31",
+          "is_consolidated": true,
+          "currency": "JPY",
+          "period_type": "ytd"
+        }
+      },
+      {
+        "name": "Eight Business",
+        "period": "2027-05-31",
+        "sales": 1719,
+        "profit": -166,
+        "is_consolidated": true,
+        "flags": {
+          "profit_basis": "adjusted_operating_profit",
+          "profit_tag": "tse-qcedjpfr-44430:adjustedoperatingprofitlosssegmentinformation",
+          "profit_label": "セグメント利益または 損失(△)　(注)2",
+          "sales_basis": "including_intersegment",
+          "sales_label": "計",
+          "sales_tag": "jppfs_cor:netsales",
+          "period_start": "2026-06-01",
+          "period_end": "2026-08-31",
+          "is_consolidated": true,
+          "currency": "JPY",
+          "period_type": "ytd"
+        }
+      },
+      {
+        "name": "Other",
+        "period": "2027-05-31",
+        "sales": 140,
+        "profit": -92,
+        "is_consolidated": true,
+        "flags": {
+          "profit_basis": "adjusted_operating_profit",
+          "profit_tag": "tse-qcedjpfr-44430:adjustedoperatingprofitlosssegmentinformation",
+          "profit_label": "セグメント利益または 損失(△)　(注)2",
+          "sales_basis": "including_intersegment",
+          "sales_label": "計",
+          "sales_tag": "jppfs_cor:netsales",
+          "period_start": "2026-06-01",
+          "period_end": "2026-08-31",
+          "is_consolidated": true,
+          "currency": "JPY",
+          "period_type": "ytd"
+        }
+      }
+    ]
+  },
+  {
+    "ticker": "1777",
+    "doc": "20260730503391",
+    "zip_sha256": "ca7bd489e1127c09cebb7ff6a6ef8a753f1d215af48be6359052a0209b8e77f3",
+    "status": "success_with_rows",
+    "rows": [
+      {
+        "name": "Eastern Region",
+        "period": "2026-03-31",
+        "sales": 2692,
+        "profit": 474,
+        "is_consolidated": false,
+        "flags": {
+          "profit_basis": "operating_profit",
+          "profit_tag": "jppfs_cor:operatingincome",
+          "profit_label": "セグメント利益",
+          "sales_basis": "construction_revenue",
+          "sales_label": "完 成 工 事 高",
+          "sales_tag": "jppfs_cor:netsalesofcompletedconstructioncontractscns",
+          "period_start": "2025-04-01",
+          "period_end": "2025-06-30",
+          "is_consolidated": false,
+          "currency": "JPY",
+          "period_type": "ytd"
+        }
+      },
+      {
+        "name": "Middle Region",
+        "period": "2026-03-31",
+        "sales": 4150,
+        "profit": 888,
+        "is_consolidated": false,
+        "flags": {
+          "profit_basis": "operating_profit",
+          "profit_tag": "jppfs_cor:operatingincome",
+          "profit_label": "セグメント利益",
+          "sales_basis": "construction_revenue",
+          "sales_label": "完 成 工 事 高",
+          "sales_tag": "jppfs_cor:netsalesofcompletedconstructioncontractscns",
+          "period_start": "2025-04-01",
+          "period_end": "2025-06-30",
+          "is_consolidated": false,
+          "currency": "JPY",
+          "period_type": "ytd"
+        }
+      },
+      {
+        "name": "Western Region",
+        "period": "2026-03-31",
+        "sales": 2215,
+        "profit": 334,
+        "is_consolidated": false,
+        "flags": {
+          "profit_basis": "operating_profit",
+          "profit_tag": "jppfs_cor:operatingincome",
+          "profit_label": "セグメント利益",
+          "sales_basis": "construction_revenue",
+          "sales_label": "完 成 工 事 高",
+          "sales_tag": "jppfs_cor:netsalesofcompletedconstructioncontractscns",
+          "period_start": "2025-04-01",
+          "period_end": "2025-06-30",
+          "is_consolidated": false,
+          "currency": "JPY",
+          "period_type": "ytd"
+        }
+      },
+      {
+        "name": "Eastern Region",
+        "period": "2027-03-31",
+        "sales": 2706,
+        "profit": 490,
+        "is_consolidated": false,
+        "flags": {
+          "profit_basis": "operating_profit",
+          "profit_tag": "jppfs_cor:operatingincome",
+          "profit_label": "セグメント利益",
+          "sales_basis": "construction_revenue",
+          "sales_label": "完 成 工 事 高",
+          "sales_tag": "jppfs_cor:netsalesofcompletedconstructioncontractscns",
+          "period_start": "2026-04-01",
+          "period_end": "2026-06-30",
+          "is_consolidated": false,
+          "currency": "JPY",
+          "period_type": "ytd"
+        }
+      },
+      {
+        "name": "Middle Region",
+        "period": "2027-03-31",
+        "sales": 3855,
+        "profit": 784,
+        "is_consolidated": false,
+        "flags": {
+          "profit_basis": "operating_profit",
+          "profit_tag": "jppfs_cor:operatingincome",
+          "profit_label": "セグメント利益",
+          "sales_basis": "construction_revenue",
+          "sales_label": "完 成 工 事 高",
+          "sales_tag": "jppfs_cor:netsalesofcompletedconstructioncontractscns",
+          "period_start": "2026-04-01",
+          "period_end": "2026-06-30",
+          "is_consolidated": false,
+          "currency": "JPY",
+          "period_type": "ytd"
+        }
+      },
+      {
+        "name": "Western Region",
+        "period": "2027-03-31",
+        "sales": 1481,
+        "profit": 290,
+        "is_consolidated": false,
+        "flags": {
+          "profit_basis": "operating_profit",
+          "profit_tag": "jppfs_cor:operatingincome",
+          "profit_label": "セグメント利益",
+          "sales_basis": "construction_revenue",
+          "sales_label": "完 成 工 事 高",
+          "sales_tag": "jppfs_cor:netsalesofcompletedconstructioncontractscns",
+          "period_start": "2026-04-01",
+          "period_end": "2026-06-30",
+          "is_consolidated": false,
+          "currency": "JPY",
+          "period_type": "ytd"
+        }
+      }
+    ]
+  }
+]

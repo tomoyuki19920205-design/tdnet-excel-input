@@ -282,6 +282,7 @@ class MigrationDB:
         seg_cols = {row[1] for row in cur2.fetchall()}
         seg_migrations = [
             ("raw_profit_label", "ALTER TABLE segment_financials ADD COLUMN raw_profit_label TEXT DEFAULT ''"),
+            ("segment_metadata", "ALTER TABLE segment_financials ADD COLUMN segment_metadata TEXT"),
             ("data_source", "ALTER TABLE segment_financials ADD COLUMN data_source TEXT DEFAULT 'excel_legacy'"),
             ("segment_name_norm", "ALTER TABLE segment_financials ADD COLUMN segment_name_norm TEXT"),
             ("extractor_route", "ALTER TABLE segment_financials ADD COLUMN extractor_route TEXT"),
@@ -657,6 +658,7 @@ class MigrationDB:
         unit_raw: str | None = None,
         unit_multiplier: int | None = None,
         raw_profit_label: str = "",
+        segment_metadata: dict | None = None,
         data_source: str = "migration",
         actor: str = "migration",
         source: str = "migration",
@@ -681,7 +683,7 @@ class MigrationDB:
         # 既存チェック
         cur = self._conn.execute(
             """
-            SELECT segment_order, segment_sales, segment_profit, raw_profit_label
+            SELECT segment_order, segment_sales, segment_profit, raw_profit_label, segment_metadata
             FROM segment_financials
             WHERE company_code=? AND fiscal_year_end=? AND quarter=?
               AND segment_name=?
@@ -697,16 +699,16 @@ class MigrationDB:
                     (company_code, fiscal_year_end, quarter,
                      segment_name, segment_order,
                      segment_sales, segment_profit,
-                     raw_profit_label, data_source,
+                     raw_profit_label, segment_metadata, data_source,
                      segment_name_norm, extractor_route, source_doc_type,
                      disclosure_date, tdnet_doc_id, row_type,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (company_code, fiscal_year_end, quarter,
                  segment_name, segment_order,
                  segment_sales, segment_profit,
-                 raw_profit_label, data_source,
+                 raw_profit_label, json.dumps(segment_metadata, ensure_ascii=False, sort_keys=True) if segment_metadata else None, data_source,
                  segment_name_norm, extractor_route, source_doc_type,
                  disclosure_date, tdnet_doc_id, row_type,
                  now, now),
@@ -726,8 +728,12 @@ class MigrationDB:
                         )
             return "inserted"
 
-        old_order, old_sales, old_profit, old_label = existing
+        old_order, old_sales, old_profit, old_label, old_metadata = existing
         changes = {}
+        if segment_metadata:
+            merged_metadata = json.dumps({**json.loads(old_metadata or '{}'), **segment_metadata}, ensure_ascii=False, sort_keys=True)
+            if merged_metadata != old_metadata:
+                changes['segment_metadata'] = (old_metadata, merged_metadata)
         if segment_order != old_order:
             changes["segment_order"] = (old_order, segment_order)
         if segment_sales is not None and old_sales != segment_sales:
@@ -783,6 +789,7 @@ class MigrationDB:
         unit_raw: str | None = None,
         unit_multiplier: int | None = None,
         raw_profit_label: str = "",
+        segment_metadata: dict | None = None,
         data_source: str = "migration",
         actor: str = "migration",
         source: str = "migration",
@@ -813,6 +820,7 @@ class MigrationDB:
             "segment_sales",
             "segment_profit",
             "raw_profit_label",
+            "segment_metadata",
             "data_source",
             "segment_name_norm",
             "extractor_route",
@@ -826,6 +834,7 @@ class MigrationDB:
             segment_sales,
             segment_profit,
             raw_profit_label,
+            json.dumps(segment_metadata, ensure_ascii=False, sort_keys=True) if segment_metadata else None,
             data_source,
             segment_name_norm,
             extractor_route,
@@ -887,6 +896,17 @@ class MigrationDB:
         # Different versions still follow the existing conflict gate below.
         if existing_filing_id and existing_filing_id == incoming_filing_id:
             values = list(incoming_values)
+            metadata_index = saved_columns.index('segment_metadata')
+            old_meta = json.loads(existing_by_column.get('segment_metadata') or '{}')
+            new_meta = segment_metadata or {}
+            # Same filing is necessary but insufficient: incompatible bases cannot
+            # silently fill a peer metric from a different accounting definition.
+            for key in ('sales_basis', 'profit_basis', 'is_consolidated', 'currency', 'period_start', 'period_end'):
+                if key in old_meta and key in new_meta and old_meta[key] != new_meta[key]:
+                    return SegmentUpsertResult('rejected_measure_conflict', row_id, False,
+                        'segment_metadata_incompatible:' + key, existing_source, incoming_source)
+            merged_meta = {**old_meta, **new_meta}
+            values[metadata_index] = json.dumps(merged_meta, ensure_ascii=False, sort_keys=True) if merged_meta else None
             for metric in ("segment_sales", "segment_profit"):
                 index = saved_columns.index(metric)
                 if values[index] is None:

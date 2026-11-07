@@ -410,9 +410,9 @@ def _to_million_yen(value: int, unit: str) -> int:
     if unit == "million_yen":
         return value
     if unit == "thousand_yen":
-        return value // 1000
+        return value / 1000
     if unit == "yen":
-        return value // 1_000_000
+        return value / 1_000_000
     return value
 
 
@@ -445,7 +445,9 @@ def _parse_ixbrl_number(text: str, sign_attr: str | None = None) -> Optional[int
     s = s.replace(",", "").replace("，", "").replace(" ", "").strip()
 
     try:
-        val = int(float(s))
+        from decimal import Decimal
+        parsed = Decimal(s)
+        val = int(parsed) if parsed == parsed.to_integral_value() else float(parsed)
         return -val if negative else val
     except (ValueError, OverflowError):
         return None
@@ -831,9 +833,9 @@ def extract_segments_from_xbrl_zip_detailed(
                     sales_raw = sales
 
                     if sales is not None:
-                        sales = _to_million_yen(sales, unit)
+                        sales = (data.get("sales_fact") or {}).get("million_value", _to_million_yen(sales, unit))
                     if profit is not None:
-                        profit = _to_million_yen(profit, unit)
+                        profit = (data.get("profit_fact") or {}).get("million_value", _to_million_yen(profit, unit))
 
                     if period_type == "previous" and _prev_period:
                         row_period = _prev_period
@@ -841,13 +843,23 @@ def extract_segments_from_xbrl_zip_detailed(
                         row_period = loop_period or ""
 
                     profit_tag = data.get("profit_tag")
-                    row_raw_json = {"_segment_period_role": period_type}
+                    row_raw_json = {"_segment_period_role": period_type, "sales_fact": data.get("sales_fact"), "profit_fact": data.get("profit_fact")}
                     if profit_tag:
                         row_raw_json["profit_tag"] = profit_tag
                         from src.segment.profit_basis import profit_basis
-                        row_raw_json["profit_basis"] = profit_basis(profit_tag)
+                        # The company's disclosed row label can override a misleading
+                        # company taxonomy name (e.g. operating-income tag for business profit).
+                        label = data.get('raw_profit_label') or ''
+                        row_raw_json['raw_profit_label'] = label
+                        row_raw_json["profit_basis"] = profit_basis(label) or profit_basis(profit_tag) or 'company_defined_unknown'
+                    from src.segment.semantic_facts import sales_basis
+                    row_raw_json['raw_sales_label'] = data.get('raw_sales_label') or ''
+                    row_raw_json['sales_basis'] = sales_basis(data.get('raw_sales_label'), data.get('sales_fact_selected_name'), data.get('sales_fact_names') or [])
+                    row_raw_json['is_consolidated'] = not ('nonconsolidated' in (data.get('context_ref') or '').lower() or '非連結' in (document_title or ''))
+                    row_raw_json['currency'] = 'JPY' if unit in ('yen', 'thousand_yen', 'million_yen', '円', '千円', '百万円') else None
                     row_raw_json.update({
                         "_sales_fact_explicit_nil": bool(data.get("sales_fact_explicit_nil")),
+                        "_profit_fact_explicit_nil": bool(data.get("profit_fact_explicit_nil")),
                         "_sales_fact_names": list(data.get("sales_fact_names") or []),
                         "_sales_fact_numeric_present": sales_raw is not None,
                         "_sales_fact_selected_name": data.get("sales_fact_selected_name"),
@@ -873,7 +885,7 @@ def extract_segments_from_xbrl_zip_detailed(
                         ),
                     })
 
-                    if include_context_evidence:
+                    if True:  # Period evidence is required by ordinary persistence, not only audits.
                         row_raw_json = row_raw_json or {}
                         ctx_ref = data.get("context_ref", "")
                         cinfo = global_context_map.get(ctx_ref, {})
@@ -929,7 +941,7 @@ def extract_segments_from_xbrl_zip_detailed(
                         unit="million_yen",
                         extraction_method="xbrl",
                         confidence_score=0.95,
-                        is_consolidated=True,
+                        is_consolidated=row_raw_json['is_consolidated'],
                         accounting_standard=accounting_standard,
                         table_title=f"XBRL segment: {seg_file}",
                         raw_json=row_raw_json,
@@ -1178,6 +1190,7 @@ def _extract_ixbrl_segment_data(
         {(member_name, period_type): {"sales": int, "profit": int}}
         period_type は "current" | "previous"
     """
+    from src.segment.semantic_facts import disclosed_metric, monetary_fact
     sales_tags = ALL_SALES_TAGS
     profit_tags = ALL_PROFIT_TAGS
 
@@ -1207,6 +1220,7 @@ def _extract_ixbrl_segment_data(
         ctx = tag.get("contextref", "")
         sign = tag.get("sign")
         text = tag.get_text(strip=True)
+        inferred_metric, disclosed_label = disclosed_metric(tag)
 
         # unknown context と Instant は除外。current / previous は両方通す。
         period_type = _classify_period_type(ctx)
@@ -1230,13 +1244,26 @@ def _extract_ixbrl_segment_data(
             elif any(local_name.endswith(s) for s in _COMPANY_PROFIT_SUFFIXES):
                 if not local_name.endswith("extraordinaryincome"):
                     is_profit = True
+        semantic_only = not is_sales and not is_profit
+        if semantic_only:
+            is_sales = inferred_metric == 'sales'
+            is_profit = inferred_metric == 'profit'
 
         value = _parse_ixbrl_number(text, sign)
+        fact = monetary_fact(tag, soup)
+        if fact is not None and fact.get("currency") != "JPY":
+            continue  # Never label foreign currency, ratios, shares or EPS as yen.
 
         # ReportableSegmentsMember の合計とdimensionなし連結値は、
         # explicit-nil segmentを安全に受理するreconciliation証跡にだけ使う。
         context_info = global_context_map.get(ctx, {}) if global_context_map else {}
         member = _extract_segment_member(ctx, context_info)
+        if semantic_only:
+            dimensions = {str(m.get('dimension') or '').split(':')[-1].lower()
+                          for m in context_info.get('explicit_members', [])}
+            business_axes = {'operatingsegmentsaxis', 'businesssegmentsaxis', 'businesssegmentaxis', 'reportablesegmentsaxis'}
+            if not (dimensions & business_axes) and not re.search(r'(?:reportablesegments?member|operatingsegmentsnotincluded)', ctx, re.I):
+                continue
         if not member:
             if is_sales and value is not None:
                 ctx_l = ctx.lower()
@@ -1271,7 +1298,10 @@ def _extract_ixbrl_segment_data(
                 "profit": None,
                 "profit_priority": 999,
                 "profit_tag": None,
+                "raw_profit_label": '',
+                "raw_sales_label": '',
                 "sales_fact_explicit_nil": False,
+                "profit_fact_explicit_nil": False,
                 "sales_fact_names": [],
                 "sales_fact_selected_name": None,
                 "segment_member_kind": (
@@ -1289,6 +1319,8 @@ def _extract_ixbrl_segment_data(
             temp_candidate[key]["sales_fact_names"].append(name)
         if is_sales and str(tag.get("xsi:nil") or tag.get("nil") or "").lower() == "true":
             temp_candidate[key]["sales_fact_explicit_nil"] = True
+        if is_profit and str(tag.get("xsi:nil") or tag.get("nil") or "").lower() == "true":
+            temp_candidate[key]["profit_fact_explicit_nil"] = True
         if value is None:
             continue
 
@@ -1296,13 +1328,21 @@ def _extract_ixbrl_segment_data(
             if is_primary_sales or temp_candidate[key]["sales"] is None:
                 temp_candidate[key]["sales"] = value
                 temp_candidate[key]["sales_fact_selected_name"] = name
+                temp_candidate[key]["raw_sales_label"] = disclosed_label
+                temp_candidate[key]["sales_fact"] = fact
         elif is_profit:
             priority = _get_profit_priority(name)
+            if inferred_metric == 'profit' and 'セグメント' in disclosed_label:
+                priority = 0
+            elif inferred_metric == 'profit' and name not in profit_tags and not any(name.endswith(s) for s in _COMPANY_PROFIT_SUFFIXES):
+                priority = 5
             current_priority = temp_candidate[key].get("profit_priority", 999)
             if priority < current_priority:
                 temp_candidate[key]["profit"] = value
                 temp_candidate[key]["profit_priority"] = priority
                 temp_candidate[key]["profit_tag"] = name
+                temp_candidate[key]["raw_profit_label"] = disclosed_label
+                temp_candidate[key]["profit_fact"] = fact
 
     # global_context_map から「当期の期待終了日」の基準値 (reference_end) を推定
     reference_end: Optional[datetime.date] = None

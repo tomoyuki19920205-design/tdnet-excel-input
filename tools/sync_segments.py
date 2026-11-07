@@ -11,7 +11,7 @@ Usage:
 """
 from __future__ import annotations
 
-from src.segment.profit_basis import profit_basis, segment_flags
+from src.segment.profit_basis import persisted_flags, profit_basis, segment_flags
 
 import argparse
 import glob
@@ -793,8 +793,8 @@ def plan_alias_aware_segment_ids(
         )
         segment_name = str(row["segment_name"]).strip()
         segment_key = normalize_segment_display_key(ticker, segment_name)
-        sales = int(row["segment_sales"]) if row["segment_sales"] is not None else None
-        profit = int(row["segment_profit"]) if row["segment_profit"] is not None else None
+        sales = row["segment_sales"]
+        profit = row["segment_profit"]
         group = (ticker, period, quarter)
         wide_payload = {
             "ticker": ticker, "period": period, "quarter": quarter,
@@ -1105,8 +1105,8 @@ def sync_sqlite_segments(
         # SQLite REAL -> Supabase bigint: int() で変換
         raw_sales = rdict["segment_sales"]
         raw_profit = rdict["segment_profit"]
-        sales = int(raw_sales) if raw_sales is not None else None
-        profit = int(raw_profit) if raw_profit is not None else None
+        sales = raw_sales if raw_sales is not None else None
+        profit = raw_profit if raw_profit is not None else None
 
         payload = {
             "ticker": rdict["company_code"],
@@ -1168,9 +1168,9 @@ def sync_sqlite_segments(
                     raw_profit = rdict["segment_profit"]
                     ticker_batches[key].append({
                         "segment_name": rdict["segment_name"].strip(),
-                        "sales": int(raw_sales) if raw_sales is not None else None,
-                        "profit": int(raw_profit) if raw_profit is not None else None,
-                        "profit_basis": profit_basis(rdict.get('raw_profit_label')),
+                        "sales": raw_sales if raw_sales is not None else None,
+                        "profit": raw_profit if raw_profit is not None else None,
+                        "flags": persisted_flags(rdict),
                     })
 
                 canonical_total = 0

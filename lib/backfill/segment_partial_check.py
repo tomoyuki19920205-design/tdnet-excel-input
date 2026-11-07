@@ -272,10 +272,15 @@ def check_xbrl_partial_segments(
     suspicious = False
     reason = ""
 
-    missing_profits = sum(r.get("segment_profit") is None for r in current_rows)
+    missing_profits = sum(r.get("segment_profit") is None and not r.get('_profit_fact_explicit_nil') and not (r.get('profit_status') == 'not_disclosed' and r.get('profit_non_disclosure_evidence')) for r in current_rows)
+    missing_sales = sum(r.get("segment_sales") is None and not r.get('_sales_fact_explicit_nil') for r in current_rows)
+    detail['sales_missing_count'] = missing_sales
     detail["profit_missing_count"] = missing_profits
     detail["profit_non_null_count"] = len(current_rows) - missing_profits
-    if missing_profits:
+    if missing_sales:
+        suspicious = True
+        reason = 'segment_sales_incomplete'
+    elif missing_profits:
         suspicious = True
         reason = "segment_profit_incomplete"
     elif is_other_only:
@@ -335,6 +340,33 @@ def decide_fallback_adoption(
             detail.get("ticker"), detail.get("fiscal_year_end"),
         )
         return False, "keep_xbrl"
+
+    # A more populated candidate is not permission to delete previously extracted
+    # cells. Compare exact normalized identities within this same filing; never use
+    # fuzzy names or a table's aggregate quality score to override a valid metric.
+    from lib.pipeline.canonical_writer import normalize_segment_display_key
+    from src.segment.profit_basis import persisted_flags
+    ticker = detail.get('ticker', '')
+    def identity(row):
+        return (row.get('period') or detail.get('fiscal_year_end'), row.get('quarter'),
+                normalize_segment_display_key(ticker, row.get('segment_name', '')))
+    new_rows = {identity(row): row for row in pdf_records}
+    for old in xbrl_records:
+        if all(old.get(m) is None for m in ('segment_sales', 'segment_profit')):
+            continue
+        new = new_rows.get(identity(old))
+        if new is None:
+            detail['compatibility_reason'] = 'existing_segment_not_identified_in_fallback'
+            return False, 'keep_xbrl_incompatible_fallback'
+        old_flags, new_flags = persisted_flags(old), persisted_flags(new)
+        for key in ('profit_basis', 'sales_basis', 'is_consolidated', 'currency', 'period_start', 'period_end'):
+            if old_flags.get(key) is not None and new_flags.get(key) is not None and old_flags[key] != new_flags[key]:
+                detail['compatibility_reason'] = 'incompatible_' + key
+                return False, 'keep_xbrl_incompatible_fallback'
+        for metric in ('segment_sales', 'segment_profit'):
+            if old.get(metric) is not None and old[metric] != new.get(metric):
+                detail['compatibility_reason'] = 'existing_numeric_' + metric + '_would_change'
+                return False, 'keep_xbrl_incompatible_fallback'
 
     # PDF V4 の方がセグメント数が多い → 採用
     if pdf_count > xbrl_count:
