@@ -919,7 +919,8 @@ def _textblock_segment_records(root, start, end, scope, instance_name):
         name=elem.tag.rsplit('}',1)[-1]
         if 'segment' not in name.lower() or 'textblock' not in name.lower():continue
         for row in extract_textblock_tables(elem.text,period_start=start,period_end=end,is_consolidated=scope=='true',textblock_tag=name,context_ref=elem.get('contextRef','')):
-            key=_normalize_segment_name(row['segment_name'])
+            printed=disclosed_column_name([{'inline_evidence':{'column':{'label':row['raw_segment_label'],'role':'segment'}}}])
+            key=_normalize_segment_name(printed or row['segment_name'])
             if key in rows:
                 if any(rows[key][m]!=row[m] for m in ('sales','profit')):return []
             else:rows[key]=row
@@ -928,7 +929,7 @@ def _textblock_segment_records(root, start, end, scope, instance_name):
         facts={m:{**f,'instance_file':instance_name} for m,f in row['facts'].items()}
         metadata={k:row[k] for k in ('period_start','period_end','is_consolidated','currency','sales_basis','profit_basis','sales_label','profit_label')}
         metadata.update(period_type='ytd',segment_label=row['raw_segment_label'],extraction_method='xhtml_textblock',table_facts=facts)
-        result.append(EdinetSegmentRecord(segment_name_raw=row['segment_name'],segment_name_norm=key,sales=row['sales'],profit=row['profit'],sales_ytd=row['sales'],profit_ytd=row['profit'],derivation_method='ytd_only',special_row_type='ordinary_segment',metadata=metadata))
+        result.append(EdinetSegmentRecord(segment_name_raw=key,segment_name_norm=key,sales=row['sales'],profit=row['profit'],sales_ytd=row['sales'],profit_ytd=row['profit'],derivation_method='ytd_only',special_row_type='other' if key=='その他' else 'ordinary_segment',metadata=metadata))
     return result
 
 

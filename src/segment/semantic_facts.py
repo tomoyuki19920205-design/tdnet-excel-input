@@ -168,7 +168,7 @@ def column_role(label):
         role = 'header_group'
     elif re.match(r'^(?:計|合計|小計|総計|連結合計|報告セグメント計|事業計|total|subtotal)(?:$|\(|注|※)', text):
         role = 'total'
-    elif text in ('連結','consolidated') or re.match(r'^(?:調整額|消去|全社|連結財務諸表|財務諸表計上額|損益計算書計上額|連結損益計算書|四半期連結損益計算書|中間連結損益計算書)', text):
+    elif text in ('連結','consolidated') or re.match(r'^(?:調整額|消去|全社|連結財務諸表|財務諸表計上額|(?:四半期|中間)?(?:連結)?損益計算書)', text):
         role = 'adjustment_or_consolidated'
     else:
         role = 'segment' if label else 'unresolved'
