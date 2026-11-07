@@ -287,20 +287,16 @@ class TestExpandSegmentsRows:
         )
         assert all(r["ticker"] == "7203" for r in rows)
 
-    def test_dedupe(self):
-        """同一 source_row_key が重複する場合、後勝ちで dedupe される"""
-        rows, _ = expand_segments_rows(
-            ticker="6750", period="2026-03-31", quarter="FY",
-            segments=[
-                {"segment_name": "テスト", "sales": 100, "profit": 50},
-                {"segment_name": "テスト", "sales": 200, "profit": 80},
-            ],
-            source="xbrl",
-        )
-        # 後勝ちで 2 rows (sales + profit)
-        assert len(rows) == 2
-        sales_row = [r for r in rows if r["metric"] == "sales"][0]
-        assert sales_row["value"] == 200
+    def test_conflicting_same_filing_cells_are_rejected(self):
+        with pytest.raises(ValueError, match="conflicting business measures"):
+            expand_segments_rows(
+                ticker="6750", period="2026-03-31", quarter="FY",
+                segments=[
+                    {"segment_name": "テスト", "sales": 100, "profit": 50},
+                    {"segment_name": "テスト", "sales": 200, "profit": 80},
+                ],
+                source="xbrl",
+            )
 
 
 # ================================================================

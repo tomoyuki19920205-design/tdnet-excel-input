@@ -323,7 +323,8 @@ def expand_segments_rows(
         for metric in ("sales", "sales_with_internal", "profit"):
             value = seg.get(metric)
             if value is None:
-                skipped += 1
+                if metric in seg:
+                    skipped += 1
                 continue
             row_key = _make_segments_row_key(
                 ticker, period, quarter, seg_key, metric, source, filing_id
