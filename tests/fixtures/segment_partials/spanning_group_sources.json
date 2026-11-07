@@ -1,0 +1,14 @@
+[
+  {
+    "ticker": "9227",
+    "file": "spanning_group_9227.zip",
+    "original_path": "C:\\Users\\takuy\\tdnet-production\\state\\data\\edinet_cache\\S100Z6BW\\xbrl.zip",
+    "sha256": "24d79a7ab168be57a158821d65f054c64a07f2c27c4e1d8b84c05ef25623fedc"
+  },
+  {
+    "ticker": "8051",
+    "file": "spanning_group_8051.zip",
+    "original_path": "C:\\Users\\takuy\\tdnet-production\\state\\data\\edinet_cache\\S100TRSX\\xbrl.zip",
+    "sha256": "f49e4eec56b9da2067b1d6db623ccdfa82facc45ac11731e8ef6cc3a37466631"
+  }
+]

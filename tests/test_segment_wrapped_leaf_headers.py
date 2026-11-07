@@ -31,3 +31,19 @@ def test_generic_member_remains_valid_when_original_leaf_is_real_business():
 
 def test_reportable_total_label_is_not_a_business():
     assert column_role('報告セグメント 合計')=='total'
+
+def test_spanning_total_group_keeps_real_business_children():
+    with zipfile.ZipFile(FIX/'spanning_group_9227.zip') as source:
+        name=next(n for n in source.namelist() if '/PublicDoc/0105010_honbun' in n and n.endswith('.htm'))
+        soup=BeautifulSoup(source.read(name),'html.parser')
+    fact=next(t for t in soup.find_all('ix:nonfraction') if 'MicrowaveSolutionBusinessMemberReportableSegmentMember' in str(t.get('contextref')) and str(t.get('name')).endswith('RevenuesFromExternalCustomers'))
+    column=column_evidence(fact)
+    assert column['role']=='segment' and column['label']=='マイクロ波化学関連事業'
+
+def test_spanning_reconciliation_group_keeps_actual_other_business():
+    with zipfile.ZipFile(FIX/'spanning_group_8051.zip') as source:
+        name=next(n for n in source.namelist() if '/PublicDoc/0105010_honbun' in n and n.endswith('.htm'))
+        soup=BeautifulSoup(source.read(name),'html.parser')
+    fact=next(t for t in soup.find_all('ix:nonfraction') if str(t.get('contextref'))=='Prior1YearDuration_OperatingSegmentsNotIncludedInReportableSegmentsAndOtherRevenueGeneratingBusinessActivitiesMember' and str(t.get('name')).endswith('RevenuesFromExternalCustomers'))
+    column=column_evidence(fact)
+    assert column['role']=='segment' and column['label']=='その他 (注)１'

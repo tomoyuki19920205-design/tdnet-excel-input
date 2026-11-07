@@ -86,7 +86,7 @@ def column_evidence(tag):
         return {'label': '', 'role': 'unresolved'}
     cache = table.__dict__.get('_segment_column_evidence')
     if cache is None:
-        occupied = {}; headers = {}; cache = {}; body_started = False
+        occupied = {}; headers = {}; cache = {}; body_started = False; spanning_group_headers=set()
         for ri, row in enumerate(table.find_all('tr')):
             if row.find_parent('table') is not table:
                 continue
@@ -117,6 +117,8 @@ def column_evidence(tag):
                 unit_only = bool(re.fullmatch(r'(?:金額)?\(?(?:百万円|千円|円|millionsofyen|thousandsofyen)\)?',compact(label)))
                 note_only = bool(re.fullmatch(r'\(?注\)?[0-9一二三四五六七八九十、,.・]*\)?',compact(label)))
                 if not body_started and label and not unit_only and not note_only:
+                    if colspan > 1 and column_role(label) in ('total','adjustment_or_consolidated'):
+                        spanning_group_headers.add(label)
                     for col in range(ci, ci + colspan):
                         headers.setdefault(col,[]).append(label)
                 if has_fact:
@@ -127,6 +129,7 @@ def column_evidence(tag):
                         occupied[rr, cc] = True
                 ci += colspan
         table.__dict__['_segment_column_evidence'] = cache
+        table.__dict__['_segment_spanning_group_headers'] = spanning_group_headers
         leaf_paths={}
         for p in cache.values():
             businesses=tuple(compact(x) for x in p if column_role(x)=='segment')
@@ -178,7 +181,10 @@ def column_evidence(tag):
             return result
     # Retain both levels of real business headers (e.g. construction / Japan).
     # Reportable-segment group captions and note-only rows do not rename a cell.
-    meaningful=[x for x in path if column_role(x) not in ('header_group','unresolved')]
+    groups=table.__dict__.get('_segment_spanning_group_headers',set())
+    meaningful=[x for i,x in enumerate(path) if column_role(x) not in ('header_group','unresolved') and not (
+        x in groups and any(column_role(child)=='segment' and not metric_from_label(child) for child in path[i+1:])
+    )]
     if meaningful:
         last=meaningful[-1];role=column_role(last)
         aggregate=next((x for x in meaningful if column_role(x) in ('total','adjustment_or_consolidated')),None)
