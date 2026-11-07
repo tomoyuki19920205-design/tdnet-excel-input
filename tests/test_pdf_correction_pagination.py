@@ -35,3 +35,15 @@ def test_following_quarter_only_tables_do_not_displace_cumulative_tables():
     assert {r['segment_metadata']['period_start'] for r in rows}=={'2026-04-01'}
     assert {r['segment_metadata']['source_page'] for r in rows}=={16}
     assert 'current_qtd' in {p.period_type for p in result.extracted_periods}
+
+def test_actual_correction_with_stale_toc_keeps_following_current_table():
+    result=run_segment_detection_v4(str(FIX/'correction_20251030583654.pdf'),ticker='9444')
+    rows=verified_pdf_records(result,'2023-04-30','FY')
+    current=[r for r in rows if r['period']=='2023-04-30']
+    assert len(current)==4
+    mobile=next(r for r in current if r['segment_name']=='移動体通信関連事業')
+    assert mobile['segment_profit']==-393.983
+    assert mobile['segment_sales']==14017.947
+    assert mobile['segment_metadata']['source_page']==18
+    assert mobile['segment_metadata']['profit_basis']=='ordinary_profit'
+    assert {r['period'] for r in rows}=={'2022-04-30','2023-04-30'}

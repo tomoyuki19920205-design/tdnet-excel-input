@@ -490,11 +490,18 @@ def _phase1_candidate_pages(
     # physical pages using a corroborating adjacent printed page number.
     computed_base_0based = toc_booklet_page - 1
     printed_numbers = {}
+    section_pages = []
     for index, page in enumerate(pdf.pages):
         try:
             lines = (page.extract_text() or '').splitlines()
         except Exception:
             continue
+        # A corrected booklet can retain a stale TOC even when its page
+        # numbering is internally consistent. Supplement it from the actual
+        # section heading; all normal table/period gates still apply below.
+        if any(re.fullmatch(r'[（(【]?\s*セグメント情報(?:等)?\s*[）)】]?', line.strip())
+               for line in lines):
+            section_pages.append(index)
         numbers = set()
         for line in lines[:3] + lines[-3:]:
             match = re.fullmatch(r'\s*[-−―–—]?\s*(\d{1,4})\s*[-−―–—]?\s*', line)
@@ -536,6 +543,13 @@ def _phase1_candidate_pages(
                 "page_index_1based": p_0based + 1,
             })
 
+    section_candidates = {p for index in section_pages
+                          for p in range(index, min(total_pages, index + 4))}
+    added = sorted(section_candidates - set(candidate_pages))
+    if added:
+        candidate_pages = sorted(set(candidate_pages) | section_candidates)
+        log['actual_section_heading_pages_0based'] = section_pages
+        log['section_heading_supplement_0based'] = added
     log["candidate_pages"] = candidate_pages
     log["candidate_pages_1based"] = [p + 1 for p in candidate_pages]
     log["candidate_source"] = "toc_derived"

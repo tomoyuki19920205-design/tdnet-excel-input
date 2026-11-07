@@ -1,0 +1,7 @@
+{
+  "ticker": "9444",
+  "disclosure_id": "20251030583654",
+  "source_url": "https://www.release.tdnet.info/inbs/140120251030583654.pdf",
+  "sha256": "a33b0d6b13e229e6776a38bd9f1a5a9d9be71f3ac2be9089990d07c57d853f20",
+  "failure": "Printed TOC retains page 14, actual segment section begins on page 17 and current table is on page 18"
+}
