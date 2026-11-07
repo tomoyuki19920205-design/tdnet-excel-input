@@ -472,7 +472,8 @@ def _phase1_candidate_pages(
     ページ番号の基準（v4 固定定義）:
       candidate_pages の各要素 = 0始まりの物理インデックス
       toc_booklet_page          = 目次記載の冊子番号（1始まり）
-      computed_base_0based      = toc_booklet_page - 1（単純変換）
+      computed_base_0based      = 連続する印刷ページ番号で原本へ対応付け
+                                 対応が一意でなければ従来の冊子番号 - 1
 
     探索対象: base-1 〜 base+3（TOC→物理ページの ±1 ずれを安全吸収）
     """
@@ -485,8 +486,30 @@ def _phase1_candidate_pages(
         log["candidate_source"] = "all_pages_fallback"
         return candidate_pages
 
-    # 冊子番号 → 0始まり物理インデックス（単純変換）
+    # Correction cover sheets shift booklet pages. Bind the printed page to
+    # physical pages using a corroborating adjacent printed page number.
     computed_base_0based = toc_booklet_page - 1
+    printed_numbers = {}
+    for index, page in enumerate(pdf.pages):
+        try:
+            lines = (page.extract_text() or '').splitlines()
+        except Exception:
+            continue
+        numbers = set()
+        for line in lines[:3] + lines[-3:]:
+            match = re.fullmatch(r'\s*[-−―–—]?\s*(\d{1,4})\s*[-−―–—]?\s*', line)
+            if match:
+                numbers.add(int(match.group(1)))
+        printed_numbers[index] = numbers
+    bound_pages = [index for index,numbers in printed_numbers.items()
+        if toc_booklet_page in numbers and (
+            toc_booklet_page + 1 in printed_numbers.get(index + 1, set())
+            or toc_booklet_page - 1 in printed_numbers.get(index - 1, set()))]
+    if len(bound_pages) == 1:
+        computed_base_0based = bound_pages[0]
+        log['toc_physical_binding'] = {'printed_page':toc_booklet_page,
+            'physical_page_0based':computed_base_0based,
+            'method':'adjacent_printed_page_numbers'}
 
     candidate_pages = []
     candidate_detail: list[dict] = []
@@ -605,6 +628,9 @@ def _detect_period_label_in_row(row: list[Any]) -> str | None:
 
 def _classify_period_type(label: str) -> str:
     """期間ラベルを "previous" / "current" / "unknown" に分類する。"""
+    standalone = re.search(r'(前|当)第[2-4２-４二三四]四半期(?:連結)?会計期間', re.sub(r'\s+', '', label))
+    if standalone:
+        return 'previous_qtd' if standalone.group(1) == '前' else 'current_qtd'
     if _PERIOD_PREV_RE.search(label):
         return "previous"
     if _PERIOD_CURR_RE.search(label):
@@ -681,7 +707,7 @@ def _detect_period_label_in_text(page_text: str) -> list[tuple[str, str]]:
     results = []
     for m in _PERIOD_ANY_RE.finditer(page_text):
         # より長いラベルのために周辺テキストを取る
-        start = max(0, m.start() - 2)
+        start = m.start()
         end = min(len(page_text), m.end() + 20)
         label_candidate = page_text[start:end].split("\n")[0].strip()
         p_type = _classify_period_type(label_candidate)
@@ -2675,6 +2701,21 @@ def run_segment_detection_v4(
             # basis to the note on the same period's page, never to PL values.
             from src.segment.profit_basis import profit_basis, profit_label
             from src.segment.pdf_segment_evidence import bind_pdf_period_evidence,pdf_measure_metadata,pdf_period_section
+            policy_notes = []
+            for index,page in enumerate(pdf.pages):
+                try:
+                    policy_text = re.sub(r'\s+', '', page.extract_text() or '')
+                except Exception as error:
+                    log.setdefault('basis_policy_page_errors', []).append({'page':index+1,'error_type':type(error).__name__})
+                    continue
+                for match in re.finditer(r'(?:報告|事業)?セグメントの(?:利益又は損失|利益|損益)は[、,]?[^。]{0,30}?(?:売上総利益|営業利益|経常利益|税引前利益)(?:ベース|を基準)[^。]{0,40}', policy_text):
+                    preceding = policy_text[max(0,match.start()-80):match.start()]
+                    if re.search(r'(?:前|当)(?:連結)?会計年度|変更', preceding):
+                        continue
+                    basis = profit_basis(match.group())
+                    if basis:
+                        policy_notes.append({'page':index+1,'text':match.group(),'basis':basis})
+            policy_basis = next(iter({n['basis'] for n in policy_notes})) if len({n['basis'] for n in policy_notes}) == 1 else None
             for period in detected.extracted_periods:
                 page_text = re.sub(r"\s+", "", pdf.pages[period.page_index_0based].extract_text() or "")
                 section=pdf_period_section(page_text,period.period_type)
@@ -2687,6 +2728,9 @@ def run_segment_detection_v4(
                     if proof:
                         segment.unit_raw=proof['display_unit'];segment.unit_multiplier=proof['unit_multiplier']
                         metadata=pdf_measure_metadata(proof,period.sales_row_label,period.profit_row_label,period.page_index_1based)
+                        if metadata['profit_basis']=='company_defined_unknown' and policy_basis:
+                            metadata['profit_basis']=policy_basis
+                            metadata['profit_basis_policy_evidence']=policy_notes
                         if note and profit_basis(note.group()):metadata['profit_basis']=profit_basis(note.group());metadata['profit_basis_note']=note.group()
                         if segment.segment_metadata.get('sales_basis'):metadata['sales_basis']=segment.segment_metadata['sales_basis']
                         segment.segment_metadata.update(metadata)
@@ -3026,6 +3070,8 @@ def _run_v4_inner(
                     blocks = [("current", blocks[0][1], blocks[0][2])]
                 elif "previous" in page_types and "current" not in page_types:
                     blocks = [("previous", blocks[0][1], blocks[0][2])]
+                elif len(page_types) == 1 and next(iter(page_types)).endswith('_qtd'):
+                    blocks = [(next(iter(page_types)), blocks[0][1], blocks[0][2])]
                 # 両方あるか不明 → unknown のまま（後で best として使う）
 
             for block_idx, (period_type, period_label, sub_table) in enumerate(blocks):
