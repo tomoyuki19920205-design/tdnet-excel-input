@@ -22,3 +22,13 @@ def test_conflicting_metric_columns_never_merge():
     assert disclosed_column_name([f('その他（注）４')])=='その他'
     with pytest.raises(ValueError,match='different business columns'):
         disclosed_column_name([f('電子'),f('薄膜')])
+
+def test_vertical_business_rows_with_current_and_prior_period_columns():
+    source=Path(__file__).parent/'fixtures/segment_partials/S100WZ6B.zip'
+    result=extract_edinet_segments(str(source),ticker='9432',period='2026-03-31',quarter='2Q')
+    assert result.status=='ok'
+    rows={r['segment_name']:r for r in edinet_result_to_canonical_segments(result)}
+    assert rows['総合ICT事業']['profit']==474722
+    assert rows['グローバル・ソリューション事業']['profit']==268977
+    assert rows['総合ICT事業']['flags']['profit_label']=='セグメント利益'
+    assert rows['総合ICT事業']['flags']['profit_fact']['inline_evidence']['column']['orientation']=='business_rows_period_columns'

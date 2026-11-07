@@ -338,7 +338,7 @@ def expand_segments_rows(
                 "value": value,
                 "unit": unit,
                 "source": source,
-                "source_system": seg.get("source_system", "tdnet"),
+                "source_system": seg.get("source_system", "edinet" if source.startswith('edinet') else "tdnet"),
                 "source_priority": priority,
                 "segment_type": seg.get("segment_type", "ordinary"),
                 "derivation_method": seg.get("derivation_method", ""),
@@ -364,6 +364,11 @@ def expand_segments_rows(
     for row in rows:
         key = row["source_row_key"]
         if key in deduped:
+            previous=deduped[key]
+            old_member=(previous.get('flags') or {}).get('source_member')
+            new_member=(row.get('flags') or {}).get('source_member')
+            if previous['value']!=row['value'] or (old_member and new_member and old_member!=new_member):
+                raise ValueError('conflicting business measures share canonical key: '+key)
             dup_keys[key] = dup_keys.get(key, 1) + 1
         deduped[key] = row
     rows = list(deduped.values())

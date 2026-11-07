@@ -37,6 +37,18 @@ def monetary_fact(tag, soup):
     return evidence
 
 def row_label(tag):
+    label=_leading_row_text(tag)
+    evidence=column_evidence(tag)
+    if evidence.get('orientation')=='business_rows_period_columns':
+        row=tag.find_parent('tr')
+        for prior in row.find_previous_siblings('tr'):
+            cells=prior.find_all(['td','th'],recursive=False)
+            text=cells[0].get_text(' ',strip=True) if cells else ''
+            if metric_from_label(text):return text
+    return label
+
+
+def _leading_row_text(tag):
     row = tag.find_parent('tr')
     if row is None:
         return ''
@@ -97,6 +109,10 @@ def column_evidence(tag):
                 ci += colspan
         table.__dict__['_segment_column_evidence'] = cache
     label = cache.get(id(cell), '')
+    if re.match(r'^(?:前|当).*(?:会計期間|会計年度|事業年度|累計期間)',compact(label)):
+        business=_leading_row_text(tag)
+        if business and not metric_from_label(business) and column_role(business)=='segment':
+            return {'label':business,'role':'segment','orientation':'business_rows_period_columns','period_column':label}
     return {'label': label, 'role': column_role(label)}
 
 
@@ -104,7 +120,7 @@ def column_role(label):
     text = compact(label)
     if re.fullmatch(r'[△▲+\-−]?\(?\d[\d,]*(?:\.\d+)?\)?', text):
         role = 'unresolved'
-    elif text in ('報告セグメント', '事業セグメント', 'セグメント', 'reportablesegments') or '単位:' in text or text in ('百万円','千円'):
+    elif re.match(r'^(?:前|当).*(?:会計期間|会計年度|事業年度|累計期間)',text) or text in ('報告セグメント', '事業セグメント', 'セグメント', 'reportablesegments') or '単位:' in text or text in ('百万円','千円'):
         role = 'header_group'
     elif re.match(r'^(?:計|合計|小計|総計|連結合計|報告セグメント計|total|subtotal)(?:$|\(|注|※)', text):
         role = 'total'
