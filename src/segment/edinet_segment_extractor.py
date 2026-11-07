@@ -1096,12 +1096,16 @@ def extract_edinet_segments(
     return result
 
 
-def disclosed_column_name(facts):
+def disclosed_column_name(facts, *, include_hierarchy=False):
     """Use the actual period's business column over stale/generic taxonomy names."""
     labels=set()
     for fact in facts:
         column=(fact or {}).get('inline_evidence',{}).get('column',{})
         if column.get('role')!='segment' or not column.get('label'):continue
+        if include_hierarchy:
+            from src.segment.semantic_facts import column_role
+            path=[x for x in column.get('header_path',[]) if column_role(x)=='segment']
+            if path:column={**column,'label':' / '.join(dict.fromkeys(path))}
         parts=[]
         for part in unicodedata.normalize('NFKC',column['label']).split(' / '):
             part=re.sub(r'\s*\(注[^)]*\)\s*[0-9一二三四五六七八九十、,・.]*\s*$', '',part)
@@ -1212,6 +1216,18 @@ def _build_segment_records(
         if rec.sales is not None or rec.profit is not None:
             records.append(rec)
 
+    # A wide table may continue in separate HTML tables. Resolve repeated leaf
+    # names against their printed parent business headers across those tables.
+    grouped_names={}
+    for rec in records:
+        if rec.special_row_type in ('ordinary_segment','other'):
+            grouped_names.setdefault(rec.segment_name_norm,set()).add(rec.member_name)
+    for rec in records:
+        if len(grouped_names.get(rec.segment_name_norm,set()))>1:
+            full=disclosed_column_name((rec.metadata.get('sales_fact'),rec.metadata.get('profit_fact')),include_hierarchy=True)
+            if full:
+                rec.segment_name_raw=full;rec.segment_name_norm=_normalize_segment_name(full)
+                rec.metadata.update(source_column_label=full,hierarchical_business_identity=True)
     by_member = {}
     names={}
     for rec in records:
