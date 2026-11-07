@@ -1,0 +1,16 @@
+[
+  {
+    "ticker": "3393",
+    "document": "20261104564263",
+    "source_url": "https://www.release.tdnet.info/inbs/140120261104564263.pdf",
+    "sha256": "1d6cf87e2b9d62235b368286d1ebd6a214d98c3261f8e815d82ad4ff8495ea7d",
+    "fixture": "3393_202611.pdf"
+  },
+  {
+    "ticker": "3843",
+    "document": "20261106566972",
+    "source_url": "https://www.release.tdnet.info/inbs/140120261106566972.pdf",
+    "sha256": "427877d7c652fc98dda987ddd73aa8cbe6359ee1dc63b6871376f6e3c21cbcfc",
+    "fixture": "3843_202611.pdf"
+  }
+]

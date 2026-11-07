@@ -400,7 +400,7 @@ def get_file_url(
         resp = client.get(
             f"{_JQUANTS_BASE_URL}{_JQUANTS_FILES_PATH}",
             headers=headers,
-            params={"discNo": disc_no, "type": file_type},
+            params={"discNo": disc_no, "docs": file_type},
             timeout=timeout_sec,
         )
         resp.raise_for_status()

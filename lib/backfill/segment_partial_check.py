@@ -318,6 +318,42 @@ def check_xbrl_partial_segments(
 # PDF V4 fallback 採用判定
 # ---------------------------------------------------------------------------
 
+def merge_same_filing_missing_metrics(xbrl_records, pdf_records, detail):
+    """Fill missing measures only from the same filing and exact business set."""
+    import copy
+    from lib.pipeline.canonical_writer import normalize_segment_display_key
+    from src.segment.profit_basis import persisted_flags
+    def identity(r):
+        return (r.get('period') or detail.get('fiscal_year_end'),
+                r.get('quarter') or detail.get('quarter'),
+                normalize_segment_display_key(detail.get('ticker',''),r.get('segment_name','')))
+    oldkeys=[identity(r) for r in xbrl_records];newkeys=[identity(r) for r in pdf_records]
+    if len(set(oldkeys))!=len(oldkeys) or len(set(newkeys))!=len(newkeys):return xbrl_records
+    if set(oldkeys)!=set(newkeys):return xbrl_records
+    added=0;bykey=dict(zip(newkeys,pdf_records));merged=copy.deepcopy(xbrl_records)
+    for row in merged:
+        candidate=bykey[identity(row)];old=persisted_flags(row);new=persisted_flags(candidate)
+        if any(k not in old or k not in new or old[k]!=new[k] for k in ('period_start','period_end','is_consolidated','currency')):continue
+        if new.get('normalization_count')!=1 or new.get('normalized_unit')!='millions_jpy':continue
+        for metric in ('sales','profit'):
+            field='segment_'+metric
+            if row.get(field) is not None or candidate.get(field) is None or row.get('_'+metric+'_fact_explicit_nil'):continue
+            if row.get(metric+'_status')=='not_disclosed' and row.get(metric+'_non_disclosure_evidence'):continue
+            basis=metric+'_basis'
+            if old.get(basis) not in (None,'company_defined_unknown',new.get(basis)):continue
+            row[field]=candidate[field]
+            for suffix in ('basis','label','tag'):
+                key=metric+'_'+suffix
+                old.pop(key,None)
+                if new.get(key) is not None:old[key]=new[key]
+            old.setdefault('metric_sources',{})[metric]={'extraction_method':'pdf_table','source_page':new.get('source_page'),'source_table_cells':new.get('source_table_cells'),'period_start':new['period_start'],'period_end':new['period_end'],'display_unit':new.get('display_unit'),'unit_multiplier':new.get('unit_multiplier')}
+            if metric=='profit':row['raw_profit_label']=new.get('profit_label','セグメント利益')
+            added+=1
+        row['segment_metadata']=old
+    detail['compatible_pdf_metrics_added']=added
+    return merged
+
+
 def decide_fallback_adoption(
     xbrl_records: list[dict],
     pdf_records: list[dict],
@@ -348,7 +384,7 @@ def decide_fallback_adoption(
     from src.segment.profit_basis import persisted_flags
     ticker = detail.get('ticker', '')
     def identity(row):
-        return (row.get('period') or detail.get('fiscal_year_end'), row.get('quarter'),
+        return (row.get('period') or detail.get('fiscal_year_end'), row.get('quarter') or detail.get('quarter'),
                 normalize_segment_display_key(ticker, row.get('segment_name', '')))
     new_rows = {identity(row): row for row in pdf_records}
     for old in xbrl_records:

@@ -541,7 +541,8 @@ def _process_single(
                 xbrl_raw_rows = extract_segments_from_xbrl_zip(
                     zip_path=xbrl_path,
                     period=fiscal_year_end,
-                    quarter=financials.quarter
+                    quarter=financials.quarter,
+                    include_context_evidence=True
                 )
                 if xbrl_raw_rows:
                     # 当期分のみフィルタ
@@ -570,10 +571,14 @@ def _process_single(
         if not _v4_segs_list or any((s.get("segment_profit") is None and not s.get("_profit_fact_explicit_nil")) or (s.get("segment_sales") is None and not s.get("_sales_fact_explicit_nil")) for s in _v4_segs_list):
             from src.analysis.segment_detection_v4 import run_segment_detection_v4
             _v4r = run_segment_detection_v4(doc_path, ticker=code)
-            from dataclasses import asdict
-            from lib.backfill.segment_partial_check import decide_fallback_adoption
-            pdf_records = [asdict(s) for s in (getattr(_v4r, "segments", []) or [])]
-            if _v4r.success and (not _v4_segs_list or decide_fallback_adoption(_v4_segs_list, pdf_records, {})[0]):
+            from src.segment.pdf_segment_evidence import verified_pdf_records
+            from lib.backfill.segment_partial_check import decide_fallback_adoption,merge_same_filing_missing_metrics
+            pdf_records = verified_pdf_records(_v4r, fiscal_year_end, financials.quarter, current_only=True)
+            merge_detail={"ticker":code,"fiscal_year_end":fiscal_year_end,"quarter":financials.quarter}
+            merged=merge_same_filing_missing_metrics(_v4_segs_list,pdf_records,merge_detail)
+            if merge_detail.get('compatible_pdf_metrics_added'):
+                pdf_records=merged
+            if _v4r.success and pdf_records and (not _v4_segs_list or decide_fallback_adoption(_v4_segs_list, pdf_records, {"ticker":code,"fiscal_year_end":fiscal_year_end,"quarter":financials.quarter})[0]):
                 _v4_segs_list = pdf_records
                 _v4_ok = True
                 _v4_reason = "none"

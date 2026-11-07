@@ -246,6 +246,9 @@ class SegmentRecordV4:
     segment_profit: float | None = None
     raw_profit_label: str = ""
     extraction_engine: str = "v4"
+    unit_raw: str | None = None
+    unit_multiplier: int | None = None
+    segment_metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -1332,10 +1335,11 @@ def _process_one_block(
         and sales_row is not None
         and len(seg_cols) >= 2
         and sibling_tables
+        and period_type in ("current","previous")
     ):
         sp_row, sp_label, sp_tbl_idx = _phase6_find_profit_from_sibling_table(
             seg_cols=seg_cols,
-            sibling_tables=sibling_tables,
+            sibling_tables=[t for t in sibling_tables[:1] if _phase5_get_segment_names(t,{})[0]==seg_cols and any(_classify_period_type(_detect_period_label_in_row(row) or "")==period_type for row in t)],
             ticker=ticker,
             page_idx=page_idx,
             base_tbl_idx=tbl_idx,
@@ -1358,6 +1362,11 @@ def _process_one_block(
     # Phase 7
     p7_log: dict[str, Any] = {}
     records = _phase7_build_records(seg_cols, sales_row, profit_row, profit_label, p7_log)
+    for record in records:
+        column,name=seg_cols[record.segment_order-1]
+        record.segment_metadata['source_table_cells']={'page':page_idx+1,'table_index':tbl_idx,'block_index':block_idx,'column_index':column,'header':name,'sales_label':p6_log.get('chosen_sales_row') or '', 'profit_label':profit_label,'sales_raw_cell':sales_row[column] if sales_row and column<len(sales_row) else None,'profit_raw_cell':profit_row[column] if profit_row and column<len(profit_row) else None,'profit_table_index':p6_log.get('split_profit_tbl',tbl_idx)}
+        if p6_log.get('chosen_sales_row') in ('計','合計') and any('内部' in _cell_str(row[0]) or 'セグメント間' in _cell_str(row[0]) for row in sub_table if row):
+            record.segment_metadata['sales_basis']='including_intersegment'
     trace.append(f"Phase7: {prefix} records={len(records)}")
 
     # Phase 8
@@ -2662,12 +2671,24 @@ def run_segment_detection_v4(
             # A segment profit label does not imply operating profit. Bind the
             # basis to the note on the same period's page, never to PL values.
             from src.segment.profit_basis import profit_basis, profit_label
+            from src.segment.pdf_segment_evidence import bind_pdf_period_evidence,pdf_measure_metadata,pdf_period_section
             for period in detected.extracted_periods:
                 page_text = re.sub(r"\s+", "", pdf.pages[period.page_index_0based].extract_text() or "")
-                note = re.search(r"セグメント利益.{0,100}?(?:売上総利益|営業利益|経常利益).{0,30}?一致", page_text)
+                section=pdf_period_section(page_text,period.period_type)
+                note = re.search(r"セグメント利益.{0,100}?(?:売上総利益|営業利益|経常利益).{0,30}?(?:一致|調整を行)", section or "")
                 if note and profit_basis(note.group()):
                     for segment in period.segments:
                         segment.raw_profit_label = profit_label(note.group())
+                proof=bind_pdf_period_evidence(page_text,period.period_type)
+                for segment in period.segments:
+                    if proof:
+                        segment.unit_raw=proof['display_unit'];segment.unit_multiplier=proof['unit_multiplier']
+                        metadata=pdf_measure_metadata(proof,period.sales_row_label,period.profit_row_label,period.page_index_1based)
+                        if note and profit_basis(note.group()):metadata['profit_basis']=profit_basis(note.group());metadata['profit_basis_note']=note.group()
+                        if segment.segment_metadata.get('sales_basis'):metadata['sales_basis']=segment.segment_metadata['sales_basis']
+                        segment.segment_metadata.update(metadata)
+                    else:
+                        segment.segment_metadata['period_unit_evidence_status']='unresolved'
             return detected
     except Exception as e:
         result.quarantine_reason = f"unexpected_error: {e}"
@@ -3361,7 +3382,7 @@ def _run_v4_inner(
                 logger.warning("[v4] segment_validation_failed: garbled char in %r", name)
                 continue
             # 3. 長すぎる判定
-            if len(name) > 30:
+            if len(name) > 30 and not any(seg is row for period in result.extracted_periods for row in period.segments):
                 logger.warning("[v4] segment_validation_failed: name too long (%d chars): %r", len(name), name)
                 continue
             # 4. 本文混入・単一セグメント省略文などのブラックリスト判定

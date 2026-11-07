@@ -427,8 +427,8 @@ def _try_pdf_source_v4(
         )
 
     # period / quarter 解決
-    period = (financials_data or {}).get("period", "")
-    quarter = (financials_data or {}).get("quarter", "")
+    period = getattr(filing, 'expected_period', None) or (financials_data or {}).get("period", "")
+    quarter = getattr(filing, 'expected_quarter', None) or (financials_data or {}).get("quarter", "")
     # V4 result から period/quarter を取得できる場合も試みる
     if v4_result.extracted_periods:
         pr = v4_result.extracted_periods[0]
@@ -457,245 +457,16 @@ def _try_pdf_source_v4(
             rule_trace=getattr(v4_result, "rule_trace", []),
         )
 
-    # SegmentRecordV4 -> dict レコードに変換
-    records = []
-    _TRACE_TICKERS = {"2901", "2936"}
-
-    # ── ローカルヘルパー: period_label の「至 YYYY年M月D日」を ISO 形式でパース ──
-    _PERIOD_END_DATE_RE = __import__("re").compile(
-        r"至\s*([0-9０-９]{4})年\s*([0-9０-９]{1,2})月\s*([0-9０-９]{1,2})日"
-    )
-
-    def _parse_period_end_from_label(label: str) -> str | None:
-        """period_label 内の「至 YYYY年M月D日」を YYYY-MM-DD 形式で返す。
-
-        例:
-          「自 2024年4月1日 至 2025年3月31日」  → "2025-03-31"
-          "自 2025年4月1日 至 2026年3月31日"    → "2026-03-31"
-          見つからなければ None
-        """
-        if not label:
-            return None
-        m = _PERIOD_END_DATE_RE.search(label)
-        if not m:
-            return None
-        import unicodedata
-        def _to_ascii_int(s: str) -> int:
-            return int(unicodedata.normalize("NFKC", s))
-        try:
-            y = _to_ascii_int(m.group(1))
-            mo = _to_ascii_int(m.group(2))
-            d = _to_ascii_int(m.group(3))
-            return f"{y:04d}-{mo:02d}-{d:02d}"
-        except (ValueError, TypeError):
-            return None
-
-    def _derive_period_for_block(
-        base_period: str,
-        period_type: str,
-        period_label: str = "",
-    ) -> str:
-        """ブロックの period を決定する。
-
-        優先順位:
-          1. period_label 内の「至 YYYY年M月D日」が直接読み取れる場合はそれを使用
-             → 「前連結会計年度」ブロックを誤って当期 FY にしない
-          2. フォールバック: period_type=="previous" なら base_period の年を -1
-          3. それ以外は base_period のまま
-        """
-        # Priority 1: period_label 内の終了日を直接パース
-        parsed = _parse_period_end_from_label(period_label)
-        if parsed:
-            logger.debug(
-                "[v4-period] derive from label: ticker=%s label=%r -> %s",
-                filing.ticker, period_label[:60], parsed,
-            )
-            return parsed
-
-        # Priority 2: previous ブロックは年を -1
-        if period_type == "previous" and base_period and len(base_period) >= 4:
-            try:
-                prev_year = int(base_period[:4]) - 1
-                return f"{prev_year}{base_period[4:]}"
-            except ValueError:
-                pass
-
-        return base_period
-
-    # PDF全体から単位を検出（セグメント側の unit_raw が全て None の場合のfallback）
-    # unit 判定のため、全セグを集める（extracted_periods / segments 両方に対応）
-    _all_segs_for_unit = []
-    if v4_result.extracted_periods:
-        for _ep in v4_result.extracted_periods:
-            _all_segs_for_unit.extend(getattr(_ep, "segments", []))
-    else:
-        _all_segs_for_unit = list(v4_result.segments)
-
-    _pdf_unit_raw: str | None = None
-    _pdf_unit_mult: int | None = None
-    _all_units_missing = all(
-        getattr(s, "unit_raw", None) is None
-        and getattr(s, "unit_multiplier", None) is None
-        for s in _all_segs_for_unit
-    )
-    if _all_units_missing:
-        _pdf_unit_raw, _pdf_unit_mult = _detect_pdf_unit(doc_path)
-        if _pdf_unit_raw:
-            logger.info(
-                "[UNIT_DETECT] ticker=%s unit_raw=%r mult=%s (pdf_text_fallback)",
-                filing.ticker, _pdf_unit_raw, _pdf_unit_mult,
-            )
-        else:
-            logger.warning(
-                "[UNIT_DETECT] ticker=%s unit not detected from PDF text",
-                filing.ticker,
-            )
-
-    # ── extracted_periods があればそれを全件 records 化（current + previous） ──
-    if v4_result.extracted_periods:
-        _n_curr = sum(1 for ep in v4_result.extracted_periods if getattr(ep, "period_type", "") == "current")
-        _n_prev = sum(1 for ep in v4_result.extracted_periods if getattr(ep, "period_type", "") == "previous")
-        _n_unk  = sum(1 for ep in v4_result.extracted_periods if getattr(ep, "period_type", "") == "unknown")
-        logger.info(
-            "[V4] extracted_periods used: ticker=%s current=%d previous=%d unknown=%d",
-            filing.ticker, _n_curr, _n_prev, _n_unk,
-        )
-        for ep in v4_result.extracted_periods:
-            ep_period_type = getattr(ep, "period_type", "unknown")
-            ep_period_label = getattr(ep, "period_label", "") or ""
-
-            # ── unknown ブロックは保存しない ──
-            # period_type=unknown のブロックを base_period/current に丸めて
-            # 誤ったFY行として保存しないよう除外する。
-            if ep_period_type == "unknown":
-                logger.info(
-                    "[V4] skip_unknown_block: ticker=%s period_label=%r seg_count=%d "
-                    "reason=period_type_unresolved",
-                    filing.ticker, ep_period_label[:60],
-                    len(getattr(ep, "segments", [])),
-                )
-                continue
-
-            ep_period = _derive_period_for_block(period, ep_period_type, ep_period_label)
-            logger.info(
-                "[V4] ep_period: ticker=%s period_type=%s period_label=%r -> ep_period=%s",
-                filing.ticker, ep_period_type, ep_period_label[:60], ep_period,
-            )
-            for seg in getattr(ep, "segments", []):
-                seg_name = getattr(seg, "segment_name", "") or ""
-                _unit_raw  = getattr(seg, "unit_raw", None) or _pdf_unit_raw
-                _unit_mult = getattr(seg, "unit_multiplier", None) or _pdf_unit_mult
-
-                if _unit_raw is None and _unit_mult is None:
-                    logger.warning(
-                        "[SEG_UNIT_TRACE] unit missing: ticker=%s seg=%s sales=%s period_type=%s",
-                        filing.ticker, seg_name, getattr(seg, "segment_sales", None), ep_period_type,
-                    )
-                elif str(filing.ticker) in _TRACE_TICKERS:
-                    logger.info(
-                        "[SEG_UNIT_TRACE] ticker=%s segment=%s unit_raw=%r "
-                        "unit_multiplier=%s sales_before=%s period_type=%s",
-                        filing.ticker, seg_name, _unit_raw, _unit_mult,
-                        getattr(seg, "segment_sales", None), ep_period_type,
-                    )
-
-                # ── 集計行フィルタ (「連結」「合計」「調整額」等を除外) ──
-                if _is_aggregate_segment(seg_name):
-                    logger.info(
-                        "[v4_filter] drop_aggregate_segment ticker=%s name=%r reason=aggregate_row",
-                        filing.ticker, seg_name,
-                    )
-                    continue
-
-                records.append({
-                    "ticker":           filing.ticker,
-                    "period":           ep_period,
-                    "quarter":          quarter,
-                    "segment_name":     seg_name,
-                    "segment_order":    getattr(seg, "segment_order", 0),
-                    "segment_sales":    getattr(seg, "segment_sales", None),
-                    "segment_profit":   getattr(seg, "segment_profit", None),
-                    "unit_raw":         _unit_raw,
-                    "unit_multiplier":  _unit_mult,
-                    "raw_profit_label": getattr(seg, "raw_profit_label", ""),
-                    "source":           "backfill_v4_pdf",
-                    "_table_header_verified": True,
-                    "segment_name_norm": _normalize_segment_name_conservative(seg_name),
-                    "extractor_route":  f"v4_{getattr(seg, 'extraction_engine', 'pdf')}",
-                    "source_doc_type":  "earnings_summary",
-                    "disclosure_date":  filing.disclosure_date,
-                    "tdnet_doc_id":     fid,
-                    "row_type":         _classify_row_type(seg_name),
-                })
-
-        # ── resolved ブロックが1件もない場合は保存しない ──
-        # 全ブロックが unknown のまま（例: fill3-skip された場合）は
-        # records を空にして quarantine 扱いとする。
-        _n_resolved = sum(
-            1 for ep in v4_result.extracted_periods
-            if getattr(ep, "period_type", "unknown") in ("current", "previous")
-        )
-        if _n_resolved == 0 and records:
-            logger.warning(
-                "[V4] no_resolved_period: ticker=%s all_periods_unknown "
-                "dropping %d records to prevent unknown-period save",
-                filing.ticker, len(records),
-            )
-            records = []
-        elif _n_resolved == 0:
-            logger.info(
-                "[V4] no_resolved_period: ticker=%s all_periods_unknown "
-                "quarantine_reason=no_resolved_period_segments",
-                filing.ticker,
-            )
-    else:
-        # extracted_periods が空の場合は従来通り v4_result.segments を使う
-        for seg in v4_result.segments:
-            seg_name = getattr(seg, "segment_name", "") or ""
-            _unit_raw  = getattr(seg, "unit_raw", None) or _pdf_unit_raw
-            _unit_mult = getattr(seg, "unit_multiplier", None) or _pdf_unit_mult
-
-            if _unit_raw is None and _unit_mult is None:
-                logger.warning(
-                    "[SEG_UNIT_TRACE] unit missing: ticker=%s seg=%s sales=%s",
-                    filing.ticker, seg_name, getattr(seg, "segment_sales", None),
-                )
-            elif str(filing.ticker) in _TRACE_TICKERS:
-                logger.info(
-                    "[SEG_UNIT_TRACE] ticker=%s segment=%s unit_raw=%r "
-                    "unit_multiplier=%s sales_before=%s",
-                    filing.ticker, seg_name, _unit_raw, _unit_mult,
-                    getattr(seg, "segment_sales", None),
-                )
-
-            # ── 集計行フィルタ (「連結」「合計」「調整額」等を除外) ──
-            if _is_aggregate_segment(seg_name):
-                logger.info(
-                    "[v4_filter] drop_aggregate_segment ticker=%s name=%r reason=aggregate_row",
-                    filing.ticker, seg_name,
-                )
-                continue
-
-            records.append({
-                "ticker":           filing.ticker,
-                "period":           period,
-                "quarter":          quarter,
-                "segment_name":     seg_name,
-                "segment_order":    getattr(seg, "segment_order", 0),
-                "segment_sales":    getattr(seg, "segment_sales", None),
-                "segment_profit":   getattr(seg, "segment_profit", None),
-                "unit_raw":         _unit_raw,
-                "unit_multiplier":  _unit_mult,
-                "raw_profit_label": getattr(seg, "raw_profit_label", ""),
-                "source":           "backfill_v4_pdf",
-                "_table_header_verified": True,
-                "segment_name_norm": _normalize_segment_name_conservative(seg_name),
-                "extractor_route":  f"v4_{getattr(seg, 'extraction_engine', 'pdf')}",
-                "source_doc_type":  "earnings_summary",
-                "disclosure_date":  filing.disclosure_date,
-                "tdnet_doc_id":     fid,
-                "row_type":         _classify_row_type(seg_name),
-            })
+    from src.segment.pdf_segment_evidence import verified_pdf_records
+    records = verified_pdf_records(v4_result, period, quarter)
+    records = [r for r in records if not _is_aggregate_segment(r['segment_name'])]
+    for record in records:
+        record.update(ticker=filing.ticker, source='backfill_v4_pdf',
+                      _table_header_verified=True,
+                      segment_name_norm=_normalize_segment_name_conservative(record['segment_name']),
+                      extractor_route='v4_pdf', source_doc_type='earnings_summary',
+                      disclosure_date=filing.disclosure_date, tdnet_doc_id=fid,
+                      row_type=_classify_row_type(record['segment_name']))
 
     if not records:
         return SourceCandidate(
@@ -914,7 +685,7 @@ def process_one_filing_v4(
         # ── Partial-success チェック: suspicious な場合は PDF V4 fallback を試みる ──
         from lib.backfill.segment_partial_check import (
             check_xbrl_partial_segments,
-            decide_fallback_adoption,
+            decide_fallback_adoption, merge_same_filing_missing_metrics,
         )
         _xbrl_period = (financials_data or {}).get("period", "") or ""
         if not _xbrl_period and xbrl_candidate.segment_records:
@@ -950,6 +721,10 @@ def process_one_filing_v4(
                 doc_path, filing, financials_data, fid, metrics,
             )
             _pdf_records = _partial_pdf_candidate.segment_records or []
+            _merged=merge_same_filing_missing_metrics(xbrl_candidate.segment_records,_pdf_records,_partial_detail)
+            if _partial_detail.get('compatible_pdf_metrics_added'):
+                _pdf_records=_merged
+                _partial_pdf_candidate.segment_records=_merged
             _use_pdf, _decision = decide_fallback_adoption(
                 xbrl_records=xbrl_candidate.segment_records,
                 pdf_records=_pdf_records,
