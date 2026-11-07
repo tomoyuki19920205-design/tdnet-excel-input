@@ -1,0 +1,10 @@
+{
+  "ticker": "3843",
+  "doc": "20221208576529",
+  "source_url": "https://www.release.tdnet.info/inbs/140120221208576529.pdf",
+  "zip_sha256": "8cedf9d4527329d78a9757d4fab1ca067f0301d16554773f5bbdc6ef422b0107",
+  "archive_file": "XBRLData/Attachment/qualitative.htm",
+  "quarter": "2Q",
+  "period": "2023-04-30",
+  "case": "A separate adjustment table has one numeric amount and a dash before the total row; neither is a business header. Original business table retains three businesses and Other."
+}

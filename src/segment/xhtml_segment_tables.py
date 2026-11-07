@@ -148,8 +148,8 @@ def _extract_tables(html, *, period_start, period_end, is_consolidated, textbloc
             if not row or not row[0]:continue
             label=row[0]['text'];metric=metric_from_label(label)
             numeric=sum(c is not None and _number(c['text']) is not None for c in row[1:])
-            if body is None and numeric>=2:body=ri
             has_dash=any(c is not None and compact(c['text']) in _NIL and compact(c['text']) for c in row[1:])
+            if body is None and (numeric>=2 or (metric and (numeric or has_dash))):body=ri
             if metric and (numeric or has_dash):metric_rows.append((ri,metric,label,row))
         if body is None or not any(m=='profit' for _,m,_,_ in metric_rows):continue
         # Presence of a segment-profit row distinguishes business performance
@@ -160,7 +160,7 @@ def _extract_tables(html, *, period_start, period_end, is_consolidated, textbloc
             for ci,cell in enumerate(row):
                 if not cell:continue
                 label=cell['text'];text=compact(label)
-                if not text or '単位' in text or text.strip('()') in ('千円','百万円','円'):continue
+                if text in _NIL or '単位' in text or text.strip('()') in ('千円','百万円','円'):continue
                 headers[ci]=label
         selected={};ambiguous=False
         for ri,metric,label,row in metric_rows:

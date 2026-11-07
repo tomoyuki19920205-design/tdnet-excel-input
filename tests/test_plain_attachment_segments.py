@@ -44,3 +44,12 @@ def test_plain_attachment_requires_explicit_segment_section():
     assert extract_attachment_tables(html,**args)==[]
     rows=extract_attachment_tables('<h2>セグメント情報</h2>'+html,**args)
     assert [(r['sales'],r['profit']) for r in rows]==[(0,0),(2,-1)]
+
+def test_separate_adjustment_table_never_uses_a_data_dash_as_business_header():
+    path=FIX.parent/'plain_attachment_20221208576529.zip'
+    result=extract_segments_from_xbrl_zip_detailed(str(path),period='2023-04-30',quarter='2Q')
+    assert result.status=='success_with_rows'
+    assert all(r.raw_segment_name not in ('－','-','調整額','四半期連結損益計算書計上額') for r in result.segments)
+    previous=[r for r in result.segments if r.period=='2022-04-30']
+    assert len(previous)==4
+    assert sorted(r.profit for r in previous)==[-7.836,329.906,544.42,1187.503]
