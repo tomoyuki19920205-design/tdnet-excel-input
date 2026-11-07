@@ -1,0 +1,10 @@
+{
+  "ticker": "3123",
+  "doc": "20220908530117",
+  "source_url": "https://www.release.tdnet.info/inbs/140120220908530117.pdf",
+  "zip_sha256": "b20370f23e02a20433f7497a8aec8915c16284e2b9a4e24d61d153c8b801b203",
+  "archive_file": "XBRLData/Attachment/qualitative.htm",
+  "quarter": "2Q",
+  "period": "2023-03-31",
+  "case": "Business headers append (千円), independently corroborated by every monetary header. Preserve the raw labels and unit while excluding that explicit unit from business names and identity."
+}

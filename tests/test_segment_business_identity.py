@@ -24,6 +24,12 @@ def test_literal_identity_uses_original_cell_coordinates():
     assert flags['business_key'] == '電子'
     assert flags['business_key_evidence'][0]['column_index'] == 2
 
+def test_unit_annotation_is_removed_only_with_independent_table_unit():
+    column={'role':'segment','label':'繊維事業（千円）'}
+    assert business_identity_flags([column])['business_key']=='繊維事業(千円)'
+    assert business_identity_flags([{**column,'display_unit':'千円'}])['business_key']=='繊維事業'
+    assert business_identity_flags([{**column,'display_unit':'百万円'}])['business_key']=='繊維事業(千円)'
+
 def test_real_1301_originals_retain_exact_identity_across_taxonomy_names():
     from pathlib import Path
     from src.segment.xbrl_segment_extractor import extract_segments_from_xbrl_zip_detailed

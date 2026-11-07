@@ -4,6 +4,12 @@ import unicodedata
 
 METHOD = 'original_business_header_v1'
 
+def strip_disclosed_unit_annotation(label, display_unit):
+    """Remove only the monetary unit independently established for this table."""
+    if display_unit not in ('百万円','千円','円'):
+        return str(label or '')
+    return re.sub(r'[（(]\s*'+re.escape(display_unit)+r'\s*[)）]', '', str(label or '')).strip()
+
 def normalize_business_header(label):
     """Remove typography and explicit trailing notes, retaining business wording."""
     parts = []
@@ -27,7 +33,7 @@ def business_identity_flags(columns):
         label = column.get('label')
         if not label or column_role(label) != 'segment' or metric_from_label(label):
             return {}
-        key = normalize_business_header(label)
+        key = normalize_business_header(strip_disclosed_unit_annotation(label, column.get('display_unit')))
         if not key:
             return {}
         keys.add(key)
@@ -44,6 +50,7 @@ def raw_business_identity_flags(raw):
         fact = raw.get(metric + '_fact')
         if literal and literal.get('status') == 'disclosed_numeric':
             columns.append({'label': literal.get('segment_label'), 'role': 'segment',
+                'display_unit': literal.get('display_unit'),
                 'textblock_context': literal.get('textblock_context'),
                 'table_index': literal.get('table_index'), 'column_index': literal.get('column_index')})
         elif fact:

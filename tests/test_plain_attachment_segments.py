@@ -53,3 +53,13 @@ def test_separate_adjustment_table_never_uses_a_data_dash_as_business_header():
     previous=[r for r in result.segments if r.period=='2022-04-30']
     assert len(previous)==4
     assert sorted(r.profit for r in previous)==[-7.836,329.906,544.42,1187.503]
+
+def test_real_units_in_business_headers_are_retained_as_units():
+    from src.segment.profit_basis import segment_flags
+    path=FIX.parent/'plain_attachment_20220908530117.zip'
+    result=extract_segments_from_xbrl_zip_detailed(str(path),period='2023-03-31',quarter='2Q')
+    current=[r for r in result.segments if r.period=='2023-03-31']
+    assert [r.raw_segment_name for r in current]==['繊維事業','不動産活用事業','ゴルフ 練習場 事業','その他']
+    assert (current[0].sales,current[0].profit)==(2699.878,40.53)
+    assert segment_flags(current[0].raw_json)['business_key']=='繊維事業'
+    assert current[0].raw_json['table_facts']['sales']['segment_label']=='繊維事業 (千円)'

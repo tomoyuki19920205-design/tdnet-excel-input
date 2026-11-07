@@ -919,7 +919,7 @@ def _textblock_segment_records(root, start, end, scope, instance_name):
         name=elem.tag.rsplit('}',1)[-1]
         if 'segment' not in name.lower() or 'textblock' not in name.lower():continue
         for row in extract_textblock_tables(elem.text,period_start=start,period_end=end,is_consolidated=scope=='true',textblock_tag=name,context_ref=elem.get('contextRef','')):
-            printed=disclosed_column_name([{'inline_evidence':{'column':{'label':row['raw_segment_label'],'role':'segment'}}}])
+            printed=disclosed_column_name([{'inline_evidence':{'column':{'label':row['segment_name'],'role':'segment'}}}])
             key=_normalize_segment_name(printed or row['segment_name'])
             if key in rows:
                 if any(rows[key][m]!=row[m] for m in ('sales','profit')):return []

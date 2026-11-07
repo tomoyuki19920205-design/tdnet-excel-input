@@ -177,6 +177,8 @@ def _extract_tables(html, *, period_start, period_end, is_consolidated, textbloc
             if ci==0 or column_role(label)!='segment':continue
             # Remove only an explicit note marker, retaining the literal source label.
             name=re.sub(r'[（(]注[）)]\s*\d*.*$','',label).strip()
+            from src.segment.business_identity import strip_disclosed_unit_annotation
+            name=strip_disclosed_unit_annotation(name,unit)
             if not name:continue
             values={};facts={};labels={};bases={}
             for metric,(_,ri,rowlabel,basis,row) in selected.items():
