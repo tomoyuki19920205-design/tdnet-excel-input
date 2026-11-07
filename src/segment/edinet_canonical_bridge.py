@@ -65,6 +65,7 @@ def edinet_record_to_segment_dict(
         "concept_sales": rec.concept_sales,
         "concept_profit": rec.concept_profit,
         "member_name": rec.member_name,
+        "flags": {k:v for k,v in rec.metadata.items() if v is not None},
     }
 
 
@@ -99,12 +100,12 @@ def edinet_result_to_canonical_segments(
         seg_type = seg_dict["segment_type"]
 
         # ordinaly のみ canonical に書き込む (デフォルト)
-        if not include_non_ordinary and seg_type not in ("ordinary",):
+        if not include_non_ordinary and seg_type not in ("ordinary", "other"):
             continue
 
         # segment_name が空 or 短すぎる場合は unresolved
         name = seg_dict["segment_name"]
-        if not name or len(name) < 2:
+        if not name:
             unresolved.append(rec.member_name)
             continue
 
@@ -154,7 +155,8 @@ def edinet_result_to_raw_rows(
             extraction_method="edinet_xbrl",
             derivation_method=rec.derivation_method,
             confidence_score=0.9,
-            is_consolidated=True,
+            is_consolidated=rec.metadata.get('is_consolidated',True),
+            raw_json=rec.metadata,
         )
         rows.append(row)
 

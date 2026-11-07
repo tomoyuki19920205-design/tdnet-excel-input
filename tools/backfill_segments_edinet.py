@@ -309,6 +309,12 @@ def process_one_filing(
             jsonl.log(result_record)
         return result_record
 
+    # DEI fiscal-year identity is authoritative for storage, including 1H/2Q.
+    fiscal_end = extract_result.period
+    quarter = extract_result.quarter
+    ticker = extract_result.ticker
+    result_record.update(fiscal_end=fiscal_end,quarter=quarter,ticker=ticker)
+
     # ── Step 3: Convert to canonical format ──
     canonical_segments = edinet_result_to_canonical_segments(
         extract_result, include_non_ordinary=False,
@@ -337,7 +343,7 @@ def process_one_filing(
                 "source": "edinet_xbrl",
                 "filing_id": doc_id,
             })
-        filing_buffer.append(filing)
+        filing_buffer.append({**filing,'fiscal_end':fiscal_end,'quarter':quarter,'ticker':ticker})
         metrics._batch_filings += 1
         metrics._batch_rows += len(canonical_segments) * 2  # sales + profit per segment
 

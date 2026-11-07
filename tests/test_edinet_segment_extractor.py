@@ -299,9 +299,9 @@ class TestValueParsing:
         assert _parse_xbrl_value("－") is None
 
     def test_yen_to_million(self):
-        assert _yen_to_million(7951946000) == 7951  # 79億5194万円
+        assert _yen_to_million(7951946000) == 7951.946
         assert _yen_to_million(None) is None
-        assert _yen_to_million(-23484000) == -24  # floor division: -23484000 // 1_000_000 = -24
+        assert _yen_to_million(-23484000) == -23.484
 
 
 # ============================================================
@@ -349,16 +349,18 @@ class TestDeriveQuarterValues:
         """FY: annual 扱い"""
         recs = [self._make_rec("Seg A", 5000, 600)]
         result = derive_quarter_values({"FY": recs}, "FY")
-        assert result[0].sales_qtd == 5000
-        assert result[0].profit_qtd == 600
-        assert result[0].derivation_method == "reported_qtd"
+        assert result[0].sales_qtd is None
+        assert result[0].profit_qtd is None
+        assert result[0].sales_ytd == 5000
+        assert result[0].derivation_method == "ytd_only"
 
     def test_1h_no_derivation(self):
         """1H: 半期扱い"""
         recs = [self._make_rec("Seg A", 2500, 300)]
         result = derive_quarter_values({"1H": recs}, "1H")
-        assert result[0].sales_qtd == 2500
-        assert result[0].derivation_method == "reported_qtd"
+        assert result[0].sales_qtd is None
+        assert result[0].sales_ytd == 2500
+        assert result[0].derivation_method == "ytd_only"
 
     def test_missing_prior_quarter(self):
         """前四半期データなし → ytd_only"""
@@ -375,7 +377,8 @@ class TestDeriveQuarterValues:
         result = derive_quarter_values({"1Q": q1, "2Q": q2}, "2Q")
         seg_a = [r for r in result if r.segment_name_norm == "Seg A"][0]
         seg_b = [r for r in result if r.segment_name_norm == "Seg B"][0]
-        assert seg_a.derivation_method == "derived_from_ytd_diff"
+        assert seg_a.derivation_method == "ytd_only"
+        assert seg_a.sales_qtd is None
         assert seg_b.derivation_method == "ytd_only"
         assert seg_b.sales_qtd is None
 

@@ -17,6 +17,7 @@ import zipfile
 from dataclasses import dataclass, field
 from typing import Optional
 from xml.etree import ElementTree as ET
+from decimal import Decimal, InvalidOperation
 
 logger = logging.getLogger("edinet_seg")
 
@@ -44,6 +45,7 @@ class EdinetSegmentRecord:
     context_sales: str = ""
     context_profit: str = ""
     special_row_type: str = "ordinary_segment"  # ordinary_segment / adjustment / total / corporate / other
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -182,7 +184,7 @@ _PROFIT_PRIORITY = {
 }
 
 
-def classify_concept(qname: str) -> tuple[str, int]:
+def classify_concept(qname: str, label: str = "") -> tuple[str, int]:
     """concept QName を sales/profit/other に分類する。
 
     Args:
@@ -200,14 +202,15 @@ def classify_concept(qname: str) -> tuple[str, int]:
     if local in _PROFIT_CONCEPTS:
         return "profit", _PROFIT_PRIORITY.get(local, 50)
 
-    # ラベルベースの fallback (ローカル名の部分一致)
-    lower = local.lower()
-    if any(kw in lower for kw in ["externalsales", "externalcustomer", "externrevenue"]):
-        return "sales", 40
-    if any(kw in lower for kw in ["netsales", "revenue", "sales"]) and "intersegment" not in lower:
-        return "sales", 30
-    if any(kw in lower for kw in ["segmentprofit", "operatingincome", "operatingprofit"]):
-        return "profit", 30
+    # Extensions require their disclosed row or taxonomy label, never a substring.
+    if label:
+        from bs4 import BeautifulSoup
+        from html import escape
+        from src.segment.semantic_facts import disclosed_metric
+        soup = BeautifulSoup('<table><tr><td>' + escape(label) + '</td><td><ix:nonfraction unitref="JPY">0</ix:nonfraction></td></tr></table>', 'html.parser')
+        metric, _ = disclosed_metric(soup.find('ix:nonfraction'))
+        if metric:
+            return metric, 100 if metric == 'profit' and 'セグメント' in label else 80
 
     return "other", 0
 
@@ -354,6 +357,8 @@ def _member_to_segment_name(member_name: str) -> str:
         → "Digital Systems And Services"
     """
     local = member_name.split(":")[-1] if ":" in member_name else member_name
+    if local in ('OperatingSegmentsNotIncludedInReportableSegmentsAndOtherRevenueGeneratingBusinessActivitiesMember','OtherOperatingSegmentsAxisMember'):
+        return 'Other'
 
     # 企業固有のプレフィックスを除去 (jpcrp030000-asr_EXXXXX-000 パターン)
     local = re.sub(r"^jpcrp\d+-\w+_E\d+-\d+", "", local)
@@ -555,21 +560,11 @@ def derive_quarter_values(
         return []
 
     # 前の四半期を特定
-    prior_map = {"2Q": "1Q", "3Q": "2Q"}
+    prior_map = {"2Q": "1Q", "3Q": "2Q", "FY": "3Q", "1H": "1Q"}
     prior_q = prior_map.get(target_quarter)
 
     if target_quarter == "1Q":
         # 1Q: YTD = QTD
-        for rec in target_records:
-            rec.sales_ytd = rec.sales
-            rec.profit_ytd = rec.profit
-            rec.sales_qtd = rec.sales
-            rec.profit_qtd = rec.profit
-            rec.derivation_method = "reported_qtd"
-        return target_records
-
-    if target_quarter == "FY" or target_quarter == "1H":
-        # FY/1H: annual/半期扱い — YTD→単Q変換しない
         for rec in target_records:
             rec.sales_ytd = rec.sales
             rec.profit_ytd = rec.profit
@@ -599,13 +594,22 @@ def derive_quarter_values(
         rec.sales_ytd = rec.sales
         rec.profit_ytd = rec.profit
         prior = prior_by_name.get(rec.segment_name_norm)
-        if prior:
+        definitions_match = {r.segment_name_norm for r in target_records} == set(prior_by_name)
+        compatible = definitions_match and prior is not None
+        if compatible and (rec.metadata or prior.metadata):
+            compatible = bool(rec.metadata.get('period_start')) and rec.metadata.get('period_start') == prior.metadata.get('period_start')
+            compatible = compatible and all(rec.metadata.get(k)==prior.metadata.get(k) for k in ('currency','is_consolidated'))
+            compatible = compatible and bool(prior.metadata.get('period_end')) and (rec.metadata.get('period_end') or '') > prior.metadata['period_end']
+        if compatible:
             rec.sales_qtd = (
                 (rec.sales - prior.sales) if rec.sales is not None and prior.sales is not None else None
             )
             rec.profit_qtd = (
                 (rec.profit - prior.profit) if rec.profit is not None and prior.profit is not None else None
             )
+            if rec.metadata or prior.metadata:
+                if rec.metadata.get('sales_basis') != prior.metadata.get('sales_basis'):rec.sales_qtd=None
+                if rec.metadata.get('profit_basis') in (None,'company_defined_unknown') or rec.metadata.get('profit_basis') != prior.metadata.get('profit_basis'):rec.profit_qtd=None
             rec.derivation_method = "derived_from_ytd_diff"
         else:
             rec.sales_qtd = None
@@ -739,6 +743,8 @@ def _find_xbrl_instance(zf: zipfile.ZipFile) -> Optional[str]:
 def _extract_segment_facts(
     root: ET.Element,
     contexts: dict[str, ParsedContext],
+    *, labels: dict | None = None, inline: dict | None = None,
+    currency_units: dict | None = None,
 ) -> list[dict]:
     """XBRL instance から segment axis を持つ fact を抽出。
 
@@ -769,8 +775,15 @@ def _extract_segment_facts(
         else:
             local = tag
 
-        classification, priority = classify_concept(local)
+        evidence = (inline or {}).get((local.lower(), ctx_ref), {})
+        label = evidence.get('label') or _resolve_member_label(local, labels or {})
+        classification, priority = classify_concept(local, label)
         if classification == "other":
+            continue
+        unit_ref = elem.get('unitRef', '')
+        if currency_units is not None and currency_units.get(unit_ref) != ['JPY']:
+            continue
+        if evidence.get('column', {}).get('role') in ('total','adjustment_or_consolidated'):
             continue
 
         # Parse value
@@ -789,6 +802,9 @@ def _extract_segment_facts(
             "axis": pc.segment_axis_name,
             "classification": classification,
             "priority": priority,
+            "label": label,
+            "inline_evidence": evidence,
+            "is_nil": elem.get('{http://www.w3.org/2001/XMLSchema-instance}nil') == 'true',
         })
 
     return facts
@@ -800,8 +816,10 @@ def _parse_xbrl_value(text: str) -> Optional[int]:
         return None
     s = text.strip().replace(",", "").replace(" ", "")
     try:
-        return int(float(s))
-    except (ValueError, OverflowError):
+        value = Decimal(s)
+        if not value.is_finite():return None
+        return int(value) if value == value.to_integral_value() else value
+    except (ValueError, OverflowError, InvalidOperation):
         return None
 
 
@@ -809,7 +827,8 @@ def _yen_to_million(val: Optional[int]) -> Optional[int]:
     """円を百万円に変換。"""
     if val is None:
         return None
-    return val // 1_000_000
+    amount = Decimal(str(val)) / Decimal(1_000_000)
+    return int(amount) if amount == amount.to_integral_value() else float(amount)
 
 
 # ============================================================
@@ -861,6 +880,37 @@ def _parse_ixbrl_content(html_content: str) -> Optional[ET.Element]:
 # ============================================================
 # Main entry point
 # ============================================================
+def _filing_dei(root):
+    values = {}
+    for elem in root:
+        local = elem.tag.rsplit('}',1)[-1]
+        if local.endswith('DEI'):
+            values.setdefault(local,set()).add((elem.text or '').strip())
+    return {k:next(iter(v)) for k,v in values.items() if len(v)==1}
+
+
+def _segment_inline_evidence(zf, contexts):
+    from bs4 import BeautifulSoup
+    from src.segment.semantic_facts import row_label,column_evidence,monetary_fact
+    result = {}
+    for name in zf.namelist():
+        if 'publicdoc' not in name.lower() or not name.lower().endswith(('.htm','.html')):
+            continue
+        content = zf.read(name)
+        if b'SegmentInformation' not in content or b'nonFraction' not in content:
+            continue
+        soup = BeautifulSoup(content,'html.parser')
+        for tag in soup.find_all('ix:nonfraction'):
+            ctx = tag.get('contextref','')
+            if ctx not in contexts:continue
+            key = (str(tag.get('name') or '').split(':')[-1].lower(),ctx)
+            evidence = {'file':name,'label':row_label(tag),'column':column_evidence(tag),'fact':monetary_fact(tag,soup)}
+            if key in result and result[key]['fact'] != evidence['fact']:
+                raise ValueError('conflicting duplicate inline fact: '+str(key))
+            result[key] = evidence
+    return result
+
+
 def extract_edinet_segments(
     zip_path: str,
     *,
@@ -868,6 +918,7 @@ def extract_edinet_segments(
     doc_type: str = "",
     period: str = "",
     quarter: str = "",
+    period_role: str = "current",
 ) -> EdinetSegmentResult:
     """EDINET ZIP からセグメント売上・利益を抽出。
 
@@ -932,6 +983,39 @@ def extract_edinet_segments(
 
             # Step 3: Parse contexts
             contexts = _parse_contexts(root)
+            dei = _filing_dei(root)
+            from src.common_ticker import normalize_ticker
+            actual_ticker = normalize_ticker(dei.get('SecurityCodeDEI',''))
+            actual_period = dei.get('PreviousFiscalYearEndDateDEI' if period_role=='previous' else 'CurrentFiscalYearEndDateDEI')
+            actual_quarter = {'Q1':'1Q','Q2':'2Q','HY':'2Q','H1':'2Q','Q3':'3Q','FY':'FY'}.get(dei.get('TypeOfCurrentPeriodDEI',''))
+            requested_quarter = {'1H':'2Q','HY':'2Q'}.get(quarter,quarter)
+            if actual_ticker and ticker and actual_ticker != normalize_ticker(ticker):
+                raise ValueError('filing ticker does not match requested company')
+            if actual_period and period and actual_period[:7] != period[:7]:
+                raise ValueError('filing fiscal year differs from requested period')
+            if actual_quarter and requested_quarter and actual_quarter != requested_quarter:
+                raise ValueError('filing cumulative quarter differs from requested quarter')
+            result.ticker = actual_ticker or ticker
+            result.period = actual_period or period
+            result.quarter = actual_quarter or requested_quarter
+            start = dei.get('PreviousFiscalYearStartDateDEI' if period_role=='previous' else 'CurrentFiscalYearStartDateDEI')
+            end = dei.get('ComparativePeriodEndDateDEI' if period_role=='previous' else 'CurrentPeriodEndDateDEI')
+            scope = dei.get('WhetherConsolidatedFinancialStatementsArePreparedDEI')
+            selected_contexts = {}
+            for cid, pc in contexts.items():
+                if not pc.has_segment_axis or pc.period_type!='duration':continue
+                if start and pc.start_date!=start:continue
+                if end and pc.end_date!=end:continue
+                if not (start and end) and not (pc.is_prior_period if period_role=='previous' else pc.is_current_period):continue
+                noncon = 'nonconsolidated' in cid.lower() or any('nonconsolidatedmember' in m['member'].lower() for m in pc.dimensions)
+                if scope=='true' and noncon:continue
+                if any(not (_is_segment_axis(m['axis']) or 'consolidated' in m['axis'].lower()) for m in pc.dimensions):continue
+                # Extraction below uses one verified fiscal cumulative context.
+                pc.is_current_period = True
+                selected_contexts[cid]=pc
+            result.debug_summary['dei'] = dei
+            result.debug_summary['selected_period_role'] = period_role
+            result.debug_summary['selected_context_dates'] = {'start':start,'end':end}
             segment_ctx_count = sum(1 for pc in contexts.values() if pc.has_segment_axis)
 
             result.debug_summary["instance_file"] = instance_name
@@ -944,18 +1028,22 @@ def extract_edinet_segments(
                 return result
 
             # Step 4: Extract segment facts
-            facts = _extract_segment_facts(root, contexts)
+            units = {}
+            for unit in root.findall('xbrli:unit',_NS):
+                units[unit.get('id','')] = [(m.text or '').split(':')[-1] for m in unit.findall('xbrli:measure',_NS)]
+            inline = _segment_inline_evidence(zf, selected_contexts)
+            facts = _extract_segment_facts(root, selected_contexts, labels=label_map_jp, inline=inline, currency_units=units or None)
             result.debug_summary["segment_facts_count"] = len(facts)
 
             if not facts:
                 result.status = "no_segments"
-                result.review_hint = "no_segments_single_segment"
+                result.review_hint = "supported_segment_facts_absent_not_proof_of_nondisclosure"
                 return result
 
             # Step 5: Group facts by member → build segment records
             #         Use label linkbase for segment names
             records = _build_segment_records(
-                facts, contexts,
+                facts, selected_contexts,
                 label_map_jp=label_map_jp,
                 label_map_en=label_map_en,
                 segment_roles=segment_roles,
@@ -995,16 +1083,16 @@ def _build_segment_records(
     label_jp = label_map_jp or {}
     label_en = label_map_en or {}
 
-    # Group by member
-    member_facts: dict[str, list[dict]] = {}
+    # A sales/profit pair must come from the same cumulative context.
+    member_facts: dict[tuple[str,str], list[dict]] = {}
     for f in facts:
-        member = f["member"]
+        member = (f["member"], f["ctx_id"])
         if member not in member_facts:
             member_facts[member] = []
         member_facts[member].append(f)
 
     records = []
-    for member, mfacts in member_facts.items():
+    for (member, context_id), mfacts in member_facts.items():
         rec = EdinetSegmentRecord()
         rec.member_name = member
 
@@ -1028,6 +1116,8 @@ def _build_segment_records(
         best_profit = None
 
         for f in mfacts:
+            if f.get('value') is None:
+                continue
             if f["classification"] == "sales":
                 if best_sales is None or f["priority"] > best_sales["priority"]:
                     best_sales = f
@@ -1044,11 +1134,40 @@ def _build_segment_records(
             rec.concept_profit = best_profit["concept"]
             rec.context_profit = best_profit["ctx_id"]
 
-        # Phase 3: annual の場合は derivation_method = reported_qtd
-        rec.derivation_method = "reported_qtd"
+        from src.segment.profit_basis import profit_basis
+        from src.segment.semantic_facts import sales_basis
+        context = contexts[context_id]
+        rec.metadata = {
+            'period_start':context.start_date,'period_end':context.end_date,
+            'period_type':'ytd','currency':'JPY',
+            'is_consolidated':'nonconsolidated' not in context_id.lower(),
+            'source_context':context_id,'source_member':member,
+            'profit_basis':(profit_basis((best_profit or {}).get('label')) or profit_basis(rec.concept_profit) or 'company_defined_unknown') if best_profit else None,
+            'profit_label':(best_profit or {}).get('label') or None,
+            'profit_tag':rec.concept_profit or None,
+            'sales_label':(best_sales or {}).get('label') or None,
+            'sales_basis':sales_basis((best_sales or {}).get('label'),rec.concept_sales,[f['concept'] for f in mfacts if f['classification']=='sales']) if best_sales else None,
+            'sales_tag':rec.concept_sales or None,
+            'sales_fact':({**best_sales,'value':str(best_sales['value'])} if best_sales else None),
+            'profit_fact':({**best_profit,'value':str(best_profit['value'])} if best_profit else None),
+            'explicit_nil_facts':[f for f in mfacts if f.get('is_nil')],
+        }
+        rec.sales_ytd = rec.sales
+        rec.profit_ytd = rec.profit
+        rec.derivation_method = "ytd_only"
 
         # Only include if we have at least sales or profit
         if rec.sales is not None or rec.profit is not None:
             records.append(rec)
 
-    return records
+    by_member = {}
+    for rec in records:
+        old = by_member.get(rec.member_name)
+        if old is not None:
+            comparable = (old.sales,old.profit,old.metadata.get('period_start'),old.metadata.get('period_end'),old.metadata.get('is_consolidated'))
+            current = (rec.sales,rec.profit,rec.metadata.get('period_start'),rec.metadata.get('period_end'),rec.metadata.get('is_consolidated'))
+            if comparable != current:
+                raise ValueError('ambiguous segment contexts for '+rec.member_name)
+            continue
+        by_member[rec.member_name] = rec
+    return list(by_member.values())
