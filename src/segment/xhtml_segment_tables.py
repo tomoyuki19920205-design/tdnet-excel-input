@@ -108,8 +108,21 @@ def extract_textblock_tables(html, *, period_start, period_end, is_consolidated,
     The caller binds company, fiscal year, quarter and consolidation using DEI.
     TextBlock context alone is insufficient because it often wraps two years.
     """
-    if not period_start or not period_end or not isinstance(is_consolidated,bool):return []
     if 'segment' not in textblock_tag.lower() or 'textblock' not in textblock_tag.lower():return []
+    return _extract_tables(html, period_start=period_start, period_end=period_end, is_consolidated=is_consolidated, textblock_tag=textblock_tag, context_ref=context_ref)
+
+
+def extract_attachment_tables(html, *, period_start, period_end, is_consolidated):
+    """Read untagged attachment tables under an explicit segment heading.
+
+    Company, fiscal period and scope must independently be bound by the caller.
+    No TextBlock tag or context is fabricated for this older filing format.
+    """
+    return _extract_tables(html, period_start=period_start, period_end=period_end, is_consolidated=is_consolidated, attachment=True)
+
+
+def _extract_tables(html, *, period_start, period_end, is_consolidated, textblock_tag='', context_ref='', attachment=False):
+    if not period_start or not period_end or not isinstance(is_consolidated,bool):return []
     soup=BeautifulSoup(html or '','html.parser');whole=soup.get_text(' ',strip=True)
     outputs=[]
     for ti,table in enumerate(soup.find_all('table')):
@@ -121,6 +134,7 @@ def extract_textblock_tables(html, *, period_start, period_end, is_consolidated,
         # Do not reuse a business-period heading after entering related
         # geographic/customer/product disclosures.
         flat=compact(prefix)
+        if attachment and not re.search(r'(?:セグメント情報|segmentinformation)',flat):continue
         boundary=max(flat.rfind('【関連情報】'),flat.rfind('[関連情報]'))
         if boundary>=0 and 'セグメント情報' not in flat[boundary+len('【関連情報】'):]:continue
         unit_matches=list(re.finditer(r'(?:単位[:：]?)?(百万円|千円|円)',compact(table.get_text(' ',strip=True))[:180]))
@@ -151,7 +165,9 @@ def extract_textblock_tables(html, *, period_start, period_end, is_consolidated,
         selected={};ambiguous=False
         for ri,metric,label,row in metric_rows:
             basis=sales_basis(label,'',[]) if metric=='sales' else profit_basis(label)
-            priority=(100 if basis=='external_customers' else 60 if basis=='disclosed_revenue' else 40) if metric=='sales' else 100
+            # A specifically labelled segment result takes precedence over an
+            # additional operating-profit reconciliation row in that table.
+            priority=(100 if basis=='external_customers' else 60 if basis=='disclosed_revenue' else 40) if metric=='sales' else (110 if re.search(r'(?:セグメント|segment).*(?:利益|損失|損益|profit|loss)',compact(label)) else 100)
             if metric in selected and priority==selected[metric][0]:
                 if [c['text'] if c else None for c in row]!=[c['text'] if c else None for c in selected[metric][4]]:ambiguous=True
             if metric not in selected or priority>selected[metric][0]:selected[metric]=(priority,ri,label,basis,row)
@@ -171,6 +187,7 @@ def extract_textblock_tables(html, *, period_start, period_end, is_consolidated,
                 value=amount*factor if amount is not None else None
                 values[metric]=int(value) if value is not None and value==value.to_integral_value() else float(value) if value is not None else None
                 facts[metric]={'textblock_tag':textblock_tag,'textblock_context':context_ref,'table_index':ti,'row_index':ri,'column_index':ci,'segment_label':label,'row_label':rowlabel,'raw_text':cell['text'],'display_unit':unit,'currency':'JPY','million_value':values[metric],'status':status,'period_start':period_start,'period_end':period_end,'printed_period':ranges[-1][2],'evidence_type':'xhtml_table_cell'}
+                if attachment:facts[metric]['evidence_type']='xhtml_attachment_table_cell'
                 labels[metric]=rowlabel;bases[metric]=basis
             if not any(v is not None for v in values.values()):continue
             if not bases.get('profit'):

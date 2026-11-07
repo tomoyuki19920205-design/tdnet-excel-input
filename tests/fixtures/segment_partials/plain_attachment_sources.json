@@ -1,0 +1,15 @@
+{
+  "doc": "20230112588103",
+  "ticker": "2337",
+  "title": "2023年2月期 第3四半期決算短信",
+  "source_url": "https://www.release.tdnet.info/inbs/140120230112588103.pdf",
+  "archive_path": "XBRLData/Attachment/qualitative.htm",
+  "zip_sha256": "1dc99a33d6b87067770396c20d2411724f0da821485d373f8ee8f45e11fe9062",
+  "failure": "segment table appears after first 5000 characters and has no segment TextBlock or numeric XBRL facts",
+  "periods": [
+    "2023-02-28",
+    "2022-02-28"
+  ],
+  "quarter": "3Q",
+  "measure": "ALL-IN営業利益; preserve as company_defined_unknown rather than operating_profit"
+}

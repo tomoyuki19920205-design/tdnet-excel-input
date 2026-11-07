@@ -22,6 +22,10 @@ def profit_basis(value):
     if value in LABELS:
         return value
     text = re.sub(r'\s+', '', str(value or '')).lower()
+    if re.search(r'all[-－‐‑–—]?in営業利益', text):
+        # The issuer's ALL-IN result includes extraordinary property gains.
+        # Retain its original label; it is not ordinary operating profit.
+        return 'company_defined_unknown'
     if 'ebitda' in text:
         return 'adjusted_ebitda' if 'adjusted' in text or '調整後' in text else 'ebitda'
     if re.fullmatch(r'(?:adjusted|調整後)?ebit(?:ifrs)?', text) or 'profitbeforefinancingandincometax' in text or '財務・法人所得税前利益' in text or '金利税引前利益' in text:

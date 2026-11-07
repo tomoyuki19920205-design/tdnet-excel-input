@@ -969,7 +969,7 @@ def extract_segments_from_xbrl_zip_detailed(
                 # a generic CurrentYear TextBlock may also contain prior data.
                 if len(dei_scopes)==1 and len(dei_tickers)==1 and expected_end:
                     import html as html_module
-                    from src.segment.xhtml_segment_tables import extract_textblock_tables,literal_metric_completions
+                    from src.segment.xhtml_segment_tables import extract_textblock_tables,extract_attachment_tables,literal_metric_completions
                     periods=[]
                     if len(dei_start_dates)==1:
                         periods.append(('current',loop_period,str(next(iter(dei_start_dates))),str(expected_end)))
@@ -987,6 +987,12 @@ def extract_segments_from_xbrl_zip_detailed(
                             for value in parsed:
                                 value['facts']={m:{**f,'file':seg_file} for m,f in value['facts'].items()}
                             table_rows.extend(parsed)
+                        if not table_rows and not any('segment' in str(b.get('name') or '').lower() and 'textblock' in str(b.get('name') or '').lower() for b in soup.find_all('ix:nonnumeric')):
+                            # Older TDnet qualitative attachments contain the
+                            # same published tables without inline XBRL tags.
+                            table_rows=extract_attachment_tables(content,period_start=start,period_end=end,is_consolidated=next(iter(dei_scopes))=='true')
+                            for value in table_rows:
+                                value['facts']={m:{**f,'file':seg_file} for m,f in value['facts'].items()}
                         if existing:
                             primary=[]
                             for row in existing:
@@ -1000,13 +1006,14 @@ def extract_segments_from_xbrl_zip_detailed(
                                     setattr(row,metric,completion['value'])
                                     raw.setdefault('table_facts',{})[metric]=completion['fact']
                                     raw[metric+'_basis']=completion['basis'];raw['raw_'+metric+'_label']=completion['label']
-                                    raw.setdefault('metric_sources',{})[metric]={'extraction_method':'xhtml_textblock','source_table_cell':completion['fact']}
+                                    raw.setdefault('metric_sources',{})[metric]={'extraction_method':'xhtml_attachment' if completion['fact'].get('evidence_type')=='xhtml_attachment_table_cell' else 'xhtml_textblock','source_table_cell':completion['fact']}
                                 row.raw_json=raw
                             continue
                         for value in table_rows:
                             facts={m:{**f,'file':seg_file} for m,f in value['facts'].items()}
                             raw={'_segment_period_role':role,'raw_segment_label':value['raw_segment_label'],'raw_sales_label':value['sales_label'],'raw_profit_label':value['profit_label'],'sales_basis':value['sales_basis'],'profit_basis':value['profit_basis'],'is_consolidated':value['is_consolidated'],'currency':'JPY','table_facts':facts,'extraction_method':'xhtml_textblock','_context_evidence':{'context_ref':next(iter(facts.values()))['textblock_context'],'context_start':start,'context_end':end,'current_or_previous':role,'quarter':estimated_quarter,'date_guard_status':'PASS','context_period_type':role,'selection_reason':'printed_table_dates_match_filing_dei'}}
-                            results.append(SegmentRawRow(source='xbrl',source_document_id=basename,doc_hash=doc_hash,raw_ticker=ticker or '',normalized_ticker=ticker or '',period=target_period,quarter=estimated_quarter or '',raw_segment_name=value['segment_name'],normalized_segment_name=normalize_segment_name(value['segment_name']),special_row_type='ordinary_segment',sales=value['sales'],profit=value['profit'],unit='million_yen',extraction_method='xhtml_textblock',confidence_score=0.95,is_consolidated=value['is_consolidated'],accounting_standard=accounting_standard,table_title=f'XHTML segment: {seg_file}',raw_json=raw))
+                            if any(f.get('evidence_type')=='xhtml_attachment_table_cell' for f in facts.values()):raw['extraction_method']='xhtml_attachment'
+                            results.append(SegmentRawRow(source='xbrl',source_document_id=basename,doc_hash=doc_hash,raw_ticker=ticker or '',normalized_ticker=ticker or '',period=target_period,quarter=estimated_quarter or '',raw_segment_name=value['segment_name'],normalized_segment_name=normalize_segment_name(value['segment_name']),special_row_type='ordinary_segment',sales=value['sales'],profit=value['profit'],unit='million_yen',extraction_method=raw['extraction_method'],confidence_score=0.95,is_consolidated=value['is_consolidated'],accounting_standard=accounting_standard,table_title=f'XHTML segment: {seg_file}',raw_json=raw))
                             date_guard_status_set.add('PASS')
 
             if results:
@@ -1159,7 +1166,7 @@ def _find_segment_files(zf: zipfile.ZipFile) -> list[str]:
     for name in zf.namelist():
         if "Attachment" in name and name.endswith((".htm", ".html")):
             try:
-                content = zf.read(name).decode("utf-8", errors="replace")[:5000]
+                content = zf.read(name).decode("utf-8", errors="replace")
                 if "セグメント" in content:
                     seg_files.append(name)
             except:
