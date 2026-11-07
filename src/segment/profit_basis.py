@@ -56,7 +56,7 @@ def profit_label(value):
 def segment_flags(raw):
     raw = raw or {}
     evidence = raw.get('_context_evidence') or {}
-    return {k: v for k, v in {
+    flags = {k: v for k, v in {
         'profit_basis': raw.get('profit_basis') or profit_basis(raw.get('profit_tag')),
         'profit_tag': raw.get('profit_tag'),
         'profit_label': raw.get('raw_profit_label'),
@@ -72,6 +72,9 @@ def segment_flags(raw):
         'extraction_method': raw.get('extraction_method'),
         'period_type': 'ytd',
     }.items() if v is not None and v != '?'}
+    from src.segment.business_identity import raw_business_identity_flags
+    flags.update(raw_business_identity_flags(raw))
+    return flags
 
 
 def persisted_flags(value):

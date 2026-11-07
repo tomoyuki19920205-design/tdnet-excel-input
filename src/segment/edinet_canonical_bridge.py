@@ -51,6 +51,9 @@ def edinet_record_to_segment_dict(
             "segment_name_raw": ...,
         }
     """
+    from src.segment.business_identity import raw_business_identity_flags
+    flags = {k:v for k,v in rec.metadata.items() if v is not None}
+    flags.update(raw_business_identity_flags(rec.metadata))
     return {
         "segment_name": rec.segment_name_norm or rec.segment_name_raw,
         "segment_name_raw": rec.segment_name_raw,
@@ -65,7 +68,7 @@ def edinet_record_to_segment_dict(
         "concept_sales": rec.concept_sales,
         "concept_profit": rec.concept_profit,
         "member_name": rec.member_name,
-        "flags": {k:v for k,v in rec.metadata.items() if v is not None},
+        "flags": flags,
     }
 
 

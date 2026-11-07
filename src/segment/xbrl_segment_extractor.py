@@ -1324,6 +1324,8 @@ def _extract_ixbrl_segment_data(
         context_info = global_context_map.get(ctx, {}) if global_context_map else {}
         member = _extract_segment_member(ctx, context_info)
         column = column_evidence(tag)
+        if fact is not None:
+            fact = {**fact, 'column': column}
         member_from_header = False
         if (not member and column['role'] == 'segment'
                 and re.search(r'(?:^|_)ReportableSegmentsMember$', ctx, re.I)):

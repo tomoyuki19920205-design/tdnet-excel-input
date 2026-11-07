@@ -1,0 +1,18 @@
+[
+  {
+    "ticker": "1301",
+    "doc": "20250131560451",
+    "quarter": "3Q",
+    "source_url": "https://www.release.tdnet.info/inbs/140120250131560451.pdf",
+    "sha256": "8dd7ed74cd99f701742e69698d323b5db19c50bf77550513079f83dd22565ec0",
+    "file": "business_identity_20250131560451.zip"
+  },
+  {
+    "ticker": "1301",
+    "doc": "20250509539155",
+    "quarter": "FY",
+    "source_url": "https://www.release.tdnet.info/inbs/140120250509539155.pdf",
+    "sha256": "4ad80606a8f568c27a17245dc5451951650b49626f77e2e248c4e995bde7b7cc",
+    "file": "business_identity_20250509539155.zip"
+  }
+]
