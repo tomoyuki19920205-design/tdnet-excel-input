@@ -445,10 +445,11 @@ def _classify_skip_reason(row: dict) -> str:
     quarter = (row.get("quarter") or "")
     if quarter == "?Q":
         return "invalid_quarter"
-    # ratio check
-    if sales is not None and abs(sales) > 0 and abs(sales) < 1:
-        return "ratio"
-    if profit is not None and abs(profit) > 0 and abs(profit) < 1:
+    # Magnitude cannot identify a ratio: thousand-yen disclosures legitimately
+    # contain fractional million-yen amounts, including small losses and zero.
+    flags = persisted_flags(row)
+    unit = str(flags.get("unit") or row.get("unit") or "").lower()
+    if unit in {"ratio", "percent", "percentage", "pure", "%"}:
         return "ratio"
     return ""
 

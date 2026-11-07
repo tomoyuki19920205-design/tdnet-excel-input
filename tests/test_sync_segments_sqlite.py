@@ -52,7 +52,15 @@ class TestClassifySkipReason:
         assert _classify_skip_reason(row) == "invalid_quarter"
 
     def test_ratio(self):
-        row = {"segment_name": "物流", "segment_sales": 0.738, "segment_profit": 0.1, "quarter": "1Q"}
+        row = {"segment_name": "物流", "segment_sales": 0.738, "segment_profit": 0.1, "quarter": "1Q", "unit": "ratio"}
+        assert _classify_skip_reason(row) == "ratio"
+
+    def test_fractional_million_yen_and_small_loss_survive(self):
+        row = {"segment_name": "その他", "segment_sales": 0.738, "segment_profit": -0.001, "quarter": "1Q", "unit": "millions_jpy"}
+        assert _classify_skip_reason(row) == ""
+
+    def test_explicit_ratio_metadata_is_rejected(self):
+        row = {"segment_name": "物流", "segment_sales": 12.3, "segment_profit": None, "quarter": "1Q", "segment_metadata": '{"unit":"percent"}'}
         assert _classify_skip_reason(row) == "ratio"
 
     def test_value_error(self):
