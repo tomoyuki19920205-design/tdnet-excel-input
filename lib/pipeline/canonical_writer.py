@@ -348,6 +348,10 @@ def expand_segments_rows(
                 "correction_flag": correction_flag,
                 "recency_key": recency,
                 "updated_at": now_iso,
+                "flags": {
+                    **(seg.get("flags") or {}),
+                    **({"profit_basis": seg["profit_basis"]} if seg.get("profit_basis") else {}),
+                },
             })
 
     if not rows:

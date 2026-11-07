@@ -681,7 +681,7 @@ class MigrationDB:
         # 既存チェック
         cur = self._conn.execute(
             """
-            SELECT segment_order, segment_sales, segment_profit
+            SELECT segment_order, segment_sales, segment_profit, raw_profit_label
             FROM segment_financials
             WHERE company_code=? AND fiscal_year_end=? AND quarter=?
               AND segment_name=?
@@ -726,7 +726,7 @@ class MigrationDB:
                         )
             return "inserted"
 
-        old_order, old_sales, old_profit = existing
+        old_order, old_sales, old_profit, old_label = existing
         changes = {}
         if segment_order != old_order:
             changes["segment_order"] = (old_order, segment_order)
@@ -734,6 +734,8 @@ class MigrationDB:
             changes["segment_sales"] = (old_sales, segment_sales)
         if segment_profit is not None and old_profit != segment_profit:
             changes["segment_profit"] = (old_profit, segment_profit)
+        if segment_profit is not None and raw_profit_label and raw_profit_label != old_label:
+            changes["raw_profit_label"] = (old_label, raw_profit_label)
 
         if not changes:
             return "no_change"
@@ -879,6 +881,20 @@ class MigrationDB:
         existing_by_column = dict(zip(saved_columns, existing_values))
         existing_source = str(existing_by_column["data_source"] or "")
         existing_filing_id = str(existing_by_column["tdnet_doc_id"] or "").strip()
+
+        # Same filing identity and natural key: missing extraction is not a
+        # correction or withdrawal. Keep independently obtained valid metrics.
+        # Different versions still follow the existing conflict gate below.
+        if existing_filing_id and existing_filing_id == incoming_filing_id:
+            values = list(incoming_values)
+            for metric in ("segment_sales", "segment_profit"):
+                index = saved_columns.index(metric)
+                if values[index] is None:
+                    values[index] = existing_by_column[metric]
+            label_index = saved_columns.index("raw_profit_label")
+            if not values[label_index] or segment_profit is None:
+                values[label_index] = existing_by_column["raw_profit_label"]
+            incoming_values = tuple(values)
 
         if existing_filing_id and incoming_filing_id:
             if existing_filing_id != incoming_filing_id:

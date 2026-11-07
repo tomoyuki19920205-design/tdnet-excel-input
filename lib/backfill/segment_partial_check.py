@@ -272,7 +272,13 @@ def check_xbrl_partial_segments(
     suspicious = False
     reason = ""
 
-    if is_other_only:
+    missing_profits = sum(r.get("segment_profit") is None for r in current_rows)
+    detail["profit_missing_count"] = missing_profits
+    detail["profit_non_null_count"] = len(current_rows) - missing_profits
+    if missing_profits:
+        suspicious = True
+        reason = "segment_profit_incomplete"
+    elif is_other_only:
         suspicious = True
         reason = "other_only"
     elif is_main_plus_other:

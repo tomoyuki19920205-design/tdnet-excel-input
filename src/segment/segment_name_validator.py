@@ -283,7 +283,7 @@ _ALLOW_PATTERNS: list[re.Pattern] = [
 # メインバリデーション
 # ============================================================
 
-def validate_segment_name(name: str) -> SegmentNameValidation:
+def validate_segment_name(name: str, *, verified_table_header: bool = False) -> SegmentNameValidation:
     """セグメント名の妥当性を3層で判定する。
 
     Layer 1: Deny list (PL/BS/CF勘定科目、ヘッダー)
@@ -480,7 +480,7 @@ def validate_segment_name(name: str) -> SegmentNameValidation:
     # ============ Layer 3: Allow signal → 最終判定 ============
 
     # allow signal なしで短すぎる名前はフラグメントとして排除
-    if not has_allow and len(nfkc) <= 3:
+    if not has_allow and len(nfkc) <= 3 and not verified_table_header:
         return SegmentNameValidation(
             name=name, normalized_name=normalized, is_valid=False,
             invalid_reason=InvalidReason.FRAGMENT,

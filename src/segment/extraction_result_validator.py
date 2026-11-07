@@ -145,7 +145,9 @@ def validate_extraction_result(
     validations: list[SegmentNameValidation] = []
     for rec in segment_records:
         name = rec.get("segment_name", "") or ""
-        validations.append(validate_segment_name(name))
+        validations.append(validate_segment_name(name, verified_table_header=(
+            source == "pdf_compat" and rec.get("_table_header_verified") is True
+        )))
 
     # --- XBRL source 限定: too_short_no_signal 免除 ---
     # XBRL member 由来の短い英字略称 (D2C 等) を救済する。

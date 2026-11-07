@@ -17,6 +17,8 @@ NOTE: 将来、対象件数がさらに増える場合は
 """
 from __future__ import annotations
 
+from src.segment.profit_basis import profit_basis
+
 import logging
 import os
 import sqlite3
@@ -790,6 +792,7 @@ def sync_canonical(
                             "segment_name": seg_name,
                             "sales": s.get("segment_sales"),
                             "profit": s.get("segment_profit"),
+                            "profit_basis": profit_basis(s.get('raw_profit_label')),
                         })
 
                     if not seg_dicts:

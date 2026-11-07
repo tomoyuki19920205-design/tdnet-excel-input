@@ -11,6 +11,8 @@ Usage:
 """
 from __future__ import annotations
 
+from src.segment.profit_basis import profit_basis, segment_flags
+
 import argparse
 import glob
 import logging
@@ -1168,6 +1170,7 @@ def sync_sqlite_segments(
                         "segment_name": rdict["segment_name"].strip(),
                         "sales": int(raw_sales) if raw_sales is not None else None,
                         "profit": int(raw_profit) if raw_profit is not None else None,
+                        "profit_basis": profit_basis(rdict.get('raw_profit_label')),
                     })
 
                 canonical_total = 0
@@ -1574,6 +1577,7 @@ def main(args: list[str] | None = None) -> int:
                         "segment_name": row.normalized_segment_name,
                         "sales": row.sales,
                         "profit": row.profit,
+                        "flags": segment_flags(row.raw_json),
                     })
 
                 stats["xbrl_cs_batches"] = len(xbrl_batches)

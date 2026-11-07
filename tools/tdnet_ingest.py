@@ -537,6 +537,7 @@ def _process_single(
         if xbrl_path and os.path.isfile(xbrl_path):
             try:
                 from src.segment.xbrl_segment_extractor import extract_segments_from_xbrl_zip
+                from src.segment.profit_basis import profit_label
                 xbrl_raw_rows = extract_segments_from_xbrl_zip(
                     zip_path=xbrl_path,
                     period=fiscal_year_end,
@@ -553,7 +554,7 @@ def _process_single(
                             "segment_profit": r.profit,
                             "unit_raw": None,       # 既に百万円単位化済み
                             "unit_multiplier": None,
-                            "raw_profit_label": "xbrl",
+                            "raw_profit_label": profit_label((r.raw_json or {}).get("profit_tag")),
                         })
                     if _v4_segs_list:
                         _v4_ok = True
@@ -563,13 +564,19 @@ def _process_single(
                 logger.warning(f"[SEGMENT_XBRL] {code} exception: {e}")
 
         # 2. XBRL抽出が0件または失敗した場合はPDFフォールバック
-        if not _v4_segs_list:
+        if not _v4_segs_list or any(s.get("segment_profit") is None for s in _v4_segs_list):
             from src.analysis.segment_detection_v4 import run_segment_detection_v4
             _v4r = run_segment_detection_v4(doc_path, ticker=code)
-            _v4_segs_list = getattr(_v4r, "segments", []) or []
-            _v4_ok = bool(_v4r.success or _v4_segs_list)
-            _v4_reason = getattr(_v4r, "quarantine_reason", None) or "none"
-            seg_metrics["xbrl_used"] = False
+            from dataclasses import asdict
+            from lib.backfill.segment_partial_check import decide_fallback_adoption
+            pdf_records = [asdict(s) for s in (getattr(_v4r, "segments", []) or [])]
+            if _v4r.success and (not _v4_segs_list or decide_fallback_adoption(_v4_segs_list, pdf_records, {})[0]):
+                _v4_segs_list = pdf_records
+                _v4_ok = True
+                _v4_reason = "none"
+                seg_metrics["xbrl_used"] = False
+            elif not _v4_segs_list:
+                _v4_reason = getattr(_v4r, "quarantine_reason", None) or "none"
 
         if _v4_ok and _v4_segs_list:
             # ── V4成功：保存 ──

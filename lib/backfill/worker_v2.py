@@ -12,6 +12,8 @@ PIPELINE_SPEC §11
 """
 from __future__ import annotations
 
+from src.segment.profit_basis import profit_label
+
 import json
 import logging
 import time
@@ -574,7 +576,7 @@ def _try_xbrl_source(
             "segment_order": idx + 1,
             "segment_sales": row.sales,
             "segment_profit": row.profit,
-            "raw_profit_label": "",
+            "raw_profit_label": profit_label((row.raw_json or {}).get('profit_tag')),
             "source": "backfill_xbrl",
             "segment_name_norm": _normalize_segment_name_conservative(seg_name),
             "extractor_route": "xbrl",

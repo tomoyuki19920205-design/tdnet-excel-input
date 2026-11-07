@@ -79,6 +79,7 @@ _SALES_TAGS = {
     "jppfs_cor:revenue",                        # 営業収益
 }
 _PROFIT_TAGS = {
+    "jppfs_cor:grossprofit",                    # 売上総利益基準のセグメント利益
     "jppfs_cor:operatingincome",                # 営業利益 / セグメント利益
     "jppfs_cor:operatingprofit",
     "jppfs_cor:ordinaryincome",                 # 経常利益
@@ -120,6 +121,8 @@ _COMPANY_SALES_SUFFIXES = (
     "revenue2ifrs",
 )
 _COMPANY_PROFIT_SUFFIXES = (
+    "grossprofit",
+    "grossprofitlosssegmentinformation",
     "operatingincome",
     "operatingprofit",
     "operatingprofitlossifrs",
@@ -193,6 +196,7 @@ _CAMEL_SPLIT = re.compile(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
 _STRUCTURAL_OPERATING_SEGMENT_MEMBERS = {
+    "totalofreportablesegmentsandothersmember",
     "reportablesegmentmember",
     "reportablesegmentsmember",
     "operatingsegmentsnotincludedinreportablesegmentsmember",
@@ -240,6 +244,8 @@ def _extract_segment_member(
     → "DomesticBeverageBusiness"
     """
     # パターン1: 標準 suffix
+    if "totalofreportablesegmentsandothersmember" in context_ref.lower():
+        return None
     m = _SEGMENT_MEMBER_RE.search(context_ref)
     if m:
         name = m.group(1)
@@ -838,6 +844,8 @@ def extract_segments_from_xbrl_zip_detailed(
                     row_raw_json = {"_segment_period_role": period_type}
                     if profit_tag:
                         row_raw_json["profit_tag"] = profit_tag
+                        from src.segment.profit_basis import profit_basis
+                        row_raw_json["profit_basis"] = profit_basis(profit_tag)
                     row_raw_json.update({
                         "_sales_fact_explicit_nil": bool(data.get("sales_fact_explicit_nil")),
                         "_sales_fact_names": list(data.get("sales_fact_names") or []),

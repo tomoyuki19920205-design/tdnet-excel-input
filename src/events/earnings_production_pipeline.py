@@ -351,10 +351,12 @@ def _extract_and_filter_segments_detailed(
 
     for r, _ in best_segs.values():
         name = r.normalized_segment_name or r.raw_segment_name
+        from src.segment.profit_basis import segment_flags
         target_segs.append({
             "segment_name": name,
             "sales": r.sales,
             "profit": r.profit,
+            "flags": segment_flags(r.raw_json),
             "source_system": r.source_system or "tdnet",
             "segment_type": r.segment_type or "ordinary",
             "derivation_method": r.derivation_method or "",

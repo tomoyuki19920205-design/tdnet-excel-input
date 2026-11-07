@@ -2677,7 +2677,17 @@ def run_segment_detection_v4(
 
     try:
         with pdf:
-            return _run_v4_inner(pdf, result, log, trace)
+            detected = _run_v4_inner(pdf, result, log, trace)
+            # A segment profit label does not imply operating profit. Bind the
+            # basis to the note on the same period's page, never to PL values.
+            from src.segment.profit_basis import profit_basis, profit_label
+            for period in detected.extracted_periods:
+                page_text = re.sub(r"\s+", "", pdf.pages[period.page_index_0based].extract_text() or "")
+                note = re.search(r"セグメント利益.{0,100}?(?:売上総利益|営業利益|経常利益).{0,30}?一致", page_text)
+                if note and profit_basis(note.group()):
+                    for segment in period.segments:
+                        segment.raw_profit_label = profit_label(note.group())
+            return detected
     except Exception as e:
         result.quarantine_reason = f"unexpected_error: {e}"
         result.failed_stage = "inner"
@@ -3391,7 +3401,9 @@ def _run_v4_inner(
                 logger.warning("[v4] segment_validation_failed: numeric-like name %r", name)
                 continue
             # 7. 標準バリデーター（PL科目などの判定）
-            val_res = validate_segment_name(name)
+            val_res = validate_segment_name(name, verified_table_header=any(
+                seg is row for period in result.extracted_periods for row in period.segments
+            ))
             if not val_res.is_valid or val_res.row_type == RowType.INVALID:
                 logger.warning("[v4] segment_validation_failed: failed segment_name_validator (%s) for %r", val_res.invalid_reason, name)
                 continue
