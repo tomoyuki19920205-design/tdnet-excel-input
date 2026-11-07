@@ -897,7 +897,10 @@ def _segment_inline_evidence(zf, contexts):
         if 'publicdoc' not in name.lower() or not name.lower().endswith(('.htm','.html')):
             continue
         content = zf.read(name)
-        if b'SegmentInformation' not in content or b'nonFraction' not in content:
+        # Amendment documents can omit the SegmentInformation TextBlock name.
+        # The caller has already selected exact-period business-axis contexts;
+        # the actual fact/table column still has to prove every business value.
+        if b'nonFraction' not in content:
             continue
         soup = BeautifulSoup(content,'html.parser')
         for tag in soup.find_all('ix:nonfraction'):

@@ -1,0 +1,38 @@
+[
+  {
+    "doc": "S100TQEX",
+    "ticker": "2613",
+    "period": "2023-03-31",
+    "quarter": "FY",
+    "period_role": "previous",
+    "zip_sha256": "f9bbba2149527b3deac9eefb519fc960bff5bd12f2401810a06294b715a0e9d7",
+    "source_url": "https://api.edinet-fsa.go.jp/api/v2/documents/S100TQEX?type=1"
+  },
+  {
+    "doc": "S100V8ZV",
+    "ticker": "7435",
+    "period": "2022-04-30",
+    "quarter": "3Q",
+    "period_role": "current",
+    "zip_sha256": "5b6f77f1d87f28aeef77700a8a8a46bb3504ef6fb878f6037d61c9495fe65838",
+    "source_url": "https://api.edinet-fsa.go.jp/api/v2/documents/S100V8ZV?type=1"
+  },
+  {
+    "doc": "S100R3HY",
+    "ticker": "2613",
+    "period": "2022-03-31",
+    "quarter": "FY",
+    "period_role": "previous",
+    "zip_sha256": "5a6c54db5caadd5bc65e6a65a819c47d262ce897580c20fae02556dc2e31ccaa",
+    "source_url": "https://api.edinet-fsa.go.jp/api/v2/documents/S100R3HY?type=1"
+  },
+  {
+    "doc": "S100OD03",
+    "ticker": "8001",
+    "period": "2021-03-31",
+    "quarter": "FY",
+    "period_role": "previous",
+    "zip_sha256": "a412fab2b80135a837ec31aeacaabef4d5b0a2b7c0f3b238210b274e8689a129",
+    "source_url": "https://api.edinet-fsa.go.jp/api/v2/documents/S100OD03?type=1"
+  }
+]

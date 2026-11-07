@@ -127,9 +127,33 @@ def column_evidence(tag):
             if businesses:leaf_paths.setdefault(businesses[-1],set()).add(businesses)
         table.__dict__['_segment_leaf_paths']=leaf_paths
     path = cache.get(id(cell), [])
+    if not path:
+        # Some filings split a single printed table into adjacent header/body
+        # tables. Require a header-only sibling and an identical expanded grid.
+        previous=table.find_previous_sibling()
+        if previous is None and table.parent.name=='div' and len(table.parent.find_all('table'))==1 and compact(table.parent.get_text(' ',strip=True))==compact(table.get_text(' ',strip=True)):
+            wrapper=table.parent.find_previous_sibling()
+            if wrapper is not None and wrapper.name=='div' and len(wrapper.find_all('table'))==1:
+                candidate=wrapper.find('table')
+                if compact(wrapper.get_text(' ',strip=True))==compact(candidate.get_text(' ',strip=True)):previous=candidate
+        if previous is not None and previous.name=='table' and previous.find('ix:nonfraction') is None and '報告セグメント' in compact(previous.get_text(' ',strip=True)):
+            from src.segment.xhtml_segment_tables import _grid
+            header_grid=_grid(previous);body_grid=_grid(table)
+            widths={len(row) for row in header_grid+body_grid if row}
+            if len(widths)==1 and not any(re.fullmatch(r'[△▲+\-−]?\d[\d,]*(?:\.\d+)?',compact(c['text'])) for row in header_grid for c in row if c):
+                columns={ci for row in body_grid for ci,c in enumerate(row) if c and c['node'] is cell}
+                paths=[]
+                for ci in columns:
+                    parts=[]
+                    for row in header_grid:
+                        text=row[ci]['text'] if row[ci] else ''
+                        if text and text not in parts:parts.append(text)
+                    paths.append(parts)
+                if paths and all(p==paths[0] for p in paths):path=paths[0]
     label = path[-1] if path else ''
     period_headers=[x for x in path if re.match(r'^(?:(?:前|当).*(?:会計期間|会計年度|事業年度|累計期間)|\d{4}年度)',compact(x))]
-    if period_headers or metric_from_label(label):
+    business_headers=[x for x in path if column_role(x)=='segment' and not metric_from_label(x)]
+    if (period_headers and not business_headers) or metric_from_label(label):
         business=_leading_row_text(tag)
         if column_role(business) in ('total','adjustment_or_consolidated'):
             return {'label':business,'role':column_role(business),'header_path':path}
