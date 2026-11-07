@@ -68,6 +68,8 @@ def segment_flags(raw):
         'period_end': evidence.get('context_end'),
         'is_consolidated': raw.get('is_consolidated', True),
         'currency': raw.get('currency'),
+        'table_facts': raw.get('table_facts'),
+        'extraction_method': raw.get('extraction_method'),
         'period_type': 'ytd',
     }.items() if v is not None and v != '?'}
 

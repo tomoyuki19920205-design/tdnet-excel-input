@@ -911,6 +911,27 @@ def _segment_inline_evidence(zf, contexts):
     return result
 
 
+def _textblock_segment_records(root, start, end, scope, instance_name):
+    from src.segment.xhtml_segment_tables import extract_textblock_tables
+    if scope not in ('true','false'):return []
+    rows={}
+    for elem in root:
+        name=elem.tag.rsplit('}',1)[-1]
+        if 'segment' not in name.lower() or 'textblock' not in name.lower():continue
+        for row in extract_textblock_tables(elem.text,period_start=start,period_end=end,is_consolidated=scope=='true',textblock_tag=name,context_ref=elem.get('contextRef','')):
+            key=_normalize_segment_name(row['segment_name'])
+            if key in rows:
+                if any(rows[key][m]!=row[m] for m in ('sales','profit')):return []
+            else:rows[key]=row
+    result=[]
+    for key,row in rows.items():
+        facts={m:{**f,'instance_file':instance_name} for m,f in row['facts'].items()}
+        metadata={k:row[k] for k in ('period_start','period_end','is_consolidated','currency','sales_basis','profit_basis','sales_label','profit_label')}
+        metadata.update(period_type='ytd',segment_label=row['raw_segment_label'],extraction_method='xhtml_textblock',table_facts=facts)
+        result.append(EdinetSegmentRecord(segment_name_raw=row['segment_name'],segment_name_norm=key,sales=row['sales'],profit=row['profit'],sales_ytd=row['sales'],profit_ytd=row['profit'],derivation_method='ytd_only',special_row_type='ordinary_segment',metadata=metadata))
+    return result
+
+
 def extract_edinet_segments(
     zip_path: str,
     *,
@@ -1023,8 +1044,10 @@ def extract_edinet_segments(
             result.debug_summary["segment_axis_contexts"] = segment_ctx_count
 
             if segment_ctx_count == 0:
-                result.status = "no_segments"
-                result.review_hint = "no_segments_axis_missing"
+                result.segments = _textblock_segment_records(root,start,end,scope,instance_name)
+                result.status = "ok" if result.segments else "no_segments"
+                result.review_hint = "" if result.segments else "no_segments_axis_missing"
+                result.debug_summary['textblock_table_records']=len(result.segments)
                 return result
 
             # Step 4: Extract segment facts
@@ -1036,8 +1059,10 @@ def extract_edinet_segments(
             result.debug_summary["segment_facts_count"] = len(facts)
 
             if not facts:
-                result.status = "no_segments"
-                result.review_hint = "supported_segment_facts_absent_not_proof_of_nondisclosure"
+                result.segments = _textblock_segment_records(root,start,end,scope,instance_name)
+                result.status = "ok" if result.segments else "no_segments"
+                result.review_hint = "" if result.segments else "supported_segment_facts_absent_not_proof_of_nondisclosure"
+                result.debug_summary['textblock_table_records']=len(result.segments)
                 return result
 
             # Step 5: Group facts by member → build segment records
@@ -1048,6 +1073,9 @@ def extract_edinet_segments(
                 label_map_en=label_map_en,
                 segment_roles=segment_roles,
             )
+            if not records:
+                records = _textblock_segment_records(root,start,end,scope,instance_name)
+                result.debug_summary['textblock_table_records']=len(records)
             result.segments = records
             result.debug_summary["segment_record_count"] = len(records)
 

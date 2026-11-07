@@ -571,6 +571,11 @@ def extract_segments_from_xbrl_zip_detailed(
     title_quarter = None
     dei_current_period_ends: set[datetime.date] = set()
     dei_fiscal_year_ends: set[datetime.date] = set()
+    dei_start_dates = set()
+    dei_previous_start_dates = set()
+    dei_previous_end_dates = set()
+    dei_scopes = set()
+    dei_tickers = set()
 
     try:
         with zipfile.ZipFile(zip_path) as zf:
@@ -593,6 +598,17 @@ def extract_segments_from_xbrl_zip_detailed(
                             dei_fiscal_year_ends.update(
                                 _extract_dei_date_values(s, "CurrentFiscalYearEndDateDEI")
                             )
+                            dei_start_dates.update(_extract_dei_date_values(s, "CurrentFiscalYearStartDateDEI"))
+                            dei_previous_start_dates.update(_extract_dei_date_values(s, "PreviousFiscalYearStartDateDEI"))
+                            dei_previous_end_dates.update(_extract_dei_date_values(s, "ComparativePeriodEndDateDEI"))
+                            for dei_tag in s.find_all(['ix:nonnumeric','ix:nonfraction']):
+                                if str(dei_tag.get('name') or '').split(':')[-1].lower() in ('securitycodedei','securitycode'):
+                                    from src.common_ticker import normalize_ticker
+                                    code=normalize_ticker(dei_tag.get_text(strip=True))
+                                    if code:dei_tickers.add(code)
+                                if str(dei_tag.get('name') or '').split(':')[-1].lower()=='whetherconsolidatedfinancialstatementsareprepareddei':
+                                    value=dei_tag.get_text(strip=True).lower()
+                                    if value in ('true','false'):dei_scopes.add(value)
                     except Exception as e:
                         logger.warning(f"Failed to parse context in {name}: {e}")
                         parse_error_count += 1
@@ -799,10 +815,7 @@ def extract_segments_from_xbrl_zip_detailed(
                     )
                     continue
 
-                if not rows:
-                    continue
-
-                ticker = None
+                ticker = next(iter(dei_tickers)) if len(dei_tickers)==1 else None
                 for tag in soup.find_all("ix:nonfraction")[:20]:
                     _ctx = tag.get("contextref", "")
                     if _ctx:
@@ -949,6 +962,31 @@ def extract_segments_from_xbrl_zip_detailed(
                         raw_json=row_raw_json,
                     )
                     results.append(row)
+
+                # Some filings provide the entire segment table only as XHTML
+                # in a TextBlock. Its printed dates and unit are mandatory;
+                # a generic CurrentYear TextBlock may also contain prior data.
+                if len(dei_scopes)==1 and len(dei_tickers)==1 and expected_end:
+                    import html as html_module
+                    from src.segment.xhtml_segment_tables import extract_textblock_tables
+                    periods=[]
+                    if len(dei_start_dates)==1:
+                        periods.append(('current',loop_period,str(next(iter(dei_start_dates))),str(expected_end)))
+                    if len(dei_previous_start_dates)==1 and len(dei_previous_end_dates)==1:
+                        prior_period=_prev_period
+                        if prior_period:periods.append(('previous',prior_period,str(next(iter(dei_previous_start_dates))),str(next(iter(dei_previous_end_dates)))))
+                    for role,target_period,start,end in periods:
+                        if any(r.period==target_period and r.quarter==estimated_quarter for r in results):continue
+                        table_rows=[]
+                        for block in soup.find_all('ix:nonnumeric'):
+                            name=str(block.get('name') or '')
+                            if 'segment' not in name.lower() or 'textblock' not in name.lower():continue
+                            table_rows.extend(extract_textblock_tables(html_module.unescape(block.decode_contents()),period_start=start,period_end=end,is_consolidated=next(iter(dei_scopes))=='true',textblock_tag=name,context_ref=block.get('contextref','')))
+                        for value in table_rows:
+                            facts={m:{**f,'file':seg_file} for m,f in value['facts'].items()}
+                            raw={'_segment_period_role':role,'raw_segment_label':value['raw_segment_label'],'raw_sales_label':value['sales_label'],'raw_profit_label':value['profit_label'],'sales_basis':value['sales_basis'],'profit_basis':value['profit_basis'],'is_consolidated':value['is_consolidated'],'currency':'JPY','table_facts':facts,'extraction_method':'xhtml_textblock','_context_evidence':{'context_ref':next(iter(facts.values()))['textblock_context'],'context_start':start,'context_end':end,'current_or_previous':role,'quarter':estimated_quarter,'date_guard_status':'PASS','context_period_type':role,'selection_reason':'printed_table_dates_match_filing_dei'}}
+                            results.append(SegmentRawRow(source='xbrl',source_document_id=basename,doc_hash=doc_hash,raw_ticker=ticker or '',normalized_ticker=ticker or '',period=target_period,quarter=estimated_quarter or '',raw_segment_name=value['segment_name'],normalized_segment_name=normalize_segment_name(value['segment_name']),special_row_type='ordinary_segment',sales=value['sales'],profit=value['profit'],unit='million_yen',extraction_method='xhtml_textblock',confidence_score=0.95,is_consolidated=value['is_consolidated'],accounting_standard=accounting_standard,table_title=f'XHTML segment: {seg_file}',raw_json=raw))
+                            date_guard_status_set.add('PASS')
 
             if results:
                 from src.segment.normalize import normalize_segment_key

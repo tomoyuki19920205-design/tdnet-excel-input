@@ -97,6 +97,10 @@ def column_evidence(tag):
                 ci += colspan
         table.__dict__['_segment_column_evidence'] = cache
     label = cache.get(id(cell), '')
+    return {'label': label, 'role': column_role(label)}
+
+
+def column_role(label):
     text = compact(label)
     if re.fullmatch(r'[△▲+\-−]?\(?\d[\d,]*(?:\.\d+)?\)?', text):
         role = 'unresolved'
@@ -104,31 +108,35 @@ def column_evidence(tag):
         role = 'header_group'
     elif re.match(r'^(?:計|合計|小計|総計|連結合計|報告セグメント計|total|subtotal)(?:$|\(|注|※)', text):
         role = 'total'
-    elif text in ('連結','consolidated') or re.match(r'^(?:調整額|消去|全社|連結損益計算書|四半期連結損益計算書|中間連結損益計算書)', text):
+    elif text in ('連結','consolidated') or re.match(r'^(?:調整額|消去|全社|連結財務諸表|財務諸表計上額|損益計算書計上額|連結損益計算書|四半期連結損益計算書|中間連結損益計算書)', text):
         role = 'adjustment_or_consolidated'
     else:
         role = 'segment' if label else 'unresolved'
-    return {'label': label, 'role': role}
+    return role
 
 def disclosed_metric(tag):
     """Require an unambiguous row label and a monetary unit; caller checks dimension."""
     label = row_label(tag)
-    text = compact(label)
     unit = compact(str(tag.get('unitref') or ''))
     if not unit or any(x in unit for x in ('pershare', 'shares', 'pure', 'percent')):
         return None, label
+    return metric_from_label(label), label
+
+
+def metric_from_label(label):
+    text = compact(label)
     if re.match(r'^(?:(?:調整後|adjusted)?ebit(?:da)?|財務[・及び]*法人所得税前利益|金利[・及び]*税引前利益)(?:$|\(|※|（)', text):
-        return 'profit', label
+        return 'profit'
     # Components of profit, rates, forecasts and reconciliation adjustments are not profits.
     if any(x in text for x in ('利益率', '損益率', '前年比', '増減率', '償却費', '減損', '調整額', '配賦', '法人税', '1株', '一株')):
-        return None, label
+        return None
     if re.match(r'^(?:セグメント(?:利益|損益|損失)|(?:調整後営業|コア営業|事業|売上総|営業|経常|税引前|のれん等償却前セグメント)(?:利益|損益|損失)|与信費用控除後業務純益)', text):
-        return 'profit', label
+        return 'profit'
     if re.match(r'^(?:segment(?:profit|loss|income)|adjustedoperating(?:profit|loss)|businessprofit)', text):
-        return 'profit', label
+        return 'profit'
     if re.match(r'^(?:外部顧客(?:への|からの|に対する)(?:売上高|売上収益|営業収益|収益)|外部収益|完成工事高|営業収益|営業総収入|売上高|売上収益(?:合計)?|顧客との契約から生じる収益)(?:$|\(|※)', text):
-        return 'sales', label
-    return None, label
+        return 'sales'
+    return None
 
 def sales_basis(label, selected_tag, available_tags):
     text = compact(label)
