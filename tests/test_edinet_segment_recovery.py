@@ -9,8 +9,8 @@ def test_real_thousand_yen_loss_other_nil_and_nonconsolidated_scope():
     rows={r['segment_name']:r for r in edinet_result_to_canonical_segments(result)}
     assert len(rows)==4
     assert (rows['卸売部門']['sales'],rows['卸売部門']['profit'])==(1909.446,-22.058)
-    assert rows['Other']['sales']==1.84 and rows['Other']['profit'] is None
-    assert rows['Other']['flags']['explicit_nil_facts']
+    assert rows['その他']['sales']==1.84 and rows['その他']['profit'] is None
+    assert rows['その他']['flags']['explicit_nil_facts']
     assert all(r['flags']['is_consolidated'] is False for r in rows.values())
     assert all(r['flags']['period_start']=='2025-04-01' and r['flags']['period_end']=='2026-03-31' for r in rows.values())
 

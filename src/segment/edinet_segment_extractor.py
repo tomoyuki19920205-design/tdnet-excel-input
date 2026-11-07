@@ -1096,6 +1096,21 @@ def extract_edinet_segments(
     return result
 
 
+def disclosed_column_name(facts):
+    """Use the actual period's business column over stale/generic taxonomy names."""
+    labels=set()
+    for fact in facts:
+        column=(fact or {}).get('inline_evidence',{}).get('column',{})
+        if column.get('role')!='segment' or not column.get('label'):continue
+        label=unicodedata.normalize('NFKC',column['label'])
+        label=re.sub(r'\s*\(注[^)]*\)\s*[0-9一二三四五六七八九十、,・.]*\s*$', '',label)
+        label=re.sub(r'\s*\(?注\)?\s*[0-9一二三四五六七八九十、,・.]*\s*$', '',label).strip()
+        label=re.sub(r'\s+', '',label)
+        if label:labels.add(label)
+    if len(labels)>1:raise ValueError('sales/profit identify different business columns: '+repr(sorted(labels)))
+    return next(iter(labels),None)
+
+
 def _build_segment_records(
     facts: list[dict],
     contexts: dict[str, ParsedContext],
@@ -1153,6 +1168,11 @@ def _build_segment_records(
                 if best_profit is None or f["priority"] > best_profit["priority"]:
                     best_profit = f
 
+        printed_name=disclosed_column_name((best_sales,best_profit))
+        if printed_name:
+            rec.segment_name_raw=printed_name
+            rec.segment_name_norm=_normalize_segment_name(printed_name)
+            rec.special_row_type='other' if rec.segment_name_norm=='その他' else 'ordinary_segment'
         if best_sales:
             rec.sales = _yen_to_million(best_sales["value"])
             rec.concept_sales = best_sales["concept"]
@@ -1170,6 +1190,8 @@ def _build_segment_records(
             'period_type':'ytd','currency':'JPY',
             'is_consolidated':'nonconsolidated' not in context_id.lower(),
             'source_context':context_id,'source_member':member,
+            'taxonomy_segment_label':label_name or _member_to_segment_name(member),
+            'source_column_label':printed_name,
             'profit_basis':(profit_basis((best_profit or {}).get('label')) or profit_basis(rec.concept_profit) or 'company_defined_unknown') if best_profit else None,
             'profit_label':(best_profit or {}).get('label') or None,
             'profit_tag':rec.concept_profit or None,
@@ -1189,7 +1211,12 @@ def _build_segment_records(
             records.append(rec)
 
     by_member = {}
+    names={}
     for rec in records:
+        previous_member=names.get(rec.segment_name_norm)
+        if previous_member is not None and previous_member!=rec.member_name:
+            raise ValueError('different business members share a normalized name: '+rec.segment_name_norm)
+        names[rec.segment_name_norm]=rec.member_name
         old = by_member.get(rec.member_name)
         if old is not None:
             comparable = (old.sales,old.profit,old.metadata.get('period_start'),old.metadata.get('period_end'),old.metadata.get('is_consolidated'))
