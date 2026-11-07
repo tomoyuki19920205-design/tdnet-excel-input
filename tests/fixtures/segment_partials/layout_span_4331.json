@@ -1,0 +1,13 @@
+{
+  "ticker": "4331",
+  "doc": "20260706588553",
+  "source_url": "https://www.release.tdnet.info/inbs/081220260706588553.zip",
+  "sha256": "2fa2c9d96f18d04bb6bcf8bfd2a0285bc7abfde85046020cc504cabaf615773e",
+  "original_filing_identity": {
+    "ticker": "4331",
+    "period": "2025-12-31",
+    "quarter": "FY",
+    "document_type": "attachment_xbrl",
+    "internal_document_id": "20260703443310"
+  }
+}

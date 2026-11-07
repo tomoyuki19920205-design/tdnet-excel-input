@@ -16,6 +16,11 @@ _RANGE = re.compile(r'自' + _DATE + r'至' + _DATE)
 _NIL = {'', '-', '―', '—', '–', '…', '該当なし'}
 
 
+def unprefix_metric_caption(label):
+    """Remove an enumeration marker, while provenance keeps the full caption."""
+    return re.sub(r'^\s*(?:[（(]\s*\d+\s*[)）]|[a-zA-ZＡ-Ｚａ-ｚ][.．])\s*', '', label)
+
+
 def _date(groups):
     era,ey,year,month,day=groups
     y=int(year) if year else (2018 if era=='令和' else 1988)+(1 if ey=='元' else int(ey))
@@ -149,7 +154,7 @@ def _extract_tables(html, *, period_start, period_end, is_consolidated, textbloc
             label=row[0]['text']
             # Numbered row captions are ordinary disclosure labels; retain the
             # full original caption in provenance while recognizing its metric.
-            metric=metric_from_label(re.sub(r'^\s*[（(]\s*\d+\s*[)）]\s*','',label))
+            metric=metric_from_label(unprefix_metric_caption(label))
             numeric=sum(c is not None and _number(c['text']) is not None for c in row[1:])
             has_dash=any(c is not None and compact(c['text']) in _NIL and compact(c['text']) for c in row[1:])
             if body is None and (numeric>=2 or (metric and (numeric or has_dash))):body=ri
@@ -158,13 +163,13 @@ def _extract_tables(html, *, period_start, period_end, is_consolidated, textbloc
         # Presence of a segment-profit row distinguishes business performance
         # from regional revenue disaggregation without a corresponding profit.
         if not any('セグメント' in compact(label) or 'segment' in compact(label) for _,m,label,_ in metric_rows if m=='profit') and '報告セグメント' not in compact(table.get_text(' ',strip=True)):continue
-        headers={}
+        headers={};header_cells={}
         for row in grid[:body]:
             for ci,cell in enumerate(row):
                 if not cell:continue
                 label=cell['text'];text=compact(label)
                 if text in _NIL or '単位' in text or text.strip('()') in ('千円','百万円','円'):continue
-                headers[ci]=label
+                headers[ci]=label;header_cells[ci]=cell
         selected={};ambiguous=False
         for ri,metric,label,row in metric_rows:
             basis=sales_basis(label,'',[]) if metric=='sales' else profit_basis(label)
@@ -187,11 +192,19 @@ def _extract_tables(html, *, period_start, period_end, is_consolidated, textbloc
             for metric,(_,ri,rowlabel,basis,row) in selected.items():
                 if ci>=len(row) or row[ci] is None:continue
                 cell=row[ci]
-                if cell['colspan']!=1 or cell['column']!=ci:continue
+                if cell['column']!=ci or cell['row']!=ri:continue
+                if cell['colspan']>1:
+                    # Some generators split one logical business into layout
+                    # subcolumns. A single numeric cell is valid only when the
+                    # identical leaf header spans exactly those same columns.
+                    header=header_cells.get(ci)
+                    if not header or header['column']!=ci or header['colspan']!=cell['colspan']:continue
+                    if any(header_cells.get(col) is not header for col in range(ci,ci+cell['colspan'])):continue
                 amount=_number(cell['text']);status='disclosed_numeric' if amount is not None else 'explicit_dash' if compact(cell['text']) in _NIL and compact(cell['text']) else 'unresolved_cell'
                 value=amount*factor if amount is not None else None
                 values[metric]=int(value) if value is not None and value==value.to_integral_value() else float(value) if value is not None else None
                 facts[metric]={'textblock_tag':textblock_tag,'textblock_context':context_ref,'table_index':ti,'row_index':ri,'column_index':ci,'segment_label':label,'row_label':rowlabel,'raw_text':cell['text'],'display_unit':unit,'currency':'JPY','million_value':values[metric],'status':status,'period_start':period_start,'period_end':period_end,'printed_period':ranges[-1][2],'evidence_type':'xhtml_table_cell'}
+                if cell['colspan']>1:facts[metric]['column_span']=cell['colspan']
                 if attachment:facts[metric]['evidence_type']='xhtml_attachment_table_cell'
                 labels[metric]=rowlabel;bases[metric]=basis
             if not any(v is not None for v in values.values()):continue
