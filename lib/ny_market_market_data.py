@@ -293,20 +293,55 @@ class YahooChartProvider:
             raise MarketDataError(f"{self.name}:{symbol}: response symbol mismatch {returned_symbol}")
         symbol_mapping_evidence = None
         if provider_symbol != symbol:
-            expected_name = self.expected_names[symbol]
+            expected_name = self.expected_names[symbol].strip()
             actual_names = [str(meta.get(key) or "") for key in ("longName", "shortName")]
             normalize = lambda name: re.sub(r"[^a-z0-9]", "", name.casefold())
-            if (normalize(expected_name) not in {normalize(name) for name in actual_names}
+            matching_name = next((name for name in actual_names if normalize(name) == normalize(expected_name)), None)
+            ads_descriptor = re.fullmatch(
+                r"(.+?)\s+((?:(?:ADS|ADR)\s+)?American Depositary (?:Shares|Receipts))",
+                expected_name, re.I,
+            )
+            class_descriptor = re.fullmatch(
+                r"(.+?)\s+(Class ([A-Z])(?: (?:Common|Ordinary) (?:Stock|Shares))?)",
+                expected_name, re.I,
+            )
+            voting_descriptor = re.fullmatch(
+                r"(.+?)\s+((?:Non-Voting|Voting) Common Stock)", expected_name, re.I,
+            )
+            common_descriptor = re.fullmatch(
+                r"(.+?)\s+((?:Common Stock|Ordinary Shares))", expected_name, re.I,
+            )
+            descriptor = ads_descriptor or class_descriptor or voting_descriptor or common_descriptor
+            matching_descriptor_name = next((name for name in actual_names if descriptor
+                                             and normalize(descriptor.group(1)) == normalize(name)), None)
+            name_with_security_descriptor = (
+                bool(descriptor)
+                and len(normalize(descriptor.group(1))) >= 6
+                and bool(matching_descriptor_name)
+                and bool(actual_names[0])
+                and bool(meta.get("fullExchangeName"))
+                and (class_descriptor is None or class_descriptor.group(3).upper() == symbol.rsplit(".", 1)[-1])
+            )
+            if ((matching_name is None and not name_with_security_descriptor)
                     or meta.get("instrumentType") != "EQUITY" or meta.get("currency") != "USD"):
                 raise MarketDataError(f"{self.name}:{symbol}: class-symbol alias identity mismatch")
             symbol_mapping_evidence = {
                 "canonical_symbol": symbol, "provider_symbol": provider_symbol,
                 "screener_company_name": expected_name,
-                "provider_company_name": next(name for name in actual_names if normalize(name) == normalize(expected_name)),
+                "provider_company_name": matching_name or matching_descriptor_name,
                 "provider_instrument_type": meta["instrumentType"],
                 "provider_currency": meta["currency"],
                 "source_identifier": url, "raw_response_sha256": raw_hash,
                 "rule": "single_class_suffix_dot_to_hyphen_after_404",
+                **({"name_match_rule": (
+                        "issuer_short_name_with_ads_security_descriptor" if ads_descriptor
+                        else "issuer_short_name_with_class_security_descriptor" if class_descriptor
+                        else "issuer_name_with_voting_security_descriptor" if voting_descriptor
+                        else "issuer_name_with_common_stock_descriptor"),
+                    "provider_long_name": actual_names[0],
+                    "screener_security_descriptor": descriptor.group(2),
+                    "provider_exchange": meta["fullExchangeName"]}
+                   if name_with_security_descriptor and matching_name is None else {}),
             }
         return DailySeries(
             symbol=symbol,
@@ -1238,21 +1273,60 @@ class NasdaqOfficialCloseProvider:
                 # live quote. A numerical match alone does not establish basis.
                 volume_marker = str(previous_row.get("volume")).strip().upper()
                 provider_marks_adjusted = volume_marker == "N/A"
+                vendor_basis = None
                 if target_session_date == self.now().astimezone(NY_TZ).date() and nls_previous is not None:
                     if close_matches(nls_previous, previous_close) and provider_marks_adjusted:
                         basis = "already_split_normalized"
                     elif close_matches(nls_previous, normalized) and not provider_marks_adjusted:
                         basis = "unadjusted"
                     else:
-                        raise MarketDataError(f"{self.name}:{symbol}: official split/NLS basis unresolved")
+                        basis = None
                 else:
-                    if not provider_marks_adjusted:
-                        raise MarketDataError(f"{self.name}:{symbol}: historical split basis needs dated corroboration")
-                    basis = "already_split_normalized"
+                    basis = "already_split_normalized" if provider_marks_adjusted else None
+                if basis is None:
+                    vendor = YahooCorporateActionProvider(transport=self.transport).fetch(symbol, target_session_date)
+                    if not vendor.get("events"):
+                        raise MarketDataError(f"{self.name}:{symbol}: independent split event missing")
+                    try:
+                        validate_vendor_actions(vendor["events"], notice)
+                    except ValueError as exc:
+                        raise MarketDataError(f"{self.name}:{symbol}: vendor action disagrees with exchange: {exc}") from exc
+                    stamp = vendor.get("regular_market_time")
+                    vendor_day = (datetime.fromtimestamp(stamp, timezone.utc).astimezone(NY_TZ).date()
+                                  if isinstance(stamp, int) else None)
+                    vendor_previous = _numeric(vendor.get("chart_previous_close"), "vendor split-adjusted previous")
+                    if (vendor.get("meta_symbol") != symbol
+                            or vendor.get("exchange_timezone_name") != "America/New_York"
+                            or vendor_day != target_session_date):
+                        raise MarketDataError(f"{self.name}:{symbol}: dated vendor split basis unavailable")
+                    matches_raw = close_matches(vendor_previous, previous_close)
+                    matches_adjusted = close_matches(vendor_previous, normalized)
+                    if matches_raw == matches_adjusted:
+                        independent_history = StockAnalysisHistoricalCloseProvider(
+                            transport=self.transport,
+                        ).fetch_pair(symbol, previous_day, target_session_date)
+                        if (independent_history["price_basis"] != "regular_close_normalized_for_split"
+                                or independent_history["previous_session_date"] != previous_day.isoformat()
+                                or independent_history["target_session_date"] != target_session_date.isoformat()):
+                            raise MarketDataError(f"{self.name}:{symbol}: independent split dates or basis disagree")
+                        displayed_previous = float(independent_history["previous_split_normalized_close"])
+                        digits = int(independent_history["previous_display_decimal_places"])
+                        matches_raw = close_matches(displayed_previous, round_market_display(previous_close, digits))
+                        matches_adjusted = close_matches(displayed_previous, round_market_display(normalized, digits))
+                        if matches_raw == matches_adjusted:
+                            raise MarketDataError(f"{self.name}:{symbol}: independent split basis is ambiguous")
+                    else:
+                        independent_history = None
+                    basis = "already_split_normalized" if matches_raw else "unadjusted"
+                    vendor_basis = vendor
                 normalization = {"previous_close_raw": previous_close, "previous_price_basis": basis,
                                  "applied_split_factor": notice["old_shares"] / notice["new_shares"] if basis == "unadjusted" else 1.0,
                                  "official_action": notice,
                                  "historical_volume_basis_marker": volume_marker}
+                if vendor_basis:
+                    normalization["independent_split_basis"] = vendor_basis
+                    if independent_history:
+                        normalization["independent_adjusted_history_basis"] = independent_history
                 if basis == "unadjusted":
                     previous_close = normalized
                 normalization["previous_close_on_target_basis"] = True
@@ -1280,6 +1354,11 @@ class NasdaqOfficialCloseProvider:
             historical_target_close = _numeric(target_rows[0].get("close"), "official target close")
             if abs(target_close - historical_target_close) > max(1e-7, historical_target_close * 1e-6):
                 raise MarketDataError(f"{self.name}:{symbol}: official info/historical target close mismatch")
+        if normalization.get("independent_split_basis") and not close_matches(
+            _numeric(normalization["independent_split_basis"].get("regular_market_price"),
+                     "vendor split-date regular close"), target_close,
+        ):
+            raise MarketDataError(f"{self.name}:{symbol}: vendor split-date target differs from exchange close")
         return {
             "provider": self.name, "provider_family": self.family,
             "target_close_verified": True, "target_timestamp": target_stamp,
@@ -2744,10 +2823,23 @@ class LiveDiscrepancyArbitrator:
             datetime.fromtimestamp(vendor_stamp, timezone.utc).astimezone(NY_TZ).date()
             if isinstance(vendor_stamp, int) else None
         )
+        vendor_previous = _numeric(vendor.get("chart_previous_close"), "vendor split-adjusted previous")
+        independent_history = official.get("independent_adjusted_history_basis")
+        independent_previous_support = (
+            official["previous_price_basis"] == "already_split_normalized"
+            and isinstance(independent_history, dict)
+            and independent_history.get("price_basis") == "regular_close_normalized_for_split"
+            and independent_history.get("previous_session_date") == expected_previous_session_date.isoformat()
+            and independent_history.get("target_session_date") == target_session_date.isoformat()
+            and close_matches(
+                float(independent_history["previous_split_normalized_close"]),
+                round_market_display(official_previous, int(independent_history["previous_display_decimal_places"])),
+            )
+        )
         if (vendor.get("meta_symbol") != ticker
                 or vendor.get("exchange_timezone_name") != "America/New_York"
                 or vendor_day != target_session_date
-                or not close_matches(_numeric(vendor.get("chart_previous_close"), "vendor split-adjusted previous"), official_previous)
+                or not (close_matches(vendor_previous, official_previous) or independent_previous_support)
                 or not close_matches(_numeric(vendor.get("regular_market_price"), "vendor regular close"), official_target)):
             raise MarketDataError(f"Top20 {ticker}: vendor dated split-adjusted prices disagree")
         corrected_change = (official_target / official_previous - 1.0) * 100.0
@@ -2776,6 +2868,9 @@ class LiveDiscrepancyArbitrator:
                 "previous_close_on_target_basis": official_previous,
                 "target_regular_close": official_target,
                 "vendor_chart_previous_close": vendor["chart_previous_close"],
+                "vendor_chart_previous_agrees_with_exchange": close_matches(vendor_previous, official_previous),
+                **({"independent_adjusted_history_basis": independent_history}
+                   if independent_previous_support else {}),
                 "vendor_regular_market_price": vendor["regular_market_price"],
                 "official_action": notice,
             },
@@ -3188,7 +3283,8 @@ def build_canonical_market_data_packet(
         for key in ("official_raw_response_sha256", "chart_raw_response_sha256",
                     "official_previous_raw_response_sha256"):
             if key in item:
-                raw_hashes.add(item[key])
+                hashes = item[key] if isinstance(item[key], list) else [item[key]]
+                raw_hashes.update(value for value in hashes if isinstance(value, str))
     for item in (*snapshot["indexes"], *snapshot["sectors"], *top20,
                  *excluded_action_candidates, *candidate_floor_audit):
         provider = item.get("provider")

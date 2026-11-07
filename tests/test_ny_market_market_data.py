@@ -390,6 +390,124 @@ def test_captured_class_share_alias_requires_matching_issuer_identity():
     }
 
 
+def test_captured_ads_class_alias_matches_issuer_short_name_and_security_descriptor():
+    raw = (ROOT / "tests/fixtures/ny_market_cig_c_yahoo_20261106.json").read_bytes()
+    def transport(url, _headers):
+        if "/CIG.C?" in url:
+            raise HTTPError(url, 404, "Not Found", None, None)
+        assert "/CIG-C?" in url
+        return raw
+    provider = YahooChartProvider(
+        transport=transport,
+        expected_names={"CIG.C": "Comp En De Mn Cemig ADS American Depositary Receipts"},
+    )
+    result = provider.fetch("CIG.C", date(2026, 10, 27), date(2026, 11, 6))
+    mapping = result.symbol_mapping_evidence
+    assert result.symbol == "CIG.C" and result.bars[-1].session_date == date(2026, 11, 6)
+    assert mapping["provider_symbol"] == "CIG-C"
+    assert mapping["provider_company_name"] == "Comp En De Mn Cemig"
+    assert mapping["name_match_rule"] == "issuer_short_name_with_ads_security_descriptor"
+    assert mapping["screener_security_descriptor"] == "ADS American Depositary Receipts"
+    assert mapping["provider_exchange"] == "NYSE"
+    assert mapping["raw_response_sha256"] == hashlib.sha256(raw).hexdigest()
+
+    provider.expected_names["CIG.C"] = "Different Company ADS American Depositary Receipts"
+    with pytest.raises(MarketDataError, match="alias identity mismatch"):
+        provider.fetch("CIG.C", date(2026, 10, 27), date(2026, 11, 6))
+    provider.expected_names["CIG.C"] = "Comp En De Mn Cemig ADS American Depositary Receipts"
+    wrong_symbol = json.loads(raw)
+    wrong_symbol["chart"]["result"][0]["meta"]["symbol"] = "CIG-A"
+    def wrong_transport(url, headers):
+        return json.dumps(wrong_symbol).encode() if "/CIG-C?" in url else transport(url, headers)
+    provider.transport = wrong_transport
+    with pytest.raises(MarketDataError, match="response symbol mismatch"):
+        provider.fetch("CIG.C", date(2026, 10, 27), date(2026, 11, 6))
+
+
+def test_captured_class_suffix_alias_requires_matching_class_and_issuer():
+    raw = (ROOT / "tests/fixtures/ny_market_gef_b_yahoo_20261106.json").read_bytes()
+    def transport(url, _headers):
+        if "/GEF.B?" in url:
+            raise HTTPError(url, 404, "Not Found", None, None)
+        assert "/GEF-B?" in url
+        return raw
+    provider = YahooChartProvider(
+        transport=transport,
+        expected_names={"GEF.B": "Greif Inc. Corporation Class B Common Stock"},
+    )
+    mapped = provider.fetch("GEF.B", date(2026, 10, 27), date(2026, 11, 6))
+    assert mapped.symbol_mapping_evidence["provider_company_name"] == "Greif, Inc. Corporation"
+    assert mapped.symbol_mapping_evidence["name_match_rule"] == "issuer_short_name_with_class_security_descriptor"
+    assert mapped.symbol_mapping_evidence["screener_security_descriptor"] == "Class B Common Stock"
+    provider.expected_names["GEF.B"] = "Greif Inc. Corporation Class A Common Stock"
+    with pytest.raises(MarketDataError, match="alias identity mismatch"):
+        provider.fetch("GEF.B", date(2026, 10, 27), date(2026, 11, 6))
+    provider.expected_names["GEF.B"] = "Other Company Corporation Class B Common Stock"
+    with pytest.raises(MarketDataError, match="alias identity mismatch"):
+        provider.fetch("GEF.B", date(2026, 10, 27), date(2026, 11, 6))
+
+
+def test_short_issuer_name_keeps_class_letter_guard():
+    raw = (ROOT / "tests/fixtures/ny_market_mog_b_yahoo_20261106.json").read_bytes()
+    def transport(url, _headers):
+        if "/MOG.B?" in url:
+            raise HTTPError(url, 404, "Not Found", None, None)
+        assert "/MOG-B?" in url
+        return raw
+    provider = YahooChartProvider(
+        transport=transport, expected_names={"MOG.B": "Moog Inc. Class B Common Stock"},
+    )
+    mapped = provider.fetch("MOG.B", date(2026, 10, 27), date(2026, 11, 6))
+    assert mapped.symbol_mapping_evidence["provider_company_name"] == "Moog Inc."
+    assert mapped.symbol_mapping_evidence["name_match_rule"] == "issuer_short_name_with_class_security_descriptor"
+    provider.expected_names["MOG.B"] = "Moog Inc. Class A Common Stock"
+    with pytest.raises(MarketDataError, match="alias identity mismatch"):
+        provider.fetch("MOG.B", date(2026, 10, 27), date(2026, 11, 6))
+
+
+def test_captured_class_alias_matches_common_stock_issuer_long_name():
+    raw = (ROOT / "tests/fixtures/ny_market_mkc_v_yahoo_20261106.json").read_bytes()
+    def transport(url, _headers):
+        if "/MKC.V?" in url:
+            raise HTTPError(url, 404, "Not Found", None, None)
+        assert "/MKC-V?" in url
+        return raw
+    provider = YahooChartProvider(
+        transport=transport,
+        expected_names={"MKC.V": "McCormick & Company Incorporated Common Stock"},
+    )
+    mapped = provider.fetch("MKC.V", date(2026, 10, 27), date(2026, 11, 6))
+    assert mapped.symbol_mapping_evidence["provider_symbol"] == "MKC-V"
+    assert mapped.symbol_mapping_evidence["provider_company_name"] == "McCormick & Company, Incorporated"
+    assert mapped.symbol_mapping_evidence["name_match_rule"] == "issuer_name_with_common_stock_descriptor"
+    provider.expected_names["MKC.V"] = "Different Company Incorporated Common Stock"
+    with pytest.raises(MarketDataError, match="alias identity mismatch"):
+        provider.fetch("MKC.V", date(2026, 10, 27), date(2026, 11, 6))
+
+
+@pytest.mark.parametrize("symbol,name,fixture,rule", [
+    ("UHAL.B", "U-Haul Holding Company Series N Non-Voting Common Stock ",
+     "ny_market_uhal_b_yahoo_20261106.json", "issuer_name_with_voting_security_descriptor"),
+    ("LEN.B", "Lennar Corporation Class B",
+     "ny_market_len_b_yahoo_20261106.json", "issuer_short_name_with_class_security_descriptor"),
+])
+def test_other_captured_class_security_descriptors_keep_symbol_and_issuer_guard(symbol, name, fixture, rule):
+    raw = (ROOT / "tests/fixtures" / fixture).read_bytes()
+    alias = symbol.replace(".", "-")
+    def transport(url, _headers):
+        if f"/{symbol}?" in url:
+            raise HTTPError(url, 404, "Not Found", None, None)
+        assert f"/{alias}?" in url
+        return raw
+    provider = YahooChartProvider(transport=transport, expected_names={symbol: name})
+    mapped = provider.fetch(symbol, date(2026, 10, 27), date(2026, 11, 6))
+    assert mapped.symbol_mapping_evidence["provider_symbol"] == alias
+    assert mapped.symbol_mapping_evidence["name_match_rule"] == rule
+    provider.expected_names[symbol] = "Different Company Class B"
+    with pytest.raises(MarketDataError, match="alias identity mismatch"):
+        provider.fetch(symbol, date(2026, 10, 27), date(2026, 11, 6))
+
+
 @pytest.mark.parametrize("expected_name", ["Different Company, Inc.", ""])
 def test_class_share_alias_rejects_unverified_issuer_identity(expected_name):
     raw = (ROOT / "tests/fixtures/ny_market_gtn_a_yahoo_20261029.json").read_bytes()
@@ -1926,6 +2044,34 @@ def test_same_symbol_split_history_gap_uses_dated_exchange_and_vendor_basis(alre
     with pytest.raises(MarketDataError, match="vendor dated split-adjusted prices disagree"):
         arbitrator.resolve_missing_previous(**arguments)
 
+    # The vendor's chartPreviousClose may drift after the exchange rebases
+    # its dated history. A separately dated, split-adjusted history must
+    # corroborate the exchange pair before its stale metadata is bypassed.
+    official_with_independent = Official()
+    original_fetch = official_with_independent.fetch
+    def corroborated_fetch(symbol, day, last):
+        return {**original_fetch(symbol, day, last), "independent_adjusted_history_basis": {
+            "price_basis": "regular_close_normalized_for_split",
+            "previous_session_date": prior.isoformat(),
+            "target_session_date": target.isoformat(),
+            "previous_split_normalized_close": 0.85,
+            "previous_display_decimal_places": 2,
+            "source_identifier": "https://stockanalysis.com/stocks/cdt/history/",
+            "raw_response_sha256": "c" * 64,
+        }}
+    arbitrator.official_provider = official_with_independent
+    official_with_independent.fetch = corroborated_fetch
+    def drifted_previous(symbol, day):
+        return {**Vendor().fetch(symbol, day), "chart_previous_close": 1.88}
+    bad_vendor.fetch = drifted_previous
+    if already_adjusted:
+        resolved = arbitrator.resolve_missing_previous(**arguments)
+        assert resolved["basis_evidence"]["vendor_chart_previous_agrees_with_exchange"] is False
+        assert resolved["basis_evidence"]["independent_adjusted_history_basis"]["previous_split_normalized_close"] == 0.85
+    else:
+        with pytest.raises(MarketDataError, match="vendor dated split-adjusted prices disagree"):
+            arbitrator.resolve_missing_previous(**arguments)
+
 
 def test_regular_universe_split_candidate_uses_normalized_official_previous():
     target = date(2026, 11, 6)
@@ -2104,6 +2250,60 @@ def test_effective_split_precedes_nls_comparison_without_double_application(hist
                 minute_close=None,independent_sources=[{"provider":"public_com_previous_close",
                     "provider_family":"public_com","previous_close":3.0969,"target_close":None}],
                 tolerance_pct=.2,resolved_at="2026-10-27T22:00:00Z")
+
+
+def test_split_history_rebases_to_adjusted_previous_without_volume_marker_or_double_factor():
+    day = date(2026, 11, 6)
+    notice_url = "https://www.nasdaqtrader.com/TraderNews.aspx?id=ECA2026-793"
+    notice = ("(CDT) will effect a one-for-twenty (1-20) reverse stock split. "
+              "The reverse stock split will become effective on Friday, November 6, 2026.").encode()
+    history = json.dumps({"status": {"rCode": 200}, "data": {"tradesTable": {"rows": [
+        {"date": "11/06/2026", "close": "$1.31", "volume": "27,133,040"},
+        {"date": "11/05/2026", "close": "$0.846", "volume": "500,000"},
+    ]}}}).encode()
+    nls = json.dumps({"data": {"topTable": {"rows": [{"previousClose": "$0.846"}]}}}).encode()
+    vendor = json.dumps({"chart": {"result": [{"meta": {
+        "symbol": "CDT", "chartPreviousClose": 1.88, "regularMarketPrice": 1.31,
+        "regularMarketTime": int(datetime(2026, 11, 6, 21, tzinfo=timezone.utc).timestamp()),
+        "exchangeTimezoneName": "America/New_York",
+    }, "events": {"splits": {"x": {
+        "date": int(datetime(2026, 11, 6, 14, 30, tzinfo=timezone.utc).timestamp()),
+        "numerator": 1, "denominator": 20,
+    }}}}]}}).encode()
+    independent = ("<html>Past prices are adjusted for stock splits"
+                   "<table><tr><th>Date</th><th>Close</th><th>Change</th></tr>"
+                   "<tr><td>Nov 6, 2026</td><td>1.31</td><td>+54.85%</td></tr>"
+                   "<tr><td>Nov 5, 2026</td><td>0.85</td><td>+1.00%</td></tr>"
+                   "</table></html>").encode()
+    def transport(url, _headers):
+        if "stockanalysis.com" in url:
+            return independent
+        if "/historical?" in url:
+            return history
+        if "/realtime-trades?" in url:
+            return nls
+        if "/info?" in url:
+            return b'{"data":{}}'
+        if "finance/chart/" in url:
+            return vendor
+        raise AssertionError(url)
+    provider = NasdaqOfficialCloseProvider(
+        transport=transport, corporate_action_notices={"CDT": notice_url},
+        notice_transport=lambda *_: notice,
+        now=lambda: datetime(2026, 11, 6, 23, tzinfo=timezone.utc),
+    )
+    result = provider.fetch("CDT", day, 1.31)
+    assert result["previous_close_raw"] == result["previous_close"] == pytest.approx(0.846)
+    assert result["previous_price_basis"] == "already_split_normalized"
+    assert result["applied_split_factor"] == 1
+    assert result["target_close_source"] == "nasdaq_historical"
+    assert result["independent_adjusted_history_basis"]["previous_split_normalized_close"] == 0.85
+
+    def conflicting(url, headers):
+        return independent.replace(b"0.85", b"1.50") if "stockanalysis.com" in url else transport(url, headers)
+    provider.transport = conflicting
+    with pytest.raises(MarketDataError, match="independent split basis is ambiguous"):
+        provider.fetch("CDT", day, 1.31)
 
 
 def test_effective_split_requires_dated_independent_pair_and_keeps_exchange_close():
