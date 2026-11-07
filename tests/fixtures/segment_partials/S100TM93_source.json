@@ -1,0 +1,9 @@
+{
+  "ticker": "4523",
+  "period": "2023-03-31",
+  "quarter": "FY",
+  "period_role": "previous",
+  "document_id": "S100TM93",
+  "source_url": "https://api.edinet-fsa.go.jp/api/v2/documents/S100TM93?type=1",
+  "sha256": "6048d57b9a70b9461ef3f272c2b50f291ff9501d233b675db498ee47de519e53"
+}

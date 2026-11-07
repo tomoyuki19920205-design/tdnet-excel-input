@@ -1,0 +1,9 @@
+{
+  "ticker": "9381",
+  "period": "2024-02-29",
+  "quarter": "1Q",
+  "period_role": "previous",
+  "document_id": "S100U1X7",
+  "source_url": "https://api.edinet-fsa.go.jp/api/v2/documents/S100U1X7?type=1",
+  "sha256": "5bd01ebaedaa3c5f2b018e270ca87f10e0cf241dfb6135271794e066dd5ae07c"
+}

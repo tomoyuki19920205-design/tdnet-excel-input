@@ -39,7 +39,16 @@ def monetary_fact(tag, soup):
 def row_label(tag):
     label=_leading_row_text(tag)
     evidence=column_evidence(tag)
+    if evidence.get('orientation')=='business_rows_metric_columns':
+        return evidence['metric_column']
     if evidence.get('orientation')=='business_rows_period_columns':
+        if compact(label)=='外部顧客に対するもの':
+            for prior in tag.find_parent('tr').find_previous_siblings('tr'):
+                cells=prior.find_all(['td','th'],recursive=False)
+                text=cells[0].get_text(' ',strip=True) if cells else ''
+                if metric_from_label(text)=='sales':return text.rstrip(':：')+'（'+label+'）'
+        if metric_from_label(label) or re.match(r'^(?:外部顧客|セグメント間)',compact(label)):
+            return label
         row=tag.find_parent('tr')
         for prior in row.find_previous_siblings('tr'):
             cells=prior.find_all(['td','th'],recursive=False)
@@ -85,6 +94,9 @@ def column_evidence(tag):
             has_fact = any(c.find('ix:nonfraction') is not None for c in cells)
             # XHTML can contain untagged numeric rows before the first XBRL fact.
             numeric_cells = sum(bool(re.fullmatch(r'[△▲+\-−]?\(?\d[\d,]*(?:\.\d+)?\)?', compact(c.get_text(' ', strip=True)))) or compact(c.get_text(' ', strip=True)) in ('-','―','—') for c in cells)
+            if body_started and not has_fact and not numeric_cells and any(compact(c.get_text(' ',strip=True)) in ('報告セグメント','事業セグメント','reportablesegments') for c in cells):
+                # The same HTML table can wrap horizontally and repeat its header.
+                headers={};body_started=False
             body_started = body_started or has_fact or numeric_cells >= 2
             ci = 0
             for current in cells:
@@ -96,33 +108,65 @@ def column_evidence(tag):
                 except ValueError:
                     colspan = rowspan = 1
                 label = current.get_text(' ', strip=True)
-                unit_only = compact(label).strip('()（）') in ('百万円','千円','円','millionsofyen','thousandsofyen')
-                if not body_started and label and not unit_only:
+                unit_only = bool(re.fullmatch(r'(?:金額)?\(?(?:百万円|千円|円|millionsofyen|thousandsofyen)\)?',compact(label)))
+                note_only = bool(re.fullmatch(r'\(?注\)?[0-9一二三四五六七八九十、,.・]*\)?',compact(label)))
+                if not body_started and label and not unit_only and not note_only:
                     for col in range(ci, ci + colspan):
-                        headers[col] = label
+                        headers.setdefault(col,[]).append(label)
                 if has_fact:
-                    labels = list(dict.fromkeys(headers.get(col, '') for col in range(ci, ci + colspan)))
-                    cache[id(current)] = ' / '.join(x for x in labels if x)
+                    paths = [headers.get(col,[]) for col in range(ci, ci + colspan)]
+                    cache[id(current)] = paths[0] if paths and all(p==paths[0] for p in paths) else []
                 for rr in range(ri, ri + rowspan):
                     for cc in range(ci, ci + colspan):
                         occupied[rr, cc] = True
                 ci += colspan
         table.__dict__['_segment_column_evidence'] = cache
-    label = cache.get(id(cell), '')
-    if re.match(r'^(?:前|当).*(?:会計期間|会計年度|事業年度|累計期間)',compact(label)):
+        leaf_paths={}
+        for p in cache.values():
+            businesses=tuple(compact(x) for x in p if column_role(x)=='segment')
+            if businesses:leaf_paths.setdefault(businesses[-1],set()).add(businesses)
+        table.__dict__['_segment_leaf_paths']=leaf_paths
+    path = cache.get(id(cell), [])
+    label = path[-1] if path else ''
+    period_headers=[x for x in path if re.match(r'^(?:(?:前|当).*(?:会計期間|会計年度|事業年度|累計期間)|\d{4}年度)',compact(x))]
+    if period_headers or metric_from_label(label):
         business=_leading_row_text(tag)
+        if column_role(business) in ('total','adjustment_or_consolidated'):
+            return {'label':business,'role':column_role(business),'header_path':path}
+        if re.match(r'^(?:外部顧客|セグメント間)',compact(business)):
+            for prior in tag.find_parent('tr').find_previous_siblings('tr'):
+                cells=prior.find_all(['td','th'],recursive=False)
+                if not cells:continue
+                heading=cells[0].get_text(' ',strip=True).strip().rstrip(':：')
+                if any(c.get_text(strip=True) for c in cells[1:]):continue
+                if heading and not metric_from_label(heading) and column_role(heading)=='segment':
+                    business=heading;break
         if business and not metric_from_label(business) and column_role(business)=='segment':
-            return {'label':business,'role':'segment','orientation':'business_rows_period_columns','period_column':label}
-    return {'label': label, 'role': column_role(label)}
+            result={'label':business,'role':'segment','orientation':'business_rows_metric_columns' if metric_from_label(label) else 'business_rows_period_columns','header_path':path}
+            if period_headers:result['period_column']=period_headers[-1]
+            if metric_from_label(label):result['metric_column']=label
+            return result
+    # Retain both levels of real business headers (e.g. construction / Japan).
+    # Reportable-segment group captions and note-only rows do not rename a cell.
+    meaningful=[x for x in path if column_role(x) not in ('header_group','unresolved')]
+    if meaningful:
+        last=meaningful[-1];role=column_role(last)
+        aggregate=next((x for x in meaningful if column_role(x) in ('total','adjustment_or_consolidated')),None)
+        if aggregate:label=aggregate;role=column_role(aggregate)
+        else:
+            ambiguous_leaf=len(table.__dict__['_segment_leaf_paths'].get(compact(last),set()))>1
+            label=' / '.join(dict.fromkeys(meaningful)) if role=='segment' and ambiguous_leaf else last
+    else:role=column_role(label)
+    return {'label': label, 'role': role, 'header_path':path}
 
 
 def column_role(label):
     text = compact(label)
     if re.fullmatch(r'[△▲+\-−]?\(?\d[\d,]*(?:\.\d+)?\)?', text):
         role = 'unresolved'
-    elif re.match(r'^(?:前|当).*(?:会計期間|会計年度|事業年度|累計期間)',text) or text in ('報告セグメント', '事業セグメント', 'セグメント', 'reportablesegments') or '単位:' in text or text in ('百万円','千円'):
+    elif re.match(r'^(?:(?:前|当).*(?:会計期間|会計年度|事業年度|累計期間)|\d{4}年度)',text) or text in ('報告セグメント', '事業セグメント', 'セグメント', 'reportablesegments') or '単位:' in text or re.fullmatch(r'(?:金額)?\(?(?:百万円|千円|円)\)?',text):
         role = 'header_group'
-    elif re.match(r'^(?:計|合計|小計|総計|連結合計|報告セグメント計|total|subtotal)(?:$|\(|注|※)', text):
+    elif re.match(r'^(?:計|合計|小計|総計|連結合計|報告セグメント計|事業計|total|subtotal)(?:$|\(|注|※)', text):
         role = 'total'
     elif text in ('連結','consolidated') or re.match(r'^(?:調整額|消去|全社|連結財務諸表|財務諸表計上額|損益計算書計上額|連結損益計算書|四半期連結損益計算書|中間連結損益計算書)', text):
         role = 'adjustment_or_consolidated'
@@ -141,6 +185,8 @@ def disclosed_metric(tag):
 
 def metric_from_label(label):
     text = compact(label)
+    if re.match(r'^売上高及び金融ビジネス収入(?:$|[:：(])',text):
+        return 'sales'
     if re.match(r'^(?:(?:調整後|adjusted)?ebit(?:da)?|財務[・及び]*法人所得税前利益|金利[・及び]*税引前利益)(?:$|\(|※|（)', text):
         return 'profit'
     # Components of profit, rates, forecasts and reconciliation adjustments are not profits.

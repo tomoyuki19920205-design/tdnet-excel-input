@@ -1,0 +1,9 @@
+{
+  "ticker": "1827",
+  "period": "2023-03-31",
+  "quarter": "FY",
+  "period_role": "previous",
+  "document_id": "S100TWBK",
+  "source_url": "https://api.edinet-fsa.go.jp/api/v2/documents/S100TWBK?type=1",
+  "sha256": "3c88a89f5a38dadcb779fe1bb990f86d4b367dc67ee59432f4be4c56e16651d8"
+}

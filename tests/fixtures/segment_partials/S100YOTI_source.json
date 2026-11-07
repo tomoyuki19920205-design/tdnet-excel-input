@@ -1,0 +1,9 @@
+{
+  "ticker": "8015",
+  "period": "2023-03-31",
+  "quarter": "FY",
+  "period_role": "previous",
+  "document_id": "S100YOTI",
+  "source_url": "https://api.edinet-fsa.go.jp/api/v2/documents/S100YOTI?type=1",
+  "sha256": "b4c7ed50b31384a7d23e69cfb21d7112db49243339373bf90aed6b75082f4808"
+}

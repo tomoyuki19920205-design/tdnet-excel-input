@@ -1102,10 +1102,12 @@ def disclosed_column_name(facts):
     for fact in facts:
         column=(fact or {}).get('inline_evidence',{}).get('column',{})
         if column.get('role')!='segment' or not column.get('label'):continue
-        label=unicodedata.normalize('NFKC',column['label'])
-        label=re.sub(r'\s*\(注[^)]*\)\s*[0-9一二三四五六七八九十、,・.]*\s*$', '',label)
-        label=re.sub(r'\s*\(?注\)?\s*[0-9一二三四五六七八九十、,・.]*\s*$', '',label).strip()
-        label=re.sub(r'\s+', '',label)
+        parts=[]
+        for part in unicodedata.normalize('NFKC',column['label']).split(' / '):
+            part=re.sub(r'\s*\(注[^)]*\)\s*[0-9一二三四五六七八九十、,・.]*\s*$', '',part)
+            part=re.sub(r'\s*\(?注\)?\s*[0-9一二三四五六七八九十、,・.]*\s*$', '',part).strip()
+            if part:parts.append(re.sub(r'\s+', '',part))
+        label='/'.join(parts)
         if label:labels.add(label)
     if len(labels)>1:raise ValueError('sales/profit identify different business columns: '+repr(sorted(labels)))
     return next(iter(labels),None)
@@ -1213,10 +1215,11 @@ def _build_segment_records(
     by_member = {}
     names={}
     for rec in records:
-        previous_member=names.get(rec.segment_name_norm)
-        if previous_member is not None and previous_member!=rec.member_name:
-            raise ValueError('different business members share a normalized name: '+rec.segment_name_norm)
-        names[rec.segment_name_norm]=rec.member_name
+        if rec.special_row_type in ('ordinary_segment','other'):
+            previous_member=names.get(rec.segment_name_norm)
+            if previous_member is not None and previous_member!=rec.member_name:
+                raise ValueError('different business members share a normalized name: '+rec.segment_name_norm)
+            names[rec.segment_name_norm]=rec.member_name
         old = by_member.get(rec.member_name)
         if old is not None:
             comparable = (old.sales,old.profit,old.metadata.get('period_start'),old.metadata.get('period_end'),old.metadata.get('is_consolidated'))

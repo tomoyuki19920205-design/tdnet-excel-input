@@ -1,0 +1,9 @@
+{
+  "ticker": "5216",
+  "period": "2022-12-31",
+  "quarter": "FY",
+  "period_role": "previous",
+  "document_id": "S100T6GP",
+  "source_url": "https://api.edinet-fsa.go.jp/api/v2/documents/S100T6GP?type=1",
+  "sha256": "6e072b189253996ea7a229ede5ec2a69fe33f3bcdeb362a3e2ac2126d6281425"
+}

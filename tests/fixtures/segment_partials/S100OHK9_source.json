@@ -1,0 +1,9 @@
+{
+  "ticker": "9735",
+  "period": "2021-03-31",
+  "quarter": "FY",
+  "period_role": "previous",
+  "document_id": "S100OHK9",
+  "source_url": "https://api.edinet-fsa.go.jp/api/v2/documents/S100OHK9?type=1",
+  "sha256": "85a99892fcce29f1bd8f2c536a33b99d9473a6bde6932c742a2a9d9975637f3b"
+}
