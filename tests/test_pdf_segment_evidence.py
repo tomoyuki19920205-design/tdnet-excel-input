@@ -43,7 +43,7 @@ def test_ambiguous_units_or_unbound_dates_never_use_pl_unit():
 
 def test_zero_fraction_loss_and_no_qtd_copy():
  proof=bind_pdf_period_evidence('当第2四半期連結累計期間（自2026年4月1日至2026年9月30日）単位：千円','current')
- segment=SegmentRecordV4(segment_name='電子',segment_sales=0,segment_profit=-500,segment_metadata={**proof,'source_table_cells':{'header':'電子'}})
+ segment=SegmentRecordV4(segment_name='電子',segment_sales=0,segment_profit=-500,segment_metadata={**proof,'source_table_cells':{'header':'電子','sales_raw_cell':'0','profit_raw_cell':'△500'}})
  result=SimpleNamespace(extracted_periods=[SimpleNamespace(period_type='current',segments=[segment])])
  row=verified_pdf_records(result,'2027-03-31','2Q')[0]
  assert row['segment_sales']==0 and row['segment_profit']==-0.5
@@ -60,3 +60,19 @@ def test_worker_preserves_fiscal_identity_and_table_metadata():
     assert rows[0]['segment_metadata']['display_unit']=='千円'
     assert rows[0]['segment_sales']==9010.763
     assert rows[0]['unit_multiplier']==1000000
+
+def test_combined_sales_profit_title_is_not_a_profit_row():
+    result=run_segment_detection_v4(str(FIXTURES/'6301_202610.pdf'),ticker='6301')
+    rows=verified_pdf_records(result,'2027-03-31','2Q',current_only=True)
+    assert len(rows)==3
+    assert [r['segment_profit'] for r in rows]==[244472,17372,21074]
+    assert [r['segment_sales'] for r in rows]==[1999563,65437,114495]
+    assert all(r['segment_metadata']['profit_label']=='セグメント利益' for r in rows)
+    assert all(r['segment_name']!='連結' for r in rows)
+
+def test_ambiguous_stacked_numeric_cell_cannot_be_saved_as_one_amount():
+    proof=bind_pdf_period_evidence('当連結会計年度（自2025年4月1日至2026年3月31日）単位：百万円','current')
+    segment=SegmentRecordV4(segment_name='電子',segment_sales=10,segment_profit=100,segment_metadata={**proof,'source_table_cells':{'header':'電子','sales_raw_cell':'10','profit_raw_cell':'100\n20'}})
+    result=SimpleNamespace(extracted_periods=[SimpleNamespace(period_type='current',segments=[segment])])
+    rows=verified_pdf_records(result,'2026-03-31','FY')
+    assert rows[0]['segment_sales']==10 and rows[0]['segment_profit'] is None

@@ -3,7 +3,7 @@ import re,calendar,datetime,unicodedata
 from decimal import Decimal
 from dataclasses import asdict,is_dataclass
 from src.segment.xhtml_segment_tables import _RANGE,_date
-from src.segment.semantic_facts import compact,sales_basis
+from src.segment.semantic_facts import compact,sales_basis,column_role
 from src.segment.profit_basis import profit_basis
 
 _HEADING=re.compile(r'(前|当)(?:第[123一二三])?(?:四半期連結累計期間|四半期累計期間|中間連結会計期間|中間会計期間|連結会計年度|事業年度|連結累計期間|四半期連結会計期間)')
@@ -67,6 +67,7 @@ def verified_pdf_records(result,base_period,quarter,*,current_only=False):
         for segment in period.segments:
             record=asdict(segment) if is_dataclass(segment) else dict(segment)
             flags=record.get('segment_metadata') or {}
+            if column_role((flags.get('source_table_cells') or {}).get('header',''))!='segment':continue
             if flags.get('evidence_rule')!='same_pdf_page_explicit_period_and_unit':continue
             fiscal=pdf_fiscal_period(base_period,quarter,role,flags.get('period_end'))
             if not fiscal or not flags.get('source_table_cells'):continue
@@ -77,7 +78,18 @@ def verified_pdf_records(result,base_period,quarter,*,current_only=False):
             scale=flags.get('unit_multiplier')
             if scale not in (1,1000,1000000):continue
             for metric in ('segment_sales','segment_profit'):
-                if record.get(metric) is not None:record[metric]=float(Decimal(str(record[metric]))*Decimal(scale)/Decimal(1000000))
+                if record.get(metric) is not None:
+                    raw=(flags['source_table_cells'].get(metric.replace('segment_','')+'_raw_cell') or '')
+                    normalized=compact(str(raw)).replace(',','')
+                    negative=normalized.startswith(('△','▲','−','-')) or (normalized.startswith('(') and normalized.endswith(')'))
+                    normalized=normalized.lstrip('△▲−-+').strip('()')
+                    try:amount=Decimal(normalized)*(-1 if negative else 1)
+                    except Exception:amount=None
+                    if amount is None or amount!=Decimal(str(record[metric])):
+                        record[metric]=None
+                        record['segment_metadata'][metric.replace('segment_','')+'_evidence_status']='ambiguous_pdf_numeric_cell'
+                    else:record[metric]=float(amount*Decimal(scale)/Decimal(1000000))
+            if record.get('segment_sales') is None and record.get('segment_profit') is None:continue
             record.update(period=fiscal,quarter=quarter,unit_raw='百万円',unit_multiplier=1000000)
             record['segment_metadata']={**flags,'normalized_unit':'millions_jpy','normalization_count':1}
             rows.append(record)

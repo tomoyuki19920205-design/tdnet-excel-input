@@ -1027,6 +1027,9 @@ def _phase6_find_profit_row(
         # pdfplumber が改行を含む複合セル（'セグメント利\n益又は損失' など）を
         # 返すことがあるため、キーワード照合は改行除去後の文字列で行う
         left_cell_norm = left_cell.replace("\n", "")
+        from src.segment.semantic_facts import metric_from_label
+        if metric_from_label(left_cell_norm) != 'profit':
+            continue
         for kw in _PROFIT_ROW_KEYWORDS:
             if kw not in left_cell_norm:
                 continue
