@@ -146,7 +146,10 @@ def _extract_tables(html, *, period_start, period_end, is_consolidated, textbloc
         metric_rows=[];body=None
         for ri,row in enumerate(grid):
             if not row or not row[0]:continue
-            label=row[0]['text'];metric=metric_from_label(label)
+            label=row[0]['text']
+            # Numbered row captions are ordinary disclosure labels; retain the
+            # full original caption in provenance while recognizing its metric.
+            metric=metric_from_label(re.sub(r'^\s*[（(]\s*\d+\s*[)）]\s*','',label))
             numeric=sum(c is not None and _number(c['text']) is not None for c in row[1:])
             has_dash=any(c is not None and compact(c['text']) in _NIL and compact(c['text']) for c in row[1:])
             if body is None and (numeric>=2 or (metric and (numeric or has_dash))):body=ri
