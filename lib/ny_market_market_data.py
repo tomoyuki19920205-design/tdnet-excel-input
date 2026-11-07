@@ -2842,6 +2842,18 @@ class LiveDiscrepancyArbitrator:
                 or not (close_matches(vendor_previous, official_previous) or independent_previous_support)
                 or not close_matches(_numeric(vendor.get("regular_market_price"), "vendor regular close"), official_target)):
             raise MarketDataError(f"Top20 {ticker}: vendor dated split-adjusted prices disagree")
+        independent_history = independent_history or self.split_history_provider.fetch_pair(
+            ticker, expected_previous_session_date, target_session_date,
+        )
+        if (independent_history.get("provider_family") in {"nasdaq", "yahoo"}
+                or independent_history.get("price_basis") != "regular_close_normalized_for_split"
+                or independent_history.get("previous_session_date") != expected_previous_session_date.isoformat()
+                or independent_history.get("target_session_date") != target_session_date.isoformat()
+                or not close_matches(float(independent_history["previous_split_normalized_close"]),
+                                     round_market_display(official_previous, int(independent_history["previous_display_decimal_places"])))
+                or not close_matches(float(independent_history["target_regular_close"]),
+                                     round_market_display(official_target, int(independent_history["target_display_decimal_places"])))):
+            raise MarketDataError(f"Top20 {ticker}: independent dated split-adjusted pair disagrees")
         corrected_change = (official_target / official_previous - 1.0) * 100.0
         if (abs(corrected_change - float(candidate["_change_pct"])) > tolerance_pct
                 or corrected_change < source_top20_floor_pct - tolerance_pct):
@@ -2858,7 +2870,7 @@ class LiveDiscrepancyArbitrator:
             "official_target_close": official_target,
             "corporate_action_status": "official_action_verified",
             "liquidity_flag": "low_liquidity" if volume is not None and volume < 250_000 else "normal_liquidity",
-            "compared_providers": ["nasdaq", "sec", "yahoo"],
+            "compared_providers": ["nasdaq", "sec", "yahoo", str(independent_history["provider_family"])],
             "basis_evidence": {
                 "previous_session_date": expected_previous_session_date.isoformat(),
                 "target_session_date": target_session_date.isoformat(),
@@ -2875,16 +2887,17 @@ class LiveDiscrepancyArbitrator:
                 "official_action": notice,
             },
             "supporting_sources": [
-                action_source,
+                {**action_source, "role": "corporate_action_check"},
                 {**notice, "provider": "nasdaq_corporate_action_notice", "provider_family": "nasdaq",
                  "role": "official_corporate_action"},
-                {**official, "role": "official_split_normalized_pair"},
+                {**official, "role": "official_market_source"},
                 {**vendor, "role": "dated_vendor_split_metadata"},
                 {"provider": historical_series.provider,
                  "provider_family": provider_family(historical_series.provider),
                  "source_identifier": historical_series.source_identifier,
                  "raw_response_sha256": historical_series.raw_response_sha256,
                  "role": "target_regular_close_and_missing_previous_bar"},
+                {**independent_history, "role": "independent_support"},
             ],
             "resolved_at": self.now().astimezone(timezone.utc).isoformat(timespec="seconds"),
         }

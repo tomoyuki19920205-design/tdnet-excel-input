@@ -2012,6 +2012,18 @@ def test_same_symbol_split_history_gap_uses_dated_exchange_and_vendor_basis(alre
                 "regular_market_time": int(datetime(2026, 11, 6, 21, 0, tzinfo=timezone.utc).timestamp()),
                 "exchange_timezone_name": "America/New_York",
             }
+    class Independent:
+        def fetch_pair(self, symbol, previous_day, target_day):
+            assert (symbol, previous_day, target_day) == ("CDT", prior, target)
+            return {
+                "provider": "stockanalysis_historical_s_p_global", "provider_family": "s_p_global",
+                "source_identifier": "https://stockanalysis.com/stocks/cdt/history/",
+                "raw_response_sha256": "c" * 64,
+                "price_basis": "regular_close_normalized_for_split",
+                "previous_session_date": prior.isoformat(), "target_session_date": target.isoformat(),
+                "previous_split_normalized_close": 0.85, "previous_display_decimal_places": 2,
+                "target_regular_close": 1.31, "target_display_decimal_places": 2,
+            }
     action = {"CDT": {"event_type": "reverse_split", "prior_ticker": "CDT",
                        "effective_session_date": target.isoformat(), "exchange": "Nasdaq",
                        "new_shares": 1, "old_shares": 20, "source_url": sec_url}}
@@ -2020,6 +2032,7 @@ def test_same_symbol_split_history_gap_uses_dated_exchange_and_vendor_basis(alre
     arbitrator = LiveDiscrepancyArbitrator(
         official_provider=Official(), action_provider=Vendor(), notice_transport=primary,
         corporate_action_notices={"CDT": notice_url}, corporate_action_evidence=action,
+        split_history_provider=Independent(),
     )
     daily = series("CDT", (1.31,), days=(target,), provider="yahoo_chart_query1")
     arguments = dict(ticker="CDT", candidate={"_close": 1.31, "_change_pct": 54.846,
@@ -2031,7 +2044,12 @@ def test_same_symbol_split_history_gap_uses_dated_exchange_and_vendor_basis(alre
     assert resolved["historical_change_pct"] == pytest.approx((1.31 / 0.846 - 1) * 100)
     assert resolved["basis_evidence"]["applied_split_factor"] == expected_factor
     assert resolved["discrepancy_reason"] == "same_symbol_split_missing_vendor_previous_bar"
-    assert {source["provider_family"] for source in resolved["supporting_sources"]} == {"sec", "nasdaq", "yahoo"}
+    assert {source["provider_family"] for source in resolved["supporting_sources"]} == {"sec", "nasdaq", "yahoo", "s_p_global"}
+    assert {source["role"] for source in resolved["supporting_sources"]} >= {
+        "corporate_action_check", "official_market_source", "independent_support",
+    }
+    from lib.ny_market_research import _validate_discrepancy
+    assert _validate_discrepancy(resolved, "CDT") == resolved
     arbitrator.corporate_action_notices = {}
     with pytest.raises(MarketDataError, match="requires exchange notice"):
         arbitrator.resolve_missing_previous(**arguments)
@@ -2050,15 +2068,8 @@ def test_same_symbol_split_history_gap_uses_dated_exchange_and_vendor_basis(alre
     official_with_independent = Official()
     original_fetch = official_with_independent.fetch
     def corroborated_fetch(symbol, day, last):
-        return {**original_fetch(symbol, day, last), "independent_adjusted_history_basis": {
-            "price_basis": "regular_close_normalized_for_split",
-            "previous_session_date": prior.isoformat(),
-            "target_session_date": target.isoformat(),
-            "previous_split_normalized_close": 0.85,
-            "previous_display_decimal_places": 2,
-            "source_identifier": "https://stockanalysis.com/stocks/cdt/history/",
-            "raw_response_sha256": "c" * 64,
-        }}
+        return {**original_fetch(symbol, day, last), "independent_adjusted_history_basis":
+                Independent().fetch_pair(symbol, prior, day)}
     arbitrator.official_provider = official_with_independent
     official_with_independent.fetch = corroborated_fetch
     def drifted_previous(symbol, day):
@@ -2071,6 +2082,15 @@ def test_same_symbol_split_history_gap_uses_dated_exchange_and_vendor_basis(alre
     else:
         with pytest.raises(MarketDataError, match="vendor dated split-adjusted prices disagree"):
             arbitrator.resolve_missing_previous(**arguments)
+    arbitrator.action_provider = Vendor()
+    class ConflictingIndependent(Independent):
+        def fetch_pair(self, symbol, previous_day, target_day):
+            return {**super().fetch_pair(symbol, previous_day, target_day),
+                    "previous_split_normalized_close": 1.5}
+    arbitrator.official_provider = Official()
+    arbitrator.split_history_provider = ConflictingIndependent()
+    with pytest.raises(MarketDataError, match="independent dated split-adjusted pair disagrees"):
+        arbitrator.resolve_missing_previous(**arguments)
 
 
 def test_regular_universe_split_candidate_uses_normalized_official_previous():
