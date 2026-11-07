@@ -498,6 +498,7 @@ class SegmentExtractionResult:
     date_guard_status: str | None = None
     candidate_file_count: int = 0
     parsed_file_count: int = 0
+    omission_evidence: list[dict] | None = None
 
 
 def extract_segments_from_xbrl_zip(
@@ -542,6 +543,7 @@ def extract_segments_from_xbrl_zip_detailed(
     candidate_file_count = 0
     parsed_file_count = 0
     results = []
+    omission_evidence = []
 
     if not os.path.exists(zip_path):
         logger.warning(f"ZIP not found: {zip_path}")
@@ -1029,6 +1031,21 @@ def extract_segments_from_xbrl_zip_detailed(
                             results.append(SegmentRawRow(source='xbrl',source_document_id=basename,doc_hash=doc_hash,raw_ticker=ticker or '',normalized_ticker=ticker or '',period=target_period,quarter=estimated_quarter or '',raw_segment_name=value['segment_name'],normalized_segment_name=normalize_segment_name(value['segment_name']),special_row_type='ordinary_segment',sales=value['sales'],profit=value['profit'],unit='million_yen',extraction_method=raw['extraction_method'],confidence_score=0.95,is_consolidated=value['is_consolidated'],accounting_standard=accounting_standard,table_title=f'XHTML segment: {seg_file}',raw_json=raw))
                             date_guard_status_set.add('PASS')
 
+                    # A plain narrative omission has no TextBlock context.
+                    # Bind its real heading and sentence to the filing's DEI;
+                    # never infer prior-year omission from an unlabelled note.
+                    if not any('segment' in str(b.get('name') or '').lower() and 'textblock' in str(b.get('name') or '').lower() for b in soup.find_all('ix:nonnumeric')):
+                        from src.segment.business_disclosure_evidence import attachment_business_omissions
+                        from src.segment.xhtml_segment_tables import _period_ranges
+                        for proof in attachment_business_omissions(content):
+                            matching=[p for p in periods if p[0]==proof['period_role']]
+                            if len(matching)!=1:continue
+                            role,target_period,start,end=matching[0]
+                            if proof.get('period_heading') and not any(p[:2]==(start,end) for p in _period_ranges(proof['period_heading'])):continue
+                            if any(r.period==target_period and r.quarter==estimated_quarter for r in results):continue
+                            omission_evidence.append({**proof,'file':seg_file,'ticker':ticker,'period':target_period,'quarter':estimated_quarter,'period_start':start,'period_end':end,'is_consolidated':next(iter(dei_scopes))=='true'})
+                            date_guard_status_set.add('PASS')
+
             if results:
                 from src.segment.normalize import normalize_segment_key
                 groups = {}
@@ -1125,6 +1142,7 @@ def extract_segments_from_xbrl_zip_detailed(
             parsed_file_count=parsed_file_count
         )
 
+    omission_evidence=[p for p in omission_evidence if not any(r.period==p['period'] and r.quarter==p['quarter'] for r in results)]
     if len(results) > 0:
         return SegmentExtractionResult(
             status="success_with_rows",
@@ -1132,7 +1150,8 @@ def extract_segments_from_xbrl_zip_detailed(
             title_quarter=estimated_quarter,
             date_guard_status=date_guard_status_final,
             candidate_file_count=candidate_file_count,
-            parsed_file_count=parsed_file_count
+            parsed_file_count=parsed_file_count,
+            omission_evidence=omission_evidence
         )
 
     is_date_guard_ok = (expected_end is not None) and (date_guard_status_final == "PASS")
@@ -1151,7 +1170,8 @@ def extract_segments_from_xbrl_zip_detailed(
             title_quarter=estimated_quarter,
             date_guard_status=date_guard_status_final,
             candidate_file_count=candidate_file_count,
-            parsed_file_count=parsed_file_count
+            parsed_file_count=parsed_file_count,
+            omission_evidence=omission_evidence
         )
 
     return SegmentExtractionResult(
@@ -1233,8 +1253,8 @@ def _has_verified_current_segment_omission(
             ).date()
         except ValueError:
             continue
-        from src.segment.disclosure_evidence import single_segment_omission_html
-        proof = single_segment_omission_html(str(tag))
+        from src.segment.business_disclosure_evidence import business_segment_omission_html
+        proof = business_segment_omission_html(str(tag))
         if abs((context_end - expected_end).days) <= 40 and proof:
             current_segment_narrative = True
 

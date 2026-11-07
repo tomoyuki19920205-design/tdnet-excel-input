@@ -80,6 +80,7 @@ class SourceCandidate:
     # Phase 2: Trace & Scores
     rule_trace: list[str] = field(default_factory=list)
     score_summary: dict = field(default_factory=dict)
+    omission_evidence: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -544,6 +545,7 @@ def _try_xbrl_source(
             return SourceCandidate(
                 source="xbrl", attempted=True, available=True,
                 skip_reason=f"valid_no_segments:{detailed.status}",
+                omission_evidence=detailed.omission_evidence or [],
             )
         return SourceCandidate(
             source="xbrl", attempted=True, available=True,
@@ -677,6 +679,8 @@ def _build_debug_log(
         entry[f"{prefix}_attempted"] = c.attempted
         entry[f"{prefix}_available"] = c.available
         entry[f"{prefix}_skip_reason"] = c.skip_reason
+        if c.omission_evidence:
+            entry[f"{prefix}_omission_evidence"] = c.omission_evidence
         if c.validation:
             entry[f"{prefix}_validator_status"] = c.validation.status.value
             entry[f"{prefix}_validator_reason"] = c.validation.hard_fail_reason.value
