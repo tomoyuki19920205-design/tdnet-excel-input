@@ -56,6 +56,7 @@ def test_tdnet_normal_route_reads_plain_textblock_with_dei_dates(tmp_path):
     content='''<html><xbrli:context id="CurrentYearDuration"><xbrli:period><xbrli:startDate>2025-04-01</xbrli:startDate><xbrli:endDate>2026-03-31</xbrli:endDate></xbrli:period></xbrli:context>
 <ix:nonNumeric name="tse:DocumentName">2026年3月期 決算短信</ix:nonNumeric>
 <ix:nonNumeric name="jpdei_cor:SecurityCodeDEI">99990</ix:nonNumeric>
+<ix:nonFraction name="jppfs_cor:NetSales" contextRef="CurrentYearDuration" unitRef="JPY" scale="6">999999</ix:nonFraction>
 <ix:nonNumeric name="jpdei_cor:CurrentFiscalYearStartDateDEI">2025-04-01</ix:nonNumeric>
 <ix:nonNumeric name="jpdei_cor:CurrentFiscalYearEndDateDEI">2026-03-31</ix:nonNumeric>
 <ix:nonNumeric name="jpdei_cor:CurrentPeriodEndDateDEI">2026-03-31</ix:nonNumeric>
@@ -67,3 +68,4 @@ def test_tdnet_normal_route_reads_plain_textblock_with_dei_dates(tmp_path):
     assert result.status=='success_with_rows',result
     assert [(r.raw_segment_name,r.sales,r.profit) for r in result.segments]==[('電子',0,-0.001),('長い 事業名',1.234,None),('その他',0.008,0)]
     assert segment_flags(result.segments[0].raw_json)['table_facts']['profit']['raw_text']=='△1'
+    assert all(r.normalized_ticker=='9999' for r in result.segments)

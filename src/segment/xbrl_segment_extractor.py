@@ -819,8 +819,9 @@ def extract_segments_from_xbrl_zip_detailed(
                 for tag in soup.find_all("ix:nonfraction")[:20]:
                     _ctx = tag.get("contextref", "")
                     if _ctx:
-                        ticker = _extract_ticker_from_context(_ctx)
-                        if ticker:
+                        context_ticker = _extract_ticker_from_context(_ctx)
+                        if context_ticker:
+                            ticker = context_ticker
                             break
 
                 _prev_period = None
