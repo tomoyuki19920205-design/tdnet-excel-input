@@ -57,9 +57,9 @@ def test_accepted_identity_uses_same_zip_and_pdf_only(monkeypatch, verdict):
 def test_v2_xbrl_source_uses_filing_canonical_fiscal_period(monkeypatch):
     import lib.backfill.worker_v2 as worker_v2
 
-    extracted = Mock(return_value=SimpleNamespace(status="success", segments=[SimpleNamespace(
+    extracted = Mock(return_value=SimpleNamespace(status="success", omission_evidence=[], segments=[SimpleNamespace(
         normalized_segment_name="Smartstore", raw_segment_name="Smartstore",
-        period="2026-05-31", quarter="1Q", sales=1242325, profit=-89191,
+        period="2026-05-31", quarter="1Q", sales=1242325, profit=-89191, raw_json={},
     )]))
     monkeypatch.setattr("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip_detailed", extracted)
     filing = _filing(title="title-derived-value")
@@ -307,7 +307,7 @@ def test_verified_linked_identity_without_internal_id_keeps_business_id_null(mon
 @pytest.mark.parametrize("detailed_status", ["success_empty", "segment_source_unavailable"])
 def test_v2_xbrl_known_empty_status_is_normal_skip_candidate(monkeypatch, detailed_status):
     import lib.backfill.worker_v2 as worker_v2
-    extracted = Mock(return_value=SimpleNamespace(status=detailed_status, segments=[]))
+    extracted = Mock(return_value=SimpleNamespace(status=detailed_status, segments=[], omission_evidence=[]))
     monkeypatch.setattr("src.segment.xbrl_segment_extractor.extract_segments_from_xbrl_zip_detailed", extracted)
     result = worker_v2._try_xbrl_source(
         "verified.zip", None, _filing(), {"period": "2027-02-28", "quarter": "1Q"},

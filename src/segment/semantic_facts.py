@@ -94,7 +94,13 @@ def column_evidence(tag):
             has_fact = any(c.find('ix:nonfraction') is not None for c in cells)
             # XHTML can contain untagged numeric rows before the first XBRL fact.
             numeric_cells = sum(bool(re.fullmatch(r'[△▲+\-−]?\(?\d[\d,]*(?:\.\d+)?\)?', compact(c.get_text(' ', strip=True)))) or compact(c.get_text(' ', strip=True)) in ('-','―','—') for c in cells)
-            if body_started and not has_fact and not numeric_cells and any(compact(c.get_text(' ',strip=True)) in ('報告セグメント','事業セグメント','reportablesegments') for c in cells):
+            labels=[c.get_text(' ',strip=True) for c in cells]
+            wrapped_leaf_header = (
+                labels and not compact(labels[0])
+                and sum(column_role(label) in ('segment','total','adjustment_or_consolidated') and not metric_from_label(label) for label in labels) >= 2
+                and any(column_role(label) in ('total','adjustment_or_consolidated') for label in labels)
+            )
+            if body_started and not has_fact and not numeric_cells and (wrapped_leaf_header or any(compact(label) in ('報告セグメント','事業セグメント','reportablesegments') for label in labels)):
                 # The same HTML table can wrap horizontally and repeat its header.
                 headers={};body_started=False
             body_started = body_started or has_fact or numeric_cells >= 2
@@ -190,7 +196,7 @@ def column_role(label):
         role = 'unresolved'
     elif re.match(r'^(?:(?:前|当).*(?:会計期間|会計年度|事業年度|累計期間)|\d{4}年度)',text) or text in ('報告セグメント', '事業セグメント', 'セグメント', 'reportablesegments') or '単位:' in text or re.fullmatch(r'(?:金額)?\(?(?:百万円|千円|円)\)?',text):
         role = 'header_group'
-    elif re.match(r'^(?:計|合計|小計|総計|連結合計|報告セグメント計|事業計|total|subtotal)(?:$|\(|注|※)', text):
+    elif re.match(r'^(?:計|合計|小計|総計|連結合計|報告セグメント(?:合)?計|事業セグメント(?:合)?計|事業計|total|subtotal)(?:$|\(|注|※)', text):
         role = 'total'
     elif text in ('連結','consolidated') or re.match(r'^(?:調整額|消去|全社|(?:四半期|中間)?(?:連結)?財務諸表|(?:四半期|中間)?(?:連結)?損益計算書)', text):
         role = 'adjustment_or_consolidated'

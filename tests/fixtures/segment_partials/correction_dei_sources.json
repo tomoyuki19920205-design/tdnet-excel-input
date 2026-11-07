@@ -1,0 +1,20 @@
+[
+  {
+    "ticker": "3246",
+    "period": "2026-01-31",
+    "quarter": "FY",
+    "filename": "correction_dei_20260409500519.zip",
+    "sha256": "913e5bb843c5fd4001c03992f6ae5e86ce967208c194dddb767f3c5b9c46e831",
+    "source_url": "https://www.release.tdnet.info/inbs/081220260409500519.zip",
+    "source_doc": "20260409500519"
+  },
+  {
+    "ticker": "9686",
+    "period": "2023-03-31",
+    "quarter": "FY",
+    "filename": "correction_dei_20250617592021.zip",
+    "sha256": "0cd22f75f42443bf90d39b81c8cbd94cbb93d061e5e88ea4c99a8873bcd84e61",
+    "source_url": "https://www.release.tdnet.info/inbs/081220250617592021.zip",
+    "source_doc": "20250617592021"
+  }
+]

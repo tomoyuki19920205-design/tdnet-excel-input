@@ -620,6 +620,27 @@ def extract_segments_from_xbrl_zip_detailed(
             if document_title:
                 title_quarter = _parse_quarter_from_title(document_title)
 
+            if not title_quarter or title_quarter == "UNKNOWN":
+                # Correction ZIPs can omit DocumentName while retaining a full
+                # original DEI identity. Use the same namespace/structure and
+                # cross-file consensus check as the normal identity gate.
+                from src.segment.zip_identity_verifier import _identity_candidate_audit
+                identity = _identity_candidate_audit(zip_path)
+                consensus = identity["consensus"]
+                required = ("ticker", "period", "quarter", "document_type")
+                if identity["candidate_count"] and all(
+                    consensus[field]["status"] in ("CONSENSUS", "COMPATIBLE")
+                    and len(consensus[field]["values"]) == 1 for field in required
+                ):
+                    original_quarter = consensus["quarter"]["values"][0]
+                    original_period = consensus["period"]["values"][0]
+                    if (
+                        original_quarter in ("1Q", "2Q", "3Q", "FY")
+                        and (not estimated_period or original_period == estimated_period)
+                        and (not meta_quarter or meta_quarter == "UNKNOWN" or meta_quarter == original_quarter)
+                    ):
+                        title_quarter = original_quarter
+
             if (
                 (not title_quarter or title_quarter == "UNKNOWN")
                 and allow_expected_quarter_without_title
