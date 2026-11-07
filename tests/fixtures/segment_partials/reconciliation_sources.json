@@ -1,0 +1,16 @@
+[
+  {
+    "ticker": "7752",
+    "file": "reconciliation_7752.zip",
+    "original_path": "C:\\Users\\takuy\\tdnet-production\\state\\data\\edinet_cache\\S100TPAP\\xbrl.zip",
+    "sha256": "2794388b915e8864252dd0567e0b601a99edea2ab8dbfaa86d0a7747672e7f40",
+    "source_url": "https://api.edinet-fsa.go.jp/api/v2/documents/S100TPAP?type=1"
+  },
+  {
+    "ticker": "8002",
+    "file": "reconciliation_8002.zip",
+    "original_path": "C:\\Users\\takuy\\tdnet-production\\state\\data\\edinet_cache\\S100OE5O\\xbrl.zip",
+    "sha256": "2959f0c4edeff24b7a80ca2e700e0d3a3941a64ce584f343dc8d5e4d8a9cfa9c",
+    "source_url": "https://api.edinet-fsa.go.jp/api/v2/documents/S100OE5O?type=1"
+  }
+]

@@ -258,6 +258,7 @@ _ADJUSTMENT_MEMBER_NAMES = {
     "EliminationsMember",
     "EliminationsAndReconcilingItemsMember",
     "IntersegmentEliminationMember",
+    "IntersegmentMember",
     "AdjustmentMember",
 }
 
@@ -280,6 +281,7 @@ def _classify_member(member_name: str, label_name: str = "") -> str:
     5. fallback → ordinary_segment
     """
     local = member_name.split(":")[-1] if ":" in member_name else member_name
+    local = re.sub(r"^jpcrp\d+-\w+_E\d+-\d+", "", local)
 
     # --- 1. 完全一致 ---
     if local in _TOTAL_MEMBER_NAMES:

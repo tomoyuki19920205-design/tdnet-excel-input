@@ -164,6 +164,10 @@ def column_evidence(tag):
     business_headers=[x for x in path if column_role(x)=='segment' and not metric_from_label(x)]
     if (period_headers and not business_headers) or metric_from_label(label):
         business=_leading_row_text(tag)
+        # A standalone intersegment row is a reconciliation, not a nested
+        # revenue measure whose business name must be recovered above it.
+        if compact(business) in ('セグメント間取引','セグメント間取引消去'):
+            return {'label':business,'role':'adjustment_or_consolidated','header_path':path}
         if column_role(business) in ('total','adjustment_or_consolidated'):
             return {'label':business,'role':column_role(business),'header_path':path}
         if re.match(r'^(?:外部顧客|セグメント間)',compact(business)):
