@@ -59,6 +59,8 @@ def test_metadata_survives_same_filing_partial_arrivals_and_rejects_different_ba
 def test_known_and_unknown_basis_do_not_relabel_as_operating_profit():
     assert profit_basis('adjusted_operating_profit') == 'adjusted_operating_profit'
     assert profit_basis('セグメント利益（基準未確定）') == 'company_defined_unknown'
+    assert profit_basis('OperatingProfitBeforeDepreciationAndAmortizationEBITDAIFRS') == 'ebitda'
+    assert profit_basis('AdjustedEBITDA') == 'adjusted_ebitda'
 
 def test_displayed_total_is_not_other_and_generic_member_business_is_kept():
     result = extract_segments_from_xbrl_zip_detailed(str(FIX / '20261105566269.zip'), period='2027-03-31', quarter='2Q')
