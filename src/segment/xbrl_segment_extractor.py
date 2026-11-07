@@ -1154,7 +1154,10 @@ def _has_verified_current_segment_omission(
             ).date()
         except ValueError:
             continue
-        if abs((context_end - expected_end).days) <= 40 and tag.get_text(strip=True):
+        from src.segment.disclosure_evidence import single_segment_omission
+        proof = single_segment_omission(tag.get_text(' ',strip=True),
+            table_count=len(tag.find_all('table')),numeric_facts=len(tag.find_all('ix:nonfraction')))
+        if abs((context_end - expected_end).days) <= 40 and proof:
             current_segment_narrative = True
 
     if not current_segment_narrative:

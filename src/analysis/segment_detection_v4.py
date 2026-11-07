@@ -382,27 +382,8 @@ def _is_single_segment_omission_text(text: str) -> bool:
     補助条件: 「。3e業のみ」かつ「記載を省略」、または 90%超ルール。
     NEGATIVE_HINTS必須ゲートは除去（パターン自体が十分具体的なため）。
     """
-    s = (text or "").replace("\u3000", " ")
-    if not s:
-        return False
-
-    # 主判定: パターン完全一致
-    if any(p in s for p in _SINGLE_SEGMENT_PATTERNS):
-        return True
-
-    # 補助条件: 「XXX事業のみ」 かつ 「記載を省略」
-    if "事業のみ" in s and "記載を省略" in s:
-        return True
-
-    # 補助条件: 90%超ルールで省略
-    if (
-        ("90%" in s or "90％" in s)
-        and "記載を省略" in s
-        and ("売上高" in s or "利益" in s or "資産" in s)
-    ):
-        return True
-
-    return False
+    from src.segment.disclosure_evidence import single_segment_omission
+    return single_segment_omission(text) is not None
 
 
 # ==============================================================
