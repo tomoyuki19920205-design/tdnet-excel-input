@@ -1,0 +1,8 @@
+{
+  "disclosure_id": "20261105566269",
+  "zip_sha256": "c8c5dae7a6ab4f5c8445df983b4a2689d1521404e6e84414cb3d207d64d6bdde",
+  "source_url": "https://www.release.tdnet.info/inbs/140120261105566269.pdf",
+  "period": "2027-03-31",
+  "quarter": "2Q",
+  "reason": "Issuer uses Other member for displayed total and generic ReportableSegmentsMember for the concrete business-support column."
+}

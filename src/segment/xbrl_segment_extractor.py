@@ -854,6 +854,8 @@ def extract_segments_from_xbrl_zip_detailed(
                         row_raw_json["profit_basis"] = profit_basis(label) or profit_basis(profit_tag) or 'company_defined_unknown'
                     from src.segment.semantic_facts import sales_basis
                     row_raw_json['raw_sales_label'] = data.get('raw_sales_label') or ''
+                    row_raw_json['raw_segment_label'] = data.get('raw_segment_label') or ''
+                    row_raw_json['segment_identity_method'] = 'xhtml_column_and_peer_dimensions' if data.get('member_from_header') else 'segment_dimension'
                     row_raw_json['sales_basis'] = sales_basis(data.get('raw_sales_label'), data.get('sales_fact_selected_name'), data.get('sales_fact_names') or [])
                     row_raw_json['is_consolidated'] = not ('nonconsolidated' in (data.get('context_ref') or '').lower() or '非連結' in (document_title or ''))
                     row_raw_json['currency'] = 'JPY' if unit in ('yen', 'thousand_yen', 'million_yen', '円', '千円', '百万円') else None
@@ -1190,7 +1192,7 @@ def _extract_ixbrl_segment_data(
         {(member_name, period_type): {"sales": int, "profit": int}}
         period_type は "current" | "previous"
     """
-    from src.segment.semantic_facts import disclosed_metric, monetary_fact
+    from src.segment.semantic_facts import disclosed_metric, monetary_fact, column_evidence
     sales_tags = ALL_SALES_TAGS
     profit_tags = ALL_PROFIT_TAGS
 
@@ -1258,6 +1260,21 @@ def _extract_ixbrl_segment_data(
         # explicit-nil segmentを安全に受理するreconciliation証跡にだけ使う。
         context_info = global_context_map.get(ctx, {}) if global_context_map else {}
         member = _extract_segment_member(ctx, context_info)
+        column = column_evidence(tag)
+        member_from_header = False
+        if (not member and column['role'] == 'segment'
+                and re.search(r'(?:^|_)ReportableSegmentsMember$', ctx, re.I)):
+            # A few issuers place a real business column on the generic member.
+            # Accept only a concrete leaf header alongside independently
+            # dimensioned peers in the same period's segment table.
+            table = tag.find_parent('table')
+            peers = table.find_all('ix:nonfraction') if table else []
+            if any(_classify_period_type(p.get('contextref', '')) == period_type
+                   and _extract_segment_member(p.get('contextref', ''),
+                       (global_context_map or {}).get(p.get('contextref', ''), {}))
+                   and column_evidence(p)['role'] == 'segment' for p in peers):
+                member = column['label']
+                member_from_header = True
         if semantic_only:
             dimensions = {str(m.get('dimension') or '').split(':')[-1].lower()
                           for m in context_info.get('explicit_members', [])}
@@ -1289,6 +1306,9 @@ def _extract_ixbrl_segment_data(
         if not is_sales and not is_profit:
             continue
 
+        if column['role'] in ('total', 'adjustment_or_consolidated'):
+            continue
+
         # キーを (member, period_type, context_ref) にする
         key = (member, period_type, ctx)
         if key not in temp_candidate:
@@ -1300,6 +1320,8 @@ def _extract_ixbrl_segment_data(
                 "profit_tag": None,
                 "raw_profit_label": '',
                 "raw_sales_label": '',
+                "raw_segment_label": column['label'],
+                "member_from_header": member_from_header,
                 "sales_fact_explicit_nil": False,
                 "profit_fact_explicit_nil": False,
                 "sales_fact_names": [],

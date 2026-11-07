@@ -52,6 +52,7 @@ def segment_flags(raw):
         'profit_basis': raw.get('profit_basis') or profit_basis(raw.get('profit_tag')),
         'profit_tag': raw.get('profit_tag'),
         'profit_label': raw.get('raw_profit_label'),
+        'segment_label': raw.get('raw_segment_label'),
         'sales_basis': raw.get('sales_basis'),
         'sales_label': raw.get('raw_sales_label'),
         'sales_tag': raw.get('_sales_fact_selected_name'),

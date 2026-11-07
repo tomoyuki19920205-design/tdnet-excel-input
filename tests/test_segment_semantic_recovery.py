@@ -59,3 +59,13 @@ def test_metadata_survives_same_filing_partial_arrivals_and_rejects_different_ba
 def test_known_and_unknown_basis_do_not_relabel_as_operating_profit():
     assert profit_basis('adjusted_operating_profit') == 'adjusted_operating_profit'
     assert profit_basis('セグメント利益（基準未確定）') == 'company_defined_unknown'
+
+def test_displayed_total_is_not_other_and_generic_member_business_is_kept():
+    result = extract_segments_from_xbrl_zip_detailed(str(FIX / '20261105566269.zip'), period='2027-03-31', quarter='2Q')
+    current = [r for r in result.segments if r.period == '2027-03-31']
+    assert len(current) == 6
+    assert all(r.raw_segment_name != 'Other' for r in current)
+    support = next(r for r in current if 'サポート' in r.raw_segment_name)
+    assert (support.sales, support.profit) == (18137, 613)
+    assert support.raw_json['segment_identity_method'] == 'xhtml_column_and_peer_dimensions'
+    assert sum(r.sales for r in current) == 254412  # Independent displayed total is 254413.

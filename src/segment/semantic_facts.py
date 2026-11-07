@@ -52,6 +52,63 @@ def row_label(tag):
 def compact(value):
     return re.sub(r'\s+', '', unicodedata.normalize('NFKC', value or '')).lower()
 
+
+def column_evidence(tag):
+    """Resolve the fact's actual XHTML header, including row/column spans.
+
+    Some issuer files attach an Other member to a total column. The displayed
+    column role is therefore an independent guard on dimension-based extraction.
+    """
+    cell = tag.find_parent(['td', 'th'])
+    table = tag.find_parent('table')
+    if cell is None or table is None:
+        return {'label': '', 'role': 'unresolved'}
+    cache = table.__dict__.get('_segment_column_evidence')
+    if cache is None:
+        occupied = {}; headers = {}; cache = {}; body_started = False
+        for ri, row in enumerate(table.find_all('tr')):
+            if row.find_parent('table') is not table:
+                continue
+            cells = row.find_all(['td', 'th'], recursive=False)
+            has_fact = any(c.find('ix:nonfraction') is not None for c in cells)
+            # XHTML can contain untagged numeric rows before the first XBRL fact.
+            numeric_cells = sum(bool(re.fullmatch(r'[△▲+\-−]?\(?\d[\d,]*(?:\.\d+)?\)?', compact(c.get_text(' ', strip=True)))) or compact(c.get_text(' ', strip=True)) in ('-','―','—') for c in cells)
+            body_started = body_started or has_fact or numeric_cells >= 2
+            ci = 0
+            for current in cells:
+                while (ri, ci) in occupied:
+                    ci += 1
+                try:
+                    colspan = max(1, int(current.get('colspan') or 1))
+                    rowspan = max(1, int(current.get('rowspan') or 1))
+                except ValueError:
+                    colspan = rowspan = 1
+                label = current.get_text(' ', strip=True)
+                if not body_started and label:
+                    for col in range(ci, ci + colspan):
+                        headers[col] = label
+                if has_fact:
+                    labels = list(dict.fromkeys(headers.get(col, '') for col in range(ci, ci + colspan)))
+                    cache[id(current)] = ' / '.join(x for x in labels if x)
+                for rr in range(ri, ri + rowspan):
+                    for cc in range(ci, ci + colspan):
+                        occupied[rr, cc] = True
+                ci += colspan
+        table.__dict__['_segment_column_evidence'] = cache
+    label = cache.get(id(cell), '')
+    text = compact(label)
+    if re.fullmatch(r'[△▲+\-−]?\(?\d[\d,]*(?:\.\d+)?\)?', text):
+        role = 'unresolved'
+    elif text in ('報告セグメント', '事業セグメント', 'セグメント', 'reportablesegments') or '単位:' in text or text in ('百万円','千円'):
+        role = 'header_group'
+    elif re.match(r'^(?:計|合計|小計|総計|連結合計|報告セグメント計|total|subtotal)(?:$|\(|注|※)', text):
+        role = 'total'
+    elif re.match(r'^(?:調整額|消去|全社|連結損益計算書|四半期連結損益計算書|中間連結損益計算書)', text):
+        role = 'adjustment_or_consolidated'
+    else:
+        role = 'segment' if label else 'unresolved'
+    return {'label': label, 'role': role}
+
 def disclosed_metric(tag):
     """Require an unambiguous row label and a monetary unit; caller checks dimension."""
     label = row_label(tag)
