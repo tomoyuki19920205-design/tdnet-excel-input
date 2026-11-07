@@ -11,6 +11,8 @@ LABELS = {
     'business_profit': 'セグメント利益（事業利益ベース）',
     'ebitda': 'セグメント利益（EBITDAベース）',
     'adjusted_ebitda': 'セグメント利益（調整後EBITDAベース）',
+    'ebit': 'セグメント利益（EBITベース）',
+    'adjusted_ebit': 'セグメント利益（調整後EBITベース）',
     'before_goodwill_amortization': 'セグメント利益（のれん等償却前）',
     'company_defined_unknown': 'セグメント利益（基準未確定）',
 }
@@ -22,6 +24,8 @@ def profit_basis(value):
     text = re.sub(r'\s+', '', str(value or '')).lower()
     if 'ebitda' in text:
         return 'adjusted_ebitda' if 'adjusted' in text or '調整後' in text else 'ebitda'
+    if re.fullmatch(r'(?:adjusted|調整後)?ebit(?:ifrs)?', text) or 'profitbeforefinancingandincometax' in text or '財務・法人所得税前利益' in text or '金利税引前利益' in text:
+        return 'adjusted_ebit' if 'adjusted' in text or '調整後' in text else 'ebit'
     if 'adjustedoperating' in text or '調整後営業' in text:
         return 'adjusted_operating_profit'
     if 'coreoperating' in text or 'コア営業' in text:

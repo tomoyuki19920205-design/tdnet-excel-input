@@ -71,3 +71,12 @@ def test_displayed_total_is_not_other_and_generic_member_business_is_kept():
     assert (support.sales, support.profit) == (18137, 613)
     assert support.raw_json['segment_identity_method'] == 'xhtml_column_and_peer_dimensions'
     assert sum(r.sales for r in current) == 254412  # Independent displayed total is 254413.
+
+def test_real_ebit_survives_nil_tax_profit_and_financing_revenue_is_not_sales():
+    result = extract_segments_from_xbrl_zip_detailed(str(FIX / '20261102562314.zip'), period='2027-03-31', quarter='2Q')
+    current = [r for r in result.segments if r.period == '2027-03-31']
+    full = next(r for r in current if r.raw_segment_name == 'Full Service Carrier')
+    assert (full.sales, full.profit) == (884970, 41666)
+    assert full.raw_json['profit_basis'] == 'ebit'
+    assert 'フルサービス' in full.raw_json['raw_segment_label'] or 'FSC' in full.raw_json['raw_segment_label']
+    assert not any('financialexpensesfinancialrevenue' in t for t in full.raw_json['_sales_fact_names'])

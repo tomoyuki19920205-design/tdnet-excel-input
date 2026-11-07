@@ -84,7 +84,8 @@ def column_evidence(tag):
                 except ValueError:
                     colspan = rowspan = 1
                 label = current.get_text(' ', strip=True)
-                if not body_started and label:
+                unit_only = compact(label).strip('()（）') in ('百万円','千円','円','millionsofyen','thousandsofyen')
+                if not body_started and label and not unit_only:
                     for col in range(ci, ci + colspan):
                         headers[col] = label
                 if has_fact:
@@ -103,7 +104,7 @@ def column_evidence(tag):
         role = 'header_group'
     elif re.match(r'^(?:計|合計|小計|総計|連結合計|報告セグメント計|total|subtotal)(?:$|\(|注|※)', text):
         role = 'total'
-    elif re.match(r'^(?:調整額|消去|全社|連結損益計算書|四半期連結損益計算書|中間連結損益計算書)', text):
+    elif text in ('連結','consolidated') or re.match(r'^(?:調整額|消去|全社|連結損益計算書|四半期連結損益計算書|中間連結損益計算書)', text):
         role = 'adjustment_or_consolidated'
     else:
         role = 'segment' if label else 'unresolved'
@@ -116,6 +117,8 @@ def disclosed_metric(tag):
     unit = compact(str(tag.get('unitref') or ''))
     if not unit or any(x in unit for x in ('pershare', 'shares', 'pure', 'percent')):
         return None, label
+    if re.match(r'^(?:(?:調整後|adjusted)?ebit(?:da)?|財務[・及び]*法人所得税前利益|金利[・及び]*税引前利益)(?:$|\(|※|（)', text):
+        return 'profit', label
     # Components of profit, rates, forecasts and reconciliation adjustments are not profits.
     if any(x in text for x in ('利益率', '損益率', '前年比', '増減率', '償却費', '減損', '調整額', '配賦', '法人税', '1株', '一株')):
         return None, label
@@ -123,7 +126,7 @@ def disclosed_metric(tag):
         return 'profit', label
     if re.match(r'^(?:segment(?:profit|loss|income)|adjustedoperating(?:profit|loss)|businessprofit)', text):
         return 'profit', label
-    if re.match(r'^(?:外部顧客(?:への|からの|に対する)(?:売上|収益)|完成工事高|営業収益|売上高|顧客との契約から生じる収益)(?:$|\(|※)', text):
+    if re.match(r'^(?:外部顧客(?:への|からの|に対する)(?:売上高|売上収益|営業収益|収益)|外部収益|完成工事高|営業収益|営業総収入|売上高|売上収益(?:合計)?|顧客との契約から生じる収益)(?:$|\(|※)', text):
         return 'sales', label
     return None, label
 

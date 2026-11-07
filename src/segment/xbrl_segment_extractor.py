@@ -1216,6 +1216,8 @@ def _extract_ixbrl_segment_data(
         "previous": {"reportable_total": {}, "consolidated": {}},
     }
 
+    known_sales_local = {n.split(':')[-1] for n in sales_tags}
+    known_profit_local = {n.split(':')[-1] for n in profit_tags}
     # ix:nonfraction タグを収集
     for tag in soup.find_all("ix:nonfraction"):
         name = (tag.get("name") or "").lower()
@@ -1236,14 +1238,14 @@ def _extract_ixbrl_segment_data(
         is_primary_sales = name in _PRIMARY_SALES_NAMES
         if not is_sales and not is_profit:
             local_name = name.split(":")[-1] if ":" in name else name
-            if _matches_company_sales_suffix(local_name):
+            if _matches_company_sales_suffix(local_name) and (inferred_metric == 'sales' or local_name in known_sales_local):
                 is_sales = True
                 if any(local_name.endswith(s) for s in (
                     "netsales", "netsalesifrs", "revenueifrs", "revenue",
                     "revenue2", "revenue2ifrs",
                 )):
                     is_primary_sales = True
-            elif any(local_name.endswith(s) for s in _COMPANY_PROFIT_SUFFIXES):
+            elif any(local_name.endswith(s) for s in _COMPANY_PROFIT_SUFFIXES) and (inferred_metric == 'profit' or local_name in known_profit_local):
                 if not local_name.endswith("extraordinaryincome"):
                     is_profit = True
         semantic_only = not is_sales and not is_profit
