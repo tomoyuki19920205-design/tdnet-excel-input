@@ -136,3 +136,50 @@ def test_q4_stock_widget_rejects_identity_mismatch(tmp_path, issuer, ticker, sto
         fetch_q4_ir_news(PAGE_URL, issuer, ticker, "2026-11-03", tmp_path,
                          fetch=make_fetch(page=page))
     assert not list(tmp_path.iterdir())
+
+
+def test_q4_companion_official_release_verifies_brand_only_page(tmp_path):
+    page = (
+        '<title>Serina Therapeutics - News</title>'
+        '<script src="/js/evergreen.q4Api.min.js"></script>'
+        f"<script>$('.news').q4News({{category: '{CATEGORY}'}});</script>"
+        '<footer>Serina Therapeutics, Inc.</footer>'
+    ).encode()
+    identity_url = "https://investors.example.test/news/news-details/2026/older/default.aspx"
+    release = b"<article>Serina Therapeutics, Inc. (NYSE American: SER) reported prior results.</article>"
+    releases = [{"PressReleaseDate": "10/26/2026 09:30:00", "Headline": "Prior Serina release",
+                 "LinkToDetailPage": "/news/news-details/2026/older/default.aspx"}]
+    base_fetch = make_fetch(releases, page)
+
+    def fetch(url):
+        return (release, url) if url == identity_url else base_fetch(url)
+
+    result = fetch_q4_ir_news(PAGE_URL, "Serina Therapeutics, Inc.", "SER", "2026-11-06", tmp_path,
+                              prefix="ser", identity_url=identity_url, fetch=fetch)
+    assert result["official_page_identity_evidence"] == "same_origin_official_release_name_and_exchange_ticker"
+    assert result["official_identity_page_url"] == identity_url
+    assert hashlib.sha256((tmp_path / result["official_identity_page_raw"]["file"]).read_bytes()).hexdigest() == result["official_identity_page_raw"]["sha256"]
+    assert result["target_day_count"] == 0
+
+
+@pytest.mark.parametrize("identity_url,release", [
+    ("https://other.example.test/issuer.html", b"Serina Therapeutics, Inc. (NYSE American: SER)"),
+    ("https://investors.example.test/issuer.html", b"Serina Therapeutics, Inc. (NYSE American: OTHER)"),
+    ("https://investors.example.test/issuer.html", b"Other Therapeutics, Inc. (NYSE American: SER)"),
+])
+def test_q4_companion_identity_rejects_wrong_origin_or_issuer(tmp_path, identity_url, release):
+    page = (
+        '<title>Serina Therapeutics - News</title>'
+        '<script src="/js/evergreen.q4Api.min.js"></script>'
+        f"<script>$('.news').q4News({{category: '{CATEGORY}'}});</script>"
+        '<footer>Serina Therapeutics, Inc.</footer>'
+    ).encode()
+    base_fetch = make_fetch(page=page)
+
+    def fetch(url):
+        return (release, url) if url == identity_url else base_fetch(url)
+
+    with pytest.raises(IRFeedError, match="identity"):
+        fetch_q4_ir_news(PAGE_URL, "Serina Therapeutics, Inc.", "SER", "2026-11-06", tmp_path,
+                         identity_url=identity_url, fetch=fetch)
+    assert not list(tmp_path.iterdir())

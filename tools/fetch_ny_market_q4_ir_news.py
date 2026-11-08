@@ -21,10 +21,12 @@ def main() -> int:
     parser.add_argument("--market-session-date", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--prefix", default="ny-ir")
+    parser.add_argument("--identity-url", help="Same-origin official release with issuer name and exchange ticker")
     args = parser.parse_args()
     result = fetch_q4_ir_news(
         args.ir_url, args.issuer_name, args.ticker,
         args.market_session_date, args.output_dir, prefix=args.prefix,
+        identity_url=args.identity_url,
     )
     print(json.dumps({
         "summary": str(args.output_dir / f"{args.prefix}-summary.json"),

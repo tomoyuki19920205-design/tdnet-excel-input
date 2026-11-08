@@ -85,6 +85,19 @@ def _identity_evidence(page: str, title: str, issuer_name: str, ticker: str) -> 
     raise IRFeedError(f"ticker identity not found in official page title or stock link: {title!r}")
 
 
+def _companion_identity_evidence(page: str, issuer_name: str, ticker: str) -> str:
+    parsed = _PageIdentity()
+    parsed.feed(page)
+    visible = " ".join(parsed.visible)
+    pattern = re.compile(
+        re.escape(issuer_name) + r".{0,180}\((?:NASDAQ|NYSE(?:\s+American)?|AMEX):\s*"
+        + re.escape(ticker) + r"\)", re.I | re.S,
+    )
+    if not pattern.search(visible):
+        raise IRFeedError("same-origin official identity page lacks matching issuer and exchange ticker")
+    return "same_origin_official_release_name_and_exchange_ticker"
+
+
 def _default_fetch(url: str) -> tuple[bytes, str]:
     request = Request(url, headers={"User-Agent": "NYMarketDaily/1.0"})
     for attempt in range(3):
@@ -150,6 +163,7 @@ def fetch_q4_ir_news(
     *,
     prefix: str = "ny-ir",
     fetch: Fetch = _default_fetch,
+    identity_url: str | None = None,
 ) -> dict:
     """Fetch the first-party JSON feed named by an issuer's Q4 news widget.
 
@@ -165,7 +179,18 @@ def fetch_q4_ir_news(
     page = page_raw.decode("utf-8", errors="replace")
     title_match = _TITLE_RE.search(page)
     title = html.unescape(re.sub(r"<[^>]+>", " ", title_match.group(1))).strip() if title_match else ""
-    identity_evidence = _identity_evidence(page, title, issuer_name, ticker)
+    companion_raw = None
+    try:
+        identity_evidence = _identity_evidence(page, title, issuer_name, ticker)
+    except IRFeedError:
+        if identity_url is None:
+            raise
+        if not _same_origin(ir_url, identity_url):
+            raise IRFeedError("official identity page must be on the issuer origin")
+        companion_raw = _fetch_checked(fetch, identity_url, ir_url)
+        identity_evidence = _companion_identity_evidence(
+            companion_raw.decode("utf-8", errors="replace"), issuer_name, ticker,
+        )
     widget_start = page.find(".q4News(")
     if widget_start < 0:
         raise IRFeedError("official page has no Q4 investor-news widget")
@@ -230,6 +255,9 @@ def fetch_q4_ir_news(
         "target_day_releases": [],
         "note": "An empty target-day feed is not proof that no other official channel published an item.",
     }
+    if companion_raw is not None:
+        evidence["official_identity_page_url"] = identity_url
+        evidence["official_identity_page_raw"] = _save_raw(output_dir, prefix, "identity.html", companion_raw)
     for index, (release_day, release) in enumerate(dated):
         if release_day != target:
             continue
