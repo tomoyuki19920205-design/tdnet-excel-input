@@ -51,6 +51,8 @@ def row_label(tag):
                 cells=prior.find_all(['td','th'],recursive=False)
                 text=cells[0].get_text(' ',strip=True) if cells else ''
                 if metric_from_label(text)=='sales':return text.rstrip(':：')+'（'+label+'）'
+            caption=_adjacent_sales_caption(tag.find_parent('table'))
+            if caption:return caption+'（'+label+'）'
         if metric_from_label(label) or re.match(r'^(?:外部顧客|セグメント間)',compact(label)):
             return label
         row=tag.find_parent('tr')
@@ -59,6 +61,32 @@ def row_label(tag):
             text=cells[0].get_text(' ',strip=True) if cells else ''
             if metric_from_label(text):return text
     return label
+
+
+def _adjacent_sales_caption(table):
+    """Use only an immediately preceding sales caption, allowing a unit label.
+
+    Some business-by-period tables put their measure above the table instead
+    of in a row. Do not cross another table, a paragraph, or a different measure.
+    """
+    if table is None:
+        return None
+    node=table
+    if table.parent.name=='div' and len(table.parent.find_all('table'))==1 and compact(table.parent.get_text(' ',strip=True))==compact(table.get_text(' ',strip=True)):
+        node=table.parent
+    for previous in list(node.find_previous_siblings())[:5]:
+        if previous.find('ix:nonfraction') is not None:
+            return None
+        text=previous.get_text(' ',strip=True)
+        if re.fullmatch(r'\(?(?:単位[:：])?(?:百万円|千円|円)\)?',compact(text)):
+            continue
+        if previous.name=='table' or previous.find('table') is not None:
+            return None
+        if not compact(text):
+            continue
+        caption=text.rstrip(':：')
+        return caption if len(compact(caption))<=30 and metric_from_label(caption)=='sales' else None
+    return None
 
 
 def _contribution_adjusted_profit_label(tag):

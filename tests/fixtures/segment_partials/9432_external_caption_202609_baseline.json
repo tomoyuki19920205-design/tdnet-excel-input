@@ -1,0 +1,50 @@
+[
+  {
+    "period": "2026-03-31",
+    "name": "Integrated ICT Business",
+    "sales": null,
+    "profit": 474722
+  },
+  {
+    "period": "2027-03-31",
+    "name": "Integrated ICT Business",
+    "sales": null,
+    "profit": 482052
+  },
+  {
+    "period": "2026-03-31",
+    "name": "Global Solutions Business",
+    "sales": null,
+    "profit": 268977
+  },
+  {
+    "period": "2027-03-31",
+    "name": "Global Solutions Business",
+    "sales": null,
+    "profit": 144167
+  },
+  {
+    "period": "2026-03-31",
+    "name": "Regional Communications Business Member",
+    "sales": null,
+    "profit": 187540
+  },
+  {
+    "period": "2027-03-31",
+    "name": "Regional Communications Business Member",
+    "sales": null,
+    "profit": 188247
+  },
+  {
+    "period": "2026-03-31",
+    "name": "Others Real Estate Energy And Others",
+    "sales": null,
+    "profit": 34911
+  },
+  {
+    "period": "2027-03-31",
+    "name": "Others Real Estate Energy And Others",
+    "sales": null,
+    "profit": 29502
+  }
+]

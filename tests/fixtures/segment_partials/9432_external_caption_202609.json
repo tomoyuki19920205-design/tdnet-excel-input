@@ -1,0 +1,19 @@
+{
+  "ticker": "9432",
+  "doc": "20261104563442",
+  "zip_path": "C:\\Users\\takuy\\tdnet-production\\state\\data\\tdnet_cache\\20261104563442\\xbrl.zip",
+  "zip_sha256": "9def0ba84f131e31c5fb0afe002d8ae12d63dd3932b5ca8534d4c1af2bcb941a",
+  "source_url": "https://www.release.tdnet.info/inbs/140120261104563442.pdf",
+  "current_external_sales": {
+    "Integrated ICT Business": 3131242,
+    "Global Solutions Business": 2514919,
+    "Regional Communications Business Member": 1220807,
+    "Others Real Estate Energy And Others": 495186
+  },
+  "previous_external_sales": {
+    "Integrated ICT Business": 2892807,
+    "Global Solutions Business": 2247733,
+    "Regional Communications Business Member": 1210530,
+    "Others Real Estate Energy And Others": 421643
+  }
+}
