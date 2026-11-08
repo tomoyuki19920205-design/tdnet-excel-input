@@ -1034,7 +1034,8 @@ def extract_edinet_segments(
                 if start and pc.start_date!=start:continue
                 if end and pc.end_date!=end:continue
                 if not (start and end) and not (pc.is_prior_period if period_role=='previous' else pc.is_current_period):continue
-                noncon = 'nonconsolidated' in cid.lower() or any('nonconsolidatedmember' in m['member'].lower() for m in pc.dimensions)
+                from src.segment.semantic_facts import is_nonconsolidated_context
+                noncon = is_nonconsolidated_context(cid, pc.dimensions)
                 if scope=='true' and noncon:continue
                 if any(not (_is_segment_axis(m['axis']) or 'consolidated' in m['axis'].lower()) for m in pc.dimensions):continue
                 # Extraction below uses one verified fiscal cumulative context.
@@ -1195,12 +1196,12 @@ def _build_segment_records(
             rec.context_profit = best_profit["ctx_id"]
 
         from src.segment.profit_basis import profit_basis
-        from src.segment.semantic_facts import sales_basis
+        from src.segment.semantic_facts import sales_basis, is_nonconsolidated_context
         context = contexts[context_id]
         rec.metadata = {
             'period_start':context.start_date,'period_end':context.end_date,
             'period_type':'ytd','currency':'JPY',
-            'is_consolidated':'nonconsolidated' not in context_id.lower(),
+            'is_consolidated':not is_nonconsolidated_context(context_id, context.dimensions),
             'source_context':context_id,'source_member':member,
             'taxonomy_segment_label':label_name or _member_to_segment_name(member),
             'source_column_label':printed_name,

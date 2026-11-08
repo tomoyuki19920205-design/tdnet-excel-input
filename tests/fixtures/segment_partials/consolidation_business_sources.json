@@ -1,0 +1,18 @@
+[
+  {
+    "ticker": "3433",
+    "doc": "20260511522245",
+    "file": "consolidation_business_20260511522245.zip",
+    "sha256": "cc10de29a78f8509cfc20d6beeec700f2b600a6c2c34ce2bdfed3e6208a0712b",
+    "source_url": "https://www.release.tdnet.info/inbs/140120260511522245.pdf",
+    "case": "Consolidated business table has a business named ThermalSprayProcessingNonConsolidated, not a non-consolidated financial statement context."
+  },
+  {
+    "ticker": "3433",
+    "doc": "S100W0IW",
+    "file": "consolidation_business_S100W0IW.zip",
+    "sha256": "2c31fbb99a18434df212b2e94a70f2711c67e9519d51ca93b2328e972d18a4a6",
+    "source_url": "https://api.edinet-fsa.go.jp/api/v2/documents/S100W0IW?type=1",
+    "case": "Consolidated business table has a business named ThermalSprayProcessingNonConsolidated, not a non-consolidated financial statement context."
+  }
+]

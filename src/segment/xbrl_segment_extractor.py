@@ -914,7 +914,12 @@ def extract_segments_from_xbrl_zip_detailed(
                     row_raw_json['raw_segment_label'] = data.get('raw_segment_label') or ''
                     row_raw_json['segment_identity_method'] = 'xhtml_column_and_peer_dimensions' if data.get('member_from_header') else 'segment_dimension'
                     row_raw_json['sales_basis'] = sales_basis(data.get('raw_sales_label'), data.get('sales_fact_selected_name'), data.get('sales_fact_names') or [])
-                    row_raw_json['is_consolidated'] = not ('nonconsolidated' in (data.get('context_ref') or '').lower() or '非連結' in (document_title or ''))
+                    from src.segment.semantic_facts import is_nonconsolidated_context
+                    scope_context = data.get('context_ref') or ''
+                    row_raw_json['is_consolidated'] = not (
+                        is_nonconsolidated_context(scope_context, global_context_map.get(scope_context, {}).get('explicit_members'))
+                        or '非連結' in (document_title or '')
+                    )
                     row_raw_json['currency'] = 'JPY' if unit in ('yen', 'thousand_yen', 'million_yen', '円', '千円', '百万円') else None
                     row_raw_json.update({
                         "_sales_fact_explicit_nil": bool(data.get("sales_fact_explicit_nil")),

@@ -4,6 +4,28 @@ import unicodedata
 from decimal import Decimal, InvalidOperation
 
 
+def is_nonconsolidated_context(context_ref, dimensions=()):
+    """Read the financial-statement scope without interpreting business names.
+
+    A segment such as ThermalSprayProcessingNonConsolidated is a business
+    member in a consolidated table. Only the consolidation axis, or a whole
+    legacy scope token in the context ID, identifies a separate statement.
+    """
+    scopes = set()
+    for item in dimensions or ():
+        axis = str(item.get('dimension') or item.get('axis') or '').split(':')[-1].lower()
+        if axis != 'consolidatedornonconsolidatedaxis':
+            continue
+        member = str(item.get('member') or '').split(':')[-1].lower()
+        if member in ('consolidatedmember', 'nonconsolidatedmember'):
+            scopes.add(member == 'nonconsolidatedmember')
+    if len(scopes) > 1:
+        raise ValueError('conflicting consolidated/nonconsolidated context members')
+    if scopes:
+        return next(iter(scopes))
+    return bool(re.search(r'(?:^|_)NonConsolidated(?:Member)?(?:_|$)', context_ref or '', re.I))
+
+
 def monetary_fact(tag, soup):
     """Apply the actual XBRL unit and scale exactly once, preserving sub-millions."""
     ref = str(tag.get('unitref') or '')
