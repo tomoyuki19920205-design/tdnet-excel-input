@@ -6,6 +6,8 @@ LABELS = {
     'operating_profit': 'セグメント利益（営業利益ベース）',
     'ordinary_profit': 'セグメント利益（経常利益ベース）',
     'profit_before_tax': 'セグメント利益（税引前利益ベース）',
+    'net_profit': 'セグメント利益（純利益ベース）',
+    'profit_attributable_to_owners': 'セグメント利益（親会社所有者帰属純利益ベース）',
     'adjusted_operating_profit': 'セグメント利益（調整後営業利益ベース）',
     'core_operating_profit': 'セグメント利益（コア営業利益ベース）',
     'business_profit': 'セグメント利益（事業利益ベース）',
@@ -48,6 +50,13 @@ def profit_basis(value):
         return 'profit_before_tax'
     if 'operatingincome' in text or 'operatingprofit' in text or '営業利益' in text:
         return 'operating_profit'
+    if ('profitlossattributabletoownersofparent' in text or
+            (re.search(r'純(?:利益|損失)',text) and
+             re.search(r'親会社(?:の所有者|株主)に帰属',text))):
+        return 'profit_attributable_to_owners'
+    if re.fullmatch(r'(?:[^:]+:)?profitloss(?:ifrs)?',text) or re.fullmatch(
+            r'(?:当期|四半期|中間)?純(?:利益|損失)(?:又は(?:当期|四半期|中間)?純(?:利益|損失))?(?:[（(]△[）)])?',text):
+        return 'net_profit'
     if '基準未確定' in text:
         return 'company_defined_unknown'
     return None

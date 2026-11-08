@@ -97,6 +97,7 @@ _IFRS_SALES_TAGS = {
     "jpigp_cor:netsalesifrs",                           # 純売上高 (IFRS)
 }
 _IFRS_PROFIT_TAGS = {
+    "jpigp_cor:profitlossattributabletoownersofparentifrs",
     "jpigp_cor:profitlossifrs",
     "jpigp_cor:operatingprofitlossifrs",
     "jpigp_cor:businessprofitlossifrs",
@@ -1233,6 +1234,8 @@ def _get_profit_priority(name: str) -> int:
     n = name.lower()
     if "extraordinary" in n:
         return 999
+    if 'profitlossattributabletoownersofparent' in n:
+        return 6
     if "operating" in n or "businessprofit" in n or "profitlossifrs" in n:
         return 1
     if "ordinaryincomebnk" in n:
@@ -1371,6 +1374,9 @@ def _extract_ixbrl_segment_data(
                 if not local_name.endswith("extraordinaryincome"):
                     is_profit = True
         semantic_only = not is_sales and not is_profit
+        owner_net_measure = name == 'jpigp_cor:profitlossattributabletoownersofparentifrs'
+        if owner_net_measure and inferred_metric != 'profit':
+            continue
         if semantic_only:
             is_sales = inferred_metric == 'sales'
             is_profit = inferred_metric == 'profit'
@@ -1401,7 +1407,7 @@ def _extract_ixbrl_segment_data(
                    and column_evidence(p)['role'] == 'segment' for p in peers):
                 member = column['label']
                 member_from_header = True
-        if semantic_only:
+        if semantic_only or owner_net_measure:
             dimensions = {str(m.get('dimension') or '').split(':')[-1].lower()
                           for m in context_info.get('explicit_members', [])}
             business_axes = {'operatingsegmentsaxis', 'businesssegmentsaxis', 'businesssegmentaxis', 'reportablesegmentsaxis'}

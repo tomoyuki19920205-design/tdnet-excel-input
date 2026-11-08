@@ -23,3 +23,22 @@ def test_original_correction_and_continued_table(ticker,period,quarter,name,curr
  if ticker=='6554':
   assert all(r['segment_metadata']['correction_section']=='後' for r in rows)
   assert next(r for r in rows if r['period']==period and r['segment_name']=='AR/VR事業')['segment_profit']==-26
+
+def test_wrapped_table_unit_remains_in_its_dated_period():
+ result=run_segment_detection_v4(str(FIX/'4351_wrapped_unit.pdf'),ticker='4351')
+ rows=verified_pdf_records(result,'2022-12-31','2Q')
+ current=next(r for r in rows if r['period']=='2022-12-31' and r['segment_name']=='サービサー事業')
+ assert (current['segment_sales'],current['segment_profit'])==(462.907,279.289)
+ assert current['segment_metadata']['display_unit']=='千円'
+ assert current['segment_metadata']['period_start']=='2022-01-01'
+ assert current['segment_metadata']['source_page']==13
+
+def test_equal_sales_do_not_select_the_correction_before_profit():
+ result=run_segment_detection_v4(str(FIX/'7081_correction_sections.pdf'),ticker='7081')
+ rows=verified_pdf_records(result,'2023-12-31','2Q')
+ assert len(rows)==4
+ rental=next(r for r in rows if r['segment_name']=='レンタル関連事業')
+ ict=next(r for r in rows if r['segment_name']=='ＩＣＴ事業')
+ assert (rental['segment_sales'],rental['segment_profit'])==(8363.272,1053.802)
+ assert ict['segment_profit']==178.515
+ assert all(r['segment_metadata']['correction_section']=='後' for r in rows)

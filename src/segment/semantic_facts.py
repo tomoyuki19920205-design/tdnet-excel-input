@@ -232,6 +232,11 @@ def metric_from_label(label):
     # Components of profit, rates, forecasts and reconciliation adjustments are not profits.
     if any(x in text for x in ('利益率', '損益率', '前年比', '増減率', '償却費', '減損', '調整額', '配賦', '法人税', '1株', '一株')):
         return None
+    # Net income is eligible only as a whole disclosed measure. Callers still
+    # require a real business column/dimension and its duration context.
+    from src.segment.profit_basis import profit_basis
+    if not any(x in text for x in ('非支配','予想','増減額','構成比','1人','一人')) and profit_basis(text) in ('net_profit','profit_attributable_to_owners'):
+        return 'profit'
     if re.match(r'^(?:セグメント(?:利益|損益|損失)|(?:調整後営業|コア営業|事業|売上総|営業|経常|税引前|のれん等償却前セグメント)(?:利益|損益|損失)|与信費用控除後業務純益)', text):
         return 'profit'
     if re.match(r'^(?:segment(?:profit|loss|income)|adjustedoperating(?:profit|loss)|businessprofit)', text):

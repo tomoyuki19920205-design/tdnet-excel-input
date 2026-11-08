@@ -65,8 +65,17 @@ def pdf_cell_identity(pdf,page_index,table,row_index,column_index):
     for line in _positioned_pdf_lines(page):
         if line['bottom']<=top+2:
             for unit in re.findall(r'単位[:：]?(百万円|千円|円)',line['text']):units.append((line['top'],unit))
-    if not units:return None
-    unit=max(units)[1]
+    lower=proof['top'] if heading_page==page_index+1 else 0
+    upper=min((h['top'] for h in pdf_positioned_periods(page) if h['top']>top),default=page.height)
+    units=[(y,u) for y,u in units if y>=lower]
+    if units:unit=max(units)[1]
+    else:
+        # A wrapped horizontal table may print its unit above the continuation
+        # containing totals, or in each business header. Stay inside these dates.
+        section=[line for line in _positioned_pdf_lines(page) if lower<=line['top']<upper]
+        explicit={u for line in section for u in re.findall(r'(?:単位[:：]?|\()(百万円|千円|円)\)?',line['text'])}
+        if len(explicit)!=1:return None
+        unit=next(iter(explicit))
     return {**proof,'display_unit':unit,'unit_multiplier':{'百万円':1000000,'千円':1000,'円':1}[unit],
             'heading_page':heading_page,'numeric_cell_bbox':list(cell),'correction_section':correction,
             'correction_heading_page':correction_page,'evidence_rule':'positioned_original_table_period_and_unit'}
@@ -88,11 +97,14 @@ def bind_pdf_record_cells(pdf,page_index,tables,segment):
                 for ri,row in enumerate(raw):
                     if column>=len(row) or compact(str(row[column] or ''))!=compact(str(source.get(metric+'_raw_cell') or '')):continue
                     label=compact(str(row[0] or ''));wanted=compact(source.get(metric+'_label') or '')
-                    if label==wanted or (metric=='profit' and ri and compact(str(raw[ri-1][0] or ''))==wanted):matches.append((ti,ri,column))
+                    if label==wanted or (metric=='profit' and ri and compact(str(raw[ri-1][0] or ''))==wanted):
+                        proof=pdf_cell_identity(pdf,page_index,table,ri,column)
+                        if proof:matches.append((ti,ri,column,proof))
+        preferred_table=source.get('profit_table_index') if metric=='profit' else source.get('table_index')
+        preferred=[m for m in matches if m[0]==preferred_table and m[2]==source.get('column_index')]
+        if len(preferred)==1:matches=preferred
         if len(matches)!=1:return None
-        ti,ri,column=matches[0]
-        proof=pdf_cell_identity(pdf,page_index,tables[ti],ri,column)
-        if not proof:return None
+        ti,ri,column,proof=matches[0]
         proofs.append(proof)
         original_cells[metric]={'table_index':ti,'row_index':ri,'column_index':column}
     identity=('source_period_role','period_start','period_end','display_unit','is_consolidated')
