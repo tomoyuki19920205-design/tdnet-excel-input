@@ -101,3 +101,38 @@ def test_q4_brand_page_rejects_unverified_identity(tmp_path, corporate, ticker, 
         fetch_q4_ir_news(PAGE_URL, corporate, ticker, "2026-11-05", tmp_path,
                          fetch=make_fetch(page=page))
     assert not list(tmp_path.iterdir())
+
+
+def test_q4_stock_widget_verifies_official_issuer_and_listing(tmp_path):
+    page = (
+        '<title>Micron Technology, Inc. - Investor Relations</title>'
+        '<script src="/js/evergreen.q4Api.min.js"></script>'
+        f"<script>$('.news').q4News({{category: '{CATEGORY}'}});</script>"
+        '<div>Micron Technology, Inc.</div>'
+        '<script>$(".stock").q4StockSummary({tickerList: '
+        '[{"StockSymbol":"MU","StockExchange":"XNAS"}]});</script>'
+    ).encode()
+    result = fetch_q4_ir_news(PAGE_URL, "Micron Technology, Inc.", "MU", "2026-11-03", tmp_path,
+                              prefix="widget", fetch=make_fetch(page=page))
+    assert result["official_page_identity_evidence"] == "visible_corporate_name_and_official_q4_stock_widget"
+    assert result["target_day_count"] == 1
+
+
+@pytest.mark.parametrize("issuer,ticker,stock_symbol,exchange", [
+    ("Other Inc.", "MU", "MU", "XNAS"),
+    ("Micron Technology, Inc.", "MUS", "MU", "XNAS"),
+    ("Micron Technology, Inc.", "MU", "MU", "UNKNOWN"),
+])
+def test_q4_stock_widget_rejects_identity_mismatch(tmp_path, issuer, ticker, stock_symbol, exchange):
+    page = (
+        '<title>Micron Technology, Inc. - Investor Relations</title>'
+        '<script src="/js/evergreen.q4Api.min.js"></script>'
+        f"<script>$('.news').q4News({{category: '{CATEGORY}'}});</script>"
+        '<div>Micron Technology, Inc.</div>'
+        f'<script>$(".stock").q4StockSummary({{tickerList: [{{"StockSymbol":"{stock_symbol}",'
+        f'"StockExchange":"{exchange}"}}]}});</script>'
+    ).encode()
+    with pytest.raises(IRFeedError, match="identity"):
+        fetch_q4_ir_news(PAGE_URL, issuer, ticker, "2026-11-03", tmp_path,
+                         fetch=make_fetch(page=page))
+    assert not list(tmp_path.iterdir())

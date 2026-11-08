@@ -22,6 +22,7 @@ _FEED_PATH = "/feed/PressRelease.svc/GetPressReleaseList"
 _CATEGORY_RE = re.compile(r"\bcategory\s*:\s*['\"]([0-9a-fA-F-]{36})['\"]")
 _SCRIPT_RE = re.compile(r"<script[^>]+src=['\"]([^'\"]*evergreen\.q4Api[^'\"]*)['\"]", re.I)
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+_STOCK_TICKERS_RE = re.compile(r"\btickerList\s*:\s*(\[[^\]]{1,3000}\])", re.I)
 
 
 class IRFeedError(ValueError):
@@ -66,6 +67,21 @@ def _identity_evidence(page: str, title: str, issuer_name: str, ticker: str) -> 
             value.casefold() in ("nasdaq", "nyse", "amex") for value in query.get("exchange", [])
         ):
             return "visible_corporate_name_and_stock_link"
+    for match in _STOCK_TICKERS_RE.finditer(page):
+        script_start = page.rfind("<script", 0, match.start())
+        if script_start < 0 or ".q4StockSummary(" not in page[script_start:match.start()] or page.find("</script>", script_start) < match.end():
+            continue
+        try:
+            stocks = json.loads(match.group(1))
+        except (TypeError, ValueError):
+            continue
+        if isinstance(stocks, list) and any(
+            isinstance(stock, dict)
+            and str(stock.get("StockSymbol", "")).casefold() == ticker.casefold()
+            and str(stock.get("StockExchange", "")).casefold() in ("xnas", "xnys", "xase")
+            for stock in stocks
+        ):
+            return "visible_corporate_name_and_official_q4_stock_widget"
     raise IRFeedError(f"ticker identity not found in official page title or stock link: {title!r}")
 
 
