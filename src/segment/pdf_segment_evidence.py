@@ -44,6 +44,7 @@ def bind_pdf_period_evidence(page_text,period_type):
 def pdf_fiscal_period(base_period,quarter,period_type,printed_end=None):
     """Canonical period remains the fiscal year-end, including quarterly PDFs."""
     if period_type not in ('current','previous'):return None
+    if quarter not in ('FY','1Q','2Q','3Q'):return None
     try:
         y,m,d=map(int,base_period.split('-'))
         if period_type=='previous':y-=1;d=min(d,calendar.monthrange(y,m)[1])
@@ -69,7 +70,13 @@ def verified_pdf_records(result,base_period,quarter,*,current_only=False):
             flags=record.get('segment_metadata') or {}
             if column_role((flags.get('source_table_cells') or {}).get('header',''))!='segment':continue
             if flags.get('evidence_rule')!='same_pdf_page_explicit_period_and_unit':continue
-            fiscal=pdf_fiscal_period(base_period,quarter,role,flags.get('period_end'))
+            normalized_quarter=quarter
+            if quarter in ('',None):
+                # A missing legacy quarter is annual only when the original
+                # table explicitly says so. Quarterly headings remain unresolved.
+                if flags.get('period_heading') not in ('当連結会計年度','前連結会計年度','当事業年度','前事業年度'):continue
+                normalized_quarter='FY'
+            fiscal=pdf_fiscal_period(base_period,normalized_quarter,role,flags.get('period_end'))
             if not fiscal or not flags.get('source_table_cells'):continue
             y,m,d=map(int,fiscal.split('-'))
             previous_end=datetime.date(y-1,m,min(d,calendar.monthrange(y-1,m)[1]))
@@ -90,7 +97,9 @@ def verified_pdf_records(result,base_period,quarter,*,current_only=False):
                         record['segment_metadata'][metric.replace('segment_','')+'_evidence_status']='ambiguous_pdf_numeric_cell'
                     else:record[metric]=float(amount*Decimal(scale)/Decimal(1000000))
             if record.get('segment_sales') is None and record.get('segment_profit') is None:continue
-            record.update(period=fiscal,quarter=quarter,unit_raw='百万円',unit_multiplier=1000000)
+            record.update(period=fiscal,quarter=normalized_quarter,unit_raw='百万円',unit_multiplier=1000000)
             record['segment_metadata']={**flags,'normalized_unit':'millions_jpy','normalization_count':1}
+            if normalized_quarter!=quarter:
+                record['segment_metadata']['quarter_identity_evidence']='original_annual_heading_and_exact_full_fiscal_duration'
             rows.append(record)
     return rows
