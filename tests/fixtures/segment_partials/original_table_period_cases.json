@@ -1,0 +1,16 @@
+[
+  {
+    "ticker": "9249",
+    "original_url": "https://www.release.tdnet.info/inbs/140120260513530259.pdf",
+    "sha256": "af8d2ee9a4d30e6509d32bd41d28bdad094957043828a8dfeb977edb819669e0",
+    "fixture": "9249_period_table_binding.pdf",
+    "case": "tax_note_current_heading_before_previous_segment_table"
+  },
+  {
+    "ticker": "6645",
+    "original_url": "https://www.release.tdnet.info/inbs/140120260121536647.pdf",
+    "sha256": "b5ea59d0acd880c49c8f339949d50621350349b81613ecca9cb3dcfeb6f7dca5",
+    "fixture": "6645_period_table_binding.pdf",
+    "case": "previous_and_current_tables_on_same_page"
+  }
+]
