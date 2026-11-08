@@ -2737,8 +2737,8 @@ def run_segment_detection_v4(
                 if note and profit_basis(note.group()):
                     for segment in period.segments:
                         segment.raw_profit_label = profit_label(note.group())
-                proof=bind_pdf_period_evidence(page_text,period.period_type)
                 for segment in period.segments:
+                    proof=segment.segment_metadata.get('positioned_period_proof')
                     if proof:
                         segment.unit_raw=proof['display_unit'];segment.unit_multiplier=proof['unit_multiplier']
                         metadata=pdf_measure_metadata(proof,period.sales_row_label,period.profit_row_label,period.page_index_1based)
@@ -3008,6 +3008,10 @@ def _run_v4_inner(
                 continue
 
 
+        # Keep original table geometry before any structural merging. Numeric
+        # dates must be bound to the actual cell, not a later heading on a page.
+        _geometry_settings=dict(_TABLE_EXTRACTION_STRATEGIES).get(_used_strategy)
+        _geometry_tables=page.find_tables(table_settings=_geometry_settings) if _geometry_settings is not None else []
         # 左右分割セグメント表を先に横結合（side-by-side）
         raw_tables = _try_merge_side_by_side_segment_tables(
             raw_tables, ticker, page_idx, trace
@@ -3124,6 +3128,21 @@ def _run_v4_inner(
                 )
                 if pr is None:
                     continue
+
+                from src.segment.pdf_segment_evidence import bind_pdf_record_cells
+                _cell_proofs=[bind_pdf_record_cells(pdf,page_idx,_geometry_tables,s) for s in pr.segments]
+                if not all(_cell_proofs):
+                    trace.append(f'Phase3-identity: page={page_idx} tbl={tbl_idx} unresolved numeric period/unit or correction-before table')
+                    continue
+                _identities={(p['source_period_role'],p['period_start'],p['period_end'],p['display_unit']) for p in _cell_proofs}
+                if len(_identities)!=1:continue
+                period_type=_cell_proofs[0]['source_period_role']
+                if '四半期連結会計期間' in _cell_proofs[0]['period_heading']:
+                    period_type+='_qtd'
+                pr.period_type=period_type
+                pr.period_label=_cell_proofs[0]['period_heading']
+                for segment,proof in zip(pr.segments,_cell_proofs):
+                    segment.segment_metadata['positioned_period_proof']=proof
 
                 # period_best に登録（セグメント数多い方を優先）
                 existing = period_best.get(period_type)

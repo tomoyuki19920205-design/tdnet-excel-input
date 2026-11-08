@@ -1,0 +1,29 @@
+[
+  {
+    "ticker": "6554",
+    "period": "2023-09-30",
+    "quarter": "1Q",
+    "filename": "6554_2023-09-30_positioned.pdf",
+    "pdf_sha256": "863b5de46aaf55e92ebb1aeb6d2234e081ef9ecfa829d31cd26a27675b3584ea",
+    "source_path": "C:\\Users\\takuy\\Documents\\Codex\\2026-11-07\\files-pasted-by-the-user-codex\\work\\all_segments\\sources\\20230215512841\\document.pdf",
+    "url": "https://www.release.tdnet.info/inbs/140120230215512841.pdf"
+  },
+  {
+    "ticker": "2990",
+    "period": "2026-03-31",
+    "quarter": "FY",
+    "filename": "2990_2026-03-31_positioned.pdf",
+    "pdf_sha256": "e2ec6c6cd4792eb504fdea96a7ebf285536b69b264e936c48a004c4711ca7779",
+    "source_path": "C:\\Users\\takuy\\tdnet-production\\state\\data\\docs\\140120260514533561.pdf",
+    "url": "https://www.release.tdnet.info/inbs/140120260514533561.pdf"
+  },
+  {
+    "ticker": "2990",
+    "period": "2025-03-31",
+    "quarter": "FY",
+    "filename": "2990_2025-03-31_positioned.pdf",
+    "pdf_sha256": "f33f689901bbbf5f304caa1e8ffa5914dd95fe91800432e08ce98dbb945cfaba",
+    "source_path": "C:\\Users\\takuy\\Documents\\Codex\\2026-11-07\\files-pasted-by-the-user-codex\\work\\all_segments\\sources\\20250513545355\\document.pdf",
+    "url": "https://www.release.tdnet.info/inbs/140120250513545355.pdf"
+  }
+]

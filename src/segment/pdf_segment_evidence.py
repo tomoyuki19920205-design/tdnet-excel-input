@@ -8,6 +8,97 @@ from src.segment.profit_basis import profit_basis
 
 _HEADING=re.compile(r'(前|当)(?:第[123一二三])?(?:四半期連結累計期間|四半期累計期間|中間連結会計期間|中間会計期間|連結会計年度|事業年度|連結累計期間|四半期連結会計期間)')
 
+def _positioned_pdf_lines(page):
+    if hasattr(page,'_segment_positioned_lines'):return page._segment_positioned_lines
+    lines=[]
+    for word in sorted(page.extract_words(),key=lambda w:(round(w['top'],1),w['x0'])):
+        if not lines or abs(lines[-1]['top']-word['top'])>2:
+            lines.append({'top':word['top'],'bottom':word['bottom'],'words':[word]})
+        else:
+            lines[-1]['words'].append(word)
+            lines[-1]['bottom']=max(lines[-1]['bottom'],word['bottom'])
+    for line in lines:
+        line['text']=compact(''.join(w['text'] for w in sorted(line['words'],key=lambda w:w['x0'])))
+    page._segment_positioned_lines=lines
+    return lines
+
+def pdf_positioned_periods(page):
+    if hasattr(page,'_segment_positioned_periods'):return page._segment_positioned_periods
+    lines=_positioned_pdf_lines(page);out=[]
+    for index,line in enumerate(lines):
+        if not _HEADING.search(line['text']):continue
+        text=''.join(x['text'] for x in lines[index:index+4] if x['top']-line['top']<65)
+        text=re.sub(r'単位[:：]?(百万円|千円|円)','',text)
+        for role in ('current','previous'):
+            proof=bind_pdf_period_evidence(text+'単位:円',role)
+            if proof:out.append({**proof,'top':line['top'],'bottom':line['bottom'],'positioned_heading':text})
+    page._segment_positioned_periods=out
+    return out
+
+def pdf_cell_identity(pdf,page_index,table,row_index,column_index):
+    """Bind the actual numeric cell to preceding dates and its local unit.
+
+    Correction-before sections are never eligible. An adjacent page may carry
+    a continued segment table's heading, but a later heading may not label it.
+    """
+    cell=table.rows[row_index].cells[column_index]
+    if cell is None:return None
+    page=pdf.pages[page_index];top=cell[1]
+    heads=[h for h in pdf_positioned_periods(page) if h['bottom']<=top+2]
+    heading_page=page_index+1
+    if not heads and page_index:
+        prior=pdf.pages[page_index-1]
+        if 'セグメント' in compact(prior.extract_text() or ''):
+            heads=pdf_positioned_periods(prior);heading_page=page_index
+    if not heads:return None
+    nearest=max(h['top'] for h in heads);choices=[h for h in heads if abs(h['top']-nearest)<2]
+    if len({(h['source_period_role'],h['period_start'],h['period_end']) for h in choices})!=1:return None
+    proof=choices[0]
+    correction=None;correction_page=None
+    for pi in range(page_index+1):
+        for line in _positioned_pdf_lines(pdf.pages[pi]):
+            if pi==page_index and line['top']>top:break
+            marker=re.fullmatch(r'[【\[(（〈<]?訂正(前|後)[】\])）〉>]?',line['text'])
+            if marker:correction=marker[1];correction_page=pi+1
+    if correction=='前':return None
+    units=[]
+    for line in _positioned_pdf_lines(page):
+        if line['bottom']<=top+2:
+            for unit in re.findall(r'単位[:：]?(百万円|千円|円)',line['text']):units.append((line['top'],unit))
+    if not units:return None
+    unit=max(units)[1]
+    return {**proof,'display_unit':unit,'unit_multiplier':{'百万円':1000000,'千円':1000,'円':1}[unit],
+            'heading_page':heading_page,'numeric_cell_bbox':list(cell),'correction_section':correction,
+            'correction_heading_page':correction_page,'evidence_rule':'positioned_original_table_period_and_unit'}
+
+def bind_pdf_record_cells(pdf,page_index,tables,segment):
+    source=segment.segment_metadata.get('source_table_cells') or {};proofs=[]
+    from src.analysis.segment_detection_v4 import _phase5_get_segment_names
+    original_cells={}
+    for metric in ('sales','profit'):
+        if getattr(segment,'segment_'+metric) is None:continue
+        matches=[]
+        for ti,table in enumerate(tables):
+            if not hasattr(table,'_segment_cells_names'):
+                raw=table.extract();names,_=_phase5_get_segment_names(raw,{})
+                table._segment_cells_names=(raw,names)
+            raw,names=table._segment_cells_names
+            columns=[column for column,name in names if compact(name)==compact(source.get('header') or '')]
+            for column in columns:
+                for ri,row in enumerate(raw):
+                    if column>=len(row) or compact(str(row[column] or ''))!=compact(str(source.get(metric+'_raw_cell') or '')):continue
+                    label=compact(str(row[0] or ''));wanted=compact(source.get(metric+'_label') or '')
+                    if label==wanted or (metric=='profit' and ri and compact(str(raw[ri-1][0] or ''))==wanted):matches.append((ti,ri,column))
+        if len(matches)!=1:return None
+        ti,ri,column=matches[0]
+        proof=pdf_cell_identity(pdf,page_index,tables[ti],ri,column)
+        if not proof:return None
+        proofs.append(proof)
+        original_cells[metric]={'table_index':ti,'row_index':ri,'column_index':column}
+    identity=('source_period_role','period_start','period_end','display_unit','is_consolidated')
+    if not proofs or len({tuple(p[k] for k in identity) for p in proofs})!=1:return None
+    return {**proofs[0],'original_metric_cells':original_cells}
+
 def pdf_period_section(page_text,period_type):
     """Keep notes within the identified current/prior section on this page."""
     text=compact(page_text);headings=list(_HEADING.finditer(text));sections=[]
@@ -69,7 +160,7 @@ def verified_pdf_records(result,base_period,quarter,*,current_only=False):
             record=asdict(segment) if is_dataclass(segment) else dict(segment)
             flags=record.get('segment_metadata') or {}
             if column_role((flags.get('source_table_cells') or {}).get('header',''))!='segment':continue
-            if flags.get('evidence_rule')!='same_pdf_page_explicit_period_and_unit':continue
+            if flags.get('evidence_rule') not in ('same_pdf_page_explicit_period_and_unit','positioned_original_table_period_and_unit'):continue
             normalized_quarter=quarter
             if quarter in ('',None):
                 # A missing legacy quarter is annual only when the original
