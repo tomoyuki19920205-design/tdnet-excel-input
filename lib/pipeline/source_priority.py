@@ -63,6 +63,11 @@ SOURCE_PRIORITY: dict[str, int] = {
     # backfill_xbrl: XBRL ZIP から後処理抽出したデータ (attachment_xbrl 相当)
     # excel_legacy(5) より高優先、summary_xbrl(1) より低優先
     "backfill_xbrl": 2,
+    # Independently verified official PDF cells can correct a historical XBRL
+    # at its existing tier without hiding other businesses in the same period.
+    # Ordinary PDF extraction retains priority 4; callers must retain the
+    # original page/cell, period, business, unit and correction evidence.
+    "verified_pdf_backfill": 2,
     # ── EDINET source ──
     # EDINET XBRL は TDnet XBRL (priority=1) の次、HTML/PDF より上
     "edinet_xbrl": 2,
