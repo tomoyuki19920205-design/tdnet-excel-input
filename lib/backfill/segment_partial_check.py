@@ -701,3 +701,34 @@ def cleanup_aggregate_pdf_rows(
             ticker, fiscal_year_end, e,
         )
         return 0
+
+
+def allow_verified_pdf_fallback(result, records: list[dict]) -> bool:
+    """A count heuristic cannot discard independently bound business tables.
+
+    Called before merging XBRL rows. Low-count exceptions require positioned
+    original cells and a single normalized unit for every surviving PDF row.
+    Other quarantine reasons remain in force.
+    """
+    if not records:
+        return False
+    if getattr(result, "success", False):
+        return True
+    if getattr(result, "quarantine_reason", None) != "low_segment_count":
+        return False
+    from src.segment.semantic_facts import column_role
+    for row in records:
+        flags = row.get("segment_metadata") or {}
+        cells = flags.get("source_table_cells") or {}
+        if (flags.get("evidence_rule") != "positioned_original_table_period_and_unit"
+            or flags.get("normalization_count") != 1
+            or flags.get("normalized_unit") != "millions_jpy"
+            or not flags.get("period_start") or not flags.get("period_end")
+            or flags.get("currency") != "JPY"
+            or not isinstance(flags.get("is_consolidated"), bool)
+            or column_role(cells.get("header", "")) != "segment"):
+            return False
+        metrics = [m for m in ("sales", "profit") if row.get("segment_" + m) is not None]
+        if not metrics or any(m not in (flags.get("original_metric_cells") or {}) for m in metrics):
+            return False
+    return True

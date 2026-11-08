@@ -572,13 +572,14 @@ def _process_single(
             from src.analysis.segment_detection_v4 import run_segment_detection_v4
             _v4r = run_segment_detection_v4(doc_path, ticker=code)
             from src.segment.pdf_segment_evidence import verified_pdf_records
-            from lib.backfill.segment_partial_check import decide_fallback_adoption,merge_same_filing_missing_metrics
+            from lib.backfill.segment_partial_check import decide_fallback_adoption,merge_same_filing_missing_metrics,allow_verified_pdf_fallback
             pdf_records = verified_pdf_records(_v4r, fiscal_year_end, financials.quarter, current_only=True)
+            pdf_eligible = allow_verified_pdf_fallback(_v4r, pdf_records)
             merge_detail={"ticker":code,"fiscal_year_end":fiscal_year_end,"quarter":financials.quarter}
             merged=merge_same_filing_missing_metrics(_v4_segs_list,pdf_records,merge_detail)
             if merge_detail.get('compatible_pdf_metrics_added'):
                 pdf_records=merged
-            if _v4r.success and pdf_records and (not _v4_segs_list or decide_fallback_adoption(_v4_segs_list, pdf_records, {"ticker":code,"fiscal_year_end":fiscal_year_end,"quarter":financials.quarter})[0]):
+            if pdf_eligible and pdf_records and (not _v4_segs_list or decide_fallback_adoption(_v4_segs_list, pdf_records, {"ticker":code,"fiscal_year_end":fiscal_year_end,"quarter":financials.quarter})[0]):
                 _v4_segs_list = pdf_records
                 _v4_ok = True
                 _v4_reason = "none"
