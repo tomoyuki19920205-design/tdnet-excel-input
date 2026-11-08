@@ -1,0 +1,18 @@
+{
+  "ticker": "4755",
+  "disclosure_id": "20251112598242",
+  "source_path": "C:\\Users\\takuy\\OneDrive\\tdnet-excel-input\\data\\v4_campaign_cache\\v4-jquants-3y-20260710\\0000016429\\xbrl.zip",
+  "zip_sha256": "36033e93b2cab8587e3adf3fc606b6f1c0ace80fdeb92d8e6bce64f43137cd6e",
+  "source_url": "https://www.release.tdnet.info/inbs/140120251112598242.pdf",
+  "expected_profit_current": {
+    "Fin Tech": 142420,
+    "Internet Services": 51515,
+    "Mobile": -126872
+  },
+  "expected_profit_previous": {
+    "Fin Tech": 114705,
+    "Internet Services": 47408,
+    "Mobile": -168185
+  },
+  "definition": "Non-GAAP operating segment result after mobile ecosystem contribution, explicitly used by management and in the business narrative."
+}

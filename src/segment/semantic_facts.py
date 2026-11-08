@@ -38,6 +38,10 @@ def monetary_fact(tag, soup):
 
 def row_label(tag):
     label=_leading_row_text(tag)
+    if compact(label)=='考慮後':
+        combined=_contribution_adjusted_profit_label(tag)
+        if combined:
+            return combined
     evidence=column_evidence(tag)
     if evidence.get('orientation')=='business_rows_metric_columns':
         return evidence['metric_column']
@@ -55,6 +59,61 @@ def row_label(tag):
             text=cells[0].get_text(' ',strip=True) if cells else ''
             if metric_from_label(text):return text
     return label
+
+
+def _contribution_adjusted_profit_label(tag):
+    """Bind a final subtotal to its own explicit segment-profit section.
+
+    A bare 'after considering' tag is not a profit concept. Require the printed
+    profit heading, before/contribution/after sequence, same business context,
+    and a non-aggregate business column. Never select the contribution alone.
+    """
+    row=tag.find_parent('tr')
+    if row is None or column_evidence(tag).get('role')!='segment':
+        return None
+    context=tag.get('contextref')
+    previous=[]
+    for sibling in row.find_previous_siblings('tr'):
+        if sibling.find_parent('table') is not row.find_parent('table'):
+            return None
+        cells=sibling.find_all(['td','th'],recursive=False)
+        texts=[c.get_text(' ',strip=True) for c in cells]
+        if not any(texts):
+            continue
+        previous.append((sibling,texts))
+        if len(previous)==3:
+            break
+    if len(previous)!=3:
+        return None
+    (contribution,ct),(before,bt),(heading,ht)=previous
+    if not re.fullmatch(r'.{1,60}貢献額',compact(ct[0])) or compact(bt[0])!='考慮前':
+        return None
+    if compact(ht[0]) not in ('セグメント損益','セグメント利益','セグメント利益又は損失') or any(compact(x) for x in ht[1:]):
+        return None
+    if heading.find('ix:nonfraction') is not None:
+        return None
+    for source_row in (before,contribution):
+        matches=source_row.find_all('ix:nonfraction',attrs={'contextref':context})
+        if len(matches)!=1 or matches[0].get('unitref')!=tag.get('unitref') or column_evidence(matches[0]).get('label')!=column_evidence(tag).get('label'):
+            return None
+    return ht[0]+'（'+ct[0]+'考慮後）'
+
+
+def contribution_profit_policy(soup,measure_label=''):
+    """Return the explicit management measure definition, with its source text."""
+    label=compact(measure_label)
+    modifier=re.fullmatch(r'セグメント(?:損益|利益|利益又は損失)\((.+貢献)額考慮後\)',label)
+    if not modifier:
+        return {}
+    cache=soup.__dict__.setdefault('_contribution_profit_policy',{})
+    if label in cache:
+        return cache[label]
+    text=re.sub(r'\s+','',unicodedata.normalize('NFKC',soup.get_text(' ',strip=True)))
+    matches=re.findall(r'(?:セグメント(?:損益|利益)|社内指標)[^。]{0,200}?Non-GAAP営業(?:利益|損益)ベース[^。]{0,40}',text,re.I)
+    links=re.findall(re.escape(modifier[1])+r'をセグメント(?:損益|利益)に反映[^。]{0,40}',text)
+    result={'basis':'adjusted_operating_profit','original_policy_text':matches,'contribution_policy_text':links} if matches and links else {}
+    cache[label]=result
+    return result
 
 
 def _leading_row_text(tag):

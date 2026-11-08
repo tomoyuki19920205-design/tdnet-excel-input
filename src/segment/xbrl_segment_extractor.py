@@ -903,6 +903,12 @@ def extract_segments_from_xbrl_zip_detailed(
                         label = data.get('raw_profit_label') or ''
                         row_raw_json['raw_profit_label'] = label
                         row_raw_json["profit_basis"] = profit_basis(label) or profit_basis(profit_tag) or 'company_defined_unknown'
+                        if label.startswith(('セグメント損益（','セグメント利益（','セグメント利益又は損失（')) and label.endswith('貢献額考慮後）'):
+                            from src.segment.semantic_facts import contribution_profit_policy
+                            policy=contribution_profit_policy(soup,label)
+                            if policy:
+                                row_raw_json['profit_basis']=policy['basis']
+                                row_raw_json['profit_basis_policy_evidence']=policy
                     from src.segment.semantic_facts import sales_basis
                     row_raw_json['raw_sales_label'] = data.get('raw_sales_label') or ''
                     row_raw_json['raw_segment_label'] = data.get('raw_segment_label') or ''
