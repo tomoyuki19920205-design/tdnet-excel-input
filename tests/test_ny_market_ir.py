@@ -183,3 +183,35 @@ def test_q4_companion_identity_rejects_wrong_origin_or_issuer(tmp_path, identity
         fetch_q4_ir_news(PAGE_URL, "Serina Therapeutics, Inc.", "SER", "2026-11-06", tmp_path,
                          identity_url=identity_url, fetch=fetch)
     assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("about,quote,accepted", [
+    ("About Unity Software Inc. (Unity)", "Unity [NYSE: U]", True),
+    ("About Unity Software Inc. (Unity)", "Other [NYSE: U]", False),
+    ("About Unity Software Inc. (Unity)", "Unity [NYSE: OTHER]", False),
+    ("About Other Software Inc. (Unity)", "Unity [NYSE: U]", False),
+])
+def test_q4_companion_about_alias_requires_matching_issuer_alias_and_ticker(tmp_path, about, quote, accepted):
+    page = (
+        '<title>Unity Technologies - News</title>'
+        '<script src="/js/evergreen.q4Api.min.js"></script>'
+        f"<script>$('.news').q4News({{category: '{CATEGORY}'}});</script>"
+    ).encode()
+    identity_url = "https://investors.example.test/news/news-details/2026/older/default.aspx"
+    release = f"<article>{about} {quote} provides tools for creators.</article>".encode()
+    releases = [{"PressReleaseDate": "10/26/2026 09:30:00", "Headline": "Prior Unity release",
+                 "LinkToDetailPage": "/news/news-details/2026/older/default.aspx"}]
+    base_fetch = make_fetch(releases, page)
+
+    def fetch(url):
+        return (release, url) if url == identity_url else base_fetch(url)
+
+    if accepted:
+        result = fetch_q4_ir_news(PAGE_URL, "Unity Software Inc.", "U", "2026-11-06", tmp_path,
+                                  identity_url=identity_url, fetch=fetch)
+        assert result["official_page_identity_evidence"] == "same_origin_official_release_about_alias_and_exchange_ticker"
+    else:
+        with pytest.raises(IRFeedError, match="identity"):
+            fetch_q4_ir_news(PAGE_URL, "Unity Software Inc.", "U", "2026-11-06", tmp_path,
+                             identity_url=identity_url, fetch=fetch)
+        assert not list(tmp_path.iterdir())

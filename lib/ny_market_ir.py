@@ -93,9 +93,16 @@ def _companion_identity_evidence(page: str, issuer_name: str, ticker: str) -> st
         re.escape(issuer_name) + r".{0,180}\((?:NASDAQ|NYSE(?:\s+American)?|AMEX):\s*"
         + re.escape(ticker) + r"\)", re.I | re.S,
     )
-    if not pattern.search(visible):
-        raise IRFeedError("same-origin official identity page lacks matching issuer and exchange ticker")
-    return "same_origin_official_release_name_and_exchange_ticker"
+    if pattern.search(visible):
+        return "same_origin_official_release_name_and_exchange_ticker"
+    about_alias = re.compile(
+        r"About\s+" + re.escape(issuer_name) + r"\s*\((?P<alias>[^()]{2,80})\)\s*"
+        r"(?P=alias)\s*[\[(](?:NASDAQ|NYSE(?:\s+American)?|AMEX):\s*"
+        + re.escape(ticker) + r"[\])]", re.I,
+    )
+    if about_alias.search(visible):
+        return "same_origin_official_release_about_alias_and_exchange_ticker"
+    raise IRFeedError("same-origin official identity page lacks matching issuer and exchange ticker")
 
 
 def _default_fetch(url: str) -> tuple[bytes, str]:
