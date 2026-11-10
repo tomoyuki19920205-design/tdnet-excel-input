@@ -854,7 +854,8 @@ class NasdaqYahooRegularUniverseProvider:
             # session. When it conflicts with a zero-volume daily bar, require
             # the exchange's dated historical no-trade row before omitting the
             # symbol from a pure regular-session ranking.
-            if (target_bar.volume == 0
+            if (evidence["primary_exchange"].upper().startswith("NASDAQ")
+                    and target_bar.volume == 0
                     and primary_stamp == f"{target.strftime('%b')} {target.day}, {target.year}"):
                 primary_close = _numeric(primary.get("lastSalePrice"), "official date-only quote", nullable=True)
                 if primary_close is not None and not close_matches(primary_close, target_bar.regular_close):
@@ -883,20 +884,34 @@ class NasdaqYahooRegularUniverseProvider:
                     previous, _ = completed_session_pair(series, target)
                     current_row = by_day.get(target)
                     previous_row = by_day.get(previous.session_date)
+                    official_target = (_numeric(current_row.get("close"), "official no-trade close")
+                                       if current_row else None)
+                    official_previous = (_numeric(previous_row.get("close"), "official previous close")
+                                         if previous_row else None)
+                    matching_digits = next((digits for digits in range(2, 5)
+                                            if official_target is not None and official_previous is not None
+                                            and close_matches(target_bar.regular_close,
+                                                              round_market_display(official_target, digits))
+                                            and close_matches(previous.regular_close,
+                                                              round_market_display(official_previous, digits))), None)
+                    prices_match = (official_target is not None and official_previous is not None
+                                    and ((close_matches(official_target, target_bar.regular_close)
+                                          and close_matches(official_previous, previous.regular_close))
+                                         or matching_digits is not None))
                     if (not current_row or not previous_row
                             or str(current_row.get("volume", "")).strip().upper() not in {"N/A", "0"}
-                            or not close_matches(_numeric(current_row.get("close"), "official no-trade close"),
-                                                 target_bar.regular_close)
-                            or not close_matches(_numeric(previous_row.get("close"), "official previous close"),
-                                                 previous.regular_close)):
+                            or not prices_match):
                         raise MarketDataError(f"regular-universe {symbol}: zero-volume close conflicts with official history")
                     evidence.update({"disposition": "zero_regular_volume_confirmed_by_official_history",
                                      "date_only_quote_close": primary_close,
                                      "official_no_trade_source_identifier": history_url,
                                      "official_no_trade_raw_response_sha256": hashlib.sha256(history_raw).hexdigest(),
                                      "official_no_trade_target_close": target_bar.regular_close,
+                                     "official_no_trade_exchange_target_close": official_target,
                                      "official_no_trade_previous_session_date": previous.session_date.isoformat(),
-                                     "official_no_trade_previous_close": previous.regular_close})
+                                     "official_no_trade_previous_close": previous.regular_close,
+                                     "official_no_trade_exchange_previous_close": official_previous,
+                                     "official_no_trade_vendor_display_decimal_places": matching_digits})
                     return None, evidence
             try:
                 previous, target_bar = completed_session_pair(series, target)
