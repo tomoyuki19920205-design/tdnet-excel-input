@@ -58,6 +58,30 @@ def test_forward_split_uses_the_same_effective_date_basis_rule():
     assert previous_on_target_basis(10, date(2026, 10, 25), date(2026, 10, 26), parsed) == 10
 
 
+def test_fractional_exchange_ratio_is_exact_and_vendor_display_is_precision_checked():
+    # Nasdaq Trader ECA2026-800 and the Yahoo 2026-11-09 event are retained
+    # as raw/hash evidence in the NY work checkpoint for this incident.
+    parsed = parse_exchange_split_notice(
+        b"<p>SMX (Security Matters) Public Limited Company (SMX) will effect a one-for-two point eight (1-2.8) reverse split and par value change of its Ordinary Shares. The reverse stock split and par value change from $0.00000000558603475 to $0.0000000156408973 will become effective on Monday, November 9, 2026.</p>",
+        "https://www.nasdaqtrader.com/TraderNews.aspx?id=ECA2026-800", "SMX",
+    )
+    assert (parsed["new_shares"], parsed["old_shares"]) == (5, 14)
+    assert (parsed["announced_new_shares"], parsed["announced_old_shares"]) == ("1", "2.8")
+    assert previous_on_target_basis(1.76, date(2026, 11, 6), date(2026, 11, 9), parsed) == pytest.approx(4.928)
+    assert previous_on_target_basis(4.928, date(2026, 11, 9), date(2026, 11, 9), parsed) == 4.928
+    stamp = int(datetime(2026, 11, 9, 14, 30, tzinfo=timezone.utc).timestamp())
+    vendor = {"splits": {"x": {"numerator": 357.0, "denominator": 1000.0,
+                               "splitRatio": "357:1000", "date": stamp}}}
+    validate_vendor_actions(vendor, parsed)
+    for changed in ({"numerator": 358.0, "splitRatio": "358:1000"},
+                    {"date": stamp + 86400},
+                    {"denominator": 100.0, "splitRatio": "357:100"},
+                    {"splitRatio": "357:999"}):
+        bad = {"splits": {"x": {**vendor["splits"]["x"], **changed}}}
+        with pytest.raises(ValueError, match="conflicts with official notice"):
+            validate_vendor_actions(bad, parsed)
+
+
 def test_split_basis_only_changes_when_effective_session_is_crossed():
     event = notice()
     assert previous_on_target_basis(.2299, date(2026, 9, 2), date(2026, 9, 3), event) == .2299

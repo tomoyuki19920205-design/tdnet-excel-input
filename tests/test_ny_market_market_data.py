@@ -2326,6 +2326,54 @@ def test_split_history_rebases_to_adjusted_previous_without_volume_marker_or_dou
         provider.fetch("CDT", day, 1.31)
 
 
+def test_fractional_split_uses_official_ratio_and_does_not_rebase_adjusted_previous_again():
+    day = date(2026, 11, 9)
+    notice_url = "https://www.nasdaqtrader.com/TraderNews.aspx?id=ECA2026-800"
+    notice = ("<p>SMX (Security Matters) Public Limited Company (SMX) will effect a "
+              "one-for-two point eight (1-2.8) reverse split of its Ordinary Shares. "
+              "The reverse stock split will become effective on Monday, November 9, 2026.</p>").encode()
+    history = json.dumps({"status": {"rCode": 200}, "data": {"tradesTable": {"rows": [
+        {"date": "11/09/2026", "close": "$9.35", "volume": "8,436,599"},
+        {"date": "11/06/2026", "close": "$4.928", "volume": "1,223,744"},
+    ]}}}).encode()
+    nls = b'{"data":{"topTable":{"rows":[{"previousClose":"$4.928"}]}}}'
+    vendor = json.dumps({"chart": {"result": [{"meta": {
+        "symbol": "SMX", "chartPreviousClose": 4.902, "regularMarketPrice": 9.35,
+        "regularMarketTime": int(datetime(2026, 11, 9, 21, tzinfo=timezone.utc).timestamp()),
+        "exchangeTimezoneName": "America/New_York",
+    }, "events": {"splits": {"x": {
+        "date": int(datetime(2026, 11, 9, 14, 30, tzinfo=timezone.utc).timestamp()),
+        "numerator": 357.0, "denominator": 1000.0, "splitRatio": "357:1000",
+    }}}}]}}).encode()
+    independent = ("<html>Past prices are adjusted for stock splits"
+                   "<table><tr><th>Date</th><th>Close</th><th>Change</th></tr>"
+                   "<tr><td>Nov 9, 2026</td><td>9.35</td><td>+89.73%</td></tr>"
+                   "<tr><td>Nov 6, 2026</td><td>4.93</td><td>+1.00%</td></tr>"
+                   "</table></html>").encode()
+    def transport(url, _headers):
+        if "stockanalysis.com" in url:
+            return independent
+        if "/historical?" in url:
+            return history
+        if "/realtime-trades?" in url:
+            return nls
+        if "/info?" in url:
+            return b'{"data":{}}'
+        if "finance/chart/" in url:
+            return vendor
+        raise AssertionError(url)
+    result = NasdaqOfficialCloseProvider(
+        transport=transport, corporate_action_notices={"SMX": notice_url},
+        notice_transport=lambda *_: notice,
+        now=lambda: datetime(2026, 11, 9, 23, tzinfo=timezone.utc),
+    ).fetch("SMX", day, 9.35)
+    assert result["official_action"]["old_shares"] / result["official_action"]["new_shares"] == 2.8
+    assert result["previous_close_raw"] == result["previous_close"] == pytest.approx(4.928)
+    assert result["previous_price_basis"] == "already_split_normalized"
+    assert result["applied_split_factor"] == 1
+    assert (result["target_close"] / result["previous_close"] - 1) * 100 == pytest.approx(89.73214285714286)
+
+
 def test_effective_split_requires_dated_independent_pair_and_keeps_exchange_close():
     args=dict(candidate={"_close":5.41,"_change_pct":74.69,"volume":1000},historical_provider="yahoo_chart_query1",
         historical_previous_close=3.0654,historical_target_close=5.41,historical_change_pct=76.48,

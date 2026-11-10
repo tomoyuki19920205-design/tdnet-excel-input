@@ -6,6 +6,7 @@ import math
 import re
 from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
+from fractions import Fraction
 from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup
@@ -55,21 +56,25 @@ def parse_exchange_split_notice(raw: bytes, url: str, symbol: str) -> dict:
     validate_notice_url(url)
     text = BeautifulSoup(raw, "html.parser").get_text(" ", strip=True)
     # Limit parsing to the symbol's announcement, not site navigation or other notices.
-    pattern = (r"\(" + re.escape(symbol) + r"\) will effect .*?\((\d+)\s*(?:-\s*for\s*-|[-:])\s*(\d+)\) (reverse |forward )?(?:stock )?split.*?"
+    pattern = (r"\(" + re.escape(symbol) + r"\) will effect .*?\((\d+(?:\.\d+)?)\s*(?:-\s*for\s*-|[-:])\s*(\d+(?:\.\d+)?)\) (reverse |forward )?(?:stock )?split.*?"
                r"will become effective on (\w+, \w+ \d{1,2}, \d{4})\.")
     found = re.findall(pattern, text, re.I)
     if len(found) != 1:
         raise ValueError("split notice symbol, ratio or effective session is ambiguous")
-    new, old, direction, effective = found[0]
-    if int(new) <= 0 or int(old) <= 0 or int(new) == int(old):
+    announced_new, announced_old, direction, effective = found[0]
+    new_decimal, old_decimal = Decimal(announced_new), Decimal(announced_old)
+    if new_decimal <= 0 or old_decimal <= 0 or new_decimal == old_decimal:
         raise ValueError("invalid split ratio")
-    if direction.strip().lower() == "reverse" and int(new) >= int(old):
+    if direction.strip().lower() == "reverse" and new_decimal >= old_decimal:
         raise ValueError("reverse split ratio conflicts with notice")
-    if direction.strip().lower() == "forward" and int(new) <= int(old):
+    if direction.strip().lower() == "forward" and new_decimal <= old_decimal:
         raise ValueError("forward split ratio conflicts with notice")
+    # Keep share counts integral while preserving the exact announced ratio.
+    ratio = Fraction(new_decimal) / Fraction(old_decimal)
     return {
-        "symbol": symbol, "new_shares": int(new), "old_shares": int(old),
-        "action_type": "reverse_split" if int(new) < int(old) else "forward_split",
+        "symbol": symbol, "new_shares": ratio.numerator, "old_shares": ratio.denominator,
+        "announced_new_shares": announced_new, "announced_old_shares": announced_old,
+        "action_type": "reverse_split" if new_decimal < old_decimal else "forward_split",
         "effective_session_date": datetime.strptime(effective, "%A, %B %d, %Y").date().isoformat(),
         "source_identifier": url, "raw_response_sha256": hashlib.sha256(raw).hexdigest(),
     }
@@ -89,7 +94,30 @@ def validate_vendor_actions(events: dict, notice: dict) -> None:
         effective = datetime.fromtimestamp(int(event["date"]), timezone.utc).astimezone(ZoneInfo("America/New_York")).date()
     except (KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
         raise ValueError("vendor split event is incomplete") from exc
-    if not close_matches(ratio, notice["new_shares"] / notice["old_shares"]) or effective.isoformat() != notice["effective_session_date"]:
+    official_ratio = Fraction(notice["new_shares"], notice["old_shares"])
+    exact = close_matches(ratio, float(official_ratio))
+    rounded = False
+    # Yahoo can encode a fractional split as a three-decimal ratio such as
+    # 357:1000 for the official 1:2.8. Accept only the precision explicitly
+    # encoded in the event, with at least three decimal places and a matching
+    # splitRatio string; the official notice remains the calculation basis.
+    if not exact and "." in str(notice.get("announced_old_shares", "")) + str(notice.get("announced_new_shares", "")):
+        numerator, denominator = event.get("numerator"), event.get("denominator")
+        reported = str(event.get("splitRatio") or "")
+        try:
+            vendor_new = int(numerator)
+            vendor_old = int(denominator)
+        except (TypeError, ValueError):
+            vendor_new = vendor_old = 0
+        if (vendor_old >= 1000 and str(vendor_old) == "1" + "0" * (len(str(vendor_old)) - 1)
+                and reported == f"{vendor_new}:{vendor_old}"
+                and float(vendor_new) == numerator and float(vendor_old) == denominator):
+            quantum = Decimal(1) / Decimal(vendor_old)
+            displayed = (Decimal(official_ratio.numerator) / Decimal(official_ratio.denominator)).quantize(
+                quantum, rounding=ROUND_HALF_UP,
+            )
+            rounded = Decimal(vendor_new) / Decimal(vendor_old) == displayed
+    if (not (exact or rounded)) or effective.isoformat() != notice["effective_session_date"]:
         raise ValueError("vendor split event conflicts with official notice")
 
 
