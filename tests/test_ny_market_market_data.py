@@ -2374,6 +2374,50 @@ def test_fractional_split_uses_official_ratio_and_does_not_rebase_adjusted_previ
     assert (result["target_close"] / result["previous_close"] - 1) * 100 == pytest.approx(89.73214285714286)
 
 
+def test_zero_volume_daily_conflicting_with_dated_quote_needs_official_no_trade_row():
+    day = date(2026, 11, 9)
+    stamps = [int(datetime(2026, 11, d, 14, 30, tzinfo=timezone.utc).timestamp())
+              for d in (6, 9)]
+    chart = json.dumps({"chart": {"result": [{"meta": {
+        "symbol": "SFWL", "exchangeTimezoneName": "America/New_York",
+        "dataGranularity": "1d",
+    }, "timestamp": stamps, "indicators": {"quote": [{
+        "close": [3.475, 3.475], "volume": [1607, 0],
+    }]}}]}}).encode()
+    info = json.dumps({"status": {"rCode": 200}, "data": {
+        "symbol": "SFWL", "exchange": "NASDAQ-CM", "primaryData": {
+            "lastSalePrice": "$4.64", "lastTradeTimestamp": "Nov 9, 2026",
+        }, "secondaryData": None,
+    }}).encode()
+    rows = [
+        {"date": "11/09/2026", "close": "$3.475", "volume": "N/A"},
+        {"date": "11/06/2026", "close": "$3.475", "volume": "1,607"},
+    ]
+    def history_with(values):
+        return json.dumps({"status": {"rCode": 200}, "data": {
+            "symbol": "SFWL", "tradesTable": {"rows": values},
+        }}).encode()
+    current_history = history_with(rows)
+    def transport(url, _headers):
+        if "/info?" in url:
+            return info
+        if "/historical?" in url:
+            return current_history
+        if "finance/chart/" in url:
+            return chart
+        raise AssertionError(url)
+    provider = NasdaqYahooRegularUniverseProvider(transport=transport)
+    quote, evidence = provider._verify_missing("SFWL", "Shengfeng Development Limited", day)
+    assert quote is None
+    assert evidence["disposition"] == "zero_regular_volume_confirmed_by_official_history"
+    assert evidence["date_only_quote_close"] == 4.64
+    assert evidence["official_no_trade_target_close"] == 3.475
+    assert evidence["official_no_trade_raw_response_sha256"] == hashlib.sha256(current_history).hexdigest()
+    current_history = history_with([{**rows[0], "close": "$4.64", "volume": "1,302"}, rows[1]])
+    with pytest.raises(MarketDataError, match="zero-volume close conflicts with official history"):
+        provider._verify_missing("SFWL", "Shengfeng Development Limited", day)
+
+
 def test_effective_split_requires_dated_independent_pair_and_keeps_exchange_close():
     args=dict(candidate={"_close":5.41,"_change_pct":74.69,"volume":1000},historical_provider="yahoo_chart_query1",
         historical_previous_close=3.0654,historical_target_close=5.41,historical_change_pct=76.48,

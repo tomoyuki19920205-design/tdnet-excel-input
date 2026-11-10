@@ -848,6 +848,56 @@ class NasdaqYahooRegularUniverseProvider:
                          "chart_raw_response_sha256": series.raw_response_sha256})
         target_bar = next((bar for bar in series.bars if bar.session_date == target), None)
         if target_bar is not None:
+            primary = data.get("primaryData") or {}
+            primary_stamp = str(primary.get("lastTradeTimestamp") or "")
+            # A date-only Nasdaq quote can include activity outside the regular
+            # session. When it conflicts with a zero-volume daily bar, require
+            # the exchange's dated historical no-trade row before omitting the
+            # symbol from a pure regular-session ranking.
+            if (target_bar.volume == 0
+                    and primary_stamp == f"{target.strftime('%b')} {target.day}, {target.year}"):
+                primary_close = _numeric(primary.get("lastSalePrice"), "official date-only quote", nullable=True)
+                if primary_close is not None and not close_matches(primary_close, target_bar.regular_close):
+                    if symbol in self.corporate_action_notices:
+                        raise MarketDataError(f"regular-universe {symbol}: zero-volume split basis needs arbitration")
+                    history_url = (f"https://api.nasdaq.com/api/quote/{quote(symbol, safe='')}/historical?"
+                                   + urlencode({"assetclass": "stocks", "fromdate": (target - timedelta(days=10)).isoformat(),
+                                                "todate": (target + timedelta(days=1)).isoformat(), "limit": 5000}))
+                    history_raw = self.transport(history_url, {"User-Agent": "Mozilla/5.0", "Accept": "application/json",
+                                                               "Origin": "https://www.nasdaq.com"})
+                    history = _raw_json(history_raw, self.name)
+                    history_data = history.get("data") or {}
+                    rows = (history_data.get("tradesTable") or {}).get("rows")
+                    if (history.get("status", {}).get("rCode") != 200
+                            or history_data.get("symbol") != symbol or not isinstance(rows, list)):
+                        raise MarketDataError(f"regular-universe {symbol}: official no-trade history unavailable")
+                    by_day = {}
+                    for row in rows:
+                        try:
+                            day = datetime.strptime(str(row.get("date")), "%m/%d/%Y").date()
+                        except (TypeError, ValueError):
+                            continue
+                        if day in by_day:
+                            raise MarketDataError(f"regular-universe {symbol}: duplicate official no-trade history")
+                        by_day[day] = row
+                    previous, _ = completed_session_pair(series, target)
+                    current_row = by_day.get(target)
+                    previous_row = by_day.get(previous.session_date)
+                    if (not current_row or not previous_row
+                            or str(current_row.get("volume", "")).strip().upper() not in {"N/A", "0"}
+                            or not close_matches(_numeric(current_row.get("close"), "official no-trade close"),
+                                                 target_bar.regular_close)
+                            or not close_matches(_numeric(previous_row.get("close"), "official previous close"),
+                                                 previous.regular_close)):
+                        raise MarketDataError(f"regular-universe {symbol}: zero-volume close conflicts with official history")
+                    evidence.update({"disposition": "zero_regular_volume_confirmed_by_official_history",
+                                     "date_only_quote_close": primary_close,
+                                     "official_no_trade_source_identifier": history_url,
+                                     "official_no_trade_raw_response_sha256": hashlib.sha256(history_raw).hexdigest(),
+                                     "official_no_trade_target_close": target_bar.regular_close,
+                                     "official_no_trade_previous_session_date": previous.session_date.isoformat(),
+                                     "official_no_trade_previous_close": previous.regular_close})
+                    return None, evidence
             try:
                 previous, target_bar = completed_session_pair(series, target)
             except MarketDataError as exc:
@@ -3289,7 +3339,8 @@ def build_canonical_market_data_packet(
     for batch in screener.get("universe_evidence", {}).get("spark_batches", []):
         raw_hashes.add(batch["raw_response_sha256"])
     for item in screener.get("universe_evidence", {}).get("missing_quote_audit", []):
-        for key in ("official_raw_response_sha256", "chart_raw_response_sha256"):
+        for key in ("official_raw_response_sha256", "chart_raw_response_sha256",
+                    "official_no_trade_raw_response_sha256"):
             if key in item:
                 raw_hashes.add(item[key])
     for item in screener.get("universe_evidence", {}).get("top_candidate_official_audit", []):
