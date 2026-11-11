@@ -11,6 +11,7 @@ import json
 import math
 import os
 import re
+import requests
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
@@ -88,9 +89,23 @@ def default_transport(url: str, headers: dict[str, str]) -> bytes:
     """Retry only transient transport failures, with a fixed upper bound."""
     for attempt in range(3):
         try:
-            request = Request(url, headers=headers)
-            with urlopen(request, timeout=30) as response:
-                raw = response.read()
+            if urlsplit(url).hostname == "api.nasdaq.com":
+                # Nasdaq's public API can reject urllib's HTTP client while
+                # accepting the same endpoint and headers through requests.
+                # Keep the URL, response body, and validation contract intact.
+                try:
+                    response = requests.get(url, headers=headers, timeout=(10, 30),
+                                            allow_redirects=False)
+                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+                    raise URLError(str(exc)) from exc
+                if response.status_code != 200:
+                    raise HTTPError(url, response.status_code, "Nasdaq API request failed",
+                                    response.headers, None)
+                raw = response.content
+            else:
+                request = Request(url, headers=headers)
+                with urlopen(request, timeout=30) as response:
+                    raw = response.read()
             evidence_dir = os.environ.get("NY_MARKET_EVIDENCE_DIR")
             if evidence_dir:
                 folder = Path(evidence_dir)

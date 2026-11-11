@@ -2302,6 +2302,35 @@ def test_transient_http_retries_are_bounded(monkeypatch):
     assert len(calls) == 3
 
 
+def test_nasdaq_api_uses_bounded_requests_client_and_preserves_http_errors(monkeypatch):
+    from types import SimpleNamespace
+    from lib import ny_market_market_data as market_data
+
+    url = "https://api.nasdaq.com/api/quote/TEST/info?assetclass=stocks"
+    calls = []
+    monkeypatch.setattr(market_data.time_module, "sleep", lambda duration: None)
+
+    def response(_url, **kwargs):
+        calls.append((_url, kwargs))
+        status = 503 if len(calls) < 3 else 200
+        return SimpleNamespace(status_code=status, content=b'{"data":{}}', headers={})
+
+    monkeypatch.setattr(market_data.requests, "get", response)
+    assert default_transport(url, {"Accept": "application/json"}) == b'{"data":{}}'
+    assert len(calls) == 3
+    assert all(call[1]["allow_redirects"] is False for call in calls)
+    assert all(call[1]["headers"] == {"Accept": "application/json"} for call in calls)
+
+    calls.clear()
+    monkeypatch.setattr(market_data.requests, "get", lambda _url, **kwargs:
+                        (calls.append(_url) or SimpleNamespace(status_code=403, content=b"",
+                                                               headers={})))
+    with pytest.raises(HTTPError) as caught:
+        default_transport(url, {})
+    assert caught.value.code == 403
+    assert calls == [url]
+
+
 @pytest.mark.parametrize("historical_previous,basis,factor", [(0.3441,"unadjusted",9.0),(3.0969,"already_split_normalized",1.0)])
 def test_effective_split_precedes_nls_comparison_without_double_application(historical_previous,basis,factor):
     notice_url="https://www.nasdaqtrader.com/TraderNews.aspx?id=fixture"
