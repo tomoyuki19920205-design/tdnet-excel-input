@@ -2134,8 +2134,19 @@ def resolve_discrepancy(
             primary_target = float(non_nasdaq_eod[0]["target_close"])
             # A two-decimal display may only corroborate a more precise
             # vendor close; never replace that precise value with rounding.
+            primary_daily_rounding = next((digits for digits in range(2, 5)
+                                           if close_matches(historical_previous_close,
+                                                            round_market_display(primary_previous, digits))
+                                           and close_matches(historical_target_close,
+                                                             round_market_display(primary_target, digits))), None)
             if (close_matches(primary_previous, historical_previous_close)
                     and close_matches(primary_target, historical_target_close)):
+                canonical_primary_pair = (primary_previous, primary_target)
+            elif (official.get("info_historical_conflict")
+                  and primary_daily_rounding is not None
+                  and close_matches(primary_previous, official_previous)
+                  and close_matches(primary_target,
+                                    float(official["info_historical_conflict"]["nasdaq_historical_close"]))):
                 canonical_primary_pair = (primary_previous, primary_target)
             basis_evidence = {
                 "primary_exchange": non_nasdaq_eod[0]["primary_exchange"],
@@ -2146,6 +2157,7 @@ def resolve_discrepancy(
                    if official.get("info_historical_conflict") else {}),
                 "screener_close": screener_last,
                 "vendor_daily_close": historical_target_close,
+                "vendor_daily_display_rounding_places": primary_daily_rounding,
                 "comparison_basis": "primary_exchange_regular_close",
                 "nasdaq_info_role": "nasdaq_reported_last_sale_not_primary_exchange_close",
             }

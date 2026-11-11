@@ -1358,7 +1358,8 @@ def test_nasdaq_official_close_rejects_info_historical_target_mismatch():
         NasdaqOfficialCloseProvider(transport=transport).fetch("PAAI", date(2026, 9, 4), 1.04)
 
 
-def test_non_nasdaq_info_history_conflict_needs_independent_primary_eod():
+@pytest.mark.parametrize("vendor_pair", [(0.2463, 0.4065), (0.246, 0.407)])
+def test_non_nasdaq_info_history_conflict_needs_independent_primary_eod(vendor_pair):
     target_date = date(2026, 11, 10)
 
     def transport(url, _headers):
@@ -1389,8 +1390,8 @@ def test_non_nasdaq_info_history_conflict_needs_independent_primary_eod():
                    "_change_pct": (0.4051 / 0.2463 - 1) * 100,
                    "netchange": None, "volume": "411696893"},
         historical_provider="yahoo_chart_query1",
-        historical_previous_close=0.2463, historical_target_close=0.4065,
-        historical_change_pct=(0.4065 / 0.2463 - 1) * 100,
+        historical_previous_close=vendor_pair[0], historical_target_close=vendor_pair[1],
+        historical_change_pct=(vendor_pair[1] / vendor_pair[0] - 1) * 100,
         official=official,
         corporate_action={"provider": "yahoo_corporate_actions", "provider_family": "yahoo",
                           "status": "checked_none", "source_identifier": "https://yahoo.test/actions",
@@ -1411,6 +1412,8 @@ def test_non_nasdaq_info_history_conflict_needs_independent_primary_eod():
     assert resolved["discrepancy_reason"] == "non_nasdaq_primary_exchange_eod"
     assert resolved["canonical_previous_close"] == pytest.approx(0.2463)
     assert resolved["canonical_target_close"] == pytest.approx(0.4065)
+    if vendor_pair[0] == 0.246:
+        assert resolved["basis_evidence"]["vendor_daily_display_rounding_places"] == 3
 
 
 @pytest.mark.parametrize(("raw", "expected"), [
