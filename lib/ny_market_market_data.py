@@ -2177,7 +2177,8 @@ def resolve_discrepancy(
     vendor_previous_rounding_places = next((digits for digits in range(2, 5)
                                             if close_matches(historical_previous_close,
                                                              round_market_display(official_previous, digits))), None)
-    if (reason is None and action_status == "checked_none"
+    if (reason in {None, "official_closed_eod_with_secondary_boundary_difference"}
+            and action_status == "checked_none"
             and official.get("target_close_verified") is True
             and official.get("target_close_source") == "nasdaq_info"
             and re.fullmatch(r"Closed at .* 4:00 PM ET", str(official.get("target_timestamp", "")))
@@ -2190,6 +2191,11 @@ def resolve_discrepancy(
             and source.get("target_close") is not None
             and source.get("previous_close") is not None
             and close_matches(float(source["previous_close"]), official_previous)
+        )]
+        confirmed_dated_eod = [source for source in dated_eod if (
+            close_matches(float(source["target_close"]), official_target)
+            or abs(float(source["target_close"]) - official_target)
+            <= 0.5 * 10 ** -int(source.get("display_decimal_places", 8)) + 1e-12
         )]
         preclose_quotes = [source for source in independent_sources if (
             source.get("session") == "regular_close"
@@ -2206,7 +2212,9 @@ def resolve_discrepancy(
         nls_conflict_verified = (not official.get("nls_previous_mismatch")
                                  or any(close_matches(float(source["target_close"]), official_target)
                                         for source in dated_eod))
-        if (dated_eod or preclose_quotes) and nls_conflict_verified:
+        if ((reason is None and (dated_eod or preclose_quotes))
+                or (reason == "official_closed_eod_with_secondary_boundary_difference" and confirmed_dated_eod)) and nls_conflict_verified:
+            prior_classification = reason
             known_hashes = {source.get("raw_response_sha256") for source in independent_support}
             independent_support.extend({**source, "support_role": "independent_preclose_quote"}
                                        for source in preclose_quotes
@@ -2226,6 +2234,7 @@ def resolve_discrepancy(
                 "movers_quote_change_pct": screener_change,
                 "independent_dated_eod": dated_eod,
                 "independent_preclose_quotes": preclose_quotes,
+                "previous_discrepancy_classification": prior_classification,
                 "comparison_basis": "dated_regular_close_with_conflicting_movers_quote",
             }
 

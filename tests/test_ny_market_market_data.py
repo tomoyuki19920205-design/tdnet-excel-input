@@ -1469,6 +1469,45 @@ def test_nasdaq_info_history_mutation_requires_independent_dated_eod():
     assert resolved["basis_evidence"]["vendor_daily_display_rounding_places"] == 2
 
 
+def test_next_day_movers_quote_overrides_secondary_boundary_only_with_dated_eod():
+    kwargs = dict(
+        candidate={"symbol": "INLF", "_close": 0.7989, "_change_pct": 46.59,
+                   "netchange": None, "volume": "170140900"},
+        historical_provider="yahoo_chart_query1",
+        historical_previous_close=0.302, historical_target_close=0.545,
+        historical_change_pct=(0.545 / 0.302 - 1) * 100,
+        official={"provider": "nasdaq_official_historical_nls", "provider_family": "nasdaq",
+                  "target_close_verified": True, "target_close_source": "nasdaq_info",
+                  "target_timestamp": "Closed at Nov 10, 2026 4:00 PM ET",
+                  "target_session_date": "2026-11-10", "previous_session_date": "2026-11-09",
+                  "previous_close": 0.302, "target_close": 0.545,
+                  "nls_previous_mismatch": False,
+                  "source_identifiers": ["https://nasdaq.test/info"],
+                  "raw_response_sha256": ["a" * 64]},
+        corporate_action={"provider": "yahoo_corporate_actions", "provider_family": "yahoo",
+                          "status": "checked_none", "source_identifier": "https://yahoo.test/actions",
+                          "raw_response_sha256": "b" * 64},
+        minute_close={"provider": "yahoo_minute_close", "provider_family": "yahoo",
+                      "price_field": "boundary_open", "previous_close": 0.2968,
+                      "target_close": 0.545, "source_identifier": "https://yahoo.test/minute",
+                      "raw_response_sha256": "c" * 64},
+        tolerance_pct=0.2, resolved_at="2026-11-11T14:00:00+00:00",
+    )
+    independent = {"provider": "captured_end_of_day_quote", "provider_family": "chartexchange",
+                   "session": "regular_close", "target_session_date": "2026-11-10",
+                   "previous_close": 0.302, "target_close": 0.545,
+                   "raw_value": "0.5450", "reported_change_raw": "0.2430",
+                   "primary_exchange": "NASDAQ", "display_decimal_places": 4,
+                   "source_identifier": "https://chartexchange.com/symbol/nasdaq-inlf/historical/",
+                   "raw_response_sha256": "d" * 64}
+    with pytest.raises(MarketDataError, match="unresolved Top20 discrepancy"):
+        resolve_discrepancy(**kwargs, independent_sources=[])
+    resolved = resolve_discrepancy(**kwargs, independent_sources=[independent])
+    assert resolved["discrepancy_reason"] == "movers_quote_differs_from_verified_regular_close"
+    assert resolved["basis_evidence"]["previous_discrepancy_classification"] == "official_closed_eod_with_secondary_boundary_difference"
+    assert resolved["official_target_close"] == pytest.approx(0.545)
+
+
 @pytest.mark.parametrize(("raw", "expected"), [
     ("$15.10.", 15.10),
     ("$15.10", 15.10),
