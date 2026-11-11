@@ -10,6 +10,7 @@ import sys
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -54,6 +55,7 @@ def _single_builder(lock_path: Path):
 
 def _checkpoint(path: Path, *, session: str, stage: str, snapshot: dict | None,
                 evidence_input_sha256: str, error: str | None = None,
+                error_kind: str | None = None,
                 data_failure: bool = False) -> None:
     current = json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}
     if current and current.get("market_session_date") != session:
@@ -69,7 +71,7 @@ def _checkpoint(path: Path, *, session: str, stage: str, snapshot: dict | None,
              "evidence_input_sha256": evidence_input_sha256,
              "data_failure_count": failures,
              "attempts": int(current.get("attempts", 0)) + int(stage in {"complete", "provisional", "blocked"}),
-             "last_error": error}
+             "last_error": error, "last_error_kind": error_kind}
     atomic_write_json(path, state)
 
 
@@ -128,7 +130,8 @@ def main() -> int:
         raise ValueError(f"refusing to overwrite existing packet: {args.output}")
     checkpoint_path = args.checkpoint or args.output.with_suffix(".checkpoint.json")
     with _single_builder(checkpoint_path.with_suffix(".lock")):
-        os.environ["NY_MARKET_EVIDENCE_DIR"] = str(checkpoint_path.parent / f"ny-{args.market_session_date}-raw-responses")
+        os.environ.setdefault("NY_MARKET_EVIDENCE_DIR",
+                              str(checkpoint_path.parent / f"ny-{args.market_session_date}-raw-responses"))
         verified_snapshot = _snapshot_from_checkpoint(checkpoint_path, args.market_session_date.isoformat())
         if verified_snapshot is None:
             providers = (
@@ -148,6 +151,7 @@ def main() -> int:
         unresolved = prior_exhausted
         if prior_exhausted:
             reason = str(current.get("last_error") or "unresolved market data")
+            error_kind = str(current.get("last_error_kind") or "data_validation")
             if not args.allow_provisional:
                 raise MarketDataError(f"same unresolved evidence reached retry limit: {reason}")
         else:
@@ -161,12 +165,21 @@ def main() -> int:
                 )
             except MarketDataError as exc:
                 reason = str(exc)
+                error_kind = "data_validation"
+                unresolved = True
+            except HTTPError as exc:
+                reason = f"market data source HTTP {exc.code}: {exc.url}"
+                error_kind = "source_access_denied" if exc.code == 403 else "transport_exhausted"
+                unresolved = True
+            except (URLError, TimeoutError) as exc:
+                reason = f"market data transport failed: {exc}"
+                error_kind = "transport_exhausted"
                 unresolved = True
         if unresolved:
             _checkpoint(checkpoint_path, session=args.market_session_date.isoformat(),
                         stage="provisional" if args.allow_provisional else "blocked",
                         snapshot=verified_snapshot, evidence_input_sha256=evidence_input_sha256,
-                        error=reason, data_failure=not prior_exhausted)
+                        error=reason, error_kind=error_kind, data_failure=not prior_exhausted)
             if not args.allow_provisional:
                 raise MarketDataError(reason)
             packet = {**verified_snapshot, "market_data_contract_version": "ny_market_data_provisional_v1",

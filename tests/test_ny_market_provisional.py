@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from urllib.error import HTTPError
 
 from lib.ny_market import NYMarketValidationError, validate_payload
 from tests.ny_market_quality_fixture import payload as full_payload
@@ -94,6 +95,33 @@ def test_builder_emits_provisional_packet_and_keeps_verified_checkpoint(tmp_path
     assert packet_builder.main() == 0
     assert calls["top20"] == 5
     assert json.loads(checkpoint.read_text(encoding="utf-8"))["data_failure_count"] == 1
+
+
+def test_builder_preserves_verified_snapshot_when_quote_api_denies_access(tmp_path, monkeypatch, capsys):
+    calls = {"market": 0}
+    monkeypatch.setattr(packet_builder, "build_index_sector_snapshot", lambda *_: _synthetic_packet())
+    def denied(*_, **__):
+        calls["market"] += 1
+        url = "https://api.nasdaq.com/api/quote/AAPL/info?assetclass=stocks"
+        raise HTTPError(url, 403, "Forbidden", None, None)
+    monkeypatch.setattr(packet_builder, "build_canonical_market_data_packet", denied)
+    monkeypatch.setenv("NY_MARKET_EVIDENCE_DIR", str(tmp_path / "originals"))
+    checkpoint = tmp_path / "source-denied-checkpoint.json"
+    for number in range(4):
+        output = tmp_path / f"source-denied-{number}.json"
+        monkeypatch.setattr("sys.argv", ["packet_builder", "--market-session-date", "2026-09-01",
+                                        "--output", str(output), "--checkpoint", str(checkpoint),
+                                        "--allow-provisional"])
+        assert packet_builder.main() == 0
+        capsys.readouterr()
+        packet = json.loads(output.read_text(encoding="utf-8"))
+        assert packet["quality_status"] == "provisional" and packet["top_gainers_20"] == []
+        assert "HTTP 403" in packet["unresolved_items"][0]["reason"]
+    state = json.loads(checkpoint.read_text(encoding="utf-8"))
+    assert calls["market"] == 3 and state["data_failure_count"] == 3
+    assert state["last_error_kind"] == "source_access_denied"
+    assert state["snapshot_sha256"] and state["stage"] == "provisional"
+    assert packet_builder.os.environ["NY_MARKET_EVIDENCE_DIR"] == str(tmp_path / "originals")
 
 
 def test_provisional_upgrades_one_row_to_complete_and_duplicate_is_skipped(tmp_path):
