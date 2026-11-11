@@ -2121,20 +2121,26 @@ def resolve_discrepancy(
                 "comparison_basis": "dated_regular_close_not_secondary_boundary_open",
             }
 
-    if (reason is None or (reason == "stale_daily_bar" and not official_supports)) and action_status == "checked_none":
+    if (reason is None or (reason == "stale_daily_bar" and not official_supports)
+            or (official.get("info_historical_conflict")
+                and reason == "official_closed_eod_with_secondary_boundary_difference")) and action_status == "checked_none":
         non_nasdaq_eod = [source for source in independent_support if (
             source.get("session") == "regular_close"
             and source.get("target_session_date") == official.get("target_session_date")
             and source.get("primary_exchange")
             and "NASDAQ" not in str(source.get("primary_exchange")).upper()
-            and abs(float(source["target_close"]) - screener_last)
-            <= max(0.02, screener_last * 0.002)
+            and (abs(float(source["target_close"]) - screener_last)
+                 <= max(0.02, screener_last * 0.002)
+                 or (official.get("info_historical_conflict")
+                     and close_matches(float(source["target_close"]),
+                                       float(official["info_historical_conflict"]["nasdaq_historical_close"]))))
             and abs(float(source["previous_close"]) - implied_previous)
             <= max(0.02, implied_previous * 0.002)
             and abs(historical_target_close - screener_last)
             <= max(0.02, screener_last * 0.002)
         )]
         if non_nasdaq_eod:
+            prior_classification = reason
             reason = "non_nasdaq_primary_exchange_eod"
             official_supports = True
             primary_previous = float(non_nasdaq_eod[0]["previous_close"])
@@ -2167,6 +2173,7 @@ def resolve_discrepancy(
                 "vendor_daily_display_rounding_places": primary_daily_rounding,
                 "comparison_basis": "primary_exchange_regular_close",
                 "nasdaq_info_role": "nasdaq_reported_last_sale_not_primary_exchange_close",
+                "previous_discrepancy_classification": prior_classification,
             }
 
     # A live movers table can keep updating after the regular close while its

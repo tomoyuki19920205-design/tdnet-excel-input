@@ -1508,6 +1508,49 @@ def test_next_day_movers_quote_overrides_secondary_boundary_only_with_dated_eod(
     assert resolved["official_target_close"] == pytest.approx(0.545)
 
 
+def test_non_nasdaq_info_close_boundary_conflict_uses_exact_primary_eod():
+    official = {"provider": "nasdaq_official_historical_nls", "provider_family": "nasdaq",
+                "target_close_verified": True, "target_close_source": "nasdaq_info",
+                "target_timestamp": "Closed at Nov 10, 2026 4:00 PM ET",
+                "target_session_date": "2026-11-10", "previous_session_date": "2026-11-09",
+                "previous_close": 4.29, "target_close": 6.57,
+                "info_historical_conflict": {"primary_exchange": "NYSE", "nasdaq_info_close": 6.57,
+                                             "nasdaq_historical_close": 6.59,
+                                             "resolution_required": "independent_primary_exchange_eod"},
+                "source_identifiers": ["https://nasdaq.test/zip"],
+                "raw_response_sha256": ["a" * 64]}
+    kwargs = dict(
+        candidate={"symbol": "ZIP", "_close": 6.57, "_change_pct": 53.15,
+                   "netchange": None, "volume": "6185432"},
+        historical_provider="yahoo_chart_query1",
+        historical_previous_close=4.29, historical_target_close=6.59,
+        historical_change_pct=(6.59 / 4.29 - 1) * 100,
+        official=official,
+        corporate_action={"provider": "yahoo_corporate_actions", "provider_family": "yahoo",
+                          "status": "checked_none", "source_identifier": "https://yahoo.test/actions",
+                          "raw_response_sha256": "b" * 64},
+        minute_close={"provider": "yahoo_minute_close", "provider_family": "yahoo",
+                      "price_field": "boundary_open", "previous_close": 4.29,
+                      "target_close": 6.59, "source_identifier": "https://yahoo.test/minute",
+                      "raw_response_sha256": "c" * 64},
+        tolerance_pct=0.2, resolved_at="2026-11-11T14:00:00+00:00",
+    )
+    with pytest.raises(MarketDataError, match="lacks exact independent primary EOD pair"):
+        resolve_discrepancy(**kwargs, independent_sources=[])
+    resolved = resolve_discrepancy(**kwargs, independent_sources=[{
+        "provider": "captured_end_of_day_quote", "provider_family": "chartexchange",
+        "session": "regular_close", "target_session_date": "2026-11-10",
+        "previous_close": 4.29, "target_close": 6.59,
+        "primary_exchange": "NYSE", "display_decimal_places": 4,
+        "source_identifier": "https://chartexchange.com/symbol/nyse-zip/historical/",
+        "raw_response_sha256": "d" * 64,
+    }])
+    assert resolved["discrepancy_reason"] == "non_nasdaq_primary_exchange_eod"
+    assert resolved["canonical_target_close"] == pytest.approx(6.59)
+    assert resolved["basis_evidence"]["nasdaq_info_close"] == pytest.approx(6.57)
+    assert resolved["basis_evidence"]["nasdaq_historical_close"] == pytest.approx(6.59)
+
+
 @pytest.mark.parametrize(("raw", "expected"), [
     ("$15.10.", 15.10),
     ("$15.10", 15.10),
