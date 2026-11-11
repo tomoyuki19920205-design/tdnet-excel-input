@@ -1484,13 +1484,17 @@ class NasdaqOfficialCloseProvider:
         previous_day, previous_row = max(parsed_rows, key=lambda item: item[0])
         previous_close = _numeric(previous_row.get("close"), "official previous close")
 
+        nls_session_date = self.now().astimezone(NY_TZ).date()
         nls_url = (
             f"https://api.nasdaq.com/api/quote/{quote(symbol, safe='')}/realtime-trades?"
             + urlencode({"assetclass": "stocks", "limit": 5000})
         )
-        nls_raw = self.transport(nls_url, self._headers(symbol))
-        nls = _raw_json(nls_raw, self.name)
-        top_rows = ((nls.get("data") or {}).get("topTable") or {}).get("rows")
+        nls_raw = None
+        top_rows = None
+        if target_session_date == nls_session_date:
+            nls_raw = self.transport(nls_url, self._headers(symbol))
+            nls = _raw_json(nls_raw, self.name)
+            top_rows = ((nls.get("data") or {}).get("topTable") or {}).get("rows")
         nls_previous: float | None = None
         if isinstance(top_rows, list) and top_rows and isinstance(top_rows[0], dict):
             nls_previous = _numeric(top_rows[0].get("previousClose"), "NLS previous close", nullable=True)
@@ -1568,7 +1572,6 @@ class NasdaqOfficialCloseProvider:
                 normalization["previous_close_on_target_basis"] = True
         # NLS is a live quote. Its previousClose belongs to the current New York
         # trading day, so it cannot corroborate a historical session's prior close.
-        nls_session_date = self.now().astimezone(NY_TZ).date()
         nls_previous_mismatch = (
             target_session_date == nls_session_date
             and nls_previous is not None
@@ -1627,10 +1630,10 @@ class NasdaqOfficialCloseProvider:
             **({"info_historical_conflict": info_historical_conflict} if info_historical_conflict else {}),
             **normalization,
             "previous_volume": _numeric(previous_row.get("volume"), "official previous volume", nullable=True),
-            "source_identifiers": [historical_url, nls_url, info_url],
-            "raw_response_sha256": [
-                hashlib.sha256(historical_raw).hexdigest(), hashlib.sha256(nls_raw).hexdigest(), hashlib.sha256(info_raw).hexdigest(),
-            ],
+            "source_identifiers": [historical_url, *([nls_url] if nls_raw is not None else []), info_url],
+            "raw_response_sha256": [hashlib.sha256(historical_raw).hexdigest(),
+                                    *([hashlib.sha256(nls_raw).hexdigest()] if nls_raw is not None else []),
+                                    hashlib.sha256(info_raw).hexdigest()],
             "retrieved_at": self.now().astimezone(timezone.utc).isoformat(timespec="seconds"),
         }
 

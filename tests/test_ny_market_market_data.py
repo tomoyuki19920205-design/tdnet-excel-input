@@ -1398,7 +1398,9 @@ def test_nasdaq_official_close_uses_dated_historical_row_when_info_date_is_stale
 
 
 def test_nasdaq_official_close_does_not_compare_live_nls_with_backfill_session():
+    calls = []
     def transport(url, _headers):
+        calls.append(url)
         if "/historical?" in url:
             return json.dumps({
                 "status": {"rCode": 200},
@@ -1424,6 +1426,8 @@ def test_nasdaq_official_close_does_not_compare_live_nls_with_backfill_session()
     backfill = provider.fetch("SOAR", date(2026, 9, 28), 0.32)
     assert backfill["previous_close"] == pytest.approx(0.18)
     assert backfill["target_close"] == pytest.approx(0.32)
+    assert not any("/realtime-trades?" in url for url in calls)
+    assert len(backfill["source_identifiers"]) == len(backfill["raw_response_sha256"]) == 2
 
     def conflicting_transport(url, headers):
         if "/realtime-trades?" in url:
