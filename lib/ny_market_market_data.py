@@ -1524,10 +1524,22 @@ class NasdaqOfficialCloseProvider:
             target_close = _numeric(target_rows[0].get("close"), "official target close")
             target_stamp = f"Nasdaq historical close {target_session_date:%m/%d/%Y}"
             target_close_source = "nasdaq_historical"
+        info_historical_conflict = None
         if target_rows:
             historical_target_close = _numeric(target_rows[0].get("close"), "official target close")
             if abs(target_close - historical_target_close) > max(1e-7, historical_target_close * 1e-6):
-                raise MarketDataError(f"{self.name}:{symbol}: official info/historical target close mismatch")
+                primary_exchange = str(info.get("exchange") or "").upper().strip()
+                if primary_exchange not in {"AMEX", "NYSE", "NYSE AMERICAN", "NYSEAMERICAN", "NYSE ARCA"}:
+                    raise MarketDataError(f"{self.name}:{symbol}: official info/historical target close mismatch")
+                # Nasdaq's dated last sale can differ from another exchange's
+                # EOD row. Pass both values to arbitration; that stage still
+                # requires a separate dated primary-exchange EOD source.
+                info_historical_conflict = {
+                    "primary_exchange": primary_exchange,
+                    "nasdaq_info_close": target_close,
+                    "nasdaq_historical_close": historical_target_close,
+                    "resolution_required": "independent_primary_exchange_eod",
+                }
         if normalization.get("independent_split_basis") and not close_matches(
             _numeric(normalization["independent_split_basis"].get("regular_market_price"),
                      "vendor split-date regular close"), target_close,
@@ -1543,6 +1555,7 @@ class NasdaqOfficialCloseProvider:
             "previous_close": previous_close, "target_close": target_close,
             "nls_previous_close": nls_previous,
             "nls_previous_mismatch": nls_previous_mismatch,
+            **({"info_historical_conflict": info_historical_conflict} if info_historical_conflict else {}),
             **normalization,
             "previous_volume": _numeric(previous_row.get("volume"), "official previous volume", nullable=True),
             "source_identifiers": [historical_url, nls_url, info_url],
@@ -2129,6 +2142,8 @@ def resolve_discrepancy(
                 "primary_exchange_previous_close": primary_previous,
                 "primary_exchange_eod_close": float(non_nasdaq_eod[0]["target_close"]),
                 "nasdaq_info_close": official_target,
+                **({"nasdaq_historical_close": official["info_historical_conflict"]["nasdaq_historical_close"]}
+                   if official.get("info_historical_conflict") else {}),
                 "screener_close": screener_last,
                 "vendor_daily_close": historical_target_close,
                 "comparison_basis": "primary_exchange_regular_close",
@@ -2293,6 +2308,13 @@ def resolve_discrepancy(
                 ],
                 "comparison_basis": "dated_exchange_historical_regular_closes",
             }
+
+    conflict = official.get("info_historical_conflict")
+    if conflict and (reason != "non_nasdaq_primary_exchange_eod"
+                     or canonical_primary_pair is None
+                     or not close_matches(canonical_primary_pair[0], official_previous)
+                     or not close_matches(canonical_primary_pair[1], float(conflict["nasdaq_historical_close"]))):
+        raise MarketDataError("unresolved Top20 discrepancy: non-Nasdaq info/history conflict lacks exact independent primary EOD pair")
 
     if (not official_supports or not action_checked or not independent_support or reason is None
             or (official.get("nls_previous_mismatch") and reason != "movers_quote_differs_from_verified_regular_close")):
