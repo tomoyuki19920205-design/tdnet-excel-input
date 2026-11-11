@@ -281,6 +281,39 @@ def test_regular_universe_recovers_split_day_with_missing_yahoo_previous():
         conflict._verify_missing("EZGO", "EZGO Technologies Ordinary Shares", target)
 
 
+def test_regular_universe_audits_first_trading_session_without_inventing_prior_close():
+    target = date(2026, 11, 10)
+    stamp = int(datetime(2026, 11, 10, 21, 0, tzinfo=timezone.utc).timestamp())
+    yahoo = json.dumps({"chart": {"result": [{
+        "meta": {"symbol": "SCQC", "dataGranularity": "1d", "exchangeTimezoneName": "America/New_York"},
+        "timestamp": [stamp], "indicators": {"quote": [{"close": [9.86], "volume": [369009]}]},
+    }], "error": None}}).encode()
+    info = json.dumps({"status": {"rCode": 200}, "data": {
+        "symbol": "SCQC", "exchange": "NASDAQ-GM", "primaryData": {
+            "lastTradeTimestamp": "Nov 11, 2026 9:31 AM ET", "lastSalePrice": "$9.87",
+        },
+    }}).encode()
+    history = json.dumps({"status": {"rCode": 200}, "data": {
+        "symbol": "SCQC", "tradesTable": {"rows": [{"date": "11/10/2026", "close": "$9.86"}]},
+    }}).encode()
+    def transport(url, _headers):
+        return history if "/historical?" in url else info if "/info?" in url else yahoo
+    result, evidence = NasdaqYahooRegularUniverseProvider(transport=transport)._verify_missing(
+        "SCQC", "SPACCircle Acquisition Corp. Class A Ordinary Shares", target)
+    assert result is None
+    assert evidence["disposition"] == "first_trading_session_no_comparable_prior"
+    assert evidence["prior_session_rows"] == 0
+    assert evidence["official_target_close"] == 9.86
+    assert evidence["chart_raw_response_sha256"] == hashlib.sha256(yahoo).hexdigest()
+    assert evidence["official_history_raw_response_sha256"] == hashlib.sha256(history).hexdigest()
+
+    conflicting = history.replace(b"$9.86", b"$9.40")
+    provider = NasdaqYahooRegularUniverseProvider(
+        transport=lambda url, headers: conflicting if "/historical?" in url else transport(url, headers))
+    with pytest.raises(MarketDataError, match="first-session closes disagree"):
+        provider._verify_missing("SCQC", "SPACCircle Acquisition Corp. Class A Ordinary Shares", target)
+
+
 def test_dated_exchange_history_replaces_conflicting_info_quote_only_with_support():
     target = date(2026, 11, 5)
     candidate = {

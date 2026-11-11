@@ -1022,6 +1022,41 @@ class NasdaqYahooRegularUniverseProvider:
             except MarketDataError as exc:
                 if "previous completed session is missing" not in str(exc):
                     raise
+                # A newly trading security has no comparable prior close.  A
+                # vendor may still synthesize a change from its former unit or
+                # another class, so check the exchange's dated history before
+                # treating the gap as a split requiring normalization.
+                history_url = (f"https://api.nasdaq.com/api/quote/{quote(symbol, safe='')}/historical?"
+                               + urlencode({"assetclass": "stocks", "fromdate": (target - timedelta(days=35)).isoformat(),
+                                            "todate": (target + timedelta(days=1)).isoformat(), "limit": 5000}))
+                history_raw = self.transport(history_url, {"User-Agent": "Mozilla/5.0", "Accept": "application/json",
+                                                           "Origin": "https://www.nasdaq.com"})
+                history = _raw_json(history_raw, self.name)
+                history_data = history.get("data") or {}
+                history_rows = (history_data.get("tradesTable") or {}).get("rows")
+                if (history.get("status", {}).get("rCode") != 200
+                        or history_data.get("symbol") != symbol or not isinstance(history_rows, list)):
+                    raise MarketDataError(f"regular-universe {symbol}: official missing-prior history unavailable")
+                dated_rows = []
+                for history_row in history_rows:
+                    try:
+                        history_day = datetime.strptime(str(history_row.get("date")), "%m/%d/%Y").date()
+                    except ValueError:
+                        continue
+                    dated_rows.append((history_day, history_row))
+                target_rows = [row for day, row in dated_rows if day == target]
+                prior_rows = [row for day, row in dated_rows if day < target]
+                if not prior_rows and len(target_rows) == 1 and symbol not in self.corporate_action_notices:
+                    official_target = _numeric(target_rows[0].get("close"), "official first-session close")
+                    if not close_matches(official_target, target_bar.regular_close):
+                        raise MarketDataError(f"regular-universe {symbol}: first-session closes disagree")
+                    evidence.update({"disposition": "first_trading_session_no_comparable_prior",
+                                     "official_history_source_identifier": history_url,
+                                     "official_history_raw_response_sha256": hashlib.sha256(history_raw).hexdigest(),
+                                     "official_target_close": official_target,
+                                     "vendor_target_close": target_bar.regular_close,
+                                     "prior_session_rows": 0})
+                    return None, evidence
                 recovered, recovery_evidence = self._recover_split_missing_previous(symbol, target, target_bar)
                 evidence.update(recovery_evidence)
                 return {**recovered, "name": name}, evidence
