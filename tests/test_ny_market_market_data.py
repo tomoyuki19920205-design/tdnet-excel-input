@@ -18,6 +18,7 @@ from lib.ny_market_market_data import (
     LiveDiscrepancyArbitrator,
     MarketDataError,
     NasdaqOfficialCloseProvider,
+    NasdaqScreenerProvider,
     NasdaqYahooRegularUniverseProvider,
     StockAnalysisGainersProvider,
     StockAnalysisHistoricalCloseProvider,
@@ -43,6 +44,45 @@ STAMP_AUG_31 = 1788183000
 STAMP_SEP_1 = 1788269400
 NOW = datetime(2026, 9, 2, 0, 0, tzinfo=timezone.utc)
 ROOT = Path(__file__).parents[1]
+
+
+def test_nasdaq_screener_403_uses_dated_official_symbol_directories():
+    nasdaq = "\n".join([
+        "Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares",
+        *(f"SYM{i:03d}|Issuer {i} Common Stock|S|N|N|100|N|N" for i in range(100)),
+        "ETF1|Example ETF|S|N|N|100|Y|N",
+        "GVH|Globavend Holdings Limited - Ord Shares|S|N|N|100|N|N",
+        "NBTX|Nanobiotix S.A. - ADSs|Q|N|N|100|N|N",
+        "SIFY|Sify Technologies Limited - American Depository Shares|S|N|N|100|N|N",
+        "File Creation Time: 1110202618:01|||||||",
+    ]).encode()
+    other = "\n".join([
+        "ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Size|Test Issue|NASDAQ Symbol",
+        "CLASS.A|Class Issuer Class A Common Stock|N|CLASS.A|N|100|N|CLASS.A",
+        *(f"EXT{i:03d}|External Issuer {i} Common Stock|N|EXT{i:03d}|N|100|N|EXT{i:03d}"
+          for i in range(100)),
+        "File Creation Time: 1110202618:01||||||",
+    ]).encode()
+    def transport(url, _headers):
+        if "/screener/stocks?" in url:
+            raise HTTPError(url, 403, "Forbidden", None, None)
+        return nasdaq if url.endswith("nasdaqlisted.txt") else other
+
+    listing = NasdaqScreenerProvider(transport=transport, now=lambda: NOW).fetch()
+    assert listing["provider"] == "nasdaqtrader_symbol_directory"
+    assert len(listing["rows"]) == 204
+    assert {row["symbol"] for row in listing["rows"]} >= {"SYM000", "CLASS.A", "GVH", "NBTX", "SIFY"}
+    assert len(listing["directory_files"]) == 2
+    assert all(source["file_creation_date"] == "2026-11-10" for source in listing["directory_files"])
+    assert all(len(source["raw_response_sha256"]) == 64 for source in listing["directory_files"])
+
+    class SavedListing:
+        def fetch(self):
+            return listing
+
+    universe = NasdaqYahooRegularUniverseProvider(listing_provider=SavedListing(), transport=transport)
+    with pytest.raises(MarketDataError, match="directory date differs from target session"):
+        universe.fetch(date(2026, 11, 9))
 
 
 def test_undated_nasdaq_screener_rejects_prior_session_bulk_prices():

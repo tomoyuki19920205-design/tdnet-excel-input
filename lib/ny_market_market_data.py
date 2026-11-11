@@ -43,6 +43,7 @@ SECTOR_NAMES = {
     "XLK": "Information Technology", "XLY": "Consumer Discretionary",
 }
 NASDAQ_SCREENER_URL = "https://api.nasdaq.com/api/screener/stocks"
+NASDAQ_TRADER_DIRECTORY_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/"
 STOCKANALYSIS_GAINERS_URL = "https://stockanalysis.com/markets/gainers/"
 NY_TZ = ZoneInfo("America/New_York")
 EXCLUDED_INSTRUMENT_RE = re.compile(
@@ -494,12 +495,17 @@ class NasdaqScreenerProvider:
     def fetch(self) -> dict[str, Any]:
         query = urlencode({"tableonly": "true", "limit": 10000, "offset": 0, "download": "true"})
         url = f"{NASDAQ_SCREENER_URL}?{query}"
-        raw = self.transport(url, {
-            "User-Agent": "Mozilla/5.0",
-            "Accept": "application/json, text/plain, */*",
-            "Origin": "https://www.nasdaq.com",
-            "Referer": "https://www.nasdaq.com/market-activity/stocks/screener",
-        })
+        try:
+            raw = self.transport(url, {
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/json, text/plain, */*",
+                "Origin": "https://www.nasdaq.com",
+                "Referer": "https://www.nasdaq.com/market-activity/stocks/screener",
+            })
+        except HTTPError as exc:
+            if exc.code != 403:
+                raise
+            return self._fetch_official_directory_fallback()
         try:
             payload = json.loads(raw)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -517,6 +523,59 @@ class NasdaqScreenerProvider:
             "raw_response_sha256": hashlib.sha256(raw).hexdigest(),
             "rows": rows,
         }
+
+    def _fetch_official_directory_fallback(self) -> dict[str, Any]:
+        """Use Nasdaq Trader's complete symbol files if its screener denies access."""
+        sources = []
+        rows_by_symbol: dict[str, dict[str, Any]] = {}
+        raw_parts = []
+        for filename, symbol_field in (("nasdaqlisted.txt", "Symbol"),
+                                       ("otherlisted.txt", "ACT Symbol")):
+            url = NASDAQ_TRADER_DIRECTORY_URL + filename
+            raw = self.transport(url, {"User-Agent": "Mozilla/5.0", "Accept": "text/plain"})
+            try:
+                lines = raw.decode("utf-8-sig").splitlines()
+            except UnicodeDecodeError as exc:
+                raise MarketDataError(f"Nasdaq Trader {filename} is not UTF-8") from exc
+            if len(lines) < 100:
+                raise MarketDataError(f"Nasdaq Trader {filename} is incomplete")
+            fields = lines[0].split("|")
+            required = {symbol_field, "Security Name", "ETF", "Test Issue"}
+            if not required.issubset(fields):
+                raise MarketDataError(f"Nasdaq Trader {filename} has unexpected columns")
+            timestamp = re.fullmatch(r"File Creation Time: (\d{8}\d{2}:\d{2})\|*", lines[-1])
+            if timestamp is None:
+                raise MarketDataError(f"Nasdaq Trader {filename} lacks a creation timestamp")
+            try:
+                created = datetime.strptime(timestamp.group(1), "%m%d%Y%H:%M")
+            except ValueError as exc:
+                raise MarketDataError(f"Nasdaq Trader {filename} creation timestamp is invalid") from exc
+            for line in lines[1:-1]:
+                values = line.split("|")
+                if len(values) != len(fields):
+                    raise MarketDataError(f"Nasdaq Trader {filename} has a malformed row")
+                item = dict(zip(fields, values))
+                symbol = item[symbol_field].strip().upper()
+                name = item["Security Name"].strip()
+                if item["ETF"] != "N" or item["Test Issue"] != "N":
+                    continue
+                candidate = {"symbol": symbol, "name": name}
+                if not eligible_screener_row(candidate):
+                    continue
+                if symbol in rows_by_symbol:
+                    raise MarketDataError(f"Nasdaq Trader directory duplicates {symbol}")
+                rows_by_symbol[symbol] = candidate
+            sources.append({"source_identifier": url,
+                            "raw_response_sha256": hashlib.sha256(raw).hexdigest(),
+                            "file_creation_date": created.date().isoformat(),
+                            "file_creation_time": timestamp.group(1)})
+            raw_parts.append(raw)
+        if len(rows_by_symbol) < 100 or len({source["file_creation_date"] for source in sources}) != 1:
+            raise MarketDataError("Nasdaq Trader directory files disagree or are incomplete")
+        return {"provider": "nasdaqtrader_symbol_directory", "source_identifier": sources[0]["source_identifier"],
+                "retrieved_at": self.now().astimezone(timezone.utc).isoformat(timespec="seconds"),
+                "raw_response_sha256": hashlib.sha256(b"\n".join(raw_parts)).hexdigest(),
+                "directory_files": sources, "rows": list(rows_by_symbol.values())}
 
 
 class StockAnalysisGainersProvider:
@@ -974,6 +1033,10 @@ class NasdaqYahooRegularUniverseProvider:
     def fetch(self, target_session_date: date,
               expected_previous_session_date: date | None = None) -> dict[str, Any]:
         listing = self.listing_provider.fetch()
+        if listing.get("provider") == "nasdaqtrader_symbol_directory":
+            directory_dates = {source["file_creation_date"] for source in listing["directory_files"]}
+            if directory_dates != {target_session_date.isoformat()}:
+                raise MarketDataError("Nasdaq Trader directory date differs from target session")
         eligible = {str(row["symbol"]).strip().upper(): row for row in listing["rows"]
                     if isinstance(row, dict) and eligible_screener_row(row)}
         if len(eligible) < 100:
@@ -1060,6 +1123,7 @@ class NasdaqYahooRegularUniverseProvider:
                 "retrieved_at": self.now().astimezone(timezone.utc).isoformat(timespec="seconds"),
                 "raw_response_sha256": listing["raw_response_sha256"], "rows": rows,
                 "universe_evidence": {"eligible_count": len(symbols), "quoted_count": len(quotes),
+                                      "listing_directory_files": listing.get("directory_files", []),
                                       "spark_batches": [item for _, item in results],
                                       "missing_quote_audit": [item for _, item in verified_missing],
                                       "top_candidate_official_audit": [item for _, item in top_official]}}
@@ -2975,7 +3039,10 @@ def eligible_screener_row(row: dict[str, Any]) -> bool:
     if row.get("instrument_type") == "common_stock":
         return True
     # Nasdaq ordinary/common/class shares and foreign ordinary shares/ADS/ADR are eligible.
-    allowed = re.search(r"(?i)(common|ordinary|american depositary|ADS\b|ADR\b)", name)
+    allowed = re.search(
+        r"(?i)(common|ordinary|\bord(?:inary)? shares?\b|american deposit(?:ary|ory)|"
+        r"ADSs?\b|ADR\b|registered shares|\bclass [A-Z](?: shares?)?\b)", name,
+    )
     return bool(allowed)
 
 
