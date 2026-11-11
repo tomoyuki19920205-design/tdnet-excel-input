@@ -851,7 +851,8 @@ class NasdaqYahooRegularUniverseProvider:
         if not isinstance(results, list):
             raise MarketDataError("regular-universe Spark batch is missing results")
         evidence = {"source_identifier": url, "raw_response_sha256": hashlib.sha256(raw).hexdigest(),
-                    "requested_symbols": batch, "display_rounding_reconciliations": []}
+                    "requested_symbols": batch, "display_rounding_reconciliations": [],
+                    "dated_historical_discovery": []}
         parsed: list[dict[str, Any]] = []
         seen: set[str] = set()
         for item in results:
@@ -869,17 +870,43 @@ class NasdaqYahooRegularUniverseProvider:
             closes = quotes.get("close") or []
             volumes = quotes.get("volume") or []
             regular_price = meta.get("regularMarketPrice")
-            if len(stamps) < 2 or len(stamps) != len(closes) or not isinstance(regular_price, (int, float)):
+            if len(stamps) < 2 or len(stamps) != len(closes):
                 continue
-            if not isinstance(closes[-1], (int, float)) or not isinstance(closes[-2], (int, float)):
+            days = [datetime.fromtimestamp(stamp, NY_TZ).date() for stamp in stamps]
+            target_indexes = [index for index, day in enumerate(days) if day == target]
+            if len(target_indexes) != 1:
                 continue
-            if not all(math.isfinite(float(value)) and value > 0 for value in
-                       (regular_price, closes[-1], closes[-2])):
+            target_index = target_indexes[0]
+            previous_indexes = [index for index, day in enumerate(days) if day < target]
+            if not previous_indexes:
                 continue
-            if (datetime.fromtimestamp(stamps[-1], NY_TZ).date() != target
-                    or datetime.fromtimestamp(meta.get("regularMarketTime", 0), NY_TZ).date() != target):
+            previous_index = max(previous_indexes, key=lambda index: days[index])
+            if not all(isinstance(closes[index], (int, float)) and math.isfinite(float(closes[index]))
+                       and float(closes[index]) > 0 for index in (target_index, previous_index)):
                 continue
-            canonical_close = float(closes[-1])
+            meta_day = datetime.fromtimestamp(meta.get("regularMarketTime", 0), NY_TZ).date()
+            canonical_close = float(closes[target_index])
+            if meta_day > target:
+                previous_close = float(closes[previous_index])
+                change = (canonical_close / previous_close - 1.0) * 100.0
+                evidence["dated_historical_discovery"].append({
+                    "symbol": symbol, "target_session_date": target.isoformat(),
+                    "target_close": canonical_close,
+                    "previous_session_date": days[previous_index].isoformat(),
+                    "previous_close": previous_close,
+                    "current_meta_session_date": meta_day.isoformat(),
+                    "disposition": "ignore_next_session_live_meta_for_prior_dated_bars",
+                })
+                parsed.append({"symbol": symbol, "close": canonical_close, "change_pct": change,
+                               "volume": volumes[target_index] if len(volumes) == len(stamps) else None,
+                               "quote_source_identifier": url,
+                               "quote_raw_response_sha256": evidence["raw_response_sha256"],
+                               "previous_session_date": days[previous_index].isoformat()})
+                continue
+            if (meta_day != target or target_index != len(stamps) - 1
+                    or not isinstance(regular_price, (int, float))
+                    or not math.isfinite(float(regular_price)) or regular_price <= 0):
+                continue
             if abs(canonical_close - float(regular_price)) > max(1e-6, float(regular_price) * 1e-6):
                 display = re.fullmatch(r"\d+\.(\d{2,6})", str(closes[-1]))
                 hint = meta.get("priceHint")
@@ -900,10 +927,10 @@ class NasdaqYahooRegularUniverseProvider:
             if not isinstance(change, (int, float)) or not math.isfinite(float(change)):
                 continue
             parsed.append({"symbol": symbol, "close": canonical_close, "change_pct": change,
-                           "volume": volumes[-1] if len(volumes) == len(stamps) else None,
+                           "volume": volumes[target_index] if len(volumes) == len(stamps) else None,
                            "quote_source_identifier": url,
                            "quote_raw_response_sha256": evidence["raw_response_sha256"],
-                           "previous_session_date": datetime.fromtimestamp(stamps[-2], NY_TZ).date().isoformat()})
+                           "previous_session_date": days[previous_index].isoformat()})
         return parsed, evidence
 
     def _verify_missing(self, symbol: str, name: str, target: date) -> tuple[dict[str, Any] | None, dict[str, Any]]:

@@ -110,6 +110,32 @@ def test_regular_universe_keeps_documented_daily_display_rounding_in_discovery()
     }]
 
 
+def test_regular_universe_uses_dated_bars_after_live_meta_moves_to_next_session():
+    previous = int(datetime(2026, 11, 9, 14, 30, tzinfo=timezone.utc).timestamp())
+    target = int(datetime(2026, 11, 10, 14, 30, tzinfo=timezone.utc).timestamp())
+    next_session = int(datetime(2026, 11, 11, 14, 30, tzinfo=timezone.utc).timestamp())
+    payload = {"spark": {"result": [{"symbol": "TTEC", "response": [{
+        "meta": {"regularMarketTime": next_session, "regularMarketPrice": 2.39,
+                 "regularMarketChangePercent": -0.42, "priceHint": 2},
+        "timestamp": [previous, target, next_session],
+        "indicators": {"quote": [{"close": [1.395, 2.4, 2.39],
+                                  "volume": [1000, 2000, 100]}]},
+    }]}]}}
+    provider = NasdaqYahooRegularUniverseProvider(
+        transport=lambda *_: json.dumps(payload).encode(), now=lambda: NOW)
+    parsed, evidence = provider._spark_batch(["TTEC"], date(2026, 11, 10))
+    assert len(parsed) == 1
+    assert parsed[0]["close"] == 2.4
+    assert parsed[0]["change_pct"] == pytest.approx((2.4 / 1.395 - 1) * 100)
+    assert parsed[0]["previous_session_date"] == "2026-11-09"
+    assert evidence["dated_historical_discovery"][0]["current_meta_session_date"] == "2026-11-11"
+
+    payload["spark"]["result"][0]["response"][0]["timestamp"] = [previous, next_session]
+    payload["spark"]["result"][0]["response"][0]["indicators"]["quote"][0]["close"] = [1.395, 2.39]
+    payload["spark"]["result"][0]["response"][0]["indicators"]["quote"][0]["volume"] = [1000, 100]
+    assert provider._spark_batch(["TTEC"], date(2026, 11, 10))[0] == []
+
+
 def test_undated_nasdaq_screener_rejects_prior_session_bulk_prices():
     previous, target = date(2026, 10, 22), date(2026, 10, 23)
     symbols = [f"SYM{i:02d}" for i in range(25)]
