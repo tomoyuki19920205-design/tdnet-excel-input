@@ -423,6 +423,58 @@ def test_dated_exchange_history_replaces_conflicting_info_quote_only_with_suppor
         ]})
 
 
+def test_official_dated_close_uses_independent_reported_return_over_conflicting_eod():
+    target = date(2026, 11, 10)
+    official = {
+        "provider": "nasdaq_official_historical_nls", "provider_family": "nasdaq",
+        "target_close_verified": True, "target_close_source": "nasdaq_historical",
+        "target_timestamp": "Nasdaq historical close 11/10/2026",
+        "target_session_date": target.isoformat(), "previous_session_date": "2026-11-09",
+        "previous_close": 0.2875, "target_close": 0.372,
+        "source_identifiers": ["https://api.nasdaq.com/dated-history"],
+        "raw_response_sha256": ["a" * 64],
+    }
+    action = {"provider": "yahoo_corporate_actions", "provider_family": "yahoo",
+              "status": "checked_none", "source_identifier": "https://query1.finance.yahoo.com/action",
+              "raw_response_sha256": "b" * 64}
+    chart = {"provider": "captured_end_of_day_quote", "provider_family": "chartexchange",
+             "session": "regular_close", "target_session_date": target.isoformat(),
+             "previous_close": 0.2875, "target_close": 0.38,
+             "reported_pct_raw": "+32.174%", "display_decimal_places": 4,
+             "source_identifier": "https://chartexchange.com/symbol/nasdaq-evgn/historical/",
+             "raw_response_sha256": "c" * 64}
+    sp = {"provider": "stockanalysis_historical_s_p_global", "provider_family": "s_p_global",
+          "session": "regular_close", "target_session_date": target.isoformat(),
+          "previous_close": 0.29, "target_close": 0.37,
+          "raw_value": "0.37", "parsed_value": 0.37,
+          "reported_change_raw": "29.39%", "display_decimal_places": 2,
+          "price_basis": "regular_close_normalized_for_split",
+          "source_identifier": "https://stockanalysis.com/stocks/evgn/history/",
+          "raw_response_sha256": "d" * 64}
+    args = dict(candidate={"symbol": "EVGN", "_close": 0.37,
+                           "_change_pct": (0.37 / 0.29 - 1) * 100,
+                           "quote_source_identifier": "https://query1.finance.yahoo.com/v8/finance/chart/EVGN?interval=1d"},
+                historical_provider="yahoo_chart_query1", historical_previous_close=0.29,
+                historical_target_close=0.37, historical_change_pct=(0.37 / 0.29 - 1) * 100,
+                official=official, corporate_action=action,
+                minute_close={"provider": "yahoo_minute", "provider_family": "yahoo",
+                              "previous_close": 0.28, "target_close": 0.37,
+                              "source_identifier": "https://query1.finance.yahoo.com/minute",
+                              "raw_response_sha256": "e" * 64},
+                independent_sources=[chart, sp], tolerance_pct=0.2,
+                resolved_at="2026-11-11T15:00:00+00:00")
+    resolved = resolve_discrepancy(**args)
+    assert resolved["discrepancy_reason"] == "dated_exchange_history_over_vendor_previous_rounding"
+    assert resolved["canonical_previous_close"] == 0.2875
+    assert resolved["canonical_target_close"] == 0.372
+    assert resolved["basis_evidence"]["conflicting_independent_eod"][0]["provider_family"] == "chartexchange"
+    assert any(s["role"] == "independent_reported_change_and_rounded_pair"
+               for s in resolved["supporting_sources"])
+    with pytest.raises(MarketDataError, match="official market source does not support Screener"):
+        resolve_discrepancy(**{**args, "independent_sources": [chart,
+                             {**sp, "reported_change_raw": "32.17%"}]})
+
+
 def yahoo_bytes(symbol="^SOX", timestamps=None, closes=None, adjusted=None):
     timestamps = timestamps or [STAMP_AUG_31, STAMP_SEP_1]
     closes = closes or [100.0, 110.0]

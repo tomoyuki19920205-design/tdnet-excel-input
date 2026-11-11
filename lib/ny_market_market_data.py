@@ -2373,11 +2373,32 @@ def resolve_discrepancy(
                          rf"{re.escape(str(official['target_session_date']))} "
                          r"(?:09:(?:3\d|[4-5]\d)|1[0-5]:[0-5]\d):[0-5]\d",
                          str(source.get("last_regular_quote_timestamp", "")),
-                     )))
+                     ))
+                 or (source.get("price_basis") == "regular_close_normalized_for_split"
+                     and re.fullmatch(r"[+-]?\d+(?:\.\d+)?%", str(source.get("reported_change_raw") or ""))
+                     and 2 <= int(source.get("display_decimal_places", 0)) <= 6
+                     and abs(float(str(source["reported_change_raw"]).rstrip("%")) - official_change) <= 0.01
+                     and close_matches(float(source["target_close"]),
+                                       round_market_display(official_target,
+                                                            int(source.get("display_decimal_places", 0))))))
         )]
         if dated_previous:
             known_hashes = {source.get("raw_response_sha256") for source in independent_support}
-            independent_support.extend({**source, "support_role": "independent_precise_previous_preclose_quote"}
+            dated_roles = {
+                source.get("raw_response_sha256"): (
+                    "independent_precise_previous_preclose_quote" if source.get("last_regular_quote_timestamp")
+                    else "independent_reported_change_and_rounded_pair" if source.get("reported_change_raw")
+                    else "independent_dated_regular_pair")
+                for source in dated_previous
+            }
+            independent_support = [
+                {**source, "support_role": dated_roles.get(source.get("raw_response_sha256"),
+                                                       source.get("support_role", "independent_support"))}
+                for source in independent_support
+            ]
+            independent_support.extend({**source, "support_role": (
+                "independent_precise_previous_preclose_quote" if source.get("last_regular_quote_timestamp")
+                else "independent_reported_change_and_rounded_pair")}
                                        for source in dated_previous
                                        if source.get("raw_response_sha256") not in known_hashes)
             prior_classification = reason
@@ -2400,6 +2421,8 @@ def resolve_discrepancy(
                 "independent_previous_close_support": [
                     {**source, "support_role": ("independent_precise_previous_preclose_quote"
                                                if source.get("last_regular_quote_timestamp")
+                                               else "independent_reported_change_and_rounded_pair"
+                                               if source.get("reported_change_raw")
                                                else "independent_dated_regular_pair")}
                     for source in dated_previous
                 ],
@@ -2481,7 +2504,10 @@ def resolve_discrepancy(
         if source.get("session") == "regular_close"
         and source.get("target_session_date") == official.get("target_session_date")
         and source.get("target_close") is not None
-        and abs(float(source["target_close"]) - official_target) > max(0.02, official_target * 0.002)
+        and (abs(float(source["target_close"]) - official_target) > max(0.02, official_target * 0.002)
+             or (re.fullmatch(r"[+-]?\d+(?:\.\d+)?%", str(source.get("reported_pct_raw") or ""))
+                 and abs(float(str(source["reported_pct_raw"]).rstrip("%")) - official_change)
+                 > tolerance_pct))
     ]
     if conflicting_eod:
         basis_evidence = {**basis_evidence, "conflicting_independent_eod": conflicting_eod}
