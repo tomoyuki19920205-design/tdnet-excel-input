@@ -85,6 +85,31 @@ def test_nasdaq_screener_403_uses_dated_official_symbol_directories():
         universe.fetch(date(2026, 11, 9))
 
 
+def test_regular_universe_keeps_documented_daily_display_rounding_in_discovery():
+    previous = int(datetime(2026, 11, 9, 14, 30, tzinfo=timezone.utc).timestamp())
+    target = int(datetime(2026, 11, 10, 14, 30, tzinfo=timezone.utc).timestamp())
+    closed = int(datetime(2026, 11, 10, 21, 0, tzinfo=timezone.utc).timestamp())
+    def row(symbol, meta_price):
+        return {"symbol": symbol, "response": [{
+            "meta": {"regularMarketTime": closed, "regularMarketPrice": meta_price,
+                     "regularMarketChangePercent": 65.24, "priceHint": 4},
+            "timestamp": [previous, target],
+            "indicators": {"quote": [{"close": [0.246, 0.407], "volume": [1000, 2000]}]},
+        }]}
+    payload = {"spark": {"result": [row("MI", 0.4065), row("BAD", 0.44)]}}
+    provider = NasdaqYahooRegularUniverseProvider(
+        transport=lambda *_: json.dumps(payload).encode(), now=lambda: NOW,
+    )
+    parsed, evidence = provider._spark_batch(["MI", "BAD"], date(2026, 11, 10))
+    assert [item["symbol"] for item in parsed] == ["MI"]
+    assert parsed[0]["close"] == 0.4065
+    assert evidence["display_rounding_reconciliations"] == [{
+        "symbol": "MI", "dated_daily_close": 0.407, "regular_market_price": 0.4065,
+        "daily_display_decimal_places": 3, "price_hint": 4,
+        "disposition": "discovery_only_dated_daily_display_rounding",
+    }]
+
+
 def test_undated_nasdaq_screener_rejects_prior_session_bulk_prices():
     previous, target = date(2026, 10, 22), date(2026, 10, 23)
     symbols = [f"SYM{i:02d}" for i in range(25)]

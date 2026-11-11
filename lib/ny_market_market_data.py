@@ -821,7 +821,7 @@ class NasdaqYahooRegularUniverseProvider:
         if not isinstance(results, list):
             raise MarketDataError("regular-universe Spark batch is missing results")
         evidence = {"source_identifier": url, "raw_response_sha256": hashlib.sha256(raw).hexdigest(),
-                    "requested_symbols": batch}
+                    "requested_symbols": batch, "display_rounding_reconciliations": []}
         parsed: list[dict[str, Any]] = []
         seen: set[str] = set()
         for item in results:
@@ -849,12 +849,27 @@ class NasdaqYahooRegularUniverseProvider:
             if (datetime.fromtimestamp(stamps[-1], NY_TZ).date() != target
                     or datetime.fromtimestamp(meta.get("regularMarketTime", 0), NY_TZ).date() != target):
                 continue
-            if abs(float(closes[-1]) - float(regular_price)) > max(1e-6, float(regular_price) * 1e-6):
-                continue
+            canonical_close = float(closes[-1])
+            if abs(canonical_close - float(regular_price)) > max(1e-6, float(regular_price) * 1e-6):
+                display = re.fullmatch(r"\d+\.(\d{2,6})", str(closes[-1]))
+                hint = meta.get("priceHint")
+                if (display is None or not isinstance(hint, int) or isinstance(hint, bool)
+                        or not 2 <= hint <= 6 or len(display.group(1)) > hint
+                        or not close_matches(round_market_display(float(regular_price), len(display.group(1))),
+                                             canonical_close)):
+                    continue
+                evidence["display_rounding_reconciliations"].append({
+                    "symbol": symbol, "dated_daily_close": canonical_close,
+                    "regular_market_price": float(regular_price),
+                    "daily_display_decimal_places": len(display.group(1)),
+                    "price_hint": hint,
+                    "disposition": "discovery_only_dated_daily_display_rounding",
+                })
+                canonical_close = float(regular_price)
             change = meta.get("regularMarketChangePercent")
             if not isinstance(change, (int, float)) or not math.isfinite(float(change)):
                 continue
-            parsed.append({"symbol": symbol, "close": float(closes[-1]), "change_pct": change,
+            parsed.append({"symbol": symbol, "close": canonical_close, "change_pct": change,
                            "volume": volumes[-1] if len(volumes) == len(stamps) else None,
                            "quote_source_identifier": url,
                            "quote_raw_response_sha256": evidence["raw_response_sha256"],
