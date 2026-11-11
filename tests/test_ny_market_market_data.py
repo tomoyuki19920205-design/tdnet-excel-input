@@ -2309,6 +2309,7 @@ def test_nasdaq_api_uses_bounded_requests_client_and_preserves_http_errors(monke
     url = "https://api.nasdaq.com/api/quote/TEST/info?assetclass=stocks"
     calls = []
     monkeypatch.setattr(market_data.time_module, "sleep", lambda duration: None)
+    monkeypatch.setattr(market_data, "_pace_nasdaq_api_request", lambda: None)
 
     def response(_url, **kwargs):
         calls.append((_url, kwargs))

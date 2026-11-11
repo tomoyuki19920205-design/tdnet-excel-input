@@ -12,6 +12,7 @@ import math
 import os
 import re
 import requests
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
@@ -83,6 +84,19 @@ def parse_market_numeric_token(value: Any, field: str = "market value") -> float
 
 
 Transport = Callable[[str, dict[str, str]], bytes]
+_nasdaq_request_lock = threading.Lock()
+_nasdaq_next_request_at = 0.0
+
+
+def _pace_nasdaq_api_request() -> None:
+    """Space public API requests across concurrent universe workers."""
+    global _nasdaq_next_request_at
+    with _nasdaq_request_lock:
+        now = time_module.monotonic()
+        scheduled = max(now, _nasdaq_next_request_at)
+        _nasdaq_next_request_at = scheduled + 1.0
+    if scheduled > now:
+        time_module.sleep(scheduled - now)
 
 
 def default_transport(url: str, headers: dict[str, str]) -> bytes:
@@ -94,6 +108,7 @@ def default_transport(url: str, headers: dict[str, str]) -> bytes:
                 # accepting the same endpoint and headers through requests.
                 # Keep the URL, response body, and validation contract intact.
                 try:
+                    _pace_nasdaq_api_request()
                     response = requests.get(url, headers=headers, timeout=(10, 30),
                                             allow_redirects=False)
                 except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
