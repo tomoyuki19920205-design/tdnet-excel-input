@@ -1529,17 +1529,24 @@ class NasdaqOfficialCloseProvider:
             historical_target_close = _numeric(target_rows[0].get("close"), "official target close")
             if abs(target_close - historical_target_close) > max(1e-7, historical_target_close * 1e-6):
                 primary_exchange = str(info.get("exchange") or "").upper().strip()
-                if primary_exchange not in {"AMEX", "NYSE", "NYSE AMERICAN", "NYSEAMERICAN", "NYSE ARCA"}:
+                if (not primary_exchange.startswith("NASDAQ")
+                        and primary_exchange not in {"AMEX", "NYSE", "NYSE AMERICAN", "NYSEAMERICAN", "NYSE ARCA"}):
                     raise MarketDataError(f"{self.name}:{symbol}: official info/historical target close mismatch")
-                # Nasdaq's dated last sale can differ from another exchange's
-                # EOD row. Pass both values to arbitration; that stage still
-                # requires a separate dated primary-exchange EOD source.
                 info_historical_conflict = {
                     "primary_exchange": primary_exchange,
                     "nasdaq_info_close": target_close,
                     "nasdaq_historical_close": historical_target_close,
-                    "resolution_required": "independent_primary_exchange_eod",
+                    "resolution_required": ("independent_dated_nasdaq_eod" if primary_exchange.startswith("NASDAQ")
+                                            else "independent_primary_exchange_eod"),
                 }
+                if primary_exchange.startswith("NASDAQ"):
+                    # A live info response can retain the target day's 4 PM
+                    # label while its last-sale price changes the next day.
+                    # The dated historical row is immutable evidence, but a
+                    # separate dated EOD publisher must still corroborate it.
+                    target_close = historical_target_close
+                    target_stamp = f"Nasdaq historical close {target_session_date:%m/%d/%Y}"
+                    target_close_source = "nasdaq_historical"
         if normalization.get("independent_split_basis") and not close_matches(
             _numeric(normalization["independent_split_basis"].get("regular_market_price"),
                      "vendor split-date regular close"), target_close,
@@ -2322,10 +2329,46 @@ def resolve_discrepancy(
             }
 
     conflict = official.get("info_historical_conflict")
-    if conflict and (reason != "non_nasdaq_primary_exchange_eod"
-                     or canonical_primary_pair is None
-                     or not close_matches(canonical_primary_pair[0], official_previous)
-                     or not close_matches(canonical_primary_pair[1], float(conflict["nasdaq_historical_close"]))):
+    if conflict and str(conflict["primary_exchange"]).startswith("NASDAQ"):
+        dated_nasdaq_eod = [source for source in independent_sources if (
+            provider_family(str(source.get("provider_family") or source.get("provider") or ""))
+            not in {"nasdaq", provider_family(historical_provider)}
+            and source.get("session") == "regular_close"
+            and source.get("target_session_date") == official.get("target_session_date")
+            and "NASDAQ" in str(source.get("primary_exchange") or "").upper()
+            and source.get("previous_close") is not None
+            and source.get("target_close") is not None
+            and close_matches(float(source["previous_close"]), official_previous)
+            and close_matches(float(source["target_close"]), float(conflict["nasdaq_historical_close"]))
+        )]
+        vendor_rounding_places = next((digits for digits in range(2, 5)
+                                       if close_matches(historical_previous_close,
+                                                        round_market_display(official_previous, digits))
+                                       and close_matches(historical_target_close,
+                                                         round_market_display(official_target, digits))), None)
+        if (action_status != "checked_none" or not dated_nasdaq_eod
+                or vendor_rounding_places is None):
+            raise MarketDataError("unresolved Top20 discrepancy: Nasdaq info/history conflict lacks independent dated EOD pair")
+        prior_classification = reason
+        reason = "dated_exchange_history_over_conflicting_info_quote"
+        official_supports = True
+        canonical_primary_pair = (official_previous, official_target)
+        basis_evidence = {
+            "primary_exchange": conflict["primary_exchange"],
+            "official_previous_close": official_previous,
+            "nasdaq_info_close": conflict["nasdaq_info_close"],
+            "nasdaq_historical_close": conflict["nasdaq_historical_close"],
+            "vendor_daily_previous_close": historical_previous_close,
+            "vendor_daily_target_close": historical_target_close,
+            "vendor_daily_display_rounding_places": vendor_rounding_places,
+            "independent_dated_eod": dated_nasdaq_eod,
+            "previous_discrepancy_classification": prior_classification,
+            "comparison_basis": "dated_nasdaq_historical_regular_close",
+        }
+    elif conflict and (reason != "non_nasdaq_primary_exchange_eod"
+                       or canonical_primary_pair is None
+                       or not close_matches(canonical_primary_pair[0], official_previous)
+                       or not close_matches(canonical_primary_pair[1], float(conflict["nasdaq_historical_close"]))):
         raise MarketDataError("unresolved Top20 discrepancy: non-Nasdaq info/history conflict lacks exact independent primary EOD pair")
 
     if (not official_supports or not action_checked or not independent_support or reason is None

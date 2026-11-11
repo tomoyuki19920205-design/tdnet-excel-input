@@ -1416,6 +1416,59 @@ def test_non_nasdaq_info_history_conflict_needs_independent_primary_eod(vendor_p
         assert resolved["basis_evidence"]["vendor_daily_display_rounding_places"] == 3
 
 
+def test_nasdaq_info_history_mutation_requires_independent_dated_eod():
+    target_date = date(2026, 11, 10)
+
+    def transport(url, _headers):
+        if "/historical?" in url:
+            return json.dumps({"status": {"rCode": 200}, "data": {"tradesTable": {"rows": [
+                {"date": "11/10/2026", "close": "$2.40", "volume": "22,277,850"},
+                {"date": "11/09/2026", "close": "$1.395", "volume": "253,393"},
+            ]}}}).encode()
+        if "/realtime-trades?" in url:
+            return json.dumps({"data": {"topTable": {"rows": [
+                {"previousClose": "$2.40"},
+            ]}}}).encode()
+        return json.dumps({"data": {
+            "symbol": "TTEC", "exchange": "NASDAQ-GS", "assetClass": "STOCKS", "notifications": [],
+            "secondaryData": {"lastSalePrice": "$2.39",
+                              "lastTradeTimestamp": "Closed at Nov 10, 2026 4:00 PM ET"},
+        }}).encode()
+
+    official = NasdaqOfficialCloseProvider(transport=transport).fetch("TTEC", target_date, 2.40)
+    assert official["target_close"] == pytest.approx(2.40)
+    assert official["target_close_source"] == "nasdaq_historical"
+    assert official["info_historical_conflict"]["nasdaq_info_close"] == pytest.approx(2.39)
+    kwargs = dict(
+        candidate={"symbol": "TTEC", "_close": 2.40,
+                   "_change_pct": (2.40 / 1.395 - 1) * 100,
+                   "netchange": None, "volume": "22277850"},
+        historical_provider="yahoo_chart_query1",
+        historical_previous_close=1.40, historical_target_close=2.40,
+        historical_change_pct=(2.40 / 1.40 - 1) * 100,
+        official=official,
+        corporate_action={"provider": "yahoo_corporate_actions", "provider_family": "yahoo",
+                          "status": "checked_none", "source_identifier": "https://yahoo.test/actions",
+                          "raw_response_sha256": "a" * 64},
+        minute_close=None, tolerance_pct=0.2,
+        resolved_at="2026-11-11T13:00:00+00:00",
+    )
+    with pytest.raises(MarketDataError, match="lacks independent dated EOD pair"):
+        resolve_discrepancy(**kwargs, independent_sources=[])
+    resolved = resolve_discrepancy(**kwargs, independent_sources=[{
+        "provider": "captured_end_of_day_quote", "provider_family": "chartexchange",
+        "session": "regular_close", "target_session_date": "2026-11-10",
+        "previous_close": 1.395, "target_close": 2.40,
+        "primary_exchange": "NASDAQ", "display_decimal_places": 4,
+        "source_identifier": "https://chartexchange.com/symbol/nasdaq-ttec/historical/",
+        "raw_response_sha256": "b" * 64,
+    }])
+    assert resolved["discrepancy_reason"] == "dated_exchange_history_over_conflicting_info_quote"
+    assert resolved["canonical_previous_close"] == pytest.approx(1.395)
+    assert resolved["canonical_target_close"] == pytest.approx(2.40)
+    assert resolved["basis_evidence"]["vendor_daily_display_rounding_places"] == 2
+
+
 @pytest.mark.parametrize(("raw", "expected"), [
     ("$15.10.", 15.10),
     ("$15.10", 15.10),
