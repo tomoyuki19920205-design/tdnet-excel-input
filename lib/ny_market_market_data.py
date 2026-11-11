@@ -1526,22 +1526,10 @@ class NasdaqOfficialCloseProvider:
                 if basis is None:
                     vendor = YahooCorporateActionProvider(transport=self.transport).fetch(symbol, target_session_date)
                     if not vendor.get("events"):
-                        raise MarketDataError(f"{self.name}:{symbol}: independent split event missing")
-                    try:
-                        validate_vendor_actions(vendor["events"], notice)
-                    except ValueError as exc:
-                        raise MarketDataError(f"{self.name}:{symbol}: vendor action disagrees with exchange: {exc}") from exc
-                    stamp = vendor.get("regular_market_time")
-                    vendor_day = (datetime.fromtimestamp(stamp, timezone.utc).astimezone(NY_TZ).date()
-                                  if isinstance(stamp, int) else None)
-                    vendor_previous = _numeric(vendor.get("chart_previous_close"), "vendor split-adjusted previous")
-                    if (vendor.get("meta_symbol") != symbol
-                            or vendor.get("exchange_timezone_name") != "America/New_York"
-                            or vendor_day != target_session_date):
-                        raise MarketDataError(f"{self.name}:{symbol}: dated vendor split basis unavailable")
-                    matches_raw = close_matches(vendor_previous, previous_close)
-                    matches_adjusted = close_matches(vendor_previous, normalized)
-                    if matches_raw == matches_adjusted:
+                        # A vendor may omit the action while leaving its daily
+                        # history on the old share basis.  Require an exchange
+                        # notice and a second publisher's explicitly adjusted,
+                        # dated price pair; a price gap alone proves nothing.
                         independent_history = StockAnalysisHistoricalCloseProvider(
                             transport=self.transport,
                         ).fetch_pair(symbol, previous_day, target_session_date)
@@ -1551,14 +1539,45 @@ class NasdaqOfficialCloseProvider:
                             raise MarketDataError(f"{self.name}:{symbol}: independent split dates or basis disagree")
                         displayed_previous = float(independent_history["previous_split_normalized_close"])
                         digits = int(independent_history["previous_display_decimal_places"])
-                        matches_raw = close_matches(displayed_previous, round_market_display(previous_close, digits))
-                        matches_adjusted = close_matches(displayed_previous, round_market_display(normalized, digits))
-                        if matches_raw == matches_adjusted:
-                            raise MarketDataError(f"{self.name}:{symbol}: independent split basis is ambiguous")
+                        if (provider_marks_adjusted
+                                or not close_matches(displayed_previous, round_market_display(normalized, digits))
+                                or close_matches(displayed_previous, round_market_display(previous_close, digits))):
+                            raise MarketDataError(f"{self.name}:{symbol}: split basis without vendor event is unconfirmed")
+                        basis = "unadjusted"
+                        vendor_basis = {**vendor, "action_status": "vendor_event_missing_independent_history_used"}
                     else:
-                        independent_history = None
-                    basis = "already_split_normalized" if matches_raw else "unadjusted"
-                    vendor_basis = vendor
+                        try:
+                            validate_vendor_actions(vendor["events"], notice)
+                        except ValueError as exc:
+                            raise MarketDataError(f"{self.name}:{symbol}: vendor action disagrees with exchange: {exc}") from exc
+                        stamp = vendor.get("regular_market_time")
+                        vendor_day = (datetime.fromtimestamp(stamp, timezone.utc).astimezone(NY_TZ).date()
+                                      if isinstance(stamp, int) else None)
+                        vendor_previous = _numeric(vendor.get("chart_previous_close"), "vendor split-adjusted previous")
+                        if (vendor.get("meta_symbol") != symbol
+                                or vendor.get("exchange_timezone_name") != "America/New_York"
+                                or vendor_day != target_session_date):
+                            raise MarketDataError(f"{self.name}:{symbol}: dated vendor split basis unavailable")
+                        matches_raw = close_matches(vendor_previous, previous_close)
+                        matches_adjusted = close_matches(vendor_previous, normalized)
+                        if matches_raw == matches_adjusted:
+                            independent_history = StockAnalysisHistoricalCloseProvider(
+                                transport=self.transport,
+                            ).fetch_pair(symbol, previous_day, target_session_date)
+                            if (independent_history["price_basis"] != "regular_close_normalized_for_split"
+                                    or independent_history["previous_session_date"] != previous_day.isoformat()
+                                    or independent_history["target_session_date"] != target_session_date.isoformat()):
+                                raise MarketDataError(f"{self.name}:{symbol}: independent split dates or basis disagree")
+                            displayed_previous = float(independent_history["previous_split_normalized_close"])
+                            digits = int(independent_history["previous_display_decimal_places"])
+                            matches_raw = close_matches(displayed_previous, round_market_display(previous_close, digits))
+                            matches_adjusted = close_matches(displayed_previous, round_market_display(normalized, digits))
+                            if matches_raw == matches_adjusted:
+                                raise MarketDataError(f"{self.name}:{symbol}: independent split basis is ambiguous")
+                        else:
+                            independent_history = None
+                        basis = "already_split_normalized" if matches_raw else "unadjusted"
+                        vendor_basis = vendor
                 normalization = {"previous_close_raw": previous_close, "previous_price_basis": basis,
                                  "applied_split_factor": notice["old_shares"] / notice["new_shares"] if basis == "unadjusted" else 1.0,
                                  "official_action": notice,
@@ -1617,6 +1636,16 @@ class NasdaqOfficialCloseProvider:
                      "vendor split-date regular close"), target_close,
         ):
             raise MarketDataError(f"{self.name}:{symbol}: vendor split-date target differs from exchange close")
+        independent_history = normalization.get("independent_adjusted_history_basis")
+        if independent_history:
+            target_digits = int(independent_history["target_display_decimal_places"])
+            reported = str(independent_history.get("reported_change_raw") or "")
+            official_change = (target_close / previous_close - 1.0) * 100.0
+            if (not close_matches(float(independent_history["target_regular_close"]),
+                                  round_market_display(target_close, target_digits))
+                    or not re.fullmatch(r"[+-]?\d+(?:\.\d+)?%", reported)
+                    or abs(float(reported[:-1]) - official_change) > 0.01):
+                raise MarketDataError(f"{self.name}:{symbol}: independent split target or return disagrees")
         return {
             "provider": self.name, "provider_family": self.family,
             "target_close_verified": True, "target_timestamp": target_stamp,

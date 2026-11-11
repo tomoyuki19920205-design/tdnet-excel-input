@@ -2675,6 +2675,59 @@ def test_effective_split_precedes_nls_comparison_without_double_application(hist
                 tolerance_pct=.2,resolved_at="2026-10-27T22:00:00Z")
 
 
+def test_official_split_and_independent_adjusted_history_recover_missing_vendor_event():
+    day = date(2026, 11, 11)
+    notice_url = "https://www.nasdaqtrader.com/TraderNews.aspx?id=eca2026-808"
+    notice = ("(SLXN) will effect a one-for-twenty-four (1-24) reverse stock split. "
+              "The reverse stock split will become effective on Wednesday, November 11, 2026.").encode()
+    history = json.dumps({"status": {"rCode": 200}, "data": {"tradesTable": {"rows": [
+        {"date": "11/10/2026", "close": "$0.1089", "volume": "640,917"},
+    ]}}}).encode()
+    nls = json.dumps({"data": {"topTable": {"rows": [{"previousClose": "$2.64"}]}}}).encode()
+    info = json.dumps({"data": {"symbol": "SLXN", "assetClass": "STOCKS",
+                                "secondaryData": {"lastSalePrice": "$3.23",
+                                                  "lastTradeTimestamp": "Closed at Nov 11, 2026 4:00 PM ET"}}}).encode()
+    vendor = json.dumps({"chart": {"result": [{"meta": {
+        "symbol": "SLXN", "chartPreviousClose": 0.145, "regularMarketPrice": 3.23,
+        "regularMarketTime": int(datetime(2026, 11, 11, 21, tzinfo=timezone.utc).timestamp()),
+        "exchangeTimezoneName": "America/New_York"}, "events": None}]}}).encode()
+    independent = ("<html>Past prices are adjusted for stock splits"
+                   "<table><tr><th>Date</th><th>Close</th><th>Change</th></tr>"
+                   "<tr><td>Nov 11, 2026</td><td>3.23</td><td>23.58%</td></tr>"
+                   "<tr><td>Nov 10, 2026</td><td>2.61</td><td>-1.00%</td></tr>"
+                   "</table></html>").encode()
+    def transport(url, _headers):
+        if "stockanalysis.com" in url: return independent
+        if "/historical?" in url: return history
+        if "/realtime-trades?" in url: return nls
+        if "/info?" in url: return info
+        if "finance/chart/" in url: return vendor
+        raise AssertionError(url)
+    provider = NasdaqOfficialCloseProvider(
+        transport=transport, corporate_action_notices={"SLXN": notice_url},
+        notice_transport=lambda *_: notice,
+        now=lambda: datetime(2026, 11, 11, 23, tzinfo=timezone.utc))
+    resolved = provider.fetch("SLXN", day, 3.23)
+    assert resolved["previous_close_raw"] == 0.1089
+    assert resolved["previous_close"] == pytest.approx(2.6136)
+    assert resolved["applied_split_factor"] == 24
+    assert resolved["previous_price_basis"] == "unadjusted"
+    assert resolved["independent_split_basis"]["action_status"] == "vendor_event_missing_independent_history_used"
+    assert resolved["independent_adjusted_history_basis"]["reported_change_raw"] == "23.58%"
+    assert resolved["official_action"]["effective_session_date"] == day.isoformat()
+
+    def wrong_return(url, headers):
+        return independent.replace(b"23.58%", b"32.00%") if "stockanalysis.com" in url else transport(url, headers)
+    provider.transport = wrong_return
+    with pytest.raises(MarketDataError, match="independent split target or return disagrees"):
+        provider.fetch("SLXN", day, 3.23)
+    def wrong_basis(url, headers):
+        return independent.replace(b"2.61", b"2.50") if "stockanalysis.com" in url else transport(url, headers)
+    provider.transport = wrong_basis
+    with pytest.raises(MarketDataError, match="split basis without vendor event is unconfirmed"):
+        provider.fetch("SLXN", day, 3.23)
+
+
 def test_split_history_rebases_to_adjusted_previous_without_volume_marker_or_double_factor():
     day = date(2026, 11, 6)
     notice_url = "https://www.nasdaqtrader.com/TraderNews.aspx?id=ECA2026-793"
