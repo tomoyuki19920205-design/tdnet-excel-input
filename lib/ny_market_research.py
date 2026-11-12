@@ -8,8 +8,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
+import tempfile
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -50,6 +54,60 @@ def market_data_packet_sha256(packet: dict[str, Any]) -> str:
         packet, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def archive_research_response(
+    raw: bytes,
+    *,
+    url: str,
+    ticker: str,
+    issuer_name: str,
+    report_date_jst: str,
+    output_dir: Path,
+    http_status: int,
+) -> dict[str, Any]:
+    """Atomically retain each NY research response by its bytes, even for a shared URL.
+
+    A URL may return different bodies on repeated or concurrent requests.  Its
+    hash therefore cannot be used as a filename.  The caller must separately
+    validate the issuer identity and the document date before citing the body.
+    """
+    if not isinstance(raw, bytes):
+        raise NYMarketResearchError("research response must be bytes")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", report_date_jst):
+        raise NYMarketResearchError("report_date_jst must be ISO date")
+    if urlsplit(url).scheme not in {"http", "https"} or not urlsplit(url).netloc:
+        raise NYMarketResearchError("research source URL must be HTTP(S)")
+    symbol = _string(ticker, "ticker").upper()
+    company = _string(issuer_name, "issuer_name")
+    if isinstance(http_status, bool) or not isinstance(http_status, int) or not 100 <= http_status <= 599:
+        raise NYMarketResearchError("http_status must be an HTTP status code")
+    directory = Path(output_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256(raw).hexdigest()
+    target = directory / f"ny-{report_date_jst}-research-{digest}.raw"
+    with tempfile.NamedTemporaryFile(mode="wb", prefix=".ny-research-", suffix=".tmp",
+                                     dir=directory, delete=False) as stream:
+        temporary = Path(stream.name)
+        stream.write(raw)
+        stream.flush()
+        os.fsync(stream.fileno())
+    try:
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+        raise NYMarketResearchError("archived research response hash mismatch")
+    return {
+        "ticker": symbol,
+        "issuer_name": company,
+        "url": url,
+        "http_status": http_status,
+        "path": str(target),
+        "sha256": digest,
+        "captured_at_utc": datetime.now(timezone.utc).isoformat(),
+        "issuer_identity_status": "unverified",
+    }
 
 
 def attach_market_data_packet_metadata(payload: dict[str, Any]) -> dict[str, Any]:
