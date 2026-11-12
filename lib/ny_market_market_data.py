@@ -2565,17 +2565,24 @@ def resolve_discrepancy(
     # reports the return calculated from the precise pair.
     quote_source = str(candidate.get("quote_source_identifier") or "")
     quote_parts = urlsplit(quote_source)
+    yahoo_dated_discovery = (
+        quote_parts.hostname in {"query1.finance.yahoo.com", "query2.finance.yahoo.com"}
+        and (quote_parts.path == "/v7/finance/spark"
+             or quote_parts.path == f"/v8/finance/chart/{quote(str(candidate.get('symbol') or ''), safe='')}")
+        and "interval=1d" in quote_parts.query
+    )
     if (reason in {None, "official_closed_eod_with_secondary_boundary_difference"}
             and action_status == "checked_none" and not official_supports
             and official.get("target_close_verified") is True
             and official.get("info_historical_conflict") is None
             and not official.get("nls_previous_mismatch")
-            and quote_parts.hostname in {"query1.finance.yahoo.com", "query2.finance.yahoo.com"}
-            and quote_parts.path == "/v7/finance/spark"
+            and yahoo_dated_discovery
             and close_matches(screener_last, round_market_display(official_target, 2))
             and close_matches(historical_previous_close, round_market_display(official_previous, 2))
             and close_matches(historical_target_close, round_market_display(official_target, 2))
-            and abs(screener_change - historical_change_pct) <= tolerance_pct):
+            and (abs(screener_change - historical_change_pct) <= tolerance_pct
+                 or abs(screener_change - (screener_last / official_previous - 1.0) * 100.0)
+                 <= tolerance_pct)):
         dated_pair = [source for source in independent_support if (
             source.get("session") == "regular_close"
             and source.get("target_session_date") == official.get("target_session_date")
@@ -2881,10 +2888,8 @@ class LiveDiscrepancyArbitrator:
                     action.get("status") in {"checked_none", "corporate_action_adjusted"}
                     and official.get("target_close_verified") is True
                     and official.get("target_close_source") in {"nasdaq_info", "nasdaq_historical"}
-                    and "no independent supporting source" in str(initial_error)
-                    and ("provider discrepancy reason is unresolved" in str(initial_error)
-                         or (minute is not None and not close_matches(
-                             float(minute["target_close"]), float(official["target_close"]))))
+                    and ("no independent supporting source" in str(initial_error)
+                         or "provider discrepancy reason is unresolved" in str(initial_error))
                 ):
                     raise
                 try:

@@ -2869,8 +2869,31 @@ def test_cent_rounded_discovery_keeps_precise_official_pair_with_independent_ret
     assert with_boundary["discrepancy_reason"] == result["discrepancy_reason"]
     assert with_boundary["basis_evidence"]["previous_discrepancy_classification"] == (
         "official_closed_eod_with_secondary_boundary_difference")
+    # The saved full-universe row mixed a cent-rounded Yahoo target with
+    # Nasdaq's precise prior, yielding 83.19% before final arbitration.
+    mixed_basis_candidate = {**kwargs["candidate"],
+        "_change_pct": (0.46 / 0.2511 - 1) * 100,
+        "quote_source_identifier": (
+            "https://query1.finance.yahoo.com/v8/finance/chart/SCKT?"
+            "period1=1793491200&period2=1794528000&interval=1d&events=history&includeAdjustedClose=false"),
+    }
+    mixed_result = resolve_discrepancy(**{**kwargs, "candidate": mixed_basis_candidate,
+                                         "minute_close": boundary}, independent_sources=[independent])
+    assert mixed_result["discrepancy_reason"] == "dated_exchange_history_over_vendor_previous_rounding"
+    assert mixed_result["canonical_previous_close"] == 0.2511
+    assert mixed_result["canonical_target_close"] == 0.4643
     with pytest.raises(MarketDataError):
         resolve_discrepancy(**kwargs, independent_sources=[])
+    public_previous_only = {
+        "provider": "public_com_previous_close", "provider_family": "public_com",
+        "previous_close": 0.25, "target_close": None,
+        "source_identifier": "https://public.com/stocks/sckt/pre-market",
+        "raw_response_sha256": "f" * 64,
+    }
+    with pytest.raises(MarketDataError, match="provider discrepancy reason is unresolved"):
+        resolve_discrepancy(**{**kwargs, "candidate": mixed_basis_candidate,
+                               "minute_close": boundary},
+                            independent_sources=[public_previous_only])
     for wrong in ({"reported_change_raw": "84.00%"}, {"previous_close": 0.26},
                   {"target_close": 0.47}, {"target_session_date": "2026-11-10"}):
         with pytest.raises(MarketDataError):
