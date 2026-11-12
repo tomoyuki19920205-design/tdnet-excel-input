@@ -2779,6 +2779,49 @@ def test_split_history_republished_on_adjusted_basis_uses_display_precision_with
         provider.fetch("SLXN", day, 3.23)
 
 
+def test_large_regular_move_requires_independent_dated_pair_and_reported_return():
+    # NXXT 11/11: Nasdaq and Yahoo agree on 0.1865 -> 1.70, while the
+    # independent S&P page displays 0.19 -> 1.70 and reports +811.53%.
+    official_change = (1.70 / 0.1865 - 1) * 100
+    source = {
+        "provider": "stockanalysis_historical_s_p_global", "provider_family": "s_p_global",
+        "session": "regular_close", "target_session_date": "2026-11-11",
+        "previous_close": 0.19, "target_close": 1.70,
+        "display_decimal_places": 2, "reported_change_raw": "811.53%",
+        "price_basis": "regular_close_normalized_for_split",
+        "source_identifier": "https://stockanalysis.com/stocks/nxxt/history/",
+        "raw_response_sha256": "d" * 64,
+    }
+    kwargs = dict(
+        candidate={"symbol": "NXXT", "_close": 1.70, "_change_pct": official_change,
+                   "netchange": "1.5135", "volume": "150570400"},
+        historical_provider="yahoo_chart_query1",
+        historical_previous_close=0.1865, historical_target_close=1.70,
+        historical_change_pct=official_change,
+        official={"provider": "nasdaq_official_historical_nls", "provider_family": "nasdaq",
+                  "target_close_verified": True, "target_close_source": "nasdaq_historical",
+                  "target_timestamp": "Nasdaq historical close 11/11/2026",
+                  "target_session_date": "2026-11-11", "previous_session_date": "2026-11-10",
+                  "previous_close": 0.1865, "target_close": 1.70,
+                  "source_identifiers": ["https://api.nasdaq.com/api/quote/NXXT/historical"],
+                  "raw_response_sha256": ["a" * 64]},
+        corporate_action={"provider": "yahoo_corporate_actions", "provider_family": "yahoo",
+                          "status": "checked_none", "source_identifier": "https://yahoo.test/actions",
+                          "raw_response_sha256": "b" * 64},
+        minute_close=None, tolerance_pct=0.2, resolved_at="2026-11-12T03:04:00+00:00",
+    )
+    with pytest.raises(MarketDataError, match="no independent supporting source"):
+        resolve_discrepancy(**kwargs, independent_sources=[])
+    result = resolve_discrepancy(**kwargs, independent_sources=[source])
+    assert result["discrepancy_reason"] == "dated_official_regular_pair_independently_confirmed"
+    assert result["official_previous_close"] == 0.1865
+    assert result["official_target_close"] == 1.70
+    for wrong in ({"reported_change_raw": "900.00%"}, {"previous_close": 0.25},
+                  {"target_close": 1.79}, {"target_session_date": "2026-11-10"}):
+        with pytest.raises(MarketDataError):
+            resolve_discrepancy(**kwargs, independent_sources=[{**source, **wrong}])
+
+
 def test_split_history_rebases_to_adjusted_previous_without_volume_marker_or_double_factor():
     day = date(2026, 11, 6)
     notice_url = "https://www.nasdaqtrader.com/TraderNews.aspx?id=ECA2026-793"

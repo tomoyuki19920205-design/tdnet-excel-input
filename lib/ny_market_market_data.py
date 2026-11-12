@@ -2522,6 +2522,43 @@ def resolve_discrepancy(
                        or not close_matches(canonical_primary_pair[1], float(conflict["nasdaq_historical_close"]))):
         raise MarketDataError("unresolved Top20 discrepancy: non-Nasdaq info/history conflict lacks exact independent primary EOD pair")
 
+    # A large move is still a dated regular-close move when the exchange,
+    # daily history, and a separate publisher's rounded pair and reported
+    # return agree. The publisher's precision is evidence, not a replacement
+    # for the exchange's exact price.
+    if (reason is None and action_status == "checked_none" and official_supports
+            and official.get("target_close_verified") is True
+            and official.get("info_historical_conflict") is None
+            and (minute_close is None or (
+                close_matches(float(minute_close["previous_close"]), official_previous)
+                and close_matches(float(minute_close["target_close"]), official_target)))
+            and close_matches(historical_previous_close, official_previous)
+            and close_matches(historical_target_close, official_target)):
+        dated_pair = [source for source in independent_support if (
+            source.get("session") == "regular_close"
+            and source.get("target_session_date") == official.get("target_session_date")
+            and source.get("price_basis") == "regular_close_normalized_for_split"
+            and 2 <= int(source.get("display_decimal_places", 0)) <= 6
+            and source.get("previous_close") is not None
+            and source.get("target_close") is not None
+            and close_matches(float(source["previous_close"]), round_market_display(
+                official_previous, int(source["display_decimal_places"])))
+            and close_matches(float(source["target_close"]), round_market_display(
+                official_target, int(source["display_decimal_places"])))
+            and re.fullmatch(r"[+-]?\d+(?:\.\d+)?%", str(source.get("reported_change_raw") or ""))
+            and abs(float(str(source["reported_change_raw"]).rstrip("%")) - official_change) <= 0.01
+        )]
+        if dated_pair:
+            reason = "dated_official_regular_pair_independently_confirmed"
+            basis_evidence = {
+                "official_previous_close": official_previous,
+                "official_target_close": official_target,
+                "vendor_daily_previous_close": historical_previous_close,
+                "vendor_daily_target_close": historical_target_close,
+                "independent_dated_regular_pair": dated_pair,
+                "comparison_basis": "dated_regular_close_with_independent_reported_return",
+            }
+
     if (not official_supports or not action_checked or not independent_support or reason is None
             or (official.get("nls_previous_mismatch") and reason != "movers_quote_differs_from_verified_regular_close")):
         problems = []
@@ -2789,16 +2826,17 @@ class LiveDiscrepancyArbitrator:
             try:
                 resolved = resolve_with_current_sources()
             except MarketDataError as initial_error:
-                # A 16:00 minute bar can begin at a price other than the
-                # exchange's final regular close. Require a second, dated EOD
-                # source before classifying this boundary difference.
+                # A 16:00 minute bar may begin before the exchange's final
+                # close. Even when all current prices agree, a large move
+                # still needs an independent dated pair and reported return.
                 if not (
                     action.get("status") in {"checked_none", "corporate_action_adjusted"}
                     and official.get("target_close_verified") is True
                     and official.get("target_close_source") in {"nasdaq_info", "nasdaq_historical"}
-                    and minute is not None
-                    and not close_matches(float(minute["target_close"]), float(official["target_close"]))
-                    and "provider discrepancy reason is unresolved" in str(initial_error)
+                    and "no independent supporting source" in str(initial_error)
+                    and ("provider discrepancy reason is unresolved" in str(initial_error)
+                         or (minute is not None and not close_matches(
+                             float(minute["target_close"]), float(official["target_close"]))))
                 ):
                     raise
                 try:
