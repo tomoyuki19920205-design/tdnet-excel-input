@@ -2728,6 +2728,57 @@ def test_official_split_and_independent_adjusted_history_recover_missing_vendor_
         provider.fetch("SLXN", day, 3.23)
 
 
+def test_split_history_republished_on_adjusted_basis_uses_display_precision_without_double_factor():
+    # Saved 11/11 SLXN history changed its 11/10 close from 0.1089 to
+    # 2.6134 after the 1-for-24 action, with a non-N/A volume in both copies.
+    day = date(2026, 11, 11)
+    notice = ("(SLXN) will effect a one-for-twenty-four (1-24) reverse stock split. "
+              "The reverse stock split will become effective on Wednesday, November 11, 2026.").encode()
+    history = json.dumps({"status": {"rCode": 200}, "data": {"tradesTable": {"rows": [
+        {"date": "11/11/2026", "close": "$3.23", "volume": "293,356"},
+        {"date": "11/10/2026", "close": "$2.6134", "volume": "26,707"},
+    ]}}}).encode()
+    vendor = json.dumps({"chart": {"result": [{"meta": {
+        "symbol": "SLXN", "chartPreviousClose": 3.48, "regularMarketPrice": 3.23,
+        "regularMarketTime": int(datetime(2026, 11, 11, 21, tzinfo=timezone.utc).timestamp()),
+        "exchangeTimezoneName": "America/New_York",
+    }, "events": {"splits": {"x": {
+        "date": int(datetime(2026, 11, 11, 14, 30, tzinfo=timezone.utc).timestamp()),
+        "numerator": 1, "denominator": 24,
+    }}}}]}}).encode()
+    independent = ("<html>Past prices are adjusted for stock splits"
+                   "<table><tr><th>Date</th><th>Close</th><th>Change</th></tr>"
+                   "<tr><td>Nov 11, 2026</td><td>3.23</td><td>23.58%</td></tr>"
+                   "<tr><td>Nov 10, 2026</td><td>2.61</td><td>-1.00%</td></tr>"
+                   "</table></html>").encode()
+    def transport(url, _headers):
+        if "stockanalysis.com" in url: return independent
+        if "/historical?" in url: return history
+        if "/realtime-trades?" in url:
+            return b'{"data":{"topTable":{"rows":[{"previousClose":"$2.64"}]}}}'
+        if "/info?" in url:
+            return b'{"data":{"symbol":"SLXN","assetClass":"STOCKS","primaryData":{"lastSalePrice":"$3.23","lastTradeTimestamp":"Nov 11, 2026"}}}'
+        if "finance/chart/" in url: return vendor
+        raise AssertionError(url)
+    provider = NasdaqOfficialCloseProvider(
+        transport=transport, corporate_action_notices={"SLXN": "https://www.nasdaqtrader.com/TraderNews.aspx?id=eca2026-808"},
+        notice_transport=lambda *_: notice,
+        now=lambda: datetime(2026, 11, 12, 3, tzinfo=timezone.utc),
+    )
+    resolved = provider.fetch("SLXN", day, 3.23)
+    assert resolved["previous_close_raw"] == resolved["previous_close"] == pytest.approx(2.6134)
+    assert resolved["previous_price_basis"] == "already_split_normalized"
+    assert resolved["applied_split_factor"] == 1
+    assert resolved["independent_reported_return_display_interval_pct"][0] < 23.58
+    assert resolved["independent_reported_return_display_interval_pct"][1] > 23.58
+
+    def wrong_return(url, headers):
+        return independent.replace(b"23.58%", b"32.00%") if "stockanalysis.com" in url else transport(url, headers)
+    provider.transport = wrong_return
+    with pytest.raises(MarketDataError, match="independent split target or return disagrees"):
+        provider.fetch("SLXN", day, 3.23)
+
+
 def test_split_history_rebases_to_adjusted_previous_without_volume_marker_or_double_factor():
     day = date(2026, 11, 6)
     notice_url = "https://www.nasdaqtrader.com/TraderNews.aspx?id=ECA2026-793"

@@ -1638,14 +1638,32 @@ class NasdaqOfficialCloseProvider:
             raise MarketDataError(f"{self.name}:{symbol}: vendor split-date target differs from exchange close")
         independent_history = normalization.get("independent_adjusted_history_basis")
         if independent_history:
+            previous_digits = int(independent_history["previous_display_decimal_places"])
             target_digits = int(independent_history["target_display_decimal_places"])
             reported = str(independent_history.get("reported_change_raw") or "")
             official_change = (target_close / previous_close - 1.0) * 100.0
+            displayed_previous = float(independent_history["previous_split_normalized_close"])
+            displayed_target = float(independent_history["target_regular_close"])
+            previous_half_unit = 0.5 * 10 ** -previous_digits
+            target_half_unit = 0.5 * 10 ** -target_digits
+            if displayed_previous <= previous_half_unit or displayed_target <= target_half_unit:
+                raise MarketDataError(f"{self.name}:{symbol}: independent split display precision is invalid")
+            # A publisher's printed closes bound the return of its underlying
+            # prices. Compare the reported return with that derived interval,
+            # rather than an arbitrary fixed tolerance on rounded closes.
+            return_interval = [
+                ((displayed_target - target_half_unit) / (displayed_previous + previous_half_unit) - 1) * 100,
+                ((displayed_target + target_half_unit) / (displayed_previous - previous_half_unit) - 1) * 100,
+            ]
             if (not close_matches(float(independent_history["target_regular_close"]),
                                   round_market_display(target_close, target_digits))
+                    or not close_matches(displayed_previous,
+                                         round_market_display(previous_close, previous_digits))
                     or not re.fullmatch(r"[+-]?\d+(?:\.\d+)?%", reported)
-                    or abs(float(reported[:-1]) - official_change) > 0.01):
+                    or not return_interval[0] <= float(reported[:-1]) <= return_interval[1]
+                    or not return_interval[0] <= official_change <= return_interval[1]):
                 raise MarketDataError(f"{self.name}:{symbol}: independent split target or return disagrees")
+            normalization["independent_reported_return_display_interval_pct"] = return_interval
         return {
             "provider": self.name, "provider_family": self.family,
             "target_close_verified": True, "target_timestamp": target_stamp,
