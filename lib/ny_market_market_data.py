@@ -2559,6 +2559,54 @@ def resolve_discrepancy(
                 "comparison_basis": "dated_regular_close_with_independent_reported_return",
             }
 
+    # The full-universe Yahoo Spark feed and its daily chart can both print
+    # only cents. Keep the exchange's precise regular-close pair when a dated
+    # independent publisher prints the same rounded pair and independently
+    # reports the return calculated from the precise pair.
+    quote_source = str(candidate.get("quote_source_identifier") or "")
+    quote_parts = urlsplit(quote_source)
+    if (reason in {None, "official_closed_eod_with_secondary_boundary_difference"}
+            and action_status == "checked_none" and not official_supports
+            and official.get("target_close_verified") is True
+            and official.get("info_historical_conflict") is None
+            and not official.get("nls_previous_mismatch")
+            and quote_parts.hostname in {"query1.finance.yahoo.com", "query2.finance.yahoo.com"}
+            and quote_parts.path == "/v7/finance/spark"
+            and close_matches(screener_last, round_market_display(official_target, 2))
+            and close_matches(historical_previous_close, round_market_display(official_previous, 2))
+            and close_matches(historical_target_close, round_market_display(official_target, 2))
+            and abs(screener_change - historical_change_pct) <= tolerance_pct):
+        dated_pair = [source for source in independent_support if (
+            source.get("session") == "regular_close"
+            and source.get("target_session_date") == official.get("target_session_date")
+            and source.get("price_basis") == "regular_close_normalized_for_split"
+            and int(source.get("display_decimal_places", 0)) == 2
+            and source.get("previous_close") is not None
+            and source.get("target_close") is not None
+            and close_matches(float(source["previous_close"]), round_market_display(official_previous, 2))
+            and close_matches(float(source["target_close"]), round_market_display(official_target, 2))
+            and re.fullmatch(r"[+-]?\d+(?:\.\d+)?%", str(source.get("reported_change_raw") or ""))
+            and abs(float(str(source["reported_change_raw"]).rstrip("%")) - official_change) <= 0.01
+        )]
+        if dated_pair:
+            prior_classification = reason
+            reason = "dated_official_regular_pair_over_rounded_discovery"
+            official_supports = True
+            canonical_primary_pair = (official_previous, official_target)
+            basis_evidence = {
+                **basis_evidence,
+                "official_previous_close": official_previous,
+                "official_target_close": official_target,
+                "rounded_discovery_close": screener_last,
+                "rounded_discovery_change_pct": screener_change,
+                "rounded_vendor_daily_previous_close": historical_previous_close,
+                "rounded_vendor_daily_target_close": historical_target_close,
+                "discovery_source_identifier": quote_source,
+                "independent_dated_regular_pair": dated_pair,
+                "previous_discrepancy_classification": prior_classification,
+                "comparison_basis": "dated_official_regular_close_over_cent_rounded_discovery",
+            }
+
     if (not official_supports or not action_checked or not independent_support or reason is None
             or (official.get("nls_previous_mismatch") and reason != "movers_quote_differs_from_verified_regular_close")):
         problems = []
@@ -3498,6 +3546,7 @@ def rank_top20(
                         "official_regular_pair_over_vendor_previous_rounding",
                         "dated_exchange_history_over_conflicting_info_quote",
                         "dated_exchange_history_over_vendor_previous_rounding",
+                        "dated_official_regular_pair_over_rounded_discovery",
                     } or (discrepancy.get("discrepancy_reason") == "non_nasdaq_primary_exchange_eod"
                           and "canonical_target_close" in discrepancy):
                         canonical_target = float(discrepancy.get("canonical_target_close", discrepancy["official_target_close"]))
