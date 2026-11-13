@@ -60,3 +60,14 @@ def test_failure_is_recorded_without_exception_secret(monkeypatch,tmp_path):
     assert 'secret-token' not in raw
     assert len(list((args.output_dir/'history').glob('*.json')))==1
     assert '異常を検出' in (args.output_dir/'index.html').read_text(encoding='utf8')
+
+def test_native_editor_crlf_does_not_report_prompt_drift(monkeypatch,tmp_path):
+    runtime=tmp_path/'runtime'; (runtime/'config').mkdir(parents=True)
+    (runtime/'config/ny_market_daily_scheduled_prompt.txt').write_text('first\nsecond\n',encoding='utf8')
+    config=tmp_path/'automation.toml'
+    config.write_text('prompt = '+json.dumps('first\r\nsecond')+'\n',encoding='utf8')
+    monkeypatch.setattr('tools.check_ny_market_delivery.audit',lambda *a,**k:{'ok':True,'checks':{'status':True}})
+    args=SimpleNamespace(automation_config=config,runtime=runtime,production_root=tmp_path,
+        db=tmp_path/'db',deadline='07:45',output_dir=tmp_path/'status')
+    r=run(args,now=datetime(2026,11,13,8,tzinfo=JST),fetch=lambda *a:{'status':'ready','complete_readback_verified':True})
+    assert r['status']=='healthy'

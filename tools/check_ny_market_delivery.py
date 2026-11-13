@@ -85,7 +85,8 @@ def run(args, *, now=None, fetch=preflight) -> dict:
                            expected_project="acce2aa5-a39b-48e1-8487-ac0e68e8f29c")
         config = tomllib.loads(args.automation_config.read_text(encoding="utf-8"))
         expected_prompt = (args.runtime / "config/ny_market_daily_scheduled_prompt.txt").read_text(encoding="utf-8").strip()
-        automation["checks"]["prompt_matches_deployed_source"] = config.get("prompt", "").strip() == expected_prompt
+        # The native automation editor may preserve CRLF inside its TOML string.
+        automation["checks"]["prompt_matches_deployed_source"] = config.get("prompt", "").replace("\r\n", "\n").strip() == expected_prompt
         automation["ok"] = all(automation["checks"].values())
     except Exception as exc:
         automation = {"ok": False, "error_type": type(exc).__name__}

@@ -6,10 +6,12 @@ param(
     [string]$AutomationConfig = 'C:\Users\takuy\.codex\automations\ny\automation.toml',
     [string]$OutputDir = 'C:\Users\takuy\tdnet-production\state\data\ny_market_health',
     [string]$TaskName = 'NYMarketDeliveryHealth',
+    [ValidateSet('S4U','Interactive')][string]$LogonType = 'S4U',
     [string]$BackupPath,
     [switch]$Apply
 )
 $ErrorActionPreference = 'Stop'
+if ((Get-TimeZone).Id -ne 'Tokyo Standard Time') { throw 'Task schedule requires Tokyo Standard Time' }
 $script = Join-Path $Runtime 'tools\check_ny_market_delivery.py'
 foreach ($path in @($Python,$script,$AutomationConfig,(Join-Path $State 'decision_db.db'))) {
     if (-not (Test-Path -LiteralPath $path)) { throw "Missing required path: $path" }
@@ -22,7 +24,7 @@ if ($old -and $old.Description -ne 'NY report read-only delivery watchdog; no AI
     throw 'Refusing to replace an unrelated task'
 }
 if (-not $Apply) {
-    [pscustomobject]@{TaskName=$TaskName;User=$user;LogonType='S4U';RunLevel='Limited';TimesJST='07:45,12:45,17:45,22:45 + boot';Execute=$Python;Arguments=$arguments;PaidGenerationCalls=0} | ConvertTo-Json
+    [pscustomobject]@{TaskName=$TaskName;User=$user;LogonType=$LogonType;RunLevel='Limited';TimesJST='07:45,12:45,17:45,22:45 + boot';Execute=$Python;Arguments=$arguments;PaidGenerationCalls=0} | ConvertTo-Json
     exit 0
 }
 if ($old) {
@@ -33,5 +35,5 @@ $action = New-ScheduledTaskAction -Execute $Python -Argument $arguments -Working
 $triggers = @('07:45','12:45','17:45','22:45') | ForEach-Object { New-ScheduledTaskTrigger -Daily -At $_ }
 $triggers += New-ScheduledTaskTrigger -AtStartup
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 10) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-$principal = New-ScheduledTaskPrincipal -UserId $user -LogonType S4U -RunLevel Limited
+$principal = New-ScheduledTaskPrincipal -UserId $user -LogonType $LogonType -RunLevel Limited
 Register-ScheduledTask -TaskName $TaskName -Description 'NY report read-only delivery watchdog; no AI generation' -Action $action -Trigger $triggers -Settings $settings -Principal $principal -Force | Select-Object TaskName,State
