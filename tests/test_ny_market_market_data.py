@@ -340,6 +340,46 @@ def test_regular_universe_audits_first_trading_session_without_inventing_prior_c
         provider._verify_missing("SCQC", "SPACCircle Acquisition Corp. Class A Ordinary Shares", target)
 
 
+def test_regular_universe_vendor_error_requires_explicit_dated_no_trade_row():
+    target = date(2026, 11, 13)
+    prior_stamp = int(datetime(2026, 11, 12, 21, 0, tzinfo=timezone.utc).timestamp())
+    target_stamp = int(datetime(2026, 11, 13, 21, 0, tzinfo=timezone.utc).timestamp())
+    info = b'{"data":null,"status":{"rCode":200,"bCodeMessage":[{"code":3004,"errorMessage":"Error while calling vendor"}]}}'
+    chart = json.dumps({"chart": {"result": [{"meta": {
+        "symbol": "EMIS", "longName": "Emmis Acquisition Corp.",
+        "exchangeTimezoneName": "America/New_York", "dataGranularity": "1d",
+    }, "timestamp": [prior_stamp, target_stamp], "indicators": {"quote": [{
+        "close": [10.33, None], "volume": [186, None],
+    }]}}], "error": None}}).encode()
+    history = json.dumps({"data": {"symbol": "EMIS", "tradesTable": {"rows": [
+        {"date": "11/13/2026", "close": "$10.33", "volume": "N/A"},
+        {"date": "11/12/2026", "close": "$10.33", "volume": "186"},
+    ]}}, "status": {"rCode": 200}}).encode()
+
+    def transport(url, _headers):
+        return info if "/info?" in url else history if "/historical?" in url else chart
+
+    result, evidence = NasdaqYahooRegularUniverseProvider(transport=transport)._verify_missing(
+        "EMIS", "Emmis Acquisition Corp.", target)
+    assert result is None
+    assert evidence["disposition"] == "vendor_error_official_dated_no_trade"
+    assert evidence["official_no_trade_target_session_date"] == target.isoformat()
+    assert evidence["official_no_trade_raw_response_sha256"] == hashlib.sha256(history).hexdigest()
+    assert evidence["chart_raw_response_sha256"] == hashlib.sha256(chart).hexdigest()
+
+    missing_target = history.replace(b'"11/13/2026"', b'"11/11/2026"')
+    provider = NasdaqYahooRegularUniverseProvider(
+        transport=lambda url, headers: missing_target if "/historical?" in url else transport(url, headers))
+    with pytest.raises(MarketDataError, match="dated no-trade row missing"):
+        provider._verify_missing("EMIS", "Emmis Acquisition Corp.", target)
+
+    traded_target = history.replace(b'"volume": "N/A"', b'"volume": "18"')
+    provider = NasdaqYahooRegularUniverseProvider(
+        transport=lambda url, headers: traded_target if "/historical?" in url else transport(url, headers))
+    with pytest.raises(MarketDataError, match="no-trade evidence conflicts"):
+        provider._verify_missing("EMIS", "Emmis Acquisition Corp.", target)
+
+
 def test_dated_exchange_history_replaces_conflicting_info_quote_only_with_support():
     target = date(2026, 11, 5)
     candidate = {

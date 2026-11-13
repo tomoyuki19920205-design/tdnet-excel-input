@@ -940,7 +940,69 @@ class NasdaqYahooRegularUniverseProvider:
         payload = _raw_json(raw, self.name)
         if payload.get("status", {}).get("rCode") != 200:
             raise MarketDataError(f"regular-universe {symbol}: official quote unavailable")
-        data = payload.get("data") or {}
+        data = payload.get("data")
+        if data is None:
+            vendor_codes = {str(item.get("code")) for item in
+                            (payload.get("status", {}).get("bCodeMessage") or [])
+                            if isinstance(item, dict)}
+            if "3004" not in vendor_codes or symbol in self.corporate_action_notices:
+                raise MarketDataError(f"regular-universe {symbol}: official quote data unavailable")
+            # A successful HTTP/rCode response can still contain a vendor error.
+            # Only an explicit dated no-trade row may resolve that gap; absence
+            # from a history response can merely mean the new session is late.
+            chart = YahooChartProvider(transport=self.transport, now=self.now,
+                                       expected_names={symbol: name})
+            series = chart.fetch(symbol, target - timedelta(days=10), target)
+            target_bar = next((bar for bar in series.bars if bar.session_date == target), None)
+            history_url = (f"https://api.nasdaq.com/api/quote/{quote(symbol, safe='')}/historical?"
+                           + urlencode({"assetclass": "stocks", "fromdate": (target - timedelta(days=10)).isoformat(),
+                                        "todate": (target + timedelta(days=1)).isoformat(), "limit": 5000}))
+            history_raw = self.transport(history_url, {"User-Agent": "Mozilla/5.0", "Accept": "application/json",
+                                                       "Origin": "https://www.nasdaq.com"})
+            history = _raw_json(history_raw, self.name)
+            history_data = history.get("data") or {}
+            rows = (history_data.get("tradesTable") or {}).get("rows")
+            if (history.get("status", {}).get("rCode") != 200
+                    or history_data.get("symbol") != symbol or not isinstance(rows, list)):
+                raise MarketDataError(f"regular-universe {symbol}: dated no-trade history unavailable after vendor error")
+            by_day = {}
+            for row in rows:
+                try:
+                    day = datetime.strptime(str(row.get("date")), "%m/%d/%Y").date()
+                except (TypeError, ValueError):
+                    continue
+                if day in by_day:
+                    raise MarketDataError(f"regular-universe {symbol}: duplicate dated history after vendor error")
+                by_day[day] = row
+            current_row = by_day.get(target)
+            previous_days = [day for day in by_day if day < target]
+            if not current_row or not previous_days:
+                raise MarketDataError(f"regular-universe {symbol}: dated no-trade row missing after vendor error")
+            previous_day = max(previous_days)
+            official_target = _numeric(current_row.get("close"), "official no-trade close")
+            official_previous = _numeric(by_day[previous_day].get("close"), "official prior close")
+            last_vendor = max((bar for bar in series.bars if bar.session_date < target),
+                              key=lambda bar: bar.session_date, default=None)
+            if (str(current_row.get("volume", "")).strip().upper() not in {"N/A", "0"}
+                    or not close_matches(official_target, official_previous)
+                    or last_vendor is None or last_vendor.session_date != previous_day
+                    or not close_matches(last_vendor.regular_close, official_previous)
+                    or (target_bar is not None and
+                        (target_bar.volume != 0 or not close_matches(target_bar.regular_close, official_target)))):
+                raise MarketDataError(f"regular-universe {symbol}: vendor error no-trade evidence conflicts")
+            return None, {"symbol": symbol, "disposition": "vendor_error_official_dated_no_trade",
+                          "official_vendor_error_code": 3004,
+                          "official_source_identifier": url,
+                          "official_raw_response_sha256": hashlib.sha256(raw).hexdigest(),
+                          "official_no_trade_source_identifier": history_url,
+                          "official_no_trade_raw_response_sha256": hashlib.sha256(history_raw).hexdigest(),
+                          "chart_source_identifier": series.source_identifier,
+                          "chart_raw_response_sha256": series.raw_response_sha256,
+                          "official_no_trade_target_session_date": target.isoformat(),
+                          "official_no_trade_previous_session_date": previous_day.isoformat(),
+                          "official_no_trade_close": official_target,
+                          "official_no_trade_volume": current_row.get("volume")}
+        data = data or {}
         if str(data.get("symbol") or "").upper() != symbol:
             raise MarketDataError(f"regular-universe {symbol}: official response symbol mismatch")
         secondary = data.get("secondaryData") or {}

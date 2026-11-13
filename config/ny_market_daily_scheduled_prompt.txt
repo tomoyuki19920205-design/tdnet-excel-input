@@ -120,7 +120,7 @@ payloadは従来field全てに加え `quality_contract_version, report_display_c
 
 validation成功後だけ `python C:/Users/takuy/tdnet-ny-market-runtime/tools/write_ny_market_payload.py <整形済みpayload.json> --market-data-packet <一時packet.json> --inbox "C:/Users/takuy/tdnet-production/state/data/ny_market_inbox"` を1回実行する。helperは検証済みpayloadをfsync済みtempから `data/news_inbox/*.json` へatomic renameする。inboxへ直接partial JSONを書かない。同日成功rowが既にある場合は通常再実行しない。その直後に `python C:/Users/takuy/tdnet-ny-market-runtime/tools/write_ny_market_payload.py <整形済みpayload.json> --market-data-packet <一時packet.json> --validate-only --emit-report` を実行し、標準出力の非空本文と `report_delivery.sha256` の一致を確認する。
 
-保存に失敗しても、検証済み `report_markdown` のレポート全文があれば必ずユーザー最終回答に出し、保存失敗の工程・短い理由を明記する。成功時はemitした本文をそのまま掲載し、本文を運用説明だけに置き換えない。本文とは分けて実行結果（実開始・生成・公開確認時刻、品質、各工程、完成率・未完了項目、追加API費用）を末尾へ付記する。正常配信済みで再生成しない実行は、既存本文への参照と配信確認結果を報告する。
+Company Viewer保存に失敗しても、検証済み `report_markdown` の完成レポート全文があれば必ずユーザー最終回答に出し、保存失敗の工程・短い理由を明記する。成功時はemitした本文をそのまま掲載し、本文を運用説明だけに置き換えない。本文とは分けて実行結果（実開始・生成・公開確認時刻、品質、各工程、完成率・未完了項目、追加API費用）を末尾へ付記する。正常配信済みで再生成しない実行は、既存本文への参照と配信確認結果を報告する。
 
 Scheduled Task自身を停止、無効化、削除、完了扱いにする操作は禁止。Company News Task01〜08、CompanyNewsInboxWorker、SectorWeeklySchedulerのschedule/prompt/assignment/queueを変更しない。
 
