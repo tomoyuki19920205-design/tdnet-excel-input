@@ -32,6 +32,7 @@ from lib.ny_market_display import (
 SCHEMA_VERSION = "ny_market_daily_v1"
 REPORT_TYPE = "ny_market_daily"
 MARKET_STATUSES = frozenset({"open", "holiday_or_weekend"})
+QUALITY_RANK = {'provisional': 0, 'published': 1, 'complete': 2}
 JSON_FIELDS = (
     "summary_bullets", "index_moves", "sector_moves", "notable_gainers",
     "notable_losers", "top_gainers_20", "earnings", "after_hours_earnings",
@@ -778,6 +779,9 @@ def validate_payload(payload: Any) -> ValidatedNYMarketReport:
         raise NYMarketValidationError("unsupported NY market report schema")
     if payload.get("quality_status") == "provisional":
         return _validate_provisional_payload(payload)
+    if payload.get("quality_status") == "published":
+        from lib.ny_market_published import validate_published
+        return validate_published(payload)
     if payload.get("quality_status", "complete") != "complete" or payload.get("unresolved_items") not in (None, []):
         raise NYMarketValidationError("complete report cannot contain unresolved items")
 
@@ -967,7 +971,7 @@ def mark_run(
     error: Exception | None = None,
     increment: bool = False,
 ) -> None:
-    if status not in {"pending", "running", "provisional", "success", "failed", "retry_pending"}:
+    if status not in {"pending", "running", "provisional", "published", "success", "failed", "retry_pending"}:
         raise ValueError("invalid NY market run status")
     now = _now()
     with conn:
@@ -980,7 +984,7 @@ def mark_run(
             "completed_at=excluded.completed_at,error_type=excluded.error_type,error_message=excluded.error_message,updated_at=excluded.updated_at",
             (
                 run["run_id"], run["stable_key"], run["report_date_jst"], status, 1 if increment else 0,
-                now if status == "running" else None, now if status in {"provisional", "success", "failed"} else None,
+                now if status == "running" else None, now if status in {"provisional", "published", "success", "failed"} else None,
                 type(error).__name__ if error else None, str(error)[:2000] if error else None, now, now,
                 1 if increment else 0,
             ),
@@ -999,7 +1003,8 @@ def upsert_report(conn: sqlite3.Connection, validated: ValidatedNYMarketReport) 
             f"INSERT INTO canonical_ny_market_reports ({','.join(columns)}) "
             f"VALUES ({','.join('?' for _ in columns)}) ON CONFLICT(stable_key) DO UPDATE SET {updates} "
             "WHERE excluded.generated_at >= canonical_ny_market_reports.generated_at "
-            "AND (canonical_ny_market_reports.quality_status = 'provisional' OR excluded.quality_status = 'complete')",
+            "AND (CASE excluded.quality_status WHEN 'complete' THEN 2 WHEN 'published' THEN 1 ELSE 0 END) "
+            ">= (CASE canonical_ny_market_reports.quality_status WHEN 'complete' THEN 2 WHEN 'published' THEN 1 ELSE 0 END)",
             [report[name] for name in report] + [now, now],
         )
 

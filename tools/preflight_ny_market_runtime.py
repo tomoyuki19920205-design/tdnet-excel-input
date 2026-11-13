@@ -119,6 +119,14 @@ def preflight(production_root: Path, db_path: Path, stable_key: str) -> dict[str
     return {
         "status": "ready",
         "complete_readback_verified": complete_readback_verified,
+        "published_readback_verified": complete_readback_verified or (
+            len(remote_report) == len(remote_runs) == len(remote_viewer) == 1
+            and sqlite['report_count'] == sqlite['run_count'] == 1
+            and sqlite['quality_status'] == remote_report[0].get('quality_status') == remote_viewer[0].get('quality_status') == 'published'
+            and sqlite['run_status'] == remote_runs[0].get('status') == 'published'
+            and bool(str(remote_report[0].get('report_markdown') or '').strip())
+            and remote_hash == viewer_hash == sqlite['markdown_sha256']
+        ),
         "environment": environment.safe_metadata(),
         "sqlite": sqlite,
         "supabase": {

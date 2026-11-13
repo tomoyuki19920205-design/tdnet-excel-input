@@ -1,7 +1,18 @@
 毎日、NY市場モーニングレポートを日本語で完成させ、同じ `report_markdown` をユーザー最終回答とCompany Viewer保存の唯一の本文入力にしてください。市場休場日、土日、米国祝日も必ず実行し、スキップ・調査のみ・通知なしで終了してはいけません。
 
 
-## 期限内公開と候補判定（2026-11-13改定）
+## 3段階公開（2026-11-13通常版復旧改定・最優先）
+
+最優先の成果は、朝に市場分析として利用できる実レポートをCompany Viewerへ配信すること。追加の有料OpenAI API呼出しは0件・0ドル。既存のChatGPTログインで調査・執筆し、API残高を前提にしない。
+
+- provisional：主要市場数値が未確定、または主要セクションがまだ不足する暫定版。published：5指数・11業種・Top20の検証済み数値、話題の上昇10社・下落10社、主要ニュース10件、決算・時間外決算、商品市況、十分な市場分析と出典が揃った通常公開版。complete：従来の全品質契約を満たす完全版。通常版を完全版と表示しない。
+- この節より下の「完全版・完成・全部PASSまで停止・全社second pass・予想比較・発表後株価・全候補の採否」の厳格条件はcomplete昇格条件として維持する。個別の未確認材料・取得不能価格・保留候補が残るだけでpublishedを止めない。主要数値・対象営業日・出典整合が未確定ならprovisionalを維持する。
+- 最初に config/ny_market_published_contract.txt を読む。既存packet・progress・verified_updates・raw/textを再利用し、主要セクション不足に限定して調べる。07:30に新規候補探索を停止、07:40までに通常版の生成・保存・読戻しを優先する。遅延起動は開始30分以内を目標とし、調査を無限に広げない。
+- 通常版draftはpublication_sourcesとsection_statusで根拠・時刻・不足理由を持ち、tools/build_ny_market_published_payload.py <draft> --output <新規payload版> で描画・検証する。旧完全版rendererへ渡さない。文言を変えてvalidatorを回避せず、未確認をverified/excludedへ書き換えない。説明用の取得不能理由と、事実に基づく十分な分析を残す。
+- 同じ既存write_ny_market_payload.py・NY専用inbox workerで保存する。preflightのpublished_readback_verified=trueを通常配信成功の条件とする。complete_readback_verifiedは完全版専用。publishedのrunはpublished。qualityはprovisional→published→completeへ進み、通常版を後続の暫定版で降格させない。
+- 07:40時点で数値未確定なら確認済み情報のprovisionalを先に配信し、残件を継続。通常版を配信できた場合も完全版の不足項目を保存し、12/17/22時に残件だけ補完する。翌日07:00は新しい対象日を優先する。日付ごとの情報cutoffを守り、日中の新情報を朝の報告や過去日へ混入させない。
+
+## 期限内公開と候補判定
 
 この節を候補の保留・全件完了・暫定版再公開に関する旧運用より優先する。完全版の事実・数値・各本文セクションの品質条件は維持する。
 
@@ -11,7 +22,7 @@
 4. 最初の公開期限は07:40 JST。遅延起動や12/17/22時の再開は開始後30分で一度保存・読戻しまで終える。調査に全時間を費やさず、期限10分前に新規探索を止め、確認済み情報を本文にする。5指数、11業種、Top20、話題の値上がり・値下がり、決算、ニュース、商品、分析を並行して編集し、1候補の失敗で全セクションを止めない。
 5. 完全版ではafter_hours_candidate_review.contract_version=ny_market_after_hours_v3を使う。全候補を残し、importance_rank、priority、status、reason_code、reason、決定済み候補のdecision_evidence、countsを記録する。pendingがあればcoverage_status=incompleteとし、quiet_dayと呼ばない。重要候補のpendingが0で、他の完全版条件がすべてPASSした場合だけcompleteにできる。normal優先度のpendingが残る場合も件数・範囲を本文で明示する。lib.ny_market_deadline.notice(counts)の確認状況文をreport_markdownに含める。
 6. 重要候補または本文セクションが未確認なら、確認済みニュースを `verified_updates` に保存する。各記事はid/title/section/summaryとevidence配列を持ち、evidenceにはurl/published_at/path/sha256/text_path/text_sha256/quote/publisherを付ける。原本と抽出textのhash、原文内のquote、cutoff以前の公開日を検証する。summaryは引用資料の確認済み事実だけから日本語で作る。`tools/build_ny_market_deadline_payload.py --packet <既存packet> --report-date-jst <日付> --market-status <状態> --progress <progress> --verified-updates <記事JSON> --unresolved <未確認項目JSON> --output <新しいpayload版>` で本文を構築する。quality_status=provisionalと「完全版ではない」表示を維持し、重要未確認候補名を残す。全件未確認でも確認済み市場情報は公開できるが、ニュース0件を復旧成功と報告しない。
-7. 完全版・期限版とも既存write_ny_market_payload.py、専用NY worker、Production/NEWS配信ビュー読戻しを通す。期限版のrunはprovisional、完全版のみsuccess。本文hashが変わらない再実行はskip。日付をまたぐbackfillは、対象日の朝07:45 JSTまでに公開された資料・対象営業日の価格だけを採用し、最新情報を流用しない。
+7. 通常版・完全版・期限版とも既存write_ny_market_payload.py、専用NY worker、Production/NEWS配信ビュー読戻しを通す。runは通常版published、期限版provisional、完全版success。本文hashが変わらない再実行はskip。日付をまたぐbackfillは、対象日の朝07:45 JSTまでに公開された資料・対象営業日の価格だけを採用し、最新情報を流用しない。
 8. 確認済みの結果は次回も使い、残件だけ再開する。日中の再開で当日を改善後、過去日を古い順に1日ずつ処理する。費用を伴う別APIの起動、自分を呼び続ける無限ループ、定期タスクの無効化をしない。
 
 ## 絶対条件

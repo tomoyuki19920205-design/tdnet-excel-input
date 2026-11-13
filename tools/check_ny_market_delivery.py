@@ -28,7 +28,7 @@ def assess(snapshot: dict, automation: dict, *, now: datetime, deadline: time) -
         reasons.append("automation_configuration_drift")
     if snapshot.get("status") != "ready":
         reasons.append("production_readback_unavailable")
-    elif not snapshot.get("complete_readback_verified"):
+    elif not (snapshot.get("published_readback_verified") or snapshot.get("complete_readback_verified")):
         reasons.append("complete_report_missing" if overdue else "awaiting_complete_report")
     status = "healthy" if not reasons else ("pending" if reasons == ["awaiting_complete_report"] else "failed")
     return {
@@ -61,11 +61,11 @@ def atomic_text(path: Path, value: str) -> None:
 def render_html(record: dict) -> str:
     safe = html.escape
     remote = record["delivery"].get("supabase", {})
-    labels = {"healthy": "完全版・保存一致", "pending": "完全版生成待ち", "failed": "異常を検出"}
+    labels = {"healthy": "公開版・保存一致（"+str(remote.get('quality_status',''))+"）", "pending": "通常公開版の生成待ち", "failed": "異常を検出"}
     reasons = {"automation_configuration_drift": "定期タスクが無効、または登録設定に変更があります。",
                "production_readback_unavailable": "本番APIまたはDBを読み戻せませんでした。",
-               "complete_report_missing": "所定時刻を過ぎても完全版と保存先の一致を確認できません。",
-               "awaiting_complete_report": "判定時刻まで完全版を待っています。"}
+               "complete_report_missing": "所定時刻を過ぎても通常公開版以上と保存先の一致を確認できません。",
+               "awaiting_complete_report": "判定時刻まで通常公開版以上を待っています。"}
     body = "".join(f"<li>{safe(reasons.get(r, r))}</li>" for r in record["reasons"])
     return f'''<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>NYレポート配信監視</title><style>body{{font:17px system-ui;margin:3rem auto;padding:1rem;max-width:850px;background:#f6f8fc;color:#182238}}main{{background:white;border-radius:14px;padding:2rem}}h1{{font-size:1.5rem}}strong{{color:{'#18703b' if record['status']=='healthy' else '#a53b20'}}}dt{{margin-top:1rem;font-weight:600}}dd{{margin-left:0}}code{{overflow-wrap:anywhere}}</style><main>

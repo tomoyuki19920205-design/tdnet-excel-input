@@ -1,0 +1,42 @@
+NY通常公開版の作り方
+
+目的：個別調査の未完了で全体を止めず、十分な情報量を持つ市場分析を朝に配信する。完全版の既存validatorは変更しない。
+
+必須
+・identity/schema/stable_key/対象NY営業日/生成時刻/朝の情報cutoff。
+・ny_market_data_v2の検証済みcanonical_market_dataと全projections。5指数、11業種、Top20の値・順位・出典・不一致の裁定を手編集しない。
+・5～8要点、上昇10社（Top20先頭10社・確認した事業説明）、上昇20社、下落10社、主要ニュース10件（同一事件最大2）、主要決算・時間外決算、商品2種類以上、市場分析3観点以上・合計600文字以上。
+・全項目の出典と時刻、事実と分析の区別、396等の候補数に依存しないprogress counts。未確認を除外にしない。
+・指数・業種・市場分析のsection_statusはcomplete。市場数値未確認では通常版にしない。
+
+補完可能（不足と理由を明記すれば通常版を止めない）
+・個別銘柄の当日材料・一部会社のissuer-total時価総額。
+・決算の市場予想値、予想超過率、発表後価格・同一基準の時間外反応。
+・金の清算値など個別価格。ただし2種類以上の商品市況の出典付き実数値は必要。金利・為替が未確認なら項目を削除せず理由を明示。
+・重要候補の最終採否。本文で重要未確認候補名・不足項目を明示し、publishedとcompleteを明確に分ける。
+
+追加調査
+・低重要度pending候補の全件確認、Top20の第2検索、補足IR/質疑、完全版向け詳細分析と表示契約。今回の朝の配信後に保存済み結果から進める。
+
+draft JSON：lib/ny_market_published.py が唯一の通常版契約。
+旧期限版payloadを土台にする場合でも、空の主要セクションは必ず執筆して埋める。公開例は2026-11-13のpublished payload。例の数値・時刻・日付・文章を翌日へコピーしない。
+publication_contract_version=ny_market_published_v1、quality_status=published、headlineの先頭=【通常公開版】。
+review_progress：prepare_ny_market_review.pyが生成したcontract/candidates/counts/as_of_utc。
+publication_sources配列：id,publisher,url,available_at,path,sha256,text_path,text_sha256,quote,time_note。
+・available_atはその情報が公知となっていた時刻。SEC受理・IR公表・保存時刻のどれかをtime_noteで区別。回収時刻を公表時刻として捏造しない。
+・rawと抽出textを保存し、quoteは原文内の短い一節。HTTP403をHTML本文と偽らない。Web表示結果を保存した場合はそう明記。
+section_status：indexes,sectors,gainers,top20,losers,earnings,after_hours,news,commodities,analysisの10キー。値はstatus（complete/partial/unavailable）,note,as_of_utc（progressと同じ）。
+index_moves/sector_moves：validate_market_packetの返すprojections。
+top_gainers_20：canonical20行の全フィールドを維持し、company_description,catalyst,material_status（verified/unconfirmed/unavailable）,source_idsを付加。notable_gainers=先頭10行。
+notable_losers：ticker,company_name,close,previous_close,change_pct,session_date,price_basis=regular_close,catalyst,source_ids,price_source_id,evidence_basis。
+・価格はアーカイブしたYahoo chart rawと照合。evidence_basis=cached_chart_meta（同日通常終値のmeta、chartPreviousClose）またはdaily_unadjusted_close（対象日・前営業日の非調整日足）。分足の16時値を終値に流用しない。遅延・企業行動等の疑義があれば一次市場データと照合し未確認値で埋めない。
+earnings/after_hours_earnings/major_news：title,summary（60文字以上の実質的内容）,source_ids。必要に応じmarket_impact,missing。major_newsにはevent_cluster。
+commodities：name,price,unit,change_pct,as_of_utc,basis,reason,source_ids。清算値/報道時点値/限月を区別。
+market_analysis：title,summary,source_ids。指数・業種・決算・商品等の確認済み事実をつなぎ、推論を分析として書く。
+unresolved_items：field,reasonの配列。完全版との差、重要未確認候補、取得不能理由を本文に残す。
+
+実行
+python tools/build_ny_market_published_payload.py <draft.json> --output <新規payload.json>
+python tools/write_ny_market_payload.py <payload.json> --market-data-packet <無変更packet.json> --inbox C:/Users/takuy/tdnet-production/state/data/ny_market_inbox
+既存NY専用workerを--onceで実行し、preflightのpublished_readback_verifiedと各本文hash一致を確認する。
+生成テストだけで成功としない。本番DB・API・NEWSまで実レポートが保存されて初めて通常配信成功とする。

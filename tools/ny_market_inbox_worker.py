@@ -15,7 +15,7 @@ from typing import Callable
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from lib.ny_market import connect_db, mark_run, stable_report_id, upsert_report, validate_payload
+from lib.ny_market import connect_db, mark_run, stable_report_id, upsert_report, validate_payload, QUALITY_RANK
 from tools.company_news_atomic import atomic_write_json
 from tools.sync_ny_market import sync
 
@@ -80,7 +80,7 @@ def _run_locked(paths: WorkerPaths, ny_sync_func: Callable | None) -> dict:
                     "SELECT quality_status, report_markdown FROM canonical_ny_market_reports WHERE stable_key=?", (key,),
                 ).fetchone()
                 if existing is not None and (existing["report_markdown"] == validated.report["report_markdown"]
-                                             or (existing["quality_status"] == "complete" and validated.report["quality_status"] == "provisional")):
+                                             or QUALITY_RANK[existing['quality_status']] > QUALITY_RANK[validated.report['quality_status']]):
                     _archive(path, paths.inbox / "processed" / "duplicates")
                     result["results"].append({"file": path.name, "status": "already_completed", "run_id": key})
                     continue
@@ -119,7 +119,7 @@ def _run_locked(paths: WorkerPaths, ny_sync_func: Callable | None) -> dict:
         try:
             conn = connect_db(paths.db)
             try:
-                mark_run(conn, run, "success" if entry["quality_status"] == "complete" else "provisional")
+                mark_run(conn, run, "success" if entry["quality_status"] == "complete" else entry['quality_status'])
             finally:
                 conn.close()
             if ny_sync_func is None:

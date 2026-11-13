@@ -358,7 +358,8 @@ def _validate_ticker(item: Any, index: int) -> dict[str, Any]:
     return result
 
 
-def validate_research_packet(payload: dict[str, Any]) -> ValidatedResearch:
+def validate_market_packet(payload: dict[str, Any]):
+    """Validate the unchanged numerical packet independently of editorial research."""
     if payload.get("quality_contract_version") != QUALITY_CONTRACT_VERSION:
         raise NYMarketResearchError(f"quality_contract_version must be {QUALITY_CONTRACT_VERSION}")
     snapshot = payload.get("canonical_market_data")
@@ -472,6 +473,13 @@ def validate_research_packet(payload: dict[str, Any]) -> ValidatedResearch:
     if discrepancy_count != actual_discrepancies:
         raise NYMarketResearchError("canonical_market_data.discrepancy_count does not match Top20")
 
+    return indexes, sectors, top, market_source_url
+
+
+def validate_research_packet(payload: dict[str, Any]) -> ValidatedResearch:
+    indexes, sectors, top, market_source_url = validate_market_packet(payload)
+    snapshot = payload['canonical_market_data']
+    packet_version = snapshot['market_data_contract_version']
     raw_tickers = payload.get("ticker_research")
     if not isinstance(raw_tickers, list):
         raise NYMarketResearchError("ticker_research must be an array")

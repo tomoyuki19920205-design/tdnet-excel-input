@@ -10,7 +10,7 @@ from typing import Iterable
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from lib.ny_market import connect_db, rows_for_sync
+from lib.ny_market import connect_db, rows_for_sync, QUALITY_RANK
 from lib.pipeline.db import (
     get_supabase_read_config,
     get_supabase_write_config,
@@ -119,8 +119,8 @@ def sync(
             if prior and key in local_by_key:
                 remote = prior[0]
                 local = local_by_key[key]
-                if remote.get("quality_status", "complete") == "complete" and local["quality_status"] == "provisional":
-                    raise RuntimeError(f"refusing provisional overwrite of complete NY report: {key}")
+                if QUALITY_RANK[remote.get('quality_status','complete')] > QUALITY_RANK[local['quality_status']]:
+                    raise RuntimeError(f"refusing provisional or lower quality overwrite of complete/published NY report: {key}")
     result: dict[str, int] = {}
     attempted: list[str] = []
     try:
