@@ -19,6 +19,11 @@ def prepare(candidates,decisions,as_of,previous=None):
         row=old.get(ticker,dict(ticker=ticker,importance_rank=i+1,priority='high' if i<10 else 'normal',
             status='pending',reason_code='awaiting_verification',reason='一次資料・発表時刻・価格反応等の確認が未完了。',
             discovery_routes=c.get('discovery_routes',[])))
+        # Preserve discovery provenance for the complete-review validator too.
+        routes=c.get('discovery_routes') or []
+        discovery=c.get('discovery_source_url') or next((u for u in routes if isinstance(u,str) and u.startswith(('http://','https://'))),None)
+        if discovery and not row.get('discovery_source_url'):
+            row={**row,'discovery_source_url':discovery}
         if ticker in updates:
             if old.get(ticker,{}).get('status') in {'included','excluded'} and updates[ticker].get('status')=='pending':
                 raise ValueError('resolved candidate cannot silently regress to pending')

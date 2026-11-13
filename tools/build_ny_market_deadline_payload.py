@@ -18,7 +18,8 @@ def build_deadline(packet,report_date,market_status,progress,updates,unresolved)
     validate_updates(updates,cutoff)
     payload=build(packet,report_date,market_status)
     payload.update(publication_contract_version=CONTRACT,review_progress=progress,
-                   verified_updates=updates,unresolved_items=unresolved)
+                   verified_updates=updates,
+                   unresolved_items=list(packet.get('unresolved_items') or [])+unresolved)
     if not unresolved:raise ValueError('deadline edition must disclose incomplete sections')
     payload['report_markdown']=render_provisional_markdown(payload)
     payload['report_delivery']={'source_field':'report_markdown','sha256':report_markdown_sha256(payload['report_markdown'])}

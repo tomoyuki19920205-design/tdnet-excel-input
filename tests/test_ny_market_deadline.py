@@ -43,13 +43,23 @@ def test_progress_counts_and_priority_cannot_be_forged():
 
 def test_resume_preserves_completed_decisions_and_unknown_candidates():
     raw=[{'ticker':f'T{i}'} for i in range(396)]
+    raw[0]['discovery_routes']=['https://example.org/calendar']
     initial=prepare(raw,[],'2026-09-01T22:45:00Z')
     decision={'ticker':'T0','status':'included','reason_code':'verified_earnings','reason':'一次資料で確認',
               'decision_evidence':[{'url':'https://example.org/release'}]}
     second=prepare(raw,[decision],'2026-09-01T22:45:00Z',initial)
     resumed=prepare(raw,[],'2026-09-01T22:45:00Z',second)
+    assert resumed['candidates'][0]['discovery_source_url']=='https://example.org/calendar'
     assert resumed['counts']==dict(discovered=396,confirmed=1,adopted=1,excluded=0,pending=395,important_pending=9)
     with pytest.raises(ValueError,match='discard'):prepare(raw[1:],[],'2026-09-01T22:45:00Z',resumed)
+
+
+def test_deadline_update_preserves_unresolved_market_evidence(tmp_path):
+    packet=_synthetic_packet()
+    packet['unresolved_items']=[{'field':'市場データ','reason':'価格根拠の照合未完了'}]
+    result=build_deadline(packet,date(2026,9,2),'open',progress(candidates()),[update(tmp_path)],
+                          [{'field':'企業調査','reason':'一次資料の確認未完了'}])
+    assert result['unresolved_items']==packet['unresolved_items']+[{'field':'企業調査','reason':'一次資料の確認未完了'}]
 
 def test_future_source_and_tampered_raw_are_rejected(tmp_path):
     u=update(tmp_path);u['evidence'][0]['published_at']='2026-09-03T00:00:00Z'
