@@ -434,7 +434,7 @@ def _validate_after_hours_contract(
             "after_hours_candidate_review.discovery_runs must cover every broad discovery scope"
         )
     coverage = review.get("coverage_status")
-    if coverage not in ({"normal", "quiet_day", "incomplete"} if finite_review else {"normal", "quiet_day"}):
+    if coverage not in {"normal", "quiet_day"}:
         raise NYMarketValidationError(
             "after_hours_candidate_review.coverage_status must be normal or quiet_day"
         )
@@ -444,10 +444,8 @@ def _validate_after_hours_contract(
         except ValueError as exc: raise NYMarketValidationError(str(exc)) from exc
         if review.get('counts')!=actual_counts:
             raise NYMarketValidationError('candidate review counts mismatch')
-        if actual_counts['important_pending']:
-            raise NYMarketValidationError('complete report cannot conceal important pending candidates')
         if actual_counts['pending']:
-            expected_coverage='incomplete'
+            raise NYMarketValidationError('complete report cannot contain pending after-hours candidates')
         if notice(actual_counts) not in payload.get('report_markdown',''):
             raise NYMarketValidationError('candidate review notice missing from report')
     if coverage != expected_coverage:
@@ -505,9 +503,6 @@ def _validate_after_hours_contract(
             source_urls.update((primary_source_url, price_source_url))
             included.append(ticker)
             included_records.append(candidate)
-        elif status == 'pending' and finite_review:
-            if candidate.get('reason_code') != 'awaiting_verification':
-                raise NYMarketValidationError('pending candidate cannot be treated as excluded')
         elif status == "excluded":
             if candidate.get("reason_code") not in {
                 "no_primary_source", "no_trusted_after_hours_price", "not_material",
