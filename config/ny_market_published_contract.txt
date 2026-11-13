@@ -8,11 +8,12 @@ NY通常公開版の作り方
 ・5～8要点、上昇10社（Top20先頭10社・確認した事業説明）、上昇20社、下落10社、主要ニュース10件（同一事件最大2）、主要決算・時間外決算、商品2種類以上、市場分析3観点以上・合計600文字以上。
 ・全項目の出典と時刻、事実と分析の区別、396等の候補数に依存しないprogress counts。未確認を除外にしない。
 ・指数・業種・市場分析のsection_statusはcomplete。市場数値未確認では通常版にしない。
+・2026-11-14以降、米国2年・10年・30年国債利回り、現物ドル指数DXY、USD/JPYの5項目を毎朝必須とする。国債の休場日は前回公表日と変化の比較日を明記する。DXY先物を現物指数に置き換えて表示しない。
 
 補完可能（不足と理由を明記すれば通常版を止めない）
 ・個別銘柄の当日材料・一部会社のissuer-total時価総額。
 ・決算の市場予想値、予想超過率、発表後価格・同一基準の時間外反応。
-・金の清算値など個別価格。ただし2種類以上の商品市況の出典付き実数値は必要。金利・為替が未確認なら項目を削除せず理由を明示。
+・金の清算値など個別価格。ただし2種類以上の商品市況の出典付き実数値は必要。必須の金利・為替5項目が未確認なら項目と理由を暫定版に残し、通常版を完成済みと扱わない。
 ・重要候補の最終採否。本文で重要未確認候補名・不足項目を明示し、publishedとcompleteを明確に分ける。
 
 追加調査
@@ -32,6 +33,10 @@ notable_losers：ticker,company_name,close,previous_close,change_pct,session_dat
 ・価格はアーカイブしたYahoo chart rawと照合。evidence_basis=cached_chart_meta（同日通常終値のmeta、chartPreviousClose）またはdaily_unadjusted_close（対象日・前営業日の非調整日足）。分足の16時値を終値に流用しない。遅延・企業行動等の疑義があれば一次市場データと照合し未確認値で埋めない。
 earnings/after_hours_earnings/major_news：title,summary（60文字以上の実質的内容）,source_ids。必要に応じmarket_impact,missing。major_newsにはevent_cluster。
 commodities：name,price,unit,change_pct,as_of_utc,basis,reason,source_ids。清算値/報道時点値/限月を区別。
+・金利・為替は同じcommodities配列へ追加する（商品2種類以上を残す）。symbol=US2Y/US10Y/US30Y/DXY/USDJPY、session_date、previous_value、previous_as_of_utcを持たせる。利回りはunit=%、instrument_type=treasury_par_yield、change_bp=(price-previous_value)*100。DXYはinstrument_type=cash_dollar_index、USDJPYはspot_fx。change_pctは全て(price/previous_value-1)*100。本文の利回り変化はbp表示。観測時刻と公表時刻を分け、価格・前回値を同じ出典に照合する。
+・市場休日などで観測日が対象NY営業日より前の場合は、observation_dateに実際の観測日、carry_forward_reasonに前回公表値を使う理由を記録し、basisにも日付と理由を明記する。対象日の新しい観測と偽らない。
+・重要な決算は市場予想・実績・会社ガイダンス・発表後株価の順で補完。GAAP/調整後、通貨、報告期間を合わせ、異なる会社管理指標をコンセンサスと比較しない。発表後価格は通常終値比、前営業日比と区別する。
+・全候補の詳細調査より主要企業・上昇Top20・下落10社を優先。各銘柄は一次資料と信頼できる報道を確認し、材料確認済み/背景のみ確認/原因未確認を別集計する。原因未確認を除外や確認済みに変えない。
 market_analysis：title,summary,source_ids。指数・業種・決算・商品等の確認済み事実をつなぎ、推論を分析として書く。
 unresolved_items：field,reasonの配列。完全版との差、重要未確認候補、取得不能理由を本文に残す。
 

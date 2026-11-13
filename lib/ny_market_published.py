@@ -54,7 +54,8 @@ def render(payload):
     heading('commodities')
     for r in payload['commodities']:
         value=f"{r['price']:,.4f}".rstrip('0').rstrip('.')
-        lines.extend(['',f"- {r['name']}：{value} {r['unit']}、{r['change_pct']:+.2f}%。基準：{r['as_of_utc']}、{r['basis']}。",r['reason'],links(r)])
+        change=f"{r['change_bp']:+.2f}bp" if 'change_bp' in r else f"{r['change_pct']:+.2f}%"
+        lines.extend(['',f"- {r['name']}：{value} {r['unit']}、{change}。基準：{r['as_of_utc']}、{r['basis']}。",r['reason'],links(r)])
     heading('analysis')
     for r in payload['market_analysis']:
         lines.extend(['','### '+r['title'],r['summary'],links(r)])
@@ -149,6 +150,30 @@ def validate_published(p):
         require(all(isinstance(r.get(k),(int,float)) and not isinstance(r[k],bool) and math.isfinite(r[k]) for k in ['price','change_pct']),'invalid commodity number')
         t=datetime.fromisoformat(r['as_of_utc'].replace('Z','+00:00'))
         require(t.tzinfo is not None and t<=cutoff and bool(r.get('basis')),'commodity time/basis missing')
+    # Mandatory morning macro observations share the existing sourced market section.
+    # Older archived editions remain readable; new editions cannot silently omit them.
+    macro_symbols={'US2Y','US10Y','US30Y','DXY','USDJPY'}
+    macro=[r for r in p['commodities'] if r.get('symbol') in macro_symbols]
+    if rd>='2026-11-14' or macro:
+        require(len(macro)==5 and {r['symbol'] for r in macro}==macro_symbols,'five daily rates/FX observations required')
+        require(len([r for r in p['commodities'] if r.get('symbol') not in macro_symbols])>=2,'two commodities required in addition to rates/FX')
+        for r in macro:
+            require(r.get('session_date')==sd,'rates/FX date differs from market session')
+            require(r['price']>0,'invalid rates/FX level')
+            previous=r.get('previous_value')
+            require(isinstance(previous,(int,float)) and not isinstance(previous,bool) and math.isfinite(previous) and previous>0,'rates/FX comparison value missing')
+            prior=datetime.fromisoformat(r.get('previous_as_of_utc','').replace('Z','+00:00'))
+            observed=datetime.fromisoformat(r['as_of_utc'].replace('Z','+00:00'))
+            require(prior.tzinfo is not None and prior<observed and observed.date().isoformat()<=sd,'rates/FX comparison time invalid')
+            if observed.date().isoformat()!=sd:
+                require(r.get('observation_date')==observed.date().isoformat() and bool(r.get('carry_forward_reason')),'older rates/FX observation must disclose its date and reason')
+            require(abs((r['price']/previous-1)*100-r['change_pct'])<0.015,'rates/FX percent change mismatch')
+            if r['symbol'].startswith('US') and r['symbol']!='USDJPY':
+                require(r.get('unit')=='%' and r.get('instrument_type')=='treasury_par_yield','Treasury yield basis required')
+                bp=r.get('change_bp')
+                require(isinstance(bp,(int,float)) and not isinstance(bp,bool) and math.isfinite(bp) and abs((r['price']-previous)*100-bp)<0.015,'yield basis-point change mismatch')
+            else:
+                require(r.get('instrument_type')=={'DXY':'cash_dollar_index','USDJPY':'spot_fx'}[r['symbol']],'cash index/spot FX basis required')
     require(bool(p.get('unresolved_items')),'published must disclose gaps to complete contract')
     require(p.get('headline','').startswith('【通常公開版】'),'published label missing')
     markdown=render(p)
