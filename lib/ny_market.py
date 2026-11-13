@@ -203,9 +203,10 @@ def _validate_provisional_payload(payload: dict[str, Any]) -> ValidatedNYMarketR
     sources = [{"title": "検証済み市場データ", "publisher": str(source.get("name") or "market provider"),
                 "url": _http_url(source.get("url"), "provisional source URL"), "published_at": None}]
     if payload.get('publication_contract_version') == 'ny_market_deadline_v1':
-        from lib.ny_market_deadline import validate_progress, validate_updates
+        from lib.ny_market_deadline import validate_progress, validate_updates, validate_morning_cutoff
         try:
             _,cutoff=validate_progress(payload.get('review_progress'))
+            validate_morning_cutoff(cutoff,report_date)
             validate_updates(payload.get('verified_updates'),cutoff)
         except (ValueError,KeyError,OSError) as exc:
             raise NYMarketValidationError(str(exc)) from exc

@@ -3,7 +3,7 @@
 Publication is independent of exhausting a discovery queue. Pending candidates
 remain pending and are never evidence for a quiet market or an exclusion.
 """
-from datetime import datetime
+from datetime import date, datetime, time, timezone, timedelta
 import hashlib
 from pathlib import Path
 import re
@@ -58,6 +58,13 @@ def validate_progress(progress):
     cutoff=datetime.fromisoformat(progress['as_of_utc'].replace('Z','+00:00'))
     if cutoff.tzinfo is None:raise ValueError('evidence cutoff needs timezone')
     return expected,cutoff
+
+
+def validate_morning_cutoff(cutoff, report_date):
+    if isinstance(report_date,str):report_date=date.fromisoformat(report_date)
+    deadline=datetime.combine(report_date,time(7,45),timezone(timedelta(hours=9)))
+    if cutoff>deadline:
+        raise ValueError('evidence cutoff cannot follow the report morning deadline')
 
 
 def validate_updates(updates,cutoff):

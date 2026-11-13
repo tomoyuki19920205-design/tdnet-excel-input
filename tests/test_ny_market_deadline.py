@@ -61,6 +61,17 @@ def test_deadline_update_preserves_unresolved_market_evidence(tmp_path):
                           [{'field':'企業調査','reason':'一次資料の確認未完了'}])
     assert result['unresolved_items']==packet['unresolved_items']+[{'field':'企業調査','reason':'一次資料の確認未完了'}]
 
+
+def test_direct_publish_cannot_shift_historical_cutoff(tmp_path):
+    from lib.ny_market import render_provisional_markdown
+    result=build_deadline(_synthetic_packet(),date(2026,9,2),'open',progress(candidates()),[update(tmp_path)],
+                          [{'field':'企業調査','reason':'未完了'}])
+    result['review_progress']['as_of_utc']='2026-09-03T00:00:00Z'
+    result['verified_updates'][0]['evidence'][0]['published_at']='2026-09-02T23:00:00Z'
+    result['report_markdown']=render_provisional_markdown(result)
+    result['report_delivery']['sha256']=report_markdown_sha256(result['report_markdown'])
+    with pytest.raises(NYMarketValidationError,match='morning deadline'):validate_payload(result)
+
 def test_future_source_and_tampered_raw_are_rejected(tmp_path):
     u=update(tmp_path);u['evidence'][0]['published_at']='2026-09-03T00:00:00Z'
     args=(_synthetic_packet(),date(2026,9,2),'open',progress(candidates()),[u],[{'field':'x','reason':'未確認'}])

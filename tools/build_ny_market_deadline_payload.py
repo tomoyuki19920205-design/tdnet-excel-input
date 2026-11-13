@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
 """Publish source-verified progress without discarding pending candidates."""
 from pathlib import Path
-from datetime import date,datetime,time,timezone,timedelta
+from datetime import date
 import argparse,json,sys
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from lib.ny_market import render_provisional_markdown,report_markdown_sha256,validate_payload
-from lib.ny_market_deadline import CONTRACT,validate_progress,validate_updates
+from lib.ny_market_deadline import CONTRACT,validate_progress,validate_updates,validate_morning_cutoff
 from tools.build_ny_market_provisional_payload import build
 from tools.company_news_atomic import atomic_write_json
 
 def build_deadline(packet,report_date,market_status,progress,updates,unresolved):
     value,cutoff=validate_progress(progress)
-    morning_cutoff=datetime.combine(report_date,time(7,45),timezone(timedelta(hours=9)))
-    if cutoff>morning_cutoff:
-        raise ValueError('evidence cutoff cannot follow the report morning deadline')
+    validate_morning_cutoff(cutoff,report_date)
     validate_updates(updates,cutoff)
     payload=build(packet,report_date,market_status)
     payload.update(publication_contract_version=CONTRACT,review_progress=progress,
