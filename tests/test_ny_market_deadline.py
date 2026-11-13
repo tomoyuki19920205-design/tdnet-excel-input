@@ -80,7 +80,7 @@ def test_future_source_and_tampered_raw_are_rejected(tmp_path):
     (tmp_path/'release.txt').write_text('changed')
     with pytest.raises(ValueError,match='integrity'):build_deadline(*args)
 
-def test_complete_contract_allows_low_priority_pending_but_not_important_pending():
+def test_complete_contract_rejects_any_pending_candidate():
     p=full_payload();review=p['after_hours_candidate_review']
     review['contract_version']=REVIEW_CONTRACT
     rows=review['candidates']
@@ -95,6 +95,8 @@ def test_complete_contract_allows_low_priority_pending_but_not_important_pending
     review['counts']=counts(rows);review['discovered_candidate_count']=len(rows);review['coverage_status']='incomplete'
     p['report_markdown']+='\n\n'+notice(review['counts'])
     p['report_delivery']['sha256']=report_markdown_sha256(p['report_markdown'])
-    assert validate_payload(p).report['quality_status']=='complete'
-    rows[-1]['priority']='high';review['counts']=counts(rows)
-    with pytest.raises(NYMarketValidationError,match='important pending'):validate_payload(p)
+    with pytest.raises(NYMarketValidationError,match='coverage_status|pending after-hours candidates'):
+        validate_payload(p)
+    review['coverage_status']='quiet_day'
+    with pytest.raises(NYMarketValidationError,match='pending after-hours candidates'):
+        validate_payload(p)
