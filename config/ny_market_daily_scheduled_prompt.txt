@@ -1,5 +1,17 @@
 毎日、NY市場モーニングレポートを日本語で完成させ、同じ `report_markdown` をユーザー最終回答とCompany Viewer保存の唯一の本文入力にしてください。市場休場日、土日、米国祝日も必ず実行し、スキップ・調査のみ・通知なしで終了してはいけません。
 
+## 承認済み通常運用（2026-11-13のユーザー指示、下記の旧運用記述より優先）
+
+成功指標は修正件数・テスト件数・調査件数ではなく、対象日の通常公開版（published）または完全版（complete）が07:40 JSTまでに本番NEWSへ配信されたこと。ユーザーは2026-11-13品質補完版の情報量と未確認項目の明示を通常運用品質として承認済み。completeの全品質条件は維持するが、残る個別材料・全候補判定・一部決算指標の未確認だけでpublishedを止めない。完全版へ昇格するためだけの際限ない追加調査は不要。
+
+- 07:00は新しいreport_date_jstを最優先する。主要指数5、11セクター、純粋上昇Top20、話題の上昇10社・下落10社、主要ニュース10件、主要決算・引け後決算、米2年/10年/30年債・現物DXY・USDJPY、商品市況、総括を省略しない。11月13日のpublished-payload-v2は構成と情報量の参照例であり、翌日へ日付・価格・材料をコピーするためのデータではない。
+- 作業中に時計を確認する。07:30までに新規候補探索を打ち切り、未確認を明示して編集をまとめる。07:35までに通常版の描画・検証・既存workerへの保存を開始し、07:40までに同日DBと本番NEWS配信APIの本文hash一致を確認する。主要市場数値が未確認なら捏造してpublishedにせず暫定版を配信し、通常版未達の工程・原因を残す。07:40を超えた場合も時刻を偽らず遅延として記録する。
+- 実行冒頭はpreflightと同日resume-checkpointを読み、既存の検証済みpacket/raw/text/判定・公開payloadから再開する。古いautomation memoryの未完了記録を現在の公開状態と誤認しない。11月13日の最新は `C:/Users/takuy/tdnet-production/state/data/ny_market_work/ny-2026-11-13-published-payload-v2.json` と同日のquality-research-v2.json。既存の確定調査を繰り返さず、翌日には新しい対象営業日の必要データだけを取得する。
+- 同日publishedまたはcompleteがDB・本番APIで一致していれば、重要な誤り・配信障害・朝のcutoff内の重要な欠落に新たな証拠がない限り再生成・再配信・残件探索を行わない。12/17/22時は配信未達の再開と必要な訂正を優先する。残件は理由付きで保存し、普通の未確認項目を全て解消するまで実行を終えないループを作らない。正常配信済みの日は配信確認結果を報告して終了してよい。翌日の生成や定期タスク自体は停止しない。
+- 各実行で `C:/Users/takuy/tdnet-production/state/data/ny_market_work/ny-<report_date_jst>-delivery-<実開始時刻の識別子>.json` に、実開始時刻と起動/データ取得/分析・執筆/検証/DB保存/本番同期/NEWS配信読戻しの状態・実時刻を保存する。予定時刻を実開始時刻として記録しない。各工程の成功直後と例外発生時に更新し、失敗工程、機密値を除いたエラー、使ったpayload/packet/progress/原本のpath・hash、次回の再開位置を残す。DB/workerの既存失敗ログとretry_pending checkpointを保持し、同期失敗だけで分析をやり直さない。上限到達した再試行を理由なくリセットしない。
+- 起動から配信の確認は実データで行う。生成時刻はpayload.generated_at、公開確認時刻は本番APIで同じ本文hashを初めて確認した実時刻とする。DBが保持する保存/更新時刻と配信確認時刻は区別する。レポート品質、各セクションの完成数/分母、未完了項目、追加有料API呼び出し件数・費用（上限0件・0 USD）も記録する。11月14日07:00実行後はこれらを必ず報告し、起動・取得・分析・DB・配信のどこが成功/失敗したか示す。
+- 従来のChatGPTログイン経由を維持する。有料OpenAI APIを追加呼出しせず、API残高を前提にしない。Windows未ログイン実行は安全な実現可能性の確認段階とし、ログイン方式、認証情報、アカウント、権限、自動ログイン設定を無断で変更しない。
+
 
 ## 3段階公開（2026-11-13通常版復旧改定・最優先）
 
@@ -15,7 +27,7 @@
 - 最初に config/ny_market_published_contract.txt を読む。既存packet・progress・verified_updates・raw/textを再利用し、主要セクション不足に限定して調べる。07:30に新規候補探索を停止、07:40までに通常版の生成・保存・読戻しを優先する。遅延起動は開始30分以内を目標とし、調査を無限に広げない。
 - 通常版draftはpublication_sourcesとsection_statusで根拠・時刻・不足理由を持ち、tools/build_ny_market_published_payload.py <draft> --output <新規payload版> で描画・検証する。旧完全版rendererへ渡さない。文言を変えてvalidatorを回避せず、未確認をverified/excludedへ書き換えない。説明用の取得不能理由と、事実に基づく十分な分析を残す。
 - 同じ既存write_ny_market_payload.py・NY専用inbox workerで保存する。preflightのpublished_readback_verified=trueを通常配信成功の条件とする。complete_readback_verifiedは完全版専用。publishedのrunはpublished。qualityはprovisional→published→completeへ進み、通常版を後続の暫定版で降格させない。
-- 07:40時点で数値未確定なら確認済み情報のprovisionalを先に配信し、残件を継続。通常版を配信できた場合も完全版の不足項目を保存し、12/17/22時に残件だけ補完する。翌日07:00は新しい対象日を優先する。日付ごとの情報cutoffを守り、日中の新情報を朝の報告や過去日へ混入させない。
+- 07:40時点で数値未確定なら確認済み情報のprovisionalを先に配信し、通常版へ必要な残件を保存する。通常版を配信できた場合は不足項目を明示して正常配信として終了できる。12/17/22時は上の承認済み通常運用に従い、配信未達・重要な訂正を優先する。翌日07:00は新しい対象日を優先する。日付ごとの情報cutoffを守り、日中の新情報を朝の報告や過去日へ混入させない。
 
 ## 期限内公開と候補判定
 
@@ -108,7 +120,7 @@ payloadは従来field全てに加え `quality_contract_version, report_display_c
 
 validation成功後だけ `python C:/Users/takuy/tdnet-ny-market-runtime/tools/write_ny_market_payload.py <整形済みpayload.json> --market-data-packet <一時packet.json> --inbox "C:/Users/takuy/tdnet-production/state/data/ny_market_inbox"` を1回実行する。helperは検証済みpayloadをfsync済みtempから `data/news_inbox/*.json` へatomic renameする。inboxへ直接partial JSONを書かない。同日成功rowが既にある場合は通常再実行しない。その直後に `python C:/Users/takuy/tdnet-ny-market-runtime/tools/write_ny_market_payload.py <整形済みpayload.json> --market-data-packet <一時packet.json> --validate-only --emit-report` を実行し、標準出力の非空本文と `report_delivery.sha256` の一致を確認する。
 
-保存に失敗しても、検証済み `report_markdown` の完成レポート全文は必ずユーザー最終回答として出し、末尾にだけ `Company Viewer保存に失敗: <短い理由>` を付ける。成功時はemitした完成本文だけを最終回答にし、保存処理・検証結果などの運用説明で本文を置き換えることを禁止する。
+保存に失敗しても、検証済み `report_markdown` のレポート全文があれば必ずユーザー最終回答に出し、保存失敗の工程・短い理由を明記する。成功時はemitした本文をそのまま掲載し、本文を運用説明だけに置き換えない。本文とは分けて実行結果（実開始・生成・公開確認時刻、品質、各工程、完成率・未完了項目、追加API費用）を末尾へ付記する。正常配信済みで再生成しない実行は、既存本文への参照と配信確認結果を報告する。
 
 Scheduled Task自身を停止、無効化、削除、完了扱いにする操作は禁止。Company News Task01〜08、CompanyNewsInboxWorker、SectorWeeklySchedulerのschedule/prompt/assignment/queueを変更しない。
 
@@ -120,6 +132,6 @@ Scheduled Task自身を停止、無効化、削除、完了扱いにする操作
 
 ## 配信の完了判定と費用上限
 
-生成処理と配信監視を混同しない。毎回の終了前に `python -X utf8 C:/Users/takuy/tdnet-ny-market-runtime/tools/check_ny_market_delivery.py --production-root C:/Users/takuy/tdnet-excel-input --db C:/Users/takuy/tdnet-production/state/decision_db.db --automation-config C:/Users/takuy/.codex/automations/ny/automation.toml --output-dir C:/Users/takuy/tdnet-production/state/data/ny_market_health --deadline 07:45` を実行する。これは有料生成を行わず、毎回の結果と最新状態を保存する。07:45 JST以後に完全版がない、保存先が不一致、定期設定が無効・変更済みの場合は非zeroとなる。監視エラーを完全版成功に読み替えない。正常な完全版の本文仕様は従来どおりとする。
+生成処理と配信監視を混同しない。毎回の終了前に `python -X utf8 C:/Users/takuy/tdnet-ny-market-runtime/tools/check_ny_market_delivery.py --production-root C:/Users/takuy/tdnet-excel-input --db C:/Users/takuy/tdnet-production/state/decision_db.db --automation-config C:/Users/takuy/.codex/automations/ny/automation.toml --output-dir C:/Users/takuy/tdnet-production/state/data/ny_market_health --deadline 07:45` を実行する。これは有料生成を行わず、毎回の結果と最新状態を保存する。07:45は配信監視の猶予時刻であり、通常版の公開期限は07:40 JST。published_readback_verified=trueまたはcomplete_readback_verified=trueを配信成功として扱い、publishedをcompleteとは呼ばない。通常版以上がない、保存先が不一致、定期設定が無効・変更済みの場合は原因を報告する。監視正常だけで起動から生成まで全工程が成功したとは判定せず、当日の実行記録と配信時刻を照合する。
 
 登録済み1日4回の実行以外に自分自身を再起動するタスクや生成ループを作らない。各endpointの通信再試行は初回込み4回まで、401/403等の恒久エラーは同一URLを繰り返さず記録して代替経路へ進む。同じ日・同じ内容hashの検索原本とpacketを再取得しない。別課金のOpenAI APIその他の生成APIを追加起動する予算は0 USD。既存Codex定期タスクの利用枠と外部API料金を混同せず、追加の有料OpenAI API呼び出しは禁止。API残高の補充を復旧条件にしない。ChatGPTログイン経由の既存Codex生成のみを使う。
