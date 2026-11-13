@@ -40,7 +40,7 @@ def _strict_select(table: str, *, params: dict[str, str], config: dict[str, str]
 
 
 def _resilient_select(table: str, *, params: dict[str, str], config: dict[str, str]) -> list[dict]:
-    """Retry transient connection failures, never convert them to empty rows."""
+    """At most four read attempts; auth/schema errors fail without retries."""
     import requests
 
     for attempt, delay in enumerate((0, 2, 5, 10)):
@@ -50,6 +50,10 @@ def _resilient_select(table: str, *, params: dict[str, str], config: dict[str, s
             return _strict_select(table, params=params, config=config)
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
             if attempt == 3:
+                raise
+        except requests.exceptions.HTTPError as exc:
+            code = exc.response.status_code if exc.response is not None else None
+            if code not in {408, 429, 500, 502, 503, 504} or attempt == 3:
                 raise
     raise AssertionError("unreachable")
 
@@ -104,7 +108,10 @@ def preflight(production_root: Path, db_path: Path, stable_key: str) -> dict[str
     complete_readback_verified = (
         len(remote_report) == len(remote_runs) == len(remote_viewer) == 1
         and sqlite["report_count"] == sqlite["run_count"] == 1
+        and sqlite["quality_status"] == "complete"
         and remote_report[0].get("quality_status") == "complete"
+        and bool(str(remote_report[0].get("report_markdown") or "").strip())
+        and not remote_report[0].get("unresolved_items")
         and remote_runs[0].get("status") == sqlite["run_status"] == "success"
         and remote_viewer[0].get("quality_status") == "complete"
         and remote_hash == viewer_hash == sqlite["markdown_sha256"]

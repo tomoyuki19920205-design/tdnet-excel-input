@@ -23,6 +23,8 @@ FILES = (
     "tools/rebuild_ny_market_packet_issuer_caps.py", "tools/sync_ny_market.py",
     "tools/fetch_ny_market_q4_ir_news.py",
     "tools/apply_ny_market_provisional_migration.py", "tools/check_ny_automation_state.py",
+    "tools/check_ny_market_delivery.py",
+    "tools/install_ny_market_health_task.ps1",
     "migrations/020_ny_market_provisional.sql",
 )
 
