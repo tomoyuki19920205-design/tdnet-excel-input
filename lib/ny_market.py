@@ -111,6 +111,8 @@ def render_provisional_markdown(payload: dict[str, Any]) -> str:
     date_label = payload["report_date_jst"]
     lines = [f"# 【暫定版】NY市場モーニングレポート {date_label}",
              "", "順位と未掲載項目は未確定です。純粋上昇率ランキングは確定していません。"]
+    if payload.get('publication_contract_version') == 'ny_market_deadline_v1':
+        lines[-1]='確認済みの市場データ・ニュースを掲載しています。未確認情報が残るため、完全版ではありません。'
     indexes = packet.get("indexes") or []
     if indexes:
         lines.extend(["", f"## 検証済み指数（{len(indexes)}件）"])
@@ -125,6 +127,9 @@ def render_provisional_markdown(payload: dict[str, Any]) -> str:
     lines.extend(["", "## 未確定項目"])
     for item in payload["unresolved_items"]:
         lines.append(f"- {item['field']}：{item['reason']}")
+    if payload.get('publication_contract_version') == 'ny_market_deadline_v1':
+        from lib.ny_market_deadline import render_updates
+        lines.append(render_updates(payload))
     return "\n".join(lines).strip()
 
 
@@ -197,6 +202,20 @@ def _validate_provisional_payload(payload: dict[str, Any]) -> ValidatedNYMarketR
         raise NYMarketValidationError("provisional source metadata missing")
     sources = [{"title": "検証済み市場データ", "publisher": str(source.get("name") or "market provider"),
                 "url": _http_url(source.get("url"), "provisional source URL"), "published_at": None}]
+    if payload.get('publication_contract_version') == 'ny_market_deadline_v1':
+        from lib.ny_market_deadline import validate_progress, validate_updates
+        try:
+            _,cutoff=validate_progress(payload.get('review_progress'))
+            validate_updates(payload.get('verified_updates'),cutoff)
+        except (ValueError,KeyError,OSError) as exc:
+            raise NYMarketValidationError(str(exc)) from exc
+        seen={s['url'] for s in sources}
+        for update in payload['verified_updates']:
+            for evidence in update['evidence']:
+                if evidence['url'] not in seen:
+                    sources.append({'title':update['title'],'publisher':evidence.get('publisher','一次資料'),
+                                    'url':evidence['url'],'published_at':evidence['published_at']})
+                    seen.add(evidence['url'])
     clean = {**payload, "quality_contract_version": QUALITY_CONTRACT_VERSION,
              "quality_status": "provisional", "sources": sources,
              "summary_bullets": [], "index_moves": packet.get("indexes", []),
@@ -356,7 +375,9 @@ def _validate_after_hours_contract(
     review = payload.get("after_hours_candidate_review")
     if not isinstance(review, dict):
         raise NYMarketValidationError("after_hours_candidate_review must be an object")
-    if review.get("contract_version") != AFTER_HOURS_CONTRACT_VERSION:
+    from lib.ny_market_deadline import REVIEW_CONTRACT, MAX_CANDIDATES, counts, notice
+    finite_review = review.get('contract_version') == REVIEW_CONTRACT
+    if review.get("contract_version") not in {AFTER_HOURS_CONTRACT_VERSION, REVIEW_CONTRACT}:
         raise NYMarketValidationError(
             f"after_hours_candidate_review.contract_version must be {AFTER_HOURS_CONTRACT_VERSION}"
         )
@@ -412,16 +433,27 @@ def _validate_after_hours_contract(
             "after_hours_candidate_review.discovery_runs must cover every broad discovery scope"
         )
     coverage = review.get("coverage_status")
-    if coverage not in {"normal", "quiet_day"}:
+    if coverage not in ({"normal", "quiet_day", "incomplete"} if finite_review else {"normal", "quiet_day"}):
         raise NYMarketValidationError(
             "after_hours_candidate_review.coverage_status must be normal or quiet_day"
         )
     expected_coverage = "normal" if len(after_hours) >= 5 else "quiet_day"
+    if finite_review:
+        try: actual_counts=counts(review.get('candidates'))
+        except ValueError as exc: raise NYMarketValidationError(str(exc)) from exc
+        if review.get('counts')!=actual_counts:
+            raise NYMarketValidationError('candidate review counts mismatch')
+        if actual_counts['important_pending']:
+            raise NYMarketValidationError('complete report cannot conceal important pending candidates')
+        if actual_counts['pending']:
+            expected_coverage='incomplete'
+        if notice(actual_counts) not in payload.get('report_markdown',''):
+            raise NYMarketValidationError('candidate review notice missing from report')
     if coverage != expected_coverage:
         raise NYMarketValidationError(
             "after_hours_candidate_review.coverage_status must be derived from selected count"
         )
-    candidates = _list(review.get("candidates"), "after_hours_candidate_review.candidates")
+    candidates = _list(review.get("candidates"), "after_hours_candidate_review.candidates", maximum=MAX_CANDIDATES)
     if review.get("discovered_candidate_count") != len(candidates):
         raise NYMarketValidationError(
             "after_hours_candidate_review.discovered_candidate_count differs from candidates"
@@ -472,6 +504,9 @@ def _validate_after_hours_contract(
             source_urls.update((primary_source_url, price_source_url))
             included.append(ticker)
             included_records.append(candidate)
+        elif status == 'pending' and finite_review:
+            if candidate.get('reason_code') != 'awaiting_verification':
+                raise NYMarketValidationError('pending candidate cannot be treated as excluded')
         elif status == "excluded":
             if candidate.get("reason_code") not in {
                 "no_primary_source", "no_trusted_after_hours_price", "not_material",

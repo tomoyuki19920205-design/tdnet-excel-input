@@ -16,9 +16,12 @@ ROOT = Path(__file__).resolve().parents[1]
 FILES = (
     "config/ny_market_daily_scheduled_prompt.txt",
     "lib/ny_market.py", "lib/ny_market_market_data.py", "lib/ny_market_price_basis.py",
+    "lib/ny_market_deadline.py",
     "lib/ny_market_research.py", "lib/ny_market_issuer_cap.py", "lib/ny_market_ir.py",
     "lib/production_environment.py", "lib/pipeline/db.py",
     "tools/build_ny_market_market_data_packet.py", "tools/build_ny_market_provisional_payload.py",
+    "tools/build_ny_market_deadline_payload.py",
+    "tools/prepare_ny_market_review.py",
     "tools/ny_market_inbox_worker.py", "tools/preflight_ny_market_runtime.py",
     "tools/rebuild_ny_market_packet_issuer_caps.py", "tools/sync_ny_market.py",
     "tools/fetch_ny_market_q4_ir_news.py",
