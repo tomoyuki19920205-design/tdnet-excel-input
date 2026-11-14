@@ -380,6 +380,59 @@ def test_regular_universe_vendor_error_requires_explicit_dated_no_trade_row():
         provider._verify_missing("EMIS", "Emmis Acquisition Corp.", target)
 
 
+def test_regular_universe_same_security_ticker_change_uses_official_and_predecessor_pair():
+    target = date(2026, 11, 13)
+    previous = date(2026, 11, 12)
+    stamp = lambda day: int(datetime(day.year, day.month, day.day, 21, tzinfo=timezone.utc).timestamp())
+    info = b'{"status":{"rCode":200},"data":{"symbol":"NEW","exchange":"NASDAQ-CM"}}'
+    history = json.dumps({"status": {"rCode": 200}, "data": {
+        "symbol": "NEW", "tradesTable": {"rows": [
+            {"date": "11/13/2026", "close": "$9.13", "volume": "54351"},
+            {"date": "11/12/2026", "close": "$9.00", "volume": "106376"},
+        ]}}}).encode()
+    def chart(symbol, day, close):
+        return json.dumps({"chart": {"result": [{"meta": {
+            "symbol": symbol, "longName": "Issuer Ltd",
+            "exchangeTimezoneName": "America/New_York", "dataGranularity": "1d",
+        }, "timestamp": [stamp(day)], "indicators": {"quote": [{
+            "close": [close], "volume": [54351],
+        }]}}], "error": None}}).encode()
+    new_chart = chart("NEW", target, 9.13)
+    old_chart = chart("OLD", previous, 9.00)
+    sec = (b"Issuer Ltd Class A ordinary shares on Nasdaq Capital Market: "
+           b"Change in Trading Symbol from OLD to NEW at open on November 13, 2026. "
+           b"The CUSIP number and rights of shareholders remain unchanged.")
+    action = {"event_type": "ticker_change", "prior_ticker": "OLD",
+              "effective_session_date": target.isoformat(), "exchange": "Nasdaq Capital Market",
+              "source_url": "https://www.sec.gov/Archives/edgar/data/123/456/change.htm"}
+    def transport(url, _headers):
+        return (info if "/info?" in url else history if "/historical?" in url
+                else new_chart if "/finance/chart/NEW?" in url else old_chart)
+    provider = NasdaqYahooRegularUniverseProvider(
+        transport=transport, notice_transport=lambda *_: sec,
+        corporate_action_evidence={"NEW": action})
+    result, evidence = provider._verify_missing("NEW", "Issuer Ltd Class A Ordinary Shares", target)
+    assert result["close"] == 9.13
+    assert result["change_pct"] == pytest.approx((9.13 / 9.00 - 1) * 100)
+    assert evidence["disposition"] == "same_security_ticker_change_dated_pair"
+    assert evidence["previous_symbol"] == "OLD"
+    assert evidence["corporate_action_raw_response_sha256"] == hashlib.sha256(sec).hexdigest()
+    assert evidence["predecessor_raw_response_sha256"] == hashlib.sha256(old_chart).hexdigest()
+    assert evidence["comparison_basis"] == "same_class_same_cusip_regular_closes_no_split"
+
+    with pytest.raises(MarketDataError, match="same-security ticker change"):
+        NasdaqYahooRegularUniverseProvider(
+            transport=transport, notice_transport=lambda *_: sec.replace(b"remain unchanged", b"will change"),
+            corporate_action_evidence={"NEW": action},
+        )._verify_missing("NEW", "Issuer Ltd Class A Ordinary Shares", target)
+    with pytest.raises(MarketDataError, match="predecessor or target close disagrees"):
+        NasdaqYahooRegularUniverseProvider(
+            transport=lambda url, headers: old_chart.replace(b"9.0", b"8.5")
+            if "/finance/chart/OLD?" in url else transport(url, headers),
+            notice_transport=lambda *_: sec, corporate_action_evidence={"NEW": action},
+        )._verify_missing("NEW", "Issuer Ltd Class A Ordinary Shares", target)
+
+
 def test_dated_exchange_history_replaces_conflicting_info_quote_only_with_support():
     target = date(2026, 11, 5)
     candidate = {

@@ -748,6 +748,7 @@ class NasdaqYahooRegularUniverseProvider:
                  now: Callable[[], datetime] | None = None,
                  max_workers: int = 8,
                  corporate_action_notices: dict[str, str] | None = None,
+                 corporate_action_evidence: dict[str, dict[str, Any]] | None = None,
                  notice_transport: Transport = default_transport,
                  action_provider: YahooCorporateActionProvider | None = None,
                  split_history_provider: StockAnalysisHistoricalCloseProvider | None = None) -> None:
@@ -756,6 +757,7 @@ class NasdaqYahooRegularUniverseProvider:
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.max_workers = max_workers
         self.corporate_action_notices = corporate_action_notices or {}
+        self.corporate_action_evidence = corporate_action_evidence or {}
         self.notice_transport = notice_transport
         self.action_provider = action_provider or YahooCorporateActionProvider(transport=transport)
         self.split_history_provider = split_history_provider or StockAnalysisHistoricalCloseProvider(transport=transport)
@@ -1135,6 +1137,48 @@ class NasdaqYahooRegularUniverseProvider:
                     dated_rows.append((history_day, history_row))
                 target_rows = [row for day, row in dated_rows if day == target]
                 prior_rows = [row for day, row in dated_rows if day < target]
+                action_entry = self.corporate_action_evidence.get(symbol)
+                if action_entry and action_entry.get("event_type") == "ticker_change":
+                    action = verify_corporate_action_evidence(
+                        symbol, action_entry, transport=self.notice_transport,
+                    )
+                    dated_prior = [(day, row) for day, row in dated_rows if day < target]
+                    if (action["effective_session_date"] != target.isoformat()
+                            or action["prior_ticker"] == symbol or len(target_rows) != 1
+                            or not dated_prior):
+                        raise MarketDataError(f"regular-universe {symbol}: ticker-change dates or official rows disagree")
+                    previous_day, previous_row = max(dated_prior, key=lambda item: item[0])
+                    predecessor = YahooChartProvider(
+                        transport=self.transport, now=self.now,
+                        expected_names={action["prior_ticker"]: name},
+                    ).fetch(action["prior_ticker"], previous_day - timedelta(days=10), previous_day)
+                    predecessor_bar = next((bar for bar in predecessor.bars
+                                            if bar.session_date == previous_day), None)
+                    official_previous = _numeric(previous_row.get("close"), "official prior ticker-change close")
+                    official_target = _numeric(target_rows[0].get("close"), "official target ticker-change close")
+                    if (predecessor_bar is None
+                            or not close_matches(predecessor_bar.regular_close, official_previous)
+                            or not close_matches(target_bar.regular_close, official_target)):
+                        raise MarketDataError(f"regular-universe {symbol}: predecessor or target close disagrees")
+                    pct = (official_target / official_previous - 1.0) * 100.0
+                    evidence.update({
+                        "disposition": "same_security_ticker_change_dated_pair",
+                        "corporate_action_source_identifier": action["source_identifier"],
+                        "corporate_action_raw_response_sha256": action["raw_response_sha256"],
+                        "official_history_source_identifier": history_url,
+                        "official_history_raw_response_sha256": hashlib.sha256(history_raw).hexdigest(),
+                        "predecessor_source_identifier": predecessor.source_identifier,
+                        "predecessor_raw_response_sha256": predecessor.raw_response_sha256,
+                        "previous_symbol": action["prior_ticker"],
+                        "previous_session_date": previous_day.isoformat(),
+                        "official_previous_close": official_previous,
+                        "official_target_close": official_target,
+                        "comparison_basis": "same_class_same_cusip_regular_closes_no_split",
+                    })
+                    return {"symbol": symbol, "name": name, "close": official_target,
+                            "change_pct": pct, "volume": target_bar.volume,
+                            "quote_source_identifier": history_url,
+                            "quote_raw_response_sha256": hashlib.sha256(history_raw).hexdigest()}, evidence
                 if not prior_rows and len(target_rows) == 1 and symbol not in self.corporate_action_notices:
                     official_target = _numeric(target_rows[0].get("close"), "official first-session close")
                     if not close_matches(official_target, target_bar.regular_close):
@@ -1433,6 +1477,11 @@ def verify_corporate_action_evidence(
         }
     if event_type == "business_combination" and "BUSINESS COMBINATION" not in upper:
         raise MarketDataError(f"Top20 {ticker}: source does not confirm business combination")
+    if event_type == "ticker_change" and not (
+        "TRADING SYMBOL" in upper and "CUSIP NUMBER" in upper
+        and "REMAIN UNCHANGED" in upper and "RIGHTS OF SHAREHOLDERS" in upper
+    ):
+        raise MarketDataError(f"Top20 {ticker}: source does not confirm same-security ticker change")
     if event_type == "new_listing" and not any(
         term in upper for term in (
             "INITIAL PUBLIC OFFERING", "FIRST DAY OF TRADING", "BEGIN TRADING",
@@ -3809,6 +3858,7 @@ def build_canonical_market_data_packet(
     else:
         screener = NasdaqYahooRegularUniverseProvider(
             corporate_action_notices=getattr(arbitrator, "corporate_action_notices", {}),
+            corporate_action_evidence=getattr(arbitrator, "corporate_action_evidence", {}),
             notice_transport=getattr(arbitrator, "notice_transport", default_transport),
             action_provider=getattr(arbitrator, "action_provider", None),
             split_history_provider=getattr(arbitrator, "split_history_provider", None),
