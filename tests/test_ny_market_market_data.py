@@ -869,6 +869,39 @@ def test_captured_historical_quote_accepts_issuer_title_with_exact_symbol_and_ca
         provider.fetch("OMH", date(2026, 11, 4))
 
 
+def test_captured_stockanalysis_web_table_preserves_rounded_pair_and_reported_return(monkeypatch):
+    url = "https://stockanalysis.com/stocks/lfmd/history/"
+    capture = f"""LifeMD (LFMD) Stock Price History 1996-2026 ({url})
+Crawled: today; Content type: text/html; Source: open({{"ref_id":"{url}"}})
+L67: LifeMD, Inc. (LFMD)
+L68: NASDAQ: LFMD · Real-Time Price · USD
+L97: Date  | Open  | High  | Low  | Close  | Adj. Close  | Change  | Volume
+L99: Nov 13, 2026  | 1.87  | 2.34  | 1.85  | 2.20  | 2.20  | 32.63%  | 6,151,676
+L100: Nov 12, 2026  | 1.74  | 1.79  | 1.60  | 1.66  | 1.66  | -7.02%  | 2,084,235
+L155: Data Source: S&P Global Market Intelligence Last updated: Nov 13, 2026
+L157: Historical price data is provided by S&P Global Market Intelligence; past prices are adjusted for stock splits.
+""".encode()
+    monkeypatch.setattr(Path, "read_bytes", lambda _path: capture)
+    provider = CapturedEndOfDayQuoteProvider({"LFMD": {"path": "capture.raw", "source_url": url}})
+    result = provider.fetch("LFMD", date(2026, 11, 13))
+    assert (result["previous_close"], result["target_close"], result["reported_change_raw"]) == (
+        1.66, 2.20, "32.63%",
+    )
+    assert result["price_basis"] == "regular_close_normalized_for_split"
+    with pytest.raises(MarketDataError, match="target/previous session missing"):
+        provider.fetch("LFMD", date(2026, 11, 12))
+    monkeypatch.setattr(Path, "read_bytes", lambda _path: capture.replace(b"L99: Nov 13", b"L99: Nov 14"))
+    with pytest.raises(MarketDataError, match="target/previous session missing"):
+        provider.fetch("LFMD", date(2026, 11, 13))
+    monkeypatch.setattr(Path, "read_bytes", lambda _path: capture.replace(b"32.63%", b"unknown"))
+    with pytest.raises(MarketDataError, match="dated price or return format invalid"):
+        provider.fetch("LFMD", date(2026, 11, 13))
+    with pytest.raises(MarketDataError, match="URL/symbol mismatch"):
+        CapturedEndOfDayQuoteProvider({"LFMD": {"path": "capture.raw", "source_url": url.replace("lfmd", "other")}}).fetch(
+            "LFMD", date(2026, 11, 13),
+        )
+
+
 def test_movers_quote_conflict_uses_verified_regular_close_without_widening_tolerance():
     # The dated movers quote and a second publisher show $15.53, while the
     # exchange's 4 PM close and the vendor daily bar both show $15.55.

@@ -1939,6 +1939,8 @@ class CapturedEndOfDayQuoteProvider:
         url = str(entry["source_url"])
         if urlsplit(url).hostname == "chartexchange.com":
             return self._fetch_chartexchange(symbol, target_session_date, entry, url)
+        if urlsplit(url).hostname == "stockanalysis.com":
+            return self._fetch_stockanalysis_capture(symbol, target_session_date, entry, url)
         if urlsplit(url).hostname != "www.marketwatch.com" or not url.endswith(f"/stock/{symbol.lower()}"):
             raise MarketDataError(f"{self.name}:{symbol}: snapshot URL/symbol mismatch")
         raw = Path(entry["path"]).read_bytes()
@@ -1990,6 +1992,62 @@ class CapturedEndOfDayQuoteProvider:
             "display_decimal_places": decimal_places,
             "primary_exchange": primary_exchange,
             "capture_type": "browser_accessibility_snapshot",
+            "source_identifier": url, "raw_response_sha256": hashlib.sha256(raw).hexdigest(),
+        }
+
+    def _fetch_stockanalysis_capture(
+        self, symbol: str, target_session_date: date,
+        entry: dict[str, str], url: str,
+    ) -> dict[str, Any]:
+        """Validate a saved web text extraction of an independently dated price table."""
+        if url != f"https://stockanalysis.com/stocks/{symbol.lower()}/history/":
+            raise MarketDataError(f"{self.name}:{symbol}: snapshot URL/symbol mismatch")
+        raw = Path(entry["path"]).read_bytes()
+        state = raw.decode("utf-8")
+        if (not re.search(
+                    rf"^[^\n]+\({re.escape(symbol)}\) Stock Price History[^\n]* \({re.escape(url)}\)$",
+                    state, re.M)
+                or not re.search(rf"^L\d+: [^\n]+\({re.escape(symbol)}\)$", state, re.M)
+                or not re.search(rf"^L\d+: (?:NASDAQ|NYSE|NYSEAMERICAN): {re.escape(symbol)}\b", state, re.M)
+                or "Content type: text/html" not in state
+                or "Source: open(" not in state
+                or f"({url})" not in state):
+            raise MarketDataError(f"{self.name}:{symbol}: captured page identity mismatch")
+        if ("S&P Global Market Intelligence" not in state
+                or "past prices are adjusted for stock splits" not in state.lower()
+                or not re.search(r"^L\d+: Date  \| Open  \| High  \| Low  \| Close  \| Adj\. Close  \| Change  \| Volume$", state, re.M)):
+            raise MarketDataError(f"{self.name}:{symbol}: source or split basis disclosure missing")
+        dated: dict[date, tuple[str, str]] = {}
+        for match in re.finditer(r"^L\d+: ([A-Z][a-z]{2} \d{1,2}, \d{4})  \| (.+)$", state, re.M):
+            day = datetime.strptime(match.group(1), "%b %d, %Y").date()
+            cells = match.group(2).split("  | ")
+            if len(cells) != 7 or day in dated:
+                raise MarketDataError(f"{self.name}:{symbol}: historical row ambiguous")
+            dated[day] = (cells[3], cells[5])
+        earlier = [day for day in dated if day < target_session_date]
+        if target_session_date not in dated or not earlier:
+            raise MarketDataError(f"{self.name}:{symbol}: target/previous session missing")
+        previous_date = max(earlier)
+        previous_raw, _ = dated[previous_date]
+        target_raw, change_raw = dated[target_session_date]
+        if not (re.fullmatch(r"\d+\.\d{2}", previous_raw)
+                and re.fullmatch(r"\d+\.\d{2}", target_raw)
+                and re.fullmatch(r"[+-]?\d+(?:\.\d+)?%", change_raw)):
+            raise MarketDataError(f"{self.name}:{symbol}: dated price or return format invalid")
+        previous_close = float(previous_raw)
+        target_close = float(target_raw)
+        if previous_close <= 0 or target_close <= 0:
+            raise MarketDataError(f"{self.name}:{symbol}: dated close invalid")
+        return {
+            "provider": self.name, "provider_family": "s_p_global",
+            "session": "regular_close", "target_session_date": target_session_date.isoformat(),
+            "previous_session_date": previous_date.isoformat(),
+            "previous_close": previous_close, "target_close": target_close,
+            "raw_value": target_raw, "parsed_value": target_close,
+            "reported_change_raw": change_raw,
+            "display_decimal_places": 2,
+            "price_basis": "regular_close_normalized_for_split",
+            "capture_type": "web_text_extraction",
             "source_identifier": url, "raw_response_sha256": hashlib.sha256(raw).hexdigest(),
         }
 
