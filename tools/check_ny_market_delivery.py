@@ -84,9 +84,12 @@ def run(args, *, now=None, fetch=preflight) -> dict:
         automation = audit(args.automation_config, expected_cwd=args.runtime,
                            expected_project="acce2aa5-a39b-48e1-8487-ac0e68e8f29c")
         config = tomllib.loads(args.automation_config.read_text(encoding="utf-8"))
-        expected_prompt = (args.runtime / "config/ny_market_daily_scheduled_prompt.txt").read_text(encoding="utf-8").strip()
-        # The native automation editor may preserve CRLF inside its TOML string.
-        automation["checks"]["prompt_matches_deployed_source"] = config.get("prompt", "").replace("\r\n", "\n").strip() == expected_prompt
+        full_contract = (args.runtime / "config/ny_market_daily_scheduled_prompt.txt").read_text(encoding="utf-8").strip()
+        entrypoint_path = args.runtime / "config/ny_market_daily_automation_entrypoint.txt"
+        entrypoint = entrypoint_path.read_text(encoding="utf-8").strip() if entrypoint_path.exists() else None
+        # The native editor may preserve CRLF. Its compact entrypoint reads the deployed full contract.
+        registered_prompt = config.get("prompt", "").replace("\r\n", "\n").strip()
+        automation["checks"]["prompt_matches_deployed_source"] = registered_prompt in (full_contract, entrypoint)
         automation["ok"] = all(automation["checks"].values())
     except Exception as exc:
         automation = {"ok": False, "error_type": type(exc).__name__}

@@ -71,3 +71,18 @@ def test_native_editor_crlf_does_not_report_prompt_drift(monkeypatch,tmp_path):
         db=tmp_path/'db',deadline='07:45',output_dir=tmp_path/'status')
     r=run(args,now=datetime(2026,11,13,8,tzinfo=JST),fetch=lambda *a:{'status':'ready','complete_readback_verified':True})
     assert r['status']=='healthy'
+
+def test_compact_entrypoint_matches_deployed_full_contract(monkeypatch,tmp_path):
+    runtime=tmp_path/'runtime'; (runtime/'config').mkdir(parents=True)
+    (runtime/'config/ny_market_daily_scheduled_prompt.txt').write_text('long full contract\n',encoding='utf8')
+    (runtime/'config/ny_market_daily_automation_entrypoint.txt').write_text('read the full contract\n',encoding='utf8')
+    config=tmp_path/'automation.toml'
+    config.write_text('prompt = '+json.dumps('read the full contract')+'\n',encoding='utf8')
+    monkeypatch.setattr('tools.check_ny_market_delivery.audit',lambda *a,**k:{'ok':True,'checks':{'status':True}})
+    args=SimpleNamespace(automation_config=config,runtime=runtime,production_root=tmp_path,
+        db=tmp_path/'db',deadline='07:45',output_dir=tmp_path/'status')
+    r=run(args,now=datetime(2026,11,13,8,tzinfo=JST),fetch=lambda *a:{'status':'ready','complete_readback_verified':True})
+    assert r['status']=='healthy'
+    config.write_text('prompt = '+json.dumps('not the entrypoint')+'\n',encoding='utf8')
+    r=run(args,now=datetime(2026,11,13,8,tzinfo=JST),fetch=lambda *a:{'status':'ready','complete_readback_verified':True})
+    assert r['reasons']==['automation_configuration_drift']
