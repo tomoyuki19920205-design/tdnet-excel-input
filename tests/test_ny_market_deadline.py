@@ -1,6 +1,7 @@
 from copy import deepcopy
 from datetime import date
 import hashlib
+import json
 import pytest
 from lib.ny_market_deadline import counts,notice,CONTRACT,REVIEW_CONTRACT
 from lib.ny_market import validate_payload,NYMarketValidationError,report_markdown_sha256
@@ -8,6 +9,7 @@ from tools.build_ny_market_deadline_payload import build_deadline
 from tests.test_ny_market_provisional import _synthetic_packet
 from tests.ny_market_quality_fixture import payload as full_payload
 from tools.prepare_ny_market_review import prepare
+from lib.ny_market_research import market_data_packet_sha256
 
 def candidates(n=396):
     return [dict(ticker=f'T{i}',importance_rank=i+1,priority='high' if i<10 else 'normal',
@@ -60,6 +62,31 @@ def test_deadline_update_preserves_unresolved_market_evidence(tmp_path):
     result=build_deadline(packet,date(2026,9,2),'open',progress(candidates()),[update(tmp_path)],
                           [{'field':'企業調査','reason':'一次資料の確認未完了'}])
     assert result['unresolved_items']==packet['unresolved_items']+[{'field':'企業調査','reason':'一次資料の確認未完了'}]
+
+
+def test_resolved_archived_blocker_is_replaced_only_with_matching_evidence(tmp_path):
+    packet=_synthetic_packet()
+    old={'field':'純粋上昇率Top20','reason':'ZYNの旧記号価格が未確認'}
+    current={'field':'純粋上昇率Top20','reason':'価格候補は照合済み、issuer-total株数が未確認'}
+    packet['unresolved_items']=[old]
+    packet['quality_status']='provisional'
+    candidate=tmp_path/'candidate.json'
+    candidate.write_text(json.dumps({'market_session_date':packet['market_session_date'],
+                                                    'top_gainers_20':[{'rank':i} for i in range(1,21)]}),encoding='utf8')
+    audit=tmp_path/'repair.json';audit.write_text('verified dated price sources',encoding='utf8')
+    sha=lambda path:hashlib.sha256(path.read_bytes()).hexdigest()
+    resolution={'packet_sha256':market_data_packet_sha256(packet),'superseded_items':[old],
+                'replacement_items':[current],'candidate_path':str(candidate),'candidate_sha256':sha(candidate),
+                'evidence':[{'path':str(audit),'sha256':sha(audit)}]}
+    args=(packet,date(2026,9,2),'open',progress(candidates()),[update(tmp_path)],
+          [{'field':'企業調査','reason':'未完了'}])
+    result=build_deadline(*args,resolution)
+    assert old not in result['unresolved_items']
+    assert current in result['unresolved_items']
+    assert result['canonical_market_data']['unresolved_items']==[old]
+    audit.write_text('tampered',encoding='utf8')
+    with pytest.raises(ValueError,match='evidence hash mismatch'):
+        build_deadline(*args,resolution)
 
 
 def test_direct_publish_cannot_shift_historical_cutoff(tmp_path):
