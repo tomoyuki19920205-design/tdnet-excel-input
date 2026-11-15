@@ -14,6 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES = (
+    "config/ny_market_daily_automation_entrypoint.txt",
     "config/ny_market_daily_scheduled_prompt.txt",
     "config/ny_market_published_contract.txt",
     "lib/ny_market.py", "lib/ny_market_market_data.py", "lib/ny_market_price_basis.py",

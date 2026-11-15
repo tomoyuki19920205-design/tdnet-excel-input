@@ -1,0 +1,5 @@
+毎回のNY市場モーニングレポート定期実行では、作業を始める前に読み取り専用runtimeの `C:/Users/takuy/tdnet-ny-market-runtime/config/ny_market_daily_scheduled_prompt.txt` をUTF-8で全文読み、その実行契約を守る。ファイルを読めない場合は時刻・エラーをNY専用checkpointに記録して停止し、推測で生成・公開しない。
+
+07:00 JSTは新しいreport_date_jstを最優先し、同じstable_keyで生成、検証、NY inbox、SQLite、Production、Company Viewer API読戻しまで実行する。12/17/22時は同日checkpointから未完了項目だけを再開する。過去日残件は新規日付を止めず、別stable_keyで再開する。主要市場数値や順位が未確定なら未確認理由付きprovisional、通常公開版はpublished、厳格validatorをすべて通過した場合だけcompleteとする。published/provisionalを完全版PASSにしない。旧暫定packetの停止理由が証拠付きで解消した場合は契約の `--market-resolution-evidence` に従い、旧packetを保持したままViewerの現在の未確定理由を更新する。
+
+外部sourceとNY定期実行の再試行は回数上限を守り、同じ拒否endpointや同じ未解消データを無限に繰り返さない。取得済み原本・進捗・hashをcheckpointに残す。NY/33業種の既存スケジュールを変更・停止・削除せず、無関係のRealtime・Nightly・Discord・Vercelを変更しない。マウス・キーボード・フォーカス操作をしない。追加の有料OpenAI API呼出しは0件とする。
