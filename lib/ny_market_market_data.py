@@ -1940,6 +1940,8 @@ class CapturedEndOfDayQuoteProvider:
         if urlsplit(url).hostname == "chartexchange.com":
             return self._fetch_chartexchange(symbol, target_session_date, entry, url)
         if urlsplit(url).hostname == "stockanalysis.com":
+            if url == f"https://stockanalysis.com/stocks/{symbol.lower()}/":
+                return self._fetch_stockanalysis_quote(symbol, target_session_date, entry, url)
             return self._fetch_stockanalysis_capture(symbol, target_session_date, entry, url)
         if urlsplit(url).hostname != "www.marketwatch.com" or not url.endswith(f"/stock/{symbol.lower()}"):
             raise MarketDataError(f"{self.name}:{symbol}: snapshot URL/symbol mismatch")
@@ -1993,6 +1995,71 @@ class CapturedEndOfDayQuoteProvider:
             "primary_exchange": primary_exchange,
             "capture_type": "browser_accessibility_snapshot",
             "source_identifier": url, "raw_response_sha256": hashlib.sha256(raw).hexdigest(),
+        }
+
+    def _fetch_stockanalysis_quote(
+        self, symbol: str, target_session_date: date,
+        entry: dict[str, str], url: str,
+    ) -> dict[str, Any]:
+        """Read the explicitly dated 4 PM quote, never the adjacent after-hours quote."""
+        raw = Path(entry["path"]).read_bytes()
+        state = raw.decode("utf-8").replace("\r\n", "\n")
+        first_line = state.splitlines()[0] if state else ""
+        identity_ok = (f"({symbol}) Stock Price" in first_line
+                       and first_line.endswith(f"({url})"))
+        attribution_ok = all(text in state for text in (
+            "Content type: text/html", "Source: open(",
+            "S&P Global Market Intelligence", "Nasdaq UTP",
+        ))
+        if not identity_ok or not attribution_ok:
+            raise MarketDataError(f"{self.name}:{symbol}: captured quote identity or attribution missing")
+        numbered = {
+            int(match.group(1)): match.group(2).strip()
+            for match in re.finditer(r"^L(\d+): (.*)$", state, re.M)
+        }
+        identity_lines = [number for number, text in numbered.items() if re.fullmatch(
+            rf"(?:NASDAQ|NYSE|NYSEAMERICAN): {re.escape(symbol)} · Real-Time Price · USD", text,
+        )]
+        if (len(identity_lines) != 1
+                or not any(re.fullmatch(rf"# .+ \({re.escape(symbol)}\)", text)
+                           for text in numbered.values())):
+            raise MarketDataError(f"{self.name}:{symbol}: quote symbol or security identity mismatch")
+        exchange_line = identity_lines[0]
+        regular_lines = [numbered.get(exchange_line + offset, "") for offset in (2, 4, 6)]
+        close_raw, change_line, stamp = regular_lines
+        change_match = re.fullmatch(r"([+-]?\d+(?:\.\d+)?) \(([+-]?\d+(?:\.\d+)?)%\)", change_line)
+        prior_rows = re.findall(r"^L\d+: Previous Close  \| (\d+(?:\.\d+)?)$", state, re.M)
+        expected_zone = datetime(target_session_date.year, target_session_date.month,
+                                 target_session_date.day, 16, tzinfo=NY_TZ).tzname()
+        expected_stamp = f"At close: {target_session_date:%b} {target_session_date.day}, {target_session_date.year}, 4:00 PM {expected_zone}"
+        if (not re.fullmatch(r"\d+\.\d+", close_raw)
+                or change_match is None or len(prior_rows) != 1 or stamp != expected_stamp):
+            raise MarketDataError(f"{self.name}:{symbol}: dated regular close or previous close missing")
+        previous_raw = prior_rows[0]
+        close, previous = float(close_raw), float(previous_raw)
+        delta, reported_pct = float(change_match[1]), float(change_match[2])
+        close_half_unit = 0.5 * 10 ** -len(close_raw.partition(".")[2])
+        previous_half_unit = 0.5 * 10 ** -len(previous_raw.partition(".")[2])
+        delta_half_unit = 0.5 * 10 ** -len(change_match[1].partition(".")[2])
+        if close <= close_half_unit or previous <= previous_half_unit:
+            raise MarketDataError(f"{self.name}:{symbol}: quote price precision invalid")
+        pct_bounds = (
+            ((close - close_half_unit) / (previous + previous_half_unit) - 1) * 100,
+            ((close + close_half_unit) / (previous - previous_half_unit) - 1) * 100,
+        )
+        if (abs((close - previous) - delta) > close_half_unit + previous_half_unit + delta_half_unit
+                or not pct_bounds[0] - 0.005 <= reported_pct <= pct_bounds[1] + 0.005):
+            raise MarketDataError(f"{self.name}:{symbol}: independent quote arithmetic mismatch")
+        return {
+            "provider": self.name, "provider_family": "stockanalysis_quote",
+            "session": "regular_close", "target_session_date": target_session_date.isoformat(),
+            "previous_close": previous, "target_close": close,
+            "raw_value": close_raw, "parsed_value": close,
+            "reported_change_raw": change_match[1], "reported_pct_raw": change_match[2],
+            "display_decimal_places": len(close_raw.partition(".")[2]),
+            "primary_exchange": numbered[exchange_line].split(":", 1)[0],
+            "capture_type": "web_text_extraction", "source_identifier": url,
+            "raw_response_sha256": hashlib.sha256(raw).hexdigest(),
         }
 
     def _fetch_stockanalysis_capture(

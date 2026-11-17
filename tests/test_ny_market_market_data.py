@@ -3309,3 +3309,39 @@ def test_missing_minute_observation_needs_independent_display_rounding_evidence(
     ):
         with pytest.raises(MarketDataError):
             resolve_discrepancy(**{**args, **changed})
+
+
+def test_stockanalysis_quote_capture_keeps_precise_regular_close_separate_from_after_hours(tmp_path):
+    url = "https://stockanalysis.com/stocks/cyab/"
+    captured = "\n".join([
+        f"Cyabra (CYAB) Stock Price, Chart & News ({url})",
+        f'Content type: text/html; Source: open({{"ref_id":"{url}"}})',
+        "L66: # Cyabra, Inc. (CYAB)",
+        "L68: NASDAQ: CYAB · Real-Time Price · USD",
+        "L69: ", "L70: 0.1368", "L71: ", "L72: +0.0478 (53.71%)",
+        "L73: ", "L74: At close: Nov 16, 2026, 4:00 PM EST",
+        "L76: 0.1400", "L78: +0.0032 (2.34%)",
+        "L80: After-hours: Nov 16, 2026, 7:59 PM EST",
+        "L112: Previous Close  | 0.0890",
+        "L297: Data Sources: S&P Global Market Intelligence",
+        "L298: Real-time prices are provided by CBOE and Nasdaq UTP",
+    ])
+    path = tmp_path / "captured.txt"
+    path.write_text(captured, encoding="utf-8")
+    provider = CapturedEndOfDayQuoteProvider({"CYAB": {"path": str(path), "source_url": url}})
+    quote = provider.fetch("CYAB", date(2026, 11, 16))
+    assert quote["previous_close"] == pytest.approx(0.089)
+    assert quote["target_close"] == pytest.approx(0.1368)
+    assert quote["reported_pct_raw"] == "53.71"
+    assert quote["display_decimal_places"] == 4
+    assert quote["session"] == "regular_close"
+    assert quote["raw_response_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+    for altered in (
+        captured.replace("NASDAQ: CYAB", "NASDAQ: OTHER"),
+        captured.replace("At close: Nov 16", "At close: Nov 13"),
+        captured.replace("L70: 0.1368", "L70: 0.1400"),
+        captured.replace("L74: At close:", "L74: After-hours:"),
+    ):
+        path.write_text(altered, encoding="utf-8")
+        with pytest.raises(MarketDataError):
+            provider.fetch("CYAB", date(2026, 11, 16))
