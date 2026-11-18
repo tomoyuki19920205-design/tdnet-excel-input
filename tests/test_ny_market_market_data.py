@@ -1657,6 +1657,61 @@ def test_non_nasdaq_info_history_conflict_needs_independent_primary_eod(vendor_p
         assert resolved["basis_evidence"]["vendor_daily_display_rounding_places"] == 3
 
 
+def test_non_nasdaq_large_info_history_conflict_uses_exact_primary_pair():
+    target_date = date(2026, 11, 17)
+
+    def transport(url, _headers):
+        if "/historical?" in url:
+            return json.dumps({"status": {"rCode": 200}, "data": {"tradesTable": {"rows": [
+                {"date": "11/17/2026", "close": "$2.12", "volume": "7,826,811"},
+                {"date": "11/16/2026", "close": "$1.28", "volume": "725"},
+            ]}}}).encode()
+        if "/realtime-trades?" in url:
+            return json.dumps({"data": {"topTable": {"rows": [
+                {"previousClose": "$1.28"},
+            ]}}}).encode()
+        return json.dumps({"data": {
+            "symbol": "MPU", "exchange": "AMEX", "assetClass": "STOCKS", "notifications": [],
+            "secondaryData": {"lastSalePrice": "$1.90", "netChange": "+0.62",
+                              "percentageChange": "+48.44%",
+                              "lastTradeTimestamp": "Closed at Nov 17, 2026 4:00 PM ET"},
+        }}).encode()
+
+    official = NasdaqOfficialCloseProvider(transport=transport).fetch("MPU", target_date, 1.90)
+    assert official["info_historical_conflict"]["nasdaq_historical_close"] == 2.12
+    kwargs = dict(
+        candidate={"symbol": "MPU", "_close": 1.90,
+                   "_change_pct": (1.90 / 1.28 - 1) * 100,
+                   "netchange": 0.62},
+        historical_provider="yahoo_chart_query1",
+        historical_previous_close=1.28, historical_target_close=2.12,
+        historical_change_pct=(2.12 / 1.28 - 1) * 100,
+        official=official,
+        corporate_action={"provider": "yahoo_corporate_actions", "provider_family": "yahoo",
+                          "status": "checked_none", "source_identifier": "https://yahoo.test/actions",
+                          "raw_response_sha256": "a" * 64},
+        minute_close=None, tolerance_pct=0.2,
+        resolved_at="2026-11-18T03:10:00+00:00",
+    )
+    with pytest.raises(MarketDataError, match="lacks exact independent primary EOD pair"):
+        resolve_discrepancy(**kwargs, independent_sources=[])
+    primary_pair = {
+        "provider": "captured_end_of_day_quote", "provider_family": "stockanalysis_quote",
+        "session": "regular_close", "target_session_date": "2026-11-17",
+        "previous_close": 1.28, "target_close": 2.12,
+        "primary_exchange": "NYSEAMERICAN", "display_decimal_places": 3,
+        "source_identifier": "https://stockanalysis.com/stocks/mpu/",
+        "raw_response_sha256": "b" * 64,
+    }
+    resolved = resolve_discrepancy(**kwargs, independent_sources=[primary_pair])
+    assert resolved["discrepancy_reason"] == "non_nasdaq_primary_exchange_eod"
+    assert resolved["canonical_previous_close"] == pytest.approx(1.28)
+    assert resolved["canonical_target_close"] == pytest.approx(2.12)
+    assert resolved["basis_evidence"]["nasdaq_info_close"] == pytest.approx(1.90)
+    with pytest.raises(MarketDataError, match="lacks exact independent primary EOD pair"):
+        resolve_discrepancy(**kwargs, independent_sources=[{**primary_pair, "target_close": 2.11}])
+
+
 def test_nasdaq_info_history_mutation_requires_independent_dated_eod():
     target_date = date(2026, 11, 10)
 

@@ -2472,11 +2472,19 @@ def resolve_discrepancy(
     if (reason is None or (reason == "stale_daily_bar" and not official_supports)
             or (official.get("info_historical_conflict")
                 and reason == "official_closed_eod_with_secondary_boundary_difference")) and action_status == "checked_none":
-        non_nasdaq_eod = [source for source in independent_support if (
-            source.get("session") == "regular_close"
+        # A non-Nasdaq primary exchange's dated EOD pair can corroborate the
+        # exchange history even when Nasdaq's live info quote is materially
+        # different. The generic support list above compares to that info
+        # quote, so it must not discard the very evidence needed here.
+        non_nasdaq_eod = [source for source in independent_sources if (
+            provider_family(str(source.get("provider_family") or source.get("provider") or ""))
+            not in excluded_families
+            and source.get("session") == "regular_close"
             and source.get("target_session_date") == official.get("target_session_date")
             and source.get("primary_exchange")
             and "NASDAQ" not in str(source.get("primary_exchange")).upper()
+            and source.get("previous_close") is not None
+            and source.get("target_close") is not None
             and (abs(float(source["target_close"]) - screener_last)
                  <= max(0.02, screener_last * 0.002)
                  or (official.get("info_historical_conflict")
@@ -2484,13 +2492,20 @@ def resolve_discrepancy(
                                        float(official["info_historical_conflict"]["nasdaq_historical_close"]))))
             and abs(float(source["previous_close"]) - implied_previous)
             <= max(0.02, implied_previous * 0.002)
-            and abs(historical_target_close - screener_last)
-            <= max(0.02, screener_last * 0.002)
+            and (abs(historical_target_close - screener_last)
+                 <= max(0.02, screener_last * 0.002)
+                 or (official.get("info_historical_conflict")
+                     and close_matches(historical_target_close,
+                                       float(official["info_historical_conflict"]["nasdaq_historical_close"]))))
         )]
         if non_nasdaq_eod:
             prior_classification = reason
             reason = "non_nasdaq_primary_exchange_eod"
             official_supports = True
+            known_hashes = {source.get("raw_response_sha256") for source in independent_support}
+            independent_support.extend({**source, "support_role": "independent_primary_exchange_eod"}
+                                       for source in non_nasdaq_eod
+                                       if source.get("raw_response_sha256") not in known_hashes)
             primary_previous = float(non_nasdaq_eod[0]["previous_close"])
             primary_target = float(non_nasdaq_eod[0]["target_close"])
             # A two-decimal display may only corroborate a more precise
