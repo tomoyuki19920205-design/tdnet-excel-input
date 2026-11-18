@@ -328,6 +328,8 @@ def read_sqlite(
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    from lib.pipeline.issuer_identity import register_sqlite_issuer_guard
+    issuer_audit = register_sqlite_issuer_guard(conn, logger)
 
     # 生データ統計
     raw_stats = dict(conn.execute(_QUERY_COUNT).fetchone())
@@ -337,7 +339,7 @@ def read_sqlite(
     )
 
     # WHERE句構築（差分同期）
-    where_conditions = []
+    where_conditions = ["pl_issuer_identity_valid(source.local_code, source.raw_json) = 1"]
     params: list = []
     if recent_days > 0:
         since = (datetime.now(JST) - timedelta(days=recent_days)).strftime(
@@ -375,6 +377,8 @@ def read_sqlite(
 
     rows = conn.execute(query, params).fetchall()
     conn.close()
+    raw_stats["issuer_quarantined"] = issuer_audit.rejected
+    raw_stats["issuer_unverified"] = issuer_audit.unverified_count
 
     # dict に変換
     now_iso = datetime.now(JST).isoformat()
@@ -484,6 +488,8 @@ def read_forecast_rows(
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    from lib.pipeline.issuer_identity import register_sqlite_issuer_guard
+    register_sqlite_issuer_guard(conn, logger)
 
     from src.common_ticker import normalize_ticker as _norm_ticker  # noqa: E402
     target_ticker = _norm_ticker(ticker) if ticker else ""
@@ -492,20 +498,21 @@ def read_forecast_rows(
     fy_rows = conn.execute(
         "SELECT DISTINCT local_code AS ticker, current_fiscal_year_end_date AS period "
         "FROM jquants_financials_normalized "
-        "WHERE type_of_current_period = 'FY'"
+        "WHERE type_of_current_period = 'FY' "
+        "AND pl_issuer_identity_valid(local_code, raw_json) = 1"
     ).fetchall()
     actual_fy_keys: set[tuple[str, str]] = {
         (_norm_ticker(r["ticker"]), r["period"]) for r in fy_rows
     }
 
     # raw_json を含む最新行を取得
-    where_clause = ""
+    where_clause = "WHERE pl_issuer_identity_valid(local_code, raw_json) = 1"
     params: list = []
     if recent_days > 0:
         since = (datetime.now(JST) - timedelta(days=recent_days)).strftime(
             "%Y-%m-%d %H:%M:%S"
         )
-        where_clause = "WHERE fetched_at >= ?"
+        where_clause += " AND fetched_at >= ?"
         params.append(since)
 
     raw_query = f"""
