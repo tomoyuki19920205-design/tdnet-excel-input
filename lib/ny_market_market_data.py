@@ -2032,8 +2032,21 @@ class CapturedEndOfDayQuoteProvider:
         expected_zone = datetime(target_session_date.year, target_session_date.month,
                                  target_session_date.day, 16, tzinfo=NY_TZ).tzname()
         expected_stamp = f"At close: {target_session_date:%b} {target_session_date.day}, {target_session_date.year}, 4:00 PM {expected_zone}"
+        # Some captured quote pages omit the zone only on the 4 PM line while
+        # retaining it on the same security's later after-hours line. Require
+        # that explicit same-date zone before accepting the shorter stamp.
+        after_hours_stamp = numbered.get(exchange_line + 12, "")
+        zone_from_after_hours = (
+            stamp == expected_stamp.rsplit(" ", 1)[0]
+            and re.fullmatch(
+                rf"After-hours: {target_session_date:%b} {target_session_date.day}, "
+                rf"{target_session_date.year}, (?:[4-9]|1[01]):[0-5]\d PM {expected_zone}",
+                after_hours_stamp,
+            ) is not None
+        )
         if (not re.fullmatch(r"\d+\.\d+", close_raw)
-                or change_match is None or len(prior_rows) != 1 or stamp != expected_stamp):
+                or change_match is None or len(prior_rows) != 1
+                or not (stamp == expected_stamp or zone_from_after_hours)):
             raise MarketDataError(f"{self.name}:{symbol}: dated regular close or previous close missing")
         previous_raw = prior_rows[0]
         close, previous = float(close_raw), float(previous_raw)
@@ -2058,6 +2071,8 @@ class CapturedEndOfDayQuoteProvider:
             "reported_change_raw": change_match[1], "reported_pct_raw": change_match[2],
             "display_decimal_places": len(close_raw.partition(".")[2]),
             "primary_exchange": numbered[exchange_line].split(":", 1)[0],
+            "timestamp_basis": "same_date_after_hours_explicit_zone" if zone_from_after_hours
+            else "regular_close_explicit_zone",
             "capture_type": "web_text_extraction", "source_identifier": url,
             "raw_response_sha256": hashlib.sha256(raw).hexdigest(),
         }
@@ -2510,6 +2525,12 @@ def resolve_discrepancy(
             primary_target = float(non_nasdaq_eod[0]["target_close"])
             # A two-decimal display may only corroborate a more precise
             # vendor close; never replace that precise value with rounding.
+            previous_daily_rounding = next((digits for digits in range(2, 5)
+                                            if close_matches(historical_previous_close,
+                                                             round_market_display(primary_previous, digits))), None)
+            target_daily_rounding = next((digits for digits in range(2, 5)
+                                          if close_matches(historical_target_close,
+                                                           round_market_display(primary_target, digits))), None)
             primary_daily_rounding = next((digits for digits in range(2, 5)
                                            if close_matches(historical_previous_close,
                                                             round_market_display(primary_previous, digits))
@@ -2519,7 +2540,8 @@ def resolve_discrepancy(
                     and close_matches(primary_target, historical_target_close)):
                 canonical_primary_pair = (primary_previous, primary_target)
             elif (official.get("info_historical_conflict")
-                  and primary_daily_rounding is not None
+                  and previous_daily_rounding is not None
+                  and target_daily_rounding is not None
                   and close_matches(primary_previous, official_previous)
                   and close_matches(primary_target,
                                     float(official["info_historical_conflict"]["nasdaq_historical_close"]))):
@@ -2534,6 +2556,8 @@ def resolve_discrepancy(
                 "screener_close": screener_last,
                 "vendor_daily_close": historical_target_close,
                 "vendor_daily_display_rounding_places": primary_daily_rounding,
+                "vendor_daily_previous_rounding_places": previous_daily_rounding,
+                "vendor_daily_target_rounding_places": target_daily_rounding,
                 "comparison_basis": "primary_exchange_regular_close",
                 "nasdaq_info_role": "nasdaq_reported_last_sale_not_primary_exchange_close",
                 "previous_discrepancy_classification": prior_classification,
@@ -3708,7 +3732,7 @@ def rank_top20(
     source_top20_floor_pct = candidates[19]["_change_pct"]
 
     ranked: list[dict[str, Any]] = []
-    for candidate in candidates:
+    for candidate_index, candidate in enumerate(candidates):
         ticker = str(candidate["symbol"]).upper()
         series = None
         review_flags: list[str] = []
@@ -3808,8 +3832,6 @@ def rank_top20(
                         canonical_target = float(discrepancy.get("canonical_target_close", discrepancy["official_target_close"]))
                         canonical_previous = float(discrepancy.get("canonical_previous_close", discrepancy["official_previous_close"]))
                         corrected_change = (canonical_target / canonical_previous - 1.0) * 100.0
-                        if corrected_change < source_top20_floor_pct:
-                            raise MarketDataError(f"Top20 {ticker}: corrected move falls below candidate floor")
                         candidate = {**candidate, "_change_pct": corrected_change,
                                      "_close": canonical_target}
                         historical_change = corrected_change
@@ -3869,11 +3891,35 @@ def rank_top20(
                if series is not None and series.symbol_mapping_evidence else {}),
             **discrepancy,
         })
-        if len(ranked) == 20:
-            ranked.sort(key=lambda row: row["change_pct"], reverse=True)
-            for rank, row in enumerate(ranked, 1):
-                row["rank"] = rank
-            return ranked
+        if len(ranked) >= 20:
+            current_floor = sorted((float(row["change_pct"]) for row in ranked), reverse=True)[19]
+            if (candidate_index + 1 == len(candidates)
+                    or float(candidates[candidate_index + 1]["_change_pct"]) <= current_floor):
+                break
+    if len(ranked) >= 20:
+        ranked.sort(key=lambda row: row["change_pct"], reverse=True)
+        selected = ranked[:20]
+        final_floor = float(selected[-1]["change_pct"])
+        original_by_ticker = {str(row["symbol"]).upper(): row for row in candidates}
+        for row in ranked[20:]:
+            original = original_by_ticker[row["ticker"]]
+            if float(original["_change_pct"]) <= final_floor:
+                continue
+            if excluded_action_candidates is None:
+                raise MarketDataError(f"Top20 {row['ticker']}: corrected outside-rank audit output is required")
+            excluded_action_candidates.append({
+                "ticker": row["ticker"], "session_date": target_session_date.isoformat(),
+                "reason": "verified_regular_close_below_final_top20_floor",
+                "screener_change_pct": float(original["_change_pct"]),
+                "screener_rank": candidates.index(original) + 1,
+                "verified_change_pct": float(row["change_pct"]),
+                "final_top20_floor_pct": final_floor,
+                "supporting_sources": row["supporting_sources"],
+                "basis_evidence": row.get("basis_evidence", {}),
+            })
+        for rank, row in enumerate(selected, 1):
+            row["rank"] = rank
+        return selected
     raise MarketDataError(
         f"only {len(ranked)} eligible Top20 records remained; "
         f"documented action exclusions={len(excluded_action_candidates or [])}; "

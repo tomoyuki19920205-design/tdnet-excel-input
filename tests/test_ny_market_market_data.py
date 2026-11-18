@@ -1237,6 +1237,44 @@ def test_non_nasdaq_exact_primary_pair_supersedes_moving_quote():
     assert resolved["canonical_target_close"] == 1.85
 
 
+def test_corrected_primary_exchange_quote_reorders_top20_with_audited_displacement():
+    previous_day, target_day = date(2026, 11, 16), date(2026, 11, 17)
+    source_moves = [(f"T{pct}", float(pct)) for pct in range(40, 21, -1)]
+    source_moves += [("MCRP", 30.0), ("PMEC", 20.8)]
+    rows = [row(symbol, pct, close=1.0 + pct / 100.0) for symbol, pct in source_moves]
+    history = {
+        symbol: series(symbol, (1.0, 1.205 if symbol == "MCRP" else 1.0 + pct / 100.0),
+                       days=(previous_day, target_day))
+        for symbol, pct in source_moves
+    }
+
+    class VerifiedPrimaryPair:
+        def resolve(self, **kwargs):
+            assert kwargs["ticker"] == "MCRP"
+            return {
+                "discrepancy_status": "resolved",
+                "discrepancy_reason": "non_nasdaq_primary_exchange_eod",
+                "official_previous_close": 1.0, "official_target_close": 1.30,
+                "canonical_previous_close": 1.0, "canonical_target_close": 1.205,
+                "corporate_action_status": "checked_none",
+                "supporting_sources": [{"provider": "captured_end_of_day_quote",
+                                        "raw_response_sha256": "c" * 64}],
+                "basis_evidence": {"comparison_basis": "primary_exchange_regular_close"},
+            }
+
+    excluded = []
+    ranked = rank_top20(screener(rows), target_session_date=target_day,
+                        historical_series=history, discrepancy_arbitrator=VerifiedPrimaryPair(),
+                        excluded_action_candidates=excluded)
+    assert len(ranked) == 20
+    assert "MCRP" not in [item["ticker"] for item in ranked]
+    assert "PMEC" in [item["ticker"] for item in ranked]
+    assert excluded[0]["ticker"] == "MCRP"
+    assert excluded[0]["reason"] == "verified_regular_close_below_final_top20_floor"
+    assert excluded[0]["verified_change_pct"] == pytest.approx(20.5)
+    assert excluded[0]["final_top20_floor_pct"] == pytest.approx(20.8)
+
+
 def test_captured_eod_quote_rejects_change_outside_display_rounding_interval(monkeypatch):
     monkeypatch.setattr(Path, "read_bytes", lambda _path: captured_refr_state("68.60"))
     provider = CapturedEndOfDayQuoteProvider({
@@ -3400,3 +3438,36 @@ def test_stockanalysis_quote_capture_keeps_precise_regular_close_separate_from_a
         path.write_text(altered, encoding="utf-8")
         with pytest.raises(MarketDataError):
             provider.fetch("CYAB", date(2026, 11, 16))
+
+
+def test_stockanalysis_quote_missing_regular_zone_needs_same_date_after_hours_zone(tmp_path):
+    url = "https://stockanalysis.com/stocks/mcrp/"
+    captured = "\n".join([
+        f"Micropolis AI Robotics (MCRP) Stock Price, Chart & News ({url})",
+        f'Content type: text/html; Source: open({{"ref_id":"{url}"}})',
+        "L66: # Micropolis AI Robotics (MCRP)",
+        "L68: NYSEAMERICAN: MCRP · Real-Time Price · USD",
+        "L70: 0.3694", "L72: +0.0720 (24.21%)",
+        "L74: At close: Nov 17, 2026, 4:00 PM",
+        "L76: 0.3680", "L78: -0.0014 (-0.38%)",
+        "L80: After-hours: Nov 17, 2026, 6:46 PM EST",
+        "L111: Previous Close  | 0.2974",
+        "L297: Data Sources: S&P Global Market Intelligence",
+        "L298: Real-time prices are provided by CBOE and Nasdaq UTP",
+    ])
+    path = tmp_path / "mcrp.txt"
+    path.write_text(captured, encoding="utf-8")
+    provider = CapturedEndOfDayQuoteProvider({"MCRP": {"path": str(path), "source_url": url}})
+    quote = provider.fetch("MCRP", date(2026, 11, 17))
+    assert quote["previous_close"] == pytest.approx(0.2974)
+    assert quote["target_close"] == pytest.approx(0.3694)
+    assert quote["timestamp_basis"] == "same_date_after_hours_explicit_zone"
+    for altered in (
+        captured.replace("6:46 PM EST", "6:46 PM EDT"),
+        captured.replace("After-hours: Nov 17", "After-hours: Nov 16"),
+        captured.replace("L80: After-hours:", "L80: Unverified:"),
+        captured.replace("L70: 0.3694", "L70: 0.3680"),
+    ):
+        path.write_text(altered, encoding="utf-8")
+        with pytest.raises(MarketDataError):
+            provider.fetch("MCRP", date(2026, 11, 17))
