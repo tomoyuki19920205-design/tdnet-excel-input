@@ -9,14 +9,21 @@ has the same ``CurFYSt`` and a self-consistent ``CurPerEn``/``CurFYEn`` pair.
 from __future__ import annotations
 
 
-def resolved_fiscal_year_end_sql(row_alias: str = "source") -> str:
+def resolved_fiscal_year_end_sql(
+    row_alias: str = "source", *, require_native_identity: bool = False
+) -> str:
     """Return a SQLite expression for the canonical fiscal-year end.
 
     The expression does not assume a twelve-month fiscal year and only changes
     interim periods.  Without an authoritative FY actual, the source value is
-    retained.
+    retained. Guarded callers also validate the FY reference issuer before it
+    can change an otherwise valid interim row. Other callers retain their API.
     """
 
+    identity_predicate = (
+        "AND pl_issuer_identity_valid(fy.local_code, fy.raw_json) = 1"
+        if require_native_identity else ""
+    )
     return f"""\
 CASE
   WHEN {row_alias}.type_of_current_period IN ('1Q', '2Q', '3Q')
@@ -27,6 +34,7 @@ CASE
       SELECT fy.current_fiscal_year_end_date
       FROM jquants_financials_normalized AS fy
       WHERE fy.local_code = {row_alias}.local_code
+        {identity_predicate}
         AND fy.type_of_current_period = 'FY'
         AND fy.type_of_document LIKE '%FinancialStatements%'
         AND json_valid(fy.raw_json)

@@ -330,7 +330,10 @@ def read_sqlite(
         )
         from lib.pipeline.jquants_fiscal_period import transition_sibling_sql
 
-        recent_predicate = "recent_fy.fetched_at >= ?"
+        recent_predicate = (
+            "recent_fy.fetched_at >= ? AND "
+            "pl_issuer_identity_valid(recent_fy.local_code, recent_fy.raw_json) = 1"
+        )
         where_conditions.append(
             f"(source.fetched_at >= ? OR "
             f"{transition_sibling_sql(recent_predicate, 'source')})"
@@ -354,7 +357,9 @@ def read_sqlite(
     query = _QUERY_BASE_TEMPLATE.format(
         where_clause=where_clause,
         pbt_expression=pbt_expression,
-        resolved_period_expression=resolved_fiscal_year_end_sql("source"),
+        resolved_period_expression=resolved_fiscal_year_end_sql(
+            "source", require_native_identity=True
+        ),
     )
     if limit > 0:
         query += f" LIMIT ?"
