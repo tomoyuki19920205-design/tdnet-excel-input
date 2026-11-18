@@ -34,3 +34,14 @@ native identifiers, malformed input, sparse corrections, forecasting, short
 fiscal years and fiscal-year transitions. No paid AI service or browser is used.
 Production deployment of this additional guard remains a separate approval;
 the already-fixed normalizer is currently active in the production runtime.
+
+The guarded reader also validates every FY reference used to resolve an interim
+fiscal-year transition, including the recent-FY sibling lookup. Filtering only
+exported rows is insufficient: a rejected FY row could otherwise move a valid
+interim to the wrong fiscal period. The helper's optional flag preserves the
+existing behavior of callers that have not registered the SQLite guard.
+
+Additional regression cases cover both transition lookups and a foreign FY
+that would incorrectly suppress a valid same-year forecast. A staged runtime
+overlay preserves unrelated local changes and must pass full-file hash checks
+before installation. It does not modify scheduler configuration.

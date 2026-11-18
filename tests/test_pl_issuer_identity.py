@@ -116,3 +116,32 @@ def test_invalid_native_json_is_logged_and_retained_without_breaking_sql(tmp_pat
     rows, stats = read_sqlite(str(path))
     assert rows == []
     assert stats["issuer_quarantined"][0]["reason"] == "invalid_native_payload"
+
+
+@pytest.mark.parametrize("recent_days", [0, 1])
+def test_foreign_fy_cannot_rebind_or_reselect_a_valid_interim(tmp_path, recent_days):
+    from datetime import datetime
+    path = tmp_path / "transition.db"; c = make_db(path)
+    put(c, period="2027-08-31", quarter="1Q", date="2026-10-01")
+    put(c, native="27600", period="2027-03-31", quarter="FY", date="2027-05-01")
+    rows = c.execute("SELECT rowid, raw_json, type_of_current_period FROM jquants_financials_normalized").fetchall()
+    for rowid, raw, quarter in rows:
+        payload = json.loads(raw)
+        payload.update(CurFYSt="2026-09-01", CurPerEn="2027-03-31" if quarter == "FY" else "2026-11-30")
+        fetched = datetime.now().isoformat(sep=" ") if quarter == "FY" else "2020-01-01 00:00:00"
+        c.execute("UPDATE jquants_financials_normalized SET raw_json=?, fetched_at=? WHERE rowid=?", (json.dumps(payload), fetched, rowid))
+    c.commit(); c.close()
+    actual, _ = read_sqlite(str(path), recent_days=recent_days)
+    assert [(r["period"], r["quarter"]) for r in actual] == ([] if recent_days else [("2027-08-31", "1Q")])
+
+
+def test_foreign_fy_does_not_suppress_valid_same_year_forecast(tmp_path):
+    path = tmp_path / "forecast.db"; c = make_db(path)
+    put(c, period="2027-08-31", quarter="1Q", date="2026-11-01")
+    rowid, raw = c.execute("SELECT rowid, raw_json FROM jquants_financials_normalized").fetchone()
+    payload = json.loads(raw); payload.update(FSales="12000000000", FOP="2500000000")
+    c.execute("UPDATE jquants_financials_normalized SET raw_json=? WHERE rowid=?", (json.dumps(payload), rowid))
+    put(c, native="27600", period="2027-08-31", quarter="FY", date="2027-10-01")
+    c.commit(); c.close()
+    forecasts = read_forecast_rows(str(path))
+    assert [(r["ticker"], r["period"], r["sales"], r["operating_profit"]) for r in forecasts] == [("276A", "2027-08-31", 12000, 2500)]
