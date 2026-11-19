@@ -3471,3 +3471,34 @@ def test_stockanalysis_quote_missing_regular_zone_needs_same_date_after_hours_zo
         path.write_text(altered, encoding="utf-8")
         with pytest.raises(MarketDataError):
             provider.fetch("MCRP", date(2026, 11, 17))
+
+
+def test_stockanalysis_quote_accepts_dated_market_closed_label_only_at_4pm(tmp_path):
+    url = "https://stockanalysis.com/stocks/ostx/"
+    captured = "\n".join([
+        f"OS Therapies (OSTX) Stock Price & Overview ({url})",
+        f'Content type: text/html; Source: open({{"ref_id":"{url}"}})',
+        "L71: # OS Therapies Incorporated (OSTX)",
+        "L73: NYSEAMERICAN: OSTX · Real-Time Price · USD",
+        "L75: 0.9199", "L77: +0.1751 (23.51%)",
+        "L79: Nov 18, 2026, 4:00 PM EST - Market closed",
+        "L111: Previous Close  | 0.7448",
+        "L297: Data Sources: S&P Global Market Intelligence",
+        "L298: Real-time prices are provided by CBOE and Nasdaq UTP",
+    ])
+    path = tmp_path / "ostx.txt"
+    path.write_text(captured, encoding="utf-8")
+    provider = CapturedEndOfDayQuoteProvider({"OSTX": {"path": str(path), "source_url": url}})
+    quote = provider.fetch("OSTX", date(2026, 11, 18))
+    assert (quote["previous_close"], quote["target_close"]) == pytest.approx((0.7448, 0.9199))
+    assert quote["primary_exchange"] == "NYSEAMERICAN"
+    assert quote["timestamp_basis"] == "regular_close_explicit_zone"
+    for altered in (
+        captured.replace("Nov 18, 2026", "Nov 17, 2026"),
+        captured.replace("4:00 PM EST", "3:59 PM EST"),
+        captured.replace("4:00 PM EST", "4:00 PM EDT"),
+        captured.replace("Market closed", "After-hours"),
+    ):
+        path.write_text(altered, encoding="utf-8")
+        with pytest.raises(MarketDataError):
+            provider.fetch("OSTX", date(2026, 11, 18))

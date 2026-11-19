@@ -2032,6 +2032,10 @@ class CapturedEndOfDayQuoteProvider:
         expected_zone = datetime(target_session_date.year, target_session_date.month,
                                  target_session_date.day, 16, tzinfo=NY_TZ).tzname()
         expected_stamp = f"At close: {target_session_date:%b} {target_session_date.day}, {target_session_date.year}, 4:00 PM {expected_zone}"
+        closed_market_stamp = (
+            f"{target_session_date:%b} {target_session_date.day}, "
+            f"{target_session_date.year}, 4:00 PM {expected_zone} - Market closed"
+        )
         # Some captured quote pages omit the zone only on the 4 PM line while
         # retaining it on the same security's later after-hours line. Require
         # that explicit same-date zone before accepting the shorter stamp.
@@ -2046,7 +2050,8 @@ class CapturedEndOfDayQuoteProvider:
         )
         if (not re.fullmatch(r"\d+\.\d+", close_raw)
                 or change_match is None or len(prior_rows) != 1
-                or not (stamp == expected_stamp or zone_from_after_hours)):
+                or not (stamp in {expected_stamp, closed_market_stamp}
+                        or zone_from_after_hours)):
             raise MarketDataError(f"{self.name}:{symbol}: dated regular close or previous close missing")
         previous_raw = prior_rows[0]
         close, previous = float(close_raw), float(previous_raw)
