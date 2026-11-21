@@ -218,6 +218,14 @@ latest AS (
                    type_of_current_period
       ORDER BY disclosed_date DESC
     ) AS rn,
+    -- Sparse facts may fall back only within the latest actual accounting
+    -- basis. Later forecast notices do not change that basis.
+    FIRST_VALUE(type_of_document) OVER (
+      PARTITION BY local_code, resolved_fiscal_year_end_date, type_of_current_period
+      ORDER BY CASE WHEN type_of_document LIKE '%FinancialStatements%' THEN 0 ELSE 1 END,
+               disclosed_date DESC, json_extract(raw_json, '$.DiscTime') DESC,
+               json_extract(raw_json, '$.DiscNo') DESC
+    ) AS actual_document_type,
     disclosed_date,
     type_of_document,
     net_sales,
@@ -240,12 +248,14 @@ field_best AS (
      WHERE s.local_code = latest.local_code
        AND s.current_fiscal_year_end_date = latest.current_fiscal_year_end_date
        AND s.type_of_current_period = latest.type_of_current_period
+       AND s.type_of_document = latest.actual_document_type
        AND s.net_sales IS NOT NULL
      ORDER BY s.rn LIMIT 1) AS net_sales,
     (SELECT s.gross_profit FROM latest s
      WHERE s.local_code = latest.local_code
        AND s.current_fiscal_year_end_date = latest.current_fiscal_year_end_date
        AND s.type_of_current_period = latest.type_of_current_period
+       AND s.type_of_document = latest.actual_document_type
        AND s.gross_profit IS NOT NULL
      ORDER BY s.rn LIMIT 1) AS gross_profit,
     -- Sparse corrections are field-wise patches.  A missing OP never tombstones
@@ -254,6 +264,7 @@ field_best AS (
      WHERE s.local_code = latest.local_code
        AND s.current_fiscal_year_end_date = latest.current_fiscal_year_end_date
        AND s.type_of_current_period = latest.type_of_current_period
+       AND s.type_of_document = latest.actual_document_type
        AND s.type_of_document LIKE '%FinancialStatements%'
        AND s.operating_profit IS NOT NULL
      ORDER BY s.disclosed_date DESC, s.rn LIMIT 1) AS operating_profit
@@ -261,12 +272,14 @@ field_best AS (
      WHERE s.local_code = latest.local_code
        AND s.current_fiscal_year_end_date = latest.current_fiscal_year_end_date
        AND s.type_of_current_period = latest.type_of_current_period
+       AND s.type_of_document = latest.actual_document_type
        AND s.operating_profit IS NOT NULL
      ORDER BY s.disclosed_date DESC, s.rn LIMIT 1) AS operating_profit_proxy_reason
     ,(SELECT s.profit_before_tax FROM latest s
      WHERE s.local_code = latest.local_code
        AND s.current_fiscal_year_end_date = latest.current_fiscal_year_end_date
        AND s.type_of_current_period = latest.type_of_current_period
+       AND s.type_of_document = latest.actual_document_type
        AND s.type_of_document LIKE '%FinancialStatements_Consolidated_%'
      ORDER BY s.disclosed_date DESC, s.rn LIMIT 1) AS profit_before_tax
   FROM latest
