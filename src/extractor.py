@@ -36,6 +36,7 @@ from .extractors.xbrl_profiles import IndustryType, detect_industry_profile
 logger = logging.getLogger("tdnet")
 
 from .pl_actual_evidence import actual_period, is_actual_statement, summary_actuals, reconcile_summary, read_pdf_actual_evidence
+from .xbrl_package_context import package_resources, resource_metadata
 
 # ============================================================
 # キーワード定義
@@ -79,6 +80,8 @@ FORECAST_B_LABELS = [
 _XBRL_TAG_MAP = {
     "NetSales": "sales",
     "Revenue": "sales",
+    "Revenue2": "sales",
+    "OperatingRevenuesSpecific": "sales",
     "OperatingRevenue": "sales",
     "OperatingRevenuesREIT": "sales",        # REIT/投資法人の営業収益
     "OperatingRevenueINV": "sales",          # 投資法人の営業収益
@@ -262,7 +265,26 @@ def _apply_ixbrl_scale(raw_text: str, scale: str, sign: str) -> int | None:
     return val
 
 
-def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFinancials | None:
+def _primary_actual_context(context_ref: str, contexts: dict, metadata: dict) -> bool:
+    if metadata.get('consolidated') == 'false' and 'ConsolidatedMember' in (contexts.get(context_ref, {}).get('members') or []):
+        return False
+    if is_actual_consolidated_duration_context(context_ref, contexts):
+        return True
+    # Nonconsolidated figures are the primary company statements only when
+    # the official DEI explicitly declares that no consolidated statements
+    # are prepared. Never use this to admit subsidiaries or forecast facts.
+    if metadata.get('consolidated') != 'false':
+        return False
+    context = contexts.get(context_ref)
+    if not context or context.get('instant') or not context.get('start') or not context.get('end'):
+        return False
+    if any(token in context_ref.lower() for token in ('forecast', 'lower', 'upper', 'estimate', 'segment')):
+        return False
+    members = set(context.get('members') or [])
+    return bool(members) and members.issubset({'NonConsolidatedMember', 'ResultMember'}) and 'NonConsolidatedMember' in members
+
+
+def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl", *, shared_resources: tuple[dict, dict] | None = None) -> ExtractedFinancials | None:
     """
     単一のXBRL/iXBRLバイト列をパースして数値を抽出する。
 
@@ -278,7 +300,14 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
     """
     xml_str = read_xbrl_bytes(raw)
     root = ET.fromstring(xml_str)
-    contexts = parse_context_metadata(root)
+    contexts, fiscal_dates = resource_metadata(root)
+    if shared_resources:
+        shared_contexts, shared_dates = shared_resources
+        contexts = {key: dict(value) for key, value in shared_contexts.items()} | contexts
+        fiscal_dates = shared_dates | fiscal_dates
+    for metadata in contexts.values():
+        metadata.update(fiscal_dates)
+
     fact_names = _concept_names(root)
 
     values: dict[str, int | None] = {
@@ -307,7 +336,10 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
             is_fallback = primary_metric is None and fallback_metric is not None
             context = elem.get("contextRef", "")
             if _is_current_duration(context):
-                if field_name in ("operating_profit", "ordinary_profit", "profit_before_tax") and not is_actual_consolidated_duration_context(context, contexts):
+                if (
+                    field_name in ("operating_profit", "gross_profit", "ordinary_profit", "profit_before_tax")
+                    and not _primary_actual_context(context, contexts, fiscal_dates)
+                ):
                     continue
                 val = normalize_number(elem.text or "")
                 if val is not None:
@@ -383,7 +415,10 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
             continue
         if "ForecastMember" in context or "LowerMember" in context or "UpperMember" in context:
             continue
-        if field_name in ("operating_profit", "ordinary_profit", "profit_before_tax") and not is_actual_consolidated_duration_context(context, contexts):
+        if (
+            field_name in ("operating_profit", "gross_profit", "ordinary_profit", "profit_before_tax")
+            and not _primary_actual_context(context, contexts, fiscal_dates)
+        ):
             continue
 
         text = (elem.text or "").strip()
@@ -488,6 +523,8 @@ def _extract_from_xbrl(xbrl_path: str) -> ExtractedFinancials | None:
                 zf.close()
                 return None
 
+            resources = package_resources(zf, candidates)
+
             logger.debug(f"[XBRL] ZIP内候補: {candidates}")
 
             # --- Phase 1: Summary ファイルを優先抽出 ---
@@ -498,7 +535,7 @@ def _extract_from_xbrl(xbrl_path: str) -> ExtractedFinancials | None:
             for entry_name in summary_candidates:
                 try:
                     entry_bytes = zf.read(entry_name)
-                    result = _parse_xbrl_content(entry_bytes, source_label="summary_xbrl")
+                    result = _parse_xbrl_content(entry_bytes, source_label="summary_xbrl", shared_resources=resources['summary'])
                     if result is not None:
                         logger.info(f"[XBRL] Summary抽出成功: {entry_name}")
                         summary_result = result
@@ -511,7 +548,7 @@ def _extract_from_xbrl(xbrl_path: str) -> ExtractedFinancials | None:
                 for entry_name in other_candidates:
                     try:
                         entry_bytes = zf.read(entry_name)
-                        result = _parse_xbrl_content(entry_bytes, source_label="xbrl")
+                        result = _parse_xbrl_content(entry_bytes, source_label="xbrl", shared_resources=resources['attachment'])
                         if result is not None:
                             logger.info(f"[XBRL] ZIP内ファイルから抽出成功: {entry_name}")
                             zf.close()
@@ -547,7 +584,7 @@ def _extract_from_xbrl(xbrl_path: str) -> ExtractedFinancials | None:
                 for entry_name in pl_candidates:
                     try:
                         entry_bytes = zf.read(entry_name)
-                        pl_result = _parse_xbrl_content(entry_bytes, source_label="attachment_xbrl")
+                        pl_result = _parse_xbrl_content(entry_bytes, source_label="attachment_xbrl", shared_resources=resources['attachment'])
                         if pl_result is None:
                             continue
                         logger.info(f"[XBRL] PL Attachment抽出成功: {entry_name}")
