@@ -8,7 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse, unquote
 
-from src.pl_actual_evidence import actual_period, is_actual_statement, normalized, summary_actuals
+from src.pl_actual_evidence import actual_period, is_actual_statement, normalized, summary_actuals, read_pdf_actual_evidence
 from src.common_ticker import normalize_ticker
 
 log = logging.getLogger(__name__)
@@ -20,11 +20,14 @@ def _read_evidence(filename: str, modified_ns: int, size: int):
     with pdfplumber.open(filename) as pdf:
         text = pdf.pages[0].dedupe_chars().extract_text() or ''
     lines=text.splitlines()
-    title=next((s for s in lines[:5] if '決算短信' in normalized(s)), '\n'.join(lines[:3]))
+    cover_title='\n'.join(lines[:3])
+    title=next((s for s in lines[:40] if '決算短信' in normalized(s) and
+                re.match(r'^\s*[（(「【]?(?:訂正|再訂正|20\d{2}年|令和|平成)',normalized(s))),cover_title)
+    if re.search(r'質疑|Q\s*&\s*A|説明会|説明資料',normalized(cover_title),re.I):title=cover_title
     compact=re.sub(r'\s+', '', normalized(text))
-    issuer=re.search(r'(?:コード番号|証券コード)[:：]?([0-9A-Z]{4})', compact)
-    period=actual_period(title,text)
-    values,unit=summary_actuals(text,period.fiscal_end,period.quarter) if period else ({},'')
+    issuer=re.search(r'(?:コード番号|証券コード|コード)[:：)）]*([0-9A-Z]{4})', compact)
+    period,actual_text,_=read_pdf_actual_evidence(filename,title)
+    values,unit=summary_actuals(actual_text,period.fiscal_end,period.quarter) if period else ({},'')
     return title, issuer[1] if issuer else None, period, values,unit
 
 
@@ -54,6 +57,9 @@ def assess_local_actual(row: dict, docs_dir: str | Path) -> tuple[bool,str]:
         return False,'original_unreadable'
     if not is_actual_statement(title):
         return False,'not_actual_statement'
+    heading = normalized(title)
+    if re.search(r'第\s*4\s*四半期',heading) or ('会計期間' in heading and '累計' not in heading):
+        return False,'standalone_quarter_not_cumulative'
     if issuer and issuer != normalize_ticker(str(row.get('company_code') or row.get('ticker') or '')):
         return False,'issuer_conflict'
     if period:

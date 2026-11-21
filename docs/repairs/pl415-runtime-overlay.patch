@@ -1,0 +1,655 @@
+--- /dev/null
++++ b/src/pl_actual_evidence.py
+@@ -0,0 +1,250 @@
++"""Evidence for statement actuals; never infer a closing day from a month label.
++
++This module has no network, database or model/API calls. Forecast extraction
++has a separate entry point and must not use the actual-result gate below.
++"""
++from __future__ import annotations
++
++import re
++import unicodedata
++import calendar
++from dataclasses import dataclass
++from datetime import date, timedelta
++from decimal import Decimal, InvalidOperation
++
++
++def normalized(text: str) -> str:
++    text = unicodedata.normalize('NFKC', text or '')
++    for era, offset in (('令和', 2018), ('平成', 1988)):
++        text = re.sub(era + r'(元|\d+)年',
++                      lambda m: str(offset + (1 if m[1] == '元' else int(m[1]))) + '年', text)
++    return text
++
++
++def is_actual_statement(title: str) -> bool:
++    title = normalized(title).lower()
++    return ('決算短信' in title or 'financial results' in title) and not re.search(
++        r'質疑|q\s*&\s*a|説明会|説明資料|補足資料|presentation|スライド', title)
++
++
++@dataclass(frozen=True)
++class ActualPeriod:
++    fiscal_end: str
++    quarter: str
++    start: str
++    end: str
++
++
++def completed_actual_period(period, quarter, evidence_datetime, *, today=None):
++    """Keep an exact non-month-end closing day in the completion check.
++
++    A month-end year still has month-end quarters (including February).
++    This is a conservative fallback for legacy rows without duration facts;
++    it does not infer or rewrite a changed fiscal year's reporting dates.
++    """
++    try:
++        value = str(period)
++        if len(value) == 7:
++            year, month = map(int, value.split('-'))
++            closing = date(year, month, calendar.monthrange(year, month)[1])
++        else:
++            closing = date.fromisoformat(value[:10])
++        q = 4 if quarter in ('FY', '4Q') else {'1Q': 1, '2Q': 2, '3Q': 3}[quarter]
++        index = closing.year * 12 + closing.month - 1 - (4 - q) * 3
++        year, month_zero = divmod(index, 12)
++        last = calendar.monthrange(year, month_zero + 1)[1]
++        month_end = closing.day == calendar.monthrange(closing.year, closing.month)[1]
++        end = date(year, month_zero + 1, last if month_end else min(closing.day, last))
++        evidence = date.fromisoformat(str(evidence_datetime)[:10])
++        return end <= evidence <= (today or date.today())
++    except (TypeError, ValueError, KeyError):
++        return False
++
++
++_DATE = r'(20\d{2})年\s*(\d{1,2})月\s*(\d{1,2})日'
++_RANGE = re.compile(_DATE + r'\s*[~～〜－—–-]\s*' + _DATE)
++
++
++def actual_period(title: str, text: str) -> ActualPeriod | None:
++    """Resolve explicit current ranges, with a checked regular-year fallback.
++
++    A forecast's full-year *date range* can identify the fiscal closing day,
++    but forecast amounts and quarter labels are never treated as actuals.
++    Short fiscal years need an explicit full-year range. A single quarter's
++    standalone duration must not be relabelled as cumulative or annual.
++    """
++    title, text = normalized(title), normalized(text)
++    compact = re.sub(r'\s+', '', text)
++    ym = re.search(r'(20\d{2})年(\d{1,2})月期', re.sub(r'\s+', '', title))
++    if not ym:
++        ym = re.search(r'(20\d{2})年(\d{1,2})月期', compact)
++    if not ym:
++        return None
++    expected = (int(ym[1]), int(ym[2]))
++    heading = title if '決算短信' in title else compact[ym.start():ym.start()+100]
++    qm = re.search(r'第\s*([1-4])\s*四半期', heading)
++    q = qm[1] + 'Q' if qm else ('2Q' if '中間' in heading else 'FY')
++    if q == '4Q' or ('会計期間' in heading and '累計' not in heading):
++        return None
++    stop = re.search(r'(?:連結)?経営成績', compact)
++    if not stop:
++        return None
++    ranges = []
++    for m in _RANGE.finditer(compact):
++        try:
++            start = date(*map(int, m.groups()[:3])); end = date(*map(int, m.groups()[3:]))
++        except ValueError:
++            continue
++        if start <= end:
++            ranges.append((m.start(), start, end))
++    current = [r for r in ranges if r[0] < stop.start()]
++    if not current:
++        return None
++    _, start, end = current[-1]
++    if q == 'FY':
++        return ActualPeriod(end.isoformat(), 'FY', start.isoformat(), end.isoformat()) if (end.year, end.month) == expected else None
++    days = (end - start).days + 1
++    lo, hi = {'1Q': (75,105), '2Q': (165,195), '3Q': (255,285)}[q]
++    # A disclosed short/changed fiscal year is allowed only with explicit dates;
++    # never synthesize its end by adding twelve months.
++    candidates = {e for _, s, e in ranges if s == start and (e.year,e.month) == expected and e >= end}
++    if len(candidates) == 1:
++        fiscal_end = candidates.pop()
++    elif not candidates and lo <= days <= hi and not re.search(r'決算期.{0,12}変更|変則決算', compact):
++        try:
++            fiscal_end = start.replace(year=start.year+1) - timedelta(days=1)
++        except ValueError:
++            return None
++        if (fiscal_end.year,fiscal_end.month) != expected:
++            return None
++    else:
++        return None
++    if not lo <= days <= hi and not re.search(r'決算期.{0,12}変更|変則決算', compact):
++        return None
++    return ActualPeriod(fiscal_end.isoformat(), q, start.isoformat(), end.isoformat())
++
++
++_TOKEN = re.compile(r'^(?:[△▲−－-]?\d[\d,]*(?:\.\d+)?|[―—–－─-])$')
++
++
++def money(token: str) -> Decimal | None:
++    """Parse the entire cell; never delete a decimal/percentage substring."""
++    token = normalized(token).strip()
++    if not _TOKEN.fullmatch(token):
++        raise ValueError('not a complete monetary cell')
++    if token in ('―','—','–','－','─','-'):
++        return None
++    token = token.translate(str.maketrans({'△':'-','▲':'-','−':'-','－':'-'}))
++    if ',' in token and not re.fullmatch(r'-?\d{1,3}(?:,\d{3})+(?:\.\d+)?', token):
++        raise ValueError('broken thousands grouping')
++    return Decimal(token.replace(',', ''))
++
++
++def summary_actuals(text: str, fiscal_end: str, quarter: str) -> tuple[dict, str]:
++    """Read one labelled current row in the first actual results table.
++
++    Require explicit units, complete cells, distinct metric headings, the
++    requested fiscal year and quarter, and the usual amount/YoY column pairs.
++    Ambiguous layouts return empty, never a nearby year, profit or fragment.
++    """
++    era_year = '令和' in text or '平成' in text
++    text = normalized(text)
++    begin = re.search(r'(?:連結)?経営成績', text)
++    if not begin:
++        return {}, ''
++    block = text[begin.end():]
++    end = re.search(r'(?:連結)?財政状態|包括利益|1\s*株当たり|業績予想', block)
++    if end:
++        block = block[:end.start()]
++    year, month = map(int, fiscal_end.split('-')[:2])
++    year_pattern = '(?:'+str(year)+'|'+str(year-2018)+')' if era_year else str(year)
++    rowlabel = re.compile(r'^\s*'+year_pattern+r'年\s*0?'+str(month)+r'月期(?P<q>第\s*[1-4]\s*四半期(?:\s*\(?累計\)?)?|中間期)?\s+(?P<values>.+)$')
++    lines = block.splitlines()
++    matches=[]
++    for i,line in enumerate(lines):
++        m = rowlabel.match(line)
++        if not m:
++            continue
++        label = re.sub(r'\s+', '', m['q'] or '')
++        rowq = '2Q' if '中間' in label else (re.search(r'第([1-4])',label)[1]+'Q' if '第' in label else 'FY')
++        if rowq != quarter:
++            continue
++        header = '\n'.join(lines[:i])
++        if '営業利益' not in header and '営業損失' not in header:
++            continue
++        if not re.search(r'売上高|売上収益|営業収益|営業収入|経常収益',header):
++            continue
++        # IFRS summaries with both total and attributable profit need their
++        # structured XBRL/table route; do not assume their column count.
++        sales_headers = re.findall(r'売上高|売上収益|営業収益|営業収入|経常収益', header)
++        if len(sales_headers)>2 or len(sales_headers)!=len(set(sales_headers)):
++            continue
++        preferred = '売上高' if '売上高' in sales_headers else sales_headers[0]
++        metrics=['sales' if name==preferred else 'operating_revenue' for name in sales_headers]+['operating_profit']
++        if re.search(r'経常利益|経常損失',header):metrics.append('ordinary_profit')
++        elif '税引前' in header:metrics.append('profit_before_tax')
++        if re.search(r'純利益|純損失|帰属',header):metrics.append('net_income')
++        units=re.findall(r'百万円|千円|(?<![千万円億])円(?!銭)',header)
++        if not units or len(set(units)) != 1:
++            continue
++        tokens=m['values'].split()
++        if len(tokens) != 2*len(metrics):
++            continue
++        try:
++            values={k:money(tokens[2*j]) for j,k in enumerate(metrics)}
++            for tok in tokens[1::2]:money(tok.rstrip('%'))
++        except (ValueError,InvalidOperation):
++            continue
++        if values.get('sales') is None or values.get('operating_profit') is None:
++            continue
++        matches.append((values,units[0]))
++    return matches[0] if len(matches)==1 else ({},'')
++
++
++def reconcile_summary(result, values: dict, unit: str) -> bool:
++    """Compare validated cells in yen, including published rounding precision."""
++    factors={'円':1,'千円':1000,'百万円':1000000,'億円':100000000}
++    source=factors.get(result.source_unit); target=factors.get(unit)
++    if not source or not target or not values:
++        return False
++    for field in ('sales','operating_profit'):
++        a=getattr(result,field,None); b=values.get(field)
++        if a is None or b is None or abs(Decimal(str(a))*source-b*target)>=max(source,target):
++            return False
++    return True
++
++
++def read_pdf_actual_evidence(path: str, title: str):
++    """Find the actual summary, including an explicitly corrected attachment.
++
++    Correction cover pages are not financial tables. If both BEFORE and AFTER
++    versions are attached, only an explicitly labelled AFTER version can be
++    used. Ambiguous partial corrections remain pending rather than overwriting
++    an existing actual. Normal statements require only their first page.
++    """
++    import pdfplumber
++    correction = '訂正' in title
++    candidates=[]; phase=None; after_only=False; first=''
++    with pdfplumber.open(path) as pdf:
++        for index,page in enumerate(pdf.pages if correction else pdf.pages[:1]):
++            text=page.dedupe_chars().extract_text() or ''
++            if index==0:
++                first=text
++                compact=re.sub(r'\s+','',normalized(text))
++                after_only=bool(re.search(r'訂正後のみ(?:の)?全文|訂正後の全文のみ',compact))
++            markers=re.findall(r'(?:^|\n)\s*[【\[(（]?\s*(訂正前|訂正後)\s*[】\])）]?\s*(?=\n|$)',normalized(text))
++            if markers:phase=markers[-1]
++            evidence=actual_period(title,text)
++            if not evidence:continue
++            if not correction:return evidence,text,index
++            if phase=='訂正前':continue
++            if phase=='訂正後' or after_only:
++                # A later page can repeat the same fiscal year for separate
++                # (nonconsolidated) reference results. It is not a second
++                # primary statement attachment. A second full statement
++                # heading remains ambiguous and is deliberately held.
++                if candidates and '決算短信' not in normalized(text[:250]):
++                    continue
++                candidates.append((evidence,text,index))
++    if len(candidates)==1:return candidates[0]
++    return None,first,0
+--- /dev/null
++++ b/lib/pipeline/actual_export_guard.py
+@@ -0,0 +1,92 @@
++"""Read-only evidence check before old local actuals are exported again."""
++from __future__ import annotations
++
++import logging
++import re
++from decimal import Decimal
++from functools import lru_cache
++from pathlib import Path
++from urllib.parse import urlparse, unquote
++
++from src.pl_actual_evidence import actual_period, is_actual_statement, normalized, summary_actuals, read_pdf_actual_evidence
++from src.common_ticker import normalize_ticker
++
++log = logging.getLogger(__name__)
++
++
++@lru_cache(maxsize=256)
++def _read_evidence(filename: str, modified_ns: int, size: int):
++    import pdfplumber
++    with pdfplumber.open(filename) as pdf:
++        text = pdf.pages[0].dedupe_chars().extract_text() or ''
++    lines=text.splitlines()
++    cover_title='\n'.join(lines[:3])
++    title=next((s for s in lines[:40] if '決算短信' in normalized(s) and
++                re.match(r'^\s*[（(「【]?(?:訂正|再訂正|20\d{2}年|令和|平成)',normalized(s))),cover_title)
++    if re.search(r'質疑|Q\s*&\s*A|説明会|説明資料',normalized(cover_title),re.I):title=cover_title
++    compact=re.sub(r'\s+', '', normalized(text))
++    issuer=re.search(r'(?:コード番号|証券コード|コード)[:：)）]*([0-9A-Z]{4})', compact)
++    period,actual_text,_=read_pdf_actual_evidence(filename,title)
++    values,unit=summary_actuals(actual_text,period.fiscal_end,period.quarter) if period else ({},'')
++    return title, issuer[1] if issuer else None, period, values,unit
++
++
++def assess_local_actual(row: dict, docs_dir: str | Path) -> tuple[bool,str]:
++    """Reject contradictions; retain unverified legacy rows without guessing.
++
++    Only retained official PDFs are read. There is no network fetch or local
++    database mutation; rejected source rows remain available for recovery.
++    """
++    source = str(row.get('source_url') or '')
++    parsed = urlparse(source)
++    # Old downloader rows retain the redirect URL, whose query contains the
++    # original official URL. Resolve the reference locally, without HTTP.
++    if parsed.hostname == 'webapi.yanoshin.jp' and parsed.path == '/rd.php':
++        source = unquote(parsed.query)
++        parsed = urlparse(source)
++    name = Path(parsed.path).name
++    if not re.fullmatch(r'\d{18}\.pdf',name):
++        return True,'unverified_no_official_pdf_reference'
++    path = Path(docs_dir)/name
++    if not path.is_file():
++        return True,'unverified_original_not_retained'
++    try:
++        stat=path.stat()
++        title,issuer,period,values,unit=_read_evidence(str(path),stat.st_mtime_ns,stat.st_size)
++    except Exception:
++        return False,'original_unreadable'
++    if not is_actual_statement(title):
++        return False,'not_actual_statement'
++    heading = normalized(title)
++    if re.search(r'第\s*4\s*四半期',heading) or ('会計期間' in heading and '累計' not in heading):
++        return False,'standalone_quarter_not_cumulative'
++    if issuer and issuer != normalize_ticker(str(row.get('company_code') or row.get('ticker') or '')):
++        return False,'issuer_conflict'
++    if period:
++        q=row.get('quarter')
++        if (row.get('fiscal_year_end') or row.get('period')) != period.fiscal_end:
++            return False,'fiscal_end_conflict'
++        if q != period.quarter and not(q=='4Q' and period.quarter=='FY'):
++            return False,'quarter_conflict'
++    factors={'円':Decimal('0.000001'),'千円':Decimal('.001'),'百万円':Decimal(1),
++             'million_yen':Decimal(1),'millions_jpy':Decimal(1),'JPY':Decimal('0.000001')}
++    factor=factors.get(unit); stored_factor=factors.get(row.get('unit') or '百万円')
++    if values and factor and stored_factor:
++        for key in ('sales','operating_profit'):
++            if row.get(key) is not None and values.get(key) is not None:
++                if abs(Decimal(str(row[key]))*stored_factor-values[key]*factor)>=max(factor,stored_factor):
++                    return False,'actual_amount_conflict_'+key
++    return True,'verified' if issuer and period and values else 'unverified_incomplete_evidence'
++
++
++def filter_local_actuals(rows: list[dict], db_path: str) -> list[dict]:
++    docs=Path(db_path).resolve().parent/'data'/'docs'
++    accepted=[]
++    for row in rows:
++        ok,reason=assess_local_actual(row,docs)
++        if ok:
++            accepted.append(row)
++        else:
++            log.warning('PL_EXPORT_QUARANTINE local_id=%s issuer=%s period=%s quarter=%s reason=%s original_retained=true',
++                        row.get('id'),row.get('company_code'),row.get('fiscal_year_end'),row.get('quarter'),reason)
++    return accepted
+--- a/src/extractor.py
++++ b/src/extractor.py
+@@ -34,6 +34,8 @@
+ from .extractors.xbrl_profiles import IndustryType, detect_industry_profile
+ 
+ logger = logging.getLogger("tdnet")
++
++from .pl_actual_evidence import actual_period, is_actual_statement, summary_actuals, reconcile_summary, read_pdf_actual_evidence
+ 
+ # ============================================================
+ # キーワード定義
+@@ -378,6 +380,9 @@
+         )
+         result.cost_of_sales = values["cost_of_sales"]
+         result.quarter = _detect_quarter_from_context(sales_context, contexts)
++        result.fiscal_year = fiscal_dates.get("fiscal_end", "")
++        if result.quarter == "4Q" and result.fiscal_year:
++            result.quarter = "FY"
+         return result
+ 
+     # --- パス2: iXBRLモード（ix:nonFraction の name 属性）---
+@@ -497,6 +502,10 @@
+     if detected_quarter:
+         result.quarter = detected_quarter
+ 
++    result.fiscal_year = fiscal_dates.get("fiscal_end", "")
++    if result.quarter == "4Q" and result.fiscal_year:
++        result.quarter = "FY"
++
+     return result
+ 
+ 
+@@ -710,16 +719,25 @@
+         text = text.replace(exclude_keyword, "")
+ 
+     # YoY%表記を除去
+-    text = re.sub(r"[+\-－]?\d{1,3}\.\d%?", "", text)
++    # Remove a complete YoY token only. A flattened cell such as 11,0981.5
++    # must not lose its tail and silently become 110 (the 7590 failure).
++    text = re.sub(r"(?<![\d,])[+\-－]?\d{1,3}\.\d%?(?![\d,])", " ", text)
+ 
+     # 数値パターン抽出
+     # △▲付き、カンマ区切り、マイナス付きに対応
+     pattern = re.compile(r"[△▲\-－]?\d[\d,]*(?:\.\d+)?")
+-    matches = pattern.findall(text)
++    matches = pattern.finditer(text)
+ 
+     results: list[int] = []
+-    for raw in matches:
+-        val = normalize_number(raw)
++    from .pl_actual_evidence import money
++    for match in matches:
++        if re.match(r"\s*[年月日%]", text[match.end():]):
++            continue
++        try:
++            parsed = money(match.group())
++        except ValueError:
++            return []  # An ambiguous merged cell invalidates this fallback row.
++        val = int(parsed) if parsed is not None else None
+         if val is not None and abs(val) >= 100:  # 100未満は除外（YoY%等）
+             results.append(val)
+ 
+@@ -1310,6 +1328,52 @@
+     return False
+ 
+ 
++def _extract_validated_actual_pdf(doc_path, title, evidence):
++    """Accept amounts only from a labelled current results row with units."""
++    if evidence is None:
++        return None, "QUARANTINE_MISSING_EXACT_PERIOD"
++    try:
++        selected, text, page_index = read_pdf_actual_evidence(doc_path, title)
++        if selected != evidence:
++            return None, "QUARANTINE_PERIOD_EVIDENCE_CONFLICT"
++        with pdfplumber.open(doc_path) as pdf:
++            page = pdf.pages[page_index].dedupe_chars()
++            values, unit = summary_actuals(text, evidence.fiscal_end, evidence.quarter)
++            if not values:
++                # Keep the existing explicitly labelled USD/JPY table route.
++                # Never apply this exception to ordinary single-currency PDFs.
++                from . import pdf_financial_table
++                detect_jpy = getattr(pdf_financial_table, "parenthesized_jpy_unit", None)
++                if detect_jpy and detect_jpy(page.extract_tables() or [], text):
++                    return _extract_from_pdf(doc_path)
++                return None, "QUARANTINE_AMBIGUOUS_ACTUAL_CELLS"
++        factor = {"円":1, "千円":1000, "百万円":1000000}[unit]
++        result = ExtractedFinancials(source_unit="円", confidence="high",
++            fiscal_year=evidence.fiscal_end, quarter=evidence.quarter)
++        for key, value in values.items():
++            if hasattr(result, key) and value is not None:
++                setattr(result, key, int(value * factor))
++                result.field_sources[key] = "pdf_current_actual_cells"
++        # Existing structured statement enrichment is optional. Its current
++        # column must agree with the summary before accepting gross profit.
++        from . import pdf_financial_table
++        body_reader = getattr(pdf_financial_table, "extract_actual_statement_pdf", None)
++        if body_reader and "訂正" not in title:
++            body, body_unit = body_reader(doc_path, title)
++            from decimal import Decimal
++            body = {k:Decimal(str(v)) for k,v in body.items() if v is not None}
++            if reconcile_summary(result, body, body_unit):
++                body_factor={"円":1,"千円":1000,"百万円":1000000}[body_unit]
++                for key,value in body.items():
++                    if hasattr(result,key):
++                        setattr(result,key,int(value*body_factor))
++                        result.field_sources[key]="pdf_statement"
++        return result, ""
++    except Exception as exc:
++        logger.warning("Actual PDF evidence unavailable: %s", exc)
++        return None, "QUARANTINE_ACTUAL_EVIDENCE_ERROR"
++
++
+ def extract_financials(
+     doc_path: str,
+     title: str,
+@@ -1329,21 +1393,21 @@
+     Returns:
+         (ExtractedFinancials or None, エラーメッセージ)
+     """
++    # This gate applies to XBRL as well as PDF: a Q&A attachment is not an
++    # actual financial statement. Corrections to a statement remain eligible.
++    if not is_actual_statement(title):
++        return None, "SKIP_NOT_ACTUAL_STATEMENT"
+     # 年度・四半期の抽出
+     result_text = ""
++    evidence = None
+     try:
+-        with open(doc_path, "rb") as f:
+-            # PDFの先頭テキストから年度情報を取る（pdfplumberを使用）
+-            pdf = pdfplumber.open(doc_path)
+-            first_page_text = ""
+-            if pdf.pages:
+-                first_page_text = pdf.pages[0].extract_text() or ""
+-            pdf.close()
+-            result_text = first_page_text
++        evidence, result_text, _ = read_pdf_actual_evidence(doc_path, title)
+     except Exception:
+         pass
+ 
+     fiscal_year, quarter = extract_fiscal_info(title, result_text)
++    fiscal_year = evidence.fiscal_end if evidence else None
++    quarter = evidence.quarter if evidence else None
+ 
+     # ルート1: XBRL（常に試行）
+     if xbrl_path and Path(xbrl_path).exists():
+@@ -1352,11 +1416,14 @@
+         if result is not None:
+             # 年度: iXBRL由来があればそちら優先、なければtitle/PDF
+             result.fiscal_year = result.fiscal_year or fiscal_year or ""
+-            # quarter: タイトル由来を最優先（iXBRLは確定性が低い）
+-            if quarter:
+-                result.quarter = quarter
+-            # iXBRL由来のみの場合はフォールバック
+-            result.quarter = result.quarter or ""
++            # Keep explicit XBRL fiscal dates/duration. A title must not
++            # overwrite a cumulative context with a different quarter.
++            result.quarter = result.quarter or quarter or ""
++            if evidence and (result.fiscal_year != evidence.fiscal_end or
++                             result.quarter not in (evidence.quarter, "4Q" if evidence.quarter == "FY" else evidence.quarter)):
++                return None, "QUARANTINE_PERIOD_EVIDENCE_CONFLICT"
++            if not result.fiscal_year or not result.quarter:
++                return None, "QUARANTINE_MISSING_EXACT_PERIOD"
+             logger.info(f"[抽出] XBRL抽出成功: sales={result.sales}, gp={result.gross_profit}, op={result.operating_profit}")
+ 
+             # === per-field PDF 補完 ===
+@@ -1366,7 +1433,7 @@
+             missing = [f for f in _PL_FIELDS if getattr(result, f) is None]
+             if missing and _is_tanshin_title(title) and Path(doc_path).exists():
+                 logger.info(f"[補完] XBRL欠損フィールド={missing}, PDF補完を試行")
+-                pdf_result, pdf_err = _extract_from_pdf(doc_path)
++                pdf_result, pdf_err = _extract_validated_actual_pdf(doc_path, title, evidence)
+                 if pdf_result is not None:
+                     for f in missing:
+                         pdf_val = getattr(pdf_result, f)
+@@ -1401,7 +1468,7 @@
+             return None, reason
+ 
+         logger.info(f"[抽出] PDF抽出を試行: {doc_path}")
+-        result, error = _extract_from_pdf(doc_path)
++        result, error = _extract_validated_actual_pdf(doc_path, title, evidence)
+         if result is not None:
+             result.fiscal_year = fiscal_year or ""
+             result.quarter = quarter or ""
+--- a/src/events/summary_financials.py
++++ b/src/events/summary_financials.py
+@@ -865,6 +865,9 @@
+         YOYが1つも計算できない場合はNone
+     """
+     result = EarningsSummaryData(ticker=ticker)
++    from src.pl_actual_evidence import is_actual_statement
++    if title and not is_actual_statement(title):
++        return None
+ 
+     # ---- XBRL から複数期間抽出 ----
+     periods: dict[str, PeriodFinancials] = {}
+@@ -928,7 +931,7 @@
+     ))
+     if missing_pl and pdf_path and os.path.isfile(pdf_path):
+         try:
+-            from src.extractor import _extract_from_pdf
++            from src.extractor import extract_financials
+             from src.pdf_financial_table import extract_actual_statement_pdf
+             from src.utils import parse_scale_unit
+             sales_was_missing = result.sales_current is None
+@@ -943,7 +946,7 @@
+             )
+             if statement_mismatch:
+                 statement_jpy = {}
+-            pdf_result, _ = _extract_from_pdf(pdf_path)
++            pdf_result, _ = extract_financials(pdf_path, title or "")
+             if (sales_was_missing and pdf_result and pdf_result.sales is not None
+                     and pdf_result.source_unit and not statement_mismatch):
+                 multiplier = parse_scale_unit(pdf_result.source_unit or "円")
+@@ -966,26 +969,30 @@
+                             text += (page.extract_text() or "") + "\n"
+                             tables.extend(page.extract_tables() or [])
+                     dual_currency_jpy = bool(parenthesized_jpy_unit(tables, text))
++                    from src.extractor import _detect_scale
++                    prior_multiplier = parse_scale_unit(parenthesized_jpy_unit(tables, text) or _detect_scale(text))
+                     prior = extract_actual_financial_table(
+                         tables,
+                         prefer_parenthesized_jpy=dual_currency_jpy,
+                         period_index=1,
+                     )
+                     result.sales_prior = (
+-                        prior["sales"] * multiplier if prior.get("sales") is not None else None
++                        prior["sales"] * prior_multiplier if prior.get("sales") is not None else None
+                     )
+                     result.op_prior = (
+-                        prior["operating_profit"] * multiplier
++                        prior["operating_profit"] * prior_multiplier
+                         if prior.get("operating_profit") is not None else None
+                     )
+                     result.profit_before_tax_prior = (
+-                        prior["profit_before_tax"] * multiplier
++                        prior["profit_before_tax"] * prior_multiplier
+                         if prior.get("profit_before_tax") is not None else None
+                     )
+                 except Exception as prior_error:
+                     logger.warning(f"[FINANCIALS] PDF prior-period extraction failed: {prior_error}")
+                 result.source = "pdf"
+                 result.source_unit = "円"
++                result.period = pdf_result.fiscal_year
++                result.quarter = pdf_result.quarter
+                 logger.info(f"[FINANCIALS] PDF fallback: sales={pdf_result.sales} op={pdf_result.operating_profit}")
+                 # PDF からは前期値が取れないことが多い → YOY 計算不可の可能性
+             if any(
+@@ -1015,7 +1022,7 @@
+             logger.warning(f"[FINANCIALS] PDF extraction failed: {e}")
+ 
+     # ---- Q検出 ----
+-    if title:
++    if title and not result.quarter:
+         from src.year_parser import detect_all_quarters
+         qs = detect_all_quarters(title)
+         if qs:
+--- a/lib/pipeline/canonical_sync.py
++++ b/lib/pipeline/canonical_sync.py
+@@ -278,13 +278,15 @@
+         )
+ 
+     conn.close()
+-    from .financial_integrity import stored_quarter_is_completed_actual
+-    eligible = [r for r in rows if stored_quarter_is_completed_actual(
++    from src.pl_actual_evidence import completed_actual_period
++    eligible = [r for r in rows if completed_actual_period(
+         r.get("period") or r.get("fiscal_year_end"), r.get("quarter"),
+         r.get("disclosure_datetime") or r.get("updated_at") or r.get("created_at"),
+     )]
+     if len(eligible) != len(rows):
+         logger.warning("[canonical] excluded %d pre-period actual rows", len(rows) - len(eligible))
++    from .actual_export_guard import filter_local_actuals
++    eligible = filter_local_actuals(eligible, db_path)
+     return eligible, fallback_used
+ 
+ 
+--- a/tools/sqlite_to_supabase.py
++++ b/tools/sqlite_to_supabase.py
+@@ -763,8 +763,8 @@
+ 
+ def _quarterly_row_is_completed_actual(period: str, quarter: str, updated_at: str | None) -> bool:
+     """Reject imported forecast/template values dated before their quarter end."""
+-    from lib.pipeline.financial_integrity import stored_quarter_is_completed_actual
+-    return stored_quarter_is_completed_actual(period, quarter, updated_at)
++    from src.pl_actual_evidence import completed_actual_period
++    return completed_actual_period(period, quarter, updated_at)
+ 
+ 
+ def _build_financials_rows_from_tdnet(
+@@ -1196,6 +1196,8 @@
+ 
+     rows = conn.execute(query, params).fetchall()
+     conn.close()
++    from lib.pipeline.actual_export_guard import filter_local_actuals
++    rows = filter_local_actuals([dict(row) for row in rows], db_path)
+ 
+     target = len(rows)
+     logger.info(
+@@ -1986,6 +1988,8 @@
+     )
+     rows = conn.execute(query, list(disclosure_ids)).fetchall()
+     conn.close()
++    from lib.pipeline.actual_export_guard import filter_local_actuals
++    rows = filter_local_actuals([dict(row) for row in rows], db_path)
+ 
+     stats["target_rows_count"] = len(rows)
+     logger.info(

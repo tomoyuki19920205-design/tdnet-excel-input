@@ -35,7 +35,7 @@ from .extractors.xbrl_profiles import IndustryType, detect_industry_profile
 
 logger = logging.getLogger("tdnet")
 
-from .pl_actual_evidence import actual_period, is_actual_statement, summary_actuals, reconcile_summary
+from .pl_actual_evidence import actual_period, is_actual_statement, summary_actuals, reconcile_summary, read_pdf_actual_evidence
 
 # ============================================================
 # キーワード定義
@@ -655,16 +655,25 @@ def _extract_numbers_from_line(line: str, exclude_keyword: str | None = None) ->
         text = text.replace(exclude_keyword, "")
 
     # YoY%表記を除去
-    text = re.sub(r"[+\-－]?\d{1,3}\.\d%?", "", text)
+    # Remove a complete YoY token only. A flattened cell such as 11,0981.5
+    # must not lose its tail and silently become 110 (the 7590 failure).
+    text = re.sub(r"(?<![\d,])[+\-－]?\d{1,3}\.\d%?(?![\d,])", " ", text)
 
     # 数値パターン抽出
     # △▲付き、カンマ区切り、マイナス付きに対応
     pattern = re.compile(r"[△▲\-－]?\d[\d,]*(?:\.\d+)?")
-    matches = pattern.findall(text)
+    matches = pattern.finditer(text)
 
     results: list[int] = []
-    for raw in matches:
-        val = normalize_number(raw)
+    from .pl_actual_evidence import money
+    for match in matches:
+        if re.match(r"\s*[年月日%]", text[match.end():]):
+            continue
+        try:
+            parsed = money(match.group())
+        except ValueError:
+            return []  # An ambiguous merged cell invalidates this fallback row.
+        val = int(parsed) if parsed is not None else None
         if val is not None and abs(val) >= 100:  # 100未満は除外（YoY%等）
             results.append(val)
 
@@ -1215,9 +1224,11 @@ def _extract_validated_actual_pdf(doc_path, title, evidence):
     if evidence is None:
         return None, "QUARANTINE_MISSING_EXACT_PERIOD"
     try:
+        selected, text, page_index = read_pdf_actual_evidence(doc_path, title)
+        if selected != evidence:
+            return None, "QUARANTINE_PERIOD_EVIDENCE_CONFLICT"
         with pdfplumber.open(doc_path) as pdf:
-            page = pdf.pages[0].dedupe_chars()
-            text = page.extract_text() or ""
+            page = pdf.pages[page_index].dedupe_chars()
             values, unit = summary_actuals(text, evidence.fiscal_end, evidence.quarter)
             if not values:
                 # Keep the existing explicitly labelled USD/JPY table route.
@@ -1279,20 +1290,13 @@ def extract_financials(
         return None, "SKIP_NOT_ACTUAL_STATEMENT"
     # 年度・四半期の抽出
     result_text = ""
+    evidence = None
     try:
-        with open(doc_path, "rb") as f:
-            # PDFの先頭テキストから年度情報を取る（pdfplumberを使用）
-            pdf = pdfplumber.open(doc_path)
-            first_page_text = ""
-            if pdf.pages:
-                first_page_text = pdf.pages[0].dedupe_chars().extract_text() or ""
-            pdf.close()
-            result_text = first_page_text
+        evidence, result_text, _ = read_pdf_actual_evidence(doc_path, title)
     except Exception:
         pass
 
     fiscal_year, quarter = extract_fiscal_info(title, result_text)
-    evidence = actual_period(title, result_text)
     fiscal_year = evidence.fiscal_end if evidence else None
     quarter = evidence.quarter if evidence else None
 
