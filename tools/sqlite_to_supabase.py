@@ -1172,6 +1172,8 @@ def push_sqlite_to_supabase(
 
     rows = conn.execute(query, params).fetchall()
     conn.close()
+    from lib.pipeline.actual_export_guard import filter_local_actuals
+    rows = filter_local_actuals([dict(row) for row in rows], db_path)
 
     target = len(rows)
     logger.info(
@@ -1932,6 +1934,8 @@ def push_sqlite_to_supabase_targeted(
     )
     rows = conn.execute(query, list(disclosure_ids)).fetchall()
     conn.close()
+    from lib.pipeline.actual_export_guard import filter_local_actuals
+    rows = filter_local_actuals([dict(row) for row in rows], db_path)
 
     stats["target_rows_count"] = len(rows)
     logger.info(

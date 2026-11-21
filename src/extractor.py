@@ -35,6 +35,8 @@ from .extractors.xbrl_profiles import IndustryType, detect_industry_profile
 
 logger = logging.getLogger("tdnet")
 
+from .pl_actual_evidence import actual_period, is_actual_statement, summary_actuals, reconcile_summary
+
 # ============================================================
 # キーワード定義
 # ============================================================
@@ -384,6 +386,9 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
         )
         result.cost_of_sales = values["cost_of_sales"]
         result.quarter = _detect_quarter_from_context(sales_context, contexts)
+        result.fiscal_year = fiscal_dates.get("fiscal_end", "")
+        if result.quarter == "4Q" and result.fiscal_year:
+            result.quarter = "FY"
         return result
 
     # --- パス2: iXBRLモード（ix:nonFraction の name 属性）---
@@ -502,6 +507,10 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl") -> ExtractedFina
     # iXBRLから検出したqを設定（呼び出し側で上書き可能）
     if detected_quarter:
         result.quarter = detected_quarter
+
+    result.fiscal_year = fiscal_dates.get("fiscal_end", "")
+    if result.quarter == "4Q" and result.fiscal_year:
+        result.quarter = "FY"
 
     return result
 
@@ -1296,6 +1305,50 @@ def _is_tanshin_title(title: str) -> bool:
     return False
 
 
+def _extract_validated_actual_pdf(doc_path, title, evidence):
+    """Accept amounts only from a labelled current results row with units."""
+    if evidence is None:
+        return None, "QUARANTINE_MISSING_EXACT_PERIOD"
+    try:
+        with pdfplumber.open(doc_path) as pdf:
+            page = pdf.pages[0].dedupe_chars()
+            text = page.extract_text() or ""
+            values, unit = summary_actuals(text, evidence.fiscal_end, evidence.quarter)
+            if not values:
+                # Keep the existing explicitly labelled USD/JPY table route.
+                # Never apply this exception to ordinary single-currency PDFs.
+                from . import pdf_financial_table
+                detect_jpy = getattr(pdf_financial_table, "parenthesized_jpy_unit", None)
+                if detect_jpy and detect_jpy(page.extract_tables() or [], text):
+                    return _extract_from_pdf(doc_path)
+                return None, "QUARANTINE_AMBIGUOUS_ACTUAL_CELLS"
+        factor = {"円":1, "千円":1000, "百万円":1000000}[unit]
+        result = ExtractedFinancials(source_unit="円", confidence="high",
+            fiscal_year=evidence.fiscal_end, quarter=evidence.quarter)
+        for key, value in values.items():
+            if hasattr(result, key) and value is not None:
+                setattr(result, key, int(value * factor))
+                result.field_sources[key] = "pdf_current_actual_cells"
+        # Existing structured statement enrichment is optional. Its current
+        # column must agree with the summary before accepting gross profit.
+        from . import pdf_financial_table
+        body_reader = getattr(pdf_financial_table, "extract_actual_statement_pdf", None)
+        if body_reader and "訂正" not in title:
+            body, body_unit = body_reader(doc_path, title)
+            from decimal import Decimal
+            body = {k:Decimal(str(v)) for k,v in body.items() if v is not None}
+            if reconcile_summary(result, body, body_unit):
+                body_factor={"円":1,"千円":1000,"百万円":1000000}[body_unit]
+                for key,value in body.items():
+                    if hasattr(result,key):
+                        setattr(result,key,int(value*body_factor))
+                        result.field_sources[key]="pdf_statement"
+        return result, ""
+    except Exception as exc:
+        logger.warning("Actual PDF evidence unavailable: %s", exc)
+        return None, "QUARANTINE_ACTUAL_EVIDENCE_ERROR"
+
+
 def extract_financials(
     doc_path: str,
     title: str,
@@ -1315,6 +1368,10 @@ def extract_financials(
     Returns:
         (ExtractedFinancials or None, エラーメッセージ)
     """
+    # This gate applies to XBRL as well as PDF: a Q&A attachment is not an
+    # actual financial statement. Corrections to a statement remain eligible.
+    if not is_actual_statement(title):
+        return None, "SKIP_NOT_ACTUAL_STATEMENT"
     # 年度・四半期の抽出
     result_text = ""
     try:
@@ -1323,13 +1380,16 @@ def extract_financials(
             pdf = pdfplumber.open(doc_path)
             first_page_text = ""
             if pdf.pages:
-                first_page_text = pdf.pages[0].extract_text() or ""
+                first_page_text = pdf.pages[0].dedupe_chars().extract_text() or ""
             pdf.close()
             result_text = first_page_text
     except Exception:
         pass
 
     fiscal_year, quarter = extract_fiscal_info(title, result_text)
+    evidence = actual_period(title, result_text)
+    fiscal_year = evidence.fiscal_end if evidence else None
+    quarter = evidence.quarter if evidence else None
 
     # ルート1: XBRL（常に試行）
     if xbrl_path and Path(xbrl_path).exists():
@@ -1338,11 +1398,14 @@ def extract_financials(
         if result is not None:
             # 年度: iXBRL由来があればそちら優先、なければtitle/PDF
             result.fiscal_year = result.fiscal_year or fiscal_year or ""
-            # quarter: タイトル由来を最優先（iXBRLは確定性が低い）
-            if quarter:
-                result.quarter = quarter
-            # iXBRL由来のみの場合はフォールバック
-            result.quarter = result.quarter or ""
+            # Keep explicit XBRL fiscal dates/duration. A title must not
+            # overwrite a cumulative context with a different quarter.
+            result.quarter = result.quarter or quarter or ""
+            if evidence and (result.fiscal_year != evidence.fiscal_end or
+                             result.quarter not in (evidence.quarter, "4Q" if evidence.quarter == "FY" else evidence.quarter)):
+                return None, "QUARANTINE_PERIOD_EVIDENCE_CONFLICT"
+            if not result.fiscal_year or not result.quarter:
+                return None, "QUARANTINE_MISSING_EXACT_PERIOD"
             logger.info(f"[抽出] XBRL抽出成功: sales={result.sales}, gp={result.gross_profit}, op={result.operating_profit}")
 
             # === per-field PDF 補完 ===
@@ -1352,7 +1415,7 @@ def extract_financials(
             missing = [f for f in _PL_FIELDS if getattr(result, f) is None]
             if missing and _is_tanshin_title(title) and Path(doc_path).exists():
                 logger.info(f"[補完] XBRL欠損フィールド={missing}, PDF補完を試行")
-                pdf_result, pdf_err = _extract_from_pdf(doc_path)
+                pdf_result, pdf_err = _extract_validated_actual_pdf(doc_path, title, evidence)
                 if pdf_result is not None:
                     for f in missing:
                         pdf_val = getattr(pdf_result, f)
@@ -1387,7 +1450,7 @@ def extract_financials(
             return None, reason
 
         logger.info(f"[抽出] PDF抽出を試行: {doc_path}")
-        result, error = _extract_from_pdf(doc_path)
+        result, error = _extract_validated_actual_pdf(doc_path, title, evidence)
         if result is not None:
             result.fiscal_year = fiscal_year or ""
             result.quarter = quarter or ""

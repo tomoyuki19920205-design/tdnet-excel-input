@@ -273,6 +273,8 @@ def _select_financials_rows(
         )
 
     conn.close()
+    from .actual_export_guard import filter_local_actuals
+    rows = filter_local_actuals(rows, db_path)
     return rows, fallback_used
 
 

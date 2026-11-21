@@ -835,6 +835,9 @@ def extract_earnings_data(
         YOYが1つも計算できない場合はNone
     """
     result = EarningsSummaryData(ticker=ticker)
+    from src.pl_actual_evidence import is_actual_statement
+    if title and not is_actual_statement(title):
+        return None
 
     # ---- XBRL から複数期間抽出 ----
     periods: dict[str, PeriodFinancials] = {}
@@ -887,20 +890,22 @@ def extract_earnings_data(
     # ---- PDF フォールバック（XBRL で取れなかった場合） ----
     if result.sales_current is None and pdf_path and os.path.isfile(pdf_path):
         try:
-            from src.extractor import _extract_from_pdf
-            pdf_result, _ = _extract_from_pdf(pdf_path)
+            from src.extractor import extract_financials
+            pdf_result, _ = extract_financials(pdf_path, title or "")
             if pdf_result and pdf_result.sales is not None:
                 result.sales_current = pdf_result.sales
                 result.op_current = pdf_result.operating_profit
                 result.source = "pdf"
                 result.source_unit = pdf_result.source_unit
+                result.period = pdf_result.fiscal_year
+                result.quarter = pdf_result.quarter
                 logger.info(f"[FINANCIALS] PDF fallback: sales={pdf_result.sales} op={pdf_result.operating_profit}")
                 # PDF からは前期値が取れないことが多い → YOY 計算不可の可能性
         except Exception as e:
             logger.warning(f"[FINANCIALS] PDF extraction failed: {e}")
 
     # ---- Q検出 ----
-    if title:
+    if title and not result.quarter:
         from src.year_parser import detect_all_quarters
         qs = detect_all_quarters(title)
         if qs:
