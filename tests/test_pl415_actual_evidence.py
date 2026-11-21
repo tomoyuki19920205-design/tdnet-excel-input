@@ -81,3 +81,51 @@ def test_current_row_is_identified_even_when_prior_row_is_first():
 def test_ambiguous_before_after_correction_is_held():
     text='連結経営成績\n売上高 営業利益\n百万円 % 百万円 %\n2026年3月期 123 1.1 20 1.2\n2026年3月期 130 1.1 22 1.2'
     assert summary_actuals(text,'2026-03-20','FY')==({},'')
+
+
+@pytest.mark.parametrize('after_only',[False,True])
+def test_correction_cover_selects_only_explicit_after_attachment(monkeypatch,after_only):
+    from src.pl_actual_evidence import read_pdf_actual_evidence
+    import pdfplumber
+    title='(訂正・数値データ訂正)2026年3月期 決算短信'
+    summary='2026年3月期(2025年3月21日~2026年3月20日)\n連結経営成績\n売上高 営業利益\n百万円 % 百万円 %\n2026年3月期 {sales} 1.1 20 1.2'
+    pages=['訂正後のみ全文を記載します' if after_only else '訂正前及び訂正後の全文を添付します']
+    if not after_only:pages+=['【訂正前】\n'+summary.format(sales=100)]
+    pages+=[('' if after_only else '【訂正後】\n')+summary.format(sales=123)]
+    class Page:
+        def __init__(self,text):self.text=text
+        def dedupe_chars(self):return self
+        def extract_text(self):return self.text
+    class PDF:
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def __init__(self):self.pages=[Page(s) for s in pages]
+    monkeypatch.setattr(pdfplumber,'open',lambda path:PDF())
+    period,text,index=read_pdf_actual_evidence('fixture.pdf',title)
+    values,unit=summary_actuals(text,period.fiscal_end,period.quarter)
+    assert values['sales']==123 and index==len(pages)-1
+
+
+@pytest.mark.parametrize('line,expected',[
+    ('11,0981.5',[]),('11,098 1.5',[11098]),
+    ('2026年8月27日',[]),('120,057 2.0 6,744 388.2',[120057,6744]),
+])
+def test_legacy_fallback_never_truncates_a_merged_cell_or_uses_a_year(line,expected):
+    from src.extractor import _extract_numbers_from_line
+    assert _extract_numbers_from_line(line)==expected
+
+
+@pytest.mark.parametrize('period,quarter,evidence,expected',[
+    ('2026-09-20','FY','2026-09-21',True),
+    ('2026-09-20','2Q','2026-03-21',True),
+    ('2026-08-15','1Q','2025-11-16',True),
+    ('2026-08-20','3Q','2026-05-19',False),
+    ('2027-02-28','1Q','2026-05-30',False),
+    ('2027-02-28','1Q','2026-05-31',True),
+    ('2026-03','FY','2026-03-30',False),
+    ('2026-03-31','FY','2027-01-01',False),
+])
+def test_completed_actual_keeps_day_without_accepting_forecasts(period,quarter,evidence,expected):
+    from datetime import date
+    from src.pl_actual_evidence import completed_actual_period
+    assert completed_actual_period(period,quarter,evidence,today=date(2026,11,21)) is expected

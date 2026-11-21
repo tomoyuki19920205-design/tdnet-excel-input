@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+import calendar
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
@@ -32,6 +33,32 @@ class ActualPeriod:
     quarter: str
     start: str
     end: str
+
+
+def completed_actual_period(period, quarter, evidence_datetime, *, today=None):
+    """Keep an exact non-month-end closing day in the completion check.
+
+    A month-end year still has month-end quarters (including February).
+    This is a conservative fallback for legacy rows without duration facts;
+    it does not infer or rewrite a changed fiscal year's reporting dates.
+    """
+    try:
+        value = str(period)
+        if len(value) == 7:
+            year, month = map(int, value.split('-'))
+            closing = date(year, month, calendar.monthrange(year, month)[1])
+        else:
+            closing = date.fromisoformat(value[:10])
+        q = 4 if quarter in ('FY', '4Q') else {'1Q': 1, '2Q': 2, '3Q': 3}[quarter]
+        index = closing.year * 12 + closing.month - 1 - (4 - q) * 3
+        year, month_zero = divmod(index, 12)
+        last = calendar.monthrange(year, month_zero + 1)[1]
+        month_end = closing.day == calendar.monthrange(closing.year, closing.month)[1]
+        end = date(year, month_zero + 1, last if month_end else min(closing.day, last))
+        evidence = date.fromisoformat(str(evidence_datetime)[:10])
+        return end <= evidence <= (today or date.today())
+    except (TypeError, ValueError, KeyError):
+        return False
 
 
 _DATE = r'(20\d{2})年\s*(\d{1,2})月\s*(\d{1,2})日'
@@ -185,3 +212,39 @@ def reconcile_summary(result, values: dict, unit: str) -> bool:
         if a is None or b is None or abs(Decimal(str(a))*source-b*target)>=max(source,target):
             return False
     return True
+
+
+def read_pdf_actual_evidence(path: str, title: str):
+    """Find the actual summary, including an explicitly corrected attachment.
+
+    Correction cover pages are not financial tables. If both BEFORE and AFTER
+    versions are attached, only an explicitly labelled AFTER version can be
+    used. Ambiguous partial corrections remain pending rather than overwriting
+    an existing actual. Normal statements require only their first page.
+    """
+    import pdfplumber
+    correction = '訂正' in title
+    candidates=[]; phase=None; after_only=False; first=''
+    with pdfplumber.open(path) as pdf:
+        for index,page in enumerate(pdf.pages if correction else pdf.pages[:1]):
+            text=page.dedupe_chars().extract_text() or ''
+            if index==0:
+                first=text
+                compact=re.sub(r'\s+','',normalized(text))
+                after_only=bool(re.search(r'訂正後のみ(?:の)?全文|訂正後の全文のみ',compact))
+            markers=re.findall(r'(?:^|\n)\s*[【\[(（]?\s*(訂正前|訂正後)\s*[】\])）]?\s*(?=\n|$)',normalized(text))
+            if markers:phase=markers[-1]
+            evidence=actual_period(title,text)
+            if not evidence:continue
+            if not correction:return evidence,text,index
+            if phase=='訂正前':continue
+            if phase=='訂正後' or after_only:
+                # A later page can repeat the same fiscal year for separate
+                # (nonconsolidated) reference results. It is not a second
+                # primary statement attachment. A second full statement
+                # heading remains ambiguous and is deliberately held.
+                if candidates and '決算短信' not in normalized(text[:250]):
+                    continue
+                candidates.append((evidence,text,index))
+    if len(candidates)==1:return candidates[0]
+    return None,first,0
