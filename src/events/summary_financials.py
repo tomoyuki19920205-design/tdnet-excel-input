@@ -810,6 +810,9 @@ def extract_earnings_data(
         YOYが1つも計算できない場合はNone
     """
     result = EarningsSummaryData(ticker=ticker)
+    from src.pl_actual_evidence import is_actual_statement
+    if title and not is_actual_statement(title):
+        return None
 
     # ---- XBRL から複数期間抽出 ----
     periods: dict[str, PeriodFinancials] = {}
@@ -865,7 +868,7 @@ def extract_earnings_data(
     ))
     if missing_pl and pdf_path and os.path.isfile(pdf_path):
         try:
-            from src.extractor import _extract_from_pdf
+            from src.extractor import extract_financials
             from src.pdf_financial_table import extract_actual_statement_pdf
             from src.utils import parse_scale_unit
 
@@ -884,7 +887,10 @@ def extract_earnings_data(
             if statement_mismatch:
                 statement_jpy = {}
 
-            pdf_result, _ = _extract_from_pdf(pdf_path)
+            pdf_result, _ = extract_financials(pdf_path, title or "")
+            if pdf_result is not None and result.source != "xbrl":
+                result.period = pdf_result.fiscal_year
+                result.quarter = pdf_result.quarter
             pdf_multiplier = (
                 parse_scale_unit(pdf_result.source_unit)
                 if pdf_result and pdf_result.source_unit else 0
@@ -913,7 +919,7 @@ def extract_earnings_data(
             logger.warning(f"[FINANCIALS] PDF extraction failed: {e}")
 
     # ---- Q検出 ----
-    if title:
+    if title and not result.quarter:
         from src.year_parser import detect_all_quarters
         qs = detect_all_quarters(title)
         if qs:

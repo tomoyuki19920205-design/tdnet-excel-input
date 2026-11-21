@@ -283,7 +283,8 @@ def _select_financials_rows(
     )]
     if len(eligible) != len(rows):
         logger.warning("[canonical] excluded %d pre-period actual rows", len(rows) - len(eligible))
-    return eligible, fallback_used
+    from .actual_export_guard import filter_local_actuals
+    return filter_local_actuals(eligible, db_path), fallback_used
 
 
 def _select_segments_rows(
