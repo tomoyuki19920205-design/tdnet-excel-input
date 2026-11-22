@@ -71,7 +71,13 @@ def stored_quarter_is_completed_actual(period, quarter, evidence_datetime):
             return False
         month_index = fiscal_end.year * 12 + fiscal_end.month - 1 - (4 - q) * 3
         year, month_zero = divmod(month_index, 12)
-        quarter_end = date(year, month_zero + 1, calendar.monthrange(year, month_zero + 1)[1])
+        # Full dates carry the issuer's actual cutoff (e.g. the 15th/20th).
+        # Only legacy YYYY-MM periods imply month-end; do not postpone valid
+        # exact-date actuals until an invented month-end.
+        last_day = calendar.monthrange(year, month_zero + 1)[1]
+        fiscal_is_month_end = fiscal_end.day == calendar.monthrange(fiscal_end.year, fiscal_end.month)[1]
+        cutoff_day = last_day if fiscal_is_month_end else min(fiscal_end.day, last_day)
+        quarter_end = date(year, month_zero + 1, cutoff_day)
         evidence_date = date.fromisoformat(str(evidence_datetime)[:10])
         return quarter_end <= evidence_date <= date.today()
     except (TypeError, ValueError, IndexError):

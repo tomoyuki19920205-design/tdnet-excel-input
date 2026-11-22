@@ -258,13 +258,10 @@ def fetch_statements_for_date(
 # ticker 正規化（4桁→5桁 local_code）
 # ============================================================
 def _to_local_code(ticker: str) -> str:
-    """4桁 ticker → 5桁 local_code（末尾0補完）。"""
-    t = ticker.strip()
-    if len(t) == 4 and t.isdigit():
-        return t + "0"
-    if len(t) == 5 and t.isdigit():
-        return t
-    return t
+    """TDnet ticker → J-Quants 5-character security code."""
+    from src.common_ticker import ticker_to_sec_code
+
+    return ticker_to_sec_code(ticker)
 
 
 # ============================================================
@@ -409,6 +406,7 @@ WHERE
     AND disclosed_date           = :disclosed_date
     AND current_fiscal_year_end_date = :current_fiscal_year_end_date
     AND type_of_current_period   = :type_of_current_period
+    AND type_of_document         = :type_of_document
 """
 
 

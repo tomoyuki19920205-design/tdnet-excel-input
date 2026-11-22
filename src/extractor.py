@@ -220,7 +220,7 @@ def _is_consolidated_preferred(context_ref: str) -> bool:
     return "Consolidated" in context_ref and "NonConsolidated" not in context_ref
 
 
-def _detect_quarter_from_context(context_ref: str) -> str:
+def _detect_quarter_from_context(context_ref: str, contexts=None) -> str:
     """
     contextRefからQ情報を検出する。
 
@@ -229,6 +229,12 @@ def _detect_quarter_from_context(context_ref: str) -> str:
     - CurrentYearDuration_ConsolidatedMember_ResultMember → '4Q'（四半期指定なし=通期）
     - CurrentYearDuration_AnnualMember_... → '4Q'
     """
+    if contexts and context_ref in contexts:
+        from lib.pipeline.financial_integrity import duration_quarter
+        meta = contexts[context_ref]
+        q = duration_quarter(meta.get("start"), meta.get("end"),
+                             meta.get("fiscal_start"), meta.get("fiscal_end"))
+        return "4Q" if q == "FY" else (q or "")
     if "FirstQuarterMember" in context_ref:
         return "1Q"
     if "SecondQuarterMember" in context_ref:
@@ -321,6 +327,7 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl", *, shared_resour
     }
     value_priority: dict[str, tuple[int, bool]] = {}
     value_tags: dict[str, str] = {}
+    sales_context = ""
 
     # --- パス1: 従来XBRLモード（タグ名直接マッチ）---
     for elem in root.iter():
@@ -351,6 +358,8 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl", *, shared_resour
                         values[field_name] = val
                         value_priority[field_name] = new_prio
                         value_tags[field_name] = tag_local
+                        if field_name == "sales":
+                            sales_context = context
 
     if values["sales"] is not None:
         sources = _field_sources_with_profile(values, value_tags, fact_names, source_label)
@@ -459,7 +468,7 @@ def _parse_xbrl_content(raw: bytes, source_label: str = "xbrl", *, shared_resour
         return None
 
     # contextRefからQ情報を検出
-    detected_quarter = _detect_quarter_from_context(sales_context)
+    detected_quarter = _detect_quarter_from_context(sales_context, contexts)
 
     sources = _field_sources_with_profile(values, value_tags, fact_names, source_label)
     result = ExtractedFinancials(
