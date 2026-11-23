@@ -1781,6 +1781,7 @@ class NasdaqOfficialCloseProvider:
             "target_close_source": target_close_source,
             "target_session_date": target_session_date.isoformat(),
             "notifications": info.get("notifications", []),
+            "primary_exchange": str(info.get("exchange") or "").upper().strip(),
             "previous_session_date": previous_day.isoformat(),
             "previous_close": previous_close, "target_close": target_close,
             "nls_previous_close": nls_previous,
@@ -1929,13 +1930,38 @@ class CapturedEndOfDayQuoteProvider:
     name = "captured_end_of_day_quote"
     family = "factset"
 
-    def __init__(self, snapshots: dict[str, dict[str, str]]) -> None:
+    def __init__(self, snapshots: dict[str, dict[str, str]],
+                 *, live_transport: Transport | None = None) -> None:
         self.snapshots = snapshots
+        self.live_transport = live_transport
+        self._live_cache: dict[tuple[str, date, str], dict[str, Any] | Exception] = {}
 
-    def fetch(self, symbol: str, target_session_date: date) -> dict[str, Any]:
+    def fetch(self, symbol: str, target_session_date: date,
+              *, primary_exchange: str | None = None) -> dict[str, Any]:
         entry = self.snapshots.get(symbol)
         if not entry:
-            raise MarketDataError(f"{self.name}:{symbol}: snapshot unavailable")
+            exchange = (primary_exchange or "").upper().replace(" ", "")
+            route = ("nyseamerican" if exchange in {"AMEX", "NYSEAMERICAN"}
+                     else "nasdaq" if exchange.startswith("NASDAQ")
+                     else "nyse" if exchange == "NYSE" else None)
+            if (self.live_transport is None or route is None
+                    or re.fullmatch(r"[A-Z0-9]+", symbol) is None):
+                raise MarketDataError(f"{self.name}:{symbol}: snapshot unavailable")
+            url = f"https://chartexchange.com/symbol/{route}-{symbol.lower()}/historical/"
+            key = (symbol, target_session_date, route)
+            cached = self._live_cache.get(key)
+            if isinstance(cached, Exception):
+                raise cached
+            if cached is not None:
+                return cached
+            try:
+                raw = self.live_transport(url, {"User-Agent": "Mozilla/5.0", "Accept": "text/html"})
+                result = self._fetch_chartexchange(symbol, target_session_date, {}, url, raw_bytes=raw)
+            except Exception as exc:
+                self._live_cache[key] = exc
+                raise
+            self._live_cache[key] = result
+            return result
         url = str(entry["source_url"])
         if urlsplit(url).hostname == "chartexchange.com":
             return self._fetch_chartexchange(symbol, target_session_date, entry, url)
@@ -2141,6 +2167,7 @@ class CapturedEndOfDayQuoteProvider:
     def _fetch_chartexchange(
         self, symbol: str, target_session_date: date,
         entry: dict[str, str], url: str,
+        *, raw_bytes: bytes | None = None,
     ) -> dict[str, Any]:
         from bs4 import BeautifulSoup
 
@@ -2149,7 +2176,7 @@ class CapturedEndOfDayQuoteProvider:
             urlsplit(url).path,
         ):
             raise MarketDataError(f"{self.name}:{symbol}: snapshot URL/symbol mismatch")
-        raw = Path(entry["path"]).read_bytes()
+        raw = raw_bytes if raw_bytes is not None else Path(entry["path"]).read_bytes()
         page = BeautifulSoup(raw, "html.parser")
         title = page.title.get_text(" ", strip=True) if page.title else ""
         canonical = page.find("link", rel="canonical")
@@ -2993,6 +3020,7 @@ class LiveDiscrepancyArbitrator:
         minute_provider: YahooMinuteCloseProvider | None = None,
         independent_providers: Iterable[PublicPreviousCloseProvider] | None = None,
         independent_snapshots: dict[str, dict[str, str]] | None = None,
+        auto_capture_independent_eod: bool = False,
         corporate_action_notices: dict[str, str] | None = None,
         corporate_action_evidence: dict[str, dict[str, Any]] | None = None,
         notice_transport: Transport = default_transport,
@@ -3012,9 +3040,22 @@ class LiveDiscrepancyArbitrator:
         self.minute_provider = minute_provider or YahooMinuteCloseProvider()
         self.independent_providers = tuple(independent_providers or (
             PublicPreviousCloseProvider(),
-            CapturedEndOfDayQuoteProvider(independent_snapshots or {}),
+            CapturedEndOfDayQuoteProvider(
+                independent_snapshots or {},
+                live_transport=default_transport if auto_capture_independent_eod else None,
+            ),
         ))
         self.now = now or (lambda: datetime.now(timezone.utc))
+
+    @staticmethod
+    def _fetch_independent(provider: Any, ticker: str, target_session_date: date,
+                           official: dict[str, Any]) -> dict[str, Any]:
+        if isinstance(provider, CapturedEndOfDayQuoteProvider):
+            return provider.fetch(
+                ticker, target_session_date,
+                primary_exchange=str(official.get("primary_exchange") or ""),
+            )
+        return provider.fetch(ticker, target_session_date)
 
     def resolve(
         self,
@@ -3061,7 +3102,7 @@ class LiveDiscrepancyArbitrator:
                 independent = []
                 for provider in self.independent_providers:
                     try:
-                        independent.append(provider.fetch(ticker, target_session_date))
+                        independent.append(self._fetch_independent(provider, ticker, target_session_date, official))
                     except (MarketDataError, HTTPError, URLError, TimeoutError):
                         continue
                 independent_previous = [source for source in independent if (
@@ -3143,7 +3184,7 @@ class LiveDiscrepancyArbitrator:
         errors: list[str] = []
         for provider in self.independent_providers:
             try:
-                independent.append(provider.fetch(ticker, target_session_date))
+                independent.append(self._fetch_independent(provider, ticker, target_session_date, official))
             except Exception as exc:
                 errors.append(f"{provider.name}: {exc}")
         historical_change = (target.regular_close / previous.regular_close - 1.0) * 100.0

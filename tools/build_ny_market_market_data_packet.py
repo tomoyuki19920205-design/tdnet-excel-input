@@ -161,6 +161,7 @@ def main() -> int:
                     discrepancy_arbitrator=LiveDiscrepancyArbitrator(
                         corporate_action_notices=notices, corporate_action_evidence=actions,
                         independent_snapshots=snapshots,
+                        auto_capture_independent_eod=True,
                     ), verified_snapshot=verified_snapshot,
                 )
             except MarketDataError as exc:

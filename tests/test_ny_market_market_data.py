@@ -845,6 +845,51 @@ def test_captured_historical_quote_uses_dated_close_and_rejects_wrong_session(mo
         provider.fetch("SOAR", date(2026, 9, 25))
 
 
+def test_missing_capture_fetches_dated_primary_exchange_eod_and_keeps_guardrails():
+    url = "https://chartexchange.com/symbol/nyseamerican-paai/historical/"
+    raw = f'''<html><head><title>PAAI Historical Prices - Paradium.AI | ChartExchange</title>
+<link rel="canonical" href="{url}"/></head><body><table>
+<tr><td>Date ( EST )</td><td>Open</td><td>High</td><td>Low</td><td>Close</td><td>Change</td></tr>
+<tr><td>2026-11-23</td><td>0.47</td><td>0.91</td><td>0.47</td><td>0.7200</td><td>+98.347%</td></tr>
+<tr><td>2026-11-20</td><td>0.44</td><td>0.54</td><td>0.33</td><td>0.3630</td><td>-21.087%</td></tr>
+</table></body></html>'''.encode()
+    calls = []
+
+    def transport(source_url, _headers):
+        calls.append(source_url)
+        return raw
+
+    provider = CapturedEndOfDayQuoteProvider({}, live_transport=transport)
+    result = provider.fetch("PAAI", date(2026, 11, 23), primary_exchange="AMEX")
+    assert calls == [url]
+    assert result["target_close"] == 0.72
+    assert result["previous_close"] == 0.363
+    assert result["target_session_date"] == "2026-11-23"
+    assert result["raw_response_sha256"] == hashlib.sha256(raw).hexdigest()
+    assert provider.fetch("PAAI", date(2026, 11, 23), primary_exchange="AMEX") == result
+    assert calls == [url]
+    with pytest.raises(MarketDataError, match="snapshot unavailable"):
+        provider.fetch("PAAI", date(2026, 11, 23), primary_exchange="UNKNOWN")
+    assert calls == [url]
+    with pytest.raises(MarketDataError, match="target/previous session missing"):
+        provider.fetch("PAAI", date(2026, 11, 24), primary_exchange="AMEX")
+
+
+def test_live_independent_eod_does_not_retry_same_denied_endpoint():
+    calls = []
+
+    def denied(url, _headers):
+        calls.append(url)
+        raise HTTPError(url, 403, "Forbidden", None, None)
+
+    provider = CapturedEndOfDayQuoteProvider({}, live_transport=denied)
+    for _ in range(2):
+        with pytest.raises(HTTPError) as exc:
+            provider.fetch("PAAI", date(2026, 11, 23), primary_exchange="AMEX")
+        assert exc.value.code == 403
+    assert len(calls) == 1
+
+
 def test_captured_historical_quote_accepts_issuer_title_with_exact_symbol_and_canonical(monkeypatch):
     raw = b'''<html><head><title>OMH Historical Prices - Ohmyhome | ChartExchange</title>
 <link rel="canonical" href="https://chartexchange.com/symbol/nasdaq-omh/historical/"/></head>
