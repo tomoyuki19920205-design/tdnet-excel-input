@@ -1301,11 +1301,16 @@ class NasdaqYahooRegularUniverseProvider:
     def _official_previous(self, symbol: str, target: date,
                            target_close: float | None = None) -> tuple[date, float, dict[str, Any]]:
         if symbol in self.corporate_action_notices:
-            pair = NasdaqOfficialCloseProvider(
-                transport=self.transport, now=self.now,
-                corporate_action_notices=self.corporate_action_notices,
-                notice_transport=self.notice_transport,
-            ).fetch(symbol, target, target_close or 0.0)
+            try:
+                pair = NasdaqOfficialCloseProvider(
+                    transport=self.transport, now=self.now,
+                    corporate_action_notices=self.corporate_action_notices,
+                    notice_transport=self.notice_transport,
+                ).fetch(symbol, target, target_close or 0.0)
+            except ValueError as exc:
+                raise MarketDataError(
+                    f"regular-universe {symbol}: official action cannot be normalized as split-only: {exc}"
+                ) from exc
             if target_close is None or not close_matches(float(pair["target_close"]), target_close):
                 raise MarketDataError(f"regular-universe {symbol}: official split target differs from dated quote")
             return date.fromisoformat(pair["previous_session_date"]), float(pair["previous_close"]), {
@@ -2312,6 +2317,16 @@ class CapturedEndOfDayQuoteProvider:
         pct = float(pct_raw.removesuffix("%"))
         if previous_close <= 0 or abs((close / previous_close - 1) * 100 - pct) > 0.006:
             raise MarketDataError(f"{self.name}:{symbol}: EOD quote arithmetic mismatch")
+        split_event = None
+        if len(target_row) >= 9 and "split" in target_row[8].casefold():
+            match = re.fullmatch(r"(\d+)\s*-for-\s*(\d+)\s+split", target_row[8], re.I)
+            if match is None:
+                raise MarketDataError(f"{self.name}:{symbol}: split event is ambiguous")
+            split_event = {
+                "effective_session_date": target_session_date.isoformat(),
+                "new_shares": int(match.group(1)), "old_shares": int(match.group(2)),
+                "raw_text": target_row[8],
+            }
         # The page embeds its last regular quote alongside the historical
         # table. Keep its clock and price so an earlier quote is never
         # mistaken for the exchange's final 4 PM close.
@@ -2331,6 +2346,7 @@ class CapturedEndOfDayQuoteProvider:
             "display_decimal_places": len(close_raw.partition(".")[2]),
             "primary_exchange": urlsplit(url).path.split("/")[2].rsplit("-", 1)[0].upper(),
             "capture_type": "captured_historical_html",
+            "split_event": split_event,
             "last_regular_quote_timestamp": quote_stamp,
             "last_regular_quote_price": float(quote_price) if quote_price is not None else None,
             "source_identifier": url, "raw_response_sha256": hashlib.sha256(raw).hexdigest(),
@@ -2447,6 +2463,62 @@ def resolve_discrepancy(
                 "vendor_daily_target_close": historical_target_close,
                 "independent_previous_close_support": independent_support,
                 "comparison_basis": "dated_regular_closes_on_target_share_basis",
+            }
+    # A vendor's daily previous close may be stale after a reverse split.
+    # Prefer the exchange's dated pair only when its adjusted basis was
+    # established independently and another publisher records the exact
+    # dated pair, event ratio, and arithmetic return. The price gap alone is
+    # insufficient to identify the share basis.
+    if (reason is None and notice and official.get("previous_price_basis") == "already_split_normalized"
+            and official.get("previous_close_on_target_basis") is True
+            and official.get("target_close_verified") is True
+            and close_matches(screener_last, official_target)
+            and close_matches(historical_target_close, official_target)):
+        adjusted_history = official.get("independent_adjusted_history_basis")
+        previous_day = official.get("previous_session_date")
+        target_day = official.get("target_session_date")
+        adjusted_pair_ok = (
+            isinstance(adjusted_history, dict)
+            and adjusted_history.get("price_basis") == "regular_close_normalized_for_split"
+            and adjusted_history.get("previous_session_date") == previous_day
+            and adjusted_history.get("target_session_date") == target_day
+            and close_matches(float(adjusted_history["previous_split_normalized_close"]),
+                              round_market_display(official_previous, int(adjusted_history["previous_display_decimal_places"])))
+            and close_matches(float(adjusted_history["target_regular_close"]),
+                              round_market_display(official_target, int(adjusted_history["target_display_decimal_places"])))
+            and re.fullmatch(r"[+-]?\d+(?:\.\d+)?%", str(adjusted_history.get("reported_change_raw") or ""))
+            and abs(float(str(adjusted_history["reported_change_raw"]).rstrip("%")) - official_change) <= 0.01
+        )
+        event_pairs = [source for source in independent_support if (
+            source.get("session") == "regular_close"
+            and source.get("target_session_date") == target_day
+            and (source.get("split_event") or {}).get("effective_session_date") == notice["effective_session_date"]
+            and source["split_event"].get("new_shares") == notice["new_shares"]
+            and source["split_event"].get("old_shares") == notice["old_shares"]
+            and source.get("previous_close") is not None
+            and source.get("target_close") is not None
+            and close_matches(float(source["previous_close"]), official_previous)
+            and close_matches(float(source["target_close"]), official_target)
+            and re.fullmatch(r"[+-]?\d+(?:\.\d+)?%", str(source.get("reported_pct_raw") or ""))
+            and abs(float(str(source["reported_pct_raw"]).rstrip("%")) - official_change) <= 0.006
+        )]
+        if (adjusted_pair_ok and event_pairs
+                and previous_day < notice["effective_session_date"] <= target_day):
+            reason = "official_split_normalized_dated_eod_over_vendor_daily"
+            official_supports = True
+            canonical_primary_pair = (official_previous, official_target)
+            basis_evidence = {
+                "official_action": notice,
+                "official_previous_close_raw": official.get("previous_close_raw"),
+                "official_previous_price_basis": "already_split_normalized",
+                "applied_split_factor": 1.0,
+                "official_previous_close": official_previous,
+                "official_target_close": official_target,
+                "vendor_daily_previous_close": historical_previous_close,
+                "vendor_daily_target_close": historical_target_close,
+                "independent_adjusted_history": adjusted_history,
+                "independent_dated_split_event_pairs": event_pairs,
+                "comparison_basis": "dated_exchange_and_independent_split_adjusted_regular_closes",
             }
     if reason is None and minute_close is not None and not corporate_action.get("official_action"):
         minute_previous = float(minute_close["previous_close"])
@@ -3968,6 +4040,7 @@ def rank_top20(
                         continue
                     if discrepancy.get("discrepancy_reason") in {
                         "official_split_normalized_eod", "official_split_unadjusted_vendor_previous",
+                        "official_split_normalized_dated_eod_over_vendor_daily",
                         "movers_quote_differs_from_verified_regular_close",
                         "official_regular_pair_over_vendor_previous_rounding",
                         "dated_exchange_history_over_conflicting_info_quote",

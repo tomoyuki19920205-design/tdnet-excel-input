@@ -920,6 +920,77 @@ def test_captured_historical_quote_uses_dated_close_and_rejects_wrong_session(mo
         provider.fetch("SOAR", date(2026, 9, 25))
 
 
+def test_split_adjusted_official_pair_over_vendor_daily_requires_dated_event(monkeypatch):
+    url = "https://chartexchange.com/symbol/nasdaq-srtm/historical/"
+    raw = f'''<html><head><title>SRTM Historical Prices - Stratum Holdings | ChartExchange</title>
+<link rel="canonical" href="{url}"/></head><body><table>
+<tr><td>Date ( EST )</td><td>Open</td><td>High</td><td>Low</td><td>Close</td><td>Change</td><td>Volume</td><td>Change Since</td><td>Events</td></tr>
+<tr><td>2026-11-23</td><td>0.8957</td><td>1.0900</td><td>0.7451</td><td>1.0300</td><td>+36.732%</td><td>636,557</td><td>0.000%</td><td>1 -for- 9 split</td></tr>
+<tr><td>2026-11-20</td><td>1.3203</td><td>1.6443</td><td>0.6426</td><td>0.7533</td><td>-14.592%</td><td>7,270,534</td><td>+36.732%</td><td></td></tr>
+</table></body></html>'''.encode()
+    monkeypatch.setattr(Path, "read_bytes", lambda _path: raw)
+    captured = CapturedEndOfDayQuoteProvider({"SRTM": {"path": "captured.html", "source_url": url}})
+    independent = captured.fetch("SRTM", date(2026, 11, 23))
+    assert independent["split_event"] == {
+        "effective_session_date": "2026-11-23", "new_shares": 1,
+        "old_shares": 9, "raw_text": "1 -for- 9 split",
+    }
+    official = {
+        "provider": "nasdaq_official_historical_nls", "provider_family": "nasdaq",
+        "previous_session_date": "2026-11-20", "target_session_date": "2026-11-23",
+        "previous_close": 0.7533, "previous_close_raw": 0.7533,
+        "previous_price_basis": "already_split_normalized",
+        "previous_close_on_target_basis": True, "applied_split_factor": 1.0,
+        "target_close": 1.03, "target_close_verified": True,
+        "target_close_source": "nasdaq_historical",
+        "source_identifiers": ["https://api.nasdaq.com/api/quote/SRTM/historical"],
+        "raw_response_sha256": ["a" * 64], "primary_exchange": "NASDAQ-CM",
+        "independent_adjusted_history_basis": {
+            "price_basis": "regular_close_normalized_for_split",
+            "previous_session_date": "2026-11-20", "target_session_date": "2026-11-23",
+            "previous_split_normalized_close": 0.75, "target_regular_close": 1.03,
+            "previous_display_decimal_places": 2, "target_display_decimal_places": 2,
+            "reported_change_raw": "36.73%",
+        },
+    }
+    notice = {"effective_session_date": "2026-11-23", "new_shares": 1, "old_shares": 9}
+    action = {"provider": "yahoo_corporate_actions", "provider_family": "yahoo",
+              "status": "corporate_action_adjusted", "official_action": notice,
+              "source_identifier": "https://query1.finance.yahoo.com/v8/finance/chart/SRTM",
+              "raw_response_sha256": "b" * 64}
+    candidate = {"symbol": "SRTM", "_close": 1.03,
+                 "_change_pct": (1.03 / 0.756 - 1) * 100, "volume": 636557}
+    def resolve(source, adjusted=official["independent_adjusted_history_basis"]):
+        return resolve_discrepancy(
+            candidate=candidate, historical_provider="yahoo_chart_query1",
+            historical_previous_close=0.756, historical_target_close=1.03,
+            historical_change_pct=candidate["_change_pct"],
+            official={**official, "independent_adjusted_history_basis": adjusted},
+            corporate_action=action, minute_close=None,
+            independent_sources=[source], tolerance_pct=0.25,
+            resolved_at="2026-11-24T13:00:00+00:00",
+        )
+    result = resolve(independent)
+    assert result["discrepancy_reason"] == "official_split_normalized_dated_eod_over_vendor_daily"
+    assert result["canonical_previous_close"] == 0.7533
+    assert result["canonical_target_close"] == 1.03
+    assert result["basis_evidence"]["applied_split_factor"] == 1.0
+    with pytest.raises(MarketDataError, match="provider discrepancy reason is unresolved"):
+        resolve({**independent, "split_event": {**independent["split_event"], "old_shares": 8}})
+    with pytest.raises(MarketDataError, match="provider discrepancy reason is unresolved"):
+        resolve(independent, {**official["independent_adjusted_history_basis"], "reported_change_raw": "30.00%"})
+
+
+def test_complex_action_notice_becomes_bounded_market_data_failure(monkeypatch):
+    def ambiguous(*_args, **_kwargs):
+        raise ValueError("split notice symbol, ratio or effective session is ambiguous")
+    monkeypatch.setattr(NasdaqOfficialCloseProvider, "fetch", ambiguous)
+    provider = NasdaqYahooRegularUniverseProvider(
+        corporate_action_notices={"AVZO": "https://www.nasdaqtrader.com/TraderNews.aspx?id=ECA2026-839"})
+    with pytest.raises(MarketDataError, match="AVZO: official action cannot be normalized as split-only"):
+        provider._official_previous("AVZO", date(2026, 11, 23), 1.0)
+
+
 def test_missing_capture_fetches_dated_primary_exchange_eod_and_keeps_guardrails():
     url = "https://chartexchange.com/symbol/nyseamerican-paai/historical/"
     raw = f'''<html><head><title>PAAI Historical Prices - Paradium.AI | ChartExchange</title>
