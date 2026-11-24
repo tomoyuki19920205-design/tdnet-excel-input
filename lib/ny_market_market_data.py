@@ -843,6 +843,86 @@ class NasdaqYahooRegularUniverseProvider:
                      "quote_raw_response_sha256": evidence["official_raw_response_sha256"]}
         return recovered, evidence
 
+    def _recover_missing_vendor_previous_with_official_pair(
+        self, symbol: str, name: str, target: date, target_bar: DailyBar,
+        previous_day: date, previous_row: dict[str, Any], target_row: dict[str, Any],
+        info: dict[str, Any], history_url: str, history_raw: bytes,
+        listing_action: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Recover a missing bar after a documented prior-session listing."""
+        normalize_name = lambda value: re.sub(r"[^a-z0-9]", "", str(value).casefold())
+        if (listing_action.get("event_type") != "new_listing"
+                or listing_action.get("effective_session_date") != previous_day.isoformat()):
+            raise MarketDataError(f"regular-universe {symbol}: prior listing date disagrees")
+        action = self.action_provider.fetch(symbol, target)
+        if action.get("meta_symbol") not in {None, symbol}:
+            raise MarketDataError(f"regular-universe {symbol}: vendor action symbol mismatch")
+        for split in ((action.get("events") or {}).get("splits") or {}).values():
+            if not isinstance(split, dict) or not isinstance(split.get("date"), (int, float)):
+                raise MarketDataError(f"regular-universe {symbol}: split event date ambiguous")
+            if datetime.fromtimestamp(split["date"], NY_TZ).date() == target:
+                raise MarketDataError(f"regular-universe {symbol}: missing prior bar needs an official split notice")
+        if (not info.get("companyName")
+                or normalize_name(info["companyName"]) != normalize_name(name)
+                or (target - previous_day).days > 4
+                or any("stock split" in str(item).casefold()
+                       for item in info.get("notifications") or [])):
+            raise MarketDataError(f"regular-universe {symbol}: missing-prior security identity or action unresolved")
+        official_previous = _numeric(previous_row.get("close"), "official missing-vendor prior close")
+        official_target = _numeric(target_row.get("close"), "official missing-vendor target close")
+        prior_volume = _numeric(previous_row.get("volume"), "official prior volume", nullable=True)
+        target_volume = _numeric(target_row.get("volume"), "official target volume", nullable=True)
+        if (official_previous <= 0 or official_target <= 0
+                or prior_volume is None or prior_volume <= 0
+                or target_volume is None or target_volume <= 0
+                or not close_matches(target_bar.regular_close, official_target)):
+            raise MarketDataError(f"regular-universe {symbol}: dated official or vendor close disagrees")
+        independent = self.split_history_provider.fetch_pair(symbol, previous_day, target)
+        if (independent.get("previous_session_date") != previous_day.isoformat()
+                or independent.get("target_session_date") != target.isoformat()
+                or independent.get("price_basis") != "regular_close_normalized_for_split"
+                or provider_family(str(independent.get("provider_family") or independent.get("provider")))
+                in {"nasdaq", "yahoo"}):
+            raise MarketDataError(f"regular-universe {symbol}: independent missing-vendor dates or basis disagree")
+        prior_digits = int(independent["previous_display_decimal_places"])
+        target_digits = int(independent["target_display_decimal_places"])
+        independent_previous = float(independent["previous_split_normalized_close"])
+        independent_target = float(independent["target_regular_close"])
+        if (not close_matches(independent_previous, round_market_display(official_previous, prior_digits))
+                or not close_matches(independent_target, round_market_display(official_target, target_digits))):
+            raise MarketDataError(f"regular-universe {symbol}: independent missing-vendor pair disagrees")
+        change = (official_target / official_previous - 1.0) * 100.0
+        reported = str(independent.get("reported_change_raw") or "")
+        if re.fullmatch(r"[+-]?\d+(?:\.\d+)?%", reported) is None:
+            raise MarketDataError(f"regular-universe {symbol}: independent return missing")
+        reported_digits = len(reported.removesuffix("%").partition(".")[2])
+        if abs(change - float(reported.removesuffix("%"))) > 0.5 * 10 ** -reported_digits + 1e-6:
+            raise MarketDataError(f"regular-universe {symbol}: independent return disagrees")
+        evidence = {
+            "disposition": "dated_official_independent_pair_recovers_missing_vendor_previous",
+            "previous_session_date": previous_day.isoformat(),
+            "target_session_date": target.isoformat(),
+            "official_previous_close": official_previous,
+            "official_target_close": official_target,
+            "official_previous_volume": prior_volume,
+            "official_target_volume": target_volume,
+            "vendor_target_close": target_bar.regular_close,
+            "official_company_name": info["companyName"],
+            "listing_source_identifier": listing_action["source_identifier"],
+            "listing_raw_response_sha256": listing_action["raw_response_sha256"],
+            "listing_effective_session_date": listing_action["effective_session_date"],
+            "official_history_source_identifier": history_url,
+            "official_history_raw_response_sha256": hashlib.sha256(history_raw).hexdigest(),
+            "vendor_action_source_identifier": action.get("source_identifier"),
+            "vendor_action_raw_response_sha256": action.get("raw_response_sha256"),
+            "independent_dated_pair": independent,
+            "comparison_basis": "same_symbol_dated_regular_closes_after_verified_listing",
+        }
+        return ({"symbol": symbol, "name": name, "close": official_target,
+                 "change_pct": change, "volume": target_bar.volume,
+                 "quote_source_identifier": history_url,
+                 "quote_raw_response_sha256": evidence["official_history_raw_response_sha256"]}, evidence)
+
     def _spark_batch(self, batch: list[str], target: date) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         url = self.SPARK_URL + "?" + urlencode({
             "symbols": ",".join(batch), "range": "5d", "interval": "1d",
@@ -1190,6 +1270,22 @@ class NasdaqYahooRegularUniverseProvider:
                                      "vendor_target_close": target_bar.regular_close,
                                      "prior_session_rows": 0})
                     return None, evidence
+                if (prior_rows and len(target_rows) == 1
+                        and symbol not in self.corporate_action_notices
+                        and action_entry and action_entry.get("event_type") == "new_listing"):
+                    previous_day, previous_row = max(
+                        ((day, row) for day, row in dated_rows if day < target),
+                        key=lambda item: item[0],
+                    )
+                    listing_action = verify_corporate_action_evidence(
+                        symbol, action_entry, transport=self.notice_transport,
+                    )
+                    recovered, recovery_evidence = self._recover_missing_vendor_previous_with_official_pair(
+                        symbol, name, target, target_bar, previous_day, previous_row,
+                        target_rows[0], data, history_url, history_raw, listing_action,
+                    )
+                    evidence.update(recovery_evidence)
+                    return recovered, evidence
                 recovered, recovery_evidence = self._recover_split_missing_previous(symbol, target, target_bar)
                 evidence.update(recovery_evidence)
                 return {**recovered, "name": name}, evidence
@@ -3449,7 +3545,7 @@ class LiveDiscrepancyArbitrator:
             **action, "provider": "sec_primary_filing", "provider_family": "sec",
             "role": "official_corporate_action",
         }
-        if action["event_type"] == "business_combination" and expected_previous_session_date is not None:
+        if action["event_type"] in {"business_combination", "new_listing"} and expected_previous_session_date is not None:
             if effective <= expected_previous_session_date:
                 if source_top20_floor_pct is None:
                     raise MarketDataError(f"Top20 {ticker}: source cutoff required")
@@ -3467,10 +3563,14 @@ class LiveDiscrepancyArbitrator:
                     raise MarketDataError(f"Top20 {ticker}: post-combination same-symbol dated closes disagree")
                 corrected_change = (official_target / official_previous - 1.0) * 100.0
                 if corrected_change >= source_top20_floor_pct - tolerance_pct:
-                    raise MarketDataError(f"Top20 {ticker}: post-combination corrected move may qualify; ranking review required")
+                    raise MarketDataError(f"Top20 {ticker}: post-action corrected move may qualify; ranking review required")
                 return {
                     "ranking_disposition": "exclude_below_top20_floor",
-                    "exclusion_reason": "post_combination_same_symbol_move_below_verified_top20_floor",
+                    "exclusion_reason": (
+                        "post_listing_same_symbol_move_below_verified_top20_floor"
+                        if action["event_type"] == "new_listing"
+                        else "post_combination_same_symbol_move_below_verified_top20_floor"
+                    ),
                     "canonical_change_pct": corrected_change,
                     "screener_change_pct": float(candidate["_change_pct"]),
                     "source_top20_floor_pct": source_top20_floor_pct,

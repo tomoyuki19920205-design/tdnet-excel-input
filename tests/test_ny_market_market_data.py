@@ -307,6 +307,81 @@ def test_regular_universe_recovers_split_day_with_missing_yahoo_previous():
         conflict._verify_missing("EZGO", "EZGO Technologies Ordinary Shares", target)
 
 
+def test_regular_universe_recovers_missing_vendor_prior_after_prior_day_split():
+    target = date(2026, 11, 23)
+    stamp = int(datetime(2026, 11, 23, 21, tzinfo=timezone.utc).timestamp())
+    yahoo = json.dumps({"chart": {"result": [{
+        "meta": {"symbol": "CZZL", "longName": "Cizzle Brands Corporation",
+                 "dataGranularity": "1d", "exchangeTimezoneName": "America/New_York"},
+        "timestamp": [stamp], "indicators": {"quote": [{"close": [3.11], "volume": [48025]}]},
+    }], "error": None}}).encode()
+    history = json.dumps({"status": {"rCode": 200}, "data": {
+        "symbol": "CZZL", "tradesTable": {"rows": [
+            {"date": "11/23/2026", "close": "$3.11", "volume": "48,025"},
+            {"date": "11/20/2026", "close": "$4.07", "volume": "122,153"},
+        ]},
+    }}).encode()
+    info = json.dumps({"status": {"rCode": 200}, "data": {
+        "symbol": "CZZL", "companyName": "Cizzle Brands Corporation Common Stock",
+        "exchange": "NASDAQ-CM", "notifications": [],
+    }}).encode()
+    split_stamp = int(datetime(2026, 11, 20, 14, 30, tzinfo=timezone.utc).timestamp())
+    action = json.dumps({"chart": {"result": [{
+        "meta": {"symbol": "CZZL"}, "events": {"splits": {str(split_stamp): {
+            "date": split_stamp, "numerator": 1, "denominator": 25,
+        }}},
+    }]}}).encode()
+    independent = ("<html><body>Past prices are adjusted for stock splits"
+                   "<table><tr><th>Date</th><th>Close</th><th>Change</th></tr>"
+                   "<tr><td>Nov 23, 2026</td><td>3.11</td><td>-23.59%</td></tr>"
+                   "<tr><td>Nov 20, 2026</td><td>4.07</td><td>-23.35%</td></tr>"
+                   "</table></body></html>").encode()
+    sec = (b"Cizzle Brands Corporation common shares under symbol CZZL will begin trading "
+           b"on the Nasdaq Capital Market on November 20, 2026. The one post-consolidation "
+           b"share for twenty-five pre-consolidation shares takes effect on November 20, 2026.")
+    listing = {"event_type": "new_listing", "effective_session_date": "2026-11-20",
+               "exchange": "Nasdaq Capital Market",
+               "source_url": "https://www.sec.gov/Archives/edgar/data/2105038/000110465926130439/ex99-1.htm"}
+
+    def transport(url, _headers):
+        return (independent if "stockanalysis.com" in url else history if "/historical?" in url
+                else info if "/info?" in url else action if "div%2Csplits" in url else yahoo)
+
+    provider = NasdaqYahooRegularUniverseProvider(
+        transport=transport, notice_transport=lambda *_: sec,
+        corporate_action_evidence={"CZZL": listing},
+    )
+    recovered, evidence = provider._verify_missing(
+        "CZZL", "Cizzle Brands Corporation Common Stock", target)
+    assert recovered["close"] == 3.11
+    assert recovered["change_pct"] == pytest.approx((3.11 / 4.07 - 1) * 100)
+    assert evidence["disposition"] == "dated_official_independent_pair_recovers_missing_vendor_previous"
+    assert evidence["previous_session_date"] == "2026-11-20"
+    assert evidence["official_previous_close"] == 4.07
+    assert evidence["comparison_basis"] == "same_symbol_dated_regular_closes_after_verified_listing"
+    assert evidence["official_history_raw_response_sha256"] == hashlib.sha256(history).hexdigest()
+    assert evidence["listing_raw_response_sha256"] == hashlib.sha256(sec).hexdigest()
+
+    with pytest.raises(MarketDataError, match="official split notice"):
+        NasdaqYahooRegularUniverseProvider(transport=transport)._verify_missing(
+            "CZZL", "Cizzle Brands Corporation Common Stock", target)
+
+    bad_prior = independent.replace(b"4.07", b"4.20")
+    with pytest.raises(MarketDataError, match="independent missing-vendor pair disagrees"):
+        NasdaqYahooRegularUniverseProvider(
+            transport=lambda url, headers: bad_prior if "stockanalysis.com" in url
+            else transport(url, headers), notice_transport=lambda *_: sec,
+            corporate_action_evidence={"CZZL": listing},
+        )._verify_missing("CZZL", "Cizzle Brands Corporation Common Stock", target)
+    target_split = action.replace(str(split_stamp).encode(), str(stamp).encode())
+    with pytest.raises(MarketDataError, match="official split notice"):
+        NasdaqYahooRegularUniverseProvider(
+            transport=lambda url, headers: target_split if "div%2Csplits" in url
+            else transport(url, headers), notice_transport=lambda *_: sec,
+            corporate_action_evidence={"CZZL": listing},
+        )._verify_missing("CZZL", "Cizzle Brands Corporation Common Stock", target)
+
+
 def test_regular_universe_audits_first_trading_session_without_inventing_prior_close():
     target = date(2026, 11, 10)
     stamp = int(datetime(2026, 11, 10, 21, 0, tzinfo=timezone.utc).timestamp())
@@ -2554,6 +2629,47 @@ def test_nstr_post_combination_same_symbol_closes_are_compared_before_exclusion(
     assert excluded[0]["reason"] == "post_combination_same_symbol_move_below_verified_top20_floor"
     assert excluded[0]["screener_rank"] == 1
     assert excluded[0]["verified_change_pct"] == pytest.approx((4.45 / 7.7199 - 1) * 100)
+
+
+def test_prior_session_new_listing_is_excluded_only_after_dated_return_check():
+    prior_day, target_day = date(2026, 11, 20), date(2026, 11, 23)
+    source, history = _action_screener_and_history("CZZL", 100, 3.11, 4.07, prior_day, target_day)
+    history["CZZL"] = DailySeries(
+        symbol="CZZL", provider="fixture", source_identifier="https://example.test/CZZL",
+        retrieved_at=NOW.isoformat(), raw_response_sha256="a" * 64,
+        bars=(DailyBar(target_day, 3.11),),
+    )
+
+    class Official:
+        def fetch(self, _symbol, _day, _last):
+            return {"provider": "nasdaq_official_historical_nls", "provider_family": "nasdaq",
+                    "previous_session_date": prior_day.isoformat(),
+                    "target_session_date": target_day.isoformat(),
+                    "previous_close": 4.07, "target_close": 3.11,
+                    "raw_response_sha256": ["d" * 64]}
+
+    class Independent:
+        def fetch_pair(self, _symbol, _previous, _target):
+            return {"provider": "stockanalysis_historical_s_p_global",
+                    "provider_family": "s_p_global",
+                    "previous_split_normalized_close": 4.07,
+                    "target_regular_close": 3.11, "raw_response_sha256": "c" * 64}
+
+    action = {"event_type": "new_listing", "effective_session_date": prior_day.isoformat(),
+              "exchange": "Nasdaq Capital Market", "source_url":
+              "https://www.sec.gov/Archives/edgar/data/2105038/000110465926130439/ex99-1.htm"}
+    arbitrator = LiveDiscrepancyArbitrator(
+        corporate_action_evidence={"CZZL": action},
+        notice_transport=lambda *_: b"CZZL will begin trading on Nasdaq Capital Market on November 20, 2026",
+        official_provider=Official(), split_history_provider=Independent(),
+    )
+    excluded = []
+    ranked = rank_top20(source, target_session_date=target_day, historical_series=history,
+                         discrepancy_arbitrator=arbitrator, excluded_action_candidates=excluded,
+                         expected_previous_session_date=prior_day)
+    assert len(ranked) == 20 and "CZZL" not in [item["ticker"] for item in ranked]
+    assert excluded[0]["reason"] == "post_listing_same_symbol_move_below_verified_top20_floor"
+    assert excluded[0]["verified_change_pct"] == pytest.approx((3.11 / 4.07 - 1) * 100)
 
 
 @pytest.mark.parametrize("predecessor_quote,expected_factor", [(0.15, 10), (1.51, 1), (1.50, 1), (1.49, None)])
