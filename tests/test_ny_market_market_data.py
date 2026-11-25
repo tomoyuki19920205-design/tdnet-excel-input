@@ -1045,6 +1045,66 @@ def test_split_adjusted_official_pair_over_vendor_daily_requires_dated_event(mon
         resolve(independent, {**official["independent_adjusted_history_basis"], "reported_change_raw": "30.00%"})
 
 
+def test_split_adjusted_pair_accepts_verified_vendor_event_and_independent_dated_return():
+    notice = {"effective_session_date": "2026-11-24", "new_shares": 1, "old_shares": 25,
+              "source_identifier": "https://www.nasdaqtrader.com/TraderNews.aspx?id=ECA2026-854",
+              "raw_response_sha256": "d" * 64}
+    adjusted = {"price_basis": "regular_close_normalized_for_split",
+                "previous_session_date": "2026-11-23", "target_session_date": "2026-11-24",
+                "previous_split_normalized_close": 6.12, "target_regular_close": 12.80,
+                "previous_display_decimal_places": 2, "target_display_decimal_places": 2,
+                "reported_change_raw": "109.24%"}
+    official = {"provider": "nasdaq_official_historical_nls", "provider_family": "nasdaq",
+                "previous_session_date": "2026-11-23", "target_session_date": "2026-11-24",
+                "previous_close": 6.1175, "previous_close_raw": 6.1175,
+                "previous_price_basis": "already_split_normalized",
+                "previous_close_on_target_basis": True, "applied_split_factor": 1.0,
+                "target_close": 12.8, "target_close_verified": True,
+                "target_close_source": "nasdaq_historical",
+                "source_identifiers": ["https://api.nasdaq.com/api/quote/JAGX/historical"],
+                "raw_response_sha256": ["a" * 64], "primary_exchange": "NASDAQ-CM",
+                "independent_adjusted_history_basis": adjusted}
+    action = {"provider": "yahoo_corporate_actions", "provider_family": "yahoo",
+              "status": "corporate_action_adjusted", "official_action": notice,
+              "events": {"splits": {"x": {"date": 1795530600,
+                                          "numerator": 1, "denominator": 25}}},
+              "meta_symbol": "JAGX", "regular_market_time": 1795554000,
+              "regular_market_price": 12.8,
+              "source_identifier": "https://query1.finance.yahoo.com/v8/finance/chart/JAGX",
+              "raw_response_sha256": "b" * 64}
+    independent = {"provider": "stockanalysis_historical_s_p_global",
+                   "provider_family": "s_p_global", "session": "regular_close",
+                   "target_session_date": "2026-11-24", "previous_close": 6.12,
+                   "target_close": 12.8, "reported_change_raw": "109.24%",
+                   "source_identifier": "https://stockanalysis.com/stocks/jagx/history/",
+                   "raw_response_sha256": "c" * 64}
+    def resolve(action_value=action, adjusted_value=adjusted):
+        return resolve_discrepancy(
+            candidate={"symbol": "JAGX", "_close": 12.8, "_change_pct": 108.98,
+                       "volume": "12,213,400"},
+            historical_provider="yahoo_chart_query1", historical_previous_close=6.125,
+            historical_target_close=12.8,
+            historical_change_pct=(12.8 / 6.125 - 1) * 100,
+            official={**official, "independent_adjusted_history_basis": adjusted_value},
+            corporate_action=action_value, minute_close=None,
+            independent_sources=[independent], tolerance_pct=0.20,
+            resolved_at="2026-11-25T03:45:00+00:00",
+        )
+    result = resolve()
+    assert result["discrepancy_reason"] == "official_split_normalized_dated_eod_over_vendor_daily"
+    assert result["canonical_previous_close"] == 6.1175
+    assert result["canonical_target_close"] == 12.8
+    assert result["basis_evidence"]["applied_split_factor"] == 1
+    assert result["basis_evidence"]["vendor_split_event_verified"] is True
+    from lib.ny_market_research import _validate_discrepancy
+    assert _validate_discrepancy(result, "JAGX") == result
+    with pytest.raises(MarketDataError, match="provider discrepancy reason is unresolved"):
+        resolve({**action, "events": {"splits": {"x": {"date": 1795530600,
+                                                     "numerator": 1, "denominator": 20}}}})
+    with pytest.raises(MarketDataError, match="provider discrepancy reason is unresolved"):
+        resolve(adjusted_value={**adjusted, "reported_change_raw": "100.00%"})
+
+
 def test_complex_action_notice_becomes_bounded_market_data_failure(monkeypatch):
     def ambiguous(*_args, **_kwargs):
         raise ValueError("split notice symbol, ratio or effective session is ambiguous")

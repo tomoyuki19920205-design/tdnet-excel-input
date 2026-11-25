@@ -2527,7 +2527,21 @@ def resolve_discrepancy(
             and re.fullmatch(r"[+-]?\d+(?:\.\d+)?%", str(source.get("reported_pct_raw") or ""))
             and abs(float(str(source["reported_pct_raw"]).rstrip("%")) - official_change) <= 0.006
         )]
-        if (adjusted_pair_ok and event_pairs
+        vendor_event_verified = False
+        if action_status == "corporate_action_adjusted" and corporate_action.get("events"):
+            try:
+                validate_vendor_actions(corporate_action["events"], notice)
+                vendor_time = corporate_action.get("regular_market_time")
+                vendor_day = (datetime.fromtimestamp(vendor_time, timezone.utc).astimezone(NY_TZ).date()
+                              if isinstance(vendor_time, int) else None)
+                vendor_event_verified = (
+                    corporate_action.get("meta_symbol") == candidate.get("symbol")
+                    and vendor_day == date.fromisoformat(target_day)
+                    and close_matches(float(corporate_action["regular_market_price"]), official_target)
+                )
+            except (ValueError, TypeError, KeyError):
+                pass
+        if (adjusted_pair_ok and independent_support and (event_pairs or vendor_event_verified)
                 and previous_day < notice["effective_session_date"] <= target_day):
             reason = "official_split_normalized_dated_eod_over_vendor_daily"
             official_supports = True
@@ -2543,6 +2557,7 @@ def resolve_discrepancy(
                 "vendor_daily_target_close": historical_target_close,
                 "independent_adjusted_history": adjusted_history,
                 "independent_dated_split_event_pairs": event_pairs,
+                "vendor_split_event_verified": vendor_event_verified,
                 "comparison_basis": "dated_exchange_and_independent_split_adjusted_regular_closes",
             }
     if reason is None and minute_close is not None and not corporate_action.get("official_action"):
