@@ -775,8 +775,6 @@ class NasdaqYahooRegularUniverseProvider:
             notice = parse_exchange_split_notice(notice_raw, notice_url, symbol)
         except ValueError as exc:
             raise MarketDataError(f"regular-universe {symbol}: invalid split notice: {exc}") from exc
-        if date.fromisoformat(notice["effective_session_date"]) != target:
-            raise MarketDataError(f"regular-universe {symbol}: split effective date differs from target")
         action = self.action_provider.fetch(symbol, target)
         try:
             validate_vendor_actions(action.get("events") or {}, notice)
@@ -805,6 +803,9 @@ class NasdaqYahooRegularUniverseProvider:
         if len(targets) != 1 or not previous:
             raise MarketDataError(f"regular-universe {symbol}: dated official split pair missing")
         previous_day, previous_row = max(previous, key=lambda item: item[0])
+        effective = date.fromisoformat(notice["effective_session_date"])
+        if effective not in {previous_day, target}:
+            raise MarketDataError(f"regular-universe {symbol}: split effective date differs from comparison sessions")
         official_previous = _numeric(previous_row.get("close"), "official prior split close")
         official_target = _numeric(targets[0].get("close"), "official target split close")
         if not close_matches(target_bar.regular_close, official_target):
@@ -824,8 +825,28 @@ class NasdaqYahooRegularUniverseProvider:
                                      round_market_display(official_target, target_digits))):
             raise MarketDataError(f"regular-universe {symbol}: normalized independent split pair disagrees")
         change = (official_target / official_previous - 1.0) * 100.0
+        if effective == previous_day:
+            # Both completed sessions follow the action.  Their exchange
+            # closes are already on the new share basis; an extra split factor
+            # would corrupt the return.  Require the independent publisher's
+            # dated return as well as the notice and vendor event.
+            reported = str(independent.get("reported_change_raw") or "")
+            prior_volume = _numeric(previous_row.get("volume"), "official post-split prior volume", nullable=True)
+            target_volume = _numeric(targets[0].get("volume"), "official post-split target volume", nullable=True)
+            if (not (action.get("events") or {}).get("splits")
+                    or re.fullmatch(r"[+-]?\d+(?:\.\d+)?%", reported) is None
+                    or prior_volume is None or prior_volume <= 0
+                    or target_volume is None or target_volume <= 0):
+                raise MarketDataError(f"regular-universe {symbol}: post-action dated return or volume missing")
+            digits = len(reported.removesuffix("%").partition(".")[2])
+            if abs(change - float(reported.removesuffix("%"))) > 0.5 * 10 ** -digits + 1e-6:
+                raise MarketDataError(f"regular-universe {symbol}: post-action independent return disagrees")
         evidence = {
-            "disposition": "official_split_normalized_pair_recovers_missing_yahoo_previous",
+            "disposition": (
+                "post_action_dated_pair_recovers_missing_yahoo_previous"
+                if effective == previous_day
+                else "official_split_normalized_pair_recovers_missing_yahoo_previous"
+            ),
             "official_previous_session_date": previous_day.isoformat(),
             "official_previous_close": official_previous,
             "official_target_close": official_target,
@@ -837,6 +858,10 @@ class NasdaqYahooRegularUniverseProvider:
             "vendor_action_source_identifier": action.get("source_identifier"),
             "vendor_action_raw_response_sha256": action.get("raw_response_sha256"),
             "independent_split_pair": independent,
+            "comparison_basis": (
+                "both_regular_sessions_after_verified_split"
+                if effective == previous_day else "action_between_regular_sessions"
+            ),
         }
         recovered = {"symbol": symbol, "close": official_target, "change_pct": change,
                      "volume": target_bar.volume, "quote_source_identifier": url,

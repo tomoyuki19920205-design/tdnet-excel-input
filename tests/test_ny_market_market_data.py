@@ -382,6 +382,70 @@ def test_regular_universe_recovers_missing_vendor_prior_after_prior_day_split():
         )._verify_missing("CZZL", "Cizzle Brands Corporation Common Stock", target)
 
 
+def test_missing_vendor_prior_after_previous_session_split_keeps_new_share_basis():
+    target = date(2026, 11, 24)
+    notice_url = "https://www.nasdaqtrader.com/TraderNews.aspx?id=ECA2026-849"
+    notice = (b"Parabolic Technologies, Inc. (PARA) will effect a one-for-one hundred "
+              b"(1-100) reverse stock split of its Class A Common Stock. The reverse "
+              b"stock split will become effective on Monday, November 23, 2026.")
+    history = json.dumps({"status": {"rCode": 200}, "data": {
+        "symbol": "PARA", "tradesTable": {"rows": [
+            {"date": "11/24/2026", "close": "$3.04", "volume": "489,297"},
+            {"date": "11/23/2026", "close": "$2.72", "volume": "8,310"},
+        ]},
+    }}).encode()
+    event_stamp = int(datetime(2026, 11, 23, 14, 30, tzinfo=timezone.utc).timestamp())
+    vendor = json.dumps({"chart": {"result": [{"meta": {
+        "symbol": "PARA", "chartPreviousClose": 2.72, "regularMarketPrice": 3.04,
+        "regularMarketTime": int(datetime(2026, 11, 24, 21, tzinfo=timezone.utc).timestamp()),
+        "exchangeTimezoneName": "America/New_York",
+    }, "events": {"splits": {"x": {"date": event_stamp,
+                                      "numerator": 1, "denominator": 100}}}}]}}).encode()
+    independent = ("<html>Past prices are adjusted for stock splits"
+                   "<table><tr><th>Date</th><th>Close</th><th>Change</th></tr>"
+                   "<tr><td>Nov 24, 2026</td><td>3.04</td><td>11.76%</td></tr>"
+                   "<tr><td>Nov 23, 2026</td><td>2.72</td><td>-1.00%</td></tr>"
+                   "</table></html>").encode()
+    def transport(url, _headers):
+        if "stockanalysis.com" in url: return independent
+        if "/historical?" in url: return history
+        if "finance/chart/" in url: return vendor
+        raise AssertionError(url)
+    provider = NasdaqYahooRegularUniverseProvider(
+        transport=transport,
+        corporate_action_notices={"PARA": notice_url},
+        notice_transport=lambda *_: notice,
+    )
+    recovered, evidence = provider._recover_split_missing_previous(
+        "PARA", target, DailyBar(target, 3.04, 489297))
+    assert recovered["change_pct"] == pytest.approx((3.04 / 2.72 - 1) * 100)
+    assert evidence["disposition"] == "post_action_dated_pair_recovers_missing_yahoo_previous"
+    assert evidence["official_previous_price_basis"] == "already_split_normalized"
+    assert evidence["applied_split_factor"] == 1
+    assert evidence["comparison_basis"] == "both_regular_sessions_after_verified_split"
+    no_event_payload = json.loads(vendor)
+    no_event_payload["chart"]["result"][0]["events"] = {}
+    empty_action = json.dumps(no_event_payload).encode()
+    with pytest.raises(MarketDataError, match="post-action dated return or volume missing"):
+        NasdaqYahooRegularUniverseProvider(
+            transport=lambda url, headers: empty_action if "finance/chart/" in url
+            else transport(url, headers),
+            corporate_action_notices={"PARA": notice_url}, notice_transport=lambda *_: notice,
+        )._recover_split_missing_previous("PARA", target, DailyBar(target, 3.04, 489297))
+    with pytest.raises(MarketDataError, match="post-action independent return disagrees"):
+        NasdaqYahooRegularUniverseProvider(
+            transport=lambda url, headers: independent.replace(b"11.76%", b"25.00%")
+            if "stockanalysis.com" in url else transport(url, headers),
+            corporate_action_notices={"PARA": notice_url}, notice_transport=lambda *_: notice,
+        )._recover_split_missing_previous("PARA", target, DailyBar(target, 3.04, 489297))
+    with pytest.raises(MarketDataError, match="vendor split conflicts with notice"):
+        NasdaqYahooRegularUniverseProvider(
+            transport=transport,
+            corporate_action_notices={"PARA": notice_url},
+            notice_transport=lambda *_: notice.replace(b"November 23", b"November 20"),
+        )._recover_split_missing_previous("PARA", target, DailyBar(target, 3.04, 489297))
+
+
 def test_regular_universe_audits_first_trading_session_without_inventing_prior_close():
     target = date(2026, 11, 10)
     stamp = int(datetime(2026, 11, 10, 21, 0, tzinfo=timezone.utc).timestamp())
