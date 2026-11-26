@@ -307,6 +307,63 @@ def test_regular_universe_recovers_split_day_with_missing_yahoo_previous():
         conflict._verify_missing("EZGO", "EZGO Technologies Ordinary Shares", target)
 
 
+def test_regular_universe_recovers_missing_prior_without_applying_future_split():
+    target = date(2026, 11, 25)
+    stamp = int(datetime(2026, 11, 25, 21, tzinfo=timezone.utc).timestamp())
+    yahoo = json.dumps({"chart": {"result": [{"meta": {
+        "symbol": "INEO", "dataGranularity": "1d", "exchangeTimezoneName": "America/New_York",
+    }, "timestamp": [stamp], "indicators": {"quote": [{
+        "close": [0.4899], "volume": [136336],
+    }]}}], "error": None}}).encode()
+    info = json.dumps({"status": {"rCode": 200}, "data": {
+        "symbol": "INEO", "companyName": "INNEOVA Holdings Limited Class A Ordinary Shares",
+        "exchange": "NASDAQ-CM", "secondaryData": None,
+    }}).encode()
+    history = json.dumps({"status": {"rCode": 200}, "data": {
+        "symbol": "INEO", "tradesTable": {"rows": [
+            {"date": "11/25/2026", "close": "$0.4899", "volume": "136,690"},
+            {"date": "11/24/2026", "close": "$0.425", "volume": "133,482"},
+        ]},
+    }}).encode()
+    page_url = "https://chartexchange.com/symbol/nasdaq-ineo/historical/"
+    independent = f'''<html><head><title>INEO Historical Prices - INNEOVA Holdings | ChartExchange</title>
+<link rel="canonical" href="{page_url}"/></head><body><table>
+<tr><td>Date ( EST )</td><td>Open</td><td>High</td><td>Low</td><td>Close</td><td>Change</td></tr>
+<tr><td>2026-11-25</td><td>0.4522</td><td>0.4900</td><td>0.4200</td><td>0.4899</td><td>+15.271%</td></tr>
+<tr><td>2026-11-24</td><td>0.4117</td><td>0.4975</td><td>0.4001</td><td>0.4250</td><td>-15.991%</td></tr>
+</table></body></html>'''.encode()
+    future_stamp = int(datetime(2026, 11, 27, 14, 30, tzinfo=timezone.utc).timestamp())
+    actions = json.dumps({"chart": {"result": [{"meta": {"symbol": "INEO"},
+        "events": {"splits": {str(future_stamp): {"date": future_stamp,
+                                            "numerator": 1, "denominator": 5}}}}]}}).encode()
+
+    def transport(url, _headers):
+        return (info if "/info?" in url else history if "/historical?" in url
+                else independent if "chartexchange.com" in url
+                else actions if "events=div" in url else yahoo)
+
+    quote, evidence = NasdaqYahooRegularUniverseProvider(transport=transport)._verify_missing(
+        "INEO", "INNEOVA Holdings Limited Class A Ordinary Shares", target)
+    assert quote["close"] == 0.4899
+    assert quote["change_pct"] == pytest.approx((0.4899 / 0.425 - 1) * 100)
+    assert evidence["disposition"] == "same_class_dated_pair_recovers_missing_yahoo_previous"
+    assert evidence["ignored_future_vendor_split_dates"] == ["2026-11-27"]
+    assert evidence["independent_raw_response_sha256"] == hashlib.sha256(independent).hexdigest()
+
+    target_stamp = int(datetime(2026, 11, 25, 14, 30, tzinfo=timezone.utc).timestamp())
+    current_action = actions.replace(str(future_stamp).encode(), str(target_stamp).encode())
+    provider = NasdaqYahooRegularUniverseProvider(
+        transport=lambda url, headers: current_action if "events=div" in url else transport(url, headers))
+    with pytest.raises(MarketDataError, match="official split notice"):
+        provider._verify_missing("INEO", "INNEOVA Holdings Limited Class A Ordinary Shares", target)
+
+    wrong = independent.replace(b"0.4899", b"0.5000").replace(b"+15.271%", b"+17.647%")
+    provider = NasdaqYahooRegularUniverseProvider(
+        transport=lambda url, headers: wrong if "chartexchange.com" in url else transport(url, headers))
+    with pytest.raises(MarketDataError, match="independent dated pair disagrees"):
+        provider._verify_missing("INEO", "INNEOVA Holdings Limited Class A Ordinary Shares", target)
+
+
 def test_regular_universe_recovers_missing_vendor_prior_after_prior_day_split():
     target = date(2026, 11, 23)
     stamp = int(datetime(2026, 11, 23, 21, tzinfo=timezone.utc).timestamp())

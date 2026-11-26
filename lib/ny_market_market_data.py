@@ -868,6 +868,75 @@ class NasdaqYahooRegularUniverseProvider:
                      "quote_raw_response_sha256": evidence["official_raw_response_sha256"]}
         return recovered, evidence
 
+    def _recover_no_action_missing_previous(
+        self, symbol: str, name: str, target: date, target_bar: DailyBar,
+        data: dict[str, Any], history_url: str, history_raw: bytes,
+        dated_rows: list[tuple[date, dict[str, Any]]],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Use a same-class dated pair when Yahoo alone omits the prior bar."""
+        action = self.action_provider.fetch(symbol, target)
+        future_actions = []
+        for event in ((action.get("events") or {}).get("splits") or {}).values():
+            if not isinstance(event, dict) or not isinstance(event.get("date"), int):
+                raise MarketDataError(f"regular-universe {symbol}: missing-prior split date ambiguous")
+            effective = datetime.fromtimestamp(event["date"], timezone.utc).astimezone(
+                ZoneInfo("America/New_York")).date()
+            if effective <= target:
+                raise MarketDataError(f"regular-universe {symbol}: missing prior bar needs an official split notice")
+            future_actions.append(effective.isoformat())
+        normalize = lambda value: re.sub(r"[^a-z0-9]", "", str(value).casefold())
+        if (not str(data.get("exchange") or "").upper().startswith("NASDAQ")
+                or normalize(data.get("companyName")) != normalize(name)):
+            raise MarketDataError(f"regular-universe {symbol}: missing-prior issuer identity disagrees")
+        if str(action.get("meta_symbol") or "").upper() != symbol:
+            raise MarketDataError(f"regular-universe {symbol}: missing-prior action identity disagrees")
+        targets = [row for day, row in dated_rows if day == target]
+        previous = [(day, row) for day, row in dated_rows if day < target]
+        if len(targets) != 1 or not previous:
+            raise MarketDataError(f"regular-universe {symbol}: missing-prior dated official pair unavailable")
+        previous_day, previous_row = max(previous, key=lambda item: item[0])
+        official_previous = _numeric(previous_row.get("close"), "official missing-prior close")
+        official_target = _numeric(targets[0].get("close"), "official missing-prior target close")
+        previous_volume = _numeric(previous_row.get("volume"), "official missing-prior volume", nullable=True)
+        target_volume = _numeric(targets[0].get("volume"), "official missing-prior target volume", nullable=True)
+        independent = CapturedEndOfDayQuoteProvider({}, live_transport=self.transport).fetch(
+            symbol, target, primary_exchange=str(data["exchange"]),
+        )
+        if (previous_volume is None or previous_volume <= 0
+                or target_volume is None or target_volume <= 0
+                or target_bar.volume is None or target_bar.volume <= 0
+                or independent.get("provider_family") != "chartexchange"
+                or independent.get("primary_exchange") != "NASDAQ"
+                or independent.get("previous_session_date") != previous_day.isoformat()
+                or independent.get("target_session_date") != target.isoformat()
+                or independent.get("session") != "regular_close"
+                or independent.get("split_event") is not None
+                or not close_matches(target_bar.regular_close, official_target)
+                or not close_matches(independent["previous_close"], official_previous)
+                or not close_matches(independent["target_close"], official_target)):
+            raise MarketDataError(f"regular-universe {symbol}: missing-prior independent dated pair disagrees")
+        evidence = {
+            "disposition": "same_class_dated_pair_recovers_missing_yahoo_previous",
+            "comparison_basis": "adjacent_regular_closes_without_effective_split",
+            "previous_session_date": previous_day.isoformat(),
+            "target_session_date": target.isoformat(),
+            "official_previous_close": official_previous,
+            "official_target_close": official_target,
+            "official_previous_volume": previous_volume,
+            "official_target_volume": target_volume,
+            "official_source_identifier": history_url,
+            "official_raw_response_sha256": hashlib.sha256(history_raw).hexdigest(),
+            "independent_source_identifier": independent["source_identifier"],
+            "independent_raw_response_sha256": independent["raw_response_sha256"],
+            "vendor_action_source_identifier": action["source_identifier"],
+            "vendor_action_raw_response_sha256": action["raw_response_sha256"],
+            "ignored_future_vendor_split_dates": future_actions,
+        }
+        return {"symbol": symbol, "name": name, "close": official_target,
+                "change_pct": (official_target / official_previous - 1.0) * 100.0,
+                "volume": target_volume, "quote_source_identifier": history_url,
+                "quote_raw_response_sha256": evidence["official_raw_response_sha256"]}, evidence
+
     def _recover_missing_vendor_previous_with_official_pair(
         self, symbol: str, name: str, target: date, target_bar: DailyBar,
         previous_day: date, previous_row: dict[str, Any], target_row: dict[str, Any],
@@ -1313,7 +1382,12 @@ class NasdaqYahooRegularUniverseProvider:
                     )
                     evidence.update(recovery_evidence)
                     return recovered, evidence
-                recovered, recovery_evidence = self._recover_split_missing_previous(symbol, target, target_bar)
+                if symbol not in self.corporate_action_notices:
+                    recovered, recovery_evidence = self._recover_no_action_missing_previous(
+                        symbol, name, target, target_bar, data, history_url, history_raw, dated_rows,
+                    )
+                else:
+                    recovered, recovery_evidence = self._recover_split_missing_previous(symbol, target, target_bar)
                 evidence.update(recovery_evidence)
                 return {**recovered, "name": name}, evidence
             pct = (target_bar.regular_close / previous.regular_close - 1.0) * 100.0
@@ -2416,6 +2490,7 @@ class CapturedEndOfDayQuoteProvider:
         return {
             "provider": self.name, "provider_family": "chartexchange",
             "session": "regular_close", "target_session_date": target_session_date.isoformat(),
+            "previous_session_date": previous_date.isoformat(),
             "previous_close": previous_close, "target_close": close,
             "raw_value": close_raw, "parsed_value": close,
             "reported_change_raw": str(close - previous_close), "reported_pct_raw": pct_raw,
