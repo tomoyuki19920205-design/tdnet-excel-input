@@ -491,7 +491,7 @@ def test_regular_universe_vendor_error_requires_explicit_dated_no_trade_row():
         "close": [10.33, None], "volume": [186, None],
     }]}}], "error": None}}).encode()
     history = json.dumps({"data": {"symbol": "EMIS", "tradesTable": {"rows": [
-        {"date": "11/13/2026", "close": "$10.33", "volume": "N/A"},
+        {"date": "11/13/2026", "close": "$10.33", "volume": "0"},
         {"date": "11/12/2026", "close": "$10.33", "volume": "186"},
     ]}}, "status": {"rCode": 200}}).encode()
 
@@ -512,7 +512,13 @@ def test_regular_universe_vendor_error_requires_explicit_dated_no_trade_row():
     with pytest.raises(MarketDataError, match="dated no-trade row missing"):
         provider._verify_missing("EMIS", "Emmis Acquisition Corp.", target)
 
-    traded_target = history.replace(b'"volume": "N/A"', b'"volume": "18"')
+    unknown_target = history.replace(b'"volume": "0"', b'"volume": "N/A"')
+    provider = NasdaqYahooRegularUniverseProvider(
+        transport=lambda url, headers: unknown_target if "/historical?" in url else transport(url, headers))
+    with pytest.raises(MarketDataError, match="no-trade evidence conflicts"):
+        provider._verify_missing("EMIS", "Emmis Acquisition Corp.", target)
+
+    traded_target = history.replace(b'"volume": "0"', b'"volume": "18"')
     provider = NasdaqYahooRegularUniverseProvider(
         transport=lambda url, headers: traded_target if "/historical?" in url else transport(url, headers))
     with pytest.raises(MarketDataError, match="no-trade evidence conflicts"):
@@ -550,12 +556,19 @@ def test_missing_target_bar_needs_dated_no_trade_and_rejects_date_only_quote_con
     matching_info = info.replace(b"$0.69", b"$0.54")
     provider = NasdaqYahooRegularUniverseProvider(
         transport=lambda url, headers: matching_info if "/info?" in url else transport(url, headers))
+    with pytest.raises(MarketDataError, match="missing target no-trade evidence conflicts"):
+        provider._verify_missing("EQS", "Equus Total Return, Inc.", target)
+
+    zero_history = history.replace(b'"volume": "N/A"', b'"volume": "0"')
+    provider = NasdaqYahooRegularUniverseProvider(
+        transport=lambda url, headers: zero_history if "/historical?" in url
+        else matching_info if "/info?" in url else chart)
     result, evidence = provider._verify_missing("EQS", "Equus Total Return, Inc.", target)
     assert result is None
     assert evidence["disposition"] == "missing_target_official_dated_no_trade"
-    assert evidence["official_no_trade_raw_response_sha256"] == hashlib.sha256(history).hexdigest()
+    assert evidence["official_no_trade_raw_response_sha256"] == hashlib.sha256(zero_history).hexdigest()
 
-    absent_history = history.replace(b'"11/25/2026"', b'"11/23/2026"')
+    absent_history = zero_history.replace(b'"11/25/2026"', b'"11/23/2026"')
     provider = NasdaqYahooRegularUniverseProvider(
         transport=lambda url, headers: absent_history if "/historical?" in url
         else matching_info if "/info?" in url else chart)

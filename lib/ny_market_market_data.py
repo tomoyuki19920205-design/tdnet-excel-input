@@ -1090,7 +1090,9 @@ class NasdaqYahooRegularUniverseProvider:
             official_previous = _numeric(by_day[previous_day].get("close"), "official prior close")
             last_vendor = max((bar for bar in series.bars if bar.session_date < target),
                               key=lambda bar: bar.session_date, default=None)
-            if (str(current_row.get("volume", "")).strip().upper() not in {"N/A", "0"}
+            # N/A is missing volume, not evidence of zero trades. A vendor
+            # error and an absent chart bar supply no independent zero count.
+            if (str(current_row.get("volume", "")).strip() != "0"
                     or not close_matches(official_target, official_previous)
                     or last_vendor is None or last_vendor.session_date != previous_day
                     or not close_matches(last_vendor.regular_close, official_previous)
@@ -1322,8 +1324,8 @@ class NasdaqYahooRegularUniverseProvider:
                     "quote_raw_response_sha256": series.raw_response_sha256}, evidence
         # An absent Yahoo bar and a date-only Nasdaq last sale do not prove
         # that the security had no regular-session trade. The latter can be an
-        # after-hours print. Require an explicit dated no-trade history row
-        # before omitting the security from the ranking universe.
+        # after-hours print. A dated historical row with volume N/A is also
+        # insufficient: N/A means unreported, not zero. Require explicit zero.
         previous = max((bar for bar in series.bars if bar.session_date < target),
                        key=lambda bar: bar.session_date, default=None)
         if previous is None:
@@ -1357,7 +1359,7 @@ class NasdaqYahooRegularUniverseProvider:
         primary_stamp = str(primary.get("lastTradeTimestamp") or "")
         primary_close = (_numeric(primary.get("lastSalePrice"), "official date-only quote", nullable=True)
                          if primary_stamp == f"{target.strftime('%b')} {target.day}, {target.year}" else None)
-        if (str(current_row.get("volume", "")).strip().upper() not in {"N/A", "0"}
+        if (str(current_row.get("volume", "")).strip() != "0"
                 or not close_matches(official_target, official_previous)
                 or not close_matches(previous.regular_close, official_previous)
                 or (primary_close is not None and not close_matches(primary_close, official_target))):
