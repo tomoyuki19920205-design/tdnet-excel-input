@@ -1320,7 +1320,56 @@ class NasdaqYahooRegularUniverseProvider:
                     "change_pct": pct, "volume": target_bar.volume,
                     "quote_source_identifier": series.source_identifier,
                     "quote_raw_response_sha256": series.raw_response_sha256}, evidence
-        evidence["disposition"] = "no_target_session_quote_in_two_independent_sources"
+        # An absent Yahoo bar and a date-only Nasdaq last sale do not prove
+        # that the security had no regular-session trade. The latter can be an
+        # after-hours print. Require an explicit dated no-trade history row
+        # before omitting the security from the ranking universe.
+        previous = max((bar for bar in series.bars if bar.session_date < target),
+                       key=lambda bar: bar.session_date, default=None)
+        if previous is None:
+            raise MarketDataError(f"regular-universe {symbol}: missing target has no dated previous close")
+        history_url = (f"https://api.nasdaq.com/api/quote/{quote(symbol, safe='')}/historical?"
+                       + urlencode({"assetclass": "stocks", "fromdate": (target - timedelta(days=10)).isoformat(),
+                                    "todate": (target + timedelta(days=1)).isoformat(), "limit": 5000}))
+        history_raw = self.transport(history_url, {"User-Agent": "Mozilla/5.0", "Accept": "application/json",
+                                                   "Origin": "https://www.nasdaq.com"})
+        history = _raw_json(history_raw, self.name)
+        history_data = history.get("data") or {}
+        rows = (history_data.get("tradesTable") or {}).get("rows")
+        if (history.get("status", {}).get("rCode") != 200
+                or history_data.get("symbol") != symbol or not isinstance(rows, list)):
+            raise MarketDataError(f"regular-universe {symbol}: dated no-trade history unavailable")
+        by_day = {}
+        for row in rows:
+            try:
+                day = datetime.strptime(str(row.get("date")), "%m/%d/%Y").date()
+            except (TypeError, ValueError):
+                continue
+            if day in by_day:
+                raise MarketDataError(f"regular-universe {symbol}: duplicate dated no-trade history")
+            by_day[day] = row
+        current_row, previous_row = by_day.get(target), by_day.get(previous.session_date)
+        if current_row is None or previous_row is None:
+            raise MarketDataError(f"regular-universe {symbol}: dated no-trade row missing")
+        official_target = _numeric(current_row.get("close"), "official no-trade close")
+        official_previous = _numeric(previous_row.get("close"), "official prior close")
+        primary = data.get("primaryData") or {}
+        primary_stamp = str(primary.get("lastTradeTimestamp") or "")
+        primary_close = (_numeric(primary.get("lastSalePrice"), "official date-only quote", nullable=True)
+                         if primary_stamp == f"{target.strftime('%b')} {target.day}, {target.year}" else None)
+        if (str(current_row.get("volume", "")).strip().upper() not in {"N/A", "0"}
+                or not close_matches(official_target, official_previous)
+                or not close_matches(previous.regular_close, official_previous)
+                or (primary_close is not None and not close_matches(primary_close, official_target))):
+            raise MarketDataError(f"regular-universe {symbol}: missing target no-trade evidence conflicts")
+        evidence.update({"disposition": "missing_target_official_dated_no_trade",
+                         "official_no_trade_source_identifier": history_url,
+                         "official_no_trade_raw_response_sha256": hashlib.sha256(history_raw).hexdigest(),
+                         "official_no_trade_target_session_date": target.isoformat(),
+                         "official_no_trade_previous_session_date": previous.session_date.isoformat(),
+                         "official_no_trade_close": official_target,
+                         "official_no_trade_volume": current_row.get("volume"),
+                         "date_only_quote_close": primary_close})
         return None, evidence
 
     def _official_previous(self, symbol: str, target: date,

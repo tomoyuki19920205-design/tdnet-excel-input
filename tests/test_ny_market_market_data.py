@@ -519,6 +519,50 @@ def test_regular_universe_vendor_error_requires_explicit_dated_no_trade_row():
         provider._verify_missing("EMIS", "Emmis Acquisition Corp.", target)
 
 
+def test_missing_target_bar_needs_dated_no_trade_and_rejects_date_only_quote_conflict():
+    target = date(2026, 11, 25)
+    prior_stamp = int(datetime(2026, 11, 24, 14, 30, tzinfo=timezone.utc).timestamp())
+    target_stamp = int(datetime(2026, 11, 25, 14, 30, tzinfo=timezone.utc).timestamp())
+    chart = json.dumps({"chart": {"result": [{"meta": {
+        "symbol": "EQS", "exchangeTimezoneName": "America/New_York", "dataGranularity": "1d",
+    }, "timestamp": [prior_stamp, target_stamp], "indicators": {"quote": [{
+        "close": [0.54, None], "volume": [5474, None],
+    }]}}], "error": None}}).encode()
+    info = json.dumps({"status": {"rCode": 200}, "data": {
+        "symbol": "EQS", "exchange": "NYSE", "primaryData": {
+            "lastTradeTimestamp": "Nov 25, 2026", "lastSalePrice": "$0.69",
+        },
+    }}).encode()
+    history = json.dumps({"status": {"rCode": 200}, "data": {
+        "symbol": "EQS", "tradesTable": {"rows": [
+            {"date": "11/25/2026", "close": "$0.54", "volume": "N/A"},
+            {"date": "11/24/2026", "close": "$0.54", "volume": "5,474"},
+        ]},
+    }}).encode()
+
+    def transport(url, _headers):
+        return info if "/info?" in url else history if "/historical?" in url else chart
+
+    with pytest.raises(MarketDataError, match="missing target no-trade evidence conflicts"):
+        NasdaqYahooRegularUniverseProvider(transport=transport)._verify_missing(
+            "EQS", "Equus Total Return, Inc.", target)
+
+    matching_info = info.replace(b"$0.69", b"$0.54")
+    provider = NasdaqYahooRegularUniverseProvider(
+        transport=lambda url, headers: matching_info if "/info?" in url else transport(url, headers))
+    result, evidence = provider._verify_missing("EQS", "Equus Total Return, Inc.", target)
+    assert result is None
+    assert evidence["disposition"] == "missing_target_official_dated_no_trade"
+    assert evidence["official_no_trade_raw_response_sha256"] == hashlib.sha256(history).hexdigest()
+
+    absent_history = history.replace(b'"11/25/2026"', b'"11/23/2026"')
+    provider = NasdaqYahooRegularUniverseProvider(
+        transport=lambda url, headers: absent_history if "/historical?" in url
+        else matching_info if "/info?" in url else chart)
+    with pytest.raises(MarketDataError, match="dated no-trade row missing"):
+        provider._verify_missing("EQS", "Equus Total Return, Inc.", target)
+
+
 def test_regular_universe_same_security_ticker_change_uses_official_and_predecessor_pair():
     target = date(2026, 11, 13)
     previous = date(2026, 11, 12)
